@@ -146,8 +146,8 @@ from promptpotter.application.scoring.paired import (
 )
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
+    cells_read,
     closest_to_bar,
-    distinct_valid_cells,
     elect_round_winner,
     elimination_p_best,
     level_band,
@@ -1046,7 +1046,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     # The bar is what the parent can do, not the draw that crowned it.
     def won(*, se: float | None, electable: int) -> RoundResult:
         fit = {ArmKey("c0"): ArmFit(theta=0.5, theta_se=se)}
-        return round_result(1, selected=["c0"], voted={"electable": electable, "fit": fit})
+        return round_result(1, selected="c0", voted={"electable": electable, "fit": fit})
 
     unelected = round_result(1, improved=False)
     root_pi = 1 / math.sqrt(math.pi)
@@ -1055,7 +1055,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             se * root_pi, abs=abs_tol
         ), "E[max of two standard normals] is 1/√π"
     assert parent_selection_bias([won(se=0.9, electable=1)]) == 0.0, "a LONE arm has no curse"
-    assert parent_selection_bias([round_result(1, selected=["c0"])]) == 0.0, (
+    assert parent_selection_bias([round_result(1, selected="c0")]) == 0.0, (
         "a defaulted `electable_count` clamps to one arm"
     )
     assert parent_selection_bias([won(se=1.0, electable=99)]) == pytest.approx(
@@ -1090,7 +1090,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         ArmKey("thin"): sheet(measurements([1.0] * 3)),  # the highest θ, under the floor
     }
     held_id, held_abilities = elect_round_winner(list(arms), arms, twenty, 6, flat, parent_bias=0.3)
-    reads = readable_lifts(list(arms), arms, twenty, 6, held_abilities, 0.3)
+    reads = readable_lifts(list(arms), 6, held_abilities, 0.3)
     assert held_id is None, "no arm cleared the bar"
     assert held_abilities.theta["thin"] > held_abilities.bar["thin"][0], (
         "the floor, not θ, bars thin"
@@ -1099,6 +1099,12 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     assert reads[deep_key][0] < reads[near_key][0] <= 0.0
     assert sum(reads[deep_key]) > sum(reads[near_key]), "the credit orders them the other way"
     assert closest_to_bar(reads) == "near", "the lead is named on the raw θ lift"
+    cold = candidate_abilities({"off": sheet(measurements([1.0] * 8, range(26, 34)))}, twenty, None)
+    assert cold.cells["off"] == 2 and not readable_lifts([ArmKey("off")], 6, cold, 0.0), (
+        "cold, the floor counts the cells θ was READ on — those shared with the parent"
+    )
+    warm = candidate_abilities({"off": sheet(measurements([1.0] * 8, range(24, 32)))}, half, flat)
+    assert warm.cells["off"] == 4, "warm, the floor counts only the cells the ruler carries"
     assert closest_to_bar(reads, beside=near_key) == "deep"
 
     # A STOP IS NOT A VERDICT: only an invalid measurement bars an arm from leading.
@@ -1375,13 +1381,75 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         ], "an arm's lineage names the peer's mating and crossover"
         assert len(set(lineage.parent_ids)) == 2, "a crossover child has two parents"
     assert closed.election is not None
-    [winner] = closed.election.selected
+    winner = closed.election.selected
+    assert winner is not None
     assert "Merged." in closed.arms[winner].individual.prompts["solve"].fields["instruction"], (
         "CAPO's selector elected it off potter's race"
     )
     assert cycle.population[0].id == winner, (
         "the individual the next round mutates from does not lead the population the run carries"
     )
+
+    # A cut θ round reads its cold parent on the cells the archive holds GRADED, guard and election alike.
+    composed([*walk[:-1], "theta_election"])
+    replies = iter(["Merged.", "Other."])
+    theta_book = spend_book(None, usd_reserve=None)
+    # Empty until round 1 walks, so the origin's cells pay toward no cut.
+    theta_walking: list[bool] = []
+    theta_paid: list[int] = []
+
+    def paid_then_cut(_prompt: str, sample: Sample) -> bool:
+        if theta_walking:
+            theta_paid.append(sample.id)
+            if len(theta_paid) >= 2:
+                theta_book.hold_of = Hold(Budget(usd=0.0), theta_book.reserve)
+        return True
+
+    async def unpriced(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:
+        # No `target_prompt_chars`, so the composite cannot grade the row it files.
+        return MeasuredCell.from_wire(
+            {
+                "sample_key": sample.key,
+                "query": sample.query,
+                "ground_truth": sample.ground_truth,
+                "predicted": sample.ground_truth,
+                "error": None,
+                "cached": False,
+                "pipeline_data": {"total_time": 0.1},
+            }
+        )
+
+    with _peer_cycle(
+        workspace(tmp_path / "theta-cut"),
+        _PEER_HOP,
+        monkeypatch,
+        name,
+        composed_nodes,
+        paid_then_cut,
+        backend_id="theta-cut-e2e",
+        control=RunControl(book=theta_book),
+        panel_gate="off",
+    ) as (cycle, callbacks):
+        offline.llm.says = crossover_says
+        session = cycle.session
+        search = list(session.state.scoring.require_partition().search)
+        with monkeypatch.context() as patched:
+            patched.setattr(query_loop, "measure_sample", unpriced)
+            asyncio.run(
+                score_search_point(
+                    cycle.parent_point, search[1:2], session, label="origin", measured=None
+                )
+            )
+        asyncio.run(
+            score_search_point(
+                cycle.parent_point, search[:1], session, label="origin", measured=None
+            )
+        )
+        theta_walking.append(True)
+        with pytest.raises(StopLoop) as unwound:
+            asyncio.run(execute_round(cycle, 1, search, callbacks))
+    assert unwound.value.reason is StopReason.SPEND_BUDGET
+    assert cycle.rounds[-1].round == 0, "a cut round stood with no arm its selector could read"
 
     # The bench grades the pick the optimizer declared, over a higher-composite round.
     def bench_says(body: dict[str, Any]) -> str:
@@ -1414,7 +1482,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         head, fold = picked.head, picked.fold
         assert head is not None and fold is not None and fold.accuracy is not None
         assert picked.election is not None
-        [crowned] = picked.election.selected
+        crowned = picked.election.selected
+        assert crowned is not None
         [bar] = [picked.rows(key) for key in picked.arms if key not in picked.panel]
         cold = candidate_abilities({crowned: picked.rows(crowned)}, bar, None)
         fit = picked.fit(crowned)
@@ -1635,7 +1704,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         if stopped == "origin":
             assert "model is not allowed" in line_bench.status.sentence, f"{case}: says why"
         pick_arm = arm_state("C1.1", slot=ArmSlot(round=1, idx=0, total=1), individual=pick)
-        on_line = round_result(1, arms={ArmKey(pick.id): pick_arm}, selected=[pick.id], cells={})
+        on_line = round_result(1, arms={ArmKey(pick.id): pick_arm}, selected=pick.id, cells={})
         assert bench_series(line_stores, line_passes, line_scorer, rounds=[on_line]) == series, case
 
 
@@ -1770,21 +1839,27 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
 def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> None:
     # ε ramps in from its floor; the depths come from `fit_theta_given_delta`'s dispersion rule.
     cfg = pobb_knobs(epsilon=0.30, epsilon_floor=0.15)
-    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None)
+    parent = ArmKey("parent")
+    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)
     for n, epsilon in ((6, 0.15), (9, 0.225), *((n, 0.30) for n in range(12, 29))):
         assert graded.epsilon_at(n) == pytest.approx(epsilon), f"ε at {n} cells"
     flat = PoBBCheck(
-        pobb_knobs(epsilon=0.30, epsilon_floor=0.30), n_min=6, n_samples=28, ruler=None
+        pobb_knobs(epsilon=0.30, epsilon_floor=0.30),
+        n_min=6,
+        n_samples=28,
+        ruler=None,
+        parent=parent,
     )
     assert flat.epsilon_at(6) == pytest.approx(0.30), "a floor at ε does not ramp"
-    shipped = PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None)
+    shipped = PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent)
     assert shipped.epsilon_at(shipped.n_min) == pytest.approx(shipped.epsilon), (
         "the manifest sits floor and ε on the same value, so an untouched campaign never grades"
     )
 
-    def behind_perfect_prior(n: int, misses: int) -> Any:
-        check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None)
+    def behind_perfect_prior(n: int, misses: int, *, parent_cells: int = 28) -> Any:
+        check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)
         check.register_completed(sheet(measurements([1.0] * 28)), key=ArmKey("winner"))
+        check.register_completed(sheet(measurements([1.0] * parent_cells)), key=parent)
         check.set_current(ArmKey("arm"))
         return check.check(sheet(measurements([0.0] * misses + [1.0] * (n - misses))).cells)
 
@@ -1799,13 +1874,21 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     assert behind_perfect_prior(6, 2) is not None, (
         "two behind is still cut at the floor: the reprieve is for a width, not for a loser"
     )
+    assert behind_perfect_prior(9, 2, parent_cells=5) is None, (
+        "cut under the coverage floor: cold, the election reads θ on the cells the parent answered"
+    )
+    shallow = behind_perfect_prior(12, 2, parent_cells=9)
+    assert shallow is not None and shallow.check_result["epsilon"] == pytest.approx(0.225), (
+        "the ε ramp counted rows walked, not the cells θ is read on"
+    )
     late = behind_perfect_prior(26, 4)
     assert late is not None and late.outcome == "eliminated"
     assert late.check_result["epsilon"] == pytest.approx(0.30)
-    unpaired = PoBBCheck(pobb_knobs(epsilon=0.05), n_min=4, n_samples=20, ruler=None)
+    unpaired = PoBBCheck(pobb_knobs(epsilon=0.05), n_min=4, n_samples=20, ruler=None, parent=parent)
     unpaired.register_completed(
         sheet(measurements([1.0] * 8, sample_ids=list(range(8)))), key=ArmKey("lucky_leader")
     )
+    unpaired.register_completed(sheet(measurements([0.0] * 20)), key=parent)
     unpaired.set_current(ArmKey("challenger"))
     challenger = sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8]))
     assert unpaired.check(challenger.cells) is None, "an arm was cut on cells its rival never sat"
@@ -1827,7 +1910,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
         ]
 
     def collapse(rows: list[GradedCell]) -> Any:
-        return PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None).check(rows)
+        return PoBBCheck(pobb_knobs(), n_min=6, n_samples=28, ruler=None, parent=parent).check(rows)
 
     signal = collapse(answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]))
     assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED, (
@@ -2371,7 +2454,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         assert lives is not None
         origin_key = ArmKey(cycle.parent.id)
         origin_arm = arm_state("C0", slot=ArmSlot(round=0, idx=0, total=1), individual=cycle.parent)
-        origin = round_result(0, arms={origin_key: origin_arm}, selected=[origin_key], cells={})
+        origin = round_result(0, arms={origin_key: origin_arm}, selected=origin_key, cells={})
 
         def stop_after(*closes: tuple[bool, int]) -> tuple[int | None, StopReason | None]:
             line = [
@@ -2613,7 +2696,7 @@ def _evidence_campaign(
             cell.filed(dataclasses.replace(cell.facts, answer=answer))
             for cell, (_, answer, _) in zip(panel, walked, strict=True)
         )
-        closed = round_result(1, arms={key: pick}, selected=[key], cells={key: answered})
+        closed = round_result(1, arms={key: pick}, selected=key, cells={key: answered})
         close_round(
             ledgers[hop],
             [round_result(0, cells={}), closed],
@@ -2836,7 +2919,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert cells.column(ROW_GRADES["fitness"]) == standing, "a second reading is a second row"
     assert cells.column(ROW_GRADES["objective"]) == worth
     assert responses_of(cells) == worth, "the ruler read another row than the column"
-    assert distinct_valid_cells(cells) == 4
+    assert cells_read("accuracy", cells, (), None) == 4
     fold = fold_cells(cells)
     assert (fold.total, fold.accuracy) == (4, 0.75)
     assert fold.composite_fitness == pytest.approx(sum(worth.values()) / 4)
@@ -3115,7 +3198,8 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         return round_result(
             rnd,
             arms={ArmKey(on.id): arm_state("parent", individual=on)} | proposed,
-            selected=[ids[selected]] if selected else [],
+            improved=bool(selected),
+            selected=ids[selected] if selected else None,
             voted={} if selected else {"ended_on": on.id},
             cells={},
             **reading,

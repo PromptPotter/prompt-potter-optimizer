@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from functools import cached_property
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Self
 
 from pydantic import Field, field_validator
@@ -193,7 +194,7 @@ def _resolved_config(pipeline_params: dict[str, Any], schema: PipelineSchema) ->
     return pin_default_routes(fold_output_contract(pp, schema), schema)
 
 
-class OptSearchPoint(StrictModel):
+class OptSearchPoint(FrozenModel):
     """The individual: a value per locus of the roster — prompt fields and shots per prompt node, node config — plus its lineage."""
 
     prompts: dict[str, NodePrompt] = Field(
@@ -214,9 +215,10 @@ class OptSearchPoint(StrictModel):
     def _unset_is_absent(cls, prompts: dict[str, NodePrompt]) -> dict[str, NodePrompt]:
         return {node: prompt for node, prompt in prompts.items() if prompt}
 
-    @property
+    @cached_property
     def id(self) -> str:
-        """The individual IS its content, never stored: one configuration reached twice is one id."""
+        """The individual IS its content, never stored: one configuration reached twice is one id.
+        Cached, so a copy changing content is built anew (`configured`), never `model_copy`-updated."""
         return stable_hash([self.prompts_dump(), self.pipeline_params])
 
     def prompts_dump(self) -> dict[str, Any]:
@@ -224,7 +226,7 @@ class OptSearchPoint(StrictModel):
 
     def configured(self, pipeline_params: dict[str, Any] | None, schema: PipelineSchema) -> Self:
         resolved = _resolved_config(pipeline_params or {}, schema)
-        return self.model_copy(update={"pipeline_params": resolved})
+        return type(self)(prompts=self.prompts, pipeline_params=resolved, lineage=self.lineage)
 
     def prompt(self, node: str) -> NodePrompt:
         return self.prompts.get(node) or NodePrompt()

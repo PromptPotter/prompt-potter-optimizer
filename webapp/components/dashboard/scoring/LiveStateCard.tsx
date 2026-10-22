@@ -127,7 +127,7 @@ function RaceCatchUpLog({ dash }: { dash: DashboardSnapshot | null }) {
       <div className="var-label">Race catch-up (last {log.length})</div>
       <div className="payload-block">
         {log.slice().reverse().map((e, i) => {
-          const { member, round, label, position: sid, prior_ids: priors } = e;
+          const { member, round, label, position: sid, prior_keys: priors } = e;
           return (
             <div key={i} className="log-row">
               <span className="log-dim">

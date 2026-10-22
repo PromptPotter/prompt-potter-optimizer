@@ -155,7 +155,7 @@ def bench_series(
     standing = origin = headline(passes.origin)
     series: list[float | None] = []
     for outcome in rounds:
-        if outcome.election is not None and outcome.election.selected:
+        if outcome.election is not None and outcome.election.selected is not None:
             head = outcome.head
             assert head is not None, "a round that selected ends on the arm it selected"
             taken = passes.pass_of(head.individual.id)
@@ -475,7 +475,7 @@ async def grade_round_selection(
     if not (
         cycle.config.bench_trigger == "each_round"
         and election is not None
-        and election.selected
+        and election.selected is not None
         and passes is not None
     ):
         return

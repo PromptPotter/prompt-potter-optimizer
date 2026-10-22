@@ -13,7 +13,7 @@ from promptpotter.application.scoring.selection import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.intelligence.rasch import RoundAbilities
@@ -45,7 +45,7 @@ def _verdict_reason(
     winner: ArmKey | None,
     leading: ArmKey | None,
     reads: Mapping[ArmKey, tuple[float, float]],
-    n_electable: int,
+    electable: Sequence[ArmKey],
     abilities: RoundAbilities,
     labels: Mapping[ArmKey, str],
     coverage_floor: int,
@@ -57,9 +57,13 @@ def _verdict_reason(
         if cold
         else ""
     )
-    census = f"{n_electable} of {n_scored} electable, coverage floor {coverage_floor}"
+    census = f"{len(electable)} of {n_scored} electable, coverage floor {coverage_floor}"
     if leading is None:
-        return f"no arm could be read against the parent on the round's δ ruler; {census}{scale}"
+        read_on = ", ".join(f"{labels[key]} {abilities.cells.get(key, 0)}" for key in electable)
+        return (
+            f"no arm could be read against the parent; cells each θ was read on: "
+            f"{read_on or 'none'}; {census}{scale}"
+        )
     read = reads[leading]
     parent = abilities.bar[leading][0]
     numbers = (
@@ -100,14 +104,7 @@ def elect_on_theta(
         ruler,
         parent_bias=parent_bias,
     )
-    reads = readable_lifts(
-        electable,
-        rows,
-        measured.parent.rows,
-        measured.coverage_floor,
-        abilities,
-        parent_bias,
-    )
+    reads = readable_lifts(electable, measured.coverage_floor, abilities, parent_bias)
     leading = selected or closest_to_bar(reads)
     ctx.decide(
         PotterCheckpointKind.ROUND_WINNER,
@@ -129,7 +126,7 @@ def elect_on_theta(
             winner=selected,
             leading=leading,
             reads=reads,
-            n_electable=len(electable),
+            electable=electable,
             abilities=abilities,
             labels=measured.labels,
             coverage_floor=measured.coverage_floor,

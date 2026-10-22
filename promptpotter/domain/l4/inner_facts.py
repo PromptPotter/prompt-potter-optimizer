@@ -47,10 +47,9 @@ class InnerCellFacts(FrozenModel):
     peak_lift: float | None = Field(
         description="The best round's level less the origin's; null where `series_reason` names why"
     )
-    mean_round_delta: Annotated[float, Field(ge=-4.0, le=4.0)] | None = Field(
+    mean_round_delta: float | None = Field(
         description="The mean level less the origin's, the last level held forward to the round "
-        "budget; bounded for plausibility only, logit abilities differing without bound; null "
-        "where `series_reason` names why"
+        "budget; null where `series_reason` names why"
     )
     series_reason: ThetaCaveat | SeriesGap | None = Field(
         description="Why the level series differences nothing; null where it does"

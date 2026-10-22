@@ -281,8 +281,8 @@ function Scenarios({ evidence }: { evidence: Evidence }) {
               {sc.winner_changed ? (
                 <>
                   parts from the record at round {sc.first_divergent_round}, where it would have
-                  crowned <code>{sc.scenario_winner_id?.slice(0, 8)}</code> instead of{" "}
-                  <code>{sc.recorded_winner_id?.slice(0, 8)}</code>.
+                  crowned <code>{sc.scenario_winner_key?.slice(0, 8)}</code> instead of{" "}
+                  <code>{sc.recorded_winner_key?.slice(0, 8)}</code>.
                 </>
               ) : (
                 <>never parts from the record.</>

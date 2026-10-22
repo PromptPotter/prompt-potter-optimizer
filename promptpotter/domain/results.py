@@ -327,7 +327,7 @@ class BankedSearchPointError(ConflictError):
 
 
 def is_electable(arm: ArmState, rows: Sequence[GradedCell]) -> bool:
-    """NOT the whole election rule: the coverage floor is `scoring/selection.py::distinct_valid_cells`."""
+    """NOT the whole election rule: the coverage floor is `scoring/selection.py::readable_lifts`."""
     return is_leader_eligible(arm) and bool(rows) and not is_answer_collapsed(rows)
 
 
@@ -635,8 +635,7 @@ def best_line(rounds: Sequence[RoundResult]) -> list[LineStep]:
 def pick_line(rounds: Sequence[RoundOutcome]) -> list[ArmName]:
     picks: dict[ArmKey, ArmName] = {}
     for rr in rounds:
-        if rr.election is not None and rr.election.selected:
-            key = rr.election.ended_on
+        if rr.election is not None and (key := rr.election.selected) is not None:
             picks.setdefault(key, arm_name(key, rr.arms[key], rr.round))
     return list(picks.values())
 
@@ -860,10 +859,10 @@ class ArmFit(FrozenModel):
 
 
 class Election(FrozenModel):
-    """What a round's selector decided over its arms, by key; empty ``selected`` = the round HELD."""
+    """What a round's selector decided over its arms, by key; ``selected`` null = the round HELD."""
 
-    # Round 0 selects the origin it adopted.
-    selected: list[ArmKey]
+    # THE pick: round 0 selects the origin it adopted.
+    selected: ArmKey | None
     leading: ArmKey | None = Field(
         description="The ONE arm this round is read off, as its selector named it and never "
         "re-ranked: the selection where there is one, on a held round the challenger that came "
@@ -939,7 +938,7 @@ class RoundOutcome(FrozenModel):
     @property
     def improved(self) -> bool:
         """A promotion, on a bare point estimate; round 0 adopts its origin and promotes nothing."""
-        return self.round > 0 and self.election is not None and bool(self.election.selected)
+        return self.round > 0 and self.election is not None and self.election.selected is not None
 
     @property
     def ruler(self) -> RulerStamp | None:
@@ -968,7 +967,7 @@ class RoundOutcome(FrozenModel):
         return ArmElection.of(
             key,
             held=held and election is not None,
-            selected=() if election is None else election.selected,
+            selected=None if election is None else election.selected,
             leading=None if election is None else election.leading,
             electable=None if election is None else election.electable,
         )
@@ -1117,7 +1116,11 @@ def _by_sample(sheet: CellSheet) -> list[tuple[str, GradedCell, str]]:
 
 
 def declared_selection[R: RoundOutcome](rounds: Sequence[R]) -> R:
-    return next(rr for rr in reversed(rounds) if rr.election is not None and rr.election.selected)
+    return next(
+        rr
+        for rr in reversed(rounds)
+        if rr.election is not None and rr.election.selected is not None
+    )
 
 
 def _selection_line(selection: ArmName | None, pair: PairedReading) -> str:
@@ -1203,7 +1206,7 @@ class RunStanding(FrozenModel):
         lives: tuple[int, int] | None,
     ) -> RunStanding:
         declared = declared_selection(rounds)
-        picked = [rr.election.ended_on for rr in rounds if rr.election and rr.election.selected]
+        picked = [key for rr in rounds if rr.election and (key := rr.election.selected) is not None]
         chosen = picked[-1]
         arms: dict[str, ArmName] = {arm.key: arm for arm in pick_line(rounds)}
         before = [individual for individual in picked if individual != chosen]
@@ -1459,11 +1462,11 @@ class ArmElection(FrozenModel):
         key: ArmKey,
         *,
         held: bool,
-        selected: Collection[ArmKey],
+        selected: ArmKey | None,
         leading: ArmKey | None,
         electable: int | None,
     ) -> ArmElection:
-        won = key in selected
+        won = key == selected
         crown: Crown | None = None
         if won and electable is not None:
             crown = "elected" if electable > 1 else "uncontested"

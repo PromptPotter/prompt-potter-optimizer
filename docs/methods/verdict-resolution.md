@@ -9,7 +9,8 @@ answer different questions and only one of them is adaptive:
 | **Acquisition score** | Which sample is worth measuring at all? | `pick_value = decision_information_gain + delta_learning_gain`; the between-round pick ranks on term 1 alone | the persisted hard-samples ranking (both terms) + **between** rounds (`select_round_subset`, term 1 + a reserved δ-learning tail) |
 | **Round order** | In what order do we score the round's samples? | `build_round_order` | **Within** a round — one deterministic order, shared by every candidate |
 
-Both live in `application/intelligence/adaptive_queue_mechanism.py`. **There is no online per-sample
+The score lives in `application/intelligence/adaptive_queue_mechanism.py`, the order in
+`application/intelligence/rasch.py` beside the draw. **There is no online per-sample
 re-fit** — the round order is static by design (§ The round order for why adaptivity made it worse).
 
 Which *candidate* wins is the sibling question, owned by
@@ -372,6 +373,9 @@ term: `_with_ruler_learning` gives the last few slots to the cells δ is least s
 the band open; `_with_stratum_cover` then fronts one cell per shared `source_pin` level, so a
 priced draw cannot narrow to one dataset or one model; and `_with_anchor_block` swaps
 already-anchored cells into the tail until the next ruler extension has enough to equate against.
+Those `elimination_n_min` anchored cells are the cells a warm θ is read on (`rasch.py::theta_cells`),
+so they are what PoBB's gates and the election's coverage floor count, and the round order walks
+them first (§ The round order).
 Summed, `delta_learning_gain` dominated — an unmeasured sample carries the population `σ_δ`, so
 unmeasured samples outranked measured ones and tied with each other, draining the bank in stored
 order. Term 1 still overstates what a draw buys for ONE arm, because δ is fit across arms; weighting
@@ -414,9 +418,17 @@ interleave spreads the misses so thin that a futility kill lands at the very end
 pure-tie kill a handful of extra samples and buys a regression probe inside the first
 `elimination_n_min` window, plus steady loss accrual for regressors.
 
-It is a **pure function** of (parent grades, ruler, sample ids), so a resumed round re-derives the
-identical order with no recorded sidecar. The hard-samples artifact's `round_order` is this same
-function called on the frontier's grades and the cycle's ruler, over the samples the cycle has measured.
+**The first `elimination_n_min` slots take only cells θ is read on** (`theta_cells`: warm, the
+ruler's; cold, the parent's), under the same strata and probe rule; every later slot draws from
+all. PoBB's entry gate, ε ramp and lock-in, and the election's coverage floor, all count cells
+read, never rows walked: led by the strata alone, a panel holding exactly `elimination_n_min`
+ruler cells, mostly parent hits, reaches its last one at its final row, and no arm can be cut.
+The cost: a losing arm buys fewer off-ruler cells, so the ruler learns those more slowly.
+
+It is a **pure function** of (parent grades, ruler, sample ids, `elimination_n_min`), so a resumed
+round re-derives the identical order with no recorded sidecar. The hard-samples artifact's
+`round_order` is this same function called on the frontier's grades and the cycle's ruler, over
+the samples the cycle has measured.
 
 **Why static beats adaptive here:** an ability re-fit after every measurement empirically front-loads
 the parent's hit set — the zero-information region, where every early paired comparison TIES, `p_best`
@@ -473,7 +485,7 @@ holds no stamped ability, so it serves δ and no pick score, and ranks on diffic
 
 - Acquisition score — `intelligence/adaptive_queue_mechanism.py::pick_value` (with
   `::decision_information_gain` + `::delta_learning_gain`).
-- Round order — `::build_round_order`, called once per round by potter's sampler
+- Round order — `intelligence/rasch.py::build_round_order`, called once per round by potter's sampler
   (`optimizers/potter/members.py::AdaptiveQueue.draw`).
 - Between-round subset pick — `intelligence/rasch.py::select_round_subset`, off the LOCKED
   ruler (still **1PL**: feeding graduated discrimination `aₛ` in here is open,

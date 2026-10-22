@@ -633,7 +633,7 @@ def _emit_round(
     pick = prompted(instruction=name)
     key = ArmKey(pick.id)
     arm = arm_state(name, slot=ArmSlot(round=n, idx=0, total=1), individual=pick)
-    rr = _round(round=n, arms={key: arm}, election=election([key] if crowned else [], ended_on=key))
+    rr = _round(round=n, arms={key: arm}, election=election(key if crowned else None, ended_on=key))
     closed.append(rr)
     close_round(ledger, closed, cycle=closing)
     return pick.id
@@ -678,7 +678,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     on_parent = {
         "arms": {ArmKey(parent.id): arm_state("parent", individual=parent)},
-        "election": election([], ended_on=parent.id),
+        "election": election(ended_on=parent.id),
     }
     # The frontier holds every cell, answered by an individual that is not the parent.
     line = [_round(round=0, cells={ArmKey("origin"): hits}, **on_parent)]
@@ -772,7 +772,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     adopted = _round(
         round=0,
         arms={ArmKey("origin"): arm_state("origin", slot=origin_slot)},
-        election=election(["origin"]),
+        election=election("origin"),
     )
     close_round(
         ledger,
@@ -781,7 +781,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             _round(
                 round=1,
                 arms={walked_child: child_arm, read_parent.key: read_parent.state},
-                election=election([walked_child]),
+                election=election(walked_child),
                 cells={walked_child: arm, read_parent.key: bar},
             ),
         ],
@@ -899,7 +899,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                     ArmKey("parent"): arm_state("parent", total=10),
                 },
                 folds={ArmKey("c1"): score_summary(total=10)},
-                election=election([], ended_on="parent"),
+                election=election(ended_on="parent"),
             ),
         ],
         cycle=closing,

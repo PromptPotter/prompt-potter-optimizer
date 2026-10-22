@@ -4,7 +4,7 @@ import logging
 import math
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.node_context import NodeContext, measure_as_parent
 from promptpotter.application.intelligence.rasch import candidate_abilities
@@ -29,7 +29,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     open_walk,
     reread_cells,
 )
-from promptpotter.application.scoring.selection import distinct_valid_cells
+from promptpotter.application.scoring.selection import cells_read
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
@@ -118,19 +118,24 @@ async def measure_population(
     )
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
-    if cut is not None and not any(
-        distinct_valid_cells(arm) >= coverage_floor for arm in rows.values()
-    ):
-        # Nothing the cut left can be elected, so the round is unwound as an unkept cut is.
-        raise StopLoop(cut)
+    seat: NodeContext[Any] = NodeContext(ctx, selector)
+    # Cold too: a selector elects on that θ, and the round's `AbilityReading.caveat` names it.
+    ruler = cycle.difficulty.ruler
+
+    def readable(key: ArmKey, parent: CellSheet) -> bool:
+        answered = {cell.key for cell in parent.scoreable}
+        return cells_read(selector.elects_on, rows[key], answered, ruler) >= coverage_floor
 
     # The REPLICATION cohort, deliberately the looser predicate: the election admits on `is_electable`.
     scored = [key for key, arm in arms.items() if is_leader_eligible(arm)]
-    cells = selector.parent_cells(NodeContext(ctx, selector), panel, rows)
+    cells = selector.parent_cells(seat, panel, rows)
     if cut is not None:
         # The spent budget buys the parent no cell: it is read where the archive already holds it.
-        cells = reread_cells(cycle.parent_point, cells, cycle.session, label=MeasurementRole.PARENT)
-        if not cells:
+        held = reread_cells(cycle.parent_point, cells, cycle.session, label=MeasurementRole.PARENT)
+        on_disk = held.by_key()
+        cells = [sample for sample in cells if sample.key in on_disk]
+        # Nothing the cut left can be elected, so the round is unwound as an unkept cut is.
+        if not cells or not any(readable(key, held) for key in rows):
             raise StopLoop(cut)
     parent = await rescore_parent(ctx, cells, role=MeasurementRole.PARENT)
     # Never in a `finally`: an unwound round did not score. Round 0's is `round.py::emit_origin_round`.
@@ -153,13 +158,11 @@ async def measure_population(
             continue
         if rejects and isinstance(arm, Cut) and arm.kind == "eliminated":
             continue
-        # Catches an arm thin for a reason other than elimination: an operator skip.
-        if distinct_valid_cells(rows[key]) < coverage_floor:
+        # An arm the selector cannot read for a reason other than elimination: an operator skip.
+        if not readable(key, parent.rows):
             continue
         electable.append(key)
 
-    # Cold too: a selector elects on that θ, and the round's `AbilityReading.caveat` names it.
-    ruler = cycle.difficulty.ruler
     # Fixed δ decouples the arms, so this is the fit `elect_round_winner` takes of the same rows.
     abilities = candidate_abilities({key: rows[key] for key in electable}, parent.rows, ruler)
     fit = {

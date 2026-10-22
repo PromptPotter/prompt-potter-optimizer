@@ -108,7 +108,7 @@ def _origin_round(
         cells={key: results},
         folds=arm_folds({key: arm}, {key: results}, schema),
         election=Election(
-            selected=[key],
+            selected=key,
             leading=key,
             ended_on=key,
             electable=0,

@@ -480,7 +480,7 @@ def _score_cells(round_data: RoundResult, key: ArmKey) -> str:
         else f"{read.estimate.value:+.3f} [{read.estimate.ci_lo:+.3f}, {read.estimate.ci_hi:+.3f}]"
     )
     election = round_data.election
-    won = "✓" if election is not None and key in election.selected else "·"
+    won = "✓" if election is not None and key == election.selected else "·"
     fitness = fmt_fitness(fold.composite_fitness)
     return f"`{fitness}` | {fmt_pct(fold.accuracy)} | {theta} | {lift} | {won}"
 

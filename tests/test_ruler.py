@@ -33,13 +33,11 @@ from promptpotter.application.bench.difficulty import (
 )
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
-from promptpotter.application.intelligence.adaptive_queue_mechanism import (
-    build_round_order,
-    stratum_shares,
-)
+from promptpotter.application.intelligence.adaptive_queue_mechanism import stratum_shares
 from promptpotter.application.intelligence.rasch import (
     Observation,
     RaschPosterior,
+    build_round_order,
     fit_rasch,
     fit_theta_given_delta,
     graduate_ruler_model,
@@ -301,9 +299,9 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     parent_grades = {f"k{sid}": 1.0 if sid < 9 else 0.0 for sid in range(23)}
     ordering = _anchored({f"k{sid}": float(sid % 7) for sid in range(20)}, mu=2.85)
     on_slot = {sid: ordering.delta[key] for sid, key in cells.items() if key in ordering.delta}
-    order = build_round_order(parent_grades, ordering, cells)
+    order = build_round_order(parent_grades, ordering, cells, n_min=0)
     assert sorted(order) == ids
-    assert build_round_order(parent_grades, ordering, cells) == order, (
+    assert build_round_order(parent_grades, ordering, cells, n_min=0) == order, (
         "the order is not reproducible"
     )
     hit_ids = set(range(9))
@@ -319,7 +317,14 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     assert order.index(23) > max(order.index(sid) for sid in misses), "an unknown cell led a miss"
     hit_keys = [(-on_slot.get(sid, centre), sid) for sid in order if sid in hit_ids]
     assert hit_keys == sorted(hit_keys), "hit probes are not led by the hardest"
-    unknown = build_round_order({}, ordering, cells)
+    # Led: n_min cells θ is read on come first, so PoBB can cut at n_min, the probe kept.
+    led = build_round_order(parent_grades, ordering, cells, n_min=6)
+    assert all(cells[sid] in ordering.delta for sid in led[:6]), (
+        "an off-ruler cell was walked before n_min θ-readable ones: no arm can be cut that early"
+    )
+    assert order.index(20) < 6 <= led.index(20), "guard: the strata alone walk off the ruler early"
+    assert led[3] in hit_ids, "the lead dropped the regression probe"
+    unknown = build_round_order({}, ordering, cells, n_min=0)
     assert sorted(unknown) == ids
     spread = [abs(on_slot.get(sid, centre) - centre) for sid in unknown]
     assert spread == sorted(spread), (
@@ -435,14 +440,14 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
             for s, h in zip(bank, hits, strict=True)
         )
 
-    def closed(n: int, walked: dict[str, list[float]], picks: list[str], ended_on: str) -> Any:
+    def closed(n: int, walked: dict[str, list[float]], pick: str | None, ended_on: str) -> Any:
         # Each election reads its own version; the series must read none of them.
         stamp = RulerStamp(id=f"v{n}", version=n, scope=scope, excluded=())
         return round_result(
             n,
             arms={ArmKey(k): arm_state(k) for k in walked},
             cells={ArmKey(k): graded(h) for k, h in walked.items()},
-            election=election(picks, ended_on=ended_on, ruler=stamp),
+            election=election(pick, ended_on=ended_on, ruler=stamp),
         )
 
     hits = {
@@ -456,8 +461,8 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     tenant.fold(scope, [(f"f{arm}", s.key, (s.id + 0.5) / 12) for arm in range(8) for s in bank])
     frozen = tenant.version()
     run = [
-        closed(0, {"o": hits["o"]}, ["o"], "o"),
-        closed(1, {"a": hits["a"], "b": hits["b"]}, ["a"], "a"),
+        closed(0, {"o": hits["o"]}, "o", "o"),
+        closed(1, {"a": hits["a"], "b": hits["b"]}, "a", "a"),
     ]
     for rr in run:
         # After its election, as `DifficultyView.fold` banks a round.
@@ -465,7 +470,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
             scope, [(k, c.key, c.grade.objective) for k, sh in rr.cells.items() for c in sh]
         )
     run += [
-        closed(2, {"b": hits["b"], "a": hits["a"]}, [], "a"),
+        closed(2, {"b": hits["b"], "a": hits["a"]}, None, "a"),
         round_result(3, election=None, arms={}, cells={}),
     ]
     [series] = series_of(OpenAt(), warmed, [run])
@@ -485,7 +490,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
         "three rounds of one standing parent on one scale is the plateau"
     )
     # A fork that picked `b`: both lines on one fit less both lines' parents, or UCB sums two scales.
-    fork = [run[0], closed(1, {"a": hits["a"], "b": hits["b"]}, ["b"], "b")]
+    fork = [run[0], closed(1, {"a": hits["a"], "b": hits["b"]}, "b", "b")]
     line, forked = series_of(OpenAt(), warmed, [run, fork])
     assert line.stamp == forked.stamp and line.stamp.excluded == ("a", "b", "o"), (
         "two lines of one family read their levels on two scales"
@@ -523,7 +528,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
                 )
             },
             election=election(
-                [k], ended_on=k, ruler=RulerStamp(id=f"v{n}", version=n, scope=scope, excluded=())
+                k, ended_on=k, ruler=RulerStamp(id=f"v{n}", version=n, scope=scope, excluded=())
             ),
         )
         for n, k in ((0, "o"), (1, "a"))

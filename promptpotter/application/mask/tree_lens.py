@@ -88,7 +88,7 @@ class _Overlay:
                 self.criteria.setdefault(course, record.criterion)
                 for rnd_rec in cyc.rounds:
                     for cand in rnd_rec.candidates:
-                        self.readings[(course, cand.candidate_id)] = cand.reading
+                        self.readings[(course, cand.key)] = cand.reading
         self.dimmed: frozenset[tuple[CyclePath, int]] = frozenset(dimmed)
 
     def apply(self, node: CourseNode) -> CourseNode:

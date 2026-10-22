@@ -179,8 +179,8 @@ class RoundSummary(FrozenModel):
         "`verdict_reason` names as its best, at round 0 the origin. `panel_precision` is "
         "measured on it. Null where the selector could read no arm."
     )
-    selected: list[ArmName] = Field(
-        description="The arms the election crowned; empty on a round that held."
+    selected: ArmName | None = Field(
+        description="The arm the election crowned; null on a round that held."
     )
     # ``None`` where the round measured nothing readable: the chart draws a GAP, never a point at zero.
     accuracy: float | None
@@ -224,7 +224,9 @@ class RoundSummary(FrozenModel):
             leading=None
             if election is None or election.leading is None
             else name(election.leading),
-            selected=[] if election is None else [name(key) for key in election.selected],
+            selected=None
+            if election is None or election.selected is None
+            else name(election.selected),
             accuracy=None if fold is None else fold.accuracy,
             composite_fitness=None
             if fold is None or fold.accuracy is None

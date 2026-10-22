@@ -410,7 +410,7 @@ class RaceCatchUpRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
-    def prior_ids(self) -> list[ArmKey]:
+    def prior_keys(self) -> list[ArmKey]:
         return list(self.cells)
 
 

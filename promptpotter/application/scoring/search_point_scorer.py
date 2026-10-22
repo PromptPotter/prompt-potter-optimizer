@@ -258,9 +258,11 @@ async def score_search_point(
 
 def reread_cells(
     search_point: JobSearchPoint, dataset: list[Sample], session: Session, *, label: str
-) -> list[Sample]:
-    walk = open_walk(search_point, dataset, session, label=label, measured=None)
-    return [sample for sample in dataset if sample.id in walk.ctx.rereads]
+) -> CellSheet:
+    """The rows a walk of *dataset* would take free off the archive, graded as it takes them."""
+    ctx = open_walk(search_point, dataset, session, label=label, measured=None).ctx
+    held = ctx.cached_sample_results
+    return ctx.scorer.sheet(held[s.id].replayed() for s in dataset if s.id in ctx.rereads)
 
 
 def open_walk(

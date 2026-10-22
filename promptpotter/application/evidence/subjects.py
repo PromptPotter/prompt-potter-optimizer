@@ -155,8 +155,8 @@ class ScenarioReading(StrictModel):
     honest limit of a lens is not something a surface can be trusted to remember.
     """
 
-    recorded_winner_id: str | None
-    scenario_winner_id: str | None
+    recorded_winner_key: str | None
+    scenario_winner_key: str | None
     winner_changed: bool
     first_divergent_round: int | None
     invariant_rounds: int

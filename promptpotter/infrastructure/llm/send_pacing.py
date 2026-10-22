@@ -37,7 +37,10 @@ class SendBudget:
     def __init__(self, deadline_s: float | None, *, attempts: int) -> None:
         self.deadline_s = deadline_s
         self.attempts = attempts
-        self.clock = None if deadline_s is None else asyncio.timeout(deadline_s)
+        # Unbounded is a clock with no deadline: it never fires and gives nothing back.
+        self.clock = asyncio.Timeout(
+            None if deadline_s is None else asyncio.get_running_loop().time() + deadline_s
+        )
         self.resent = 0
         self.given_back = 0.0
 
@@ -53,8 +56,7 @@ class SendBudget:
 
     def give_back(self, seconds: float) -> None:
         """The clock bounds the provider WORKING, never the wait for it."""
-        when = None if self.clock is None else self.clock.when()
-        if self.clock is None or when is None:
+        if (when := self.clock.when()) is None:
             return
         try:
             self.clock.reschedule(when + seconds)

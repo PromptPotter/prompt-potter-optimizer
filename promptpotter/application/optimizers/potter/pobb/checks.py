@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict
 
-from promptpotter.application.intelligence.rasch import graded_response
+from promptpotter.application.intelligence.rasch import graded_response, theta_cells
 from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.scoring.selection import (
     PairedPosterior,
+    cells_read,
     elimination_p_best_bounds,
     paired_p_best,
     priors_covering,
@@ -90,9 +91,11 @@ class PoBBCheck:
         n_min: int,
         n_samples: int,
         ruler: DeltaRuler | None,
+        parent: ArmKey,
     ) -> None:
         # The SAME δ scale the round-winner election reads; ``None`` ⇒ flat, the ruler still cold.
         self.ruler = ruler
+        self.parent = parent
         self.n_min = n_min
         self.epsilon = knobs.epsilon
         self.epsilon_floor = knobs.epsilon_floor
@@ -147,6 +150,12 @@ class PoBBCheck:
                 fit=None,
                 paired_breakdown={},
             )
+        # Every posterior gate and the ε ramp read the depth the election's coverage floor counts.
+        read = cells_read(
+            "ability", results, self.priors_by_sample.get(self.parent, {}), self.ruler
+        )
+        if read < self.n_min:
+            return None
         fit = paired_p_best(results, self.priors_by_sample, self.ruler)
         if fit is None:
             return None
@@ -169,7 +178,7 @@ class PoBBCheck:
                     current=self._current,
                     n_samples=n,
                     paired_breakdown=paired_breakdown,
-                    decision_grade=n >= self.lock_in_n_min,
+                    decision_grade=read >= self.lock_in_n_min,
                 )
             )
 
@@ -181,13 +190,13 @@ class PoBBCheck:
             "total_queries": self.n_samples,
             "n_priors": len(fit.priors),
         }
-        if self.leader_lock_in and n >= self.lock_in_n_min and fit.p_best >= self.lock_in:
+        if self.leader_lock_in and read >= self.lock_in_n_min and fit.p_best >= self.lock_in:
             return PoBBStop(
                 self.name, "locked_in", context, fit=fit, paired_breakdown=paired_breakdown
             )
 
         # ε is the ONLY futility gate; the priors include the round's parent (`potter/race.py`).
-        bar = self.epsilon_at(n)
+        bar = self.epsilon_at(read)
         if not self.epsilon_elimination or fit.p_best >= bar:
             return None
         return PoBBStop(
@@ -228,7 +237,10 @@ class PoBBCheck:
             # Collapse needs one answer everywhere; a second, or an empty one, rules it out for good.
             if len(said) <= 1 and not said & {"", NO_RESULT}:
                 return m
-            if not priors:
+            # Cold, a catch-up may yet give the parent any cell, and a depth below what `check` will
+            # read lands the horizon past its stop: so it counts the most it could read.
+            read = len(theta_cells(dict.fromkeys(cells), cells, self.ruler))
+            if not priors or read < self.n_min:
                 continue
             settled = [
                 pid
@@ -238,8 +250,8 @@ class PoBBCheck:
             low, high = elimination_p_best_bounds(
                 cells, grades, priors, self.ruler, settled=settled
             )
-            if self.leader_lock_in and m >= self.lock_in_n_min and high >= self.lock_in:
+            if self.leader_lock_in and read >= self.lock_in_n_min and high >= self.lock_in:
                 return m
-            if self.epsilon_elimination and low < self.epsilon_at(m):
+            if self.epsilon_elimination and low < self.epsilon_at(read):
                 return m
         return None

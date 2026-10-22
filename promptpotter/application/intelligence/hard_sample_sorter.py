@@ -5,10 +5,8 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from promptpotter.application.intelligence.adaptive_queue_mechanism import (
-    build_round_order,
-    pick_value,
-)
+from promptpotter.application.intelligence.adaptive_queue_mechanism import pick_value
+from promptpotter.application.intelligence.rasch import build_round_order
 from promptpotter.domain.cells import (
     HARD_SAMPLES_VERSION,
     HardSampleCell,
@@ -45,6 +43,7 @@ def build_hard_samples(
     arm_theta: Mapping[str, float],
     parent_grades: Mapping[str, float],
     slots: Mapping[str, int],
+    n_min: int,
     cycle_id: str | None,
 ) -> HardSamples:
     """*slots* places each ``Sample.key`` at its row in the dataset served: a cell no row holds is not drawn."""
@@ -86,7 +85,9 @@ def build_hard_samples(
         positions={key: slots[key] for key in held},
         sample_order=sorted(measured, key=rank),
         samples={key: difficulty(key) for key in held},
-        round_order=[key_at[sid] for sid in build_round_order(parent_grades, ruler, key_at)],
+        round_order=[
+            key_at[sid] for sid in build_round_order(parent_grades, ruler, key_at, n_min=n_min)
+        ],
         cells=[
             HardSampleCell(candidate=o.candidate_id, sample_key=o.key, fitness=o.response)
             for o in observations

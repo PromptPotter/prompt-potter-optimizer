@@ -605,7 +605,7 @@ class RaceSnapshot:
     current: ArmKey
     n_samples: int
     paired_breakdown: dict[ArmKey, dict[str, float]]
-    # Whether `n_samples` reached the depth this race lets a standing decide at.
+    # Whether the cells read reached the depth this race lets a standing decide at.
     decision_grade: bool
 
 

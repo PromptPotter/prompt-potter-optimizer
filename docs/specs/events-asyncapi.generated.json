@@ -2988,7 +2988,7 @@
       },
       "Election": {
         "additionalProperties": false,
-        "description": "What a round's selector decided over its arms, by key; empty ``selected`` = the round HELD.",
+        "description": "What a round's selector decided over its arms, by key; ``selected`` null = the round HELD.",
         "properties": {
           "electable": {
             "title": "Electable",
@@ -3031,11 +3031,15 @@
             "$ref": "#/components/schemas/RulerStamp"
           },
           "selected": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Selected",
-            "type": "array"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected"
           },
           "verdict_reason": {
             "anyOf": [
@@ -3116,11 +3120,15 @@
             "$ref": "#/components/schemas/RulerStamp"
           },
           "selected": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Selected",
-            "type": "array"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected"
           },
           "timestamp": {
             "title": "Timestamp",

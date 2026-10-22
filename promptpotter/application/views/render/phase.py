@@ -102,7 +102,7 @@ def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
     lines: list[str] = []
     # The verdict line's point estimate reads the same on a round that resolved nothing; the interval separates them.
     election = round_result.election
-    selected = None if election is None else next(iter(election.selected), None)
+    selected = None if election is None else election.selected
     fit = None if selected is None else round_result.fit(selected)
     reading = None if fit is None else fit.vs_reference
     if reading is not None and reading.headline is not None and reading.coverage is not None:

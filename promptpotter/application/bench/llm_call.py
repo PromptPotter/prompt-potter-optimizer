@@ -102,7 +102,6 @@ async def _chat_under_deadline(
     budget = SendBudget(
         OPTIMIZER_CALL_DEADLINE_S * _MAX_ROUND_TRIPS_PER_CALL, attempts=SEND_ATTEMPTS
     )
-    assert budget.clock is not None
     try:
         async with budget.clock:
             with under_budget(budget), throttle_stall_given_to(budget.give_back):

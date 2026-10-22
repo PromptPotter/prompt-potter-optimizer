@@ -80,7 +80,7 @@ def build_candidate_rows(
             election=ArmElection.of(
                 key,
                 held=election is not None,
-                selected=() if election is None else election.selected,
+                selected=None if election is None else election.selected,
                 leading=None if election is None else election.leading,
                 electable=None if election is None else election.electable,
             ),

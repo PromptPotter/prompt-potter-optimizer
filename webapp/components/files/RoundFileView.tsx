@@ -110,7 +110,7 @@ export function RoundFileView({
           {/* A round ending on its origin adopted it: it neither selects nor holds. */}
           {election &&
             headline?.role !== "origin" &&
-            (election.selected.length > 0 ? (
+            (election.selected !== null ? (
               <span className="pass">selected</span>
             ) : (
               <span className="round-file-dim">held</span>

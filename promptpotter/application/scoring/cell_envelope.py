@@ -28,7 +28,6 @@ class CellEnvelope:
         self.label = label
         self._budget = SendBudget(budget_s, attempts=attempts)
         self._announced = False
-        assert self._budget.clock is not None
         self._deadline = self._budget.clock
         self._bound = contextlib.ExitStack()
 

@@ -2786,11 +2786,11 @@
             "title": "Position",
             "type": "integer"
           },
-          "prior_ids": {
+          "prior_keys": {
             "items": {
               "type": "string"
             },
-            "title": "Prior Ids",
+            "title": "Prior Keys",
             "type": "array"
           },
           "round": {
@@ -2804,7 +2804,7 @@
           "arm",
           "label",
           "position",
-          "prior_ids"
+          "prior_keys"
         ],
         "title": "CatchUpLogEntry",
         "type": "object"
@@ -6035,7 +6035,7 @@
       },
       "Election": {
         "additionalProperties": false,
-        "description": "What a round's selector decided over its arms, by key; empty ``selected`` = the round HELD.",
+        "description": "What a round's selector decided over its arms, by key; ``selected`` null = the round HELD.",
         "properties": {
           "electable": {
             "title": "Electable",
@@ -6078,11 +6078,15 @@
             "$ref": "#/components/schemas/RulerStamp"
           },
           "selected": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Selected",
-            "type": "array"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected"
           },
           "verdict_reason": {
             "anyOf": [
@@ -13254,7 +13258,7 @@
             "title": "Note",
             "type": "string"
           },
-          "recorded_winner_id": {
+          "recorded_winner_key": {
             "anyOf": [
               {
                 "type": "string"
@@ -13263,9 +13267,9 @@
                 "type": "null"
               }
             ],
-            "title": "Recorded Winner Id"
+            "title": "Recorded Winner Key"
           },
-          "scenario_winner_id": {
+          "scenario_winner_key": {
             "anyOf": [
               {
                 "type": "string"
@@ -13274,7 +13278,7 @@
                 "type": "null"
               }
             ],
-            "title": "Scenario Winner Id"
+            "title": "Scenario Winner Key"
           },
           "total_rounds": {
             "title": "Total Rounds",
@@ -13286,8 +13290,8 @@
           }
         },
         "required": [
-          "recorded_winner_id",
-          "scenario_winner_id",
+          "recorded_winner_key",
+          "scenario_winner_key",
           "winner_changed",
           "first_divergent_round",
           "invariant_rounds",
@@ -14229,12 +14233,15 @@
             "type": "integer"
           },
           "selected": {
-            "description": "The arms the election crowned; empty on a round that held.",
-            "items": {
-              "$ref": "#/components/schemas/ArmName"
-            },
-            "title": "Selected",
-            "type": "array"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmName"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The arm the election crowned; null on a round that held."
           },
           "selection": {
             "items": {

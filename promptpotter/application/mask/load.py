@@ -157,7 +157,7 @@ def _mask_candidate(
     key: ArmKey, arm: ArmState, sheet: CellSheet, scorer: Scorer, crowned: str
 ) -> MaskCandidate:
     return MaskCandidate(
-        candidate_id=key,
+        key=key,
         reading=read_rows(sheet, scorer),
         is_selected=key == crowned,
         is_eligible=_mask_eligible(arm, sheet),

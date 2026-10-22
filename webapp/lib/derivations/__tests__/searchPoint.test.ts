@@ -159,7 +159,7 @@ const crowned = (
   return summaryRound({
     round,
     leading: leadingIdx >= 0 ? arm(leadingIdx) : null,
-    selected: winnerIdx >= 0 ? [arm(winnerIdx)] : [],
+    selected: winnerIdx >= 0 ? arm(winnerIdx) : null,
     candidates: Array.from({ length: n }, (_, i) =>
       summaryCandidate({
         reading: armReading({

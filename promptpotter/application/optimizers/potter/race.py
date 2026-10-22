@@ -151,24 +151,25 @@ class PoBBRace(CatchUpPool):
         *,
         measured_unit: MeasuredUnit,
     ) -> None:
+        # The one prior no arm of this round labels; a cell it never answered is caught up, never borrowed.
+        parent = ArmKey(ctx.read(Lineage).parent.id)
         super().__init__(
             PoBBCheck(
                 ctx.knobs,
                 n_min=ctx.read(Bounds).elimination_n_min,
                 n_samples=len(panel.cells),
                 ruler=ctx.read(Ruler).difficulty.ruler,
+                parent=parent,
             ),
             catch_up,
             ctx.node,
         )
         self._ctx = ctx
         self._measured_unit = measured_unit
-        # The one prior no arm of this round labels; a cell it never answered is caught up, never borrowed.
-        self._parent = ArmKey(ctx.read(Lineage).parent.id)
         frontier = ctx.read(Frontier)
         if parent_results := frontier.parent_own_rows:
-            self._check.register_completed(parent_results, key=self._parent)
-            self._sps[self._parent] = frontier.parent_point
+            self._check.register_completed(parent_results, key=parent)
+            self._sps[parent] = frontier.parent_point
 
     @property
     def n_priors(self) -> int:
@@ -229,7 +230,7 @@ class PoBBRace(CatchUpPool):
             if gate is EliminationGate.EPSILON:
                 inputs["epsilon"] = context["epsilon"]
         self._ctx.decide(kind, inputs, True, data=data)
-        named = {**labels, self._parent: "parent"}
+        named = {**labels, check.parent: "parent"}
         return Elimination(
             reason=_reason(context, self._measured_unit, named), context=dict(context)
         )

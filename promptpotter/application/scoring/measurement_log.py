@@ -295,6 +295,8 @@ def _cycle_view(stores: Stores, hop: CycleHop, slots: Mapping[str, int]) -> Hard
         arm_theta={},
         parent_grades={},
         slots=slots,
+        # Nothing measured: the round order is empty whatever leads it.
+        n_min=0,
         cycle_id=hop.cycle_id,
     )
 
@@ -334,6 +336,7 @@ def _resolve_scope_artifact(
             arm_theta={},
             parent_grades={},
             slots=bank.slot_of,
+            n_min=n_min,
             cycle_id=None,
         )
 

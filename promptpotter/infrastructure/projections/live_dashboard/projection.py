@@ -388,7 +388,7 @@ class LiveDashboardProjection(Projection):
                 arm=record.arm,
                 label=self._buffer.label(record.arm),
                 position=record.position,
-                prior_ids=record.prior_ids,
+                prior_keys=record.prior_keys,
             )
         )
 

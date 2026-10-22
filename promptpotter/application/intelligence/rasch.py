@@ -15,6 +15,7 @@ from promptpotter.domain.ruler import (
     anchor_id_of,
     ruler_entry,
 )
+from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.statistics import logistic
 
@@ -98,12 +99,15 @@ class RaschPosterior:
         )
 
 
-@dataclass
-class RoundAbilities(RaschPosterior):
+@dataclass(frozen=True)
+class RoundAbilities:
     """``bar`` is, per arm, the parent's ``(θ, se)`` it is judged against; an arm absent from it
-    has no bar, never a logit-0 floor."""
+    has no bar, never a logit-0 floor. ``cells`` counts each θ's ``theta_cells``."""
 
-    bar: dict[str, tuple[float, float]] = field(default_factory=dict)
+    theta: dict[str, float]
+    theta_se: dict[str, float]
+    bar: dict[str, tuple[float, float]]
+    cells: dict[str, int]
 
 
 def _map_fit(
@@ -551,41 +555,38 @@ def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
     return list(cells.values())
 
 
+def theta_cells[V](
+    own: Mapping[str, V], parent: Collection[str], ruler: DeltaRuler | None
+) -> dict[str, V]:
+    """The cells an arm's θ is read on, which every coverage floor counts: warm, those the ruler
+    carries; cold, flat δ adjusts for no difficulty, so those the parent answered too."""
+    carried: Collection[str] = parent if ruler is None else ruler.delta
+    return {key: value for key, value in own.items() if key in carried}
+
+
 def candidate_abilities(
     results_by_id: Mapping[str, CellSheet],
     parent_results: CellSheet,
     ruler: DeltaRuler | None,
 ) -> RoundAbilities:
     """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows.
-    Cold, flat δ adjusts for no difficulty, so each arm and its bar are read on the cells both
-    answered; warm, δ does, and the bar is the parent on all of its cells."""
+    Cold, the bar is the parent on the arm's own cells; warm, on all of its cells."""
     entries = ruler.entries() if ruler is not None else None
     parent = responses_of(parent_results)
     whole = fit_theta(parent, entries)
-    theta: dict[str, float] = {}
-    theta_se: dict[str, float] = {}
-    bar: dict[str, tuple[float, float]] = {}
+    abilities = RoundAbilities(theta={}, theta_se={}, bar={}, cells={})
     for cid, sheet in results_by_id.items():
-        own = responses_of(sheet)
-        if entries is None:
-            own = {key: y for key, y in own.items() if key in parent}
-            against = fit_theta({key: parent[key] for key in own}, None)
-        else:
-            against = whole
+        own = theta_cells(responses_of(sheet), parent, ruler)
         if (read := fit_theta(own, entries)) is None:
             continue
-        theta[cid], theta_se[cid] = read
+        abilities.theta[cid], abilities.theta_se[cid] = read
+        abilities.cells[cid] = len(own)
+        against = (
+            whole if entries is not None else fit_theta({key: parent[key] for key in own}, None)
+        )
         if against is not None:
-            bar[cid] = against
-    split = {key: ruler_entry(v) for key, v in (entries or {}).items()}
-    return RoundAbilities(
-        theta=theta,
-        theta_se=theta_se,
-        delta={key: d for key, (d, _) in split.items()},
-        delta_se={},
-        discrimination={key: a for key, (_, a) in split.items() if a != 1.0},
-        bar=bar,
-    )
+            abilities.bar[cid] = against
+    return abilities
 
 
 def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> float | None:
@@ -711,3 +712,59 @@ def _with_anchor_block(
             out[i] = spare.pop(0)
             have += 1
     return out
+
+
+def build_round_order(
+    parent_grades: Mapping[str, float],
+    ruler: DeltaRuler | None,
+    cells: Mapping[int, str],
+    *,
+    n_min: int,
+) -> list[int]:
+    """*cells* maps each slot on the panel to its ``Sample.key``: grades and δ read by key, ties break by slot."""
+    # `None` (never answered) has its own stratum: read as a miss, an unshared panel leads with its easiest cell.
+    # An unmeasured δ stands at the ruler's CENTRE, never 0.0, which is a position on this scale.
+    miss_stratum: list[int] = []
+    hit_stratum: list[int] = []
+    unknown_stratum: list[int] = []
+    for sid, key in cells.items():
+        grade = parent_grades.get(key)
+        if grade is None:
+            unknown_stratum.append(sid)
+        else:
+            (hit_stratum if is_hit(grade) else miss_stratum).append(sid)
+
+    centre = ruler.mu_delta if ruler is not None else 0.0
+    known = ruler.delta if ruler is not None else {}
+
+    def _delta(sid: int) -> float:
+        return known.get(cells[sid], centre)
+
+    miss_stratum.sort(key=lambda sid: (_delta(sid), sid))
+    hit_stratum.sort(key=lambda sid: (-_delta(sid), sid))
+    # No evidence either way: a cell discriminates most where its δ sits nearest the centre.
+    unknown_stratum.sort(key=lambda sid: (abs(_delta(sid) - centre), sid))
+
+    # θ-readable cells fill the first `n_min` slots, so a cut can land there; a losing arm then
+    # buys fewer off-ruler cells, and the ruler learns those more slowly.
+    slot_of = {key: sid for sid, key in cells.items()}
+    readable = set(theta_cells(slot_of, parent_grades, ruler).values())
+    lead = min(n_min, len(readable))
+    strata = (miss_stratum, unknown_stratum, hit_stratum)
+    order: list[int] = []
+    for pos in range(1, len(cells) + 1):
+        miss, unknown, hit = (
+            next((sid for sid in stratum if pos > lead or sid in readable), None)
+            for stratum in strata
+        )
+        if pos % 4 == 0 and hit is not None and (miss is not None or unknown is not None):
+            pick = hit
+        else:
+            pick = next(sid for sid in (miss, unknown, hit) if sid is not None)
+        order.append(pick)
+        for stratum in strata:
+            if pick in stratum:
+                stratum.remove(pick)
+    if sorted(order) != sorted(cells):
+        raise ValueError("build_round_order: the order is not a permutation of the panel")
+    return order

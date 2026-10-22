@@ -594,14 +594,14 @@ PARENT = ArmKey("parent")
 
 
 def election(
-    selected: Sequence[str] = (), *, ended_on: str | None = None, **overrides: Any
+    selected: str | None = None, *, ended_on: str | None = None, **overrides: Any
 ) -> Election:
-    picks = [ArmKey(k) for k in selected]
+    pick = None if selected is None else ArmKey(selected)
     fields: dict[str, Any] = {
-        "selected": picks,
-        "leading": picks[0] if picks else None,
-        "ended_on": ArmKey(ended_on) if ended_on else picks[0] if picks else PARENT,
-        "electable": len(picks),
+        "selected": pick,
+        "leading": pick,
+        "ended_on": ArmKey(ended_on) if ended_on else pick or PARENT,
+        "electable": int(pick is not None),
         "elects_on": "ability",
         "ruler": RulerStamp(
             id=flat_ruler_id("acc"),
@@ -626,12 +626,12 @@ def round_result(
     dup: int = 0,
     collapsed: int = 0,
     cut: int = 0,
-    selected: Sequence[str] | None = None,
+    selected: str | None = None,
     arms: Mapping[ArmKey, ArmState] | None = None,
     voted: dict[str, Any] | None = None,
     **overrides: Any,
 ) -> RoundResult:
-    """*improved* selects the first measured arm unless *selected* names the keys; *voted* bends
+    """*improved* selects the first measured arm unless *selected* names the pick; *voted* bends
     the election's other fields."""
     if parse_failure:
         candidates_scored = 0
@@ -658,9 +658,9 @@ def round_result(
         },
     }
     arms = (built | {PARENT: arm_state("parent")}) if arms is None else arms
-    if selected is None:
-        measured = [k for k, a in arms.items() if isinstance(a, Measured) and a.slot is not None]
-        selected = measured[:1] if improved else []
+    if selected is None and improved:
+        measured = (k for k, a in arms.items() if isinstance(a, Measured) and a.slot is not None)
+        selected = next(measured, None)
     vote = election(selected, **{"electable": candidates_scored} | (voted or {}))
     # Merged rather than splatted after the literals, so ``overrides`` reaches EVERY field.
     base: dict[str, Any] = {
@@ -676,7 +676,7 @@ def round_result(
         "overlap": OverlapReading.unpaired(
             ReadingState.NOT_HELD if rnd else ReadingState.SAME_INDIVIDUAL,
             rnd,
-            rnd > 0 and bool(vote.selected),
+            rnd > 0 and vote.selected is not None,
         ),
         "cells": {
             ArmKey(f"c{i}"): sheet(

@@ -1,4 +1,4 @@
-"""Both terms of the acquisition score and the round order: ``docs/methods/verdict-resolution.md``."""
+"""Both terms of the acquisition score: ``docs/methods/verdict-resolution.md``."""
 
 from __future__ import annotations
 
@@ -7,11 +7,10 @@ import statistics
 from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
-from promptpotter.domain.scoring import ROW_GRADES, is_hit
+from promptpotter.domain.scoring import ROW_GRADES
 from promptpotter.shared.statistics import logistic
 
 if TYPE_CHECKING:
-    from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import GradedCell
 
 
@@ -102,60 +101,6 @@ def pick_value(
 def parent_grades(parent_rows: Iterable[GradedCell]) -> dict[str, float]:
     """CORRECTNESS, not the composite: ``is_hit`` reads every sub-1.0 ``per_cell`` composite as a miss."""
     return {cell.key: ROW_GRADES["fitness"].read(cell) for cell in parent_rows if cell.scored}
-
-
-def build_round_order(
-    parent_grades: Mapping[str, float],
-    ruler: DeltaRuler | None,
-    cells: Mapping[int, str],
-) -> list[int]:
-    """*cells* maps each slot on the panel to its ``Sample.key``: grades and δ read by key, ties break by slot."""
-    # `None` (never answered) has its own stratum: read as a miss, an unshared panel leads with its easiest cell.
-    # An unmeasured δ stands at the ruler's CENTRE, never 0.0, which is a position on this scale.
-    miss_stratum: list[int] = []
-    hit_stratum: list[int] = []
-    unknown_stratum: list[int] = []
-    for sid, key in cells.items():
-        grade = parent_grades.get(key)
-        if grade is None:
-            unknown_stratum.append(sid)
-        else:
-            (hit_stratum if is_hit(grade) else miss_stratum).append(sid)
-
-    centre = ruler.mu_delta if ruler is not None else 0.0
-    known = ruler.delta if ruler is not None else {}
-
-    def _delta(sid: int) -> float:
-        return known.get(cells[sid], centre)
-
-    miss_stratum.sort(key=lambda sid: (_delta(sid), sid))
-    hit_stratum.sort(key=lambda sid: (-_delta(sid), sid))
-    # No evidence either way: a cell discriminates most where its δ sits nearest the centre.
-    unknown_stratum.sort(key=lambda sid: (abs(_delta(sid) - centre), sid))
-
-    order: list[int] = []
-    mi, hi, ui = 0, 0, 0
-    for pos in range(1, len(cells) + 1):
-        take_hit = pos % 4 == 0
-        if (
-            take_hit
-            and hi < len(hit_stratum)
-            and (mi < len(miss_stratum) or ui < len(unknown_stratum))
-        ):
-            order.append(hit_stratum[hi])
-            hi += 1
-        elif mi < len(miss_stratum):
-            order.append(miss_stratum[mi])
-            mi += 1
-        elif ui < len(unknown_stratum):
-            order.append(unknown_stratum[ui])
-            ui += 1
-        else:
-            order.append(hit_stratum[hi])
-            hi += 1
-    if sorted(order) != sorted(cells):
-        raise ValueError("build_round_order: the order is not a permutation of the panel")
-    return order
 
 
 class CellReading(NamedTuple):

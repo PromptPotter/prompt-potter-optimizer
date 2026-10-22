@@ -699,16 +699,16 @@ def _scenario(
     if recorded is None:
         return None
     steps = scenario_spine(recorded)
-    points = [p for s in steps if (p := cycle.point(s.round, candidate_id=s.candidate_id))]
+    points = [p for s in steps if (p := cycle.point(s.round, candidate_id=s.scenario_key))]
     if not points:
         return None
     last = steps[-1]
-    parted = last.candidate_id != last.recorded_id
+    parted = last.scenario_key != last.recorded_key
     keys = cycle.mask(spec.samples)
     return (
         ScenarioReading(
-            recorded_winner_id=last.recorded_id,
-            scenario_winner_id=last.candidate_id,
+            recorded_winner_key=last.recorded_key,
+            scenario_winner_key=last.scenario_key,
             winner_changed=parted,
             first_divergent_round=last.round if parted else None,
             invariant_rounds=len(steps) - 1 if parted else len(steps),

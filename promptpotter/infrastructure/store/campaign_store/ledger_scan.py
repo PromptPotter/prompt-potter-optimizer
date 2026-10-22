@@ -514,7 +514,9 @@ class StandingRounds(NamedTuple):
     @property
     def crowns(self) -> dict[int, ArmKey]:
         return {
-            n: election.selected[0] for n, election in self.elections.items() if election.selected
+            n: key
+            for n, election in self.elections.items()
+            if (key := election.selected) is not None
         }
 
 

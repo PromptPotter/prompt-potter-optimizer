@@ -368,11 +368,11 @@ class ReadoutProjection(Projection):
         """One line and no numbers: the board, reason and overlap series first all exist at round close."""
         if not record.verdict_reason:
             return
-        selected = [self._labels.get(key, key[:6]) for key in record.selected]
+        key = record.selected
         self._write(
-            f"  {GREEN}✓ selected {', '.join(selected)}{RESET}"
-            if selected
-            else f"  {DIM}· held the best-so-far{RESET}"
+            f"  {DIM}· held the best-so-far{RESET}"
+            if key is None
+            else f"  {GREEN}✓ selected {self._labels.get(key, key[:6])}{RESET}"
         )
 
     def _handle_sample_started(self, record: SampleStartedRecord) -> None:
@@ -434,7 +434,7 @@ class ReadoutProjection(Projection):
         )
 
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None:
-        self.on_race_catch_up(record.member, record.position, record.prior_ids)
+        self.on_race_catch_up(record.member, record.position, record.prior_keys)
 
     def on_sample_scored(self, position: int, facts: MeasuredCell, grade: Grade) -> None:
         self.sample_counter += 1
@@ -495,10 +495,10 @@ class ReadoutProjection(Projection):
             f"{n_priors} candidate prior{prior_s})"
         )
 
-    def on_race_catch_up(self, member: str, position: int, prior_ids: list[ArmKey]) -> None:
-        if not prior_ids:
+    def on_race_catch_up(self, member: str, position: int, prior_keys: list[ArmKey]) -> None:
+        if not prior_keys:
             return
-        tags = [self._labels.get(key, key[:6]) for key in prior_ids]
+        tags = [self._labels.get(key, key[:6]) for key in prior_keys]
         self._write(f"  {DIM}↻ {member} catch-up #{position}:{RESET} " + ", ".join(tags))
 
     def _render_block_lines(self) -> list[str]:
@@ -610,15 +610,11 @@ class ReadoutProjection(Projection):
                 composite,
                 dict(fold.evaluators),
                 formula_short or formula_full,
-                reference=next(
-                    (
-                        fit.vs_reference.reference_level("objective")
-                        for key in election.selected
-                        if (fit := round_result.fit(key)) is not None
-                        and fit.vs_reference is not None
-                    ),
-                    None,
-                ),
+                reference=None
+                if election.selected is None
+                or (fit := round_result.fit(election.selected)) is None
+                or fit.vs_reference is None
+                else fit.vs_reference.reference_level("objective"),
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))

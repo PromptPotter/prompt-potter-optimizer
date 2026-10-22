@@ -443,7 +443,7 @@ def _scenario_lines(ev: Evidence) -> list[str]:
             continue
         verdict = (
             f"parts at round {s.first_divergent_round}, where it would have crowned "
-            f"{(s.scenario_winner_id or '-')[:8]} instead of {(s.recorded_winner_id or '-')[:8]}"
+            f"{(s.scenario_winner_key or '-')[:8]} instead of {(s.recorded_winner_key or '-')[:8]}"
             if s.winner_changed
             else "never parts from the record"
         )

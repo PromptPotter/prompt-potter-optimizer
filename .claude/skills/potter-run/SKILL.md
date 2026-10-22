@@ -178,7 +178,7 @@ where the selector elects on θ (`elects_on == "ability"`). A peer's round is or
 own manifest's nodes, so read those instead; none of what follows carries over.
 
 **The hit sequence is difficulty-ordered, so a tail of 1s is the ORDER, never a surge.**
-`build_round_order` (`intelligence/adaptive_queue_mechanism.py`) puts parent-MISS win-opportunities
+`build_round_order` (`intelligence/rasch.py`) puts parent-MISS win-opportunities
 first (ascending δ), a parent-HIT regression probe every 4th position while a miss or unknown is
 still unplaced, and cells the parent never answered last, ordered by DISTANCE FROM THE RULER'S
 CENTRE — never as misses, which front-loaded the easiest cells. (Not "by discrimination": that is

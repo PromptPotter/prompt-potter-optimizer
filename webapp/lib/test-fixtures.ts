@@ -425,7 +425,7 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
   return {
     round: 0,
     leading: null,
-    selected: [],
+    selected: null,
     accuracy: 0,
     composite_fitness: 0,
     total: 0,

@@ -8,7 +8,6 @@ from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDE
 from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     CellReading,
-    build_round_order,
     information_per_price,
     parent_grades,
     stratum_shares,
@@ -16,6 +15,7 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
 from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
 from promptpotter.application.intelligence.rasch import (
     build_observations,
+    build_round_order,
     select_round_subset,
 )
 from promptpotter.application.optimizers import nodes
@@ -204,7 +204,7 @@ class AdaptiveQueue(nodes.Member):
         readings = _origin_readings(rounds, ruler.slot_of)
         worth = information_per_price(readings)
         own = build_observations(list(rounds))
-        anchor_floor = ctx.read(Bounds).elimination_n_min
+        n_min = ctx.read(Bounds).elimination_n_min
 
         def pick(stratum: list[Sample], budget: int) -> list[Sample]:
             # Purpose reaches the draw through the ruler alone: every arm of a head-to-head reads
@@ -218,7 +218,7 @@ class AdaptiveQueue(nodes.Member):
                 budget,
                 ruler=view.ruler,
                 # Enough cells the ruler carries that θ is read on δ, not on the prior.
-                anchor_floor=anchor_floor,
+                anchor_floor=n_min,
                 worth=worth,
             )
 
@@ -248,6 +248,7 @@ class AdaptiveQueue(nodes.Member):
             parent_grades(ctx.read(Frontier).parent_own_rows),
             view.ruler,
             {int(s.id): s.key for s in cells},
+            n_min=n_min,
         )
         by_id = {int(s.id): s for s in cells}
         # Every cell closes a block: PoBB decides after each one.

@@ -43,21 +43,18 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_facts import SeriesGap, series_reason_head
 from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
-    bench_level_series,
     compute_outer_proxies,
     effective_round_budget,
     floor_reason,
     inner_cell_facts,
-    parent_level_series,
     parent_levels,
-    series_reason,
     unread_rounds,
 )
 from promptpotter.domain.phases import REFUSAL_STOPS, StopReason
 from promptpotter.domain.results import ArmFit, Cut, Measured, order_floor
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
-from promptpotter.domain.wounds import collapse_counts
+from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.io import write_json
@@ -83,6 +80,8 @@ if TYPE_CHECKING:
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.l4.inner_facts import InnerCellFacts
+    from promptpotter.domain.l4.proxies import OuterSampleProxies
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -133,7 +132,9 @@ def _lift_shape(result: CycleResult) -> str:
 
 
 @shapes_optimizer_prompt
-def _inner_narrative(result: CycleResult, head: str) -> str:
+def _inner_narrative(
+    result: CycleResult, facts: InnerCellFacts, proxies: OuterSampleProxies, head: str
+) -> str:
     """Authored under ``TRANSCRIPT_REASONING_CAP``, so the outer transcripts render never clips it."""
     if (floor := floor_reason(result)) is not None:
         return (
@@ -141,32 +142,28 @@ def _inner_narrative(result: CycleResult, head: str) -> str:
             f"(optimizer-prompt-owned); stop={result.stop_reason}."
         )
     # Both guaranteed by `compute_outer_proxies`, which ran first.
-    assert result.bench_origin_level is not None
-    bench = bench_level_series(result)
-    assert bench
-    bench_origin = result.bench_origin_level
-    bench_mean = sum(bench) / len(bench)
+    bench_origin, bench_final = facts.bench_origin_level, facts.bench_final_lift
+    assert bench_origin is not None and bench_final is not None
     held = parent_levels(result)
     levels = [] if held is None else held[1]
-    if held is None:
-        reason = series_reason(result)
+    origin = facts.origin_level
+    if origin is None:
+        reason = facts.series_reason
         assert reason is not None
         holes = f", round(s) {unread_rounds(result)}" if reason is SeriesGap.UNREAD_ROUND else ""
         search = f" | search-split th: withheld — {series_reason_head(reason)}{holes}"
     else:
-        origin = held[0]
-        # The budget-held series, not `levels`: the law averages over the round BUDGET.
-        series = parent_level_series(result)
-        mean = sum(series) / len(series)
+        assert facts.mean_round_delta is not None
+        assert facts.final_lift is not None and facts.peak_lift is not None
         search = (
-            f" | search-split th: floor {origin:+.2f} -> mean D{mean - origin:+.3f}"
-            f", ended {levels[-1]:+.2f}, peak {max(levels):+.2f}"
-            f" over {result.n_rounds_after_origin} of {len(series)} rounds"
+            f" | search-split th: floor {origin:+.2f} -> mean D{facts.mean_round_delta:+.3f}"
+            f", ended {origin + facts.final_lift:+.2f}, peak {origin + facts.peak_lift:+.2f}"
+            f" over {facts.rounds_ran} of {facts.round_budget} rounds"
         )
     lines = [
         f"{head}: held-out {result.bench.bench_size} rows:"
-        f" floor {bench_origin:.3f} -> mean-over-rounds B{bench_mean - bench_origin:+.3f}"
-        f" (the scored lift), ended {bench[-1]:.3f} (B{bench[-1] - bench_origin:+.3f})"
+        f" floor {bench_origin:.3f} -> mean-over-rounds B{proxies.mean_bench_lift:+.3f}"
+        f" (the scored lift), ended {bench_origin + bench_final:.3f} (B{bench_final:+.3f})"
         f"{search}; stop={result.stop_reason}.",
         _lift_shape(result),
     ]
@@ -188,7 +185,7 @@ def _inner_narrative(result: CycleResult, head: str) -> str:
         if rnd.round == 0:
             continue
         parts = []
-        if at < len(levels):
+        if origin is not None and at < len(levels):
             parts.append(f"level {levels[at]:.3f} (D{levels[at] - origin:+.3f})")
         steer = critiques.get(rnd.round - 1)
         if steer and steer.get("priority_fix"):
@@ -236,13 +233,9 @@ def _inner_narrative(result: CycleResult, head: str) -> str:
             parts.append("no scored candidates")
         collapses = collapse_counts(c.validation_failures for c in rnd.panel.values())
         anomalies = [
-            f"{tag} x{n}"
-            for tag, n in (
-                ("no-op", collapses.get("no_op_variant", 0)),
-                ("dup", collapses.get("duplicate_variant", 0)),
-                ("repeat", collapses.get("repeat_variant", 0)),
-            )
-            if n
+            f"{word} x{n}"
+            for reason, word in COLLAPSE_WORDS.items()
+            if (n := collapses.get(reason))
         ]
         if anomalies:
             parts.append(", ".join(anomalies))
@@ -558,7 +551,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     data: dict[str, Any] = {
         # A summary line, not an answer to be matched: this cell carries no label, so add no hit/miss reader.
         INNER_RESULT_KEY: [f"inner:{query} B{proxies.mean_bench_lift:+.3f} D{delta}"],
-        "reasoning_trace": _inner_narrative(result, _narrative_head(cell.spec)),
+        "reasoning_trace": _inner_narrative(result, facts, proxies, _narrative_head(cell.spec)),
         **proxies.model_dump(),
         "inner": facts.model_dump(mode="json"),
         # An inner campaign consumes its optimizer's ENTIRE outer config, so the stamp is its terminal.

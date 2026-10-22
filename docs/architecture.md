@@ -265,7 +265,7 @@ Both are first-class, and each is a potter node riding the measurement's
   could still beat the leader. Otherwise it is eliminated and we
   move to the next candidate in the round. Concentrates query
   budget on candidates that might actually win.
-- **Hard-sample ordering (`application/intelligence/adaptive_queue_mechanism.py::build_round_order`)** —
+- **Hard-sample ordering (`application/intelligence/rasch.py::build_round_order`)** —
   potter's `sampler`. ONE static order per
   round, shared by every candidate: a three-strata partition on the
   PARENT's per-sample grades — misses by ascending δ, hits by

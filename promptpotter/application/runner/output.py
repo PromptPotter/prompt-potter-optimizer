@@ -73,6 +73,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
         arm_theta=arm_thetas(cycle.rounds),
         parent_grades=parent_grades(cells),
         slots=session.bank.slot_of,
+        n_min=cycle.config.optimization.elimination_n_min,
         cycle_id=session.cycle_id,
     )
     with graceful("hard_samples.json write failed"):
@@ -137,7 +138,7 @@ def from_disk_log(
     for t in rounds:
         traj, _ = _load_p_best_trajectory(streams_dir, t.round)
         head, fold, election = t.head, t.fold, t.election
-        selected = None if election is None else next(iter(election.selected), None)
+        selected = None if election is None else election.selected
         fit = None if selected is None else t.fit(selected)
         round_views.append(
             RoundDigestView(

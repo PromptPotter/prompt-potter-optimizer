@@ -4,6 +4,7 @@ from typing import Literal, NamedTuple, get_args
 
 from pydantic import Field
 
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.strict_model import FrozenModel
@@ -60,7 +61,7 @@ class MaskReading(FrozenModel):
 class MaskCandidate(FrozenModel):
     """``is_eligible`` is a recorded fact, invariant under a scoring swap."""
 
-    candidate_id: str
+    key: ArmKey
     reading: MaskReading | None = None
     is_selected: bool = False
     is_eligible: bool = True

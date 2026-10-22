@@ -200,7 +200,7 @@ def _round_result(
         folds=measured.folds,
         cells=cells,
         election=Election(
-            selected=[] if winner is None else [winner],
+            selected=winner,
             leading=leading,
             ended_on=ended_on,
             electable=len(measured.electable),
@@ -588,7 +588,7 @@ async def post_round(
         hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.cycle_id),
         round_num=round_num,
         accuracy=None if fold is None else fold.accuracy,
-        winner_id=None if election is None else next(iter(election.selected), None),
+        winner_id=None if election is None else election.selected,
         control=session.state.control,
     )
     await grade_round_selection(cycle, session, round_result, cb=cb)

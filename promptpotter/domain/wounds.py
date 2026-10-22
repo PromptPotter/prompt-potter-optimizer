@@ -24,8 +24,8 @@ INVARIANT_REASONS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozense
     {"no_op_variant", "duplicate_variant", "repeat_variant"}
 )
 
-# The OPERATOR's word for each; a prompt renderer spells its own inside its hashed prose.
-COLLAPSE_WORDS: dict[str, str] = {
+# The word for each, on every surface: the inner narrative renders it into the outer's prompt.
+COLLAPSE_WORDS: Annotated[dict[str, str], shapes_optimizer_prompt] = {
     "no_op_variant": "no-op",
     "duplicate_variant": "duplicate",
     "repeat_variant": "repeat",

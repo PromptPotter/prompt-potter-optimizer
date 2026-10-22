@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.intelligence.rasch import (
@@ -8,6 +8,7 @@ from promptpotter.application.intelligence.rasch import (
     fit_theta,
     graded_response,
     theta_bounds_given_delta,
+    theta_cells,
     theta_lift_over_parent,
 )
 from promptpotter.domain.scoring import CellSheet, GradedCell
@@ -21,7 +22,7 @@ from promptpotter.shared.statistics import (
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.domain.paired_reading import ArmKey
-    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.results import DisplayMetric, RoundResult
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import GradeColumn
 
@@ -41,8 +42,15 @@ def level_band(
     return (level, min(max(ci_lo, 0.0), 1.0), min(max(ci_hi, 0.0), 1.0))
 
 
-def distinct_valid_cells(sheet: CellSheet) -> int:
-    return len(sheet.scoreable)
+def cells_read(
+    elects_on: DisplayMetric,
+    cells: Iterable[GradedCell],
+    parent: Collection[str],
+    ruler: DeltaRuler | None,
+) -> int:
+    """The coverage floor's count: on ability the scored cells θ is read on, else every scored one."""
+    scored = dict.fromkeys(cell.key for cell in cells if cell.scored)
+    return len(theta_cells(scored, parent, ruler) if elects_on == "ability" else scored)
 
 
 # E[max of k standard normals], k = 1..6; the last entry stands for any wider round.
@@ -56,9 +64,9 @@ def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
     """A winner is the MAX over its round's arms, so its θ carries the largest noise draw; corrects the BAR only."""
     for rr in reversed(rounds):
         election = rr.election
-        if election is None or not election.selected:
+        if election is None or election.selected is None:
             continue
-        winner = rr.fit(election.selected[0])
+        winner = rr.fit(election.selected)
         se = winner.theta_se if winner else None
         if not se:
             return 0.0
@@ -82,20 +90,14 @@ def lift_over_bar(
 
 def readable_lifts(
     keys: Sequence[ArmKey],
-    rows: Mapping[ArmKey, CellSheet],
-    parent_results: CellSheet,
     coverage_floor: int,
     abilities: RoundAbilities,
     parent_bias: float,
 ) -> dict[ArmKey, tuple[float, float]]:
     reads: dict[ArmKey, tuple[float, float]] = {}
     for key in keys:
-        cand_results = rows.get(key)
-        # An arm thin for a reason OTHER than elimination (an operator skip); PoBB's `n_min` IS this floor.
-        if cand_results is None or distinct_valid_cells(cand_results) < coverage_floor:
-            continue
-        # About the WALK, not a statistic: an errored row still shares the cell, where the θ fit drops it.
-        if not cand_results.by_key().keys() & parent_results.by_key().keys():
+        # PoBB's `n_min` IS this floor: both count `theta_cells`.
+        if abilities.cells.get(key, 0) < coverage_floor:
             continue
         read = lift_over_bar(abilities, key, parent_bias)
         if read is not None:
@@ -129,7 +131,7 @@ def elect_round_winner(
 
     best_rank: tuple[float, int] = (0.0, 0)
     winner: ArmKey | None = None
-    reads = readable_lifts(keys, rows, parent_results, coverage_floor, abilities, parent_bias)
+    reads = readable_lifts(keys, coverage_floor, abilities, parent_bias)
     for key, read in reads.items():
         # No SE margin: subtracting one turns a wide-posterior gain negative; uncertainty is the RANK's.
         if read[0] <= 0.0:
@@ -139,7 +141,7 @@ def elect_round_winner(
         p_better = p_exceeds(
             abilities.theta[key], abilities.theta_se[key], theta_parent - parent_bias, se_parent
         )
-        rank = (p_better, distinct_valid_cells(rows[key]))
+        rank = (p_better, abilities.cells[key])
         if rank > best_rank:
             best_rank = rank
             winner = key

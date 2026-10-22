@@ -186,7 +186,9 @@ def parent_line(rounds: Sequence[RoundResult]) -> set[str]:
     return {
         head.sp_hash
         for rr in rounds
-        if rr.election is not None and rr.election.selected and (head := rr.head) is not None
+        if rr.election is not None
+        and rr.election.selected is not None
+        and (head := rr.head) is not None
     }
 
 

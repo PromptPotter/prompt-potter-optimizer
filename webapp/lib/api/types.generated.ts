@@ -365,8 +365,8 @@ export interface ServedRound {
    * `panel_precision` is measured on it. Null where the selector could read
    * no arm. */
   leading: ArmName | null;
-  /** The arms the election crowned; empty on a round that held. */
-  selected: ArmName[];
+  /** The arm the election crowned; null on a round that held. */
+  selected: ArmName | null;
   accuracy: number | null;
   composite_fitness: number | null;
   total: number;
@@ -883,7 +883,7 @@ export interface CatchUpLogEntry {
   arm: string;
   label: string;
   position: number;
-  prior_ids: string[];
+  prior_keys: string[];
 }
 
 /** The round in flight, rebuilt whole on every persist. */
@@ -1414,9 +1414,9 @@ export interface Measured {
   locked_in: Elimination | null;
 }
 
-/** What a round's selector decided over its arms, by key; empty ``selected`` = the round HELD. */
+/** What a round's selector decided over its arms, by key; ``selected`` null = the round HELD. */
 export interface Election {
-  selected: string[];
+  selected: string | null;
   /** The ONE arm this round is read off, as its selector named it and never re-
    * ranked: the selection where there is one, on a held round the challenger
    * that came closest on the selector's own objective, at round 0 the origin.
@@ -1876,8 +1876,8 @@ export interface SubjectMask {
 
 /** What the mask did to this branch: how far it agrees with the record, and the round it stops. */
 export interface ScenarioReading {
-  recorded_winner_id: string | null;
-  scenario_winner_id: string | null;
+  recorded_winner_key: string | null;
+  scenario_winner_key: string | null;
   winner_changed: boolean;
   first_divergent_round: number | null;
   invariant_rounds: number;

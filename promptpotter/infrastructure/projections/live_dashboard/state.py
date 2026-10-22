@@ -28,7 +28,7 @@ class CatchUpLogEntry(StrictModel):
     # The arm's label as the round names it.
     label: str
     position: int
-    prior_ids: list[ArmKey]
+    prior_keys: list[ArmKey]
 
 
 class BackendWarning(StrictModel):
