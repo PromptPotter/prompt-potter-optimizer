@@ -41,7 +41,7 @@ The runtime guarantees, in order:
 
 1. **Snapshot frame first.** The first message is a `stream_snapshot` envelope whose `payload` is the subscribed cycle's served dashboard — the body the dashboard route returns (`application/served_dashboard.py`). The envelope's `sequence` is the ledger offset the tail picks up at, and nothing in the payload repeats it.
 
-   For a cycle still at check-in — no launch has declared what it runs with — the payload is the warming shape (`"warming_up": true`) and the client renders a "campaign initialising" placeholder.
+   For a moment before a launch declared what the cycle runs with, the payload is the warming shape (`"warming_up": true`) and the client renders a "campaign initialising" placeholder.
 
 2. **Live tail.** Every subsequent `CycleRecord` appended to the ledger is broadcast as one envelope. `sequence` matches the record's ledger offset; envelopes from the snapshot's `sequence` onward arrive in append order.
 

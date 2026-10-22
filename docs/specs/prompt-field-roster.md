@@ -1,176 +1,74 @@
 # Prompt fields — a roster, not a constant
 
-**Status: proposed, nothing built.** The operator signs off on § The decision before code moves.
-
-The starting prompt is authored as six named boxes. Two things about them are hard-coded that
-the design never meant to be: **which fields exist**, and **what order they render in**. This
-spec says where each is pinned today, what it costs to unpin, and which half is worth buying.
+**Status: the roster landed; the operator-authored order did not.** The operator signs off on
+§ The decision before code moves.
 
 ## What is true today
 
-The SET is a module constant and the ORDER is a class variable, and a check marries them:
+A target prompt has no class. Each prompt node declares its fields IN RENDER ORDER
+(`domain/pipeline_schema.py::NodePromptInfo.fields`, defaulting to
+`domain/search_point.py::DEFAULT_PROMPT_FIELDS`), and the individual holds per prompt node a
+`NodePrompt` — its fields by declared name plus its shots. The shape is owned by
+[`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) (the
+`OptimizerPromptTemplate` and `OptSearchPoint` rows). So the SET is the node's, and so is the
+ORDER — declared once, by whoever declares the node.
 
-- `domain/search_point.py::PROMPT_STRING_FIELDS` — six keys, module-level, `list[str]`.
-- `domain/opt_search_point.py::PromptTemplate.RENDER_ORDER` — a `ClassVar[tuple[str, ...]]`.
-  `render_fields()` walks it; `render()` joins the result with blank lines.
-- `_check_render_order`, fired from `PromptTemplate.__init_subclass__`, raises if
-  `sorted(RENDER_ORDER) != sorted(PROMPT_STRING_FIELDS)` — "a field the order omits renders
-  nowhere — silently, in a prompt."
-
-**The order is already per-class, and there are already two of them.** `PromptTemplate`'s is the
-TARGET prompt's — `PROMPT_STRING_FIELDS` order, inside the measurement archive's key, so moving it
-re-cuts every banked cell. `OptimizerPromptTemplate` overrides it for the optimizer prompt, ending at
-`dispatch/layout.py::VOLATILE_SLOT` — why is [`dispatch-hub.md`](../developer/dispatch-hub.md) § L1 layout's. So the seam this spec asks for
-**exists for the order and is load-bearing**; what it does not have is a per-CAMPAIGN value, only a
-per-class one. The set has no seam at all.
-
-**The target prompt is ordered by `PromptTemplate.RENDER_ORDER`.** `to_job_search_point` calls
-`self.render()` and writes the result to `pipeline_params[prompt_node]["prompt"]`. So a reorder
-that stays in the browser would change nothing the backend sends — the editor would show one order
-and the model would read another. **Order has to reach the engine or it is decoration.** And it is
-the OptSearchPoint order that a campaign-level layout would replace; the optimizer's own is not the
-operator's to permute.
-
-`JobSearchPoint.prompt_fields`, by contrast, is already `dict[str, Any]` — the wire to the
-connector places no constraint on the field set at all. Everything that pins the six sits
-upstream of it.
-
-## What the set is pinned by
-
-Seven readers, and they are not equally hard:
-
-| Reader | What it does with the list | Cost of a dynamic roster |
-|---|---|---|
-| `dispatch/l1_wire_schema.py` (~L197) | builds the L1 response JSON Schema — `{field: {"type": "string"}}` for every key | **The expensive one.** The schema is prompt text (`<simplify-the-problem>`), so every added field is paid on every L1 call, every round, forever. |
-| `application/datasets/origin_resolve.py` (~L293) | the check-in decomposition asks the LLM for exactly these keys | roster-driven; same token argument |
-| `optimizers/potter/validators/l1_behavior.py`, `l1_invariants.py` | diff parent vs child over the set | mechanical — iterate the roster |
-| `opt_search_point.py::mutate`, `prompt_fields`, `prompt_field_dict` | `getattr(self, f)` per field | **structural** — the six are Pydantic *attributes*. A dynamic set means a dict field, and `StrictModel` forbids extras. |
-| `bench/cycle.py` (~L540) | `setattr(opt_sp, f, …)` per field on resume | structural, with `mutate` |
-| `dispatch/injections/panels.py` (~L252) | `prompt_axes` — which axes a panel may name | mechanical |
-| `webapp/lib/prompt-fields.ts` | the TS half of the seam: LABELS only | **already generated, so nearly free.** The SET is emitted by `build_ts_types.py::_emit_prompt_string_fields` and re-exported from `types.generated.ts`; this file keeps the on-screen labels, which have no Python counterpart. A roster reaches the browser by regeneration, and only the label table needs a home. |
-
-The structural one is the real gate: `persona: str = ""` and friends are model fields, and every
-`getattr(sp, "persona")` in the tree assumes they exist. A roster turns them into
-`fields: dict[str, str]`, and that is a rename touching every prompt-shaped read in the engine.
+The optimizer's own prompt keeps a class, `OptimizerPromptTemplate`, whose `RENDER_ORDER` ends at
+`dispatch/layout.py::VOLATILE_SLOT` — why is [`dispatch-hub.md`](../developer/dispatch-hub.md)
+§ L1 layout's. It is not the operator's to permute.
 
 ## Reordering re-cuts the archive key — and that is correct
 
-`shared/hashing.py::content_hash` hashes `{"prompt": rendered_prompt, "pairs": …, "pipeline_params": …}`.
-The rendered prompt is the joined, ORDERED text — under `PromptTemplate.RENDER_ORDER` (`tuple(PROMPT_STRING_FIELDS)`); `OptimizerPromptTemplate`
-declares its own order for exactly this reason, so shaping an optimizer prompt's cache prefix
-cannot re-cut this key. So:
+The rendered prompt is the joined, ORDERED text, and it sits inside every cell key the node
+renders. So:
 
-- Reordering an origin's fields yields a different `sp_hash` / `prompt_fields_id`, and **every
-  cached measurement under the old order misses.** That is honest — a different string went to
-  the model — but on an established campaign it means re-paying for the whole origin.
+- Reordering a node's fields yields a different `sp_hash` / `prompt_fields_id`, and **every cached
+  measurement under the old order misses.** That is honest — a different string went to the
+  model — but on an established campaign it means re-paying for the whole origin.
 - It follows that **order is a searchpoint property, not a display preference.** It cannot live in
   `view-memory` or `localStorage`; it belongs beside the fields it orders and travels with a fork.
 - It also follows that reorder is an *edit*, subject to the same rule as any other: the honest
   render of a descendant reading under a changed order is `?`, never a recomputed number
   (`webapp/CLAUDE.md` § Scoring authority, "A number kept alive under a changed setup").
 
-## What the value tree already settled, and the one constraint it adds
+## The cost a roster carries
 
-`domain/value_tree.py` landed after this spec was written and changes its ground without answering
-either half of § The decision.
-
-**Settled: addressing.** Every field is already an addressable leaf —
-`agent.prompt.instruction` — carrying the node, the key, the channel it travels and whether the
-model sees it. § B needed that addressing to exist and now does not have to invent it; a roster
-becomes a SELECTION over leaves rather than a second list beside the constant.
-
-**Still open: the set and the order.** The tree derives its prose leaves from
-`open_prompt_fields()`, which still reads `PROMPT_STRING_FIELDS`, and it lists them in render order
-without making order an axis. Both halves below stand as written.
-
-**The constraint it adds, which changes § B's cost line.** A field's cost depends on the CHANNEL it
-travels, which this spec assumed was always the request. It is not: on an `artifact_body` connector
-the rendered prompt is a file the agent must open, so a roster that grows there grows a document
-the model **may never read** — while the `artifact_meta` description that decides whether it is
-opened at all is a separate, pinned leaf. Weigh § B per channel: growing a request costs input
-tokens on every call, growing an artifact costs nothing until it is opened and buys nothing if it
+A field's cost depends on the CHANNEL it travels. Every open field is a property of the L1
+response schema, and the schema is prompt text (`<simplify-the-problem>`): a roster that grows is
+input tokens on every L1 call, every round. On an `artifact_body` connector the rendered prompt is
+a file the agent must open, so growing it costs nothing until it is opened and buys nothing if it
 never is.
 
 ## The decision
 
-Two independent halves. They can ship in either order; the order half is far cheaper.
+**Order authored by the operator.** Today the order is the node's declaration; a campaign cannot
+reorder without re-declaring the node. The proposal: the check-in carries an order per prompt node
+beside its fields (`DraftCampaign.origin_prompts`), the editor drags it, `edit-draft-campaign`
+persists it, and a fork inherits it with the fields.
 
-### A — order (recommended first)
-
-Move the order off the ClassVar and onto the searchpoint, as the target-prompt twin of the lever
-the optimizer already has for its own prompt:
-
-```
-optimizers/potter/records.py::L1Layout   # exists — L2-authored slot order for the OPTIMIZER prompt
-domain/prompt_layout.py::PromptLayout  # proposed — the same idea for the TARGET prompt
-```
-
-- `PromptTemplate.render_fields()` walks the instance's layout, falling back to the CLASS's
-  `RENDER_ORDER` when unset — which keeps the optimizer prompt's cache-shaped order intact while
-  letting a target prompt carry its own. `_check_render_order` becomes a *validator*: a layout
-  whose set differs from the roster is rejected at construction, where the message can name the
-  offending campaign instead of killing the process.
-- It rides `prompt_field_dict()` / `from_prompt_fields`, so a fork and a seed inherit it for free.
-- The draft carries it (`DraftCampaign`), the editor drags it, `edit-draft-campaign` persists it.
-- **Open, and the operator decides:** is layout an *optimizer axis* (L1 may permute it, like
+- **Open, and the operator decides:** is order an *optimizer axis* (L1 may permute it, like
   `L1Layout`) or an *operator setting* (authored once, held)? Held is the smaller change and the
   honest starting point — permuting it is a search-space widening that should be measured on its
   own, not smuggled in with the surface.
 
-### B — extensible set
-
-A campaign-scoped roster replacing the module constant:
-
-```
-PromptFieldRoster = list[PromptField]   # {key, label, hint, required}
-```
-
-- Declared where the dataset is declared (`dataset.yaml`), defaulted to the six, resolved at
-  mint into `CampaignConfig`, and served beside `origin_prompt_fields`.
-- `PromptTemplate` loses its six attributes for one `fields: dict[str, str]`. Every `getattr`
-  becomes a lookup. `PROMPT_STRING_FIELDS` survives only as the DEFAULT roster.
-- `l1_wire_schema` builds its `properties` from the campaign's roster. **This is where the cost
-  lands**: the response schema is input tokens on every L1 call — the second prompt nobody counts
-  (`CLAUDE.md` § Working principles, `<simplify-the-problem>`: "count the response JSON Schema: it
-  is prompt text"). A roster that grows is a prompt that grows, on every round of every campaign.
-- Cross-campaign comparison degrades gracefully — the Compare tab already reports a key one side
-  lacks as `oneSided` rather than as a disagreement (`components/compare/SearchpointPanels.tsx`).
-
 ## The drag surface
 
-Whatever ships, the interaction is the same and it is small:
-
-- **No dependency.** `CLAUDE.md` § Conventions is explicit — fewest dependencies possible. Pointer
-  Events (`pointerdown` / `setPointerCapture` / `pointermove`) cover mouse, pen and touch in one
-  handler; a drag-and-drop library is a package for a `.map()` and a transform.
+- **No dependency.** Pointer Events (`pointerdown` / `setPointerCapture` / `pointermove`) cover
+  mouse, pen and touch in one handler.
 - **A new `components/ui/` primitive**, with an RTL test — `webapp/CLAUDE.md` forbids hand-rolling
   a second one of anything, and a reorderable list is a thing several surfaces will want.
-- **Keyboard parity is not optional.** `promptpotter-web/BRAND.md`'s accessibility floor covers painted surfaces;
-  a handle takes `↑`/`↓` (or `Alt+↑`/`Alt+↓`) with an `aria-live` announcement of the new position.
-- **Commit on drop, not per move** — the same discipline `ui/CommitInput` owns. One
-  `edit-draft-campaign` per drop, never one per `pointermove`.
+- **Keyboard parity is not optional.** A handle takes `↑`/`↓` (or `Alt+↑`/`Alt+↓`) with an
+  `aria-live` announcement of the new position.
+- **Commit on drop, not per move** — the same discipline `ui/CommitInput` owns.
 - Mobile: the handle is the drag target, not the box — a textarea that drags on touch cannot be
   scrolled or selected in.
-- The wire type is **generated** (`scripts/build_ts_types.py::EXPORTED_MODELS`), never hand-declared
-  in `lib/api/types.ts`.
 
 ## What this does NOT change
 
-- **Few-shot shots are inside the prompt structure and outside the roster.** An individual
-  carries its shots as demo-pool sample ids — the shape is owned by
-  [`../architecture.md`](../architecture.md) § Two-layer searchpoints + self-optimization — and
-  `_render_few_shot_block` resolves and renders them into the prompt the archive key hashes, so
-  a shot edit re-keys a cell like any other edit. A list of ids on a string grid is the wrong
-  shape, so no roster ever lists them.
+- **Few-shot shots are a locus of their own** (`node.shots`), never a field of the roster: a list
+  of sample keys on a string grid is the wrong shape. They render into the prompt the archive key
+  hashes, so a shot edit re-keys a cell like any other edit.
 - **`plan` is not the target prompt's.** It is potter's L3 frame and rides potter's
-  `optimizer_state`, so a roster never meets it.
+  `optimizer_state`.
 - The `prompt` key written into `pipeline_params` stays a RENDER, never storage —
   `strip_rendered_prompt` remains the sole writer of that strip.
-
-## Open
-
-1. A (order) alone, or A then B? — the recommendation above is A first.
-2. Layout as an operator setting, or an optimizer axis? — held, until measured.
-3. Where a roster is declared if B lands: `dataset.yaml::pipeline` beside the node config,
-   or its own file? The former rides an existing channel; the latter is a sidecar the pre-flight
-   gate would reject.

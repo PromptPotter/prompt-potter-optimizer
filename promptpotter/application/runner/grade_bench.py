@@ -24,7 +24,7 @@ from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.projections.live_dashboard.projection import materializing_over
 from promptpotter.shared.clock import utcnow_iso
@@ -45,7 +45,7 @@ class BenchTriggerError(ConflictError):
 
 async def grade_line_bench(*, stores: Stores, hop: CycleHop) -> BenchScore:
     """Admitted exactly where the served status says so (``BenchStatus.can_grade``)."""
-    async with paid_pass(stores=stores, verb="bench", hop=hop, declared=SpendCeilings()):
+    async with paid_pass(stores=stores, verb="bench", hop=hop, declared=Budget()):
         campaign = stores.campaigns.load_campaign(hop.campaign_id)
         if campaign is None:
             raise BenchTriggerError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
@@ -82,7 +82,7 @@ async def _grade(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScor
             banked = await bench_origin(
                 session,
                 origin_sp,
-                origin_id=rounds[0].origin.candidate_id,
+                origin_id=rounds[0].origin.individual.id,
                 spend=dashboard.state.spend,
                 cb=cb,
             )

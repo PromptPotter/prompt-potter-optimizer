@@ -19,7 +19,8 @@ nodes:
       model: openai/gpt-oss-20b:nitro
       variants: 2
       # The reply replaces the instruction alone; every other locus is the parent's.
-      rewrites: instruction
+      rewrites: field
+      field: instruction
   score:
     type: measurement
     config: {}

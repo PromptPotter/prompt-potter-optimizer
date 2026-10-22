@@ -25,7 +25,10 @@ export const TrendChart = memo(function TrendChart(props: Props) {
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   useThemeVersion();
   const bench = dash?.bench_score;
-  const { points } = useMemo(() => fitnessTrend(dash?.rounds), [dash?.rounds]);
+  const { points } = useMemo(
+    () => fitnessTrend(dash?.rounds),
+    [dash?.rounds],
+  );
   const curData = points.map((p) => p.composite);
   const benchData = points.map((p) => p.bench);
   const thetaData = points.map((p) => p.theta);
@@ -39,7 +42,7 @@ export const TrendChart = memo(function TrendChart(props: Props) {
     ...(hasBench
       ? [{ id: "bench", data: benchData, ...lineLook(getCss("--color-accent")), borderDash: [2, 3], tension: 0, pointRadius: 4, yAxisID: "y", label: "bench · held out", spanGaps: true }]
       : []),
-    { id: `round:${isLive ? dash?.total_queries_scored : "still"}`, data: curData, ...lineLook(getCss("--color-accent-strong")), yAxisID: "y", label: "round composite · search pool" },
+    { id: `round:${isLive ? dash?.total_queries_scored : "still"}`, data: curData, ...lineLook(getCss("--color-accent-strong")), yAxisID: "y", label: "round composite · search split" },
     ...(hasTheta && dash
       ? [{ id: "theta", data: thetaData, ...lineLook(getCss(metricInkToken("ability", dash.display_metric)), true), yAxisID: "theta", label: "ability θ · potter's election", spanGaps: true }]
       : []),
@@ -58,7 +61,7 @@ export const TrendChart = memo(function TrendChart(props: Props) {
         callbacks: {
           afterBody: (items: { dataIndex: number; datasetIndex: number }[]) => {
             const n = points[items[0]?.dataIndex ?? -1]?.n;
-            const lines = typeof n === "number" ? [`n = ${n} on the search pool`] : [];
+            const lines = typeof n === "number" ? [`n = ${n} on the search split`] : [];
             // The bench series is dataset 0 whenever it draws.
             if (bench && hasBench && items.some((i) => i.datasetIndex === 0)) {
               lines.push(`bench: ${bench.bench_size} held-out rows`);
@@ -74,7 +77,7 @@ export const TrendChart = memo(function TrendChart(props: Props) {
       theta: { display: hasTheta && !glyph, position: "right" as const, grid: { display: false }, ticks: { font: { size: 9 } } },
     },
   });
-  const ariaLabel = `Round composite on the search pool per round${
+  const ariaLabel = `Round composite on the search split per round${
     hasBench ? ", with the bench score of each graded selection on held-out rows" : ""
   }${hasTheta ? ", with ability θ" : ""}`;
 

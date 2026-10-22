@@ -5,4 +5,4 @@ source:
 campaign:
   optimization:
     # The head-to-head budget: one peer round at its paper's own ranges fits under it.
-    ceiling: {usd: 0.3}
+    budget: {usd: 0.3}

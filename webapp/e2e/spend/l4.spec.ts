@@ -15,7 +15,7 @@ import {
   assertThrowawayWorld,
   type Campaign,
 } from "../harness";
-import { STOP_REASON_CATEGORIES } from "@/lib/api/types.generated";
+import { STOP_REASON_CATEGORIES, type RunLimits } from "@/lib/api/types.generated";
 import { isStopReason } from "@/lib/run-phase";
 
 // Minted through the control plane: browser ingest materializes 0 items for an outer dataset, and the CLI blocks on a TTY.
@@ -81,7 +81,7 @@ test.describe("the recursion, end to end", () => {
   test("minting carries the ceiling, so there is no unclamped window", async ({ request }) => {
     const res = await command(request, "mint-campaign", {
       dataset_name: DATASET,
-      limits: { ceiling: { usd: BUDGET_USD } },
+      budget: { usd: BUDGET_USD },
     });
     expect(res.status, `mint-campaign: ${res.body}`).toBeLessThan(300);
 
@@ -110,7 +110,7 @@ test.describe("the recursion, end to end", () => {
     const started = await command(request, "start-run", {
       campaign_id: outer!.id,
       cycle_id: outer!.cycleId,
-      limits: { ceiling: { usd: BUDGET_USD } },
+      budget: { usd: BUDGET_USD },
     });
     expect(started.status, `start-run: ${started.body}`).toBeLessThan(300);
 
@@ -178,9 +178,10 @@ test.describe("the recursion, end to end", () => {
 
   test("the run stayed inside the ceiling it was minted with", async ({ request }) => {
     const d = await dashboard(request, outer!);
-    const limits = d?.run_limits as { ceiling?: { usd?: number | null } } | undefined;
-    expect(limits?.ceiling?.usd, "the L4 run has no USD ceiling at all").not.toBeNull();
-    expect(limits?.ceiling?.usd).toBeLessThanOrEqual(BUDGET_USD);
+    // An axis the served budget does not name is unbounded, exactly as a named null is.
+    const usd = (d?.run_limits as RunLimits | undefined)?.budget.usd;
+    expect(typeof usd, "the L4 run has no USD ceiling at all").toBe("number");
+    expect(usd).toBeLessThanOrEqual(BUDGET_USD);
 
     // INCURRED, not used: a replayed pass bills ~0, which would hide a re-keyed panel.
     const tape = tapeOf(d);

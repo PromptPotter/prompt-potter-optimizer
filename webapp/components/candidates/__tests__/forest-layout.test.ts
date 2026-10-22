@@ -25,7 +25,7 @@ function candsH(rounds: { n: number; held?: boolean }[]): ArmNode[] {
         id,
         label,
         reading: armReading({
-          arm: { round: ri + 1, label, candidate_id: id },
+          arm: { round: ri + 1, label, key: id },
           own: ownLevel(0.5),
           election: { held: true, selected: !r.held && i === r.n - 1 },
         }),

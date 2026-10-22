@@ -27,14 +27,14 @@ export function ScoringInspector({ selected, onClose }: Props) {
   const cv = useConnector();
   const { viewedPath } = useWorkspace();
   const round = useRound(viewedPath, selected?.round ?? null);
-  const row = selected ? round.row(selected.label) : null;
+  const row = selected ? round.row(selected.arm) : null;
   const samples = useMemo(() => round.samples(row), [round, row]);
 
   const cfg = !selected
     ? null
     : round.unfiled
-      ? liveCandidateObserveConfig(dash, selected.label)
-      : candidateObserveConfig(round.doc, selected.label, selected.label);
+      ? liveCandidateObserveConfig(dash, selected.arm)
+      : candidateObserveConfig(round.doc, selected.arm, selected.label);
 
   if (!selected) return null;
   const pass = dash?.bench_pass ?? null;
@@ -61,10 +61,10 @@ export function ScoringInspector({ selected, onClose }: Props) {
       <SearchpointDrillIn
         reading={row?.reading ?? null}
         cfg={cfg}
-        benchPass={pass?.label === selected.label ? pass : null}
+        benchPass={pass && pass.arm === selected.arm ? pass : null}
         measurements={
           <MeasurementsPane
-            preset={{ candidateId: selected.candidate_id, scope: "cycle", groupBy: "none" }}
+            preset={{ candidateId: selected.arm, scope: "cycle", groupBy: "none" }}
           />
         }
         schema={cv.schema}

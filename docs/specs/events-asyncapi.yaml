@@ -17,10 +17,9 @@
 #
 # Status: Profile A shipped. The closed outbound set is the FULL `CycleRecord`
 # union — every `record_type` on the ledger is streamable — plus the
-# projection-only `stream_snapshot`. It reached parity late: `candidate_minted`
-# and `cycle_seed` were on disk but absent from the enum, so `CycleLedgerTail`
-# dropped them while still advancing its line index, which showed up to clients
-# as a `sequence` gap and tripped the reconnect recipe in clause 4 below.
+# projection-only `stream_snapshot`. A kind absent from the enum is dropped by
+# `CycleLedgerTail` while its line index still advances, which shows up to clients
+# as a `sequence` gap and trips the reconnect recipe in clause 4 below.
 # **A record kind that is not listed here is not "filtered", it is a hole.**
 #
 # A payload property may carry `x-status`, with the two values and meaning
@@ -200,18 +199,14 @@ components:
             - provider_hold
             - provider_eased
             # One arm's walk, a fact per record; `flight` alone names no arm.
-            - candidate_started
-            - sample_order
+            # `arm` is one arm's transition (`ArmRecord`), the earliest point
+            # a chronology can name it.
+            - arm
             - sample_started
             - sample_scored
-            - candidate_scored
             - flight
             - race_standing
             - race_catch_up
-            # A candidate's IDENTITY at mint time — the only witness that a
-            # candidate exists BEFORE it is scored, and so the earliest point a
-            # chronology can name it. `CandidateMintedRecord`.
-            - candidate_minted
             # The cycle's read-once starting point (`CycleSeedRecord`). One
             # record at the head of a non-root cycle's own ledger; reads as
             # "this cycle was seeded from X" at the top of a fork's thread.
@@ -241,15 +236,12 @@ components:
             # (``ElectionRecord``). Absent here it burned one offset per round of
             # every campaign — the most frequent instance of the hole above.
             - election
-            # The cycle's δ scale, appended WHOLE at lock and after every
-            # extension (``RulerRecord``).
-            - ruler
-            # The cycle's standing operator ceiling (spend and round cap), appended by
-            # ``set-limits`` and by a launch flag that moves it
-            # (``RunLimitsRecord``); the last one wins.
-            - run_limits
+            # The cycle's standing operator budget — the axes an operator named,
+            # appended by ``set-limits`` and by a launch flag that moves one
+            # (``StandingBudgetRecord``); the last one wins.
+            - standing_budget
             # What a launch runs under — the optimizer's pacing, the connector's
-            # declarations and the admitted ceilings (``RunWiringRecord``); the
+            # declarations and the admitted budget (``RunWiringRecord``); the
             # last one wins.
             - run_wiring
             # The criterion the origin's measurement locked, where the campaign
@@ -274,9 +266,6 @@ components:
             # without a run (``LaunchReleasedRecord``). Neither is a progress event.
             - launch_claim
             - launch_released
-            # The check-in the cycle was minted in is over (``CheckinClosedRecord``):
-            # Start froze the campaign's config. Not a progress event.
-            - checkin_closed
             # An account's banked spend, written before a delete takes the rows
             # carrying it (``SpendTombstoneRecord``). Rides the WORKSPACE ledger,
             # so it reaches no cycle subscriber — listed because the enum's rule
@@ -327,11 +316,9 @@ components:
             - $ref: '#/components/schemas/BackendWarningPayload'
             - $ref: '#/components/schemas/ProviderHoldPayload'
             - $ref: '#/components/schemas/ProviderEasedPayload'
-            - $ref: '#/components/schemas/CandidateStartedPayload'
-            - $ref: '#/components/schemas/SampleOrderPayload'
+            - $ref: '#/components/schemas/ArmPayload'
             - $ref: '#/components/schemas/SampleStartedPayload'
             - $ref: '#/components/schemas/SampleScoredPayload'
-            - $ref: '#/components/schemas/CandidateScoredPayload'
             - $ref: '#/components/schemas/FlightPayload'
             - $ref: '#/components/schemas/RaceStandingPayload'
             - $ref: '#/components/schemas/RaceCatchUpPayload'
@@ -343,11 +330,9 @@ components:
             - $ref: '#/components/schemas/CommandAckPayload'
             - $ref: '#/components/schemas/ErrorPayload'
             - $ref: '#/components/schemas/RoundWarningPayload'
-            - $ref: '#/components/schemas/CandidateMintedPayload'
             - $ref: '#/components/schemas/CycleSeedPayload'
             - $ref: '#/components/schemas/ElectionPayload'
-            - $ref: '#/components/schemas/RulerPayload'
-            - $ref: '#/components/schemas/RunLimitsPayload'
+            - $ref: '#/components/schemas/StandingBudgetPayload'
             - $ref: '#/components/schemas/RunWiringPayload'
             - $ref: '#/components/schemas/ScoringLockedPayload'
             - $ref: '#/components/schemas/CycleMintedPayload'
@@ -358,7 +343,6 @@ components:
             - $ref: '#/components/schemas/SpawnedPayload'
             - $ref: '#/components/schemas/LaunchClaimPayload'
             - $ref: '#/components/schemas/LaunchReleasedPayload'
-            - $ref: '#/components/schemas/CheckinClosedPayload'
             - $ref: '#/components/schemas/SpendTombstonePayload'
             - $ref: '#/components/schemas/TrailTombstonePayload'
             - $ref: '#/components/schemas/AccountEventPayload'
@@ -453,9 +437,9 @@ components:
         detail: { type: [string, 'null'] }
         tone: { type: string, enum: [good, warn, bad, muted] }
         round: { type: [integer, 'null'] }
-        candidate:
+        arm:
           type: [string, 'null']
-          description: The candidate the record is about, by the label its course minted.
+          description: The arm the record is about, by its key; `label` renders it.
 
     # ---- Profile A: projection-synthesized payload ----
 
@@ -628,9 +612,9 @@ components:
       type: object
       description: |
         RoundProposedRecord — the arms a round's walk made, banked by the bench
-        once per round; `walk` names the manifest pipeline. `consumed` is
+        once per round. `consumed` is
         the digest of the round it read to do so; `proposals` is a list of
-        `CandidateProposal`. A resume walking back into the round replays them.
+        `Proposal`. A resume walking back into the round replays them.
         `submitted` marks the operator's answer at the arm gate instead: the
         arms the round measures, standing beside the drafts it answered.
       required: [round, consumed, proposals, timestamp]
@@ -642,7 +626,6 @@ components:
           type: array
           items: { type: object, additionalProperties: true }
         submitted: { type: boolean }
-        walk: { type: string }
         timestamp: { type: string, format: date-time }
 
     RoundClosedPayload:
@@ -650,25 +633,39 @@ components:
       description: |
         RoundClosedRecord — a round closed, WHOLE: every outcome field of the
         round (`RoundOutcome`, which the OpenAPI file declares as
-        `RoundResult` less its rows), and `cells`, the archive address of every
-        row the round read. The last close per round stands and IS the round;
-        `rounds/round_NNNN.json` is a checkout of it.
-      required: [round, label, accuracy, composite_fitness, improved, electable_count, overlap, ability, cells, timestamp]
-      additionalProperties: true
+        `RoundResult` less its rows), `cells`, the archive address of every
+        row the round read, and `positions`, each of those rows' position in
+        the bank the cycle drew. The last close per round stands and IS the
+        round; `rounds/round_NNNN.json` is a checkout of it. `level_series` is
+        the `LevelSeries` this close read, the one fit of every standing round
+        on one scale that every later reader takes off the last close.
+      required: [round, arms, folds, election, overlap, optimizer_state, cells, positions, level_series, timestamp]
+      additionalProperties: false
       properties:
         round: { type: integer, minimum: 0 }
-        label: { type: string }
-        accuracy: { type: [number, 'null'] }
-        composite_fitness: { type: [number, 'null'] }
-        improved: { type: boolean }
-        electable_count: { type: integer, minimum: 0 }
+        # By `ArmKey`: each an `ArmState`, the panel in slot order then each reference re-read.
+        arms: { type: object, additionalProperties: { type: object, additionalProperties: true } }
+        # By `ArmKey`: each arm's `ScoreSummary` over every row its walk holds; none for an
+        # arm refused before a cell.
+        folds: { type: object, additionalProperties: { type: object, additionalProperties: true } }
+        # The `Election`; null on a diag round, whose variants were generated and never scored.
+        election: { type: [object, 'null'], additionalProperties: true }
         # The `OverlapReading` the OpenAPI file declares: the best-so-far line on
         # the origin panel, and `advance`, what the round did to it.
         overlap: { type: object, additionalProperties: true }
-        ability: { type: [object, 'null'], additionalProperties: true }
-        generation_only: { type: boolean }
+        diagnostics: { type: [object, 'null'], additionalProperties: true }
+        health: { type: [object, 'null'], additionalProperties: true }
+        # The optimizer's `OptimizerState` envelope at the close.
+        optimizer_state: { type: object, additionalProperties: true }
+        optimizer_facts:
+          type: array
+          items: { type: object, additionalProperties: true }
         cells:
           $ref: '#/components/schemas/RoundCells'
+        positions:
+          type: object
+          additionalProperties: { type: integer, minimum: 0 }
+        level_series: { type: object, additionalProperties: true }
         timestamp: { type: string, format: date-time }
 
     RoundCells:
@@ -676,15 +673,12 @@ components:
       description: |
         Where a round's rows are in the archive, by row set, each a
         `WalkedCell`, in walk order.
-      required: [head, arms, references, overlap]
+      required: [arms, overlap]
       additionalProperties: false
       properties:
-        head: { $ref: '#/components/schemas/WalkedCells' }
         arms:
           type: object
-          additionalProperties: { $ref: '#/components/schemas/WalkedCells' }
-        references:
-          type: object
+          description: By `ArmKey`; a re-read reference is an arm.
           additionalProperties: { $ref: '#/components/schemas/WalkedCells' }
         overlap:
           type: object
@@ -693,17 +687,15 @@ components:
     WalkedCell:
       type: array
       description: |
-        One cell's archive address, `[sample_key, sample_id, answer, replayed]`:
-        the content key two walks pair on, the slot in the dataset that measured
-        it, the answer the cell store files, and whether this walk took it as a
-        replay.
+        One cell's archive address, `[sample_key, answer, replayed]`: the
+        content key two walks pair on, the answer the cell store files, and
+        whether this walk took it as a replay.
       prefixItems:
         - { type: string }
-        - { type: integer }
         - { type: string }
         - { type: boolean }
-      minItems: 4
-      maxItems: 4
+      minItems: 3
+      maxItems: 3
 
     WalkedCells:
       type: array
@@ -713,7 +705,7 @@ components:
       type: object
       description: |
         OptimizerStateRecord — a CLOSED round's optimizer state, restated: the
-        `OptimizerState` envelope (`{manifest, population, prompt_hashes, payload}`) as the
+        `OptimizerState` envelope (`{manifest, population, prompt_hashes, slices, outputs}`) as the
         optimizer now holds it for `round`. The last one after the round's
         standing close is that round's state.
       required: [round, optimizer_state, timestamp]
@@ -809,14 +801,15 @@ components:
         `PhaseRecord.view` of `phase: bench`, `event: enter` — one
         individual's pass over the bench set begins, and every `sample_scored`
         up to the matching `exit` is one of its rows. `subject` says whose pass
-        it is, `label` the candidate it grades as its row is labelled, `sp_hash`
-        the searchpoint scored, `round` the round whose selection that is (0 is
-        the origin) and `rows` the size of the bench set; the dashboard serves
-        it as `bench_pass`, with the rows scored so far and their running
+        it is, `arm` the key of the arm it grades and `label` that arm's label,
+        `sp_hash` the searchpoint scored, `round` the round whose selection that
+        is (0 is the origin) and `rows` the size of the bench set; the dashboard
+        serves it as `bench_pass`, with the rows scored so far and their running
         accuracy beside it.
-      required: [subject, label, sp_hash, round, rows]
+      required: [subject, arm, label, sp_hash, round, rows]
       properties:
         subject: { type: string, enum: [origin, selected] }
+        arm: { type: string }
         label: { type: string }
         sp_hash: { type: string }
         round: { type: integer, minimum: 0 }
@@ -869,10 +862,16 @@ components:
         ledger of the cycle that scored it and from whichever process runs it.
         The matching `exit` always follows; the dashboard read serves an open
         pass as `verify_pass`.
-      required: [label, round, rows, strategy]
+      required: [arm, rows, strategy]
       properties:
-        label: { type: string }
-        round: { type: integer, minimum: 0 }
+        arm:
+          type: object
+          description: The `ArmName` the OpenAPI file declares — the candidate's key, first round and label.
+          required: [key, round, label]
+          properties:
+            key: { type: string, minLength: 1 }
+            round: { type: integer, minimum: 0 }
+            label: { type: string }
         rows: { type: integer, minimum: 0 }
         strategy: { type: string, enum: [random, hard] }
 
@@ -890,96 +889,67 @@ components:
         reading: { type: object, additionalProperties: true }
 
     # ---- One arm's walk ----
-    # Every record below but `flight` is addressed by `ArmAddress`: the round and the arm's
-    # slot there.
+    # `flight` names no arm. A pass record names the round, the individual whose cell it is
+    # and the `MeasurementRole` it ran for.
 
-    ArmAddress:
+    ArmPayload:
       type: object
-      required: [round, candidate_idx, candidate_total, timestamp]
+      description: |
+        ArmRecord — one arm's transition, LAST wins: proposed, measuring, then
+        cut or measured. `arm` is the `ArmKey`; `state` is the `ArmState` the
+        OpenAPI file declares, discriminated by its own `state`. A `measuring`
+        state carries the `sample_order` the arm will walk, a declared order:
+        a stop rule can end the walk before its tail.
+      required: [round, arm, state, timestamp]
+      additionalProperties: false
       properties:
         round: { type: integer, minimum: 0 }
-        candidate_idx:
-          type: integer
-          minimum: -1
-          description: "`-1` (`NO_ROUND_SLOT`) is a pass that is no arm of the round: the parent's re-measure, a bench pass."
-        candidate_total: { type: integer, minimum: 0 }
+        arm: { type: string, minLength: 1 }
+        state: { type: object, additionalProperties: true }
+        anchors: { $ref: '#/components/schemas/ViewAnchors' }
         timestamp: { type: string, format: date-time }
-
-    CandidateStartedPayload:
-      description: |
-        CandidateStartedRecord — an arm is about to walk: what it is, announced
-        before its first cell. `block` is its turn in a block race.
-      allOf:
-        - $ref: '#/components/schemas/ArmAddress'
-        - type: object
-          properties:
-            changes_description: { type: string }
-            pipeline_overlay: { type: [object, 'null'], additionalProperties: true }
-            prompt_fields: { type: object, additionalProperties: true }
-            resolved_pipeline_params: { type: [object, 'null'], additionalProperties: true }
-            block:
-              type: [object, 'null']
-              additionalProperties: { type: integer }
-
-    SampleOrderPayload:
-      description: |
-        SampleOrderRecord — the cells the arm will walk, in the round's shared
-        order. A declared order: a stop rule can end the walk before its tail.
-      allOf:
-        - $ref: '#/components/schemas/ArmAddress'
-        - type: object
-          required: [sample_order]
-          properties:
-            n_priors: { type: integer, minimum: 0 }
-            sample_order: { type: array, items: { type: integer } }
 
     SampleStartedPayload:
       description: SampleStartedRecord — a cell left for the backend.
-      allOf:
-        - $ref: '#/components/schemas/ArmAddress'
-        - type: object
-          required: [sample_idx, sample_total, sample_id]
-          properties:
-            sample_idx: { type: integer, minimum: 0 }
-            sample_total: { type: integer, minimum: 0 }
-            sample_id: { type: integer }
-            query_preview: { type: string }
-            sample_lookahead:
-              type: integer
-              minimum: 1
-              description: What the walk held in flight as it launched this cell.
+      type: object
+      required: [round, individual_id, role, sample_idx, sample_total, position, timestamp]
+      properties:
+        round: { type: integer, minimum: 0 }
+        individual_id: { type: string }
+        role:
+          type: string
+          enum: [origin, panel, backfill, parent, repair, overlap, verify, bench]
+        timestamp: { type: string, format: date-time }
+        sample_idx: { type: integer, minimum: 0 }
+        sample_total: { type: integer, minimum: 0 }
+        position: { type: integer, minimum: 0 }
+        query_preview: { type: string }
+        sample_lookahead:
+          type: integer
+          minimum: 1
+          description: What the walk held in flight as it launched this cell.
 
     SampleScoredPayload:
+      type: object
       description: |
         SampleScoredRecord — a cell the walk took. `result` is the measured row
         as the ledger keeps it, naming the archive `answer` the walk read.
         `sample_idx` is null on a row re-banked onto a branch. `individual_id`
-        and `role` say whose cell it is and why the walk ran — the only
-        address a pass at `NO_ROUND_SLOT` has before its round closes.
-      allOf:
-        - $ref: '#/components/schemas/ArmAddress'
-        - type: object
-          required: [individual_id, role, result]
-          properties:
-            individual_id: { type: string }
-            role:
-              type: string
-              enum: [origin, panel, backfill, parent, repair, overlap, verify, bench]
-            sample_idx: { type: [integer, 'null'], minimum: 0 }
-            sample_total: { type: [integer, 'null'], minimum: 0 }
-            result: { type: object, additionalProperties: true }
-
-    CandidateScoredPayload:
-      description: |
-        CandidateScoredRecord — an arm's score report, landing when its walk is
-        decided. `scores` is the `ScoredCandidate` the OpenAPI file declares.
-      allOf:
-        - $ref: '#/components/schemas/ArmAddress'
-        - type: object
-          required: [scores]
-          properties:
-            scores: { type: object, additionalProperties: true }
-            anchors: { $ref: '#/components/schemas/ViewAnchors' }
+        and `role` say whose cell it is and why the walk ran. `running` is the
+        walk's `ScoreSummary` with this cell folded in; null on a pass of no arm.
+      required: [round, individual_id, role, position, result, timestamp]
+      properties:
+        round: { type: integer, minimum: 0 }
+        individual_id: { type: string }
+        role:
+          type: string
+          enum: [origin, panel, backfill, parent, repair, overlap, verify, bench]
+        timestamp: { type: string, format: date-time }
+        sample_idx: { type: [integer, 'null'], minimum: 0 }
+        sample_total: { type: [integer, 'null'], minimum: 0 }
+        position: { type: integer, minimum: 0 }
+        result: { type: object, additionalProperties: true }
+        running: { type: [object, 'null'], additionalProperties: true }
 
     FlightPayload:
       type: object
@@ -999,9 +969,9 @@ components:
         waiting:
           type: [object, 'null']
           description: The call a decision waits on, and since when.
-          required: [sample_id, since]
+          required: [position, since]
           properties:
-            sample_id: { type: integer }
+            position: { type: integer }
             since: { type: number }
         backpressure:
           type: [object, 'null']
@@ -1013,35 +983,37 @@ components:
       description: |
         RaceStandingRecord — one candidate's standing in its eliminator's race,
         per sample. `member` names the manifest node racing it; `p_best` is
-        about `current_id` alone.
-      allOf:
-        - $ref: '#/components/schemas/ArmAddress'
-        - type: object
-          required: [member, current_id, n_samples, p_best, decision_grade]
-          properties:
-            member: { type: string, minLength: 1 }
-            current_id: { type: string }
-            n_samples: { type: integer, minimum: 0 }
-            p_best: { type: number }
-            paired_breakdown: { type: object, additionalProperties: true }
-            decision_grade: { type: boolean }
+        about the arm `current` alone.
+      type: object
+      required: [round, member, current, n_samples, p_best, paired_breakdown, decision_grade, timestamp]
+      properties:
+        round: { type: integer, minimum: 0 }
+        member: { type: string, minLength: 1 }
+        current: { type: string, minLength: 1 }
+        n_samples: { type: integer, minimum: 0 }
+        p_best: { type: number }
+        paired_breakdown: { type: object, additionalProperties: true }
+        decision_grade: { type: boolean }
+        timestamp: { type: string, format: date-time }
 
     RaceCatchUpPayload:
       description: |
-        RaceCatchUpRecord — the catch-up walks the sample just measured took,
-        each prior's cell by its archive address. No slot writes a catch-up's
-        cells, so this record is where a line's memory finds them.
-      allOf:
-        - $ref: '#/components/schemas/ArmAddress'
-        - type: object
-          required: [member, sample_key, cells]
-          properties:
-            member: { type: string, minLength: 1 }
-            sample_key: { type: string, minLength: 1 }
-            cells:
-              type: object
-              minProperties: 1
-              additionalProperties: { $ref: '#/components/schemas/WalkedCell' }
+        RaceCatchUpRecord — the catch-up walks the sample just measured took
+        for the arm, each prior's cell by its archive address. No slot writes a
+        catch-up's cells, so this record is where a line's memory finds them.
+      type: object
+      required: [round, arm, member, sample_key, position, cells, timestamp]
+      properties:
+        round: { type: integer, minimum: 0 }
+        arm: { type: string, minLength: 1 }
+        member: { type: string, minLength: 1 }
+        sample_key: { type: string, minLength: 1 }
+        position: { type: integer, minimum: 0 }
+        cells:
+          type: object
+          minProperties: 1
+          additionalProperties: { $ref: '#/components/schemas/WalkedCell' }
+        timestamp: { type: string, format: date-time }
 
     ErrorPayload:
       type: object
@@ -1126,10 +1098,15 @@ components:
             - layer_parse_failure
             - layer_terminated_cycle
             - layer_terminate_blank
-            - l1_critique_unavailable
+            # A `fork_proposal` UCB found no ancestor with a level for:
+            # dropped, its `detail.caveats` naming what withholds θ there.
+            - layer_rebase_dropped
+            # An adapter (potter's `l1_critique`) landed no round output, and
+            # its re-runs before the next walk failed: the run halts `paused`.
+            - adapter_output_unavailable
             # The run STOPPED on a send refused before it left (`SendRefusedError`):
-            # `message` is the refusal's own sentence — which ceiling, and the sums
-            # behind it, or that no rate prices the route. `severity: error`.
+            # `message` is the refusal's own sentence — which budget axis, and the
+            # sums behind it, or that no rate prices the route. `severity: error`.
             - send_refused
             # The round selected an arm and closed `not_separated` or `unread`
             # (`OverlapReading.advance`): its lead over C0 on the origin panel
@@ -1169,73 +1146,15 @@ components:
           type: string
           format: date-time
 
-    CandidateMintedPayload:
-      type: object
-      description: |
-        CandidateMintedRecord — a candidate's IDENTITY, appended the moment it
-        is minted and BEFORE it is scored. Identity does not share the
-        measurement's durability: `rounds/round_NNNN.json` and its
-        `dashboard.json` projection exist only where a round CLOSED, so a cycle
-        whose producer dies mid-flight still leaves its candidates nameable
-        through this record alone.
-
-        Subscribers:
-          * `scan_standing_rounds` — a mint REPLACES its `(round, idx)` slot,
-            and `StandingRounds.candidates` joins it to the `candidate_scored`
-            record that lands after it to build `LedgerCandidate`, which is
-            the identity half of the served lineage tree.
-          * `CycleLedgerTail` — tails this record to SSE subscribers.
-          * `FamilyRay` — the earliest step a chronology can show for a
-            candidate; the ray's `candidate_minted` item upserts to the same
-            `cand-{label}` row the later `candidate_started` record writes.
-      required: [round, idx, candidate_id, label, timestamp]
-      additionalProperties: false
-      properties:
-        round:
-          type: integer
-          minimum: 0
-        idx:
-          type: integer
-          minimum: 0
-        candidate_id:
-          type: string
-          minLength: 1
-          description: |
-            The individual's id (`OptSearchPoint.id`): its content, so the same
-            configuration reached again carries the same id. A REJECTED proposal
-            is named by its slot (`candidate_report.py::arm_id`).
-        parent_ids:
-          type: array
-          items: { type: string, minLength: 1 }
-          description: |
-            Every individual this candidate was derived from — one for a
-            mutation, several for a crossover; empty at the origin.
-        label:
-          type: string
-          minLength: 1
-          description: |
-            `C{round}.{idx+1}` (`C0` at the origin) — a MINTED fact, not a
-            read-time one. The canonical positional identity every projection
-            joins on.
-        changes_description:
-          type: string
-        source:
-          type: string
-          description: |
-            `{manifest}:{node}` of the node that proposed it (`potter:l1_generate`);
-            the bench's own source (`origin`) for an individual the bench minted.
-        timestamp:
-          type: string
-          format: date-time
-
     ElectionPayload:
       type: object
       description: |
         ElectionRecord — what the round's selection produced, appended by the
-        optimizer's selector before the round closes, keyed by LABEL. θ is re-read on every `round_closed`
-        (its `candidate_scores`); only the selection never moves. `verdict_reason` is
-        the round's own reading as the election held it.
-      required: [round, fit, elects_on, timestamp]
+        optimizer's selector before the round closes, keyed by `ArmKey`. θ is
+        re-read on every `round_closed` (its `Election.fit`); only the selection
+        never moves. `verdict_reason` is the round's own reading as the election
+        held it.
+      required: [round, selected, leading, ended_on, electable, elects_on, ruler, timestamp]
       additionalProperties: false
       properties:
         round:
@@ -1245,18 +1164,22 @@ components:
           type: string
           enum: [accuracy, composite, ability]
           description: |
-            `RoundResult.elects_on` — the column the selector elects on. `ability`: the
+            `Election.elects_on` — the column the selector elects on. `ability`: the
             round is won on θ, not on accuracy.
-        selected_labels:
+        selected:
           type: array
           items: { type: string, minLength: 1 }
           description: |
             The individuals the next round derives from — one for potter, a
             population or a front for a peer; empty when the round held.
-            Round 0 selects the `C0` it adopted.
+            Round 0 selects the origin it adopted.
+        leading: { type: [string, 'null'] }
+        ended_on: { type: string, minLength: 1 }
+        electable: { type: integer, minimum: 0 }
+        ruler: { type: object, additionalProperties: true }
         fit:
           type: object
-          description: Per-arm readings the selection stamped, keyed by label.
+          description: Per-arm readings the selection stamped, keyed by `ArmKey` (`ArmFit`).
           additionalProperties:
             type: object
             additionalProperties: true
@@ -1271,35 +1194,6 @@ components:
           type: string
           format: date-time
 
-    RulerPayload:
-      type: object
-      description: |
-        RulerRecord — a δ ruler as it stands, written WHOLE at lock and after
-        every extension; the last record for a `scope` wins. Not a
-        progress event: the tail frames it, the activity line stays silent, so it is declared for the union.
-      required: [ruler, scope, round, timestamp]
-      additionalProperties: false
-      properties:
-        ruler:
-          type: object
-          additionalProperties: true
-          description: The `DeltaRuler` model dump; its δ are keyed by `Sample.key`.
-        scope:
-          type: object
-          description: |
-            What one scale links: a scorer on one dataset. δ on two scopes are not
-            comparable. An L4 outer ledger carries one per inner seat dataset too.
-          required: [scorer, dataset]
-          additionalProperties: false
-          properties:
-            scorer: { type: string }
-            dataset: { type: string }
-        round:
-          type: integer
-          minimum: 0
-        timestamp:
-          type: string
-          format: date-time
 
     ScoringLockedPayload:
       type: object
@@ -1324,55 +1218,29 @@ components:
           type: string
           format: date-time
 
-    RunLimitsPayload:
+    StandingBudgetPayload:
       type: object
       description: |
-        RunLimitsRecord — the cycle's standing operator ceiling, whole; the last
-        record wins. Appended by `set-limits` and by a launch flag that moves
-        it. Not a progress event: the tail frames it, the activity line stays silent.
+        StandingBudgetRecord — the cycle's standing operator budget, whole; the
+        last record wins. Appended by `set-limits` and by a launch flag that
+        moves an axis, it names only the axes an operator named. Not a progress
+        event: the tail frames it, the activity line stays silent.
       required: [timestamp]
       additionalProperties: false
       properties:
-        ceiling:
-          $ref: '#/components/schemas/SpendCeilings'
-        rounds:
-          oneOf:
-            - type: 'null'
-            - type: object
-              required: [max_rounds]
-              additionalProperties: false
-              properties:
-                max_rounds:
-                  type: [integer, 'null']
-                  minimum: 0
-                  description: '`null` lifts the round cap, so the spend ceiling governs.'
-          description: The `RoundsCap`; `null` never moved it.
+        budget:
+          $ref: 'openapi.generated.json#/components/schemas/Budget'
         pause_at_round:
           type: [integer, 'null']
           minimum: 0
           description: |
             The count of closed rounds at which the launch in flight pauses —
             `step-cycle`'s allowance. Every launch declares its own or clears
-            the last one's; the loop reads this and the round cap off the one
+            the last one's; the loop reads this and `budget.rounds` off the one
             record.
-        reserve:
-          $ref: '#/components/schemas/SpendCeilings'
-          description: The job's reservation as this change moved it; a `null` arm left it alone.
         timestamp:
           type: string
           format: date-time
-
-    SpendCeilings:
-      type: object
-      description: What a run may spend, in both units (`domain/spend.py::SpendCeilings`); a `null` arm is unbounded.
-      additionalProperties: false
-      properties:
-        usd:
-          type: [number, 'null']
-          minimum: 0
-        tokens:
-          type: [integer, 'null']
-          minimum: 0
 
     CycleMintedPayload:
       type: object
@@ -1383,15 +1251,11 @@ components:
         its seed) together; a root carries none. `parent` is the parent cycle's
         directory as a POSIX path relative to this cycle's own — `../{cycle_id}`
         for a sibling, a longer path for a fork of another tree's cycle. A
-        ledger chain is walked off this record alone. `checkin` marks a cycle
-        minted while its campaign is still authoring its origin: it reads
-        `run_phase: checkin` until a `checkin_closed` record follows.
+        ledger chain is walked off this record alone. A root's ledger may open
+        with the check-in records its draft carried; Start moves them in.
       required: [timestamp]
       additionalProperties: false
       properties:
-        checkin:
-          type: boolean
-          default: false
         parent:
           type: [string, 'null']
         forked_at_offset:
@@ -1524,25 +1388,11 @@ components:
           type: string
           format: date-time
 
-    CheckinClosedPayload:
-      type: object
-      description: |
-        CheckinClosedRecord — the check-in this cycle was minted in is over:
-        Start froze the campaign's config and the cycle is a launch's to run.
-        One per cycle. Not a progress event: the tail frames it, the activity line stays silent.
-      required: [timestamp]
-      additionalProperties: false
-      properties:
-        timestamp:
-          type: string
-          format: date-time
-
     RunWiringPayload:
       type: object
       description: |
         RunWiringRecord — what a cycle runs under that no other record states;
-        the last record wins. Appended first as the cycle's config is frozen (a
-        root's mint, the Start closing a check-in), then by every launch once
+        the last record wins. Appended first at a root's mint, then by every launch once
         its admitted config is settled, before the origin scores, and again for
         a cycle the launch forks onto. Not a progress event: the tail frames it, the activity line stays silent.
       required:
@@ -1581,14 +1431,12 @@ components:
           type: [string, 'null']
         run_limits:
           type: object
-          description: The ceilings of the config the launch was admitted under (`RunLimits`).
-          required: [max_rounds, ceiling, optimizer]
+          description: The budget of the config the launch was admitted under (`RunLimits`).
+          required: [budget, optimizer]
           additionalProperties: false
           properties:
-            max_rounds:
-              type: [integer, 'null']
-            ceiling:
-              $ref: '#/components/schemas/SpendCeilings'
+            budget:
+              $ref: 'openapi.generated.json#/components/schemas/Budget'
             optimizer:
               type: array
               description: The optimizer's own run-bounding knobs (`OptimizerLimit`).
@@ -1634,6 +1482,11 @@ components:
           type: number
         unreported_tokens:
           type: integer
+        metered:
+          type: object
+          description: What the campaign's ceiling counted of it, keyed by ceiling meter.
+          additionalProperties:
+            $ref: 'openapi.generated.json#/components/schemas/Budget'
         timestamp:
           type: string
           format: date-time
@@ -1700,7 +1553,7 @@ components:
       type: object
       description: |
         CycleSeedRecord — the cycle's read-once starting point (`CycleSeed`),
-        appended at mint / operator-steered fork / check-in flip and re-read
+        appended at mint / operator-steered fork and re-read
         once at init. A fork inherits its parent's seed record *virtually*
         (`CycleEventLog.inherit_from`) but appends its OWN, so a scan of the
         cycle's own ledger file returns that cycle's seed. A diag cycle
@@ -1715,7 +1568,7 @@ components:
           type: object
           additionalProperties: true
           description: |
-            The `CycleSeed` model dump — `origin_prompt_fields`,
+            The `CycleSeed` model dump — `origin_prompts`,
             `pipeline_overlay`, `optimizer_narrowing`, `config_overrides`, and
             the `origin_source` provenance stamp (`fork_seed` |
             `campaign_origin`; empty when an L2/L3 rebase replays its own
@@ -1868,7 +1721,7 @@ components:
         Projection of `CommandRecord` (Profile B Phase 2a). Carries the
         inbound command kind, payload, the dispatcher-captured
         `idempotency_key`, and identity context.
-      required: [command_id, kind, payload, idempotency_key, timestamp]
+      required: [command_id, kind, payload, idempotency_key, issued_by, timestamp]
       additionalProperties: false
       properties:
         command_id: { type: string, minLength: 1 }
@@ -1884,7 +1737,13 @@ components:
           type: string
           minLength: 8
           maxLength: 128
-        issued_by_user_id: { type: string }
+        issued_by:
+          type: object
+          description: The `Principal` that issued it.
+          required: [id, display]
+          properties:
+            id: { type: string }
+            display: { type: string }
         timestamp:
           type: string
           format: date-time

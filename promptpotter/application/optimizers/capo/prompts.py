@@ -12,16 +12,20 @@ __all__ = ["crossover_prompt", "init_prompt", "mutation_prompt"]
 
 
 def init_prompt(ctx: NodeContext[Any]) -> str:
-    return ctx.fill(task_description=task_description(ctx))
+    return ctx.fill(task_description=task_description(ctx, ctx.prompt_node))
 
 
 def crossover_prompt(ctx: NodeContext[Any], mother: OptSearchPoint, father: OptSearchPoint) -> str:
+    node = ctx.prompt_node
     return ctx.fill(
-        task_description=task_description(ctx),
-        mother=shown(ctx, mother),
-        father=shown(ctx, father),
+        task_description=task_description(ctx, node),
+        mother=shown(ctx, mother, node),
+        father=shown(ctx, father, node),
     )
 
 
 def mutation_prompt(ctx: NodeContext[Any], individual: OptSearchPoint) -> str:
-    return ctx.fill(task_description=task_description(ctx), instruction=shown(ctx, individual))
+    node = ctx.prompt_node
+    return ctx.fill(
+        task_description=task_description(ctx, node), instruction=shown(ctx, individual, node)
+    )

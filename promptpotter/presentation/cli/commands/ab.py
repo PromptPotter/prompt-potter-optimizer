@@ -3,29 +3,32 @@
 from __future__ import annotations
 
 import argparse
+from typing import TYPE_CHECKING
 
-from promptpotter.application.cycle_listing import active_pointer
+from promptpotter.application.cycle_listing import (
+    active_pointer,
+    resolve_campaign_id,
+    resolve_cycle_id,
+)
+from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.diagnostics.ab import ab_replay_campaign
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import BankedSearchPointError
-from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import (
-    open_stores,
-    resolve_campaign,
-    resolve_cycle,
-)
-from promptpotter.presentation.cli.session import no_dataset_hint
+from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import DiagnosticError
+
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
     if args.campaign:
-        campaign_id = resolve_campaign(stores, args.campaign)
+        campaign_id = resolve_campaign_id(stores, args.campaign)
         if args.cycle:
             return CycleHop(
-                campaign_id=campaign_id, cycle_id=resolve_cycle(stores, campaign_id, args.cycle)
+                campaign_id=campaign_id, cycle_id=resolve_cycle_id(stores, campaign_id, args.cycle)
             )
         campaign = stores.campaigns.load_campaign(campaign_id)
         if campaign is None:
@@ -40,7 +43,7 @@ def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
     return CycleHop(
         campaign_id=pointer.campaign_id,
         cycle_id=(
-            resolve_cycle(stores, pointer.campaign_id, args.cycle)
+            resolve_cycle_id(stores, pointer.campaign_id, args.cycle)
             if args.cycle
             else pointer.cycle_id
         ),

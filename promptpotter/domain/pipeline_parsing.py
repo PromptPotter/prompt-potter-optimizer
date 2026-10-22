@@ -415,7 +415,6 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             ),
             "param_types": _infer_param_types(opt, nc, f"{where}.optimizer"),
             "current_config": dict(nc),
-            "tunes_llm": kind in THINKING_KINDS and bool(pk),
             "spend_bound": node.get("spend_bound"),
         }
 
@@ -449,6 +448,11 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             step_kwargs["prompt_info"] = _built(
                 NodePromptInfo, prompt_at, **_block(node["prompt_info"], prompt_at)
             )
+        # A declared prompt field is open by its declaration: `param_keys` holds config axes alone.
+        if (prompt_info := step_kwargs.get("prompt_info")) is not None:
+            pk -= set(prompt_info.fields)
+            step_kwargs["param_keys"] = pk
+        step_kwargs["tunes_llm"] = kind in THINKING_KINDS and (bool(pk) or prompt_info is not None)
 
         # Read from `config`, the declaration the connector forwards: never a display copy beside the wire copy.
         if "output_schema" not in step_kwargs and isinstance(nc.get("output_schema"), dict):

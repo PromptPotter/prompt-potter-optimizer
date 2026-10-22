@@ -14,7 +14,7 @@ import {
 const arm = (round: number, idx: number, changes_description = "") =>
   summaryCandidate({
     reading: armReading({
-      arm: { round, label: servedLabel(round, idx), candidate_id: `r${round}c${idx}` },
+      arm: { round, label: servedLabel(round, idx), key: `r${round}c${idx}` },
       changes_description,
     }),
   });
@@ -33,6 +33,7 @@ describe("runSummary", () => {
       }),
     ],
     run_standing: runStanding(2, "C2.2", {
+      selection: { round: 2, label: "C2.2", key: "r2c1" },
       vs_origin: pairedReading(0.12, [0.01, 0.23], { rateA: 0.5 }),
     }),
   });

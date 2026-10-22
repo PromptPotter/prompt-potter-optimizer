@@ -5,7 +5,7 @@ import contextvars
 import logging
 import sys
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -17,6 +17,7 @@ from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol,
     measure_sample,
 )
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
@@ -26,7 +27,7 @@ from promptpotter.domain.phases import (
     WalkEnd,
 )
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.scoring import GradedCell, MeasuredCell, Scorer, WalkedCell
+from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
 from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.send_pacing import HELD_POLL_S
@@ -43,7 +44,6 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.runtime_flags import effective_lookahead
 from promptpotter.shared.errors import ErrorCategory, SendRefusedError, graceful
-from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
@@ -52,11 +52,11 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import CatchUps, CaughtUp
     from promptpotter.infrastructure.store.measurement_archive import CellClaim
+    from promptpotter.shared.measurement_context import MeasuredPass
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "ArmSlot",
     "BlockRace",
     "QueryLoopResult",
     "Walk",
@@ -102,11 +102,11 @@ NEXT_CELL = "the next cell"
 MAX_CONSECUTIVE_ERRORS: int = 3
 
 
-class BlockRace(Protocol):
+class BlockRace[K: Hashable](Protocol):
     @property
     def block_size(self) -> int: ...
 
-    def close(self, rows: Mapping[int, Sequence[GradedCell]]) -> Mapping[int, StopSignal]: ...
+    def close(self, rows: Mapping[K, Sequence[GradedCell]]) -> Mapping[K, StopSignal]: ...
 
 
 _ABORTS_AT_ONCE: dict[ErrorCategory, WalkEnd] = {
@@ -140,22 +140,13 @@ class WalkRecorder(Protocol):
     def provenance(self, facts: MeasuredCell) -> str: ...
 
 
-@dataclass(frozen=True)
-class ArmSlot:
-    """``idx`` is ``NO_ROUND_SLOT`` for a pass that is no arm of the round."""
-
-    idx: int
-    total: int
-    individual_id: str
-
-
 @dataclass
 class QueryLoopState:
     search_point: JobSearchPoint
     session: Session
     cached_sample_results: dict[int, MeasuredCell]
     # ``None``: the walk writes no sample record — it is no pass a live surface draws.
-    slot: ArmSlot | None
+    recorded: MeasuredPass | None
     role: str
     sample_index: SampleIndex | None
     deprecated_samples: dict[int, MeasuredCell]
@@ -165,22 +156,35 @@ class QueryLoopState:
     cell_keys: Mapping[int, str]
     # Replays the bound meter prices nothing for: none waits on the ceiling or takes a spend stop.
     rereads: frozenset[int]
+    # The rows of the walk this one continues: its running fold covers them, then its own they lack.
+    held: CellSheet
 
     @property
     def scorer(self) -> Scorer:
         return self.session.scoring.require_scorer()
 
+    def running(self, results: Sequence[GradedCell]) -> ScoreSummary:
+        held = frozenset(cell.key for cell in self.held)
+        return self.recorder.scores(
+            [*self.held, *(cell for cell in results if cell.key not in held)]
+        )
+
     def sample_scored(
-        self, cell: GradedCell, idx: int, total: int, *, running: ScoreSummary | None
+        self,
+        cell: GradedCell,
+        sample: Sample,
+        idx: int,
+        total: int,
+        *,
+        running: ScoreSummary | None,
     ) -> None:
-        if (slot := self.slot) is not None:
+        if (recorded := self.recorded) is not None:
             emit_sample_scored(
-                candidate_idx=slot.idx,
-                candidate_total=slot.total,
-                individual_id=slot.individual_id,
-                role=MeasurementRole(self.role),
+                individual_id=recorded.individual_id,
+                role=recorded.role,
                 sample_idx=idx,
                 sample_total=total,
+                position=sample.id,
                 cell=cell,
                 running=running,
             )
@@ -353,14 +357,14 @@ class Walk:
             self._started(event)
 
     def _started(self, event: LaunchEvent) -> None:
-        if (slot := self.ctx.slot) is not None:
+        if (recorded := self.ctx.recorded) is not None:
             sample, idx, armed = event
             emit_sample_started(
-                candidate_idx=slot.idx,
-                candidate_total=slot.total,
+                individual_id=recorded.individual_id,
+                role=recorded.role,
                 sample_idx=idx,
                 sample_total=self.n,
-                sample_id=sample.id,
+                position=sample.id,
                 query=sample.query,
                 sample_lookahead=armed,
             )
@@ -383,13 +387,13 @@ class Walk:
             if acq.result.facts.cached and first:
                 _emit_cached_step_tokens(acq.result.facts)
         elif acq.deprecated_display is not None:
-            ctx.sample_scored(acq.deprecated_display, acq.idx, n, running=None)
+            ctx.sample_scored(acq.deprecated_display, acq.sample, acq.idx, n, running=None)
 
         try:
             # Before the snapshot below, which names the cell by its answer's address.
             taken = ctx.recorder.take(acq.result)
             self.results.append(taken)
-            running = ctx.recorder.scores(self.results)
+            running = ctx.running(self.results)
         finally:
             if acq.claim is not None:
                 acq.claim.release()
@@ -415,7 +419,7 @@ class Walk:
             else:
                 self.consecutive_errors = 0
 
-        ctx.sample_scored(taken, acq.idx, n, running=running)
+        ctx.sample_scored(taken, acq.sample, acq.idx, n, running=running)
         return None
 
     def _abort_reason(self, result: GradedCell) -> WalkEnd | None:
@@ -530,22 +534,25 @@ class Walk:
                 cell.cancel()
 
 
-async def run_walks(
-    walks: Sequence[Walk | None],
+async def run_walks[K: Hashable](
+    walks: Mapping[K, Walk | None],
     session: Session,
     *,
     keep_cut: bool,
     backfills: CatchUps | None = None,
-    blocks: BlockRace | None = None,
-    on_turn: Callable[[int, int | None], None] | None = None,
-    on_decided: Callable[[int], None] | None = None,
+    blocks: BlockRace[K] | None = None,
+    on_turn: Callable[[K, int | None], None] | None = None,
+    on_decided: Callable[[K], None] | None = None,
 ) -> StopReason | None:
-    """Rows, cuts and events land where a SERIAL phase lands them; ``keep_cut`` returns a budget stop, not raises."""
-    phase = _ScoringPhase(walks, session, backfills, blocks, on_turn, on_decided)
+    """Rows, cuts and events land where a SERIAL phase lands them, in *walks*' order; ``keep_cut``
+    returns a budget stop, not raises."""
+    phase = _ScoringPhase(
+        list(walks), list(walks.values()), session, backfills, blocks, on_turn, on_decided
+    )
     phase.cell = _dearest(
         [
             await cell_bound(session, walk.ctx.search_point.pipeline_params or {})
-            for walk in walks
+            for walk in walks.values()
             if walk is not None
         ]
     )
@@ -590,13 +597,15 @@ class _TurnState:
 
 
 @dataclass
-class _ScoringPhase:
-    walks: Sequence[Walk | None]
+class _ScoringPhase[K: Hashable]:
+    # By turn: the walk at index ``i`` is the one keyed ``keys[i]``.
+    keys: list[K]
+    walks: list[Walk | None]
     session: Session
     backfills: CatchUps | None
-    blocks: BlockRace | None
-    on_turn: Callable[[int, int | None], None] | None
-    on_decided: Callable[[int], None] | None
+    blocks: BlockRace[K] | None
+    on_turn: Callable[[K, int | None], None] | None
+    on_decided: Callable[[K], None] | None
     cell: SendBound | None = None
     turn: int = -1
     block: int = 0
@@ -643,12 +652,12 @@ class _ScoringPhase:
     def announce(self, i: int) -> None:
         self.announced.add(i)
         if self.on_turn is not None:
-            self.on_turn(i, None if self.blocks is None else self.block)
+            self.on_turn(self.keys[i], None if self.blocks is None else self.block)
 
     def conclude(self, i: int) -> None:
         self.decided.add(i)
         if self.on_decided is not None:
-            self.on_decided(i)
+            self.on_decided(self.keys[i])
 
     def first_turn(self) -> bool:
         for opened in self.live():
@@ -681,9 +690,13 @@ class _ScoringPhase:
             for i, walk in enumerate(self.walks)
             if walk is not None and walk.outcome is None
         }
-        stops = self.blocks.close({i: walk.results for i, walk in racing.items()}) if racing else {}
+        stops = (
+            self.blocks.close({self.keys[i]: walk.results for i, walk in racing.items()})
+            if racing
+            else {}
+        )
         for i, walk in racing.items():
-            if (signal := stops.get(i)) is not None:
+            if (signal := stops.get(self.keys[i])) is not None:
                 verdict = QueryLoopResult(
                     walk.results, ended_on=WalkEnd.STOP_RULE, stop_signal=signal
                 )
@@ -874,22 +887,23 @@ class _ScoringPhase:
         self.draining.clear()
 
     def caught_up(self, walk: Walk, caught: CaughtUp | None) -> None:
-        """A catch-up walk is opened with no slot, so its cells reach the ledger here or nowhere."""
+        """A catch-up walk records no pass, so its cells reach the ledger here or nowhere."""
         if caught is None:
             return
-        slot = walk.ctx.slot
-        assert slot is not None, "a race settles arms, and every arm walks a slot"
-        by_cell: dict[str, dict[str, WalkedCell]] = {}
+        arm = walk.ctx.recorded
+        assert arm is not None, "a race settles arms, and every arm's pass is recorded"
+        by_cell: dict[str, dict[ArmKey, WalkedCell]] = {}
         for prior, cells in caught.cells.items():
             for cell in cells:
                 if (address := cell.address) is not None:
                     by_cell.setdefault(cell.key, {})[prior] = address
+        slot_of = walk.ctx.session.bank.slot_of
         for key, taken in by_cell.items():
             emit_race_catch_up(
                 member=caught.member,
-                candidate_idx=slot.idx,
-                candidate_total=slot.total,
+                arm=ArmKey(arm.individual_id),
                 sample_key=key,
+                position=slot_of[key],
                 cells=taken,
             )
 

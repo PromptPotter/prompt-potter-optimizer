@@ -30,7 +30,11 @@ A per-replica prefix cache pays only where one route is hit repeatedly, and a ho
 cache is indistinguishable from a cold one until you read `served_by`. `ChatRequest.route_order`
 names the hosts to try in order, with fallbacks on — each the gateway's `provider_name` as read off `served_by`, never its catalogue, whose `supports_implicit_caching` misreports caching hosts. It is in `hash_call` because it changes WHO answers, not what is
 asked, and hosts of one model disagree systematically; and in `PARAM_FORBIDDEN_KEYS` because that
-makes it an operator cost lever and never a search axis.
+makes it an operator cost lever and never a search axis. **A node naming no route is keyed as the
+host it gets**: a gateway model's default host is `ModelProfile.default_route`, written into the
+node's config before it is keyed (`domain/pipeline_overlay.py::pin_default_routes`), so a node left
+to the gateway and one naming that host file as one cell — and a changed default is a code change
+that re-keys every unpinned node on that model.
 
 **What a model ACCEPTS and what we MEASURED about it are two tables, kept apart and COMPOSED, never merged.** `llm/registry.py::_MODEL_PROFILES` is evidence and ships in the wheel; `llm/capabilities.py` is the provider's own claim, resolved highest first — the tenant's hand-authored `model_capabilities.yaml`, `_MODEL_PROFILES`, the fetched per-tenant snapshot, then nothing — in which **the measured evidence narrows the claim and can never widen it**. **A price is no layer of it**: the card's two prices are `llm/pricing.py::lookup_rate` for the node's provider, which is why `model_capabilities` is keyed `provider -> model`.
 

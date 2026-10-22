@@ -5,12 +5,11 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.infrastructure.store.dataset_access import list_readable_datasets
-from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 @dataclass
@@ -33,14 +32,6 @@ class SessionCtx:
         return resolve_campaign_config(self.store, self.campaign, self.hop)
 
 
-def no_dataset_hint(stores: Stores) -> str:
-    """Every dataset this account reads: its own definitions first, then the installed templates."""
-    names = [ref.dataset.name for ref in list_readable_datasets(stores)]
-    lines = [f"  python -m promptpotter new {name}" for name in names]
-    body = "\n".join(lines) if lines else "  (no datasets readable here)"
-    return "Available datasets:\n\n" + body
-
-
 def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
     campaign = store.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
@@ -51,4 +42,4 @@ def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
     return SessionCtx(store, campaign, hop.cycle_id)
 
 
-__all__ = ["SessionCtx", "load_session", "no_dataset_hint"]
+__all__ = ["SessionCtx", "load_session"]

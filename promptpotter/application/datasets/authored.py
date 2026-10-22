@@ -98,7 +98,10 @@ def load_dataset_campaign_config(dataset_dir: Path) -> CampaignConfig:
 
 
 def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> CampaignConfig:
-    merged = merge_config_layers(config.model_dump(mode="json"), {"optimization": dict(overrides)})
+    """Laid over the keys *config*'s layers SET, so a declaration off it restates no default."""
+    merged = merge_config_layers(
+        config.model_dump(mode="json", exclude_unset=True), {"optimization": dict(overrides)}
+    )
     try:
         out = CampaignConfig.model_validate(merged)
     except ValidationError as exc:
@@ -107,13 +110,6 @@ def with_optimization(config: CampaignConfig, overrides: Mapping[str, Any]) -> C
         raise PayloadInvalidError(f"{where}: {first['msg']}", code="optimization_invalid") from exc
     select_optimizer(out.optimization)
     return out
-
-
-def dataset_campaign_config(
-    dataset_dir: Path, *, optimization: Mapping[str, Any], declared: CampaignConfig | None = None
-) -> CampaignConfig:
-    config = declared or load_dataset_campaign_config(dataset_dir)
-    return with_optimization(config, optimization) if optimization else config
 
 
 def scorer_of(config: CampaignConfig, *, verifier_graded: bool) -> Scorer:
@@ -148,7 +144,6 @@ def read_authored_dataset(dataset_dir: Path) -> AuthoredDataset:
 __all__ = [
     "campaign_file_block",
     "dataset_campaign_block",
-    "dataset_campaign_config",
     "dataset_scorer",
     "load_dataset_campaign_config",
     "read_authored_dataset",

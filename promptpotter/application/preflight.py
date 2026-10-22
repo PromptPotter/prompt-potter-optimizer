@@ -5,24 +5,28 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application import optimizers
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
+from promptpotter.domain.campaign import Compare
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.registry import model_profile
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
-    from promptpotter.domain.campaign import Arm
+    from promptpotter.domain.campaign import Purpose
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
 
 
 __all__ = [
     "PreflightWarning",
-    "check_search_pool_holds_round",
+    "check_search_split_holds_round",
     "refuse_arm_below_round",
     "refuse_below_reasoning_floor",
+    "refuse_unfit_pipeline",
     "run_preflight_checks",
 ]
 
@@ -127,17 +131,17 @@ def _check_task_context_present(
 
 def _check_cap_funds_round(
     config: CampaignConfig,
-    search_pool: int,
+    search: int,
     cell_usd: float | None,
     measured_cell_usd: float | None,
 ) -> PreflightWarning | None:
     """Priced at what a cell BILLED where the archive says; the ``cell_usd`` bound alone warns on every run."""
-    cap = config.optimization.ceiling.usd
+    cap = config.optimization.budget.usd
     price = cell_usd if measured_cell_usd is None else measured_cell_usd
     if cap is None or price is None:
         return None
     selected = select_optimizer(config.optimization)
-    cells = selected.round_cells_ceiling(search_pool)
+    cells = selected.round_cells_ceiling(search)
     need = cells * price
     if need <= cap:
         return None
@@ -146,7 +150,7 @@ def _check_cap_funds_round(
             code="spend_cap_below_round",
             title=f"spend cap ${cap:.2f} is under one round's expected cost (${need:.2f})",
             detail=(
-                f"One round of {selected.name} can measure {cells} cells off the {search_pool} "
+                f"One round of {selected.name} can measure {cells} cells off the {search} "
                 f"search rows, and a cell of this dataset has billed ${measured_cell_usd:.5f} on "
                 f"these models, so a full round is expected to cost ${need:.2f} and this run to "
                 "stop on `spend_budget` inside round 1 unless an eliminator cuts arms short. Raise "
@@ -157,7 +161,7 @@ def _check_cap_funds_round(
         code="spend_cap_below_round",
         title=f"spend cap ${cap:.2f} is under one round's ceiling (${need:.2f})",
         detail=(
-            f"One round of {selected.name} can measure {cells} cells off the {search_pool} search "
+            f"One round of {selected.name} can measure {cells} cells off the {search} search "
             f"rows, and the spend book admits a cell at up to ${cell_usd:.4f}, so only a cap of "
             f"${need:.2f} is certain to close a round. A cell usually bills well under its bound "
             "and an eliminator cuts arms short, so this run may still close rounds — or stop on "
@@ -202,13 +206,13 @@ def _check_instrument_replays(
     )
 
 
-def check_search_pool_holds_round(config: CampaignConfig, search_pool: int) -> str | None:
+def check_search_split_holds_round(config: CampaignConfig, search: int) -> str | None:
     """Asked before a mint: the sampler raises on such a pool at round 1, after the origin is paid."""
     selected = select_optimizer(config.optimization)
-    if selected.round_cells_ceiling(search_pool) > 0:
+    if selected.round_cells_ceiling(search) > 0:
         return None
     return (
-        f"the search pool holds {search_pool} rows, which optimizer {selected.name!r} cannot draw "
+        f"the search split holds {search} rows, which optimizer {selected.name!r} cannot draw "
         "one round's panel from. Grow the dataset, hold fewer rows out in `dataset_split`, or "
         "narrow the round in `optimization.nodes`."
     )
@@ -245,11 +249,12 @@ def run_preflight_checks(
 
 
 def refuse_arm_below_round(
-    arm: Arm | None, warnings: Iterable[PreflightWarning], *, measured_cell_usd: float | None
+    purpose: Purpose, warnings: Iterable[PreflightWarning], *, measured_cell_usd: float | None
 ) -> None:
     """An arm alone: stopped inside round 1 it is still graded beside the arms that searched."""
-    if arm is None or measured_cell_usd is None:
+    if not isinstance(purpose, Compare) or measured_cell_usd is None:
         return
+    arm = purpose.arm
     for w in warnings:
         if w.code == "spend_cap_below_round":
             raise PayloadInvalidError(
@@ -258,6 +263,14 @@ def refuse_arm_below_round(
                 "moves this arm alone, or size the round down with the optimizer's own knobs.",
                 code="spend_cap_below_round",
             )
+
+
+def refuse_unfit_pipeline(config: CampaignConfig, schema: PipelineSchema) -> None:
+    """A member that cannot write the chain's prompt nodes would raise inside round 1, after the origin is paid."""
+    if (
+        unfit := optimizers.unfit_pipeline(select_optimizer(config.optimization), schema)
+    ) is not None:
+        raise PayloadInvalidError(unfit, code="optimizer_unfit_pipeline")
 
 
 def refuse_below_reasoning_floor(

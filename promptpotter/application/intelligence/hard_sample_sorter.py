@@ -1,4 +1,4 @@
-"""It fits nothing: a δ here is the ruler's, a θ the round's own stamp."""
+"""It fits nothing: a δ here is the ruler's, a θ an election's or the frontier's, read on it."""
 
 from __future__ import annotations
 
@@ -27,31 +27,21 @@ if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler
 
 __all__ = [
+    "arm_thetas",
     "build_hard_samples",
     "rank_hard_samples",
     "read_hard_samples",
-    "stamped_abilities",
 ]
 
 
-def stamped_abilities(
-    rounds: Sequence[RoundResult], ruler: DeltaRuler | None
-) -> tuple[tuple[float, float] | None, dict[str, float]]:
-    frontier = next(
-        (
-            (rr.ability.theta, rr.ability.se)
-            for rr in reversed(rounds)
-            if ruler is not None
-            and rr.ability is not None
-            and rr.ability.se is not None
-            and rr.ability.ruler_id == ruler.anchor_id
-        ),
-        None,
-    )
-    theta = {
-        c.candidate_id: c.theta for rr in rounds for c in rr.candidate_scores if c.theta is not None
+def arm_thetas(rounds: Sequence[RoundResult]) -> dict[str, float]:
+    return {
+        key: fit.theta
+        for rr in rounds
+        if rr.election is not None
+        for key, fit in rr.election.fit.items()
+        if fit.theta is not None
     }
-    return frontier, theta
 
 
 def build_hard_samples(
@@ -100,7 +90,7 @@ def build_hard_samples(
         ruler=standing,
         candidate_order=candidate_order,
         theta={cid: arm_theta[cid] for cid in candidate_order if cid in arm_theta},
-        sample_ids={key: slots[key] for key in held},
+        positions={key: slots[key] for key in held},
         sample_order=sorted(measured, key=rank),
         samples={key: difficulty(key) for key in held},
         round_order=[key_at[sid] for sid in build_round_order(parent_grades, ruler, key_at)],

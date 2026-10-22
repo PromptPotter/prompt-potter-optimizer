@@ -27,7 +27,7 @@ export function SubjectDiff({
       </summary>
       <NodeSurface
         node={null}
-        point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
+        point={{ origin_prompts: cfg.prompts, pipeline_overlay: {} }}
         overlay={cfg.config}
         schema={cv.schema}
         mode="values"

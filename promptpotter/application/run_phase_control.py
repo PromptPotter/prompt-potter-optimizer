@@ -27,7 +27,7 @@ __all__ = ["Flight", "FlightGauge", "RunControl"]
 
 @dataclass(frozen=True)
 class Flight:
-    """``waiting`` is the ``(sample_id, launched_at)`` call a DECISION is held on under in-order absorption."""
+    """``waiting`` is the ``(position, launched_at)`` call a DECISION is held on under in-order absorption."""
 
     out: int = 0
     allowed: int = 0
@@ -102,8 +102,7 @@ class RunControl:
                 status="applied",
                 effect={"run_phase": RunPhase.PAUSED.value},
             )
-            who = f" by {asked.issued_by}" if asked.issued_by else ""
-            return PauseCause.COMMAND, f"pause-cycle{who}"
+            return PauseCause.COMMAND, f"pause-cycle by {asked.issued_by.display}"
         for outer in reversed(self.enclosing):
             if standing_controls(outer).pause is not None:
                 return PauseCause.ENCLOSING, f"enclosing run {outer.name} was paused"
@@ -158,5 +157,9 @@ class RunControl:
         return None if refused is None else REFUSAL_STOPS[refused]
 
     def spend_used_usd(self) -> float:
-        """In the meter's units; a FLOOR while unpriced tokens are outstanding."""
+        """This cycle's, in the meter's units; a FLOOR while unpriced tokens are outstanding."""
         return self.book.usd_metered
+
+    def spend_cap_usd(self) -> float | None:
+        """This cycle's share of the campaign's ceiling, which ``spend_used_usd`` counts toward."""
+        return self.book.allotment.usd

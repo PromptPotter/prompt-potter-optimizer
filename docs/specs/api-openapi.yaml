@@ -39,7 +39,7 @@
 # `/optimizer-pipeline`) were both already live and undeclared when it started.
 # The wired set is `commands.py::_WIRED_KINDS` plus
 # the four typed routes (edit-draft-campaign, resolve-origin, start-checkin,
-# replace-dataset). Check it before promising a UI button — chat-foundation.md
+# compact-archive). Check it before promising a UI button — chat-foundation.md
 # once advertised `endorse-candidate` as live on the strength of this file alone.
 #
 # Permanent contract: docs/adr/0001-m12-control-plane.md
@@ -100,9 +100,10 @@ tags:
     description: Commands that register external backends. (There is no sync verb.)
   - name: datasets
     description: |
-      Workspace-scoped dataset ingest. These endpoints mint a durable `checkin`
-      campaign and mutate its server-held `DraftCampaign` before the loop runs;
-      the eventual Start IS a command (`/commands/start-checkin`) declared above.
+      Workspace-scoped dataset ingest. These endpoints open a durable check-in
+      DRAFT (`drafts/{draft_id}/`, no campaign yet) and mutate its server-held
+      `DraftCampaign` before the loop runs; the eventual Start IS a command
+      (`/commands/start-checkin`) declared above, and it mints the campaign.
   - name: site-records
     description: Rows the operator's own website keeps on this box, behind one token.
   - name: cycles
@@ -460,9 +461,9 @@ paths:
         Bounded manual advance: resumes the cycle in place, runs `rounds` clean
         rounds (default 1), then auto-pauses (StopReason.PAUSED — resumable, so the
         operator can step again, with `run.pause.cause: step`). Reuses the resume
-        launcher: the allowance is the launch's `step_rounds` limit, declared as
-        `pause_at_round` on the cycle's `run_limits` record, where the loop reads
-        it beside the round cap. The `campaign.step`
+        launcher: the allowance is the launch's `step_rounds`, declared as
+        `pause_at_round` on the cycle's `standing_budget` record, where the loop reads
+        it beside `budget.rounds`. The `campaign.step`
         capability — a delegate holding it (but not `campaign.run`) can step but cannot
         fire an autonomous loop.
       tags: [cycle-control]
@@ -833,6 +834,36 @@ paths:
         '404': { $ref: '#/components/responses/CommandTargetNotFound' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
+  /commands/discard-draft:
+    post:
+      operationId: discardDraft
+      summary: Close an open check-in draft without a run.
+      description: |
+        Recorded on the draft's own ledger, then the draft is closed: what its
+        check-in calls cost is banked to the workspace, as a deleted campaign's is.
+        Nothing was minted, so nothing else moves.
+      tags: [datasets]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/CommandEnvelope'
+                - type: object
+                  required: [kind, payload]
+                  properties:
+                    kind: { const: discard-draft }
+                    payload: { $ref: '#/components/schemas/DiscardDraftPayload' }
+      responses:
+        '202': { $ref: '#/components/responses/CommandAccepted' }
+        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
+        '403': { $ref: '#/components/responses/CapabilityDenied' }
+        '404': { $ref: '#/components/responses/CommandTargetNotFound' }
+        '422': { $ref: '#/components/responses/PayloadInvalid' }
+
   /commands/unarchive-campaign:
     post:
       operationId: unarchiveCampaign
@@ -930,7 +961,7 @@ paths:
   /commands/change-run-limits:
     post:
       operationId: changeRunLimits
-      summary: Raise or lower a cycle's USD, token and/or round cap mid-flight.
+      summary: Raise or lower any axis of a cycle's budget mid-flight.
       tags: [budget]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1091,7 +1122,7 @@ paths:
         Wire form of editing `campaign.json::scoring`. There is no live-swap
         counterpart to be the wire form OF: the cell scorer compiles once at run
         init and is never re-read, and a mid-cycle redefinition makes the
-        composite incomparable to its own past — `EscalationFSM._advanced` reads
+        composite incomparable to its own past — `escalation/state.py::_improved` reads
         `best_composite_fitness` as the L2/L3 stall gate whenever the θ ruler is
         unavailable. So this must land as a FORK (the wire twin of
         `resume --fork-on-divergence`), never as a swap into the running cycle.
@@ -1113,66 +1144,6 @@ paths:
                   properties:
                     kind: { const: change-scoring-composite }
                     payload: { $ref: '#/components/schemas/ChangeScoringCompositePayload' }
-      responses:
-        '202': { $ref: '#/components/responses/CommandAccepted' }
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '403': { $ref: '#/components/responses/CapabilityDenied' }
-        '409': { $ref: '#/components/responses/VersionConflict' }
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
-  /commands/mark-hard-sample:
-    post:
-      operationId: markHardSample
-      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
-      summary: Promote a sample to the hard-sample queue (operator override).
-      description: |
-        Operator-authored signal; the L1 signal catalogue picks it up at the
-        next round boundary. Overrides the zero-signal filter even if the
-        sample is borderline always-hit / always-miss.
-      tags: [operator-feedback]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/ExpectedVersion'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: mark-hard-sample }
-                    payload: { $ref: '#/components/schemas/MarkHardSamplePayload' }
-      responses:
-        '202': { $ref: '#/components/responses/CommandAccepted' }
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '403': { $ref: '#/components/responses/CapabilityDenied' }
-        '409': { $ref: '#/components/responses/VersionConflict' }
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
-  /commands/unmark-hard-sample:
-    post:
-      operationId: unmarkHardSample
-      x-status: declared-not-wired  # no handler; POST 404s `command_kind_unknown`
-      summary: Demote a previously marked sample (clear operator override).
-      tags: [operator-feedback]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/ExpectedVersion'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: unmark-hard-sample }
-                    payload: { $ref: '#/components/schemas/UnmarkHardSamplePayload' }
       responses:
         '202': { $ref: '#/components/responses/CommandAccepted' }
         '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
@@ -1252,11 +1223,10 @@ paths:
         Drives the chat ↔ panel dual-surface mutation path (see
         `docs/specs/roadmap.md § State-sync`). Both the
         assistant tool-call surface and the panel "Apply" button ride this
-        same verb. Check-in scoped — dispatched through `CommandDispatcher`
-        onto the check-in cycle's ledger (`cycle_chk_*`, minted with its own
-        `.runtime/` at the first ingest action and retained across the flip to
-        `active`), so an origin edit is a `CommandRecord` + `CommandAckRecord`
-        like every other Control-remote mutation. No `Expected-Version` — a
+        same verb. Draft scoped — dispatched through `CommandDispatcher`
+        onto the draft's own ledger (`drafts/{draft_id}/`, which Start moves into
+        the root cycle it mints), so an origin edit is a `CommandRecord` +
+        `CommandAckRecord` like every other Control-remote mutation. No `Expected-Version` — a
         draft is authored, not raced. An `Idempotency-Key` retry is deduped and
         the body re-read from `draft.json`.
 
@@ -1305,34 +1275,31 @@ paths:
   /commands/start-checkin:
     post:
       operationId: startCheckin
-      summary: Start a CHECKIN campaign — gate the origin, commit the Dataset, mint the run.
+      summary: Start a check-in DRAFT — gate the origin, commit the Dataset, mint the campaign and run.
       description: |
-        Terminal verb in the check-in phase. The campaign already exists durably
-        (minted on the first ingest action — `/datasets/ingest` or
-        `/datasets/{name}/draft`); its working state lives at
-        `projects/{tenant}/campaigns/{campaign_id}/checkin/`, and the phase itself
-        is a fact of the root cycle's ledger (minted in check-in, not yet closed).
-        This verb closes it and runs. Server:
-        1. Loads the campaign by `campaign_id`, asserts owned + flag still set,
-           rehydrates the draft from `checkin/draft.json`.
-        2. Runs the deterministic origin-readiness gate (incomplete → 422; the flag
-           stays set so the operator resolves + retries).
+        Terminal verb of a check-in. The draft exists durably (opened on the
+        first ingest action — `/datasets/ingest`, `/datasets/{name}/draft` or
+        `/origins/{id}/draft`) at `projects/{tenant}/drafts/{draft_id}/`; no
+        campaign exists before this verb. Server:
+        1. Loads the draft by `draft_id`, asserts owned.
+        2. Runs the deterministic origin-readiness gate (incomplete → 422; the
+           draft stays open so the operator resolves + retries).
         3. Takes a machine slot — or a place in the queue for one, in which case
-           everything below happens after the wait, leaving the check-in exactly
+           everything below happens after the wait, leaving the draft exactly
            as the operator left it — then commits the origin: a fresh upload
-           writes `projects/{tenant}/datasets/{slug}/` (the four Dataset files
-           + sibling `campaign.yaml`) from the materialized bank; a draft derived
-           from an existing dataset persists only its candidate library.
-        4. Resolves the cycle plan, flips `checkin` → `active`, appends
-           `checkin_closed` to the cycle's ledger, and detaches the runner.
+           writes `projects/{tenant}/datasets/{slug}/` from the materialized
+           bank; a draft derived from an existing dataset persists only its
+           candidate library.
+        4. Declares the run through the one mint (`jobs/mint.py::declare`),
+           mints the campaign and its root cycle, MOVES the draft's ledger into
+           that cycle (what its check-in calls cost bills there) and detaches
+           the runner.
 
-        Check-in scoped — dispatched through `CommandDispatcher` onto the
-        check-in cycle's ledger, the same cycle the run then appends its rounds
-        to. No `Expected-Version`. `Idempotency-Key` set by the client, but this
-        verb alone is NOT ledger-deduped: `job_id` is a live `JobRegistry` handle
-        with no disk home, so a deduped retry could only fabricate one. The
-        durable campaign is what makes a retry safe — a second Start finds the
-        campaign `active` and raises `LaunchError` (422).
+        Draft scoped — dispatched through `CommandDispatcher` onto the draft's
+        ledger. No `Expected-Version`. `Idempotency-Key` set by the client, but
+        this verb alone is NOT ledger-deduped: `job_id` is a live `JobRegistry`
+        handle with no disk home, so a deduped retry could only fabricate one.
+        A second Start finds the draft closed and 404s.
       tags: [datasets]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -1351,9 +1318,10 @@ paths:
       responses:
         '200':
           description: |
-            Canonical mint response — `campaign_id`, `cycle_id`, `job_id`.
-            Synchronous through the commit + runner spawn; background progress
-            then rides the canonical ledger + `dashboard.json` stream.
+            `job_id`, and `hop` — the minted `{campaign_id, cycle_id}`, or null
+            while the launch waits in the machine queue (nothing is minted yet).
+            Background progress then rides the canonical ledger +
+            `dashboard.json` stream.
           content:
             application/json:
               schema:
@@ -1367,8 +1335,8 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '404':
           description: |
-            `campaign_id` has no check-in working state (already Started, never a
-            check-in, or under a different `IdentityContext.tenant_id`).
+            `draft_id` names no open draft (already Started, discarded, or under
+            a different `IdentityContext.tenant_id`).
           content:
             application/json:
               schema:
@@ -1383,7 +1351,7 @@ paths:
             field as `{field, reason, hint}`. `ingest_failed` — a confirmed
             mapping hit a per-row data failure (a blank mapped cell) at
             materialization. `pipeline_config_invalid` — the resolved pipeline
-            config can't produce a runnable cycle. The campaign stays `checkin`;
+            config can't produce a runnable cycle. The draft stays open;
             the operator resolves it (via `resolve-origin` or
             `edit-draft-campaign`) and retries.
           content:
@@ -1439,12 +1407,10 @@ paths:
           required: false
           description: |
             `active` (default), `archived`, `deleted` — the visibility intent —
-            or `all`. `checkin` is not a status but the authoring PHASE, read off
-            the root cycle's ledger; it narrows `active`, which
-            already carries the origin-authoring set.
+            or `all`. An open check-in is a draft, never a campaign: `GET /drafts`.
           schema:
             type: string
-            enum: [active, archived, deleted, checkin, all]
+            enum: [active, archived, deleted, all]
             default: active
         - name: descend
           in: query
@@ -1468,22 +1434,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
-  /campaigns/{campaign_id}/checkin:
+  /drafts:
     get:
-      operationId: getCampaignCheckin
-      summary: Re-open a CHECKIN campaign — its draft wire + last resolver turn.
+      operationId: listDrafts
+      summary: The caller's open check-ins.
       description: |
-        The sidebar opens a check-in campaign through here instead of
-        the dashboard (no `dashboard.json` exists pre-loop): the webapp rebuilds
-        the ingest "ready" panel from `draft` and shows the prior `resolution`
-        recap. Tenant-scoped — a cross-tenant id 404s. 404 when the campaign has
-        no check-in working state (already Started or never a check-in).
-      tags: [campaigns]
+        A draft is no campaign: Start mints one and closes the draft, Discard
+        closes it and banks what its check-in calls cost to the workspace.
+      tags: [datasets]
+      responses:
+        '200':
+          description: The caller's open drafts, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: 'openapi.generated.json#/components/schemas/DraftListResponse'
+
+  /drafts/{draft_id}:
+    get:
+      operationId: getDraft
+      summary: Re-open a check-in — its draft wire + last resolver turn.
+      description: |
+        The entry list opens a check-in through here: the webapp rebuilds the
+        ingest "ready" panel from `draft` and shows the prior `resolution`
+        recap. Tenant-scoped — a cross-tenant id 404s, as does a draft already
+        Started or discarded.
+      tags: [datasets]
       parameters:
-        - name: campaign_id
+        - name: draft_id
           in: path
           required: true
-          description: The check-in campaign id (the draft's `draft_id`).
           schema:
             type: string
             minLength: 8
@@ -1496,9 +1476,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: 'openapi.generated.json#/components/schemas/CheckinReopenResponse'
+                $ref: 'openapi.generated.json#/components/schemas/DraftReopenResponse'
         '404':
-          description: No check-in working state for this campaign (or cross-tenant).
+          description: No open draft by this id (or cross-tenant).
           content:
             application/json:
               schema:
@@ -1516,8 +1496,7 @@ paths:
         the campaign's FROZEN `pipeline_overlay` < cycle seed < the addressed
         candidate's sparse `pipeline_overlay` < identity contributions,
         which are unoverridable. Each param's `source` is the layer that won it,
-        stamped BY the merge. A check-in campaign resolves through the same
-        call. A one-shot read beside `dashboard.json` polling, which is its
+        stamped BY the merge. A one-shot read beside `dashboard.json` polling, which is its
         invalidation signal, not its transport (`roadmap.md` § Hard ordering).
       tags: [campaigns]
       parameters:
@@ -1650,17 +1629,16 @@ paths:
         search incurred — by bucket. Its `billed_usd` is what providers REPORTED and
         the one spend every surface leads with; `rate_priced_usd` sits beside it,
         never inside it, shown where `calls_rate_priced` says there is one; `metered_usd`
-        is read only beside `run_limits`' spend cap, and the kinds are the breakdown under
+        is read only beside `run_limits.budget.usd`, and the kinds are the breakdown under
         the bill — each with `sent` (whether a provider was reached for it) and its `prefix`
         reading, whose badge carries the kind's cache writes.
         `rounds[]` arrives in round order, and the readings decided off it are set at
-        read time, head and replay alike: `ability_on_series_ruler` and
-        `panel_precision_verdict` per round, `reading.panel.cut` per
+        read time, head and replay alike: `panel_precision_verdict` per round, `reading.panel.cut` per
         candidate row (`DashboardCandidate`), closed or in flight.
         The body names no optimizer's node in a key the bench serves.
         `current_round.candidates[]` (`LiveCandidate`) carries the round in flight
         whole: the closed-row numbers, the searchpoint as a round file's
-        `candidate_scores[]` (`ScoredCandidate`) carries it historically, the sample
+        `arms` (`ArmState`) carries it historically, the sample
         tape (`samples[]`) and `validation_failures[]`;
         `current_round.fitness_bands` counts their scored rows per tenth of [0, 1], as a
         closed round's own `fitness_bands` counts its `results`;
@@ -1674,13 +1652,16 @@ paths:
         `scorer_id` — and served from the launch's start for every trigger and for a cycle
         beside the line, its `status` (`BenchStatus`) saying where the bench stands and
         whether `grade-bench` is admitted now; the serve lays the live reading over the
-        stored one. `run_limits` holds the bench's ceilings and `optimizer[]` — the
+        stored one. `run_limits` holds the bench's `budget` and `optimizer[]` — the
         run-bounding knobs the selected optimizer declares (`OptimizerLimit`), empty
         where it declares none. `run_standing` (`RunStanding`) is where the run
         stands after the last closed round — its selection, that selection's reading
         against the origin, what the cycle had cost at that close, rounds without
         advance, and the stalls it may still absorb out of their cap; before round 0
-        closes it names no selection.
+        closes it names no selection. `rounds[].series_reading` (`SeriesReading`) is the
+        round's θ re-read at the last close on the run's one scale, with the caveat it
+        carries, its own or the series'. `rounds[].level` is the one level a round
+        serves: null under either caveat, so no surface differences one the backend withheld.
         `rounds[].optimizer_facts` are the optimizer's own words about each closed
         round (`OptimizerFact`), and `rounds[].bench` the bench's `BenchReading` of the
         selection that round declared — the origin and the final pick once their
@@ -1727,7 +1708,7 @@ paths:
 
             `run_phase` is still derived at read time — it answers what the producer is
             doing NOW, which is a clock fact and not a property of the moment asked for.
-            A replay takes NONE of what stands now — the armed ceilings and look-ahead,
+            A replay takes NONE of what stands now — the armed budget and look-ahead,
             the verify readings, the fork remainder — because restating one as a past
             moment's would be a fabrication.
           schema: { type: integer, minimum: 0 }
@@ -1741,7 +1722,7 @@ paths:
           description: |
             The leaf cycle's `ServedDashboard` — its banked `dashboard.json` plus what only
             the read can say, every field required — or a `WarmingDashboard`
-            (`warming_up: true`) for a cycle still at check-in. Both are
+            (`warming_up: true`) for a moment before its run declared its wiring. Both are
             `application/served_dashboard.py`'s models.
           content:
             application/json:
@@ -1813,7 +1794,7 @@ paths:
         flat campaign-rooted read this replaced could not describe a leaf below depth 1.
         `GET /campaigns` + `GET /cycles` stay the flat registry the sidebar groups.
 
-        IDENTITY is built from each course's **ledger** (`CandidateMintedRecord`) plus
+        IDENTITY is built from each course's **ledger** (`ArmRecord`) plus
         `index.json` topology — deliberately NOT the round file. A round that never closed
         writes no round file, but it minted its candidates, and at L4 their inner campaigns
         are finished on disk under a parent that a positional read cannot name. The ledger
@@ -2156,9 +2137,9 @@ paths:
         Applies to answers filed under the `panel` role only (a candidate's
         own walk): `origin` and `parent` serve the overwhelming majority of
         cache replays, so they are never touched.
-        A row carrying `mean_round_delta` keeps its `reasoning_trace` — the L4
-        narrative panel gate needs both, and a row with one but not the other
-        silently changes which panel the round renders.
+        An L4 outer row (one carrying `PipelineData.inner`) keeps its
+        `reasoning_trace` — the L4 narrative panel reads it, and a row without
+        it silently changes which panel the round renders.
 
         Refuses outright (`archive_writers` > 0, nothing written) while any
         cycle can still append: the archive is shared across every cycle and
@@ -2192,69 +2173,6 @@ paths:
         '403': { $ref: '#/components/responses/CapabilityDenied' }
         '422': { $ref: '#/components/responses/PayloadInvalid' }
 
-  /commands/replace-dataset:
-    post:
-      operationId: replaceDataset
-      summary: Version-and-repoint an existing dataset so its name frees for new data.
-      description: |
-        The data-safe answer to a name collision when the operator means
-        "supersede the data under this name". NEVER overwrites: the old data
-        + its results are preserved,
-        renamed out of the way. Server, in crash-safe order:
-        1. Renames `projects/{tenant}/datasets/{slug}/` to the smallest free
-           `{slug}-v{n}/` (byte-identical data: a dataset's files never name it).
-        2. Repoints every dependent campaign — `campaign.json::dataset_name`
-           and each cycle `index.json::header.dataset_name` — onto `{slug}-vN`,
-           and re-stamps that data's measurement-archive entries. After this,
-           every prior campaign resolves the exact bytes it always ran on.
-        3. Returns; the freed `{slug}` is then re-ingested via `/datasets/ingest`
-           through the normal draft/check-in flow (a separate call).
-
-        A `datasets/.migrations/pending/{id}.json` marker makes the migration
-        resumable; a crash between steps is replayed the next time the
-        workspace's stores are built, before anything reads a pin.
-        Workspace-scoped — no `Expected-Version`. `Idempotency-Key` required.
-      tags: [datasets]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              allOf:
-                - $ref: '#/components/schemas/CommandEnvelope'
-                - type: object
-                  required: [kind, payload]
-                  properties:
-                    kind: { const: replace-dataset }
-                    payload: { $ref: '#/components/schemas/ReplaceDatasetPayload' }
-      responses:
-        '200':
-          description: |
-            The migration completed. `versioned_to` is the archival name the old
-            data now lives under; the counts are what moved with it.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ReplaceDatasetResponse'
-        '400': { $ref: '#/components/responses/IdempotencyKeyMissing' }
-        '401':
-          description: Unauthenticated (no `IdentityContext` resolved at the middleware).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '409':
-          description: |
-            `nothing_to_replace` — no committed dataset holds `slug` (the name
-            was removed between the collision 409 and this call).
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '422': { $ref: '#/components/responses/PayloadInvalid' }
-
   /commands/resolve-origin:
     post:
       operationId: resolveOrigin
@@ -2271,11 +2189,11 @@ paths:
         completeness; a false `ready` is re-checked and rejected.
 
         Synchronous (mirrors `edit-draft-campaign`): returns the resolver
-        output + the post-apply `DraftCampaign`. Check-in scoped — dispatched
-        through `CommandDispatcher` onto the check-in cycle's ledger, so a turn
+        output + the post-apply `DraftCampaign`. Draft scoped — dispatched
+        through `CommandDispatcher` onto the draft's ledger, so a turn
         that moved the origin is a `CommandRecord`. No `Expected-Version`. An
         `Idempotency-Key` retry is deduped and the body re-read from
-        `cache.json::resolution` + `draft.json`, so a network retry never
+        `checkin.json::resolution` + `draft.json`, so a network retry never
         re-spends the LLM call. Drives subsequent turns from the UI; bounded by
         operator interaction.
       tags: [datasets]
@@ -2324,13 +2242,12 @@ paths:
       description: |
         Ingest path for the chat-first user web (roadmap `C1`; contract in
         `docs/specs/chat-foundation.md`). Workspace-scoped,
-        identity-bound by `IdentityContext.tenant_id`. Mints a durable `checkin`
-        campaign on this first action: the draft's `draft_id` IS the new
-        `campaign_id`, its working state lands at
-        `projects/{tenant}/campaigns/{campaign_id}/checkin/`, and on Start the
-        dataset directory is written at `projects/{tenant}/datasets/{slug}/`.
+        identity-bound by `IdentityContext.tenant_id`. Opens a durable draft on
+        this first action at `projects/{tenant}/drafts/{draft_id}/`; on Start the
+        dataset directory is written at `projects/{tenant}/datasets/{slug}/` and
+        the campaign is minted.
 
-        The check-in campaign appears in the sidebar immediately and survives a
+        The draft is listed by `GET /drafts` immediately and survives a
         restart; nothing runs until the operator starts it via the separate
         `/commands/start-checkin` verb.
         File type is detected from the filename extension: CSV, TSV, JSON,
@@ -2366,7 +2283,7 @@ paths:
           description: |
             Draft created. Body is a `DraftCampaign` with `sample_preview`
             (first 10 rows), `n_samples`, smart-defaulted `connector` /
-            `scoring_matcher` / `max_rounds`, and a server-minted `draft_id`.
+            `scoring_matcher` / `budget.rounds`, and a server-minted `draft_id`.
           content:
             application/json:
               schema:
@@ -2602,12 +2519,12 @@ paths:
   /datasets/{name}/draft:
     post:
       operationId: draftFromExistingDataset
-      summary: Open an authored dataset as a durable check-in campaign.
+      summary: Open an authored dataset as a durable check-in draft.
       description: |
         The direct path behind "open this dataset in the ingest panel" — a demo /
-        benchmark / owned dataset becomes a prefilled check-in (`draft_id` ==
-        `campaign_id`) with no browser-side CSV round-trip. **Mints a campaign**,
-        so it is a state-creating POST, not a read. Identity-gated through the
+        benchmark / owned dataset becomes a prefilled check-in draft with no
+        browser-side CSV round-trip. **Opens a draft**, so it is a state-creating
+        POST, not a read. Identity-gated through the
         same resolver as the other dataset reads; nothing runs until the operator
         starts it via `/commands/start-checkin`.
       tags: [datasets]
@@ -2647,7 +2564,7 @@ paths:
   /origins/{origin_id}/draft:
     post:
       operationId: draftFromOrigin
-      summary: Open a prior origin as a prefilled check-in campaign ("Reuse an origin").
+      summary: Open a prior origin as a prefilled check-in draft ("Reuse an origin").
       description: |
         Resolves the origin's EXACT prompt fields: a campaign itself minted from
         an origin carries those fields on its root-cycle seed, so they are reused
@@ -2767,7 +2684,7 @@ paths:
         (the answers already in the data are a runnable pool). A multipart ingress
         for `edit-draft-campaign`: the parsed terms become that command's
         `patch.candidate_library` and dispatch through `CommandDispatcher`, so the
-        edit lands on the check-in cycle's ledger like every other origin mutation.
+        edit lands on the draft's ledger like every other origin mutation.
       tags: [datasets]
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -2787,7 +2704,7 @@ paths:
                   type: string
                   minLength: 8
                   maxLength: 128
-                  description: The draft to attach the library to (the check-in `campaign_id`).
+                  description: The open draft to attach the library to.
       responses:
         '200':
           description: |
@@ -3041,8 +2958,6 @@ components:
       $ref: 'openapi.generated.json#/components/schemas/LineageDivergence'
     ArmPanel:
       $ref: 'openapi.generated.json#/components/schemas/ArmPanel'
-    ArmSpend:
-      $ref: 'openapi.generated.json#/components/schemas/ArmSpend'
     ArmAbility:
       $ref: 'openapi.generated.json#/components/schemas/ArmAbility'
     ArmElection:
@@ -3092,7 +3007,13 @@ components:
             machine-wide admission window, so occupancy cannot be read and
             nothing was started; retryable),
             `ingest_failed` / `dataset_unstartable` / `extra_missing` / `origin_incomplete` /
-            `pipeline_config_invalid` (422), `stored_config_invalid` (500). Generic families:
+            `pipeline_config_invalid` (422), `stored_config_invalid` (500),
+            `arm_halt_refused` (409 — a head-to-head arm declares a halt accuracy; an arm
+            stops on its budget alone). One ceiling per campaign, refused at admission
+            and on a moved money axis: `campaign_ceiling_held` (429 — what the campaign
+            spent plus what its other live cycles hold leaves nothing) and
+            `campaign_ceiling_unshared` (429 — a live sibling runs unbounded on an axis
+            this launch bounds, so there is no share to take). Generic families:
             `bad_request` (400), `unauthenticated`
             (401), `capability_denied` (403), `not_found` (404), `too_large`
             (413), `request_invalid` (422), `service_unavailable` (503),
@@ -3118,7 +3039,9 @@ components:
             - origin_incomplete
             - pipeline_config_invalid
             - stored_config_invalid
-            - nothing_to_replace
+            - arm_halt_refused
+            - campaign_ceiling_held
+            - campaign_ceiling_unshared
             - resolver_failed
             - backend_sync_failed
             - identity_not_initialised
@@ -3315,12 +3238,20 @@ components:
       additionalProperties: false
       description: |
         One arm an operator wrote: an EDIT of the round's parent. It carries
-        at least one of `prompt_fields` / `pipeline_overlay`.
+        at least one of `prompt_fields` / `shots` / `pipeline_overlay`.
       properties:
         prompt_fields:
           type: object
-          additionalProperties: { type: string }
-          description: The prompt fields this arm rewrites, by name; every other one is the parent's.
+          additionalProperties:
+            type: object
+            additionalProperties: { type: string }
+          description: The prompt fields this arm rewrites, per prompt node and by name; every other one is the parent's.
+        shots:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+          description: '`{node: [sample key]}`: the demo-pool shots this arm sets on each prompt node, in render order; `[]` clears them, and a node absent keeps the parent''s.'
         pipeline_overlay:
           type: object
           additionalProperties: { type: object, additionalProperties: true }
@@ -3413,7 +3344,7 @@ components:
         - type: object
           additionalProperties: false
           properties:
-            rounds:
+            step_rounds:
               type: integer
               minimum: 1
               maximum: 100
@@ -3432,15 +3363,15 @@ components:
               minLength: 1
               maxLength: 128
               description: >-
-                The searchpoint, as `GET /evidence` addresses one: `candidate_id` on its round
-                file's `candidate_scores` row. The origin is addressed the same way — and with
+                The searchpoint, as `GET /evidence` addresses one: the `ArmKey` of its round
+                file's `arms` entry. The origin is addressed the same way — and with
                 `descend`, an L4 inner candidate is verified like a top-level one.
             strategy:
               type: string
               enum: [random, hard]
               default: random
               description: >-
-                Which unseen cells to buy: `random` from the unmeasured search pool, or `hard`
+                Which unseen cells to buy: `random` from the unmeasured search split, or `hard`
                 — the highest-δ cells on the cycle's ruler first.
             seed:
               type: integer
@@ -3501,7 +3432,7 @@ components:
                 parent and the fork continues at `round` under the seed's
                 overrides. That is what an "apply this from here" press means, and
                 the same act the terminal spells `resume --rewind N`. It refuses a
-                seed carrying `origin_prompt_fields`: the lifted round 0 already
+                seed carrying `origin_prompts`: the lifted round 0 already
                 IS the origin, so declaring a second one is contradictory.
             seed:
               $ref: '#/components/schemas/CycleSeed'
@@ -3521,17 +3452,27 @@ components:
         operator edits. `origin_source` is not sent: the dispatcher stamps
         `fork_seed`. Required on every operator fork.
         Under `keep_rounds` the origin is the LIFTED round 0 instead, so only the
-        override half of this applies and `origin_prompt_fields` is refused.
+        override half of this applies and `origin_prompts` is refused.
         Persisted to the fork's ledger as a read-once `CycleSeedRecord` (read at
         init) and onto the parent's `FORK_CUT` ledger record.
       properties:
-        origin_prompt_fields:
+        origin_prompts:
           type: object
-          additionalProperties: true
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            properties:
+              fields:
+                type: object
+                additionalProperties: { type: string }
+              shots:
+                type: array
+                items: { type: string }
           description: |
-            The fork's origin prompt — a `PromptTemplate.prompt_field_dict()`
-            shape (the 8 prompt fields). Becomes the origin `OptSearchPoint` at
-            init. `{}` inherits the parent's origin prompt.
+            The fork's origin prompt, per prompt node — each a `NodePrompt`
+            (its fields by declared name, its shots as demo-pool sample keys).
+            Becomes the origin `OptSearchPoint` at init. `{}` inherits the
+            parent's origin prompt.
         pipeline_overlay:
           type: object
           additionalProperties: true
@@ -3606,9 +3547,9 @@ components:
         The fork's campaign-config delta. Every field optional — absent
         inherits the parent's value; applied to the fork's snapshot at init,
         never mutates the parent's frozen config. Three kinds of knob ride here:
-        (1) the bench's run limits (`max_rounds`/`ceiling`)
-        — ABSOLUTE values the reconcile dialog re-sets (defaults to the parent's
-        remaining, e.g. "3 of 6 rounds left"); (2) `nodes`, the fork's delta over
+        (1) the bench's `budget`, ABSOLUTE values laid axis by axis over the
+        parent's, which the reconcile dialog re-sets (`rounds` defaults to what the
+        parent's cap has left, e.g. "3 of 6 rounds left"); (2) `nodes`, the fork's delta over
         the selected optimizer manifest — every knob its nodes take, which
         `GET /optimizers/{name}/knobs` lists; (3) the composite
         criterion (`scoring`), which sits on `CampaignConfig` itself rather than
@@ -3616,18 +3557,12 @@ components:
         so a fork-at-offset-0 is how you A/B one without touching the manifest or
         the parent cycle.
       properties:
-        max_rounds:
-          type: integer
-          minimum: 0
-          maximum: 100
+        budget:
+          $ref: 'openapi.generated.json#/components/schemas/Budget'
           description: |
-            Absolute L1-round ceiling for the fork. `0` measures the origin and stops.
-        ceiling:
-          $ref: '#/components/schemas/SpendCeilings'
-          description: |
-            Absolute spend caps for the fork, in USD and cumulative tokens. A null
-            arm inherits: the USD arm takes what the parent's cap has left, the
-            token arm the parent's own.
+            The fork's budget, axis by axis; an axis it does not name inherits the
+            parent's. The money axes stay the campaign's ONE ceiling, which the fork
+            shares with every live cycle of it rather than taking a remainder.
         nodes:
           type: object
           description: |
@@ -3658,7 +3593,7 @@ components:
             lens IS `{per_cell: F}`, re-grading rows already measured, so the round
             the preview parts at is the round a `keep_rounds` fork carrying this is
             minted at. Every other field here
-            moves a ceiling or a patience count, which no measurement can be
+            moves a budget axis or a patience count, which no measurement can be
             re-read under, so those forks preview nothing.
 
     DeleteCyclePayload:
@@ -3674,68 +3609,11 @@ components:
             resolves it to its root and sweeps every empty stub under that
             root (matching `cleanup_empty_stubs` semantics).
 
-    SpendCeilings:
-      type: object
-      additionalProperties: false
-      description: |
-        What a run may spend, in both units (`domain/spend.py::SpendCeilings`) — the
-        one pair a launch asks, admission holds, the run's process arms and the
-        dashboard serves. An arm omitted or `null` declares nothing: no ceiling of
-        the caller's own on a launch, that arm left unchanged on `change-run-limits`.
-        Whichever arm is met first halts the cycle.
-      properties:
-        usd:
-          type: [number, "null"]
-          minimum: 0
-          description: |
-            USD ceiling. Must be FINITE — `NaN` satisfies a `minimum` and then
-            never compares true, and the spend book's probe is `spent >= cap`.
-        tokens:
-          type: [integer, "null"]
-          minimum: 0
-          description: |
-            Cumulative-token ceiling (optimizer + backend, input + output), the
-            model-portable twin of `usd` and the one that still binds when a model
-            has no rate on file.
-
-    LaunchLimits:
-      type: object
-      additionalProperties: false
-      description: |
-        What ONE launch asks to be bounded by (`domain/launch_limits.py::LaunchLimits`),
-        carried whole as `limits` by every verb that BEGINS spending: `mint-campaign`,
-        `start-run` and `start-checkin`. Omitted, the launch declares no limit of
-        its own.
-      properties:
-        halt_at_accuracy:
-          type: [number, "null"]
-          minimum: 0
-          maximum: 1
-          description: |
-            Stop once the optimizer's declared pick reaches this accuracy. Omitted, the run
-            never halts on accuracy. Must be FINITE — `NaN` satisfies a
-            `minimum`/`maximum` pair and then never compares true, so a halt that
-            can never fire looks identical to no halt at all.
-        ceiling:
-          $ref: '#/components/schemas/SpendCeilings'
-          description: |
-            This run's ceiling — the CLI's `--spend-budget` / `--token-budget`.
-            One the account cannot cover is refused whole (ADR-0003 § D1); one it
-            can may lower the campaign's ceiling, never raise it.
-        step_rounds:
-          type: [integer, "null"]
-          minimum: 1
-          maximum: 100
-          description: |
-            A round allowance: the launch pauses (resumable, `run.pause.cause: step`)
-            once it has closed this many rounds. `step-cycle` is a launch that
-            declares only this. Unset, the round cap and the controller end the run.
-
     RunMode:
       type: object
       additionalProperties: false
       description: |
-        The SHAPE a run of an existing cycle takes (`domain/launch_limits.py::RunMode`),
+        The SHAPE a run of an existing cycle takes (`domain/run_mode.py::RunMode`),
         carried whole as `mode` by `start-run` and by `fork-cycle`, where it
         shapes the fork's first run. Omitted, the run continues where the ledger
         stands.
@@ -3778,8 +3656,8 @@ components:
       required: [dataset_name]
       additionalProperties: false
       properties:
-        limits:
-          $ref: '#/components/schemas/LaunchLimits'
+        budget:
+          $ref: 'openapi.generated.json#/components/schemas/Budget'
         dataset_name:
           type: string
           minLength: 1
@@ -3803,30 +3681,45 @@ components:
             the terminal's `--set` are, by the one resolution a run takes: an
             optimizer this install lacks is a 404 `optimizer_unknown`, a knob its
             manifest refuses a 422. Omitted, the dataset's own declaration runs.
-        arm:
-          type: object
-          required: [head_to_head_id, arm_key]
-          additionalProperties: false
+        purpose:
           description: |
-            Mint as a CONTROLLED arm of a head-to-head (`head_to_heads/{id}.json`).
-            The first arm declares it off its own bench set (instrument, dataset rows,
-            split, held-out rows, scorer, target models, origin) and budget; a later arm
-            on any other is refused 409 `arm_off_bench_set`, a key another arm
-            holds 409 `arm_taken`. An arm reads no other campaign's measurements,
-            refuses fork/skip/limit commands 409, and its spend ceiling is its
-            search's INCURRED USD, the bench pass metered beside it. Omitted, the
-            campaign optimizes with everything that helps.
-          properties:
-            head_to_head_id:
-              type: string
-              pattern: '^[A-Za-z0-9_-]+$'
-              minLength: 1
-              maxLength: 64
-            arm_key:
-              type: string
-              pattern: '^[A-Za-z0-9_-]+$'
-              minLength: 1
-              maxLength: 64
+            `{"kind": "optimize"}` (the default) uses everything that helps.
+            `{"kind": "compare", "arm": {head_to_head_id, arm_key}}` mints a CONTROLLED
+            arm of a head-to-head (`head_to_heads/{id}.json`). The first arm declares it
+            off its own bench set (instrument, dataset rows, split, held-out rows, scorer,
+            target models, origin) and budget; a later arm on any other is refused 409
+            `arm_off_bench_set`, a key another arm holds 409 `arm_taken`, and a campaign
+            config declaring a halt accuracy 409 `arm_halt_refused`. An arm reads no
+            other campaign's measurements, refuses fork/skip/limit commands 409, and its
+            spend ceiling is its search's INCURRED USD, the bench pass metered beside it.
+          oneOf:
+            - type: object
+              required: [kind]
+              additionalProperties: false
+              properties:
+                kind: { type: string, enum: [optimize] }
+            - type: object
+              required: [kind, arm]
+              additionalProperties: false
+              properties:
+                kind: { type: string, enum: [compare] }
+                arm:
+                  type: object
+                  required: [head_to_head_id, arm_key]
+                  additionalProperties: false
+                  properties:
+                    head_to_head_id:
+                      type: string
+                      pattern: '^[A-Za-z0-9_-]+$'
+                      minLength: 1
+                      maxLength: 64
+                    arm_key:
+                      type: string
+                      pattern: '^[A-Za-z0-9_-]+$'
+                      minLength: 1
+                      maxLength: 64
+          discriminator:
+            propertyName: kind
         diag:
           type: boolean
           default: false
@@ -3860,8 +3753,16 @@ components:
         - type: object
           additionalProperties: false
           properties:
-            limits:
-              $ref: '#/components/schemas/LaunchLimits'
+            budget:
+              $ref: 'openapi.generated.json#/components/schemas/Budget'
+            step_rounds:
+              type: [integer, "null"]
+              minimum: 1
+              maximum: 100
+              description: |
+                A round allowance: the launch pauses (resumable, `run.pause.cause: step`)
+                once it has closed this many rounds. `step-cycle` is a launch that
+                declares only this. Unset, `budget.rounds` and the controller end the run.
             mode:
               $ref: '#/components/schemas/RunMode'
 
@@ -3869,31 +3770,18 @@ components:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
         - type: object
+          required: [budget]
           additionalProperties: false
-          anyOf:
-            - required: [ceiling]
-            - required: [max_rounds]
           description: |
-            At least one of `ceiling.usd` / `ceiling.tokens` / `max_rounds` must be
-            present — the model refuses a `ceiling` with both arms unset, which this
-            `anyOf` cannot say. An arm that is omitted leaves that ceiling unchanged,
-            in the running job's reservation and the cycle's standing record alike,
-            each from its own prior. Whichever ceiling is met first halts the cycle.
+            `budget` must name at least one axis, which this schema cannot say. An
+            axis it does not name is left unchanged, in the running job's reservation
+            and the cycle's standing record alike. A named money axis is clamped to
+            what the account funds and re-shared with the campaign's other live
+            cycles; one set to `0` halts the cycle at the next checkpoint, and raising
+            it above what is already spent releases the halt.
           properties:
-            ceiling:
-              $ref: '#/components/schemas/SpendCeilings'
-              description: |
-                The cycle's new ceiling. An arm set to `0` halts the cycle at the
-                next checkpoint; raising it above what is already spent releases
-                the halt.
-            max_rounds:
-              type: [integer, "null"]
-              minimum: 0
-              description: |
-                New L1 round cap for the cycle, read at the next round boundary.
-                `null` lifts it, so the spend ceiling governs; a cap at or below
-                the rounds already run halts after the current round. Not clamped
-                against the account — a round is not money.
+            budget:
+              $ref: 'openapi.generated.json#/components/schemas/Budget'
 
     ChangePipelineParamPayload:
       allOf:
@@ -4049,22 +3937,6 @@ components:
                 trimmed of surrounding whitespace. Empty restores the dataset-name
                 fallback. Display only — nothing addresses a campaign by it.
 
-    MarkHardSamplePayload:
-      allOf:
-        - $ref: '#/components/schemas/CycleRef'
-        - type: object
-          required: [sample_id]
-          additionalProperties: false
-          properties:
-            sample_id:
-              type: string
-              minLength: 1
-              maxLength: 128
-              description: 'Dataset-local sample id (`datasets/{name}/dataset.json` row id).'
-
-    UnmarkHardSamplePayload:
-      $ref: '#/components/schemas/MarkHardSamplePayload'
-
     AnnotateRoundPayload:
       allOf:
         - $ref: '#/components/schemas/CycleRef'
@@ -4140,15 +4012,26 @@ components:
         selects (a new knob is one property here, not a fresh field threaded
         through every surface).
       properties:
-        max_rounds:
-          type: integer
-          minimum: 0
-          maximum: 100
-          default: 5
+        budget:
+          allOf:
+            - $ref: 'openapi.generated.json#/components/schemas/Budget'
+          default:
+            rounds: 5
           description: |
-            Round ceiling; `0` measures the origin and stops. Smart-default `5`
-            (matches the M10 prompt-iteration
-            framework default). Operator-editable.
+            The campaign's own layer of the run's budget, axis by axis
+            (`usd` / `tokens` / `rounds` / `wall_clock_s`). An axis the object
+            names binds and a named `null` lifts it; an unnamed one inherits the
+            layer beneath. `rounds` is at most 100 on a check-in edit; `0`
+            measures the origin and stops.
+        halt_at_accuracy:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 1
+          default: null
+          description: |
+            Stop `target_hit` once the declared pick's own accuracy reaches this;
+            `null` sets no such stop. Refused on an arm of a head-to-head
+            (`arm_halt_refused`), which stops only on its record's rule.
         optimizer:
           type: string
           minLength: 1
@@ -4171,9 +4054,18 @@ components:
               config:
                 type: object
                 additionalProperties: true
+        arm_gate:
+          type: string
+          enum: ['off', review, author]
+          default: 'off'
+          description: |
+            Hold every round, before any arm is measured, until the operator
+            answers with the arms it measures (`submit-arms`). `review` keeps the
+            proposers' drafts for the operator to keep, extend or replace;
+            `author` runs no proposer and every arm is the operator's.
 
     # The draft every check-in route answers with, under the name this file's commands use
-    # for it. `draft_id` IS the owning `campaign_id`; identity scope rides the tenant prefix,
+    # for it. A draft is no campaign until Start mints one; identity scope rides the tenant prefix,
     # so the wire never carries a per-record `tenant_id` (ADR-0002 no-drift gate #3). Its
     # pipeline block is a second DELIVERY of `GET /campaigns/{id}/pipeline`'s answer, never a
     # second source.
@@ -4202,7 +4094,7 @@ components:
           type: string
           minLength: 8
           maxLength: 128
-          description: The check-in `campaign_id` (the draft's `draft_id`), from `/datasets/ingest`.
+          description: The open draft, from `/datasets/ingest` or a `/draft` route.
         message:
           type: string
           maxLength: 4000
@@ -4232,7 +4124,7 @@ components:
           type: string
           minLength: 8
           maxLength: 128
-          description: The check-in `campaign_id` (the draft's `draft_id`), from `/datasets/ingest`.
+          description: The open draft, from `/datasets/ingest` or a `/draft` route.
         patch:
           type: object
           additionalProperties: false
@@ -4263,11 +4155,12 @@ components:
               allOf:
                 - $ref: '#/components/schemas/OptimizationOverrides'
               description: |
-                The campaign-config knobs (`max_rounds` / `optimizer` / `nodes`). The
-                sent keys are merged onto the draft's current overrides — send one knob
-                or several; `nodes` merges node by node and key by key. Validated against
-                `OptimizationOverrides` and the selected manifest's node knobs
-                server-side (rejects unknown keys, an out-of-range `max_rounds`, a node
+                The campaign-config knobs (`budget` / `halt_at_accuracy` / `optimizer` /
+                `nodes` / `arm_gate`). The sent keys are merged onto the draft's current
+                overrides — send one knob or several; `nodes` merges node by node and key
+                by key. Validated against `OptimizationOverrides` and the selected
+                manifest's node knobs server-side (rejects unknown keys, an out-of-range
+                `budget.rounds`, a node
                 the manifest does not declare, a knob value its node refuses).
             raw_task_description:
               type: string
@@ -4324,12 +4217,14 @@ components:
                 Confirm which uploaded header is the target column. Same
                 membership rule; moves `field_provenance["column.ground_truth"]`
                 to `confirmed`.
-            origin_prompt_fields:
+            origin_prompts:
               type: object
-              additionalProperties: true
+              additionalProperties:
+                type: object
+                additionalProperties: { type: string }
               description: |
-                Replaces (not deep-merges) the draft's origin prompt — the editor
-                sends the full `PromptTemplate.prompt_field_dict()` object.
+                Replaces (not deep-merges) the draft's origin prompts — per active
+                step, its fields by name; the editor sends every node's whole map.
             pipeline_steps:
               type: array
               items: { type: string }
@@ -4348,56 +4243,45 @@ components:
 
     StartCheckinPayload:
       type: object
-      required: [campaign_id]
+      required: [draft_id]
       additionalProperties: false
       description: |
         Start-verb payload. The durable check-in draft stays the canonical source
         for everything the campaign IS — no field of it is overridable here.
-        `limits` is not a draft field: it bounds what THIS launch may spend,
+        `budget` is not a draft field: it bounds what THIS launch may spend,
         exactly as on `start-run` and `mint-campaign`. Tenant-scoped;
-        404 on a cross-tenant `campaign_id` (or one with no check-in working state).
+        404 on a cross-tenant `draft_id` (or one no longer open).
       properties:
-        limits:
-          $ref: '#/components/schemas/LaunchLimits'
-        campaign_id:
+        budget:
+          $ref: 'openapi.generated.json#/components/schemas/Budget'
+        draft_id:
           type: string
           minLength: 8
           maxLength: 128
-          description: |
-            The check-in campaign id (the draft's `draft_id` IS this id — re-keyed
-            at `create_checkin_campaign`), returned by `/datasets/ingest`.
+          pattern: '^[A-Za-z0-9_-]+$'
+          description: The open draft, from `/datasets/ingest` or a `/draft` route.
         diag:
           type: boolean
           default: false
           description: Run the diagnostic shape, as `mint-campaign`'s `diag` does.
 
-    # A check-in keeps its provisional `cycle_chk_{rand}` id as the permanent root: drift
-    # reads `root_content_hash`, never the parsed id.
-    StartCheckinResponse:
-      $ref: 'openapi.generated.json#/components/schemas/StartCheckinResponse'
-
-    ReplaceDatasetPayload:
+    DiscardDraftPayload:
       type: object
-      required: [slug]
+      required: [draft_id]
       additionalProperties: false
       description: |
-        Names the committed dataset whose data is being superseded. The new
-        data is NOT carried here — it is re-ingested under the freed name in a
-        separate `/datasets/ingest` call after this returns.
+        Closes an open draft without a run. What its check-in calls cost is banked to
+        the workspace, as a deleted campaign's is.
       properties:
-        slug:
+        draft_id:
           type: string
-          minLength: 1
-          maxLength: 64
-          description: |
-            The colliding dataset name to version-and-repoint away. Unpatterned:
-            `ReplaceDatasetPayload` carries bounds only, and the one slug regex that
-            does exist lives on `_EditDraftPatch.slug`.
+          minLength: 8
+          maxLength: 128
+          pattern: '^[A-Za-z0-9_-]+$'
 
-    # A bare acknowledgement: the archival name and the repointed counts are recorded by the
-    # migration itself (log line + on-disk marker), never read back off the wire.
-    ReplaceDatasetResponse:
-      $ref: 'openapi.generated.json#/components/schemas/DatasetReplaced'
+    # `hop` is null while the launch waits in the machine queue: nothing is minted yet.
+    StartCheckinResponse:
+      $ref: 'openapi.generated.json#/components/schemas/StartCheckinResponse'
 
     CompactArchivePayload:
       type: object

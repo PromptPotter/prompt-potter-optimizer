@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.datasets.authored import dataset_campaign_config
+from promptpotter.application.datasets.authored import (
+    load_dataset_campaign_config,
+    with_optimization,
+)
 from promptpotter.application.datasets.draft_build import (
     default_campaign_block,
     draft_task_context,
@@ -17,7 +20,6 @@ from promptpotter.application.datasets.draft_campaign import (
     committed_pipeline_json,
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
-from promptpotter.application.datasets.tabular_ingest import Table, materialize_samples
 from promptpotter.application.initialization.wiring import bind_cycle_session, init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
@@ -26,23 +28,22 @@ from promptpotter.application.jobs.launcher.admission import (
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
+    declare,
     fresh_campaign_id,
     mint_framed_cycle,
     refuse_drifted_resume,
-    under_declared_record,
 )
 from promptpotter.application.jobs.quota import QuotaExceededError
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP, Job, JobRegistry
 from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
 )
-from promptpotter.domain.campaign import ArmRequest, Campaign
+from promptpotter.domain.campaign import Campaign, Purpose
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     declared_backend_type,
-    declared_pipelines,
     resolve_dataset,
 )
 from promptpotter.infrastructure.store.stores import Stores
@@ -79,9 +80,9 @@ class FreshMint:
 
     # Resolved once, where the request is built (`commands/launching.py::mint_campaign`).
     dataset: ResolvedDataset
-    limits: LaunchLimits
+    budget: Budget
     optimization: Mapping[str, Any]
-    arm: ArmRequest | None
+    purpose: Purpose
     declared: CampaignConfig | None
     task_text: str | None
 
@@ -90,19 +91,19 @@ class FreshMint:
         return UNRESOLVED_HOP
 
     @property
+    def step_rounds(self) -> None:
+        return None
+
+    @property
     def dataset_name(self) -> str:
         return self.dataset.name
 
     def backend_type(self, stores: Stores) -> str:
         return declared_backend_type(self.dataset.directory)
 
-    def dataset_campaign_config(self) -> CampaignConfig:
-        return dataset_campaign_config(
-            self.dataset.directory, optimization=self.optimization, declared=self.declared
-        )
-
     def campaign_config(self, stores: Stores) -> CampaignConfig:
-        return under_declared_record(stores, self.dataset_campaign_config(), self.arm)
+        declared = self.declared or load_dataset_campaign_config(self.dataset.directory)
+        return with_optimization(declared, self.optimization)
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,7 +112,8 @@ class ExistingCycle:
 
     hop: CycleHop
     campaign: Campaign
-    limits: LaunchLimits
+    budget: Budget
+    step_rounds: int | None = None
 
     @property
     def dataset_name(self) -> str:
@@ -142,16 +144,12 @@ async def hold_fresh_mint(
         )
         logger.info("mint[%s]: init_services=%.2fs", dataset_name, time.perf_counter() - _t0)
 
-        campaign_config = request.dataset_campaign_config()
-
         minted = await mint_framed_cycle(
             session,
-            campaign_config,
-            session.samples,
+            declare(session, request.campaign_config(stores), purpose=request.purpose),
+            session.bank.samples,
             campaign_id=fresh_campaign_id(session),
             task_text=request.task_text,
-            arm=request.arm,
-            limits=request.limits,
         )
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
         job_registry.update_target(job.job_id, hop=hop)
@@ -171,35 +169,29 @@ async def hold_fresh_mint(
     return HeldRun.of(job_registry, job.job_id, session, held)
 
 
-def materialize_and_write_origin(
-    stores: Stores, draft: DraftCampaign, *, bank_items: list[dict[str, Any]]
+def upload_source(draft: DraftCampaign, upload: str) -> dict[str, Any]:
+    """The definition names the kept upload and the cut; the rows stay in the upload alone."""
+    return {
+        "recipe": "table",
+        "upload": upload,
+        "query": draft.column_query,
+        "truth": draft.column_ground_truth,
+    }
+
+
+def commit_upload_definition(
+    stores: Stores, draft: DraftCampaign, *, source: dict[str, Any]
 ) -> None:
-    table = Table(headers=draft.headers, rows=tuple(bank_items))
-    # Seeded on the slug: `sample_id` is a measurement cache key and must name one question for life.
-    order_seed = draft.slug
-    samples = materialize_samples(
-        table,
-        query_col=draft.column_query,
-        ground_truth_col=draft.column_ground_truth,
-        order_seed=order_seed,
-    )
+    """Called once the cut *source* names passed every mint refusal: a refused Start takes no slug."""
     pipeline = committed_pipeline_json(draft)
-    prompt = draft.committed_prompt_fields()
-    stores.tenant_datasets.write_committed_dataset(
-        draft.slug,
-        samples=samples,
-        sample_order_seed=order_seed,
-        source_file=draft.source_file,
-        headers=draft.headers,
-    )
     stores.tenant_datasets.write_definition(
         draft.slug,
+        source=source,
         pipeline=pipeline,
         campaign=default_campaign_block(draft),
         description=draft.raw_task_description,
         framing=draft_task_context(draft),
-        # Every step: one bearing no prompt reads none, and each one bearing one starts here.
-        origin=dict.fromkeys(declared_pipelines(pipeline).get("default", []), prompt),
+        origin=draft.committed_prompts(),
     )
     persist_origin_candidate_library(stores, draft.slug, draft)
 
@@ -217,7 +209,7 @@ async def hold_existing_cycle(
     try:
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
         session, campaign_config = await bind_cycle_session(stores, campaign, hop)
-        refuse_drifted_resume(session, campaign_config, campaign, hop)
+        refuse_drifted_resume(session, campaign, hop, session.bank.samples)
     except BaseException as exc:
         # `hop=None`: a refusal stamps nothing on the cycle, so it stays as resumable as it was.
         release_slot(job_registry, job.job_id, exc, stores=stores, hop=None)
@@ -227,7 +219,7 @@ async def hold_existing_cycle(
         job_id=job.job_id,
         session=session,
         campaign_config=campaign_config,
-        limits=held,
+        budget=held,
     )
 
 
@@ -238,8 +230,9 @@ __all__ = [
     "OriginIncompleteError",
     "QuotaExceededError",
     "assert_origin_ready",
+    "commit_upload_definition",
     "hold_existing_cycle",
     "hold_fresh_mint",
-    "materialize_and_write_origin",
     "persist_origin_candidate_library",
+    "upload_source",
 ]

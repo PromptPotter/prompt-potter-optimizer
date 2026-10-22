@@ -63,8 +63,9 @@ ONE number, in ``dataset.yaml::campaign.scoring``:
 - ``mean_bench_lift`` — the mean, over the inner rounds, of the accuracy of the
   prompt the search had ADOPTED by that round on HELD-OUT rows no inner node ever
   read, minus the origin prompt's accuracy on the same rows. Accuracy points,
-  linearly re-anchored into [0,1]. The search pool's own θ lift
-  (``mean_round_delta``) is reported beside it and scores nothing.
+  linearly re-anchored into [0,1]. The search split's own θ lift
+  (``mean_round_delta``) is reported beside it wherever the inner series
+  differences, and scores nothing.
 
 Better = the inner optimizer adopted a GENERALLY stronger prompt EARLY and kept it.
 The mean rewards the shape a healthy search has — most cells lift in round 1, about

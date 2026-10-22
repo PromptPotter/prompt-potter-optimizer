@@ -6,7 +6,7 @@ import types
 from collections import Counter
 from collections.abc import Callable
 from functools import reduce
-from typing import Any, NamedTuple, Union, get_args, get_origin
+from typing import Annotated, Any, NamedTuple, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -18,11 +18,11 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.campaign import Campaign, CampaignResult
+from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.domain.run_records import CycleRecord, RoundClosedRecord
 from promptpotter.domain.scoring import GradedCell
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.cycle_index import (
     read_cycle_index,
     write_cycle_index,
@@ -41,20 +41,9 @@ from promptpotter.infrastructure.store.user_store import User
 __all__ = [
     "check_round_closes",
     "compact_cycle_ledgers",
+    "prune_stored_documents",
     "reproject_cycle_indexes",
-    "restamp_campaign_configs",
 ]
-
-
-_Rewrite = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
-
-
-def _as_frozen(pruned: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any]:
-    return CampaignConfig.model_validate(pruned).frozen(arm=doc.get("arm") is not None)
-
-
-def _as_pruned(pruned: dict[str, Any], doc: dict[str, Any]) -> dict[str, Any]:
-    return pruned
 
 
 def _whole(_path: pathlib.Path) -> dict[str, Any]:
@@ -69,67 +58,47 @@ def _definition_ancestors(path: pathlib.Path) -> dict[str, Any]:
 
 class _Surface(NamedTuple):
     title: str
-    verb: str
     workspace_globs: tuple[str, ...]
     # Empty means the whole document IS the record.
     key_path: tuple[str, ...]
     model_cls: type[BaseModel]
-    rewrite: _Rewrite
     # What the pruned record is laid over before it validates.
     laid_over: Callable[[pathlib.Path], dict[str, Any]] = _whole
 
 
-# Inner record first for a document addressed twice. No round close: pruning cannot restore a rename.
+# No round close: pruning cannot restore a rename.
 _SURFACES: tuple[_Surface, ...] = (
     _Surface(
-        title="Minted snapshots (campaigns/*/campaign.json::config) — rewritten whole",
-        verb="re-stamped",
-        workspace_globs=("*/campaigns/*/campaign.json",),
-        key_path=("config",),
-        model_cls=CampaignConfig,
-        rewrite=_as_frozen,
-    ),
-    _Surface(
-        title="Campaign manifests (campaigns/*/campaign.json) — pruned only",
-        verb="pruned",
+        title="Campaign manifests (campaigns/*/campaign.json)",
         workspace_globs=("*/campaigns/*/campaign.json",),
         key_path=(),
         model_cls=Campaign,
-        rewrite=_as_pruned,
     ),
     _Surface(
-        title="Campaign results (campaigns/*/result.json) — pruned only",
-        verb="pruned",
+        title="Campaign results (campaigns/*/result.json)",
         workspace_globs=("*/campaigns/*/result.json",),
         key_path=(),
         model_cls=CampaignResult,
-        rewrite=_as_pruned,
     ),
     _Surface(
         # The tenant tier only: install content is source, edited as source and never by a verb.
-        title="Your dataset definitions (datasets/**/dataset.yaml::campaign) — pruned only",
-        verb="pruned",
+        title="Your dataset definitions (datasets/**/dataset.yaml::campaign)",
         workspace_globs=("*/datasets/**/dataset.yaml",),
         key_path=("campaign",),
         model_cls=CampaignConfig,
-        rewrite=_as_pruned,
         laid_over=_definition_ancestors,
     ),
     _Surface(
-        title="User records (user.json) — pruned only",
-        verb="pruned",
+        title="User records (user.json)",
         workspace_globs=("*/user.json",),
         key_path=(),
         model_cls=User,
-        rewrite=_as_pruned,
     ),
     _Surface(
-        title="Diagnostic runs (diagnostics/runs/*.json) — pruned only",
-        verb="pruned",
+        title="Diagnostic runs (diagnostics/runs/*.json)",
         workspace_globs=("*/diagnostics/runs/*.json",),
         key_path=(),
         model_cls=DiagnosticRunRecord,
-        rewrite=_as_pruned,
     ),
 )
 
@@ -144,6 +113,26 @@ def _nested_model(ann: Any) -> type[BaseModel] | None:
     return None
 
 
+def _holds_parts(ann: object) -> bool:
+    if get_origin(ann) is not dict:
+        return False
+    held = get_args(ann)[1]
+    base = get_args(held)[0] if get_origin(held) is Annotated else held
+    return isinstance(base, type) and issubclass(base, StatePart)
+
+
+def _prune_parts(
+    raw: dict[str, Any], prefix: tuple[str, ...]
+) -> tuple[dict[str, Any], list[tuple[str, Any]]]:
+    """Each part by its own kind's model; a kind no installed package registers raises, never pruned away."""
+    pruned: dict[str, Any] = {}
+    dropped: list[tuple[str, Any]] = []
+    for kind, value in raw.items():
+        pruned[kind], gone = _prune_to_schema(value, StatePart.of_kind(kind), (*prefix, kind))
+        dropped.extend(gone)
+    return pruned, dropped
+
+
 def _prune_to_schema(
     raw: dict[str, Any], model_cls: type[BaseModel], prefix: tuple[str, ...] = ()
 ) -> tuple[dict[str, Any], list[tuple[str, Any]]]:
@@ -155,11 +144,11 @@ def _prune_to_schema(
         if field is None:
             dropped.append((".".join(path), value))
             continue
-        # Pruned to the annotated base, what a registered subclass banked would go.
-        nested = (
-            model_cls.stored_field_model(key, raw) if issubclass(model_cls, StrictModel) else None
-        ) or _nested_model(field.annotation)
-        if nested is not None and isinstance(value, dict):
+        nested = _nested_model(field.annotation)
+        if _holds_parts(field.annotation) and isinstance(value, dict):
+            pruned[key], gone = _prune_parts(value, path)
+            dropped.extend(gone)
+        elif nested is not None and isinstance(value, dict):
             sub, sub_dropped = _prune_to_schema(value, nested, path)
             pruned[key] = sub
             dropped.extend(sub_dropped)
@@ -173,9 +162,9 @@ class _Tally:
         self.rewritten = self.unchanged = self.empty = self.skipped = self.failed = 0
         self.gone: Counter[str] = Counter()
 
-    def report(self, title: str, verb: str) -> None:
+    def report(self, title: str, *, apply: bool) -> None:
         print(f"\n{title}")
-        print(f"  {verb:>18}: {self.rewritten}")
+        print(f"  {'pruned' if apply else 'would be pruned':>18}: {self.rewritten}")
         print(f"  {'already current':>18}: {self.unchanged}")
         print(f"  {'no config':>18}: {self.empty}")
         print(f"  {'skipped':>18}: {self.skipped}")
@@ -213,8 +202,7 @@ def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tall
             print(f"          {'.'.join(map(str, err['loc']))}: {err['type']}")
         return
 
-    new = surface.rewrite(pruned, doc)
-    if new == raw:
+    if not dropped:
         tally.unchanged += 1
         return
 
@@ -223,20 +211,20 @@ def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tall
     tally.rewritten += 1
     if apply:
         if surface.key_path:
-            holder[surface.key_path[-1]] = new
+            holder[surface.key_path[-1]] = pruned
         else:
-            doc = new
+            doc = pruned
         if is_yaml:
             write_yaml(path, doc)
         else:
             path.write_text(json.dumps(doc, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
+def prune_stored_documents(*, apply: bool) -> dict[str, int]:
     root = DEFAULT_PROJECTS_ROOT
     print(f"Workspace: {root}")
     if not root.is_dir():
-        print("  absent — nothing to re-stamp.")
+        print("  absent — nothing to prune.")
         return {"rewritten": 0, "failed": 0, "skipped": 0}
 
     # A sandbox is a projects root of its own, and its manifests load through the same models.
@@ -248,7 +236,7 @@ def restamp_campaign_configs(*, apply: bool) -> dict[str, int]:
             _process(path, surface, apply=apply, tally=tally)
 
     for surface, tally in zip(_SURFACES, tallies, strict=True):
-        tally.report(surface.title, surface.verb if apply else f"would be {surface.verb}")
+        tally.report(surface.title, apply=apply)
 
     gone: Counter[str] = Counter()
     for tally in tallies:
@@ -373,8 +361,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         print("\nDry run. Re-run with --apply to rewrite.")
     return {
         "cycles": touched,
-        "skipped_checkin": skipped.get(RunPhase.CHECKIN, 0),
-        "skipped_producing": sum(n for p, n in skipped.items() if p is not RunPhase.CHECKIN),
+        "skipped_producing": sum(skipped.values()),
         "bytes_saved": total_before - total_after,
         "record_keys_dropped": sum(gone.values()),
     }

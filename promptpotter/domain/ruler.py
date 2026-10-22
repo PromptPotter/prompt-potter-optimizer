@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping
 from enum import StrEnum
 from statistics import NormalDist
 from typing import TYPE_CHECKING, Literal, NamedTuple
@@ -18,6 +18,9 @@ if TYPE_CHECKING:
 RulerEntry = float | tuple[float, float]
 # Keyed by what the cell IS (`Sample.key`), never its position: one scale reads every shape alike.
 Ruler = Mapping[str, RulerEntry]
+
+# ``(archive address, Sample.key, graded response)``: one individual's answer to one cell.
+type RulerRow = tuple[str, str, float]
 
 
 class RulerScope(StrictModel):
@@ -44,6 +47,33 @@ class CellScopes(NamedTuple):
         return len({self.by_key[k] for k in keys})
 
 
+class RulerFold(StrictModel):
+    """One line of the tenant's ruler: an election's rows, folded after it. The line count is the
+    version, so a version is a prefix and a re-fit at it is the fit an election read."""
+
+    model_config = ConfigDict(frozen=True)
+
+    scope: RulerScope
+    rows: list[RulerRow]
+
+
+class RulerStamp(StrictModel):
+    """The δ scale a reading was taken on: the tenant ruler at ``version`` less the rows of
+    ``excluded``, the judged individuals it held. A cold stamp's ``id`` is flat."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    version: int = Field(ge=0)
+    scope: RulerScope
+    # Archive addresses, sorted; only those the version held, so one scale is one stamp.
+    excluded: tuple[str, ...]
+
+    @property
+    def cold(self) -> bool:
+        return is_flat_ruler_id(self.id)
+
+
 # A cold id carries the OBJECTIVE: flat δ depends on no fit, so nothing else separates two readings.
 _FLAT_PREFIX = "flat"
 
@@ -59,22 +89,23 @@ BAND_COLLAPSE_LOGITS = 1.0
 
 
 class ThetaCaveat(StrEnum):
-    """A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact."""
+    """A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact.
+    Each is read off the cells a θ was read on: one level's, one arm's, a whole series'."""
 
-    # The cells span several `RulerScope`s, which share no cell, so no one δ scale reads them. Round AND arm scope.
+    # All-miss, so θ sits on the prior's floor and every LIFT taken against it reads 0.000.
+    FLOOR_PINNED = "floor_pinned"
+    # The cells span several `RulerScope`s, which share no cell, so no one δ scale reads them.
     DISJOINT_SCOPES = "disjoint_scopes"
-    # No δ scale: θ is logit-accuracy on the arm's own subset, comparable only to another cold θ.
+    # No δ scale: θ is logit-accuracy, read on the cells an arm shares with the parent it is judged against.
     COLD_RULER = "cold_ruler"
     # The INSTRUMENT: the ruler itself spans almost nothing, so no draw could have been wider.
     FLAT_RULER = "flat_ruler"
     # The ACQUISITION: a thin slice of a wide ruler. Silent: the id matches and every number renders.
     COLLAPSED_BAND = "collapsed_band"
-    # Most cells sit on a δ shared with other cells: the prior, whose pin MOVES as the ruler grows. Silent.
+    # Most cells sit on a δ shared with other cells: the prior, whose pin MOVES with the version. Silent.
     PRIOR_PINNED = "prior_pinned"
-    # θ skips cells the ruler does not carry, so it is read on fewer cells than accuracy. Round AND arm scope.
+    # θ skips cells the ruler does not carry, so it is read on fewer cells than accuracy.
     UNMEASURED_DELTA = "unmeasured_delta"
-    # Per-ARM: all-miss, so θ sits on the prior's floor and every LIFT taken against it reads 0.000.
-    FLOOR_PINNED = "floor_pinned"
 
 
 class ThetaCaveatInfo(NamedTuple):
@@ -91,8 +122,10 @@ THETA_CAVEAT_INFO: dict[ThetaCaveat, ThetaCaveatInfo] = {
     ),
     ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
         "θ is not ability yet",
-        "No difficulty ruler has been fitted, so θ is plain accuracy on the logit scale, read on "
-        "each candidate's own cells. These θ compare to each other and to nothing else.",
+        "No difficulty ruler could be fitted from what this account measured before the round, "
+        "so θ is plain accuracy on the logit scale. A candidate and the parent it is judged "
+        "against are read on the cells both answered, so their lift holds; a θ compared across "
+        "rounds or against another candidate's does not.",
     ),
     ThetaCaveat.FLAT_RULER: ThetaCaveatInfo(
         "θ is not ability here",
@@ -109,15 +142,15 @@ THETA_CAVEAT_INFO: dict[ThetaCaveat, ThetaCaveatInfo] = {
         "θ is not ability here",
         "The ruler gave most of this round's cells one shared difficulty, its prior, because "
         "every candidate that saw them answered the same way. That pinned value moves as the "
-        "ruler grows, so a higher θ than before can be the scale shifting, not the prompt "
-        "improving. Compare within a round; don't read the level across rounds.",
+        "ruler takes in new rounds, so a higher θ than before can be the scale shifting, not the "
+        "prompt improving. Compare within a round; don't read the level across rounds.",
     ),
     ThetaCaveat.UNMEASURED_DELTA: ThetaCaveatInfo(
         "θ skips some of these cells",
-        "The ruler does not carry some of these cells, because no candidate already on the scale "
-        "answered them. θ leaves them out, so it is read on fewer cells than the accuracy beside "
-        "it, and two candidates can be read on different ones. A later round places a cell on the "
-        "scale once such a candidate answers it.",
+        "The ruler does not carry some of these cells, because no candidate outside this round's "
+        "judging had answered them when the round opened. θ leaves them out, so it is read on "
+        "fewer cells than the accuracy beside it, and two candidates can be read on different "
+        "ones. A later round reads them once this round's answers have joined the ruler.",
     ),
     ThetaCaveat.FLOOR_PINNED: ThetaCaveatInfo(
         "θ reads nothing for an all-miss arm",
@@ -137,27 +170,24 @@ if _missing_caveat_info:
 
 
 def theta_caveat(
-    *,
-    calibration_model: CalibrationModel | None,
-    round_span: float | None,
-    ruler_span: float | None,
-    unlinked: int,
-    scopes: int,
-    pinned_share: float | None = None,
+    ruler: DeltaRuler | None, cells: Collection[str], *, scopes: int, all_miss: bool
 ) -> ThetaCaveat | None:
-    """A ``None`` span or share is no verdict; the order is severity."""
+    """The one deriver, over the cells a θ was read on; the order is severity."""
+    if all_miss:
+        return ThetaCaveat.FLOOR_PINNED
     if scopes > 1:
         return ThetaCaveat.DISJOINT_SCOPES
-    if calibration_model is None:
+    if ruler is None:
         return ThetaCaveat.COLD_RULER
-    if round_span is not None and ruler_span is not None:
+    if (band := ruler.band_span(cells)) is not None:
+        round_span, ruler_span = band
         if ruler_span <= BAND_COLLAPSE_LOGITS:
             return ThetaCaveat.FLAT_RULER
         if round_span <= max(BAND_COLLAPSE_LOGITS, BAND_COLLAPSE_RATIO * ruler_span):
             return ThetaCaveat.COLLAPSED_BAND
-        if pinned_share is not None and pinned_share >= PRIOR_PINNED_RATIO:
+        if (pinned := ruler.pinned_share(cells)) is not None and pinned >= PRIOR_PINNED_RATIO:
             return ThetaCaveat.PRIOR_PINNED
-    return ThetaCaveat.UNMEASURED_DELTA if unlinked else None
+    return ThetaCaveat.UNMEASURED_DELTA if ruler.unlinked(cells) else None
 
 
 __all__ = [
@@ -169,20 +199,23 @@ __all__ = [
     "CellScopes",
     "DeltaRuler",
     "DeltaState",
+    "LevelSeries",
     "Ruler",
     "RulerEntry",
+    "RulerFold",
+    "RulerRow",
     "RulerScope",
+    "RulerStamp",
     "RulerStanding",
+    "SeriesReading",
     "ThetaCaveat",
     "ThetaCaveatInfo",
     "anchor_id_of",
     "flat_ruler_id",
     "is_flat_ruler_id",
     "ruler_entry",
-    "series_levels",
     "theta_band",
     "theta_caveat",
-    "theta_plateau",
 ]
 
 
@@ -207,7 +240,7 @@ def anchor_id_of(
     sigma_delta: float,
     calibration_model: CalibrationModel,
 ) -> str:
-    """Computed once at lock and carried verbatim: anchored extension grows the membership, not the id."""
+    """A hash of the δ themselves: two versions that fit one scale are one id, and comparable."""
     return stable_hash(
         [
             [[key, delta[key]] for key in sorted(delta)],
@@ -227,7 +260,6 @@ class DeltaRuler(StrictModel):
     discrimination: dict[str, float] = Field(default_factory=dict)
     mu_delta: float
     sigma_delta: float
-    # Every later read must use THIS θ prior, or the extension is regularized apart from the anchor.
     sigma_theta: float
     calibration_model: CalibrationModel
     anchor_id: str
@@ -297,7 +329,7 @@ class RulerStanding(StrictModel):
 
     state: Literal["fitted", "not_fitted"]
     ruler_id: str | None = Field(
-        description="The anchor every θ and δ of this scope is read on (`AbilityReading.ruler_id`). "
+        description="The scale every θ and δ of this scope is read on (`RulerStamp.id`). "
         "Null while not fitted."
     )
     calibration_model: CalibrationModel | None = Field(description="Null while not fitted.")
@@ -322,19 +354,16 @@ class RulerStanding(StrictModel):
 
 
 class AbilityReading(StrictModel):
-    """A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing.
-
-    A null ``ruler_id`` names NO scale: that reading is comparable to nothing.
-    """
+    """A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing."""
 
     model_config = ConfigDict(frozen=True)
 
     theta: float
     se: float | None
-    ruler_id: str | None
-    # The ruler grows by anchored extension, so the id alone cannot say how much scale was real.
-    ruler_n: int
-    # ...and the count cannot either: many cells inside a narrow span is a WARM ruler reading flat.
+    ruler: RulerStamp
+    # The cells θ was READ on: a reading on none is no reading.
+    cells: int = Field(ge=1)
+    # Many cells inside a narrow span is a WARM ruler reading flat.
     ruler_span: float | None
     # A thin round on a wide ruler and a wide round on a thin one read identical θ. ``None`` below two cells.
     round_span: float | None
@@ -342,14 +371,18 @@ class AbilityReading(StrictModel):
     calibration_model: CalibrationModel | None
     # Stamped from `theta_caveat` at the one minting site, never re-derived; ``None`` = θ is ability.
     caveat: ThetaCaveat | None
+    # The two counts `caveat` was decided on, beside it.
+    unlinked: int
+    pinned_share: float | None
 
     def comparable_to(self, other: AbilityReading) -> bool:
-        return self.ruler_id is not None and self.ruler_id == other.ruler_id
+        return self.ruler.id == other.ruler.id
 
     def scale(self, *, named: bool = True) -> str:
-        model = f", {self.calibration_model}" if self.calibration_model else ""
-        name = f"ruler {self.ruler_id or 'unscaled'}, " if named else ""
-        return f"{name}{self.ruler_n} cells{model}"
+        if self.ruler.cold:
+            return f"{self.cells} cells, cold ruler"
+        name = f"ruler {self.ruler.id} v{self.ruler.version}, " if named else ""
+        return f"{name}{self.cells} cells, {self.calibration_model}"
 
 
 # Well inside one round's θ SE: a plateau advises stopping, and a false stop costs more than a miss.
@@ -366,24 +399,61 @@ def theta_band(theta: float | None, se: float | None) -> tuple[float, float] | N
     return theta - _THETA_BAND_Z * se, theta + _THETA_BAND_Z * se
 
 
-def series_levels(readings: Sequence[AbilityReading | None]) -> list[float | None]:
-    """The series scale is the first ruler any reading names; a θ off it is ``None``."""
-    series = next((r for r in readings if r is not None and r.ruler_id is not None), None)
-    return [
-        r.theta if r is not None and series is not None and r.comparable_to(series) else None
-        for r in readings
-    ]
+class SeriesReading(StrictModel):
+    """A round's level as its series read it, under the one caveat that withholds it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    reading: AbilityReading = Field(
+        description="The round's level: the individual it ended on, read on the series' one scale"
+    )
+    caveat: ThetaCaveat | None = Field(
+        description="The level's own caveat, else its series'. Null, and it differences any "
+        "other level of the series that is null too."
+    )
 
 
-def theta_plateau(readings: Sequence[AbilityReading | None]) -> float | None:
-    """Withheld under any ``ThetaCaveat``: a flat run of a θ that is not ability advises a stop on nothing."""
-    recent = list(zip(readings, series_levels(readings), strict=True))[-PLATEAU_ROUNDS:]
-    levels = [
-        level
-        for reading, level in recent
-        if level is not None and reading is not None and reading.caveat is None
-    ]
-    if len(levels) < PLATEAU_ROUNDS:
-        return None
-    mean = sum(levels) / len(levels)
-    return mean if all(abs(level - mean) < PLATEAU_THETA_BAND for level in levels) else None
+class LevelSeries(StrictModel):
+    """Every round's ended-on individual read on ONE δ scale, so any two of its levels difference."""
+
+    model_config = ConfigDict(frozen=True)
+
+    stamp: RulerStamp = Field(
+        description="The scale every level is read on: the tenant ruler at the run's clock, less "
+        "the run's parent line (the origin and every pick)."
+    )
+    levels: dict[int, AbilityReading | None] = Field(
+        description="By round, round 0 the origin: the individual the round ended on — on a round "
+        "that elected nothing, the parent standing into it — read on all of its rows in the "
+        "cycle. Null where it holds no scored cell on the scale."
+    )
+    caveat: ThetaCaveat | None = Field(
+        description="`theta_caveat` over every cell this line read. Non-null, no two of its "
+        "levels difference, whatever `stamp` says; another line on the stamp keeps its own."
+    )
+
+    @property
+    def rounds(self) -> list[int]:
+        return sorted(self.levels)
+
+    def reading(self, rnd: int) -> SeriesReading | None:
+        """A surface showing θ under its caveat asks here, by name; ``None``: no scored cell."""
+        held = self.levels[rnd]
+        if held is None:
+            return None
+        return SeriesReading(
+            reading=held, caveat=held.caveat if held.caveat is not None else self.caveat
+        )
+
+    def level(self, rnd: int) -> AbilityReading | None:
+        """The level two rounds may difference."""
+        read = self.reading(rnd)
+        return None if read is None or read.caveat is not None else read.reading
+
+    def plateau(self) -> float | None:
+        recent = [self.level(r) for r in self.rounds[-PLATEAU_ROUNDS:]]
+        levels = [r.theta for r in recent if r is not None]
+        if len(levels) < PLATEAU_ROUNDS:
+            return None
+        mean = sum(levels) / len(levels)
+        return mean if all(abs(level - mean) < PLATEAU_THETA_BAND for level in levels) else None

@@ -19,6 +19,7 @@ from promptpotter.connectors.protocol import (
     PACKAGE_CACHE_KEY,
     Connector,
     InProcessWorkload,
+    cell_envelope_of,
 )
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
@@ -46,7 +47,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     reservation_left,
 )
 from promptpotter.infrastructure.llm.telemetry import emit_backend_warning, rate_priced_usd
-from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.errors import (
     CellInfrastructureError,
     CellThrottledError,
@@ -57,6 +57,7 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.extras import Extra
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -124,6 +125,8 @@ _PACKAGE_MANAGERS = ("apt-get", "dnf", "yum", "apk", "pacman", "brew", "pkg", "z
 _CELL_ATTEMPTS = 3
 assert _CELL_ATTEMPTS < SEND_ATTEMPTS, "a trial holds a container: it reruns less than a send"
 _INFRA_BACKOFF_S = 45.0
+# A whole agent episode, its infrastructure retries and their backoff included.
+_CELL_ENVELOPE_S = 3600.0
 
 # A terminus-2 summarize pass is three calls (`_summarize`).
 _TERMINUS_SUMMARY_CALLS = 3
@@ -329,7 +332,7 @@ def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, An
 
 
 # Hashed into every cell's identity (`_identity_config`): respelling it re-keys every banked cell.
-_REASONING_CHANNEL = "openrouter:extra_body.reasoning"
+_REASONING_CHANNEL = "extra_body.reasoning"
 
 
 def harbor_wire_adapter(
@@ -1232,6 +1235,7 @@ CONNECTOR = Connector(
     name="harbor",
     execution="in_process",
     wire_adapter=harbor_wire_adapter,
+    cell_envelope_s=cell_envelope_of(_CELL_ENVELOPE_S),
     sent_spend_bound=_sent_spend_bound,
     holds_own_sends=True,
     extract_experiment=_extract_experiment,

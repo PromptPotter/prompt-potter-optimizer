@@ -29,6 +29,6 @@ def get_origins(stores: StoresDep) -> OriginListResponse:
 
 @origins_router.post("/{origin_id}/draft", response_model=DraftCampaignWire)
 async def post_origin_draft(origin_id: str, stores: StoresDep) -> DraftCampaignWire:
-    """Open a prior origin as a prefilled check-in campaign; nothing runs until ``/commands/start-checkin``."""
+    """Open a prior origin as a prefilled check-in draft; nothing runs until ``/commands/start-checkin``."""
     draft = await draft_from_origin(stores=stores, origin_id=origin_id)
     return draft_wire(stores, draft)

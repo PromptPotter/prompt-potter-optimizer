@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import asyncio
 
-    from promptpotter.domain.results import ArmOutcome, DegradationContext
+    from promptpotter.domain.paired_reading import ArmKey
+    from promptpotter.domain.results import DegradationContext
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
 
@@ -41,10 +42,14 @@ def run_validators(
     return outcomes
 
 
+#: How a stop ends the walk: cut against the arm, or locked in for it.
+WalkStop = Literal["broken", "eliminated", "locked_in"]
+
+
 @dataclass(frozen=True)
 class StopSignal:
     check_name: str
-    outcome: ArmOutcome
+    outcome: WalkStop
     check_result: Mapping[str, Any]
 
 
@@ -75,7 +80,7 @@ class CaughtUp:
     """What one settle took: the racing member, and each prior's catch-up cells."""
 
     member: str
-    cells: Mapping[str, Sequence[GradedCell]]
+    cells: Mapping[ArmKey, Sequence[GradedCell]]
 
 
 class CatchUps(Protocol):
@@ -104,5 +109,6 @@ __all__ = [
     "StopRule",
     "StopSignal",
     "ValidatorOutcome",
+    "WalkStop",
     "run_validators",
 ]

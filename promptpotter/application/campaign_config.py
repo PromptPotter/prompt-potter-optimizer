@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from promptpotter.domain.bench import BenchTrigger, DatasetSplit
-from promptpotter.domain.campaign import ArmBudget, HeadToHeadRecord
+from promptpotter.domain.campaign import (
+    DeterminismClamp,
+    Environment,
+    Purpose,
+    RunDeclaration,
+    StoppingRule,
+)
 from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.results import DisplayMetric, HardSampleOrder
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.judges.protocol import JudgeSpec
 
@@ -23,7 +29,6 @@ __all__ = [
     "DEFAULT_ORIGIN_BUDGET",
     "ArmGateMode",
     "CampaignConfig",
-    "DeterminismClamp",
     "Estimand",
     "Knob",
     "LivesConfig",
@@ -33,11 +38,12 @@ __all__ = [
     "Scope",
     "apply_config_overrides",
     "apply_cycle_seed",
+    "declare_run",
+    "effective_config",
     "estimand_doc",
     "knob_label",
     "merge_config_layers",
     "merge_node_overlays",
-    "under_record",
 ]
 
 
@@ -108,46 +114,9 @@ class Knob:
         object.__setattr__(self, "estimands", estimands)
 
 
-class DeterminismClamp(StrictModel):
-    """What a campaign PINS on every optimizer call — how the draw is made and which host makes
-    it. Applied last, so it beats the node's file config and any per-call override alike."""
-
-    temperature: Annotated[float | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        None,
-        ge=0.0,
-        le=2.0,
-        description=(
-            "Sampling temperature EVERY optimizer node runs at, overriding its own — including "
-            "`l1_generate`'s `temperature`, the dominant run-to-run noise source. "
-            "`None` (default) leaves each node the value its pipeline file declares."
-        ),
-    )
-    seed: Annotated[int | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        None,
-        description=(
-            "Sampling seed every optimizer node sends, or draws its per-call seed from where it "
-            "asks several things in one step, so concurrent asks stay distinct draws. Temperature "
-            "0 pins the distribution and not the draw, so without a seed the provider is still "
-            "free to sample differently on identical input. It rides `hash_call`, so two "
-            "campaigns differing only here bank separate replies rather than serving one "
-            "campaign's answer under the other's name. `None` (default) sends none."
-        ),
-    )
-    route_order: Annotated[list[str] | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        None,
-        description=(
-            "The upstream HOSTS behind the gateway, in order, every optimizer call is routed "
-            "to (the gateway's own `provider_name`s — read them off `served_by` in the ledger, "
-            "never from a catalogue). Hosts of one model disagree systematically, so an "
-            "unpinned route makes a measurement whose producer nothing can name. `None` "
-            "(default) lets the gateway re-rank per call."
-        ),
-    )
-
-
 class LivesConfig(StrictModel):
     """Improvement-banked round budget: banks a life each round that promotes an arm, loses one
-    each round that does not. ``max_rounds`` and spend stay the ceilings."""
+    each round that does not. ``budget.rounds`` and spend stay the ceilings."""
 
     start: Annotated[int, Knob(Scope.POLICY, Estimand.STOPPING, Estimand.SPEND)] = Field(
         2,
@@ -166,9 +135,32 @@ class LivesConfig(StrictModel):
         return (self.start, self.cap)
 
 
+_DEFAULT_BUDGET = Budget(usd=0.025, rounds=50)
+
+
+def over_the_default(budget: Budget) -> Budget:
+    """The default is the bottom layer: a declaration naming one axis keeps the others."""
+    return _DEFAULT_BUDGET.over(budget)
+
+
+def named_over_the_default(budget: Budget) -> Budget:
+    """Only the axes where *budget* differs from the default: a declaration restates none."""
+    return budget.only(
+        axis
+        for axis in budget.named
+        if axis not in _DEFAULT_BUDGET.named
+        or getattr(budget, axis) != getattr(_DEFAULT_BUDGET, axis)
+    )
+
+
 class OptimizationConfig(StrictModel):
     """The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs
     are its nodes' ``config`` in its manifest, never fields here."""
+
+    @field_validator("budget", mode="before")
+    @classmethod
+    def _over_the_default(cls, given: object) -> Budget:
+        return over_the_default(Budget.model_validate(given))
 
     optimizer: Annotated[str, Knob(Scope.IDENTITY, Estimand.SEARCH)] = Field(
         "potter",
@@ -188,13 +180,19 @@ class OptimizationConfig(StrictModel):
             "all ride here; each node validates its own knobs when the optimizer is selected."
         ),
     )
-    max_rounds: Annotated[int | None, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
-        50,
-        ge=0,
+    budget: Annotated[Budget, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
+        _DEFAULT_BUDGET,
         description=(
-            "Max rounds. 0 = measure the origin (round 0) and stop — the "
-            "origin-only run; None = unlimited, bounded only by ``HARD_CAP_ARMS``, the arms "
-            "raced across the run."
+            "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the "
+            "CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and "
+            "checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the "
+            "origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); "
+            "``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. "
+            "A fork seed, a standing ``set-limits`` and a launch flag each lay over it axis by "
+            "axis, and the account admits the result whole or refuses the launch. A null axis "
+            "is unbounded. ``tokens`` is unset by default: a token is worth a different amount "
+            "on every route, so set it only where a backend bills but reports no cost "
+            "(``unpriced_tokens`` on the dashboard is the tell)."
         ),
     )
     lives: LivesConfig | None = Field(
@@ -203,8 +201,18 @@ class OptimizationConfig(StrictModel):
             "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per "
             "round that promotes an arm, -1 per round that does not, banked up to ``cap``, and "
             "the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election "
-            "banks nothing. ``None`` → ``max_rounds`` governs. ``max_rounds`` still caps from "
-            "above, so a lives run wanting the full bank sets ``max_rounds: null``."
+            "banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a "
+            "lives run wanting the full bank sets ``budget: {rounds: null}``."
+        ),
+    )
+    halt_at_accuracy: Annotated[float | None, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Stop ``target_hit`` once the declared pick's own accuracy reaches this. ``None`` "
+            "→ no such stop. Refused on an arm of a head-to-head, which stops only on its "
+            "record's rule."
         ),
     )
     convergence_patience: Annotated[
@@ -238,27 +246,6 @@ class OptimizationConfig(StrictModel):
         description="Minimum distinct samples before θ is read as ability: the δ ruler stays "
         "flat below it, and no eliminator cuts an arm (nor a selector crowns one) on fewer — "
         "the floor on n for a posterior to be meaningful.",
-    )
-
-    ceiling: Annotated[SpendCeilings, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
-        SpendCeilings(usd=0.025),
-        description=(
-            "Halt this cycle when its cumulative spend (optimizer + backend) reaches "
-            "``usd`` dollars or ``tokens`` tokens (input + output), whichever trips first, "
-            "at the next round boundary. The campaign's own layer of the run's budget: a "
-            "fork seed, a standing ``set-limits`` and a launch flag (CLI ``--spend-budget`` "
-            "/ ``--token-budget``) each SET over it, raise or lower, and the account admits "
-            "the result whole or refuses the launch. A null arm is disarmed, and a declared "
-            "pair is WHOLE: an arm it leaves out is null, never the default. Default "
-            "``usd`` ≈ a 5-round run on the free-backend setup (measured ~$0.019) with "
-            "headroom; raise ``max_rounds`` and let this be the binding limit. ``tokens`` "
-            "defaults disarmed: a token is worth a different amount on every route, so a "
-            "token cap sized for one model silently becomes a different budget on the "
-            "next, and dollars are the model-invariant measure every route we run reports. "
-            "Set it for the one case USD cannot see — a backend that BILLS but reports no "
-            "cost, where spend reads low and ``unpriced_tokens`` on the dashboard is the "
-            "tell."
-        ),
     )
 
     panel_gate: Annotated[PanelGateMode, Knob(Scope.POLICY, Estimand.GATE)] = Field(
@@ -333,7 +320,7 @@ class OptimizationConfig(StrictModel):
             "it can never regress a dataset. Off → always 1PL (the slice-2 behaviour)."
         ),
     )
-    determinism: DeterminismClamp | None = Field(
+    determinism: Annotated[DeterminismClamp | None, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         None,
         description=(
             "Pin the optimizer's decoding and its route so a re-run reproduces this "
@@ -345,14 +332,8 @@ class OptimizationConfig(StrictModel):
     )
 
     @property
-    def arm_budget(self) -> ArmBudget:
-        """What a head-to-head declares equal per arm, read off these knobs."""
-        return ArmBudget(
-            usd=self.ceiling.usd,
-            max_rounds=self.max_rounds,
-            determinism=None
-            if self.determinism is None
-            else self.determinism.model_dump(mode="json"),
+    def stopping(self) -> StoppingRule:
+        return StoppingRule(
             lives=None if self.lives is None else self.lives.model_dump(mode="json"),
             convergence_patience=self.convergence_patience,
         )
@@ -368,7 +349,7 @@ class CampaignConfig(StrictModel):
         "free: θ_origin is the term EVERY delta subtracts, and its rows are "
         "content-addressed cache replayed into every candidate arm, fork and resume — "
         "paid once per config. Candidate breadth is paid per candidate, per round. "
-        "Every comparison downstream is matched by sample_id or θ-space, so an origin "
+        "Every comparison downstream is matched by sample key or θ-space, so an origin "
         "scored on a superset stays like-for-like. A bank smaller than this scores on "
         "the whole bank (`sample_dataset` is a prefix slice) — not an error.",
     )
@@ -458,9 +439,16 @@ class CampaignConfig(StrictModel):
     )
     dataset_split: Annotated[DatasetSplit | None, Knob(Scope.DATA, Estimand.SELECTION)] = Field(
         None,
-        description="How run init partitions the bank into the search pool every optimizer draw "
+        description="How run init partitions the bank into the search split every optimizer draw "
         "reads, the held-out bench set the headline is scored on, and a demo pool. `None` "
-        "holds nothing out: the whole bank is the search pool and there is no bench score.",
+        "holds nothing out: the whole bank is the search split and there is no bench score.",
+    )
+    run_seed: Annotated[int, Knob(Scope.DATA, Estimand.SELECTION)] = Field(
+        0,
+        description="The run's one seed. It seeds which rows fall where and the order the search "
+        "pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, "
+        "so a reordered bank holds out the same rows and reads them in the same order. An L4 "
+        "seat seeds its determinism clamp and its solver node from it too.",
     )
     bench_trigger: Annotated[BenchTrigger, Knob(Scope.POLICY, Estimand.SPEND)] = Field(
         "manual",
@@ -476,12 +464,6 @@ class CampaignConfig(StrictModel):
     )
 
     optimization: OptimizationConfig
-
-    def frozen(self, *, arm: bool) -> dict[str, Any]:
-        """Sole writer of ``campaign.json::config``: the WHOLE config the campaign was minted to
-        run, so no later edit to its dataset's files reaches a resume, a fork or a served read of
-        it — less, for an *arm*, what its head-to-head's record owns (:func:`under_record`)."""
-        return self.model_dump(mode="json", exclude=_RECORD_OWNED if arm else None)
 
     def identity(self) -> dict[str, Any]:
         """What this config adds to a cell's identity beside its optimizer's ``Treatment``, which
@@ -523,33 +505,54 @@ def merge_node_overlays(
     return out
 
 
-_RECORD_OWNED: dict[str, Any] = {
-    "dataset_split": True,
-    "optimization": {
-        "ceiling": {"usd": True},
-        "max_rounds": True,
-        "determinism": True,
-        "lives": True,
-        "convergence_patience": True,
-    },
-}
 _TREATMENT_OWNED: dict[str, Any] = {"optimization": {"optimizer": True, "nodes": True}}
 
+# What the target runs on and is graded by: the declaration's environment, every other key its loop.
+_ENVIRONMENT_KEYS = frozenset(
+    {"pipeline_overlay", "exclude_nodes", "task_framing", "scoring", "judges"}
+)
 
-def under_record(config: CampaignConfig, record: HeadToHeadRecord) -> CampaignConfig:
-    budget = record.budget
-    optimization = type(config.optimization).model_validate(
-        {
-            **config.optimization.model_dump(),
-            "ceiling": replace(config.optimization.ceiling, usd=budget.usd),
-            "max_rounds": budget.max_rounds,
-            "determinism": budget.determinism,
-            "lives": budget.lives,
-            "convergence_patience": budget.convergence_patience,
-        }
+
+def declare_run(
+    config: CampaignConfig,
+    *,
+    purpose: Purpose,
+    dataset_hash: str,
+    connector: str,
+    bench_defaults_pin: str,
+) -> RunDeclaration:
+    """Every door's config becomes ONE declaration: the keys its layers SET, never a default."""
+    named = config.model_dump(mode="json", exclude_unset=True)
+    optimization = {k: v for k, v in named.pop("optimization").items() if k != "budget"}
+    run_seed = named.pop("run_seed", None)
+    return RunDeclaration(
+        purpose=purpose,
+        dataset_hash=dataset_hash,
+        run_seed=run_seed,
+        loop={
+            **{k: v for k, v in named.items() if k not in _ENVIRONMENT_KEYS},
+            "optimization": optimization,
+        },
+        budget=named_over_the_default(config.optimization.budget),
+        environment=Environment(
+            connector=connector,
+            target={k: v for k, v in named.items() if k in _ENVIRONMENT_KEYS},
+        ),
+        bench_defaults_pin=bench_defaults_pin,
     )
-    return config.model_copy(
-        update={"optimization": optimization, "dataset_split": record.bench_set.split}
+
+
+def effective_config(declaration: RunDeclaration) -> CampaignConfig:
+    """The ONE derivation of what a declaration runs: today's defaults under its parts."""
+    loop = declaration.loop
+    seed = {} if declaration.run_seed is None else {"run_seed": declaration.run_seed}
+    return CampaignConfig.model_validate(
+        {
+            **loop,
+            **declaration.environment.target,
+            **seed,
+            "optimization": {**loop["optimization"], "budget": declaration.budget},
+        }
     )
 
 
@@ -560,9 +563,11 @@ def _scoring_block(scoring: str | dict[str, str] | None) -> dict[str, str]:
 
 
 def apply_config_overrides(config: CampaignConfig, overrides: ConfigOverrides) -> CampaignConfig:
-    """ABSOLUTE values; a seed's budget is admitted before launch, not here."""
+    """ABSOLUTE values, laid axis by axis over the budget; the account admits it before launch."""
     opt_updates: dict[str, Any] = (
-        {"max_rounds": overrides.max_rounds} if overrides.max_rounds is not None else {}
+        {"budget": config.optimization.budget.over(overrides.budget)}
+        if overrides.budget.named
+        else {}
     )
     if overrides.nodes:
         opt_updates["nodes"] = merge_node_overlays(config.optimization.nodes, overrides.nodes)

@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from promptpotter.config.settings import settings
+from promptpotter.domain.pipeline_overlay import normalize_model_id
 from promptpotter.infrastructure.llm.anthropic import AnthropicClient
 from promptpotter.infrastructure.llm.base import LLMClientBase
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient, ProviderSpec
@@ -20,21 +21,25 @@ class ModelProfile:
     refuses_efforts: frozenset[str] = frozenset()
     # Never subtracted, only reported. `None` is unprobed; `frozenset()` is probed, all distinct.
     indistinct_efforts: frozenset[str] | None = None
+    # The hosts a gateway tries for a node naming none: hosts of one model disagree systematically.
+    default_route: tuple[str, ...] = ()
 
 
 # Keyed by the normalized ``org/model`` id; fill one with `probe-reasoning <model>`.
 _MODEL_PROFILES: dict[str, ModelProfile] = {
     "deepseek/deepseek-v4-flash": ModelProfile(min_max_tokens=8000),
-    "openai/gpt-6-luna": ModelProfile(min_max_tokens=8000),
+    "openai/gpt-6-luna": ModelProfile(min_max_tokens=8000, default_route=("OpenAI",)),
     "openai/gpt-oss-20b": ModelProfile(
         min_max_tokens=8000,
         refuses_efforts=frozenset({"none"}),
         indistinct_efforts=frozenset(),
+        default_route=("Groq",),
     ),
     "openai/gpt-oss-120b": ModelProfile(
         min_max_tokens=8000,
         refuses_efforts=frozenset({"none"}),
         indistinct_efforts=frozenset(),
+        default_route=("Cerebras",),
     ),
     "qwen/qwen3.7-flash": ModelProfile(
         indistinct_efforts=frozenset({"minimal", "low", "medium", "high"})
@@ -43,11 +48,6 @@ _MODEL_PROFILES: dict[str, ModelProfile] = {
         indistinct_efforts=frozenset({"minimal", "low", "medium", "high"})
     ),
 }
-
-
-def normalize_model_id(model: str) -> str:
-    """``:nitro`` picks a HOST, and every host of one model takes the same parameters."""
-    return model.split(":", 1)[0].strip().lower()
 
 
 def model_profile(model: str) -> ModelProfile | None:
@@ -77,6 +77,12 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
 
 def openai_compat_spec(provider: str) -> ProviderSpec | None:
     return _OPENAI_COMPAT_SPECS.get(provider)
+
+
+def default_routes() -> dict[str, dict[str, list[str]]]:
+    """Per gateway: a route names a gateway's hosts, so a direct provider takes none."""
+    pins = {m: list(p.default_route) for m, p in _MODEL_PROFILES.items() if p.default_route}
+    return {name: pins for name, spec in _OPENAI_COMPAT_SPECS.items() if spec.gateway and pins}
 
 
 def _rate_caps(provider: str) -> tuple[int | None, int | None]:
@@ -120,6 +126,7 @@ def get_llm_client(provider: str) -> LLMClientBase:
 
 __all__ = [
     "ModelProfile",
+    "default_routes",
     "get_llm_client",
     "model_profile",
     "openai_compat_spec",

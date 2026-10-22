@@ -4,22 +4,25 @@ import argparse
 import logging
 from typing import get_args
 
+from promptpotter.application.cycle_listing import resolve_campaign_id_hint
 from promptpotter.application.evidence.head_to_head import GuardState, HeadToHeadRow
 from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricUnit
 from promptpotter.application.evidence.read import Evidence, select_evidence
+from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.bench import BandedValue, BenchColumn, BenchScore, DatasetSplit
-from promptpotter.domain.campaign import ArmBudget, BenchSet
+from promptpotter.domain.campaign import BenchSet
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     CellSet,
     LiftEstimate,
     PairedReading,
 )
-from promptpotter.domain.spend import RATE_PRICED_LABEL, SPEND_KIND_LABELS
+from promptpotter.domain.spend import RATE_PRICED_LABEL, SPEND_KIND_LABELS, Budget
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -60,7 +63,7 @@ def _roster_lines(ev: Evidence) -> list[str]:
     ]
     for r in ev.subjects:
         value = "         ." if r.value is None else f"{spec.format(r.value):>10}"
-        ruler = (r.ability.ruler_id if r.ability is not None else None) or "-"
+        ruler = r.ability.ruler.id if r.ability is not None else "-"
         mark = {True: " ", False: "x", None: "?"}[r.comparable]
         # `~` on the kind: a masked channel shares its label with the record it masks, and two rows must not read alike.
         kind = f"{r.kind}~" if r.mask else r.kind
@@ -121,7 +124,7 @@ def _bench_set_text(bench_set: BenchSet | None, field: str) -> str:
         return "—"
     value = getattr(bench_set, field)
     if isinstance(value, DatasetSplit):
-        return f"bench {value.bench}, demo {value.demo}, seed {value.seed}"
+        return f"bench {value.bench}, demo {value.demo}"
     if isinstance(value, CellSet):
         return f"{value.id} ({value.size} cells)"
     if isinstance(value, dict):
@@ -135,8 +138,9 @@ def _differing_text(row: HeadToHeadRow, field: str) -> str:
     if field == "origin_reading":
         return _origin_text(row.bench)
     value = getattr(row, field)
-    if isinstance(value, ArmBudget):
-        return ", ".join(f"{k}={v}" for k, v in value.model_dump().items() if v is not None) or "—"
+    if isinstance(value, Budget):
+        # Named axes only, and a named null is a lift: printed, never dropped.
+        return ", ".join(f"{k}={v}" for k, v in value.model_dump().items()) or "—"
     if isinstance(value, list):
         return ", ".join(value) or "—"
     return str(value)
@@ -627,9 +631,15 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
     try:
+        subjects = [
+            spec._replace(
+                campaign_id=resolve_campaign_id_hint(stores, spec.campaign_id, inside=spec.inside)
+            )
+            for spec in map(parse_subject, args.subject)
+        ]
         ev = select_evidence(
             stores,
-            subjects=args.subject,
+            subjects=subjects,
             dataset=args.dataset or "",
             grid=args.grid or "",
             include_ranking=args.ranking,
@@ -637,7 +647,7 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
             include_config=args.config,
             metric=args.metric or MEASURAND,
         )
-    except (ValueError, SyntaxError) as exc:
+    except (ValueError, SyntaxError, BadRequestError, NotFoundError) as exc:
         return CommandResult(data={"error": str(exc)}, human=str(exc))
     lines = [
         *_head_to_head_lines(ev),

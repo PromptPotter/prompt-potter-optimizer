@@ -3,10 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.llm_call import (
-    LLMCallContext,
-    run_optimizer_node,
-)
+from promptpotter.application.bench.llm_call import run_optimizer_node
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
@@ -25,20 +22,26 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     VariantEvidenceGrounding,
     build_l1_response_model,
 )
-from promptpotter.domain.opt_search_point import EvidenceGrounding
+from promptpotter.application.optimizers.potter.records import Ladder
+from promptpotter.application.optimizers.potter.validators.l1_strict import (
+    L1_BLOCKS_IN_POOL,
+    L1_SHOTS_IN_DEMO_POOL,
+)
+from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, loci_of
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
     PARSE_FAILURE_WRONG_TYPE,
 )
-from promptpotter.domain.results import CandidateProposal
+from promptpotter.domain.results import Proposal
+from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
-    from promptpotter.application.optimizers.potter.state import PotterState
+    from promptpotter.domain.wounds import ValidationFailure
 
 import logging
 
@@ -60,7 +63,7 @@ def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceG
 class L1Generation:
     """``citable`` and ``exploration_budget`` are ``None`` where the proposals came back off disk."""
 
-    proposals: list[CandidateProposal]
+    proposals: list[Proposal]
     parse_failure: str | None = None
     citable: tuple[str, ...] | None = None
     exploration_budget: str | None = None
@@ -68,7 +71,6 @@ class L1Generation:
 
 async def l1_generate(
     ctx: NodeContext[L1GenerateKnobs],
-    state: PotterState,
     *,
     n_variants: int,
     temperature: float,
@@ -76,24 +78,29 @@ async def l1_generate(
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
-    session = state.session
     round_num = ctx.round_num
-    model = ctx.optimizer.model("l1_generate")
+    model = ctx.model
     opt_sp = ctx.parent
-    pipeline_schema = session.pipeline_schema
+    pipeline_schema = ctx.schema
 
-    bundle = build_bundle(ctx, state)
+    bundle = build_bundle(ctx, ctx.slice(Ladder))
     filled = DispatchHub.fill(load_optimizer_prompt("l1_generate"), bundle, node="l1_generate")
     breakdown = filled.breakdown
     budget = bundle.cycle_slice.exploration_budget
     citable = citable_fields(
-        node_layout("l1_generate", state.memory),
+        node_layout("l1_generate", bundle.l2),
         exploration_budget=budget,
         rendered=filled.rendered,
     )
     prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **filled.injection_vars}
 
     schema_field_rename = ctx.knobs.schema_field_rename
+    # Under `closed` the wire takes an active entry's id where a pooled field's text would go.
+    pooled = (
+        {name: {b.id: b.text for b in blocks} for name, blocks in bundle.block_window().items()}
+        if bundle.block_access == "closed"
+        else None
+    )
     output_schema = (
         build_l1_response_schema(
             pipeline_schema,
@@ -102,17 +109,22 @@ async def l1_generate(
             silent_panels=breakdown.silent,
             schema_field_rename=schema_field_rename,
             n_variants=n_variants,
+            pooled_fields=None if pooled is None else {f: list(ids) for f, ids in pooled.items()},
         )
         if pipeline_schema
         else None
     )
     parent_point = ctx.parent_point
     assert parent_point is not None
+    # The wire speaks the DEMO POOL panel's ids; an individual holds sample keys.
+    key_of = {s.id: s.key for s in bundle.demo_pool}
     response_model = build_l1_response_model(
         effective_l1_field_names(),
-        parent_prompt=opt_sp.prompt_fields(),
+        parent_prompts={node: p.fields for node, p in opt_sp.prompts.items()},
         parent_params=parent_point.pipeline_params,
-        parent_shot_ids=opt_sp.shot_ids,
+        parent_shots={
+            node: [bundle.slot_of[k] for k in p.shots] for node, p in opt_sp.prompts.items()
+        },
     )
     try:
         generated, _prompt, _repairs = await run_optimizer_node(
@@ -121,12 +133,7 @@ async def l1_generate(
             temperature=temperature,
             response_model=response_model,
             response_schema=output_schema,
-            context=LLMCallContext(
-                ledger=session.state.ledger,
-                round_num=round_num,
-                cache=session.store.optimizer_reuse,
-                injections=breakdown,
-            ),
+            context=ctx.call_context(injections=breakdown),
             template=filled.template,
         )
     except OptimizerPromptParseError as parse_err:
@@ -189,19 +196,38 @@ async def l1_generate(
 
     variants_list = generated.variants
 
-    population: list[CandidateProposal] = []
+    population: list[Proposal] = []
     for v in variants_list[:n_variants]:
-        # A hallucinated node name is NOT pre-filtered: ``bench/children.py::overlay_failures`` owns it.
-        changes: dict[str, Any] = dict(v.prompt_fields_updates)
-        if v.shot_ids is not None:
-            changes["shot_ids"] = v.shot_ids
+        updates = v.prompt_fields_updates
+        failures: list[ValidationFailure] = []
+        if pooled is not None:
+            if (blocks_outcome := L1_BLOCKS_IN_POOL.check(updates, offered=pooled)) is not None:
+                failures += blocks_outcome.evidence["failures"]
+            updates = {
+                node: {f: pooled[f][i] for f, i in fields.items() if i in pooled.get(f, {})}
+                for node, fields in updates.items()
+            }
+        # Unfiltered: `bench/children.py::carried_writes` fails the child on an undeclared node or field.
+        prompt_loci: dict[Locus, Any] = loci_of(updates)
+        prompt_loci.update(
+            {
+                Locus(node, SHOTS_KEY): [key_of[i] for i in ids if i in key_of]
+                for node, ids in v.shots.items()
+            }
+        )
+        shots_outcome = L1_SHOTS_IN_DEMO_POOL.check(
+            v.shots, demo_ids=key_of.keys(), k_max=ctx.knobs.k_max
+        )
+        if shots_outcome is not None:
+            failures += shots_outcome.evidence["failures"]
         population.append(
             ctx.child(
                 [opt_sp],
                 overlay=v.pipeline_overlay,
+                failures=failures,
+                prompt_loci=prompt_loci,
                 changes_description=v.changes_description,
                 evidence_grounding=_parse_evidence_grounding(v.evidence_grounding),
-                **changes,
             )
         )
 

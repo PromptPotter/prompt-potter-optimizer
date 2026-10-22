@@ -2,13 +2,13 @@ import { encodeDescend, pathRoot, type CyclePath } from "../ids";
 import { API, send } from "./client";
 import { mintIdempotencyKey, throwApiError } from "./errors";
 import type {
+  Budget,
   CommandKind,
   ConfigOverrides as WireConfigOverrides,
   CycleSeed,
-  LaunchLimits,
   ParamIntent,
   RunMode,
-  SpendCeilings,
+  StartRunPayload,
 } from "./types.generated";
 import type { ArchiveReport, CommandAcceptedBody, VerifyReading } from "./types";
 
@@ -41,14 +41,12 @@ function cycleAddress(path: CyclePath): Record<string, unknown> {
 // Absent inherits the parent; a present value is ABSOLUTE for the fork.
 export type ConfigOverrides = Partial<WireConfigOverrides>;
 // The reconcile dialog's subset: the policy knobs break search comparability, so it sets none.
-export type RunLimitOverrides = Partial<
-  Pick<WireConfigOverrides, "max_rounds" | "ceiling" | "nodes">
->;
+export type RunLimitOverrides = Partial<Pick<WireConfigOverrides, "budget" | "nodes">>;
 // `node_narrowing` overrides the campaign's mint-time narrowing for this cycle only; absent inherits it.
 export type ForkSeed = Partial<
   Omit<CycleSeed, "origin_source" | "config_overrides" | "optimizer_narrowing">
 > & { config_overrides?: ConfigOverrides; node_narrowing?: Record<string, ParamIntent[]> };
-// `keepRounds` is `operator_rewind`, which the server refuses with an `origin_prompt_fields` seed.
+// `keepRounds` is `operator_rewind`, which the server refuses with an `origin_prompts` seed.
 export async function postSteerFork(
   path: CyclePath,
   round: number,
@@ -133,24 +131,20 @@ export async function postSetSampleLookahead(
 ): Promise<CommandAcceptedBody> {
   return postCommand("set-sample-lookahead", { ...cycleAddress(path), cells, auto });
 }
-// A `0` ceiling halts at the next round boundary and an omitted one is unchanged; `maxRounds: null` is SENT and lifts the cap, where a null spend arm is not sent.
+// A named axis binds (`0` halts at the next round boundary), a named `null` lifts it, an unnamed one is unchanged.
 export async function postChangeRunLimits(
   path: CyclePath,
-  caps: { maxUsd?: number | null; maxTokens?: number | null; maxRounds?: number | null },
+  budget: Budget,
 ): Promise<CommandAcceptedBody> {
-  const payload: Record<string, unknown> = cycleAddress(path);
-  const ceiling: Partial<SpendCeilings> = {};
-  if (typeof caps.maxUsd === "number") ceiling.usd = caps.maxUsd;
-  if (typeof caps.maxTokens === "number") ceiling.tokens = caps.maxTokens;
-  if (Object.keys(ceiling).length) payload.ceiling = ceiling;
-  if (caps.maxRounds !== undefined) payload.max_rounds = caps.maxRounds;
-  return postCommand("change-run-limits", payload);
+  return postCommand("change-run-limits", { ...cycleAddress(path), budget });
 }
 // The caller's own account limit; the result reads back off `/auth/quota-status`.
 export async function postSetConcurrentCycles(limit: number): Promise<CommandAcceptedBody> {
   return postCommand("set-concurrent-cycles", { max_concurrent_cycles: limit });
 }
-export type StartRunOptions = { limits?: Partial<LaunchLimits>; mode?: Partial<RunMode> };
+export type StartRunOptions = Partial<Pick<StartRunPayload, "budget" | "step_rounds">> & {
+  mode?: Partial<RunMode>;
+};
 
 export async function postStartRun(
   path: CyclePath,

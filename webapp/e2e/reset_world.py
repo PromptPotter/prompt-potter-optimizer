@@ -6,8 +6,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.infrastructure.store.io import rmtree_robust, unlink_robust
-from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
 
 
 def prune(directory: Path, keep: frozenset[str]) -> bool:

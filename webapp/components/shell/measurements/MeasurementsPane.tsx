@@ -53,7 +53,7 @@ const STATUSES = [
   { value: "ERR", label: "Error" },
 ] as const;
 
-const cellId = (c: CellRow) => `${c.candidate}\u001f${c.sample_id}`;
+const cellId = (c: CellRow) => `${c.candidate}\u001f${c.position}`;
 
 function Fitness({ value }: { value: number | null | undefined }) {
   if (value == null) return <span className="ms-dim">—</span>;
@@ -68,7 +68,7 @@ function SampleHeader({ it, n }: { it: DatasetItem; n: number }) {
   return (
     <span className="ms-group-line">
       <span className="ms-rank">#{it.hard_sample_rank}</span>
-      <span className="ms-sid">s{it.sample_id}</span>
+      <span className="ms-sid">s{it.position}</span>
       <span className="ms-query" title={it.query}>
         {it.query}
       </span>
@@ -148,7 +148,7 @@ export function MeasurementsPane({
 
   const columns = useMemo<Column<CellRow>[]>(
     () => [
-      { id: "sample", label: "Sample", width: "64px", cell: (c) => `s${c.sample_id}` },
+      { id: "sample", label: "Sample", width: "64px", cell: (c) => `s${c.position}` },
       {
         id: "candidate",
         label: "Candidate",
@@ -201,7 +201,7 @@ export function MeasurementsPane({
   const groups = useMemo<RowGroup<CellRow>[] | undefined>(() => {
     if (groupBy === "none") return undefined;
     const by = new Map<string, CellRow[]>();
-    const keyOf = groupBy === "sample" ? (c: CellRow) => String(c.sample_id) : (c: CellRow) => c.candidate;
+    const keyOf = groupBy === "sample" ? (c: CellRow) => String(c.position) : (c: CellRow) => c.candidate;
     for (const c of data.cells) {
       const k = keyOf(c);
       const list = by.get(k);
@@ -212,8 +212,8 @@ export function MeasurementsPane({
       return data.items
         .filter((it) => !hideUnmeasured || it.n_measured > 0)
         .map((it) => {
-          const rows = by.get(String(it.sample_id)) ?? [];
-          return { key: String(it.sample_id), header: <SampleHeader it={it} n={rows.length} />, rows };
+          const rows = by.get(String(it.position)) ?? [];
+          return { key: String(it.position), header: <SampleHeader it={it} n={rows.length} />, rows };
         });
     return data.candidates.map((c) => {
       const rows = by.get(c.key) ?? [];

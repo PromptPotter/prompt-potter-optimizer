@@ -17,7 +17,7 @@ export interface RayStep {
   cluster: number;
   activity: ActivityItem;
   round: number | null;
-  candidateLabel: string | null;
+  arm: string | null;
 }
 
 function toPath(item: RayItem): CyclePath {
@@ -36,7 +36,7 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
     const path = toPath(item);
     const pathKey = encodeCyclePath(path);
     const prev = steps[steps.length - 1];
-    const address = { activity, round: activity.round, candidateLabel: activity.candidate };
+    const address = { activity, round: activity.round, arm: activity.arm };
 
     if (prev && prev.pathKey === pathKey && pathKey !== rootPathKey) {
       steps[steps.length - 1] = {

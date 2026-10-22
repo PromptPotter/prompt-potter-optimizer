@@ -23,23 +23,23 @@ else:
             with contextlib.suppress(ImportError):
                 getattr(_parked, "__file__", None)
 
+from promptpotter.application.account import local_stores
 from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.connectors.dspy_module import (
+    PROGRAM_NODE,
     SCORE_KEY,
     DspyProgram,
     dataset_pipeline,
 )
-from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.identity.migration import registered_or_default_identity
-from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.domain.spend import Budget
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -52,7 +52,7 @@ __all__ = ["Node", "PromptPotterOpt", "compile_loop"]
 
 
 _COMPILE_DEFAULTS: dict[str, Any] = {
-    "max_rounds": 5,
+    "budget": {"rounds": 5},
     "degradation_threshold": 0.4,
     "elimination_n_min": 4,
 }
@@ -121,17 +121,16 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         valset: list[Any] | None = None,
     ) -> Any:
         """``valset`` is contract parity only: with no ``dataset_split``, the trainset is the pool."""
-        rows = samples_from_dicts([{"query": _query_of(ex), "ground_truth": ""} for ex in trainset])
-        if (distinct := len({row.key for row in rows})) != len(trainset):
+        items = [{"query": _query_of(ex), "ground_truth": ""} for ex in trainset]
+        if (distinct := len({row.key for row in samples_from_dicts(items)})) != len(trainset):
             raise ValueError(
                 f"trainset has {len(trainset)} examples but only {distinct} distinct inputs — "
                 "twin rows share one measurement, so each replays the other's score."
             )
         program = DspyProgram(student=student, metric=self.metric, examples=list(trainset))
 
-        stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
-        dataset_dir = self._write_definition(stores)
-        stores.tenant_datasets.save_materialized_rows(self.dataset_name, rows)
+        stores = local_stores(tenant=None)
+        dataset_dir = self._write_definition(stores, items)
         session = await open_session(self.dataset_name, stores=stores, program=program)
         try:
             # No overrides: the file this compile just wrote IS the projection of `loop` and `node`.
@@ -139,9 +138,8 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             configure_and_apply_pipeline(session, config)
             result = await run_campaign(
                 session,
-                list(session.samples),
                 config,
-                limits=LaunchLimits(),
+                budget=Budget(),
                 mode=RunMode(),
             )
         finally:
@@ -149,15 +147,16 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
 
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
             return student
-        # Off the ARTIFACT, never `CycleResult.result_prompt_fields`, which no `PromptTemplate` takes.
         self.export = session.store.campaigns.read_export(session.hop)
-        if self.export is None:
+        if self.export is None or PROGRAM_NODE not in self.export.prompts:
             return student
-        return _with_instructions(student, self.export.render())
+        return _with_instructions(student, self.export.render(PROGRAM_NODE))
 
-    def _write_definition(self, stores: Stores) -> Path:
+    def _write_definition(self, stores: Stores, items: list[dict[str, str]]) -> Path:
         return stores.tenant_datasets.write_definition(
             self.dataset_name,
+            # In trainset order: the connector reads a sample's example off its position.
+            source={"recipe": "rows", "shuffled": False, "items": items},
             pipeline=dataset_pipeline(
                 model=self.node.model,
                 temperature=self.node.temperature,

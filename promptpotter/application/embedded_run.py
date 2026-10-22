@@ -1,52 +1,56 @@
-"""The embedded launch entry: a host program drives one campaign in its own loop, holding no slot."""
+"""The embedded launch entry: a host program drives one campaign in its own loop, holding a share
+of its ceiling and no machine slot."""
 
 from __future__ import annotations
 
 import uuid
 from typing import TYPE_CHECKING
 
+from promptpotter.application.account import local_stores
+from promptpotter.application.campaign_config import effective_config
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
-from promptpotter.application.jobs.launcher.admission import probe_backend
+from promptpotter.application.jobs.launcher.admission import embedded_share, probe_backend
 from promptpotter.application.jobs.mint import (
+    declare,
     fresh_campaign_id,
     mint_framed_cycle,
     refuse_drifted_resume,
 )
-from promptpotter.application.jobs.quota import unadmitted_limits
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     purge_cold_store,
     reindex_measurement_archive,
     restore_measurement_archive,
 )
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.domain.campaign import ArmRequest
+from promptpotter.domain.campaign import Compare, Optimize, Purpose
 from promptpotter.domain.command_kinds import (
     OriginGateDecisionPayload,
     SubmitArmsPayload,
     SubmittedArm,
 )
 from promptpotter.domain.results import CycleResult
-from promptpotter.infrastructure.identity.migration import registered_or_default_identity
+from promptpotter.domain.sample import Bank
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
-from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.launch_limits import LaunchLimits, RunMode
     from promptpotter.domain.phases import GateDecision
+    from promptpotter.domain.run_mode import RunMode
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.spend import Budget
     from promptpotter.infrastructure.store.stores import Stores
 
 # This module IS the embedded surface: a capability it does not name is one a host cannot find.
@@ -68,25 +72,26 @@ async def open_session(
     *,
     stores: Stores | None = None,
     program: object | None = None,
+    rows: Sequence[Sample] | None = None,
 ) -> Session:
-    """Open a session on *dataset_name*; raises what ``probe_backend`` refuses a launch on.
-
-    *stores* names the workspace and whose it is; unset, the local operator's own.
-    *program* rides the backend client as ``InProcessWorkload.program``, for an in-process backend.
-    """
+    """Raises what ``probe_backend`` refuses a launch on; *rows* replace the definition's bank, which the mint labels."""
     setup_logging()
     complete_registries(every_treatment=False)
     if stores is None:
-        stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
+        stores = local_stores(tenant=None)
     down = await probe_backend(backend_type_of_dataset(stores, dataset_name))
     if down is not None:
         raise down
-    return await init_services(
+    session = await init_services(
         dataset_name=dataset_name,
         identity=stores.identity,
         stores=stores,
         program=program,
     )
+    if rows is not None:
+        session.bank = Bank.of(rows)
+        stores.tenant_datasets.put_bank(session.bank)
+    return session
 
 
 async def submit_gate_decision(stores: Stores, hop: CycleHop, decision: GateDecision) -> None:
@@ -125,54 +130,64 @@ async def submit_arms(
 
 async def run_campaign(
     session: Session,
-    train_data: list[Sample],
-    campaign_config: CampaignConfig,
+    campaign_config: CampaignConfig | None = None,
     *,
     readout_sink: StatusFn | None = None,
     langfuse_session_id: str | None = None,
-    limits: LaunchLimits,
+    budget: Budget,
+    step_rounds: int | None = None,
     mode: RunMode,
-    arm: ArmRequest | None = None,
+    purpose: Purpose = Optimize(),  # noqa: B008 — frozen
 ) -> CycleResult:
-    """Mint a campaign and run it from its origin, or resume the cycle *session* is bound to.
-
-    *limits* set the run's budget over the config's own; a host holds no slot, so none is admitted.
-    *readout_sink* receives each readout line as it is written.
-    Blocks at round 0 under ``origin_gate: strict`` until ``submit_gate_decision`` answers, and at
-    every round under an ``arm_gate`` until ``submit_arms`` does.
-    """
-    if not session.campaign_id:
-        minted = await mint_framed_cycle(
-            session,
-            campaign_config,
-            train_data,
-            campaign_id=fresh_campaign_id(session),
-            task_text=None,
-            arm=arm,
-            limits=limits,
-        )
-        campaign_config = minted.campaign_config
-    else:
+    """Blocks under ``origin_gate: strict`` until ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does."""
+    declaration = None
+    if session.campaign_id:
+        if campaign_config is not None or isinstance(purpose, Compare):
+            raise PayloadInvalidError(
+                f"{session.hop.cycle_id} resumes under its campaign's declaration: pass no "
+                "config and no arm to resume it",
+                code="resume_declared",
+            )
         campaign = session.store.campaigns.load_campaign(session.campaign_id)
         if campaign is None:
             raise NotFoundError(f"campaign not found: {session.campaign_id}")
-        refuse_drifted_resume(session, campaign_config, campaign, session.hop)
-    held = unadmitted_limits(
+        refuse_drifted_resume(session, campaign, session.hop, session.bank.samples)
+        campaign_config = resolve_campaign_config(session.store, campaign, session.hop)
+    else:
+        if campaign_config is None:
+            raise PayloadInvalidError(
+                "a mint declares its campaign: pass the config to run", code="mint_undeclared"
+            )
+        declaration = declare(session, campaign_config, purpose=purpose)
+        campaign_config = effective_config(declaration)
+    # Admitted BEFORE the mint, whose framing call is paid: a refusal leaves nothing written.
+    async with embedded_share(
         campaign_config,
         stores=session.store,
+        dataset_name=session.measured_dataset,
         hop=session.hop if session.state.cycle_id else None,
-        requested=limits,
-    )
-    return await run_optimization(
-        train_data,
-        campaign_config,
-        session=session,
-        observers=build_run_observers(
+        requested=budget,
+        step_rounds=step_rounds,
+    ) as (job_id, held):
+        if declaration is not None:
+            await mint_framed_cycle(
+                session,
+                declaration,
+                session.bank.samples,
+                campaign_id=fresh_campaign_id(session),
+                task_text=None,
+            )
+            JobRegistry.attach().update_target(job_id, hop=session.hop)
+        return await run_optimization(
+            list(session.bank.samples),
+            campaign_config,
             session=session,
-            campaign_config=campaign_config,
-            readout_sink=readout_sink,
-        ),
-        langfuse_session_id=langfuse_session_id,
-        limits=held,
-        mode=mode,
-    )
+            observers=build_run_observers(
+                session=session,
+                campaign_config=campaign_config,
+                readout_sink=readout_sink,
+            ),
+            langfuse_session_id=langfuse_session_id,
+            budget=held,
+            mode=mode,
+        )

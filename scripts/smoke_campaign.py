@@ -24,6 +24,7 @@ try:
 except ImportError:
     pass
 
+from promptpotter.application.account import local_stores  # noqa: E402
 from promptpotter.application.campaign_config import CampaignConfig  # noqa: E402
 from promptpotter.application.datasets.authored import dataset_campaign_block  # noqa: E402
 from promptpotter.application.datasets.loaders import (  # noqa: E402
@@ -34,17 +35,11 @@ from promptpotter.application.embedded_run import open_session, run_campaign  # 
 from promptpotter.application.pipeline_resolve import (  # noqa: E402
     configure_and_apply_pipeline,
 )
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT  # noqa: E402
-from promptpotter.domain.launch_limits import LaunchLimits, RunMode  # noqa: E402
-from promptpotter.infrastructure.identity.migration import (  # noqa: E402
-    registered_or_default_identity,
-)
-from promptpotter.infrastructure.store.dataset_access import (  # noqa: E402
-    DatasetAccessError,
-    resolve_dataset,
-)
-from promptpotter.infrastructure.store.stores import build_stores  # noqa: E402
+from promptpotter.domain.run_mode import RunMode  # noqa: E402
+from promptpotter.domain.spend import Budget  # noqa: E402
+from promptpotter.infrastructure.store.dataset_access import resolve_dataset  # noqa: E402
 from promptpotter.presentation.terminal.completion import report_completion  # noqa: E402
+from promptpotter.shared.errors import DatasetAccessError  # noqa: E402
 
 
 def _build_config(
@@ -58,7 +53,7 @@ def _build_config(
     return {
         "scoring": _infer_scoring(dataset_dir),
         "optimization": {
-            "max_rounds": rounds,
+            "budget": {"rounds": rounds},
             "degradation_threshold": 0.4,
             "nodes": {
                 "adaptive_queue": {"config": {"sp_budget_round": samples}},
@@ -77,12 +72,12 @@ def _infer_scoring(dataset_dir: Path) -> str:
 
 
 async def _run(args: argparse.Namespace) -> int:
-    stores = build_stores(registered_or_default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
+    stores = local_stores(tenant=None)
     try:
         dataset_dir = resolve_dataset(stores, args.dataset).directory
     except DatasetAccessError:
         dataset_dir = None
-    if dataset_dir is None or dataset_loader(dataset_dir) is None:
+    if dataset_dir is None or dataset_loader(stores, dataset_dir) is None:
         known = ", ".join(loadable_dataset_names(stores)) or "(none)"
         print(
             f"[smoke] ERROR: no source resolves dataset {args.dataset!r}. Known: {known}",
@@ -128,17 +123,15 @@ async def _run(args: argparse.Namespace) -> int:
     )
     configure_and_apply_pipeline(session, campaign_config)
 
-    train_slice = (session.samples or [])[: args.samples]
-    if not train_slice:
+    if not session.bank.samples:
         print("[smoke] ERROR: dataset loader returned no items", file=sys.stderr)
         return 3
 
     result = await run_campaign(
         session,
-        train_slice,
         campaign_config,
         readout_sink=print,
-        limits=LaunchLimits(),
+        budget=Budget(),
         mode=RunMode(),
     )
     report_completion(result, session=session)
@@ -192,7 +185,7 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--samples", type=int, default=5, help="Queries per candidate (sp_budget_round)")
     p.add_argument("--variants", type=int, default=3, help="L1 candidates per round")
-    p.add_argument("--rounds", type=int, default=1, help="max_rounds")
+    p.add_argument("--rounds", type=int, default=1, help="budget.rounds")
     p.add_argument("--patience", type=int, default=1, help="l1_patience (consecutive stalls)")
     return p.parse_args()
 

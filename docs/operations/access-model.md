@@ -12,7 +12,7 @@ illegible; keeping them distinct, and never collapsing the hierarchy, is the who
 | Boundary | Kind | Enforced by | Failure response |
 |---|---|---|---|
 | **host-admin ↔ user** | Authorization (host privilege) | the operator-admin channel only (ADR-0004, chat-id lock) — no API-side capability | channel: ignored |
-| **owner ↔ delegate** | Authorization (capability) | one dispatcher gate (`_require_capability_for` over `CommandKind.capability`) | 404 (existence-hiding) |
+| **owner ↔ delegate** | Authorization (capability) | one dispatcher gate (`require_capability` over `CommandKind.capability`) | 404 (existence-hiding) |
 | **user ↔ user** | Tenancy (data isolation) | structural directory rooting + one `owned_campaign` ownership rule | 404 |
 | **loop ↔ everything** | OS privilege | systemd-hardened unit (kernel-enforced) | process denied (EACCES / cgroup) |
 
@@ -90,7 +90,7 @@ the bounded step verb** — owned by
 [ADR-0005](../adr/0005-delegated-principals-and-capability-scoping.md) §1 and §3–§6, with what is
 deferred in its §2 and §4; this page names only where each is enforced (the one-level rule at
 `grants.py::grant_principal`). The verb gate is
-`_require_capability_for` over `CommandKind.capability` at the dispatcher's `_record_and_apply`
+`require_capability` over `CommandKind.capability` at the dispatcher's `_applier`
 (`application/commands/dispatcher.py`), answering the same 404; attenuation is clamped at read by
 `infrastructure/identity/grants.py::resolve_effective_capabilities` under
 `middleware/oidc.py::_delegated_identity`, so a hand-edited over-grant in the sealed
@@ -102,8 +102,12 @@ deferred in its §2 and §4; this page names only where each is enforced (the on
 
 **Cross-tenant isolation is structural, not a check.** `build_stores`
 (`infrastructure/store/stores.py`) roots every leaf store at `projects_root / tenant_id`, and the
-content-addressed caches at `shared_root / tenant_id`; a CONSTRUCTED `Stores` cannot name another
-tenant's directory. `Stores.tenant_id` is a derived property off the identity, never an independent
+content-addressed caches at its archive home (`Stores.archive_home`); a CONSTRUCTED `Stores`
+cannot name another tenant's directory. The home is the tenant's own unless the host sets
+`SHARED_ARCHIVE`, which shares the caches across every account on the install and is the one
+deliberate crossing: a cache hit, and every memory read over the archive, then tells one account
+what another ran (ADR-0002 § Contract B). That home is the install's, so compacting, restoring or
+purging it is the host's alone. `Stores.tenant_id` is a derived property off the identity, never an independent
 field. Today `tenant_id == user_id` (one tenant per operator).
 
 **The guarantee is "no constructed `Stores` crosses a tenant", not "no read crosses a tenant"** —
@@ -124,7 +128,7 @@ owner-scoped** (documented in-code). A CLI-minted campaign is owned by the regis
 owner-filtering would hide the operator's own origins. Tenant isolation still holds.
 
 **All write commands** flow through one `CommandDispatcher` (`application/commands/`) — the
-sole inbound writer, stamping `issued_by_user_id` and appending a `CommandRecord` to the ledger.
+sole inbound writer, stamping `issued_by` (`shared/identity.py::Principal`) and appending a `CommandRecord` to the ledger.
 The read API is otherwise read-only.
 
 ---
@@ -205,8 +209,8 @@ not backend-supplied.
   owns why — and holds that ceiling as a reservation
   while it runs — [ADR-0003](../adr/0003-spend-and-tenancy.md)'s D1 owns why, including the overrun
   the account never sees. Every path that sets a ceiling composes there,
-  `change-run-limits` included: it writes the cycle's standing ceiling, whose mirror the run's
-  gate prefers over the admitted cap mid-flight, so an unclamped one is the way around this whole section.
+  `change-run-limits` included: it writes the cycle's standing budget, which the run's
+  book prefers over the admitted budget mid-flight, so an unclamped one is the way around this whole section.
   `oidc.py::resolve_access_state` (re-read live; the one derivation, which the browser reads as
   `MeResponse.access_state`) answers
   `blocked` only for an email the operator has revoked; a `blocked` account resolves to an EMPTY
@@ -272,7 +276,7 @@ Waiting is bounded by `Settings.QUEUE_MAX_WAIT_S`, and a launch can be withdrawn
 (`cancel-queued-run`) — a queue with no way out is a trap, and `pause-cycle` cannot serve one, since
 a queued mint has no cycle to write a flag into. **Only the principal that launched it may
 withdraw it**, whatever capability the caller holds: the job is filed under
-`acting_principal_id`, never under the account, because a delegate acts in its delegator's account
+`shared/identity.py::acting_principal`'s id, never under the account, because a delegate acts in its delegator's account
 and would otherwise own every launch there. A launch refused AFTER its wait — the backend down, the
 wallet short, the wait expired — writes its reason onto the job, and `machine-status` serves it
 back to that same principal (`refused`).

@@ -4,24 +4,26 @@ Two questions with two scopes. What the deployment OFFERS (`settings.DATASET_OFF
 account but the host's: the host (the terminal, an embedded host program, the claimed browser
 account) runs the whole install. Whether a CHECK-IN can open one binds the draft alone: a draft is a
 table of labelled rows, so a verifier-graded bank has nothing to put in it and launches from `new`.
-The listing and the draft read both off the one row ladder (`loaders.resolve_dataset_items`), and
+The listing and the draft read both off the one row ladder (`loaders.resolve_bank`), and
 neither reads a row before the extra the dataset runs through is installed.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from promptpotter import connectors
 from promptpotter.application.datasets.loaders import (
-    fetch_dataset_items,
+    fetch_bank,
     has_source,
+    held_bank,
     source_extra,
 )
+from promptpotter.application.datasets.tabular_ingest import read_tabular
 from promptpotter.application.jobs.quota import spends_the_hosts_own_key
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
@@ -29,16 +31,18 @@ from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.dataset_start import DatasetStartBlock, DatasetUnstartableError, StartBlock
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
     ResolvedDataset,
     declared_backend_type,
-    held_rows,
     is_dataset_dir,
     resolve_dataset,
 )
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import DatasetAccessError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.extras import Extra, install_hint, installed
+
+if TYPE_CHECKING:
+    from promptpotter.application.datasets.draft_campaign import DraftCampaign
+    from promptpotter.domain.sample import Bank, Sample
 
 logger = logging.getLogger(__name__)
 
@@ -65,17 +69,17 @@ _EMPTY = DatasetStartBlock(
 )
 
 
-def labelled_rows(items: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+def labelled_rows(samples: Sequence[Sample]) -> list[dict[str, str]]:
     return [
-        {"query": str(it["query"]), "ground_truth": str(it["ground_truth"])}
-        for it in items
-        if it.get("query") and it.get("ground_truth")
+        {"query": s.query, "ground_truth": truth}
+        for s in samples
+        if s.query and (truth := s.ground_truth)
     ]
 
 
-def rows_block(items: Sequence[Mapping[str, Any]]) -> DatasetStartBlock | None:
+def rows_block(samples: Sequence[Sample]) -> DatasetStartBlock | None:
     """The one reading of whether a check-in can hold these rows."""
-    if all_verifier_graded(it.get("ground_truth") for it in items):
+    if all_verifier_graded(s.ground_truth for s in samples):
         return DatasetStartBlock(
             reason=StartBlock.VERIFIER_GRADED,
             explanation=(
@@ -83,7 +87,7 @@ def rows_block(items: Sequence[Mapping[str, Any]]) -> DatasetStartBlock | None:
                 "it is launched from the command line, not from here."
             ),
         )
-    return None if labelled_rows(items) else _EMPTY
+    return None if labelled_rows(samples) else _EMPTY
 
 
 def dataset_extra(dataset_dir: Path) -> Extra | None:
@@ -116,12 +120,10 @@ def _extra_block(dataset_dir: Path) -> DatasetStartBlock | None:
     )
 
 
-def _held_block(
-    dataset_dir: Path, held: Sequence[Mapping[str, Any]] | None
-) -> DatasetStartBlock | None:
+def _held_block(dataset_dir: Path, held: Bank | None) -> DatasetStartBlock | None:
     """Over the rows the account HOLDS; one not held opens on a fetch, which needs a source."""
     if held is not None:
-        return rows_block(held)
+        return rows_block(held.samples)
     return None if has_source(dataset_dir) else _EMPTY
 
 
@@ -140,7 +142,7 @@ def dataset_reading(stores: Stores, name: str) -> DatasetReading:
     if (block := _extra_block(dataset_dir)) is not None:
         return DatasetReading(None, block)
     try:
-        held = held_rows(stores, dataset)
+        held = held_bank(stores, dataset)
     except DatasetUnstartableError as exc:
         # A state of THIS install, not a fault: the same refusal opening it answers with.
         return DatasetReading(None, exc.block)
@@ -153,23 +155,35 @@ def dataset_reading(stores: Stores, name: str) -> DatasetReading:
                 explanation="Its samples could not be read on this install.",
             ),
         )
-    return DatasetReading(None if held is None else len(held), _held_block(dataset_dir, held))
+    n_held = None if held is None else len(held.samples)
+    return DatasetReading(n_held, _held_block(dataset_dir, held))
 
 
-def checkin_items(stores: Stores, name: str) -> list[dict[str, Any]]:
+def checkin_bank(stores: Stores, name: str) -> Bank:
     """The bank a check-in opens on, refused with the reason the listing serves."""
     dataset = resolve_dataset(stores, name)
     if (block := _extra_block(dataset.directory)) is not None:
         raise DatasetUnstartableError(name, block)
-    held = held_rows(stores, dataset)
+    held = held_bank(stores, dataset)
     if (block := _held_block(dataset.directory, held)) is not None:
         raise DatasetUnstartableError(name, block)
     if held is not None:
         return held
-    fetched = fetch_dataset_items(stores, dataset)
-    if (block := rows_block(fetched)) is not None:
+    fetched = fetch_bank(stores, dataset)
+    if (block := rows_block(fetched.samples)) is not None:
         raise DatasetUnstartableError(name, block)
     return fetched
+
+
+def checkin_rows(stores: Stores, draft: DraftCampaign) -> list[dict[str, str]]:
+    upload = stores.drafts.upload_of(draft.draft_id)
+    if upload is not None:
+        path = stores.tenant_datasets.upload_path(upload)
+        return list(read_tabular(path.read_bytes(), path.name).rows)
+    name = draft.source_dataset
+    if name is None:
+        raise PayloadInvalidError(f"draft {draft.draft_id!r} names neither an upload nor a dataset")
+    return labelled_rows(checkin_bank(stores, name).samples)
 
 
 def _offer() -> dict[str, Path]:
@@ -197,7 +211,8 @@ def offer_faults() -> list[str]:
 
 __all__ = [
     "DatasetReading",
-    "checkin_items",
+    "checkin_bank",
+    "checkin_rows",
     "dataset_extra",
     "dataset_reading",
     "labelled_rows",

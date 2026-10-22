@@ -2,28 +2,18 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
-from promptpotter.application.maintenance.reset import ResetPlan, apply_reset, plan_reset
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.infrastructure.store.io import iter_files
-from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
+from promptpotter.application.account import registered_or_default_identity
+from promptpotter.application.maintenance.reset import (
+    ResetPlan,
+    apply_reset,
+    plan_reset,
+    size_tag,
+)
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, SHARED_CACHE_DIRS
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.parsers import identity_from_args
 
 __all__ = ["cmd_reset"]
-
-
-def _size_tag(path: Path) -> str:
-    try:
-        if path.is_file():
-            return f"  ({path.stat().st_size:,} B)"
-        if path.is_dir():
-            sizes = [st.st_size for _p, st in iter_files(path)]
-            return f"  ({len(sizes):,} files / {sum(sizes) / 1_048_576:.1f} MiB)"
-    except OSError:
-        pass
-    return ""
 
 
 def _render_summary(plan: ResetPlan) -> str:
@@ -36,12 +26,12 @@ def _render_summary(plan: ResetPlan) -> str:
             continue
         if tenant.drop:
             lines.append("  drop:")
-            lines.extend(f"    - {p.name}{_size_tag(p)}" for p in tenant.drop)
+            lines.extend(f"    - {p.name}{size_tag(p)}" for p in tenant.drop)
         else:
             lines.append("  drop: (nothing — already clean)")
         if tenant.preserve:
             lines.append("  preserve:")
-            lines.extend(f"    + {p.name}{_size_tag(p)}" for p in tenant.preserve)
+            lines.extend(f"    + {p.name}{size_tag(p)}" for p in tenant.preserve)
         if tenant.unrecognized:
             lines.append(
                 "  unrecognized (preserved by default — name them in maintenance/reset.py::_DROP_NAMES if you want them gone):"
@@ -55,7 +45,7 @@ def _render_summary(plan: ResetPlan) -> str:
     if plan.sandboxes:
         sandbox_lines.append("inner sandboxes (off-tree, dropped with their spend banked):")
         sandbox_lines.extend(
-            f"    - {target.sandbox.name}  [{target.owner.campaign_id}]{_size_tag(target.sandbox)}"
+            f"    - {target.sandbox.name}  [{target.owner.campaign_id}]{size_tag(target.sandbox)}"
             for target in plan.sandboxes
         )
     if plan.unattributable_sandboxes:
@@ -71,7 +61,9 @@ def _render_summary(plan: ResetPlan) -> str:
 async def cmd_reset(args: argparse.Namespace) -> CommandResult:
     plan = plan_reset(
         DEFAULT_PROJECTS_ROOT,
-        tenant_id=None if args.all_tenants else identity_from_args(args).tenant_id,
+        tenant_id=None
+        if args.all_tenants
+        else registered_or_default_identity(args.tenant).tenant_id,
     )
     tenants = [str(tenant.workspace) for tenant in plan.tenants]
     drops = plan.drops
@@ -120,7 +112,8 @@ async def cmd_reset(args: argparse.Namespace) -> CommandResult:
             f"reset: dropped {len(drops)} path(s), including {len(plan.sandboxes)} inner "
             f"sandbox(es).\n"
             f"{kept_note}"
-            f"preserved: {', '.join(d + '/' for d in SHARED_CACHE_DIRS)} — the paid caches.\n"
+            f"preserved: the archive home's paid caches "
+            f"({', '.join(d + '/' for d in SHARED_CACHE_DIRS)}).\n"
             "banked: each campaign's spend plus every sandbox's unforwarded residue, onto the "
             "workspace ledger — a reset drops the data, never the money.\n"
             "next: `python -m promptpotter new <name>` (from datasets/<name>/)."

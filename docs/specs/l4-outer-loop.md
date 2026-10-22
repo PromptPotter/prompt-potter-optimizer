@@ -21,12 +21,13 @@ linear in accuracy points, so the paired estimator's effect IS the mean held-out
 not merely to order by. `scoring.per_cell` may then weigh each cell by its wall clock against a fixed
 anchor; the reason is the comment beside it in `dataset.yaml`.
 
-`mean_round_delta` — the same trajectory read on the SEARCH pool, in logits on one ability ruler
-(`rasch.py::parent_level_trajectory`) — is served beside it on every cell and scores nothing.
+`mean_round_delta` — the same trajectory read on the SEARCH split, in logits on one ability ruler
+(`difficulty.py::DifficultyView.level_series`) — is an `InnerCellFacts` fact and scores nothing; it is
+null, with `series_reason` saying why, wherever that series differences nothing.
 
 - **Held out, not in-sample.** The inner optimizer promotes on a point estimate over a small panel, so a
   variant that restates its parent, or moves a parameter that does not bind, is promoted on retest churn
-  and moves the search pool's θ a full step (`inner_review.md` of any banked cell shows it). Read on fresh
+  and moves the search split's θ a full step (`inner_review.md` of any banked cell shows it). Read on fresh
   rows that promotion is ≈0 in expectation, which is what the outer arm should be paid for it. A real
   edit lifts both; only the held-out lift separates the two, and within-cell selection bias is part of the
   inner optimizer's behaviour, so it may not score.
@@ -44,20 +45,22 @@ anchor; the reason is the comment beside it in `dataset.yaml`.
   series length makes the denominator a per-cell quantity, and since a panel's `inner_lives` stops a
   *stalling* cell, the short series is the one that lifted early and went quiet — it would be divided by
   its own brake. A round whose selection pass read nothing is a hole, and a cell with a hole is EXCLUDED
-  (`no_evidence_reason`), never held forward: a pass nobody read is not a level.
+  (`no_evidence_reason`), never held forward: a pass nobody read is not a level. A θ series that
+  differences nothing excludes no cell, since it scores nothing.
 - **No difficulty denominator, and the θ reading is paired on one ruler.** Every θ level is on the δ ruler
   of its cell's dataset, shared by every cell measuring it (`domain/ruler.py::RulerScope`), so two levels
   on one dataset already sit on one interval scale across seeds of different origin strength. Per-cell
   difficulty is modelled where it belongs: the round-winner election and PoBB, which fit an explicit
-  per-cell δ. `application/runner/inner/ruler.py` fits the scale at the outer round boundary and hands it
-  down: a cell left to derive its own sees only its own arms, so its scale comes out of the treatment.
+  per-cell δ. Every cell reads the tenant ruler at the version its outer round opened on
+  (`archive_queries.py::CellOf`), less its own parent line, so no cell's scale comes out of the treatment.
   The held-out lift needs none of this: both ends are read on the same rows of one cell.
 - **The row carries the seed's whole trajectory, and only ONE term of it scores.** An outer cell's
-  `pipeline_data` holds `mean_bench_lift` (the scored measurand), `mean_round_delta` beside it, plus
-  `InnerCellFacts` (`domain/l4/proxies.py`): that seed's origin level, where it ended, its peak, its
-  round count, its stop reason, the origin's held-out headline and where the held-out series ended, and
-  what its sends cost (`inner_sent_usd`: each at its provider's bill, else at our rate, so a provider
-  reporting no bill never reads as free). Those are REPORTING channels — what `evidence`'s Compare read
+  `pipeline_data` holds `mean_bench_lift` (the scored measurand) plus `inner`, one `InnerCellFacts`
+  (`domain/l4/inner_facts.py`) that the recursion alone writes, so a row carrying it IS an L4 outer row:
+  that seed's origin level, where it ended, its peak, `mean_round_delta` and its SE, its round count,
+  its stop reason, the origin's held-out headline and where the held-out series ended, and what its
+  sends cost (`sent_usd`: each at its provider's bill, else at our rate, so a provider reporting no
+  bill never reads as free). Those are REPORTING channels — what `evidence`'s Compare read
   and any panel may ask about a cell — and none of them is a scoring term; the bullet below records
   that peak and endpoint were measured as candidates for the measurand and lost.
 
@@ -81,7 +84,7 @@ anchor; the reason is the comment beside it in `dataset.yaml`.
   `floor_reason`, a collapsed arm is dropped from the election and eliminated at PoBB.
 - **One estimator per subtraction.** Reading the two ends of one difference through different estimators
   makes the shrinkage on the anchor move with the arm — a bias, which unlike noise does not average out over
-  a panel. `calibrate_delta_ruler` reads θ_C0 through the same conditional estimator on both branches. The
+  a panel. `bench/difficulty.py::DifficultyView.level_series` reads θ_C0 and every later level in one fit on one stamp. The
   residual anchor *wander* is measured and not worth buying out: within-seed r = +0.75, ~2% of the delta's
   variance for a ~3% spend increase.
 
@@ -96,7 +99,7 @@ exposed to.
   anchor-to-origin paired
   effect with its own interval, plus `EditSpread` — how far apart those effects are. Beside them, and
   answering at round 0 where the ranking cannot: whether the campaigns' levels are comparable at all
-  (`ruler_id`), which arms are replicates, the cell/subject/residual decomposition against the scatter a
+  (`ruler.id`), which arms are replicates, the cell/subject/residual decomposition against the scatter a
   subject mean shows under the null, and whether run order is confounded with outcome. Its per-round peer `PanelPrecision`
   reports one round's estimation noise beside its observed between-cell spread, off `mean_parent_level_se`.
   **Two bars, never their ratio**: a ratio clamped at 1.0 renders noise exceeding the spread it is a
@@ -126,15 +129,15 @@ exposed to.
 - **No knob changes mid-run.** The baselines are read per inner mint; an edit splits the run into two
   fingerprint families.
 - **The solver's SPEND AXES are the instrument, and the inner search writes prompt text alone.**
-  `runner/inner/tasks.py::inner_instrument_config` narrows every inner cell's solver node to
-  `PROMPT_STRING_FIELDS`, on any dataset, whatever the dataset's `optimizer.param_keys` open: the model
+  `runner/inner/tasks.py::inner_instrument_config` narrows every inner cell's prompt nodes to
+  their declared prompt fields, on any dataset, whatever the dataset's `optimizer.param_keys` open: the model
   and provider are the panel's ENVIRONMENT axis, and `reasoning_effort`, `max_tokens` and `temperature`
   are rails. A lift bought with more thinking or a longer output is known in advance and is not a
   property of the optimizer prompt; an arm that reaches one of them is a defect in the generator's edit
   vocabulary, never a finding.
 - **The held-out rows are unreachable by the inner search and identical across arms.** They are drawn
   from the rows the origin bank left, under the cell's seed, so every arm of a cell is read on the same
-  held-out rows and the search pool stays the bank `seed-screen` passed, byte for byte. A dataset must hold
+  held-out rows and the search split stays the bank `seed-screen` passed, byte for byte. A dataset must hold
   `n_samples_origin + n_samples_bench` rows or its cells are refused before anything is sent.
 - **A held-out ENVIRONMENT is the outer bench.** `dataset.yaml::panel` marks a task `held_out: true` and the
   connector seats it as a `bench_only` outer sample (`runner/inner/connector.py::_extract_experiment`), so no
@@ -176,14 +179,14 @@ exposed to.
   to ignore the panel is NOT the fix — the model ignores the clause.
 - **`L1Variant` is `extra="forbid"`.** A field a prompt set declares but the model lacks fails *every* outer
   variant at validation: the Pydantic model, both `answer_format`s and `resolved_schemas` move in ONE commit.
-- **`ceiling.tokens` stays `null`.** The rollup lands each inner campaign's tokens on the outer ledger as
+- **`budget.tokens` stays unbounded.** The rollup lands each inner campaign's tokens on the outer ledger as
   backend cost, so a normal-campaign token default trips after a couple of cells while the USD budget sits
-  untouched. `ceiling.usd` is the meaningful cap.
+  untouched. `budget.usd` is the meaningful cap.
 
 ## Cost
 
 Geometric: one outer round is `(1 origin + n_variants) × n_inner_tasks` fresh inner campaigns, each a full
-campaign whose optimizer calls are individually slow. **`ceiling.usd` is a cap, not an estimate** — and
+campaign whose optimizer calls are individually slow. **`budget.usd` is a cap, not an estimate** — and
 a cap too small to finish a round buys nothing, because an unclosed round scores no candidate. This page
 quotes no figure; re-measure before quoting a price to anyone.
 

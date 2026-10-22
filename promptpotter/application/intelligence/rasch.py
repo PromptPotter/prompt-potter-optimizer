@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -10,7 +9,6 @@ from numpy.typing import NDArray
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import decision_order
 from promptpotter.domain.ruler import (
-    AbilityReading,
     CalibrationModel,
     DeltaRuler,
     Ruler,
@@ -24,20 +22,13 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
 
-logger = logging.getLogger(__name__)
-
-# C0 inside the δ-calibrating fit; the archive's copies of the origin fold onto this one id.
-ORIGIN_ABILITY_ID = "__origin__"
-
 __all__ = [
-    "ORIGIN_ABILITY_ID",
     "Observation",
     "RaschPosterior",
     "RoundAbilities",
     "build_observations",
     "candidate_abilities",
     "dedup_observations",
-    "extend_ruler",
     "fit_rasch",
     "fit_rasch_2pl",
     "fit_theta",
@@ -45,7 +36,6 @@ __all__ = [
     "graded_response",
     "graduate_ruler_model",
     "observations_from_results",
-    "parent_level_trajectory",
     "responses_of",
     "select_round_subset",
     "theta_bounds_given_delta",
@@ -65,7 +55,7 @@ def graded_response(cell: GradedCell) -> float:
     """``objective``, never ``fitness``: the one place a formula's cost term reaches the election."""
     if cell.grade.objective is None:
         raise KeyError(
-            f"graded_response: the cell at slot {cell.sample_id} carries no objective. Only a "
+            f"graded_response: the cell of sample {cell.key} carries no objective. Only a "
             "cell ``Scorer.grade`` scored may be read here."
         )
     return min(max(cell.grade.objective, 0.0), 1.0)
@@ -73,31 +63,6 @@ def graded_response(cell: GradedCell) -> float:
 
 def responses_of(sheet: CellSheet) -> dict[str, float]:
     return {cell.key: graded_response(cell) for cell in sheet.scoreable}
-
-
-def parent_level_trajectory(
-    origin: AbilityReading | None,
-    winners: Sequence[AbilityReading | None],
-    ruler: DeltaRuler | None,
-) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
-    """The PARENT's level per round; a round off the origin's scale carries the previous one forward."""
-    if origin is None or origin.se is None or ruler is None or not ruler.delta:
-        return None, []
-    if origin.ruler_id != ruler.anchor_id:
-        logger.warning(
-            "origin ability sits on %s, not the cycle's ruler %s — no level series on this scale",
-            origin.scale(),
-            ruler.anchor_id,
-        )
-        return None, []
-    origin_pair = (origin.theta, origin.se)
-    prev = origin_pair
-    out: list[tuple[float, float]] = []
-    for level in winners:
-        if level is not None and level.se is not None and level.comparable_to(origin):
-            prev = (level.theta, level.se)
-        out.append(prev)
-    return origin_pair, out
 
 
 _INIT_SIGMA_THETA = 1.5
@@ -154,9 +119,10 @@ class RaschPosterior:
 
 @dataclass
 class RoundAbilities(RaschPosterior):
-    """``parent`` is its ``(θ, se)`` on the arms' δ; ``None`` is an absence, never a logit-0 floor."""
+    """``bar`` is, per arm, the parent's ``(θ, se)`` it is judged against; an arm absent from it
+    has no bar, never a logit-0 floor."""
 
-    parent: tuple[float, float] | None = None
+    bar: dict[str, tuple[float, float]] = field(default_factory=dict)
 
 
 def _map_fit(
@@ -396,53 +362,6 @@ def theta_bounds_given_delta(
     return low, high, float(np.sqrt(phi) / np.sqrt(info))
 
 
-def extend_ruler(
-    ruler: DeltaRuler,
-    observations: list[Observation],
-    *,
-    history: list[Observation],
-    max_iter: int = 50,
-    tol: float = 1e-4,
-) -> DeltaRuler:
-    """Fixed-common-item link: a written δ never moves or re-anchors, and a cell no anchored arm answered stays OFF it."""
-    seen = dedup_observations(history, observations)
-    inv_var = 1.0 / (ruler.sigma_delta * ruler.sigma_delta)
-    while True:
-        # `_INIT_SIGMA_THETA`, not `ruler.sigma_theta`: regularized as the election's own θ read is.
-        theta = fit_theta_given_delta(seen, ruler.entries())
-
-        by_s: dict[str, list[tuple[float, float]]] = {}
-        for o in seen:
-            arm = theta.get(o.candidate_id)
-            if o.key in ruler.delta or arm is None:
-                continue
-            by_s.setdefault(o.key, []).append((arm[0], o.response))
-        if not by_s:
-            return ruler
-
-        delta = dict(ruler.delta)
-        delta_se = dict(ruler.delta_se)
-        for key, rows in by_s.items():
-            t_arr = np.fromiter((t for t, _ in rows), dtype=np.float64)
-            y_arr = np.fromiter((y for _, y in rows), dtype=np.float64)
-            d = ruler.mu_delta
-            for _ in range(max_iter):
-                p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
-                grad = -float(np.sum(y_arr - p)) - inv_var * (d - ruler.mu_delta)
-                info = float(np.sum(p * (1.0 - p))) + inv_var
-                step = float(_newton_step(grad, info))
-                d += step
-                if abs(step) < tol:
-                    break
-            p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
-            info = float(np.sum(p * (1.0 - p))) + inv_var
-            delta[key] = d
-            delta_se[key] = float(1.0 / np.sqrt(max(info, 1e-9)))
-
-        # A new cell keeps a ≡ 1 even under 2PL: one round's arms cannot identify a discrimination.
-        ruler = ruler.model_copy(update={"delta": delta, "delta_se": delta_se})
-
-
 # log(aₛ) ~ N(0, σ_a²): collapses 2PL to 1PL absent evidence and identifies a against θ/δ spread.
 _SIGMA_LOG_A = 0.5
 _LOG_A_CLIP = 3.0
@@ -642,7 +561,11 @@ def observations_from_results(sheets_by_id: Mapping[str, CellSheet]) -> list[Obs
 
 
 def build_observations(rounds: list[RoundResult]) -> list[Observation]:
-    return [o for rr in rounds for o in observations_from_results(rr.all_candidate_results)]
+    return [
+        o
+        for rr in rounds
+        for o in observations_from_results({key: rr.rows(key) for key in rr.panel})
+    ]
 
 
 def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
@@ -659,25 +582,44 @@ def candidate_abilities(
     parent_results: CellSheet,
     ruler: DeltaRuler | None,
 ) -> RoundAbilities:
-    """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows."""
+    """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows.
+    Cold, flat δ adjusts for no difficulty, so each arm and its bar are read on the cells both
+    answered; warm, δ does, and the bar is the parent on all of its cells."""
     entries = ruler.entries() if ruler is not None else None
-    fit = fit_theta_given_delta(observations_from_results(results_by_id), entries)
+    parent = responses_of(parent_results)
+    whole = fit_theta(parent, entries)
+    theta: dict[str, float] = {}
+    theta_se: dict[str, float] = {}
+    bar: dict[str, tuple[float, float]] = {}
+    for cid, sheet in results_by_id.items():
+        own = responses_of(sheet)
+        if entries is None:
+            own = {key: y for key, y in own.items() if key in parent}
+            against = fit_theta({key: parent[key] for key in own}, None)
+        else:
+            against = whole
+        if (read := fit_theta(own, entries)) is None:
+            continue
+        theta[cid], theta_se[cid] = read
+        if against is not None:
+            bar[cid] = against
     split = {key: ruler_entry(v) for key, v in (entries or {}).items()}
     return RoundAbilities(
-        theta={cid: t for cid, (t, _) in fit.items()},
-        theta_se={cid: se for cid, (_, se) in fit.items()},
+        theta=theta,
+        theta_se=theta_se,
         delta={key: d for key, (d, _) in split.items()},
         delta_se={},
         discrimination={key: a for key, (_, a) in split.items() if a != 1.0},
-        parent=fit_theta(responses_of(parent_results), entries),
+        bar=bar,
     )
 
 
 def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> float | None:
     theta_c = abilities.theta.get(candidate_id)
-    if theta_c is None or abilities.parent is None:
+    bar = abilities.bar.get(candidate_id)
+    if theta_c is None or bar is None:
         return None
-    return theta_c - abilities.parent[0]
+    return theta_c - bar[0]
 
 
 def select_round_subset(
@@ -687,11 +629,10 @@ def select_round_subset(
     *,
     ruler: DeltaRuler | None = None,
     anchor_floor: int = 0,
-    leader_ids: Collection[str] | None = None,
     worth: Mapping[int, float],
 ) -> list[Sample]:
     """Never ``fit_rasch`` here: the δ that CHOOSES the cells is the locked δ that SCORES them."""
-    # `leader_ids` bounds the target θ to this race: *observations* carries the whole archive.
+    # *observations* are the race's own: its best θ is the target, never another run's.
     # `worth` is each cell's information per unit price; a cell it omits stands at the median.
     if budget <= 0 or not bank:
         return []
@@ -709,13 +650,8 @@ def select_round_subset(
     delta_se_map = {sid: ruler.delta_se.get(s.key, ruler.sigma_delta) for sid, s in by_id.items()}
     anchored = {sid for sid, s in by_id.items() if s.key in ruler.delta}
     theta = fit_theta_given_delta(observations, ruler.entries())
-    in_race = (
-        [ts for cid, ts in theta.items() if cid in leader_ids]
-        if leader_ids is not None
-        else list(theta.values())
-    )
-    if in_race:
-        leader_theta, leader_se = max(in_race, key=lambda ts: ts[0])
+    if theta:
+        leader_theta, leader_se = max(theta.values(), key=lambda ts: ts[0])
         leader_var = leader_se**2
     else:
         leader_theta, leader_var = 0.0, _INIT_SIGMA_THETA**2

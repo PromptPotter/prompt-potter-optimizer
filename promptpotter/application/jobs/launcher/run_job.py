@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import subprocess
 import sys
@@ -25,9 +26,12 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import HeldLimits, RunMode
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.spend import HeldBudget
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.io import write_text
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import IdentityContext
@@ -49,6 +53,8 @@ if sys.platform == "win32":
 else:
     _DETACHED = {"start_new_session": True}
 _WATCH_POLL_S = 1.0
+# The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
+_LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
 
 
 class JobSpec(StrictModel):
@@ -59,7 +65,7 @@ class JobSpec(StrictModel):
     hop: CycleHop
     mode: RunMode
     identity: IdentityContext
-    limits: HeldLimits
+    budget: HeldBudget
     jobs_dir: Path
     projects_root: Path
     shared_root: Path
@@ -106,7 +112,7 @@ async def run_held_job(
     campaign_config: CampaignConfig,
     *,
     mode: RunMode,
-    limits: HeldLimits,
+    budget: HeldBudget,
     readout_sink: Callable[[str], None] | None = None,
 ) -> tuple[CycleResult, RunObservers]:
     job_registry.mark_started(job_id)
@@ -120,12 +126,12 @@ async def run_held_job(
         raise
     try:
         result = await run_optimization(
-            session.samples,
+            list(session.bank.samples),
             campaign_config,
             session=session,
             observers=observers,
             mode=mode,
-            limits=limits,
+            budget=budget,
         )
     except BaseException as exc:
         # An interrupt is the pause flag's SYNTHETIC one, its pause already declared; anything else
@@ -153,7 +159,7 @@ class HeldRun:
     job_id: str
     session: Session
     campaign_config: CampaignConfig
-    limits: HeldLimits
+    budget: HeldBudget
 
     @classmethod
     def of(
@@ -161,7 +167,7 @@ class HeldRun:
         job_registry: JobRegistry,
         job_id: str,
         session: Session,
-        limits: HeldLimits,
+        budget: HeldBudget,
     ) -> HeldRun:
         """For a preamble that MINTS the manifest: the config it reads back as, which a detached run rebuilds, not the one it was made from."""
         stores, hop = session.store, session.hop
@@ -172,7 +178,7 @@ class HeldRun:
             job_id=job_id,
             session=session,
             campaign_config=resolve_campaign_config(stores, campaign, hop),
-            limits=limits,
+            budget=budget,
         )
 
     def job_spec(self, mode: RunMode) -> JobSpec:
@@ -182,7 +188,7 @@ class HeldRun:
             hop=self.session.hop,
             mode=mode,
             identity=stores.identity,
-            limits=self.limits,
+            budget=self.budget,
             jobs_dir=self.job_registry.jobs_dir,
             projects_root=stores.projects_root,
             shared_root=stores.shared_root,
@@ -195,13 +201,17 @@ class HeldRun:
     async def run_inline(
         self, *, mode: RunMode, readout_sink: Callable[[str], None] | None
     ) -> tuple[CycleResult, RunObservers]:
+        session = self.session
+        readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
+        with contextlib.suppress(OSError):
+            write_text(_LATEST_READOUT_POINTER, f"{readout}\n")
         return await run_held_job(
             self.job_registry,
             self.job_id,
             self.session,
             self.campaign_config,
             mode=mode,
-            limits=self.limits,
+            budget=self.budget,
             readout_sink=readout_sink,
         )
 
@@ -244,7 +254,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
             session,
             campaign_config,
             mode=spec.mode,
-            limits=spec.limits,
+            budget=spec.budget,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         return StopOutcome.PAUSED

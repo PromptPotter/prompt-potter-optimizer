@@ -88,11 +88,11 @@ class PairwiseComparison(StrictModel):
         description="The same pair on the hit grade, whatever metric the read selected, on the "
         "cells both graded: its headline's `flips` are what a level nets against each other.",
     )
-    gained: list[int] = Field(
+    gained: list[str] = Field(
         description="The cells `hit` counts as gained — `subject_a` missed, `subject_b` hit — "
-        "as sample ids in `subject_b`'s numbering.",
+        "as `Sample.key`s.",
     )
-    lost: list[int] = Field(description="The cells `hit` counts as lost, numbered the same way.")
+    lost: list[str] = Field(description="The cells `hit` counts as lost, as `Sample.key`s.")
 
 
 class MetricReading(StrictModel):
@@ -269,7 +269,6 @@ def _pairwise(
     (hit,) = (m for m in grade_measurands(measurand.scorer_id) if m.binary)
     out: list[PairwiseComparison] = []
     for (a, b), reading in zip(pairs, readings, strict=True):
-        numbered = {key: cell.sample_id for key, cell in members[b].rows.sheet.by_key().items()}
         flips = flipped_keys(members[a].rows.by_key(), members[b].rows.by_key())
         out.append(
             PairwiseComparison(
@@ -277,8 +276,8 @@ def _pairwise(
                 subject_b=b,
                 reading=reading,
                 hit=pair_subjects(members[a], members[b], hit),
-                gained=[numbered[key] for key in flips.gained],
-                lost=[numbered[key] for key in flips.lost],
+                gained=flips.gained,
+                lost=flips.lost,
             )
         )
     return out
@@ -294,9 +293,9 @@ def _row_verdicts(rows: list[SubjectReading]) -> list[_RowVerdict]:
     if not rows:
         return []
     majority_dataset = Counter(r.dataset_name for r in rows).most_common(1)[0][0]
-    stamped = [r.ability for r in rows if r.ability is not None and r.ability.ruler_id is not None]
-    majority_id = Counter(a.ruler_id for a in stamped).most_common(1)[0][0] if stamped else None
-    majority = next((a for a in stamped if a.ruler_id == majority_id), None)
+    stamped = [r.ability for r in rows if r.ability is not None]
+    majority_id = Counter(a.ruler.id for a in stamped).most_common(1)[0][0] if stamped else None
+    majority = next((a for a in stamped if a.ruler.id == majority_id), None)
 
     def verdict(row: SubjectReading) -> _RowVerdict:
         if row.dataset_name != majority_dataset:
@@ -308,7 +307,7 @@ def _row_verdicts(rows: list[SubjectReading]) -> list[_RowVerdict]:
                 f"question, so nothing here pairs and only its own level is readable.",
             )
         # Unknown, never a yes: an unstamped origin may sit on any scale.
-        if row.ability is None or row.ability.ruler_id is None or majority is None:
+        if row.ability is None or majority is None:
             return _RowVerdict(None, "ruler_unstamped", "")
         if not row.ability.comparable_to(majority):
             return _RowVerdict(
@@ -359,18 +358,18 @@ _SELECTION_VERDICT: dict[ComparabilityReason, tuple[bool | None, str]] = {
     ),
     "ruler_unstamped": (
         None,
-        "Comparability UNKNOWN — at least one origin carries no δ ruler, which is not "
+        "Comparability UNKNOWN — at least one subject carries no level on a δ ruler, which is not "
         "the same as yes. Absolute levels above may sit on different δ scales: pair on cells, "
         "do not read the value column across campaigns.",
     ),
     "rulers_differ": (
         False,
-        "Comparability NO — these origins were measured on different δ rulers, so their "
+        "Comparability NO — these subjects' levels were read on different δ rulers, so their "
         "absolute values are not one quantity. Only within-ruler comparisons hold.",
     ),
     "one_ruler": (
         True,
-        "Comparability YES — these origins were measured on one δ ruler, so their values are "
+        "Comparability YES — these subjects' levels were read on one δ ruler, so their values are "
         "directly comparable.",
     ),
 }

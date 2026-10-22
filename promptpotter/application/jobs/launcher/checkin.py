@@ -4,31 +4,43 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from promptpotter.application.datasets.draft_campaign import DraftCampaign, load_checkin_draft
-from promptpotter.application.datasets.origin_readiness import save_checkin_draft
+from pydantic import Field
+
+from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_draft
+from promptpotter.application.datasets.loaders import cut_bank
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
+    claim_cycle,
     release_slot,
 )
 from promptpotter.application.jobs.launcher.mint_and_start import (
     LaunchError,
     assert_origin_ready,
-    materialize_and_write_origin,
+    commit_upload_definition,
     persist_origin_candidate_library,
+    upload_source,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (
-    finalize_checkin_to_active,
-    mint_checkin_skeleton,
+    MintedCycle,
+    declare,
+    fresh_campaign_id,
+    mint,
+    refuse_unrunnable,
+    relabel_minted,
     resolve_cycle_plan,
 )
-from promptpotter.application.pipeline_resolve import checkin_campaign_config
+from promptpotter.application.jobs.registry import UNRESOLVED_HOP
+from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
+from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import LaunchLimits
+from promptpotter.domain.opt_search_point import NodePrompt
+from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.checkin_draft_store import dataset_source_of
-from promptpotter.infrastructure.store.stores import Stores, owned_campaign
+from promptpotter.infrastructure.store.draft_store import DraftClaim
+from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
@@ -38,116 +50,128 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def create_checkin_campaign(
-    stores: Stores,
-    *,
-    draft: DraftCampaign,
-    bank_items: list[dict[str, Any]],
-    source_file: str = "",
-    headers: tuple[str, ...] = (),
-) -> tuple[str, str, DraftCampaign]:
-    hop = mint_checkin_skeleton(stores, slug=draft.slug, backend_type=draft.connector)
-    campaign_id = hop.campaign_id
-    # The bank lands FIRST: ``write_resolution`` patches ``cache.json`` and no-ops without one.
-    stores.checkin.write_bank(
-        campaign_id, bank_items, source_file=source_file or draft.source_file, headers=headers
-    )
-    return campaign_id, hop.cycle_id, save_checkin_draft(stores, draft.patch(draft_id=campaign_id))
-
-
 class StartCheckinResponse(StrictModel):
-    """What a Start answers: the campaign, the cycle its loop runs and the job holding its slot."""
+    """What a Start answers: the job holding its slot, and the cycle it minted."""
 
-    campaign_id: str
-    cycle_id: str
     job_id: str
+    hop: CycleHop | None = Field(
+        description="Null while the job is queued: the campaign is minted once it holds a slot."
+    )
 
 
-def load_checkin_for_start(stores: Stores, campaign_id: str) -> tuple[CycleHop, DraftCampaign]:
-    campaign = owned_campaign(stores, campaign_id)
-    if not stores.campaigns.in_checkin(campaign.root_hop):
-        raise LaunchError(f"campaign {campaign_id} is not in check-in — its origin is committed")
-    draft = load_checkin_draft(stores, campaign_id)
-    if draft is None:
-        raise LaunchError(f"campaign {campaign_id} has no check-in working state to start")
+def start_ready_draft(stores: Stores, draft_id: str) -> DraftCampaign:
+    """The draft as Start reads it, every time it reads it: by id, under the claim."""
+    draft = owned_draft(stores, draft_id)
     assert_origin_ready(draft)
-    return campaign.root_hop, draft
+    return draft
 
 
 @dataclass(frozen=True, slots=True)
 class CheckinStart:
+    """Carries the claim, never the draft: the claim refuses every edit until the mint closes."""
+
     verb: ClassVar[str] = "start-checkin"
 
-    hop: CycleHop
-    draft: DraftCampaign
-    limits: LaunchLimits
+    claim: DraftClaim
+    # The queue's label alone; every decision reads the draft.
+    slug: str
+    budget: Budget
+
+    @property
+    def hop(self) -> CycleHop:
+        return UNRESOLVED_HOP
+
+    @property
+    def step_rounds(self) -> None:
+        return None
 
     @property
     def dataset_name(self) -> str:
-        return self.draft.slug
+        return self.slug
 
     def backend_type(self, stores: Stores) -> str:
-        return self.draft.connector
+        return owned_draft(stores, self.claim.draft_id).connector
 
     def campaign_config(self, stores: Stores) -> CampaignConfig:
-        return checkin_campaign_config(stores, self.draft)
+        return draft_config(stores, owned_draft(stores, self.claim.draft_id))
 
 
-async def _commit_checkin(stores: Stores, request: CheckinStart) -> Session:
-    hop, draft = request.hop, request.draft
-    canonical = dataset_source_of(draft.source_file)
+def _refuse_unrunnable_upload(stores: Stores, draft: DraftCampaign, source: dict[str, Any]) -> None:
+    """Before the dataset lands, so a refused Start takes no slug and its retry is a Start like the first."""
+    params, schema = draft_pipeline(stores, draft)
+    refuse_unrunnable(draft_config(stores, draft), cut_bank(stores, source), params, schema)
+
+
+async def _commit_checkin(stores: Stores, draft_id: str) -> tuple[Session, MintedCycle]:
+    draft = start_ready_draft(stores, draft_id)
+    canonical = draft.source_dataset
     if canonical is None:
         if stores.tenant_datasets.slug_exists(draft.slug):
             raise LaunchError(
                 f"slug collision at start: {draft.slug!r} already exists in this tenant's collection"
             )
-        bank = stores.checkin.load_bank(hop.campaign_id)
-        if bank is None:
-            raise LaunchError(f"campaign {hop.campaign_id} has no sample bank to materialize")
-        materialize_and_write_origin(stores, draft, bank_items=list(bank["items"]))
+        upload = stores.drafts.upload_of(draft.draft_id)
+        if upload is None:
+            raise LaunchError(f"draft {draft.draft_id} names no upload to commit")
+        source = upload_source(draft, upload)
+        _refuse_unrunnable_upload(stores, draft, source)
+        commit_upload_definition(stores, draft, source=source)
         dataset_name = draft.slug
         origin_override = None
     else:
         persist_origin_candidate_library(stores, canonical, draft)
         dataset_name = canonical
         # An origin authored over an existing slug writes no dataset: only the override carries it.
-        authored = any(str(value).strip() for value in draft.origin_prompt_fields.values())
-        # `committed_prompt_fields` rather than the raw dict, or the label enumeration is lost.
-        origin_override = draft.committed_prompt_fields() if authored else None
+        # `committed_prompts` rather than the raw map, or the label enumeration is lost.
+        origin_override = (
+            {step: NodePrompt(fields=f) for step, f in draft.committed_prompts().items()}
+            if draft.authored_prompts()
+            else None
+        )
 
     session = await init_services(
-        dataset_name=dataset_name,
-        identity=stores.identity,
-        stores=stores,
+        dataset_name=dataset_name, identity=stores.identity, stores=stores
     )
-
-    campaign_config = checkin_campaign_config(
+    campaign_config = draft_config(
         stores, draft, session_chain=[n.name for n in session.pipeline_schema.nodes]
     )
-
     plan = resolve_cycle_plan(
-        session, campaign_config, session.samples, origin_override=origin_override
+        session,
+        declare(session, campaign_config, purpose=Optimize()),
+        session.bank.samples,
+        origin_override=origin_override,
+        hop=None,
     )
-
-    finalize_checkin_to_active(session, campaign_config, hop=hop, cycle_plan=plan)
-    return session
+    ledger = stores.drafts.ledger(draft.draft_id)
+    minted = mint(
+        session,
+        plan,
+        campaign_id=fresh_campaign_id(session),
+        billed=ledger if ledger.is_file() else None,
+    )
+    relabel_minted(session)
+    stores.drafts.close(draft.draft_id)
+    return session, minted
 
 
 async def hold_checkin_start(
     request: CheckinStart, *, stores: Stores, job_registry: JobRegistry, job: Job
 ) -> HeldRun:
-    """Nothing before the slot is HELD touches the campaign: a refusal leaves the check-in as it was."""
-    hop = request.hop
-    # The cycle a failure stamps: none until admission passed, since nothing before it wrote one.
-    committing: CycleHop | None = None
+    """Nothing before the slot is HELD touches the draft, and the claim ends with this Start however it ends."""
+    hop: CycleHop | None = None
     try:
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
-        committing = hop
-        session = await _commit_checkin(stores, request)
+        session, minted = await _commit_checkin(stores, request.claim.draft_id)
+        hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
+        job_registry.update_target(job.job_id, hop=hop)
+        claim_cycle(stores, job_registry, job, hop)
     except BaseException as exc:
-        # `_commit_checkin` flips to `active` before its last await: an interrupt stamps the CYCLE too.
-        release_slot(job_registry, job.job_id, exc, stores=stores, hop=committing)
+        if isinstance(exc, BackendUnreachableError):
+            exc.details["draft_id"] = request.claim.draft_id
+        release_slot(job_registry, job.job_id, exc, stores=stores, hop=hop)
         raise
+    finally:
+        request.claim.release()
 
     logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
     return HeldRun.of(job_registry, job.job_id, session, held)
@@ -156,7 +180,6 @@ async def hold_checkin_start(
 __all__ = [
     "CheckinStart",
     "StartCheckinResponse",
-    "create_checkin_campaign",
     "hold_checkin_start",
-    "load_checkin_for_start",
+    "start_ready_draft",
 ]

@@ -15,7 +15,7 @@ from promptpotter.domain.connector import (
 from promptpotter.domain.pipeline_schema import NodeRole, NodeSpendBound
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.value_tree import Delivery
-from promptpotter.infrastructure.llm.send_pacing import CELL_WAIT_S, SEND_ATTEMPTS
+from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.shared.extras import Extra
 
 if TYPE_CHECKING:
@@ -80,6 +80,15 @@ def _in_the_request(pipeline_params: dict[str, Any] | None) -> Delivery:
     return "request"
 
 
+def cell_envelope_of(seconds: float) -> CellEnvelopeSeconds:
+    """One envelope for every cell of a backend whose cells do not vary in length."""
+
+    def envelope(sample: Sample, pipeline_params: dict[str, Any] | None) -> float:
+        return seconds
+
+    return envelope
+
+
 # The experiment-file key; its value is a scope out of `Connector.package_cache_scopes`.
 PACKAGE_CACHE_KEY = "package_cache"
 
@@ -90,6 +99,9 @@ class Connector:
     """Lowercase; matches ``dataset.yaml::pipeline.backend_type``."""
 
     wire_adapter: WireAdapter
+
+    cell_envelope_s: CellEnvelopeSeconds
+    """Bounds the SUM of one cell's awaits; reaching it is ``ErrorCategory.HALTED``, never a zero."""
 
     session_factory: Callable[[], SessionProtocol] = NoopSession
     """Called per ``BackendClient``: a session holds per-client state."""
@@ -131,17 +143,11 @@ class Connector:
     cancel_stops_billing: bool = False
     """``False``: a sent cell is left to land, since the provider bills it whether or not anyone waits."""
 
-    cell_envelope_s: CellEnvelopeSeconds | None = None
-    """Bounds the SUM of one cell's awaits; reaching it is ``ErrorCategory.HALTED``, never a zero."""
-
     cell_hop: CellHop | None = None
     """Rides the cell's ONE heartbeat as an ADDRESS, so a cell that runs a whole campaign names it."""
 
     cell_attempts: int = SEND_ATTEMPTS
     """Sends in all, the first included: only the backend knows what a resend costs."""
-
-    cell_wait_s: float = CELL_WAIT_S
-    """One request's wait on its far end; running out is no cut of ours, so the cell ends unreported."""
 
     measured_unit: MeasuredUnit = "sample"
     """Declared, never sniffed off a row."""

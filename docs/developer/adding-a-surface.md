@@ -128,12 +128,11 @@ because the model IS the document. There is no payload builder to mirror it into
 **But the webapp's live surface is not the round** — it reads `dashboard.json`. Which model you
 mirror onto decides the cost, so ask first *whose* fact it is:
 
-- **Per-CANDIDATE** (it already lives on `ScoredCandidate`) → add it to **`ArmReading`**
+- **Per-ARM** (it already lives on an `ArmState`) → add it to **`ArmReading`**
   (`domain/results.py`) and stop: a dashboard row live or closed, a scoreboard row and a tree
-  node all embed it, built by `ArmReading.of` off the score report. `build_candidate_rows` fills the live half from the slot the buffer
-  holds — banked at `candidate_scored`, then folded onto by `RoundBuffer.stamp_fit` at the
-  election — so **ask WHEN your fact exists**: one the scorer knows per sample rides
-  `_composite`, one the election stamps rides `ElectionRecord.fit`, and a field that reaches
+  node all embed it, built by `ArmReading.of` off the arm's state. `build_candidate_rows` fills the live half from the
+  `AnnouncedArms` the buffer holds — each arm's last `ArmRecord` state and running fold, and `RoundBuffer.election` once held — so **ask WHEN your fact exists**: one the scorer
+  knows per sample rides `SampleScoredRecord.running`, one the election stamps rides `ElectionRecord.fit`, and a field that reaches
   neither is null on every live row until the round closes. The webapp seam is `CandidateRow`
   (`lib/types/candidate.ts` + `lib/derivations/round-candidates.ts`, which maps both halves
   through ONE function).
@@ -246,7 +245,7 @@ own `backend_type` and `backend_name`, which the default names for TermNorm. Eve
 
 ### Step 4 — Screen the instrument before funding a campaign
 
-Set `max_rounds: 0` and measure the origin only. **Read the spread, not the mean.** An origin at
+Set `budget: {rounds: 0}` and measure the origin only. **Read the spread, not the mean.** An origin at
 0% is floor-pinned and an origin at 100% has nothing for a prompt to move; both are unusable
 instruments and neither is visible from a single cell. `seed-screen`, `noise-floor` and `verify`
 answer the sharper versions of this, and `evidence` answers whether two readings can be compared
@@ -276,7 +275,7 @@ Three things the recipe cannot show you:
 One of the optimizer's own LLM nodes — `optimizers.llm_nodes()` enumerates the structured
 ones (each an `LlmNode` member declaring its own `response_model`), and is the only place that count is correct. The JSON declaration format
 and registry live in [`developer/node-standard.md`](node-standard.md). A node renders a
-`PromptTemplate` through the same `DispatchHub` fill path as every other node —
+`OptimizerPromptTemplate` through the same `DispatchHub` fill path as every other node —
 adding a slot it needs is §2.
 
 **Guard (at template load):** `validate_template()` at `load_optimizer_prompt` rejects any
@@ -286,8 +285,9 @@ unwrapped LLM call is an automatic block at review (pre-flight gate), not a test
 
 **A whole optimizer is one package and edits nothing outside it:** `members.py` exports `MEMBERS`
 and `RUNTIME` (a plugin ships them through the two entry-point groups instead), the runtime's
-`manifest_dir` holds its `pipeline.yaml`, its payload is a `RoundPayload` registered under the
-manifest's name and its decision kinds a `CheckpointKind` its runtime gates.
+`manifest_dir` holds its `pipeline.yaml`, each kind of state it banks is a `StateSlice` (across rounds) or a `RoundOutput` (one round's)
+registered under its own `kind` and declared by the members that read and write it, and its decision kinds a
+`CheckpointKind` its runtime gates.
 [`examples/optimizer-plugin/`](../../examples/optimizer-plugin/) is that package, installable as it
 stands, and the [offline run](offline-run.md) runs it as the proof.
 
@@ -340,7 +340,7 @@ fold reads which kinds a running loop takes.
 |---|---|---|
 | the kind | the wire name; its payload model is the class NAMED for it (`CommandKind.payload_name`), in `application/commands/payloads.py` — or beside the row, under `LoopPayload`, where only a running loop takes it | `payloads.py` fails at import on a kind with no model |
 | `handler` | `module:handler`, in the `application/commands/` module named for what the kind does; the dispatcher imports it when the kind is dispatched, never at its own import | `gate.py --only handler-tables` |
-| `capability` | the rung `_require_capability_for` asks | the row cannot be written without one |
+| `capability` | the rung the dispatcher's `require_capability` asks | the row cannot be written without one |
 | **`cli_verb`** | the terminal verb that reaches it | `cli/campaign_runner.py` fails at import on a verb that is no `COMMANDS` key |
 
 The payload's address base is its target ledger (`CyclePayload`, `CampaignPayload`, a check-in's,

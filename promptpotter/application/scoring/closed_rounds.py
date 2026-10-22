@@ -25,11 +25,13 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError, graceful
 
 if TYPE_CHECKING:
+    from promptpotter.domain.bench import PartitionRecord
     from promptpotter.domain.run_records import (
         OptimizerStateRecord,
         RoundClosedRecord,
         RoundEnteredRecord,
     )
+    from promptpotter.domain.sample import Bank
     from promptpotter.domain.scoring import Scorer
 
 __all__ = [
@@ -38,6 +40,7 @@ __all__ = [
     "campaign_scorer",
     "closed_round",
     "closed_rounds",
+    "cycle_bank",
     "cycle_instrument",
     "walked_rows",
 ]
@@ -63,7 +66,7 @@ def campaign_ruler_scope(stores: Stores, campaign_id: str) -> RulerScope | None:
 
 def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> CellSheet:
     """Replicates kept (one row per sample is ``CellSheet.standing``); the sheet is shared, so read-only."""
-    replayed = {answer: was for _, _, answer, was in cells}
+    replayed = {answer: was for _, answer, was in cells}
 
     def read(facts: MeasuredCell, was_replayed: bool) -> MeasuredCell:
         # Stamped BEFORE the grade, as the walk does: a formula may read the clock.
@@ -84,10 +87,25 @@ def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> 
     return held or scorer.sheet(())
 
 
-def cycle_instrument(dataset_name: str, standing: Mapping[int, StandingRound]) -> str:
-    """The read-side spelling of ``Session.instrument_id``; before round 0 closes the dataset stands."""
+def cycle_instrument(
+    drawn: PartitionRecord | None, standing: Mapping[int, StandingRound]
+) -> str | None:
+    """The read-side spelling of ``Session.instrument_id``; a cycle that drew no bank names none."""
+    if drawn is None:
+        return None
     origin = standing.get(0)
-    return instrument_of(dataset_name, None if origin is None else origin.close.pipeline_params)
+    return instrument_of(
+        drawn.dataset_hash,
+        None if origin is None else origin.close.origin.individual.pipeline_params,
+    )
+
+
+def cycle_bank(stores: Stores, hop: CycleHop) -> Bank:
+    drawn = stores.campaigns.read_bank_partition(hop)
+    bank = None if drawn is None else stores.tenant_datasets.bank(drawn.dataset_hash)
+    if bank is None:
+        raise NotFoundError(f"cycle {hop.cycle_id} names no bank still held")
+    return bank
 
 
 def closed_rounds(
@@ -120,10 +138,10 @@ def closed_round(
 
 def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Scorer) -> RoundResult:
     def rows(cells: list[WalkedCell]) -> CellSheet:
-        walked = {sample_id for _, sample_id, _, _ in cells}
+        walked = {key for key, _, _ in cells}
         taken = walked_rows(stores, cells, scorer)
         if len(taken) != len(walked):
-            kept = {cell.sample_id for cell in taken}
+            kept = {cell.key for cell in taken}
             raise NotFoundError(
                 f"round {close.round} of cycle {hop.cycle_id} closed on answers the measurement "
                 f"archive no longer holds (samples {sorted(walked - kept)}). Its rows "
@@ -135,9 +153,7 @@ def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Score
     return RoundResult(
         **{name: getattr(close, name) for name in RoundOutcome.model_fields},
         at_offset=held.at_offset,
-        results=rows(close.cells.head),
-        all_candidate_results={k: rows(v) for k, v in close.cells.arms.items()},
-        reference_results={k: rows(v) for k, v in close.cells.references.items()},
+        cells={k: rows(v) for k, v in close.cells.arms.items()},
         overlap_results={k: rows(v) for k, v in close.cells.overlap.items()},
     )
 

@@ -1,7 +1,6 @@
 "use client";
 import { CardFrame } from "@/components/ui";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { useDraftAuthoring } from "@/lib/hooks/useDraftAuthoring";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useCandidatesState } from "@/lib/candidates-store";
 import { useHardSamples } from "@/lib/hard-samples";
@@ -28,14 +27,13 @@ export function DashboardTab() {
   const cv = useConnector();
   const { doc: optimizerPipeline } = useOptimizerPipeline(cv.optimizer);
   const { datasetName } = useHardSamples();
-  const authoring = useDraftAuthoring();
   const { candidate, node, setSelectionForCandidate, setSelectionForNode } = useSelection();
   const { showForest } = useCandidatesState();
 
   const { viewedPath, campaignId } = useWorkspace();
   const rootSelfOpt = useCampaign(campaignId)?.self_optimization;
   const isOuterSelfOpt = viewedPath?.length === 1 && rootSelfOpt === true;
-  // An L4 unit has no cache.json roster — its samples ARE the inner campaigns.
+  // An L4 unit has no sample roster — its samples ARE the inner campaigns.
   const hasSamples = !cv.selfOptimization;
 
   return (
@@ -77,11 +75,7 @@ export function DashboardTab() {
         <OptimizerCard pipeline={optimizerPipeline} />
         {node && (
           <div className="box-full">
-            <NodeDetail
-              node={node}
-              authoring={authoring}
-              onClose={() => setSelectionForNode(null)}
-            />
+            <NodeDetail node={node} onClose={() => setSelectionForNode(null)} />
           </div>
         )}
 

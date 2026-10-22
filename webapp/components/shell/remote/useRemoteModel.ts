@@ -35,14 +35,14 @@ export function useRemoteModel() {
   if (!viewedPath || !cycleId) return null;
 
   // No `settled` gate: a verb is still offered there, and this gates `RunControlButton`'s only mount.
-  if (!dash || phaseIs(dash.run_phase, "authoring")) return null;
+  if (!dash) return null;
   const terminal = phaseIs(dash.run_phase, "settled");
   const skipRefusal = dash.run_admission.skip_refusal;
   const armRefusal = dash.run_admission.lookahead_refusal;
 
   const innerHop = innerRun ? pathOf(innerRun).at(-1) : undefined;
 
-  const { metered, lines, budgetUsd, budgetTokens } = readSpend(dash);
+  const { metered, lines } = readSpend(dash);
 
   const lookahead = dash.sample_lookahead;
   const autoArmed = dash.sample_lookahead_auto;
@@ -92,9 +92,8 @@ export function useRemoteModel() {
     skipRefusal,
     metered,
     lines,
-    budgetUsd,
-    budgetTokens,
-    maxRounds: dash.run_limits.max_rounds,
+    budget: dash.run_limits.budget,
+    share: dash.allotment,
     benchLiftPerUsd: dash.bench_score?.cost.lift_per_usd ?? null,
     lookahead,
     autoArmed,

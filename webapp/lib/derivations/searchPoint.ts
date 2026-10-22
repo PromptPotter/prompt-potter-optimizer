@@ -1,7 +1,7 @@
 import { liveCandidate, liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
-import { PROMPT_STRING_FIELDS } from "@/lib/prompt-fields";
-import type { ArmNode, ArmReading, LiveCandidate } from "@/lib/api/types";
+import type { ArmName, ArmNode, ArmReading, NodePrompt } from "@/lib/api/types";
 import type { ArmRow, RoundResult, SampleRow, SelectedCandidate } from "@/lib/types";
+import { armSearchpoint, type ArmSearchpoint } from "./candidateSearchPoint";
 import { rowAt } from "./round-candidates";
 import { roundReading, type RoundReading } from "./round-reading";
 
@@ -28,8 +28,8 @@ export function observeOptions(
 }
 
 export interface ObserveConfig {
-  // `OptSearchPoint.prompt_field_dict()` shape.
-  promptFields: Record<string, unknown>;
+  // `OptSearchPoint.prompts`: per prompt node, its fields and shots.
+  prompts: Record<string, NodePrompt>;
   config: Record<string, unknown>;
   // Decorated header ("live — C1.3"); never a join key.
   label: string;
@@ -48,10 +48,10 @@ export function searchpointCopyChoices({
   const label = reading?.arm.label;
   const spec = cfg
     ? {
-        // `label` is the join key, so only a reading answers for it; the decorated header rides `shown_as`.
+        // Only a reading's served label greps against the round file; the decorated header rides `shown_as`.
         ...(label !== undefined ? { label } : { shown_as: cfg.label }),
-        resolved_pipeline_params: cfg.config,
-        prompt_fields: cfg.promptFields,
+        resolved_params: cfg.config,
+        prompts: cfg.prompts,
       }
     : null;
   const scored = reading ? { ...(spec ?? { label }), scored: reading } : null;
@@ -69,33 +69,32 @@ export function searchpointCopyChoices({
   return choices;
 }
 
-// NOT the runnable string: that is backend `PromptTemplate.compile_prompt()`, which nothing serves.
+// NOT the runnable string: the backend renders that per node, and nothing serves it.
 export function searchpointText(cfg: ObserveConfig): string {
   const lines: string[] = [];
-  for (const key of PROMPT_STRING_FIELDS) {
-    const v = cfg.promptFields[key];
-    if (typeof v === "string" && v.trim()) lines.push(`${key}:\n${v.trim()}\n`);
+  for (const [node, p] of Object.entries(cfg.prompts)) {
+    for (const [key, v] of Object.entries(p.fields)) {
+      if (v.trim()) lines.push(`${node}.${key}:\n${v.trim()}\n`);
+    }
+    if (p.shots.length > 0) lines.push(`${node}.shots: ${p.shots.join(", ")}\n`);
   }
   if (lines.length === 0) lines.push("(this searchpoint carries no prompt fields)\n");
   lines.push(`pipeline config:\n${JSON.stringify(cfg.config, null, 2)}`);
   return lines.join("\n");
 }
 
-type SearchpointRow = Pick<
-  LiveCandidate,
-  "prompt_fields" | "node_prompt_fields" | "resolved_pipeline_params"
->;
-
-// A node asks for the fields IT runs (absent = none); the whole searchpoint for the individual's own.
+// A node asks for the prompt IT runs (absent = none); the whole searchpoint for every node's.
 function rowConfig(
-  row: SearchpointRow | undefined | null,
+  row: ArmSearchpoint | undefined | null,
   label: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
   if (!row) return null;
+  const prompts = row.prompts ?? {};
+  const own = nodeId ? prompts[nodeId] : undefined;
   return {
-    promptFields: (nodeId ? row.node_prompt_fields[nodeId] : row.prompt_fields) ?? {},
-    config: row.resolved_pipeline_params ?? {},
+    prompts: nodeId ? (own ? { [nodeId]: own } : {}) : prompts,
+    config: row.resolved_params ?? {},
     label,
   };
 }
@@ -112,39 +111,33 @@ export function liveObserveConfig(
 
 export function liveCandidateObserveConfig(
   dash: DashboardSnapshot | null,
-  label: string,
+  key: string | null,
   nodeId?: string | null,
 ): ObserveConfig | null {
-  return rowConfig(liveCandidate(dash, label), `live — ${label}`, nodeId);
+  const row = liveCandidate(dash, key);
+  return row && rowConfig(row, `live — ${row.reading.arm.label}`, nodeId);
 }
 
-// Joined on the label, never `candidate_id`: a resume re-scores C0 under a NEW id, a silent miss.
 export function candidateObserveConfig(
   doc: RoundResult | null,
-  courseLabel: string,
+  key: string | null,
   display: string,
   nodeId?: string | null,
 ): ObserveConfig | null {
-  if (!doc || !courseLabel) return null;
-  const row = doc.candidate_scores.find((c) => c.label === courseLabel);
-  return rowConfig(row, display, nodeId);
+  if (!doc || !key) return null;
+  return rowConfig(armSearchpoint(doc, key), display, nodeId);
 }
 
-export interface ObserveTarget {
-  round: number;
-  label: string;
-}
+export type ObserveTarget = Pick<ArmName, "key" | "round" | "label">;
 
 function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
-  const winner = dash?.run_standing?.selection;
-  return winner ? { round: winner.round, label: winner.label } : null;
+  return dash?.run_standing?.selection ?? null;
 }
 
 // Served `leading` is the arm the selector read the round off, so a held round still has one.
 function roundObserveTarget(dash: DashboardSnapshot | null, round: number): ObserveTarget | null {
   if (!dash?.round_axis.completed.includes(round)) return null;
-  const r = dash.rounds.find((x) => x.round === round);
-  return r?.leading ? { round: r.leading.round, label: r.leading.label } : null;
+  return dash.rounds.find((x) => x.round === round)?.leading ?? null;
 }
 
 export interface ObservePoint extends ObserveTarget {
@@ -153,7 +146,7 @@ export interface ObservePoint extends ObserveTarget {
 }
 
 function pointAt(dash: DashboardSnapshot | null, target: ObserveTarget, title: string): ObservePoint {
-  return { ...target, title, row: rowAt(dash, target) };
+  return { ...target, title, row: rowAt(dash, target.key) };
 }
 
 export function originPoint(
@@ -161,12 +154,12 @@ export function originPoint(
   origin: Pick<ArmNode, "reading"> | null,
 ): ObservePoint | null {
   if (!origin) return null;
-  const { round, label } = origin.reading.arm;
-  return pointAt(dash, { round, label }, `origin · ${label}`);
+  const { arm } = origin.reading;
+  return pointAt(dash, arm, `origin · ${arm.label}`);
 }
 
 export interface ObserveSelection {
-  candidate: Pick<SelectedCandidate, "round" | "label"> | null;
+  candidate: Pick<SelectedCandidate, "round" | "arm" | "label"> | null;
   round: number | null;
   observe: ObserveState | null;
 }
@@ -201,15 +194,14 @@ export function resolveObserveSubject(
 ): ObserveSubject {
   // In flight only while the run is live: `current_round` lingers in `dashboard.json` after a stop.
   const observed = dash?.observed ?? null;
-  const latest = observed && { round: observed.round, label: observed.label };
+  const latest = observed;
   const inFlight = isLive && latest?.round === roundOf(dash);
+  const picked = selection.candidate;
   const targets: Record<ObserveState, ObserveTarget | null> = {
     best: bestObserveTarget(dash),
     latest,
     round: selection.round != null ? roundObserveTarget(dash, selection.round) : null,
-    selected: selection.candidate
-      ? { round: selection.candidate.round, label: selection.candidate.label }
-      : null,
+    selected: picked ? { key: picked.arm, round: picked.round, label: picked.label } : null,
   };
   const asked = selection.observe && targets[selection.observe] ? selection.observe : null;
   const followsLive = !asked && !targets.selected && !targets.round;

@@ -3,7 +3,7 @@
     "schemas": {
       "AbilityReading": {
         "additionalProperties": false,
-        "description": "A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing.\n\nA null ``ruler_id`` names NO scale: that reading is comparable to nothing.",
+        "description": "A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing.",
         "properties": {
           "calibration_model": {
             "anyOf": [
@@ -30,6 +30,22 @@
               }
             ]
           },
+          "cells": {
+            "minimum": 1.0,
+            "title": "Cells",
+            "type": "integer"
+          },
+          "pinned_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned Share"
+          },
           "round_span": {
             "anyOf": [
               {
@@ -41,20 +57,8 @@
             ],
             "title": "Round Span"
           },
-          "ruler_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ruler Id"
-          },
-          "ruler_n": {
-            "title": "Ruler N",
-            "type": "integer"
+          "ruler": {
+            "$ref": "#/components/schemas/RulerStamp"
           },
           "ruler_span": {
             "anyOf": [
@@ -81,17 +85,23 @@
           "theta": {
             "title": "Theta",
             "type": "number"
+          },
+          "unlinked": {
+            "title": "Unlinked",
+            "type": "integer"
           }
         },
         "required": [
           "theta",
           "se",
-          "ruler_id",
-          "ruler_n",
+          "ruler",
+          "cells",
           "ruler_span",
           "round_span",
           "calibration_model",
-          "caveat"
+          "caveat",
+          "unlinked",
+          "pinned_share"
         ],
         "title": "AbilityReading",
         "type": "object"
@@ -226,7 +236,7 @@
         "additionalProperties": false,
         "description": "One record's reading: a line to show, and the round and candidate it is about.",
         "properties": {
-          "candidate": {
+          "arm": {
             "anyOf": [
               {
                 "type": "string"
@@ -235,8 +245,8 @@
                 "type": "null"
               }
             ],
-            "description": "The candidate the record is about, by the label its course minted.",
-            "title": "Candidate"
+            "description": "The arm the record is about, by its key; `label` renders it.",
+            "title": "Arm"
           },
           "detail": {
             "anyOf": [
@@ -526,25 +536,26 @@
       },
       "Arm": {
         "additionalProperties": false,
-        "description": "The head-to-head a campaign is an arm of, frozen at mint; its presence makes it controlled.",
+        "description": "The head-to-head a campaign is an arm of, frozen at mint.",
         "properties": {
           "arm_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Arm Key",
             "type": "string"
           },
           "head_to_head_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Head To Head Id",
-            "type": "string"
-          },
-          "treatment_digest": {
-            "title": "Treatment Digest",
             "type": "string"
           }
         },
         "required": [
           "head_to_head_id",
-          "arm_key",
-          "treatment_digest"
+          "arm_key"
         ],
         "title": "Arm",
         "type": "object"
@@ -621,80 +632,6 @@
         "title": "ArmAbility",
         "type": "object"
       },
-      "ArmBudget": {
-        "additionalProperties": false,
-        "description": "What each arm of a head-to-head may spend, equal by declaration.",
-        "properties": {
-          "convergence_patience": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Convergence Patience"
-          },
-          "determinism": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Determinism"
-          },
-          "lives": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "integer"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lives"
-          },
-          "max_rounds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Rounds"
-          },
-          "usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usd"
-          }
-        },
-        "required": [
-          "usd",
-          "max_rounds",
-          "determinism",
-          "lives",
-          "convergence_patience"
-        ],
-        "title": "ArmBudget",
-        "type": "object"
-      },
       "ArmElection": {
         "additionalProperties": false,
         "description": "What one arm's round decided about it. Built by :meth:`of` alone.",
@@ -712,7 +649,7 @@
                 "type": "null"
               }
             ],
-            "description": "How a selected arm advanced. Read off the electable count the round's CLOSE banks, so null on a selected arm whose round has not closed, and on every other arm.",
+            "description": "How a selected arm advanced, read off the election's electable count; null on every arm the election did not select.",
             "title": "Crown"
           },
           "held": {
@@ -721,7 +658,7 @@
             "type": "boolean"
           },
           "leading": {
-            "description": "The ONE arm its round is read off, as the selector named it at the close (`RoundOutcome.leading_label`); false until then.",
+            "description": "The ONE arm its round is read off, as the selector named it (`Election.leading`); false until the election.",
             "title": "Leading",
             "type": "boolean"
           },
@@ -737,6 +674,84 @@
           "crown"
         ],
         "title": "ArmElection",
+        "type": "object"
+      },
+      "ArmFit": {
+        "additionalProperties": false,
+        "description": "What the election read of one arm: θ lives here and nowhere else.",
+        "properties": {
+          "theta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta"
+          },
+          "theta_caveat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThetaCaveat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "theta_se": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta Se"
+          },
+          "vs_reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairedReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ArmFit",
+        "type": "object"
+      },
+      "ArmName": {
+        "additionalProperties": false,
+        "description": "One arm of the run: its key, and where it was first walked.",
+        "properties": {
+          "key": {
+            "description": "THE join: the individual's content id, or the slot hash of a proposal rejected before it cost a cell.",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "description": "`C0` or `C{round}.{n}`, off the slot it was first walked in: a display name, never a join.",
+            "title": "Label",
+            "type": "string"
+          },
+          "round": {
+            "description": "The round the arm was first walked in; 0 is the origin.",
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "round",
+          "label"
+        ],
+        "title": "ArmName",
         "type": "object"
       },
       "ArmNode": {
@@ -800,7 +815,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the selector elects on. Candidate: the declaration its round's election carried (`RoundResult.elects_on`), null on a round that never elected. Course: the declaration its own elections carried. `ability`: the rounds are won on theta, not on accuracy.",
+            "description": "The column the selector elects on. Candidate: the declaration its round's election carried (`Election.elects_on`), null on a round that never elected. Course: the declaration its own elections carried. `ability`: the rounds are won on theta, not on accuracy.",
             "title": "Elects On"
           },
           "fork": {
@@ -981,19 +996,6 @@
         "title": "ArmNode",
         "type": "object"
       },
-      "ArmOutcome": {
-        "description": "How an arm's measurement ended, and whose decision ended it.",
-        "enum": [
-          "measured",
-          "invalid",
-          "skipped",
-          "broken",
-          "eliminated",
-          "locked_in"
-        ],
-        "title": "ArmOutcome",
-        "type": "string"
-      },
       "ArmPanel": {
         "additionalProperties": false,
         "description": "The cells one arm's walk holds of the panel its round asked of it.",
@@ -1023,7 +1025,7 @@
             "title": "Cached Share"
           },
           "cut": {
-            "description": "Stopped short of its round's panel (`panel_cuts`): under its own `expected`, or under the fullest panel an arm of its round reached.",
+            "description": "Stopped short of its round's panel (`panel_cuts`): under its own `expected`, or, for a panel arm, under the fullest panel a panel arm of its round reached.",
             "title": "Cut",
             "type": "boolean"
           },
@@ -1062,34 +1064,6 @@
         "title": "ArmPanel",
         "type": "object"
       },
-      "ArmPointer": {
-        "additionalProperties": false,
-        "description": "One arm of the run, named the three ways a surface joins on it.",
-        "properties": {
-          "candidate_id": {
-            "description": "The individual's lineage id.",
-            "title": "Candidate Id",
-            "type": "string"
-          },
-          "label": {
-            "description": "`C0` or `C{round}.{n}` — the ARM's key; an id names its individual.",
-            "title": "Label",
-            "type": "string"
-          },
-          "round": {
-            "description": "The round the arm was measured in; 0 is the origin.",
-            "title": "Round",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "round",
-          "label",
-          "candidate_id"
-        ],
-        "title": "ArmPointer",
-        "type": "object"
-      },
       "ArmReading": {
         "additionalProperties": false,
         "description": "One arm of one round, read: the one carrier every surface that lists or ranks arms embeds.\n\nEach part lands when its fact exists, so an arm in flight is this type with fewer parts set.",
@@ -1106,8 +1080,8 @@
             "description": "Null outside the round's election fit."
           },
           "arm": {
-            "$ref": "#/components/schemas/ArmPointer",
-            "description": "THE key: `(round, label)` names the arm, `candidate_id` its individual — empty only on an arm its round carried, until its score report lands."
+            "$ref": "#/components/schemas/ArmName",
+            "description": "THE key, and where the arm was first walked."
           },
           "bench": {
             "anyOf": [
@@ -1127,6 +1101,25 @@
           "election": {
             "$ref": "#/components/schemas/ArmElection"
           },
+          "end": {
+            "anyOf": [
+              {
+                "enum": [
+                  "invalid",
+                  "skipped",
+                  "broken",
+                  "eliminated",
+                  "locked_in"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How its walk ended short of its panel: cut against it (`invalid` refused it before a cell), or `locked_in` — settled FOR it by the eliminator. Null on a walk still running and one that ran its panel.",
+            "title": "End"
+          },
           "on_origin_panel": {
             "anyOf": [
               {
@@ -1138,17 +1131,6 @@
             ],
             "description": "Its individual's rate on the origin panel, as the newest overlap reading holds it: the one level two arms of different rounds may be differenced on. Null off the best-so-far line, and where it does not hold the whole panel."
           },
-          "outcome": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmOutcome"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How the arm's walk ended; null until that is decided."
-          },
           "own": {
             "anyOf": [
               {
@@ -1158,26 +1140,58 @@
                 "type": "null"
               }
             ],
-            "description": "The arm's own level on its round's cells: accuracy with the band the gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null before the first row is graded, and on an `invalid` arm, whose scores are synthetic."
+            "description": "The arm's own level on its round's cells: accuracy with the band the gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null before the first row is graded, and on an `invalid` arm, which holds no cell."
           },
           "panel": {
             "$ref": "#/components/schemas/ArmPanel"
+          },
+          "prefix": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrefixReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider's prefix-cache reading of `tokens.input`; null beside a null `tokens`."
+          },
+          "role": {
+            "description": "What the arm IS in this round: its origin, one of its proposals, or a `parent` re-read on its cells as a reference — never one of the round's proposals, whatever round `arm` names.",
+            "enum": [
+              "origin",
+              "panel",
+              "parent"
+            ],
+            "title": "Role",
+            "type": "string"
           },
           "sp_hash": {
             "description": "The archive address of this arm's measurements (`prompt_fields_id`). Not a key: a re-proposed configuration shares it across rounds. Empty before it is measured.",
             "title": "Sp Hash",
             "type": "string"
           },
-          "spend": {
+          "state": {
+            "description": "Where the arm's walk stands: proposed, being measured, or ended — cut short against it, or measured.",
+            "enum": [
+              "proposed",
+              "measuring",
+              "cut",
+              "measured"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "tokens": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ArmSpend"
+                "$ref": "#/components/schemas/TokenAccount"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "What measuring it consumed; null until its score report folds an account."
+            "description": "What measuring it consumed, the BACKEND bucket alone, replayed rows excluded; null until its score report folds an account."
           },
           "verify": {
             "anyOf": [
@@ -1200,16 +1214,25 @@
               }
             ],
             "description": "This arm (`b`) over the individual it was judged against (`a`), on the cells both scored. Null on the origin and until the election stamps it."
+          },
+          "walked_short": {
+            "description": "`end` names a stop of its walk, for it or against it: false on an `invalid` arm, which never started one.",
+            "title": "Walked Short",
+            "type": "boolean"
           }
         },
         "required": [
           "arm",
+          "role",
           "sp_hash",
           "changes_description",
-          "outcome",
+          "state",
+          "end",
+          "walked_short",
           "own",
           "panel",
-          "spend",
+          "tokens",
+          "prefix",
           "ability",
           "vs_reference",
           "election",
@@ -1253,29 +1276,29 @@
         "title": "ArmReplicate",
         "type": "object"
       },
-      "ArmSpend": {
+      "ArmSlot": {
         "additionalProperties": false,
-        "description": "What measuring one arm consumed: the BACKEND bucket alone, replayed rows excluded.",
+        "description": "Where an individual was first walked as an arm: the ``idx``-th of its round's ``total``.",
         "properties": {
-          "input_tokens": {
-            "title": "Input Tokens",
+          "idx": {
+            "title": "Idx",
             "type": "integer"
           },
-          "output_tokens": {
-            "title": "Output Tokens",
+          "round": {
+            "title": "Round",
             "type": "integer"
           },
-          "prefix": {
-            "$ref": "#/components/schemas/PrefixReading",
-            "description": "The provider's prefix-cache reading of `input_tokens`, read rather than left as a third count for a surface to divide."
+          "total": {
+            "title": "Total",
+            "type": "integer"
           }
         },
         "required": [
-          "input_tokens",
-          "output_tokens",
-          "prefix"
+          "round",
+          "idx",
+          "total"
         ],
-        "title": "ArmSpend",
+        "title": "ArmSlot",
         "type": "object"
       },
       "BackendHealthResponse": {
@@ -1506,8 +1529,13 @@
             "description": "The gateway's running accuracy over the rows scored; null before the first.",
             "title": "Accuracy"
           },
+          "arm": {
+            "description": "The arm the pass grades — the join to its row.",
+            "title": "Arm",
+            "type": "string"
+          },
           "label": {
-            "description": "The candidate the pass grades, as its row is labelled.",
+            "description": "That arm's label, to render.",
             "title": "Label",
             "type": "string"
           },
@@ -1542,6 +1570,7 @@
         },
         "required": [
           "subject",
+          "arm",
           "label",
           "sp_hash",
           "round",
@@ -2001,6 +2030,90 @@
         "title": "Body_upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
         "type": "object"
       },
+      "Broken": {
+        "additionalProperties": false,
+        "description": "The bench's run-health rules stopped it.",
+        "properties": {
+          "degradation": {
+            "$ref": "#/components/schemas/DegradationContext"
+          },
+          "failure": {
+            "$ref": "#/components/schemas/RuntimeFailure"
+          },
+          "kind": {
+            "const": "broken",
+            "default": "broken",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "failure",
+          "degradation"
+        ],
+        "title": "Broken",
+        "type": "object"
+      },
+      "Budget": {
+        "additionalProperties": false,
+        "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.",
+        "properties": {
+          "rounds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closed rounds after the origin, per cycle, read at each round boundary; 0 measures the origin only.",
+            "title": "Rounds"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The campaign's billed tokens, shared like `usd`; the axis that still binds where a model has no rate on file.",
+            "title": "Tokens"
+          },
+          "usd": {
+            "anyOf": [
+              {
+                "ge": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The campaign's USD, in its ceiling meter: one book its live cycles share.",
+            "title": "Usd"
+          },
+          "wall_clock_s": {
+            "anyOf": [
+              {
+                "gt": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds ONE launch runs, its clock afresh at every launch; a remote cell still open at the edge is cut and the run stops `wall_clock`.",
+            "title": "Wall Clock S"
+          }
+        },
+        "title": "Budget",
+        "type": "object"
+      },
       "CampaignConfig": {
         "additionalProperties": false,
         "properties": {
@@ -2038,7 +2151,7 @@
                 "type": "null"
               }
             ],
-            "description": "How run init partitions the bank into the search pool every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. `None` holds nothing out: the whole bank is the search pool and there is no bench score."
+            "description": "How run init partitions the bank into the search split every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. `None` holds nothing out: the whole bank is the search split and there is no bench score."
           },
           "display_metric": {
             "default": "accuracy",
@@ -2092,6 +2205,12 @@
             "title": "Pipeline Overlay",
             "type": "object"
           },
+          "run_seed": {
+            "default": 0,
+            "description": "The run's one seed. It seeds which rows fall where and the order the search pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows and reads them in the same order. An L4 seat seeds its determinism clamp and its solver node from it too.",
+            "title": "Run Seed",
+            "type": "integer"
+          },
           "scoring": {
             "anyOf": [
               {
@@ -2111,7 +2230,7 @@
           },
           "sp_budget_origin": {
             "default": 40,
-            "description": "Origin eval budget — how many bank samples the origin (C0) is scored on at check-in. The bench's, whatever the optimizer: a round's own panel is its sampler's knob. Wide because origin breadth is the one breadth that is nearly free: θ_origin is the term EVERY delta subtracts, and its rows are content-addressed cache replayed into every candidate arm, fork and resume — paid once per config. Candidate breadth is paid per candidate, per round. Every comparison downstream is matched by sample_id or θ-space, so an origin scored on a superset stays like-for-like. A bank smaller than this scores on the whole bank (`sample_dataset` is a prefix slice) — not an error.",
+            "description": "Origin eval budget — how many bank samples the origin (C0) is scored on at check-in. The bench's, whatever the optimizer: a round's own panel is its sampler's knob. Wide because origin breadth is the one breadth that is nearly free: θ_origin is the term EVERY delta subtracts, and its rows are content-addressed cache replayed into every candidate arm, fork and resume — paid once per config. Candidate breadth is paid per candidate, per round. Every comparison downstream is matched by sample key or θ-space, so an origin scored on a superset stays like-for-like. A bank smaller than this scores on the whole bank (`sample_dataset` is a prefix slice) — not an error.",
             "minimum": 1.0,
             "title": "Sp Budget Origin",
             "type": "integer"
@@ -2144,7 +2263,7 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN in its declaration's environment at mint. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
             "title": "Backend Type",
             "type": "string"
           },
@@ -2157,21 +2276,31 @@
                 "type": "null"
               }
             ],
-            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the campaign's result (`result.json`) under the formula its line runs — whichever cycle rebases handed the line to. `status` says where it stands and whether its pass may be asked for; `selected` is null until the line grades its pick. Null where the root config did not resolve — a check-in whose dataset is gone, a manifest this build cannot read."
+            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the campaign's result (`result.json`) under the formula its line runs — whichever cycle rebases handed the line to. `status` says where it stands and whether its pass may be asked for; `selected` is null until the line grades its pick. Null where the root config did not resolve — a manifest this build cannot read."
           },
           "campaign_id": {
             "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
             "title": "Campaign Id",
             "type": "string"
           },
+          "campaign_metered_tokens": {
+            "description": "`campaign_metered_usd` in billed tokens, the figure the token ceiling binds.",
+            "title": "Campaign Metered Tokens",
+            "type": "integer"
+          },
+          "campaign_metered_usd": {
+            "description": "What the campaign's money ceiling counts, in its meter: every cycle's own spend once, siblings and deleted cycles included. The number a surface sets beside the campaign's cap.",
+            "title": "Campaign Metered Usd",
+            "type": "number"
+          },
           "comparison": {
-            "description": "Whether the campaign is a CONTROLLED arm of a head-to-head (`campaign.json::arm`, frozen at mint), as one sentence (`domain/campaign.py::comparison_line`): an arm reads no other campaign's measurements, refuses a steer and spends its declared budget; an ordinary campaign optimizes with everything that helps.",
+            "description": "Whether the campaign is a CONTROLLED arm of a head-to-head (its declaration's `compare` purpose, frozen at mint), as one sentence (`domain/campaign.py::comparison_line`): an arm reads no other campaign's measurements, refuses a steer and spends its declared budget; an ordinary campaign optimizes with everything that helps.",
             "title": "Comparison",
             "type": "string"
           },
           "config": {
             "$ref": "#/components/schemas/CampaignConfig",
-            "description": "The config the campaign's root runs under — its draft's while it is still authoring, and for an arm the manifest with its head-to-head record's split and budget laid on."
+            "description": "The config the campaign's root runs under: its declaration, made effective."
           },
           "created_at": {
             "description": "ISO 8601 creation timestamp",
@@ -2220,7 +2349,7 @@
                 "type": "null"
               }
             ],
-            "description": "The campaign's line: the cycle answering for it now and how that cycle stands — its run state, its standing, its rounds and the cap binding them. Null while the root cycle is not on disk yet. Its `max_rounds` is null where the root config did not resolve."
+            "description": "The campaign's line: the cycle answering for it now and how that cycle stands — its run state, its standing, its rounds and the budget binding them. Null while the root cycle is not on disk yet. Its `budget_rounds` is null where the root config did not resolve."
           },
           "owner_user_id": {
             "default": "default",
@@ -2229,19 +2358,12 @@
             "type": "string"
           },
           "root_content_hash": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Content hash of the origin search point — the campaign identity; null on an unstarted check-in",
-            "title": "Root Content Hash"
+            "description": "Content hash of the origin search point",
+            "title": "Root Content Hash",
+            "type": "string"
           },
           "root_cycle_id": {
-            "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
+            "description": "The campaign's root cycle id — the content address of its origin and its run declaration together. Campaigns on one origin under one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of it; two arms of a head-to-head never share one. The sidebar groups the forest by this key.",
             "title": "Root Cycle Id",
             "type": "string"
           },
@@ -2254,7 +2376,7 @@
                 "type": "null"
               }
             ],
-            "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
+            "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `budget_rounds` is the DECLARED `budget.rounds`; 0 means origin only."
           },
           "self_optimization": {
             "description": "This campaign optimizes the optimizer itself (L4), answered off `backend_type` by the connector registry. The one test a surface draws the 'inner loops' disclosure and the self-optimization panel variants on — never a comparison of `backend_type`.",
@@ -2267,7 +2389,7 @@
           },
           "spend_metered": {
             "$ref": "#/components/schemas/MeteredSpend",
-            "description": "What the campaign's spend cap counts along its LINE — the root and every cycle a rebase handed it to — by bucket: the bill, or the search's incurred USD for a controlled arm. The number a surface sets beside a cap, live."
+            "description": "The campaign's LINE — the root and every cycle a rebase handed it to — in the ceiling's meter, by bucket: the bill, or the search's incurred USD for a controlled arm. Part of `campaign_metered_usd`, which also counts every other cycle."
           },
           "updated_at": {
             "description": "The newest activity on any of the campaign's cycles, `created_at` where none has any. The list is served in this order, newest first.",
@@ -2287,6 +2409,8 @@
           "self_optimization",
           "spend_lifetime",
           "spend_metered",
+          "campaign_metered_usd",
+          "campaign_metered_tokens",
           "bench",
           "runs_with",
           "comparison",
@@ -2417,18 +2541,13 @@
             "title": "Optimizer",
             "type": "string"
           },
-          "optimizer_knobs": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "description": "That optimizer's knob values per node as the addressed course runs them — the manifest's under the campaign's and the cycle seed's overlays",
-            "title": "Optimizer Knobs",
-            "type": "object"
+          "optimizer_setup": {
+            "$ref": "#/components/schemas/OptimizerSetup",
+            "description": "That optimizer as the addressed course runs it — the manifest's knobs under the campaign's and the cycle seed's overlays, its arms and its pools"
           },
           "params": {
             "additionalProperties": true,
-            "description": "Resolved config as the engine holds it — the bytes a round file carries as `resolved_pipeline_params`, which makes that field this endpoint's check",
+            "description": "Resolved config as the engine holds it — the bytes each arm of a round file carries as `resolved_params`, which makes that field this endpoint's check",
             "title": "Params",
             "type": "object"
           },
@@ -2463,7 +2582,7 @@
           "backend_type",
           "self_optimization",
           "optimizer",
-          "optimizer_knobs",
+          "optimizer_setup",
           "params",
           "node_config_schema",
           "view",
@@ -2480,7 +2599,7 @@
         "additionalProperties": false,
         "description": "What a campaign's root course runs with — the root's pipeline resolution, cut to settings.",
         "properties": {
-          "max_rounds": {
+          "budget_rounds": {
             "anyOf": [
               {
                 "type": "integer"
@@ -2489,8 +2608,8 @@
                 "type": "null"
               }
             ],
-            "description": "The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited",
-            "title": "Max Rounds"
+            "description": "The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = no rounds axis",
+            "title": "Budget Rounds"
           },
           "optimizer": {
             "description": "The optimizer manifest the root course runs",
@@ -2518,7 +2637,7 @@
           "params",
           "vendors",
           "optimizer",
-          "max_rounds"
+          "budget_rounds"
         ],
         "title": "CampaignRunsWith",
         "type": "object"
@@ -2597,7 +2716,7 @@
           },
           "backend_type": {
             "default": "",
-            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN on the manifest at mint. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
+            "description": "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN in its declaration's environment at mint. Re-pointing or deleting the dataset dir never changes it: a campaign outlives its dataset dir, and what it RAN is a fact about the campaign.",
             "title": "Backend Type",
             "type": "string"
           },
@@ -2610,15 +2729,25 @@
                 "type": "null"
               }
             ],
-            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the campaign's result (`result.json`) under the formula its line runs — whichever cycle rebases handed the line to. `status` says where it stands and whether its pass may be asked for; `selected` is null until the line grades its pick. Null where the root config did not resolve — a check-in whose dataset is gone, a manifest this build cannot read."
+            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the campaign's result (`result.json`) under the formula its line runs — whichever cycle rebases handed the line to. `status` says where it stands and whether its pass may be asked for; `selected` is null until the line grades its pick. Null where the root config did not resolve — a manifest this build cannot read."
           },
           "campaign_id": {
             "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
             "title": "Campaign Id",
             "type": "string"
           },
+          "campaign_metered_tokens": {
+            "description": "`campaign_metered_usd` in billed tokens, the figure the token ceiling binds.",
+            "title": "Campaign Metered Tokens",
+            "type": "integer"
+          },
+          "campaign_metered_usd": {
+            "description": "What the campaign's money ceiling counts, in its meter: every cycle's own spend once, siblings and deleted cycles included. The number a surface sets beside the campaign's cap.",
+            "title": "Campaign Metered Usd",
+            "type": "number"
+          },
           "comparison": {
-            "description": "Whether the campaign is a CONTROLLED arm of a head-to-head (`campaign.json::arm`, frozen at mint), as one sentence (`domain/campaign.py::comparison_line`): an arm reads no other campaign's measurements, refuses a steer and spends its declared budget; an ordinary campaign optimizes with everything that helps.",
+            "description": "Whether the campaign is a CONTROLLED arm of a head-to-head (its declaration's `compare` purpose, frozen at mint), as one sentence (`domain/campaign.py::comparison_line`): an arm reads no other campaign's measurements, refuses a steer and spends its declared budget; an ordinary campaign optimizes with everything that helps.",
             "title": "Comparison",
             "type": "string"
           },
@@ -2669,7 +2798,7 @@
                 "type": "null"
               }
             ],
-            "description": "The campaign's line: the cycle answering for it now and how that cycle stands — its run state, its standing, its rounds and the cap binding them. Null while the root cycle is not on disk yet. Its `max_rounds` is null where the root config did not resolve."
+            "description": "The campaign's line: the cycle answering for it now and how that cycle stands — its run state, its standing, its rounds and the budget binding them. Null while the root cycle is not on disk yet. Its `budget_rounds` is null where the root config did not resolve."
           },
           "owner_user_id": {
             "default": "default",
@@ -2678,7 +2807,7 @@
             "type": "string"
           },
           "root_cycle_id": {
-            "description": "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the campaign's ORIGIN identity. Campaigns on one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of that origin; the sidebar groups the forest by this key.",
+            "description": "The campaign's root cycle id — the content address of its origin and its run declaration together. Campaigns on one origin under one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of it; two arms of a head-to-head never share one. The sidebar groups the forest by this key.",
             "title": "Root Cycle Id",
             "type": "string"
           },
@@ -2691,7 +2820,7 @@
                 "type": "null"
               }
             ],
-            "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means origin only."
+            "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `budget_rounds` is the DECLARED `budget.rounds`; 0 means origin only."
           },
           "self_optimization": {
             "description": "This campaign optimizes the optimizer itself (L4), answered off `backend_type` by the connector registry. The one test a surface draws the 'inner loops' disclosure and the self-optimization panel variants on — never a comparison of `backend_type`.",
@@ -2704,7 +2833,7 @@
           },
           "spend_metered": {
             "$ref": "#/components/schemas/MeteredSpend",
-            "description": "What the campaign's spend cap counts along its LINE — the root and every cycle a rebase handed it to — by bucket: the bill, or the search's incurred USD for a controlled arm. The number a surface sets beside a cap, live."
+            "description": "The campaign's LINE — the root and every cycle a rebase handed it to — in the ceiling's meter, by bucket: the bill, or the search's incurred USD for a controlled arm. Part of `campaign_metered_usd`, which also counts every other cycle."
           },
           "updated_at": {
             "description": "The newest activity on any of the campaign's cycles, `created_at` where none has any. The list is served in this order, newest first.",
@@ -2724,6 +2853,8 @@
           "self_optimization",
           "spend_lifetime",
           "spend_metered",
+          "campaign_metered_usd",
+          "campaign_metered_tokens",
           "bench",
           "runs_with",
           "comparison"
@@ -2735,17 +2866,21 @@
         "additionalProperties": false,
         "description": "One race catch-up: the priors eliminator ``member`` re-measured on one sample.",
         "properties": {
-          "candidate_idx": {
-            "title": "Candidate Idx",
-            "type": "integer"
+          "arm": {
+            "title": "Arm",
+            "type": "string"
           },
-          "candidate_total": {
-            "title": "Candidate Total",
-            "type": "integer"
+          "label": {
+            "title": "Label",
+            "type": "string"
           },
           "member": {
             "title": "Member",
             "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
           },
           "prior_ids": {
             "items": {
@@ -2757,18 +2892,14 @@
           "round": {
             "title": "Round",
             "type": "integer"
-          },
-          "sample_id": {
-            "title": "Sample Id",
-            "type": "integer"
           }
         },
         "required": [
           "member",
           "round",
-          "candidate_idx",
-          "candidate_total",
-          "sample_id",
+          "arm",
+          "label",
+          "position",
           "prior_ids"
         ],
         "title": "CatchUpLogEntry",
@@ -2793,16 +2924,10 @@
             ],
             "title": "Created At"
           },
-          "dataset_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dataset Name"
+          "dataset_hash": {
+            "description": "The bank that measured it, by content.",
+            "title": "Dataset Hash",
+            "type": "string"
           },
           "error": {
             "anyOf": [
@@ -2849,6 +2974,11 @@
             "title": "Other Outputs",
             "type": "object"
           },
+          "position": {
+            "description": "Its sample's slot in the dataset the read names.",
+            "title": "Position",
+            "type": "integer"
+          },
           "predicted": {
             "title": "Predicted",
             "type": "string"
@@ -2862,7 +2992,7 @@
                 "type": "null"
               }
             ],
-            "description": "The configuration's address (`ScoredCandidate.sp_hash`).",
+            "description": "The configuration's address (a measured arm's `sp_hash`).",
             "title": "Prompt Fields Id"
           },
           "query": {
@@ -2874,11 +3004,6 @@
             "description": "Why the pass that measured it ran.",
             "title": "Role",
             "type": "string"
-          },
-          "sample_id": {
-            "description": "Its slot in the dataset that measured it.",
-            "title": "Sample Id",
-            "type": "integer"
           },
           "seconds": {
             "anyOf": [
@@ -2923,7 +3048,8 @@
         },
         "required": [
           "answer",
-          "sample_id",
+          "position",
+          "dataset_hash",
           "query",
           "ground_truth",
           "ground_truth_text",
@@ -3062,15 +3188,15 @@
             ],
             "title": "Output Tokens"
           },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
           "predicted": {
             "default": "",
             "description": "Trimmed for display.",
             "title": "Predicted",
             "type": "string"
-          },
-          "sample_id": {
-            "title": "Sample Id",
-            "type": "integer"
           },
           "seconds": {
             "anyOf": [
@@ -3096,7 +3222,7 @@
           }
         },
         "required": [
-          "sample_id",
+          "position",
           "answer",
           "candidate",
           "status"
@@ -3418,94 +3544,6 @@
         "title": "CellsResponse",
         "type": "object"
       },
-      "CheckinReopenResponse": {
-        "additionalProperties": false,
-        "description": "A re-opened check-in: its draft and what the last resolver turn left.",
-        "properties": {
-          "draft": {
-            "$ref": "#/components/schemas/DraftCampaignWire"
-          },
-          "raised": {
-            "description": "Proposals the last turn left unclicked, so a re-opened check-in keeps the operator's outstanding actions.",
-            "items": {
-              "$ref": "#/components/schemas/RaisedCommand"
-            },
-            "title": "Raised",
-            "type": "array"
-          },
-          "resolution": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OriginLastResolution"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The last resolver turn's output; null when none ran."
-          }
-        },
-        "required": [
-          "draft",
-          "resolution",
-          "raised"
-        ],
-        "title": "CheckinReopenResponse",
-        "type": "object"
-      },
-      "CloseSpend": {
-        "additionalProperties": false,
-        "description": "What a cycle's history had cost when a round closed, a fork's inherited prefix included.",
-        "properties": {
-          "billed_usd": {
-            "description": "What providers reported they billed.",
-            "title": "Billed Usd",
-            "type": "number"
-          },
-          "calls": {
-            "description": "Calls that reached a provider.",
-            "title": "Calls",
-            "type": "integer"
-          },
-          "rate_priced_usd": {
-            "description": "What our rate table prices the calls no provider billed. Never spent.",
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
-          "search_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What the search incurred, replays priced (`SpendRollup.search_incurred_usd`). Null where a search call carries tokens no rate priced.",
-            "title": "Search Usd"
-          },
-          "tokens": {
-            "description": "Billed tokens.",
-            "title": "Tokens",
-            "type": "integer"
-          },
-          "worked_s": {
-            "description": "Summed seconds of those calls — work, never clock: it exceeds the clock where cells ran concurrently.",
-            "title": "Worked S",
-            "type": "number"
-          }
-        },
-        "required": [
-          "search_usd",
-          "billed_usd",
-          "rate_priced_usd",
-          "calls",
-          "tokens",
-          "worked_s"
-        ],
-        "title": "CloseSpend",
-        "type": "object"
-      },
       "CommandAcceptedBody": {
         "additionalProperties": false,
         "description": "The 202 response shape declared in ``api-openapi.yaml``.",
@@ -3601,6 +3639,26 @@
           "roster_note"
         ],
         "title": "Comparability",
+        "type": "object"
+      },
+      "Compare": {
+        "additionalProperties": false,
+        "description": "A run of *arm*, and every L4 cell spawned under it: it reads only what a fresh run would.",
+        "properties": {
+          "arm": {
+            "$ref": "#/components/schemas/Arm"
+          },
+          "kind": {
+            "const": "compare",
+            "default": "compare",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "arm"
+        ],
+        "title": "Compare",
         "type": "object"
       },
       "ConfigCoupling": {
@@ -3870,7 +3928,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the selector elects on. Candidate: the declaration its round's election carried (`RoundResult.elects_on`), null on a round that never elected. Course: the declaration its own elections carried. `ability`: the rounds are won on theta, not on accuracy.",
+            "description": "The column the selector elects on. Candidate: the declaration its round's election carried (`Election.elects_on`), null on a round that never elected. Course: the declaration its own elections carried. `ability`: the rounds are won on theta, not on accuracy.",
             "title": "Elects On"
           },
           "fork_direction": {
@@ -4135,6 +4193,105 @@
         "title": "CurrentRound",
         "type": "object"
       },
+      "Cut": {
+        "additionalProperties": false,
+        "description": "Stopped short of its panel against it.",
+        "properties": {
+          "expected_samples": {
+            "title": "Expected Samples",
+            "type": "integer"
+          },
+          "individual": {
+            "$ref": "#/components/schemas/OptSearchPoint"
+          },
+          "overlay": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Overlay",
+            "type": "object"
+          },
+          "reason": {
+            "discriminator": {
+              "mapping": {
+                "broken": "#/components/schemas/Broken",
+                "eliminated": "#/components/schemas/Eliminated",
+                "invalid": "#/components/schemas/Invalid",
+                "skipped": "#/components/schemas/Skipped"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Eliminated"
+              },
+              {
+                "$ref": "#/components/schemas/Broken"
+              },
+              {
+                "$ref": "#/components/schemas/Invalid"
+              },
+              {
+                "$ref": "#/components/schemas/Skipped"
+              }
+            ],
+            "title": "Reason"
+          },
+          "resolved_params": {
+            "additionalProperties": true,
+            "title": "Resolved Params",
+            "type": "object"
+          },
+          "role": {
+            "enum": [
+              "origin",
+              "panel",
+              "parent"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "slot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmSlot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "state": {
+            "const": "cut",
+            "default": "cut",
+            "title": "State",
+            "type": "string"
+          },
+          "validation_failures": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationFailure"
+            },
+            "title": "Validation Failures",
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "slot",
+          "individual",
+          "sp_hash",
+          "resolved_params",
+          "expected_samples",
+          "reason"
+        ],
+        "title": "Cut",
+        "type": "object"
+      },
       "CycleHop": {
         "additionalProperties": false,
         "description": "One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle alone.",
@@ -4243,7 +4400,7 @@
           "run_phase": {
             "$ref": "#/components/schemas/RunPhase",
             "default": "detached",
-            "description": "The single run-state value (RunPhase). Computed once by derive_run_state from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `stop_reason` for the reason label."
+            "description": "The single run-state value (RunPhase). Computed once by derive_run_state from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'terminal' pairs with `stop_reason` for the reason label."
           },
           "spawned_by": {
             "anyOf": [
@@ -4474,6 +4631,11 @@
             ],
             "title": "Output Tokens"
           },
+          "position": {
+            "description": "The sample's slot in the bank the cycle drew, which diverges from the row's position in the walk once the hard-sample sorter drives the order.",
+            "title": "Position",
+            "type": "integer"
+          },
           "predicted": {
             "default": "",
             "description": "Prediction, trimmed for display. EMPTY on a verifier-graded row (see ground_truth) — the pair is both halves of a comparison nobody made there.",
@@ -4486,17 +4648,10 @@
             "title": "Query",
             "type": "string"
           },
-          "sample_id": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Dataset sample id, which diverges from the row's position in the walk once the hard-sample sorter drives the order. Null where the row carries none.",
-            "title": "Sample Id"
+          "sample_key": {
+            "description": "What the sample IS (`Sample.key`).",
+            "title": "Sample Key",
+            "type": "string"
           },
           "status": {
             "description": "The grading verdict.",
@@ -4523,6 +4678,8 @@
           }
         },
         "required": [
+          "position",
+          "sample_key",
           "status",
           "ground_truth_text"
         ],
@@ -4733,28 +4890,17 @@
             "description": "The acquisition score (`adaptive_queue_mechanism.pick_value`) of this sample for a new candidate centred on the scope's frontier ability, on the ruler's δ. Null off the ruler, and in a scope with no frontier ability (dataset scope).",
             "title": "Pick Score"
           },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
           "query": {
             "title": "Query",
             "type": "string"
-          },
-          "sample_id": {
-            "title": "Sample Id",
-            "type": "integer"
-          },
-          "task": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Task"
           }
         },
         "required": [
-          "sample_id",
+          "position",
           "query",
           "hard_sample_rank",
           "delta_label",
@@ -4821,22 +4967,6 @@
         "title": "DatasetPipelineResponse",
         "type": "object"
       },
-      "DatasetReplaced": {
-        "additionalProperties": false,
-        "description": "The ``replace-dataset`` response: the subject echoed, nothing more — the counts and the\nversioned slug are on the migration's own record, and no caller reads them off the wire.",
-        "properties": {
-          "slug": {
-            "description": "The dataset name now free for new data.",
-            "title": "Slug",
-            "type": "string"
-          }
-        },
-        "required": [
-          "slug"
-        ],
-        "title": "DatasetReplaced",
-        "type": "object"
-      },
       "DatasetSplit": {
         "additionalProperties": false,
         "properties": {
@@ -4848,15 +4978,9 @@
           },
           "demo": {
             "default": 0,
-            "description": "Distinct samples reserved as the demo pool — the rows an individual's `shot_ids` name, rendered into its prompt as query and ground truth, never scored.",
+            "description": "Distinct samples reserved as the demo pool — the rows an individual's `shots` name by `Sample.key`, rendered into its prompt as query and ground truth, never scored.",
             "minimum": 0.0,
             "title": "Demo",
-            "type": "integer"
-          },
-          "seed": {
-            "default": 0,
-            "description": "Seeds which rows fall where. Membership ranks each row by its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows.",
-            "title": "Seed",
             "type": "integer"
           },
           "tolerance": {
@@ -4996,6 +5120,44 @@
           "datasets"
         ],
         "title": "DatasetStorageResponse",
+        "type": "object"
+      },
+      "DefaultsDrift": {
+        "additionalProperties": false,
+        "description": "Something the run's declaration is a delta over moved since it was declared, so the launch\nruns today's value under the same declaration.",
+        "properties": {
+          "declared": {
+            "$ref": "#/components/schemas/DefaultsPin"
+          },
+          "running": {
+            "$ref": "#/components/schemas/DefaultsPin"
+          }
+        },
+        "required": [
+          "declared",
+          "running"
+        ],
+        "title": "DefaultsDrift",
+        "type": "object"
+      },
+      "DefaultsPin": {
+        "additionalProperties": false,
+        "description": "What a declaration is a delta over, in two halves: the bench's defaults, which every arm of\na head-to-head shares, and its optimizer's whole treatment — manifest, source and prompts —\nwhich differs by arm by design.",
+        "properties": {
+          "bench": {
+            "minLength": 1,
+            "title": "Bench",
+            "type": "string"
+          },
+          "treatment": {
+            "$ref": "#/components/schemas/Treatment"
+          }
+        },
+        "required": [
+          "bench",
+          "treatment"
+        ],
+        "title": "DefaultsPin",
         "type": "object"
       },
       "DegradationContext": {
@@ -5257,7 +5419,7 @@
       },
       "DraftCampaignWire": {
         "additionalProperties": false,
-        "description": "A check-in campaign's draft as every check-in route answers it. ``draft_id`` IS the owning\n``campaign_id``; no ``tenant_id`` rides it (ADR-0002 no-drift gate #3).",
+        "description": "A check-in's draft as every check-in route answers it; Start mints its campaign. No\n``tenant_id`` rides it (ADR-0002 no-drift gate #3).",
         "properties": {
           "active_steps": {
             "description": "The pipeline this draft runs. Who may move a node's axes is `node_config_schema`'s answer alone.",
@@ -5360,10 +5522,19 @@
           "optimization_overrides": {
             "$ref": "#/components/schemas/OptimizationOverrides"
           },
-          "origin_prompt_fields": {
-            "additionalProperties": true,
-            "description": "`OptSearchPoint.prompt_field_dict()` shape; empty until the check-in fills it.",
-            "title": "Origin Prompt Fields",
+          "optimizer_setup": {
+            "$ref": "#/components/schemas/OptimizerSetup",
+            "description": "The optimizer as this draft's config runs it, as a campaign serves it."
+          },
+          "origin_prompts": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "description": "Per active step, its starting prompt's fields by name; empty until the check-in fills it. A step bearing no prompt reads none.",
+            "title": "Origin Prompts",
             "type": "object"
           },
           "pipeline_overlay": {
@@ -5465,13 +5636,14 @@
           "scoring_matchers",
           "scoring_dials",
           "optimization_overrides",
+          "optimizer_setup",
           "raw_task_description",
           "pipeline_overlay",
           "headers",
           "column_query",
           "column_ground_truth",
           "field_provenance",
-          "origin_prompt_fields",
+          "origin_prompts",
           "candidate_library_size",
           "created_at",
           "updated_at",
@@ -5526,12 +5698,95 @@
         "title": "DraftDependency",
         "type": "object"
       },
+      "DraftListResponse": {
+        "additionalProperties": false,
+        "description": "The caller's open check-ins, most recently edited first.",
+        "properties": {
+          "drafts": {
+            "items": {
+              "$ref": "#/components/schemas/DraftSummary"
+            },
+            "title": "Drafts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "drafts"
+        ],
+        "title": "DraftListResponse",
+        "type": "object"
+      },
+      "DraftReopenResponse": {
+        "additionalProperties": false,
+        "description": "A re-opened check-in: its draft and what the last resolver turn left.",
+        "properties": {
+          "draft": {
+            "$ref": "#/components/schemas/DraftCampaignWire"
+          },
+          "raised": {
+            "description": "Proposals the last turn left unclicked, so a re-opened check-in keeps the operator's outstanding actions.",
+            "items": {
+              "$ref": "#/components/schemas/RaisedCommand"
+            },
+            "title": "Raised",
+            "type": "array"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OriginLastResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last resolver turn's output; null when none ran."
+          }
+        },
+        "required": [
+          "draft",
+          "resolution",
+          "raised"
+        ],
+        "title": "DraftReopenResponse",
+        "type": "object"
+      },
+      "DraftSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "draft_id": {
+            "title": "Draft Id",
+            "type": "string"
+          },
+          "n_samples": {
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft_id",
+          "slug",
+          "n_samples",
+          "updated_at"
+        ],
+        "title": "DraftSummary",
+        "type": "object"
+      },
       "EditDraftCampaignPayload": {
         "additionalProperties": false,
         "properties": {
           "draft_id": {
             "maxLength": 128,
             "minLength": 8,
+            "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Draft Id",
             "type": "string"
           },
@@ -5641,17 +5896,22 @@
             ],
             "title": "Optimization Overrides"
           },
-          "origin_prompt_fields": {
+          "origin_prompts": {
             "anyOf": [
               {
-                "additionalProperties": true,
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
                 "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Origin Prompt Fields"
+            "title": "Origin Prompts"
           },
           "pipeline_overlay": {
             "anyOf": [
@@ -5789,6 +6049,120 @@
         "title": "EffectProvenance",
         "type": "object"
       },
+      "Election": {
+        "additionalProperties": false,
+        "description": "What a round's selector decided over its arms, by key; empty ``selected`` = the round HELD.",
+        "properties": {
+          "electable": {
+            "title": "Electable",
+            "type": "integer"
+          },
+          "elects_on": {
+            "enum": [
+              "accuracy",
+              "composite",
+              "ability"
+            ],
+            "title": "Elects On",
+            "type": "string"
+          },
+          "ended_on": {
+            "description": "WHOSE numbers the round's headline carries: the selection where the round selected; on a held round the retained parent, re-read on this round's cells as its reference arm — never the leading challenger.",
+            "title": "Ended On",
+            "type": "string"
+          },
+          "fit": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ArmFit"
+            },
+            "title": "Fit",
+            "type": "object"
+          },
+          "leading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
+            "title": "Leading"
+          },
+          "ruler": {
+            "$ref": "#/components/schemas/RulerStamp"
+          },
+          "selected": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected",
+            "type": "array"
+          },
+          "verdict_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verdict Reason"
+          }
+        },
+        "required": [
+          "selected",
+          "leading",
+          "ended_on",
+          "electable",
+          "elects_on",
+          "ruler"
+        ],
+        "title": "Election",
+        "type": "object"
+      },
+      "Eliminated": {
+        "additionalProperties": false,
+        "properties": {
+          "elimination": {
+            "$ref": "#/components/schemas/Elimination"
+          },
+          "kind": {
+            "const": "eliminated",
+            "default": "eliminated",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "elimination"
+        ],
+        "title": "Eliminated",
+        "type": "object"
+      },
+      "Elimination": {
+        "additionalProperties": false,
+        "description": "The eliminator's reading of a stop it made, for the arm or against it.",
+        "properties": {
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "context"
+        ],
+        "title": "Elimination",
+        "type": "object"
+      },
       "EnvironmentReading": {
         "additionalProperties": false,
         "description": "One cell as an ENVIRONMENT, the block the subjects are compared within. ``snr`` is the\nsubjects' spread at this cell over the roster's pooled residual — which environments tell the\nsubjects apart, read without a replicate, which the content-addressed instrument cannot give.\nA held-out cell reads the subjects' bench passes, which only a round's selection has.",
@@ -5874,6 +6248,7 @@
           "PROVIDER_THROTTLED",
           "SPEND_CEILING",
           "TOKEN_CEILING",
+          "WALL_CLOCK",
           "PRICE_LIST_UNREACHABLE",
           "NO_RATE",
           "PIPELINE",
@@ -6692,12 +7067,12 @@
               },
               "type": "array"
             },
-            "description": "What the verdict above was compared AGAINST, per node — this campaign's frozen `optimizer_narrowing[node].param_allowed_values.model`. Served beside the verdict so a surface naming the permitted models cannot name a different set than the one that decided. A node absent from it sanctions nothing, which is why any model steer there counts.",
+            "description": "What the verdict above was compared AGAINST, per node — this campaign's declared `optimizer_narrowing[node].param_allowed_values.model`. Served beside the verdict so a surface naming the permitted models cannot name a different set than the one that decided. A node absent from it sanctions nothing, which is why any model steer there counts.",
             "title": "Permitted Models",
             "type": "object"
           },
           "steers_disallowed_model": {
-            "description": "The overlay picks a responder the campaign's frozen `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
+            "description": "The overlay picks a responder the campaign's declared `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
             "title": "Steers Disallowed Model",
             "type": "boolean"
           }
@@ -6711,13 +7086,9 @@
       },
       "ForkRemainder": {
         "additionalProperties": false,
-        "description": "What a cycle's rounds cap and spend cap have left, which an offshoot takes as its own caps.\n\nA null cap is one the cycle does not carry, or whose spend is unread: the offshoot inherits it.",
+        "description": "What a cycle's rounds cap has left, which an offshoot takes as its own. Spend is no\nremainder: the ceiling is the campaign's, and its book already counts every cycle's.",
         "properties": {
-          "ceiling": {
-            "$ref": "#/components/schemas/SpendCeilings",
-            "description": "`parent_ceiling.usd` less `metered_usd`, never under 0; the token arm is not remaindered, so it is null and the offshoot inherits the parent's"
-          },
-          "max_rounds": {
+          "parent_rounds": {
             "anyOf": [
               {
                 "type": "integer"
@@ -6726,25 +7097,10 @@
                 "type": "null"
               }
             ],
-            "description": "`parent_max_rounds` less `rounds_closed`, never under 1",
-            "title": "Max Rounds"
+            "description": "The cycle's rounds cap; null where it has none",
+            "title": "Parent Rounds"
           },
-          "metered_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What the cycle's spend cap has counted",
-            "title": "Metered Usd"
-          },
-          "parent_ceiling": {
-            "$ref": "#/components/schemas/SpendCeilings"
-          },
-          "parent_max_rounds": {
+          "rounds": {
             "anyOf": [
               {
                 "type": "integer"
@@ -6753,21 +7109,19 @@
                 "type": "null"
               }
             ],
-            "title": "Parent Max Rounds"
+            "description": "`parent_rounds` less `rounds_closed`, never under 1",
+            "title": "Rounds"
           },
           "rounds_closed": {
-            "description": "Rounds closed AFTER the origin — what `max_rounds` counts",
+            "description": "Rounds closed AFTER the origin — what `budget.rounds` counts",
             "title": "Rounds Closed",
             "type": "integer"
           }
         },
         "required": [
           "rounds_closed",
-          "parent_max_rounds",
-          "max_rounds",
-          "metered_usd",
-          "parent_ceiling",
-          "ceiling"
+          "parent_rounds",
+          "rounds"
         ],
         "title": "ForkRemainder",
         "type": "object"
@@ -6852,6 +7206,7 @@
           "models",
           "origin",
           "budget",
+          "defaults",
           "optimizer_models",
           "human_intervened",
           "origin_reading"
@@ -6983,18 +7338,12 @@
         "additionalProperties": false,
         "description": "One campaign's bench headline beside what it cost to reach.",
         "properties": {
-          "arm": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Arm"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "bench": {
             "$ref": "#/components/schemas/BenchScore"
+          },
+          "bench_defaults_pin": {
+            "title": "Bench Defaults Pin",
+            "type": "string"
           },
           "bench_set": {
             "anyOf": [
@@ -7007,7 +7356,7 @@
             ]
           },
           "budget": {
-            "$ref": "#/components/schemas/ArmBudget"
+            "$ref": "#/components/schemas/Budget"
           },
           "calls": {
             "anyOf": [
@@ -7023,6 +7372,16 @@
           "campaign_id": {
             "title": "Campaign Id",
             "type": "string"
+          },
+          "determinism": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeterminismClamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "guard": {
             "$ref": "#/components/schemas/PairGuard"
@@ -7064,6 +7423,24 @@
             "title": "Optimizer Models",
             "type": "array"
           },
+          "purpose": {
+            "discriminator": {
+              "mapping": {
+                "compare": "#/components/schemas/Compare",
+                "optimize": "#/components/schemas/Optimize"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Optimize"
+              },
+              {
+                "$ref": "#/components/schemas/Compare"
+              }
+            ],
+            "title": "Purpose"
+          },
           "rounds": {
             "title": "Rounds",
             "type": "integer"
@@ -7091,20 +7468,16 @@
           "status": {
             "$ref": "#/components/schemas/RunStatus"
           },
+          "stopping": {
+            "$ref": "#/components/schemas/StoppingRule"
+          },
           "subject": {
             "title": "Subject",
             "type": "string"
           },
           "treatment_digest": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Treatment Digest"
+            "title": "Treatment Digest",
+            "type": "string"
           },
           "worked_ratio": {
             "anyOf": [
@@ -7134,10 +7507,13 @@
           "campaign_id",
           "optimizer",
           "optimizer_models",
-          "arm",
+          "purpose",
           "guard",
           "treatment_digest",
           "budget",
+          "stopping",
+          "determinism",
+          "bench_defaults_pin",
           "spend_metered",
           "human_intervened",
           "status",
@@ -7221,6 +7597,192 @@
           }
         },
         "title": "IndividualLineage",
+        "type": "object"
+      },
+      "InnerCellFacts": {
+        "additionalProperties": false,
+        "description": "Carried BESIDE the measurement, never as ``OuterSampleProxies`` fields the formula could score.",
+        "properties": {
+          "bench_final_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last standing selection's held-out headline less the origin's",
+            "title": "Bench Final Lift"
+          },
+          "bench_origin_level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The origin's headline on the held-out rows",
+            "title": "Bench Origin Level"
+          },
+          "final_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last round's level less the origin's; null where `series_reason` names why",
+            "title": "Final Lift"
+          },
+          "mean_parent_level_se": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mean SE of the levels past the origin: this arm's own half of a paired difference, the shared origin level cancelling; a precision, never a penalty",
+            "title": "Mean Parent Level Se"
+          },
+          "mean_round_delta": {
+            "anyOf": [
+              {
+                "maximum": 4.0,
+                "minimum": -4.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The mean level less the origin's, the last level held forward to the round budget; bounded for plausibility only, logit abilities differing without bound; null where `series_reason` names why",
+            "title": "Mean Round Delta"
+          },
+          "origin_headroom": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The share of origin rows still missed: 0 is a cell no arm can lift, however sharply it reads",
+            "title": "Origin Headroom"
+          },
+          "origin_level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The origin's θ on the search split's level series; null where `series_reason` names why",
+            "title": "Origin Level"
+          },
+          "peak_lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The best round's level less the origin's; null where `series_reason` names why",
+            "title": "Peak Lift"
+          },
+          "round_budget": {
+            "description": "The round budget, never below the rounds it ran",
+            "title": "Round Budget",
+            "type": "integer"
+          },
+          "rounds_ran": {
+            "description": "The rounds the inner cycle closed past its origin",
+            "title": "Rounds Ran",
+            "type": "integer"
+          },
+          "sent_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dollars sent, cumulative across attempts; reporting only, billed per call and entering no ledger",
+            "title": "Sent Usd"
+          },
+          "series_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the level series differences nothing; null where it does",
+            "title": "Series Reason"
+          },
+          "stop_reason": {
+            "$ref": "#/components/schemas/StopReason",
+            "description": "Why the inner cycle stopped"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens used, cumulative across attempts; reporting only, as `sent_usd`",
+            "title": "Tokens"
+          }
+        },
+        "required": [
+          "origin_level",
+          "final_lift",
+          "peak_lift",
+          "mean_round_delta",
+          "series_reason",
+          "mean_parent_level_se",
+          "rounds_ran",
+          "round_budget",
+          "stop_reason",
+          "origin_headroom",
+          "bench_origin_level",
+          "bench_final_lift",
+          "sent_usd",
+          "tokens"
+        ],
+        "title": "InnerCellFacts",
+        "type": "object"
+      },
+      "Invalid": {
+        "additionalProperties": false,
+        "description": "Refused before a cell: the reasons are the arm's own fatal ``validation_failures``.",
+        "properties": {
+          "kind": {
+            "const": "invalid",
+            "default": "invalid",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "Invalid",
         "type": "object"
       },
       "JsonValue": {},
@@ -7467,6 +8029,27 @@
         "title": "KnobRow",
         "type": "object"
       },
+      "KnobSwitch": {
+        "additionalProperties": false,
+        "properties": {
+          "knob": {
+            "description": "That knob, under `nodes.{node}.config`",
+            "title": "Knob",
+            "type": "string"
+          },
+          "node": {
+            "description": "The node whose knob sets a reader's access",
+            "title": "Node",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "knob"
+        ],
+        "title": "KnobSwitch",
+        "type": "object"
+      },
       "LensShift": {
         "additionalProperties": false,
         "description": "What the request's lens did to one course's sibling ordering, over the arms on its timeline.",
@@ -7529,7 +8112,6 @@
           "active",
           "archived",
           "deleted",
-          "checkin",
           "all"
         ],
         "type": "string"
@@ -7715,7 +8297,7 @@
         "description": "One member of the best-so-far line as an overlap reading holds it.",
         "properties": {
           "arm": {
-            "$ref": "#/components/schemas/ArmPointer"
+            "$ref": "#/components/schemas/ArmName"
           },
           "n": {
             "description": "How many of the panel's cells it holds scoreable.",
@@ -7740,15 +8322,7 @@
         "additionalProperties": false,
         "description": "A campaign's line as one value: the cycle that answers for it now, and how that cycle stands.",
         "properties": {
-          "holder": {
-            "$ref": "#/components/schemas/CycleHop",
-            "description": "The cycle answering for the campaign."
-          },
-          "human_intervened": {
-            "title": "Human Intervened",
-            "type": "boolean"
-          },
-          "max_rounds": {
+          "budget_rounds": {
             "anyOf": [
               {
                 "type": "integer"
@@ -7757,8 +8331,16 @@
                 "type": "null"
               }
             ],
-            "description": "The rounds cap binding the holder: what its last launch declared with the standing operator ceiling laid over, as its dashboard's `run_limits` reads; before any launch, the cap its campaign declares. 0 is origin only; null is no cap.",
-            "title": "Max Rounds"
+            "description": "The `budget.rounds` binding the holder: what its last launch declared with the standing operator budget laid over, as its dashboard's `run_limits` reads; before any launch, its campaign's. 0 is origin only; null is no rounds axis.",
+            "title": "Budget Rounds"
+          },
+          "holder": {
+            "$ref": "#/components/schemas/CycleHop",
+            "description": "The cycle answering for the campaign."
+          },
+          "human_intervened": {
+            "title": "Human Intervened",
+            "type": "boolean"
           },
           "producer_attached": {
             "title": "Producer Attached",
@@ -7773,7 +8355,7 @@
                 "type": "null"
               }
             ],
-            "description": "What `max_rounds` says beside a rounds count (`rounds_cap_note`); null where no cap binds.",
+            "description": "What `budget_rounds` says beside a rounds count (`rounds_cap_note`); null where no rounds axis binds.",
             "title": "Rounds Cap Note"
           },
           "rounds_closed": {
@@ -7782,7 +8364,7 @@
             "type": "integer"
           },
           "rounds_line": {
-            "description": "`rounds_closed` against `max_rounds` as a campaign row prints it (`rounds_line`).",
+            "description": "`rounds_closed` against `budget_rounds` as a campaign row prints it (`rounds_line`).",
             "title": "Rounds Line",
             "type": "string"
           },
@@ -7825,7 +8407,7 @@
           "stop_reason",
           "standing",
           "rounds_closed",
-          "max_rounds",
+          "budget_rounds",
           "rounds_line",
           "rounds_cap_note",
           "human_intervened"
@@ -7868,15 +8450,6 @@
             ],
             "title": "Composite Fitness Formula Short"
           },
-          "node_prompt_fields": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "description": "`ScoredCandidate.node_prompt_fields`, from its seeding.",
-            "title": "Node Prompt Fields",
-            "type": "object"
-          },
           "pipeline_overlay": {
             "anyOf": [
               {
@@ -7889,22 +8462,25 @@
             ],
             "title": "Pipeline Overlay"
           },
-          "prompt_fields": {
+          "prompts": {
             "anyOf": [
               {
-                "additionalProperties": true,
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/NodePrompt"
+                },
                 "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Prompt Fields"
+            "description": "`OptSearchPoint.prompts`; with the resolved params, what a steered fork seeds from. Null until the candidate is announced.",
+            "title": "Prompts"
           },
           "reading": {
             "$ref": "#/components/schemas/ArmReading"
           },
-          "resolved_pipeline_params": {
+          "resolved_params": {
             "anyOf": [
               {
                 "additionalProperties": true,
@@ -7914,7 +8490,7 @@
                 "type": "null"
               }
             ],
-            "title": "Resolved Pipeline Params"
+            "title": "Resolved Params"
           },
           "samples": {
             "items": {
@@ -7939,7 +8515,7 @@
       },
       "LivesConfig": {
         "additionalProperties": false,
-        "description": "Improvement-banked round budget: banks a life each round that promotes an arm, loses one\neach round that does not. ``max_rounds`` and spend stay the ceilings.",
+        "description": "Improvement-banked round budget: banks a life each round that promotes an arm, loses one\neach round that does not. ``budget.rounds`` and spend stay the ceilings.",
         "properties": {
           "cap": {
             "default": 4,
@@ -8478,6 +9054,88 @@
         "title": "MeasurandUnit",
         "type": "string"
       },
+      "Measured": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_samples": {
+            "title": "Expected Samples",
+            "type": "integer"
+          },
+          "individual": {
+            "$ref": "#/components/schemas/OptSearchPoint"
+          },
+          "locked_in": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Elimination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overlay": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Overlay",
+            "type": "object"
+          },
+          "resolved_params": {
+            "additionalProperties": true,
+            "title": "Resolved Params",
+            "type": "object"
+          },
+          "role": {
+            "enum": [
+              "origin",
+              "panel",
+              "parent"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "slot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmSlot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "state": {
+            "const": "measured",
+            "default": "measured",
+            "title": "State",
+            "type": "string"
+          },
+          "validation_failures": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationFailure"
+            },
+            "title": "Validation Failures",
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "slot",
+          "individual",
+          "sp_hash",
+          "resolved_params",
+          "expected_samples",
+          "locked_in"
+        ],
+        "title": "Measured",
+        "type": "object"
+      },
       "MeasuredLift": {
         "additionalProperties": false,
         "description": "One measurand's lift of member `b` over member `a`, on the cells both scored.",
@@ -8544,6 +9202,104 @@
         "title": "MeasurementRole",
         "type": "string"
       },
+      "Measuring": {
+        "additionalProperties": false,
+        "description": "What is known as the walk opens; its cells and their fold land on their own records.",
+        "properties": {
+          "block": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block"
+          },
+          "expected_samples": {
+            "title": "Expected Samples",
+            "type": "integer"
+          },
+          "individual": {
+            "$ref": "#/components/schemas/OptSearchPoint"
+          },
+          "n_priors": {
+            "default": 0,
+            "title": "N Priors",
+            "type": "integer"
+          },
+          "overlay": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Overlay",
+            "type": "object"
+          },
+          "resolved_params": {
+            "additionalProperties": true,
+            "title": "Resolved Params",
+            "type": "object"
+          },
+          "role": {
+            "enum": [
+              "origin",
+              "panel",
+              "parent"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "sample_order": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Sample Order",
+            "type": "array"
+          },
+          "slot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmSlot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "state": {
+            "const": "measuring",
+            "default": "measuring",
+            "title": "State",
+            "type": "string"
+          },
+          "validation_failures": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationFailure"
+            },
+            "title": "Validation Failures",
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "slot",
+          "individual",
+          "sp_hash",
+          "resolved_params",
+          "expected_samples"
+        ],
+        "title": "Measuring",
+        "type": "object"
+      },
       "MemberAddress": {
         "additionalProperties": false,
         "description": "Where one member of a pair was read: the cycle, the individual, and the pass.",
@@ -8551,7 +9307,7 @@
           "arm": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ArmPointer"
+                "$ref": "#/components/schemas/ArmName"
               },
               {
                 "type": "null"
@@ -9361,6 +10117,30 @@
         "title": "NodeOutputSchema",
         "type": "object"
       },
+      "NodePrompt": {
+        "additionalProperties": false,
+        "description": "One prompt node's loci: its fields by name and its shots, both written only through ``derive`` / ``edited``.",
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Each field it sets, by the name its node declares; an empty field is absent.",
+            "title": "Fields",
+            "type": "object"
+          },
+          "shots": {
+            "description": "Its few-shot shots in render order, as `Sample.key`s of the campaign's demo pool — resolved to each row's query and ground truth only when the prompt renders.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Shots",
+            "type": "array"
+          }
+        },
+        "title": "NodePrompt",
+        "type": "object"
+      },
       "NodeReach": {
         "additionalProperties": false,
         "description": "How far the search reaches on one node: an unmoved param is SHUT, an absent node unknown.",
@@ -9486,25 +10266,10 @@
       },
       "OptSearchPoint": {
         "additionalProperties": false,
-        "description": "The individual: a configuration of prompt fields, shots and node config, plus its lineage.",
+        "description": "The individual: a value per locus of the roster — prompt fields and shots per prompt node, node config — plus its lineage.",
         "properties": {
-          "answer_format": {
-            "default": "",
-            "title": "Answer Format",
-            "type": "string"
-          },
-          "instruction": {
-            "default": "",
-            "title": "Instruction",
-            "type": "string"
-          },
           "lineage": {
             "$ref": "#/components/schemas/IndividualLineage"
-          },
-          "persona": {
-            "default": "",
-            "title": "Persona",
-            "type": "string"
           },
           "pipeline_params": {
             "additionalProperties": true,
@@ -9512,28 +10277,13 @@
             "title": "Pipeline Params",
             "type": "object"
           },
-          "problem_description": {
-            "default": "",
-            "title": "Problem Description",
-            "type": "string"
-          },
-          "shot_ids": {
-            "description": "Its few-shot shots, in render order, as ids of the campaign's demo pool — resolved to each row's query and ground truth only when the target prompt renders.",
-            "items": {
-              "type": "integer"
+          "prompts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodePrompt"
             },
-            "title": "Shot Ids",
-            "type": "array"
-          },
-          "task_intent": {
-            "default": "",
-            "title": "Task Intent",
-            "type": "string"
-          },
-          "thinking_style": {
-            "default": "",
-            "title": "Thinking Style",
-            "type": "string"
+            "description": "Per prompt node, the loci it sets there; a node it sets nothing on is absent.",
+            "title": "Prompts",
+            "type": "object"
           }
         },
         "title": "OptSearchPoint",
@@ -9554,12 +10304,13 @@
             "title": "Arm Gate",
             "type": "string"
           },
-          "ceiling": {
-            "$ref": "#/components/schemas/SpendCeilings",
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
             "default": {
+              "rounds": 50,
               "usd": 0.025
             },
-            "description": "Halt this cycle when its cumulative spend (optimizer + backend) reaches ``usd`` dollars or ``tokens`` tokens (input + output), whichever trips first, at the next round boundary. The campaign's own layer of the run's budget: a fork seed, a standing ``set-limits`` and a launch flag (CLI ``--spend-budget`` / ``--token-budget``) each SET over it, raise or lower, and the account admits the result whole or refuses the launch. A null arm is disarmed, and a declared pair is WHOLE: an arm it leaves out is null, never the default. Default ``usd`` ≈ a 5-round run on the free-backend setup (measured ~$0.019) with headroom; raise ``max_rounds`` and let this be the binding limit. ``tokens`` defaults disarmed: a token is worth a different amount on every route, so a token cap sized for one model silently becomes a different budget on the next, and dollars are the model-invariant measure every route we run reports. Set it for the one case USD cannot see — a backend that BILLS but reports no cost, where spend reads low and ``unpriced_tokens`` on the dashboard is the tell."
+            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork seed, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
           },
           "convergence_patience": {
             "anyOf": [
@@ -9607,6 +10358,20 @@
             "title": "Enable 2Pl Graduation",
             "type": "boolean"
           },
+          "halt_at_accuracy": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stop ``target_hit`` once the declared pick's own accuracy reaches this. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
+            "title": "Halt At Accuracy"
+          },
           "lift_reference": {
             "default": "best_so_far",
             "description": "What each arm's lift is read against — member `a` of its `vs_reference` reading. ``best_so_far`` (default): the round's selected best-so-far individual, re-scored on the round's panel and paired with the arm on the cells both measured. ``parents``: the arm's own `parent_ids`, each re-measured on exactly the cells the arm measured; a crossover child is read against the better of its parents there, the bar it must clear to have added anything over what it recombined. An arm with no parent has no reference.",
@@ -9626,21 +10391,7 @@
                 "type": "null"
               }
             ],
-            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``max_rounds`` governs. ``max_rounds`` still caps from above, so a lives run wanting the full bank sets ``max_rounds: null``."
-          },
-          "max_rounds": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": 50,
-            "description": "Max rounds. 0 = measure the origin (round 0) and stop — the origin-only run; None = unlimited, bounded only by ``HARD_CAP_ARMS``, the arms raced across the run.",
-            "title": "Max Rounds"
+            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: null}``."
           },
           "nodes": {
             "additionalProperties": {
@@ -9687,7 +10438,7 @@
       },
       "OptimizationOverrides": {
         "additionalProperties": false,
-        "description": "The ``max_rounds`` bound gates the operator EDIT path only; the trusted internal\n``draft_from_dataset`` builds the dict directly, so a reused dataset may exceed it.",
+        "description": "The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal\n``draft_from_dataset`` builds the dict directly, so a reused dataset may exceed it.",
         "properties": {
           "arm_gate": {
             "default": "off",
@@ -9700,13 +10451,26 @@
             "title": "Arm Gate",
             "type": "string"
           },
-          "max_rounds": {
-            "default": 5,
-            "description": "Round ceiling for the campaign. 0 = measure the origin and stop.",
-            "maximum": 100.0,
-            "minimum": 0.0,
-            "title": "Max Rounds",
-            "type": "integer"
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
+            "default": {
+              "rounds": 5
+            },
+            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork seed, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
+          },
+          "halt_at_accuracy": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stop ``target_hit`` once the declared pick's own accuracy reaches this. ``None`` → no such stop. Refused on an arm of a head-to-head, which stops only on its record's rule.",
+            "title": "Halt At Accuracy"
           },
           "nodes": {
             "additionalProperties": {
@@ -9725,6 +10489,20 @@
           }
         },
         "title": "OptimizationOverrides",
+        "type": "object"
+      },
+      "Optimize": {
+        "additionalProperties": false,
+        "description": "Every measurement and steer on disk is admissible.",
+        "properties": {
+          "kind": {
+            "const": "optimize",
+            "default": "optimize",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "Optimize",
         "type": "object"
       },
       "OptimizerEntry": {
@@ -10011,16 +10789,64 @@
         "title": "OptimizerRoster",
         "type": "object"
       },
+      "OptimizerSetup": {
+        "additionalProperties": false,
+        "description": "What the selected optimizer runs under a config, derived once for check-in and campaign.",
+        "properties": {
+          "arms_per_round": {
+            "description": "Arms each round tests",
+            "title": "Arms Per Round",
+            "type": "integer"
+          },
+          "knobs": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "description": "Every member's knob values, the manifest's under the config's overlays",
+            "title": "Knobs",
+            "type": "object"
+          },
+          "pools": {
+            "description": "What the members draw from",
+            "items": {
+              "$ref": "#/components/schemas/PoolRow"
+            },
+            "title": "Pools",
+            "type": "array"
+          },
+          "proposers": {
+            "description": "The nodes making each round's arms, in walk order",
+            "items": {
+              "type": "string"
+            },
+            "title": "Proposers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "knobs",
+          "arms_per_round",
+          "proposers",
+          "pools"
+        ],
+        "title": "OptimizerSetup",
+        "type": "object"
+      },
       "OptimizerState": {
         "additionalProperties": false,
-        "description": "The one envelope every optimizer's state rides: its own payload beside the bench's population.",
+        "description": "The one envelope every optimizer's state rides: its parts by kind beside the bench's population.",
         "properties": {
           "manifest": {
             "title": "Manifest",
             "type": "string"
           },
-          "payload": {
-            "$ref": "#/components/schemas/RoundPayload"
+          "outputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RoundOutput"
+            },
+            "title": "Outputs",
+            "type": "object"
           },
           "population": {
             "items": {
@@ -10035,12 +10861,20 @@
             },
             "title": "Prompt Hashes",
             "type": "object"
+          },
+          "slices": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StateSlice"
+            },
+            "title": "Slices",
+            "type": "object"
           }
         },
         "required": [
           "manifest",
           "prompt_hashes",
-          "payload"
+          "slices",
+          "outputs"
         ],
         "title": "OptimizerState",
         "type": "object"
@@ -10281,7 +11115,7 @@
       },
       "OriginResolution": {
         "additionalProperties": false,
-        "description": "The checklist state ``cache.json::resolution`` holds, and the last resolver turn beside it.",
+        "description": "The checklist state ``checkin.json::resolution`` holds, and the last resolver turn beside it.",
         "properties": {
           "complete": {
             "title": "Complete",
@@ -10367,16 +11201,16 @@
             "$ref": "#/components/schemas/PairedReading",
             "description": "The standing pick (`b`) over C0 (`a`) on the origin panel, in report scope. `bought` on each member is what this round paid to put it back on the whole panel."
           },
-          "sample_ids": {
+          "positions": {
             "items": {
               "type": "integer"
             },
-            "title": "Sample Ids",
+            "title": "Positions",
             "type": "array"
           }
         },
         "required": [
-          "sample_ids",
+          "positions",
           "lead",
           "earlier",
           "advance"
@@ -10601,9 +11435,9 @@
         "description": "One unordered pair of the roster. ``a`` precedes ``b`` in its oldest-first order — by cycle,\nthen by round within one — so every lift here reads parent-to-descendant across the table.\nEvery pair is served: one that shares too little says so in its reading's ``state``.",
         "properties": {
           "gained": {
-            "description": "The cells `hit` counts as gained — `subject_a` missed, `subject_b` hit — as sample ids in `subject_b`'s numbering.",
+            "description": "The cells `hit` counts as gained — `subject_a` missed, `subject_b` hit — as `Sample.key`s.",
             "items": {
-              "type": "integer"
+              "type": "string"
             },
             "title": "Gained",
             "type": "array"
@@ -10613,9 +11447,9 @@
             "description": "The same pair on the hit grade, whatever metric the read selected, on the cells both graded: its headline's `flips` are what a level nets against each other."
           },
           "lost": {
-            "description": "The cells `hit` counts as lost, numbered the same way.",
+            "description": "The cells `hit` counts as lost, as `Sample.key`s.",
             "items": {
-              "type": "integer"
+              "type": "string"
             },
             "title": "Lost",
             "type": "array"
@@ -10798,49 +11632,8 @@
             "title": "Error",
             "type": "string"
           },
-          "inner_bench_final_lift": {
-            "title": "Inner Bench Final Lift",
-            "type": "number"
-          },
-          "inner_bench_origin_level": {
-            "title": "Inner Bench Origin Level",
-            "type": "number"
-          },
-          "inner_final_lift": {
-            "title": "Inner Final Lift",
-            "type": "number"
-          },
-          "inner_origin_headroom": {
-            "title": "Inner Origin Headroom",
-            "type": "number"
-          },
-          "inner_origin_level": {
-            "title": "Inner Origin Level",
-            "type": "number"
-          },
-          "inner_peak_lift": {
-            "title": "Inner Peak Lift",
-            "type": "number"
-          },
-          "inner_round_budget": {
-            "title": "Inner Round Budget",
-            "type": "integer"
-          },
-          "inner_rounds_ran": {
-            "title": "Inner Rounds Ran",
-            "type": "integer"
-          },
-          "inner_sent_usd": {
-            "title": "Inner Sent Usd",
-            "type": "number"
-          },
-          "inner_stop_reason": {
-            "title": "Inner Stop Reason",
-            "type": "string"
-          },
-          "inner_tokens": {
-            "title": "Inner Tokens",
-            "type": "integer"
+          "inner": {
+            "$ref": "#/components/schemas/InnerCellFacts"
           },
           "judge_readings": {
             "additionalProperties": {
@@ -10851,14 +11644,6 @@
           },
           "mean_bench_lift": {
             "title": "Mean Bench Lift",
-            "type": "number"
-          },
-          "mean_parent_level_se": {
-            "title": "Mean Parent Level Se",
-            "type": "number"
-          },
-          "mean_round_delta": {
-            "title": "Mean Round Delta",
             "type": "number"
           },
           "outcome_note": {
@@ -11025,6 +11810,88 @@
         ],
         "title": "PipelineViewNode",
         "type": "object"
+      },
+      "PoolDraw": {
+        "additionalProperties": false,
+        "properties": {
+          "access": {
+            "description": "How it draws under this config: `off` not at all, `open` a window to suggest from, `closed` an entry's id only",
+            "enum": [
+              "off",
+              "open",
+              "closed"
+            ],
+            "title": "Access",
+            "type": "string"
+          },
+          "node": {
+            "description": "A node drawing from the pool, in walk order",
+            "title": "Node",
+            "type": "string"
+          },
+          "switch": {
+            "$ref": "#/components/schemas/KnobSwitch",
+            "description": "The knob that sets `access`"
+          }
+        },
+        "required": [
+          "node",
+          "access",
+          "switch"
+        ],
+        "title": "PoolDraw",
+        "type": "object"
+      },
+      "PoolRow": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "description": "The initializer's `active` paths: the entries in play",
+            "items": {
+              "type": "string"
+            },
+            "title": "Active",
+            "type": "array"
+          },
+          "drawn_by": {
+            "items": {
+              "$ref": "#/components/schemas/PoolDraw"
+            },
+            "title": "Drawn By",
+            "type": "array"
+          },
+          "initializer": {
+            "description": "The run-init node writing it once, before round 0",
+            "title": "Initializer",
+            "type": "string"
+          },
+          "pool": {
+            "description": "The pool's state kind, e.g. `block_pool`",
+            "title": "Pool",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PoolSource",
+            "description": "Where its entries come from"
+          }
+        },
+        "required": [
+          "pool",
+          "source",
+          "initializer",
+          "active",
+          "drawn_by"
+        ],
+        "title": "PoolRow",
+        "type": "object"
+      },
+      "PoolSource": {
+        "enum": [
+          "library",
+          "partition"
+        ],
+        "title": "PoolSource",
+        "type": "string"
       },
       "PrefixReading": {
         "additionalProperties": false,
@@ -11194,6 +12061,61 @@
         "title": "ProducerState",
         "type": "string"
       },
+      "Proposed": {
+        "additionalProperties": false,
+        "properties": {
+          "individual": {
+            "$ref": "#/components/schemas/OptSearchPoint"
+          },
+          "overlay": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Overlay",
+            "type": "object"
+          },
+          "role": {
+            "enum": [
+              "origin",
+              "panel",
+              "parent"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "slot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmSlot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "const": "proposed",
+            "default": "proposed",
+            "title": "State",
+            "type": "string"
+          },
+          "validation_failures": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationFailure"
+            },
+            "title": "Validation Failures",
+            "type": "array"
+          }
+        },
+        "required": [
+          "role",
+          "slot",
+          "individual"
+        ],
+        "title": "Proposed",
+        "type": "object"
+      },
       "Provenance": {
         "enum": [
           "unset",
@@ -11205,7 +12127,7 @@
       },
       "QuotaStatus": {
         "additionalProperties": false,
-        "description": "An account's usage against the limits its next launch is gated on.\n\nThe spend and token pairs are LIFETIME, used-ever against the account's total ceilings; the\ncampaign pair is per-day, because one is an allowance and the other an abuse limit.",
+        "description": "Usage against the next launch's gates: spend and tokens LIFETIME, campaigns per day.",
         "properties": {
           "allowance_exhausted": {
             "description": "The allowance is SPENT in either unit, unreported sends counted. What a running launch holds is not spent: a run declaring no cap holds the whole headroom. False on an account no ceiling bounds.",
@@ -11839,45 +12761,43 @@
         "title": "RoundDiagnostics",
         "type": "object"
       },
-      "RoundPayload": {
+      "RoundOutput": {
         "additionalProperties": false,
-        "description": "An optimizer's own payload, banked with every round and read back as its registered type.",
+        "description": "What ONE round produced, banked on that round; a round whose writer did not run holds ``cls()``, or nothing where it is written first.",
         "properties": {},
-        "title": "RoundPayload",
+        "title": "RoundOutput",
         "type": "object"
       },
       "RoundResult": {
         "description": "A round with its rows, which is the round file itself.",
         "properties": {
-          "ability": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AbilityReading"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "accuracy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accuracy"
-          },
-          "all_candidate_results": {
+          "arms": {
             "additionalProperties": {
-              "items": {
-                "$ref": "#/components/schemas/SheetRow"
+              "discriminator": {
+                "mapping": {
+                  "cut": "#/components/schemas/Cut",
+                  "measured": "#/components/schemas/Measured",
+                  "measuring": "#/components/schemas/Measuring",
+                  "proposed": "#/components/schemas/Proposed"
+                },
+                "propertyName": "state"
               },
-              "type": "array"
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/Proposed"
+                },
+                {
+                  "$ref": "#/components/schemas/Measuring"
+                },
+                {
+                  "$ref": "#/components/schemas/Cut"
+                },
+                {
+                  "$ref": "#/components/schemas/Measured"
+                }
+              ]
             },
-            "title": "All Candidate Results",
+            "title": "Arms",
             "type": "object"
           },
           "at_offset": {
@@ -11891,37 +12811,15 @@
             ],
             "title": "At Offset"
           },
-          "candidate_scores": {
-            "items": {
-              "$ref": "#/components/schemas/ScoredCandidate"
-            },
-            "title": "Candidate Scores",
-            "type": "array"
-          },
-          "candidates_scored": {
-            "title": "Candidates Scored",
-            "type": "integer"
-          },
-          "composite_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
+          "cells": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/SheetRow"
               },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Composite Fitness"
-          },
-          "degraded_samples": {
-            "default": 0,
-            "title": "Degraded Samples",
-            "type": "integer"
-          },
-          "deprecated": {
-            "default": 0,
-            "title": "Deprecated",
-            "type": "integer"
+              "type": "array"
+            },
+            "title": "Cells",
+            "type": "object"
           },
           "diagnostics": {
             "anyOf": [
@@ -11933,29 +12831,18 @@
               }
             ]
           },
-          "electable_count": {
-            "default": 0,
-            "title": "Electable Count",
-            "type": "integer"
-          },
-          "elects_on": {
-            "enum": [
-              "accuracy",
-              "composite",
-              "ability"
-            ],
-            "title": "Elects On",
-            "type": "string"
-          },
-          "evaluators": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Evaluators",
-            "type": "object"
+          "election": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Election"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "fitness_bands": {
-            "description": "How many scored rows of `results` graded into each tenth of [0, 1], lowest first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in the tenth. A row carrying no verdict is in none — an uncharged error's 0.0 is a floor, not a low score.",
+            "description": "How many scored rows of the `headline` arm's cells graded into each tenth of [0, 1], lowest first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in the tenth. A row carrying no verdict is in none — an uncharged error's 0.0 is a floor, not a low score.",
             "items": {
               "type": "integer"
             },
@@ -11963,51 +12850,29 @@
             "title": "Fitness Bands",
             "type": "array"
           },
-          "generation_only": {
-            "default": false,
-            "title": "Generation Only",
-            "type": "boolean"
+          "folds": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ScoreSummary"
+            },
+            "title": "Folds",
+            "type": "object"
           },
-          "health": {
+          "headline": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/DegradationHealth"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "improved": {
-            "title": "Improved",
-            "type": "boolean"
-          },
-          "label": {
-            "description": "WHOSE numbers this round's headline (`accuracy`, `composite_fitness`, `total`, `evaluators`, `results`) carries: the candidate label (`C0`, `C3.1`) of the individual the round ENDED on. Equal to `leading_label` where the round selected; on a held round it is the retained PARENT, re-scored on this round's cells, and names an arm of an earlier round — so the headline is never the leading challenger's.",
-            "title": "Label",
-            "type": "string"
-          },
-          "leading_label": {
-            "anyOf": [
-              {
-                "type": "string"
+                "$ref": "#/components/schemas/ArmReading"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "The ONE arm of `candidate_scores` this round is read off, by LABEL, as its selector named it (`Selection.leading_id`) and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `label`.",
-            "title": "Leading Label"
+            "description": "The arm the round ENDED on (`election.ended_on`), read: the headline's numbers are its own. Null on a diag round, which elects nothing.",
+            "readOnly": true
           },
-          "not_attempted": {
-            "default": 0,
-            "title": "Not Attempted",
-            "type": "integer"
-          },
-          "opt_sp": {
+          "health": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/OptSearchPoint"
+                "$ref": "#/components/schemas/DegradationHealth"
               },
               {
                 "type": "null"
@@ -12022,7 +12887,14 @@
             "type": "array"
           },
           "optimizer_state": {
-            "$ref": "#/components/schemas/OptimizerState"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OptimizerState"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "overlap": {
             "$ref": "#/components/schemas/OverlapReading"
@@ -12037,48 +12909,6 @@
             "title": "Overlap Results",
             "type": "object"
           },
-          "pipeline_params": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pipeline Params"
-          },
-          "prompt_fields": {
-            "additionalProperties": true,
-            "title": "Prompt Fields",
-            "type": "object"
-          },
-          "recall_at": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Recall At",
-            "type": "object"
-          },
-          "reference_results": {
-            "additionalProperties": {
-              "items": {
-                "$ref": "#/components/schemas/SheetRow"
-              },
-              "type": "array"
-            },
-            "title": "Reference Results",
-            "type": "object"
-          },
-          "results": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/SheetRow"
-            },
-            "title": "Results",
-            "type": "array"
-          },
           "round": {
             "title": "Round",
             "type": "integer"
@@ -12089,61 +12919,79 @@
             "type": "string"
           },
           "scoreboard": {
-            "description": "The rank-ordered display table: rank 1 is `leading_label`, then θ, then composite.",
+            "description": "`ranked`, served: the ledger's `RoundOutcome` cannot carry a computed field.",
             "items": {
               "$ref": "#/components/schemas/ScoreboardRow"
             },
             "readOnly": true,
             "title": "Scoreboard",
             "type": "array"
-          },
-          "selected_labels": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Selected Labels",
-            "type": "array"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          },
-          "unscored": {
-            "default": 0,
-            "title": "Unscored",
-            "type": "integer"
-          },
-          "verdict_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Verdict Reason"
           }
         },
         "required": [
           "round",
-          "label",
-          "accuracy",
-          "composite_fitness",
-          "total",
-          "improved",
-          "elects_on",
-          "prompt_fields",
-          "candidates_scored",
-          "selected_labels",
-          "leading_label",
+          "folds",
+          "election",
           "overlap",
-          "optimizer_state",
           "round_id",
           "scoreboard",
+          "headline",
           "fitness_bands"
         ],
         "title": "RoundResult",
+        "type": "object"
+      },
+      "RulerScope": {
+        "additionalProperties": false,
+        "description": "What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale only through\ncells they share, and two datasets share none, so a δ is never compared across datasets.",
+        "properties": {
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "scorer": {
+            "title": "Scorer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scorer",
+          "dataset"
+        ],
+        "title": "RulerScope",
+        "type": "object"
+      },
+      "RulerStamp": {
+        "additionalProperties": false,
+        "description": "The δ scale a reading was taken on: the tenant ruler at ``version`` less the rows of\n``excluded``, the judged individuals it held. A cold stamp's ``id`` is flat.",
+        "properties": {
+          "excluded": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/RulerScope"
+          },
+          "version": {
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "scope",
+          "excluded"
+        ],
+        "title": "RulerStamp",
         "type": "object"
       },
       "RulerStanding": {
@@ -12175,7 +13023,7 @@
                 "type": "null"
               }
             ],
-            "description": "The anchor every θ and δ of this scope is read on (`AbilityReading.ruler_id`). Null while not fitted.",
+            "description": "The scale every θ and δ of this scope is read on (`RulerStamp.id`). Null while not fitted.",
             "title": "Ruler Id"
           },
           "state": {
@@ -12243,22 +13091,11 @@
       },
       "RunLimits": {
         "additionalProperties": false,
-        "description": "The ceilings a launch declared; a served dashboard lays the standing operator ceiling over them.",
+        "description": "The budget a launch declared, beside its optimizer's own bounds; a served dashboard lays\nthe standing budget over it.",
         "properties": {
-          "ceiling": {
-            "$ref": "#/components/schemas/SpendCeilings",
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
             "default": {}
-          },
-          "max_rounds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Rounds"
           },
           "optimizer": {
             "items": {
@@ -12272,9 +13109,8 @@
         "type": "object"
       },
       "RunPhase": {
-        "description": "The one run-state vocabulary every surface reads.\n\n- ``checkin``: still authoring its origin; holds no machine slot.\n- ``queued``: a launch claimed the cycle and waits for a machine slot.\n- ``starting``: a claimed launch past the queue, its process coming up.\n- ``running``: a process is attached and driving the cycle.\n- ``paused``: the worker exited and the cycle stays active and resumable.\n- ``gate``: holding for the operator, at the round-0 origin gate or for a round's arms.\n- ``detached``: active with no process holding its lock; derived at the read, never stored.\n- ``terminal``: the cycle finished, and its stop reason says why.",
+        "description": "The one run-state vocabulary every surface reads.\n\n- ``queued``: a launch claimed the cycle and waits for a machine slot.\n- ``starting``: a claimed launch past the queue, its process coming up.\n- ``running``: a process is attached and driving the cycle.\n- ``paused``: the worker exited and the cycle stays active and resumable.\n- ``gate``: holding for the operator, at the round-0 origin gate or for a round's arms.\n- ``detached``: active with no process holding its lock; derived at the read, never stored.\n- ``terminal``: the cycle finished, and its stop reason says why.",
         "enum": [
-          "checkin",
           "queued",
           "starting",
           "running",
@@ -12314,7 +13150,7 @@
           "parent": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ArmPointer"
+                "$ref": "#/components/schemas/ArmName"
               },
               {
                 "type": "null"
@@ -12334,7 +13170,7 @@
           "selection": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ArmPointer"
+                "$ref": "#/components/schemas/ArmName"
               },
               {
                 "type": "null"
@@ -12346,17 +13182,6 @@
             "description": "The ONE text reading of the selection: who, and both rates on the origin panel — or the reason there is no pair. Never the selection's rate alone. The readout, `log.md`, the activity feed and every screen print this. Stamped by the two constructors alone.",
             "title": "Selection Line",
             "type": "string"
-          },
-          "spent": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CloseSpend"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What the cycle had cost at this close. Null before round 0 closes, and on a run with no ledger to fold."
           },
           "stalls_left": {
             "anyOf": [
@@ -12396,7 +13221,6 @@
           "rounds_closed",
           "improved",
           "advanced",
-          "spent",
           "selection_line"
         ],
         "title": "RunStanding",
@@ -12465,10 +13289,10 @@
         "additionalProperties": false,
         "description": "One candidate's degradation evidence from its evaluation, beside a score that stands.",
         "properties": {
-          "candidate_label": {
+          "changes_description": {
             "default": "",
-            "description": "Label of the originating candidate; informational, not a join key.",
-            "title": "Candidate Label",
+            "description": "What the originating candidate changed; informational, not a join key.",
+            "title": "Changes Description",
             "type": "string"
           },
           "degraded_count": {
@@ -12491,6 +13315,18 @@
             "description": "Round number that first recorded this failure (dedup key component).",
             "title": "First Seen Round",
             "type": "integer"
+          },
+          "node": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node whose config ``observed_config`` captures: the ``dominant_warning`` prefix. ``None`` on a ``scoring_error_abort``, which names an error, not a node, and captures the whole config.",
+            "title": "Node"
           },
           "observed_config": {
             "additionalProperties": true,
@@ -12517,6 +13353,7 @@
         "required": [
           "source",
           "dominant_warning",
+          "node",
           "degraded_rate",
           "degraded_count",
           "total_scored",
@@ -12698,28 +13535,9 @@
         "title": "ScenarioReading",
         "type": "object"
       },
-      "ScoreboardRow": {
+      "ScoreSummary": {
         "additionalProperties": false,
-        "description": "One rank-ordered row of a round's scoreboard: an arm's reading at its rank.",
-        "properties": {
-          "rank": {
-            "title": "Rank",
-            "type": "integer"
-          },
-          "reading": {
-            "$ref": "#/components/schemas/ArmReading"
-          }
-        },
-        "required": [
-          "rank",
-          "reading"
-        ],
-        "title": "ScoreboardRow",
-        "type": "object"
-      },
-      "ScoredCandidate": {
-        "additionalProperties": false,
-        "description": "One candidate's score report: its cells folded, beside what the round knows of the arm.\n\n``accuracy`` IS mean fitness, so there is no ``hits``.",
+        "description": "An arm's fold of its cells: what it walked, and its level on them.",
         "properties": {
           "accuracy": {
             "anyOf": [
@@ -12732,30 +13550,9 @@
             ],
             "title": "Accuracy"
           },
-          "cache_read_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cache Read Tokens"
-          },
-          "cached_samples": {
-            "default": 0,
-            "title": "Cached Samples",
+          "cached": {
+            "title": "Cached",
             "type": "integer"
-          },
-          "candidate_id": {
-            "title": "Candidate Id",
-            "type": "string"
-          },
-          "changes_description": {
-            "default": "",
-            "title": "Changes Description",
-            "type": "string"
           },
           "composite_fitness": {
             "anyOf": [
@@ -12768,28 +13565,13 @@
             ],
             "title": "Composite Fitness"
           },
-          "degradation_context": {
-            "$ref": "#/components/schemas/DegradationContext"
+          "degraded": {
+            "title": "Degraded",
+            "type": "integer"
           },
           "deprecated": {
             "title": "Deprecated",
             "type": "integer"
-          },
-          "elimination_context": {
-            "additionalProperties": true,
-            "title": "Elimination Context",
-            "type": "object"
-          },
-          "elimination_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Elimination Reason"
           },
           "evaluators": {
             "additionalProperties": {
@@ -12797,26 +13579,6 @@
             },
             "title": "Evaluators",
             "type": "object"
-          },
-          "expected_samples": {
-            "default": 0,
-            "title": "Expected Samples",
-            "type": "integer"
-          },
-          "input_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Input Tokens"
-          },
-          "label": {
-            "title": "Label",
-            "type": "string"
           },
           "mean_fitness_ci_hi": {
             "anyOf": [
@@ -12840,127 +13602,30 @@
             ],
             "title": "Mean Fitness Ci Lo"
           },
-          "node_prompt_fields": {
+          "recall_at": {
             "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
+              "type": "number"
             },
-            "description": "The prompt fields each node runs, by node: the individual's own under the node its prompt is rendered into, and under any other node the ones that node's config carries. A node with none is absent.",
-            "title": "Node Prompt Fields",
+            "title": "Recall At",
             "type": "object"
           },
-          "outcome": {
-            "$ref": "#/components/schemas/ArmOutcome"
-          },
-          "output_tokens": {
+          "tokens": {
             "anyOf": [
               {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output Tokens"
-          },
-          "pipeline_overlay": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pipeline Overlay"
-          },
-          "prompt_fields": {
-            "additionalProperties": true,
-            "title": "Prompt Fields",
-            "type": "object"
-          },
-          "resolved_pipeline_params": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolved Pipeline Params"
-          },
-          "runtime_failures": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeFailure"
-            },
-            "title": "Runtime Failures",
-            "type": "array"
-          },
-          "scored_samples": {
-            "default": 0,
-            "title": "Scored Samples",
-            "type": "integer"
-          },
-          "sp_hash": {
-            "default": "",
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "theta": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theta"
-          },
-          "theta_caveat": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ThetaCaveat"
+                "$ref": "#/components/schemas/TokenAccount"
               },
               {
                 "type": "null"
               }
             ]
-          },
-          "theta_se": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theta Se"
           },
           "total": {
             "title": "Total",
             "type": "integer"
           },
-          "validation_failures": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationFailure"
-            },
-            "title": "Validation Failures",
-            "type": "array"
-          },
-          "vs_reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairedReading"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "walked": {
+            "title": "Walked",
+            "type": "integer"
           }
         },
         "required": [
@@ -12968,14 +13633,35 @@
           "accuracy",
           "composite_fitness",
           "deprecated",
+          "degraded",
+          "recall_at",
+          "walked",
+          "cached",
           "evaluators",
           "mean_fitness_ci_lo",
           "mean_fitness_ci_hi",
-          "candidate_id",
-          "label",
-          "outcome"
+          "tokens"
         ],
-        "title": "ScoredCandidate",
+        "title": "ScoreSummary",
+        "type": "object"
+      },
+      "ScoreboardRow": {
+        "additionalProperties": false,
+        "description": "One rank-ordered row of a round's scoreboard: an arm's reading at its rank.",
+        "properties": {
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "reading": {
+            "$ref": "#/components/schemas/ArmReading"
+          }
+        },
+        "required": [
+          "rank",
+          "reading"
+        ],
+        "title": "ScoreboardRow",
         "type": "object"
       },
       "ScoringPass": {
@@ -13022,6 +13708,33 @@
           "guard"
         ],
         "title": "SelectionPair",
+        "type": "object"
+      },
+      "SeriesReading": {
+        "additionalProperties": false,
+        "description": "A round's level as its series read it, under the one caveat that withholds it.",
+        "properties": {
+          "caveat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThetaCaveat"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The level's own caveat, else its series'. Null, and it differences any other level of the series that is null too."
+          },
+          "reading": {
+            "$ref": "#/components/schemas/AbilityReading",
+            "description": "The round's level: the individual it ended on, read on the series' one scale"
+          }
+        },
+        "required": [
+          "reading",
+          "caveat"
+        ],
+        "title": "SeriesReading",
         "type": "object"
       },
       "ServedBackpressure": {
@@ -13114,6 +13827,17 @@
         "additionalProperties": false,
         "description": "A cycle's dashboard as it is SERVED: the fold's facts, and beside them what only the\nserving seam can say — the run phase and its producer, the controls armed now, the campaign's\nown meter, and every reading a surface would otherwise decide for itself. Nothing here reaches\ndisk, and every field is required: one builder (``_serve``) states them all, for the head and\nfor a replay alike. What the banked state holds as an INPUT to one of those readings\n(``LiveDashboardState``'s own fields) is not served beside it.",
         "properties": {
+          "allotment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Budget"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This cycle's share of the campaign's ceiling — the most it may have metered in all, and what its run's book binds; null where no run holds a share, and on a replay."
+          },
           "arms_per_round": {
             "anyOf": [
               {
@@ -13169,10 +13893,29 @@
             "title": "Campaign Id",
             "type": "string"
           },
-          "candidate": {
-            "default": "",
-            "title": "Candidate",
-            "type": "string"
+          "campaign_metered_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same count in billed tokens, the figure `run_limits.budget.tokens` binds; null with `campaign_metered_usd`.",
+            "title": "Campaign Metered Tokens"
+          },
+          "campaign_metered_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the campaign's ceiling has counted in its meter, every cycle of it once, deleted ones included — the figure `run_limits.budget.usd` binds, of which `spend_metered` is this cycle's own. Null on a replay and where the manifest is gone.",
+            "title": "Campaign Metered Usd"
           },
           "catch_up_log": {
             "items": {
@@ -13250,6 +13993,17 @@
           "cycle_id": {
             "title": "Cycle Id",
             "type": "string"
+          },
+          "defaults_drift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DefaultsDrift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set where the bench defaults or the treatment the campaign's declaration is a delta over moved since it was declared, under an unchanged origin: this launch runs today's values."
           },
           "degraded_count": {
             "default": 0,
@@ -13383,6 +14137,16 @@
             "title": "Measured Unit",
             "type": "string"
           },
+          "measuring_arm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "next_step": {
             "description": "What the operator does now, as the cycle's `stop_reason` states it (`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. Empty where the cycle has not stopped, or its reason states that nothing is owed.",
             "title": "Next Step",
@@ -13391,7 +14155,7 @@
           "observed": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ArmPointer"
+                "$ref": "#/components/schemas/ArmName"
               },
               {
                 "type": "null"
@@ -13399,11 +14163,11 @@
             ],
             "description": "The arm a surface following the run shows (`_observed`); null before any arm exists."
           },
-          "open_sample_ids": {
+          "open_positions": {
             "items": {
               "type": "integer"
             },
-            "title": "Open Sample Ids",
+            "title": "Open Positions",
             "type": "array"
           },
           "optimizer_step": {
@@ -13660,6 +14424,9 @@
           "lookahead_explained",
           "spend_metered",
           "spend_metered_by_round",
+          "campaign_metered_usd",
+          "campaign_metered_tokens",
+          "allotment",
           "fork_remainder",
           "observed",
           "walk",
@@ -13672,21 +14439,6 @@
         "additionalProperties": false,
         "description": "A closed round as a dashboard serves it: the banked summary plus every reading derived from it.",
         "properties": {
-          "ability": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AbilityReading"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "ability_on_series_ruler": {
-            "description": "Whether `ability` is on the scale the cycle's θ series is drawn on, the first ruler a round stamped (`AbilityReading.comparable_to`).",
-            "title": "Ability On Series Ruler",
-            "type": "boolean"
-          },
           "accuracy": {
             "anyOf": [
               {
@@ -13762,13 +14514,24 @@
           "leading": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ArmPointer"
+                "$ref": "#/components/schemas/ArmName"
               },
               {
                 "type": "null"
               }
             ],
             "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where the round selected, on a held round the challenger `verdict_reason` names as its best, at round 0 the origin. `panel_precision` is measured on it. Null where the selector could read no arm."
+          },
+          "level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AbilityReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This round's level on the cycle's `LevelSeries`, the one two rounds may difference: null where `series_reading` carries a caveat."
           },
           "optimizer_facts": {
             "items": {
@@ -13821,7 +14584,7 @@
           "selected": {
             "description": "The arms the election crowned; empty on a round that held.",
             "items": {
-              "$ref": "#/components/schemas/ArmPointer"
+              "$ref": "#/components/schemas/ArmName"
             },
             "title": "Selected",
             "type": "array"
@@ -13848,6 +14611,17 @@
             "title": "Selection Movement",
             "type": "array"
           },
+          "series_reading": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "That level as read, under the caveat that withholds it, for a surface that shows θ under its caveat; null where no scored cell sits on the scale."
+          },
           "total": {
             "title": "Total",
             "type": "integer"
@@ -13872,16 +14646,17 @@
           "composite_fitness",
           "total",
           "overlap",
-          "ability_on_series_ruler",
           "overlap_line",
           "panel_precision_verdict",
-          "selection_movement"
+          "selection_movement",
+          "level",
+          "series_reading"
         ],
         "title": "ServedRound",
         "type": "object"
       },
       "SheetRow": {
-        "description": "One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it.\n\nThe cell's facts beside its grade — ``unscored``, or ``fitness`` and ``objective``, never\nboth. ``status`` is the served round's mark and ``ground_truth_text`` its label as shown\n(``application/cycle_reads.py::served_round``), on every row it serves; a round file\ncarries neither.",
+        "description": "One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it.\n\nThe cell's facts beside its grade — ``unscored``, or ``fitness`` and ``objective``, never\nboth. ``position`` is the sample's slot in the bank the cycle drew, ``status`` the served\nround's mark and ``ground_truth_text`` its label as shown\n(``application/cycle_reads.py::served_round``), on every row it serves; a round file\ncarries none of the three.",
         "properties": {
           "answer": {
             "title": "Answer",
@@ -13987,6 +14762,10 @@
               }
             ]
           },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
           "predicted": {
             "title": "Predicted",
             "type": "string"
@@ -14005,10 +14784,6 @@
           "retry_of_deprecated_cache": {
             "title": "Retry Of Deprecated Cache",
             "type": "boolean"
-          },
-          "sample_id": {
-            "title": "Sample Id",
-            "type": "integer"
           },
           "sample_key": {
             "title": "Sample Key",
@@ -14041,7 +14816,6 @@
           }
         },
         "required": [
-          "sample_id",
           "sample_key",
           "query",
           "ground_truth",
@@ -14049,6 +14823,7 @@
           "error",
           "pipeline_data",
           "cached",
+          "position",
           "status",
           "ground_truth_text"
         ],
@@ -14142,11 +14917,25 @@
         "title": "SiteRecordsResponse",
         "type": "object"
       },
+      "Skipped": {
+        "additionalProperties": false,
+        "description": "The operator stopped it.",
+        "properties": {
+          "kind": {
+            "const": "skipped",
+            "default": "skipped",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "Skipped",
+        "type": "object"
+      },
       "SpawnedBy": {
         "additionalProperties": false,
         "description": "The outer work-item an L4 inner cycle was spawned to measure.",
         "properties": {
-          "candidate_id": {
+          "individual_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -14155,32 +14944,8 @@
                 "type": "null"
               }
             ],
-            "description": "The outer candidate's `OptSearchPoint.id` — stable across rounds; null for the origin.",
-            "title": "Candidate Id"
-          },
-          "candidate_idx": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Position in the outer round's population; null for the origin.",
-            "title": "Candidate Idx"
-          },
-          "candidate_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Canonical label (`C0` for the origin, else `C{round}.{idx+1}`) — the same string the round file and console use.",
-            "title": "Candidate Label"
+            "description": "The outer individual's `OptSearchPoint.id` — stable across rounds, and the outer ARM's key where `role` is an arm's. Null outside a measured pass.",
+            "title": "Individual Id"
           },
           "role": {
             "anyOf": [
@@ -14191,7 +14956,7 @@
                 "type": "null"
               }
             ],
-            "description": "WHY this cell ran (`MeasurementRole`). A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the candidate's own panel cell makes a repaired round unreproducible. Null for the origin.",
+            "description": "WHY this cell ran (`MeasurementRole`). A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass.",
             "title": "Role"
           },
           "round": {
@@ -14207,7 +14972,7 @@
             "title": "Round"
           },
           "task": {
-            "description": "The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this.",
+            "description": "The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The individual does NOT identify a run: every task runs for every individual, so one individual's spawns are as many as the panel has cells and are told apart only by this.",
             "title": "Task",
             "type": "string"
           }
@@ -14281,38 +15046,6 @@
         "title": "SpendBucket",
         "type": "object"
       },
-      "SpendCeilings": {
-        "additionalProperties": false,
-        "description": "What a run may spend, in the two units spend is metered in; a null arm is unmetered.",
-        "properties": {
-          "tokens": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tokens"
-          },
-          "usd": {
-            "anyOf": [
-              {
-                "ge": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usd"
-          }
-        },
-        "title": "SpendCeilings",
-        "type": "object"
-      },
       "SpendRollup": {
         "additionalProperties": false,
         "description": "A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them.\n\nA budget caps ``total_used_usd`` and ``total_rate_priced_usd`` together; ``total_incurred_usd``\nprices cache hits too.",
@@ -14374,15 +15107,18 @@
       },
       "StartCheckinResponse": {
         "additionalProperties": false,
-        "description": "What a Start answers: the campaign, the cycle its loop runs and the job holding its slot.",
+        "description": "What a Start answers: the job holding its slot, and the cycle it minted.",
         "properties": {
-          "campaign_id": {
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "cycle_id": {
-            "title": "Cycle Id",
-            "type": "string"
+          "hop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CycleHop"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null while the job is queued: the campaign is minted once it holds a slot."
           },
           "job_id": {
             "title": "Job Id",
@@ -14390,9 +15126,8 @@
           }
         },
         "required": [
-          "campaign_id",
-          "cycle_id",
-          "job_id"
+          "job_id",
+          "hop"
         ],
         "title": "StartCheckinResponse",
         "type": "object"
@@ -14425,6 +15160,13 @@
         "title": "StartPrompt",
         "type": "object"
       },
+      "StateSlice": {
+        "additionalProperties": false,
+        "description": "State a member carries ACROSS rounds; a round's close banks it.",
+        "properties": {},
+        "title": "StateSlice",
+        "type": "object"
+      },
       "StatusMark": {
         "enum": [
           "archived",
@@ -14433,7 +15175,6 @@
           "queued",
           "gate",
           "paused",
-          "checkin",
           "detached",
           "success",
           "halted",
@@ -14506,7 +15247,7 @@
         "description": "Why a cycle's run ended or paused.",
         "enum": [
           "perfect_score",
-          "max_rounds",
+          "rounds_budget",
           "lives_exhausted",
           "paused",
           "panel_cut",
@@ -14520,6 +15261,7 @@
           "target_hit",
           "spend_budget",
           "token_budget",
+          "wall_clock",
           "origin_gate",
           "backend_unreachable",
           "provider_credit_exhausted",
@@ -14535,6 +15277,43 @@
         ],
         "title": "StopReason",
         "type": "string"
+      },
+      "StoppingRule": {
+        "additionalProperties": false,
+        "description": "What stops a run short of its budget, so no arm outlasts another on a stall the other was\nstopped for.",
+        "properties": {
+          "convergence_patience": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Convergence Patience"
+          },
+          "lives": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lives"
+          }
+        },
+        "required": [
+          "lives",
+          "convergence_patience"
+        ],
+        "title": "StoppingRule",
+        "type": "object"
       },
       "SubjectMask": {
         "additionalProperties": false,
@@ -14801,11 +15580,12 @@
             "type": "object"
           },
           "status": {
-            "description": "Where the resolved searchpoint stands, in the lineage tree's own words. `minted` = it has no score report yet: its walk is still open (or ended with its producer), so `n_cells`, `values` and `cell_means` cover only the cells it has scored SO FAR and every reading here is a prefix, of `expected_samples`. `measured` = its walk ended and these are all its cells.",
+            "description": "Where the resolved searchpoint's arm stands, in the lineage tree's own words. `proposed` / `measuring` = its walk is still open (or ended with its producer), so `n_cells`, `values` and `cell_means` cover only the cells it has scored SO FAR and every reading here is a prefix, of `expected_samples`. `cut` = its walk stopped short of its panel; `measured` = its walk ended and these are all its cells.",
             "enum": [
-              "minted",
-              "measured",
-              "invalid"
+              "proposed",
+              "measuring",
+              "cut",
+              "measured"
             ],
             "title": "Status",
             "type": "string"
@@ -14948,15 +15728,15 @@
         "type": "object"
       },
       "ThetaCaveat": {
-        "description": "A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact.",
+        "description": "A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact.\nEach is read off the cells a θ was read on: one level's, one arm's, a whole series'.",
         "enum": [
+          "floor_pinned",
           "disjoint_scopes",
           "cold_ruler",
           "flat_ruler",
           "collapsed_band",
           "prior_pinned",
-          "unmeasured_delta",
-          "floor_pinned"
+          "unmeasured_delta"
         ],
         "title": "ThetaCaveat",
         "type": "string"
@@ -14998,6 +15778,44 @@
           }
         },
         "title": "TokenAccount",
+        "type": "object"
+      },
+      "Treatment": {
+        "additionalProperties": false,
+        "description": "Two runs are one treatment only where ``digest`` agrees; no measurement key reads it.",
+        "properties": {
+          "manifest": {
+            "title": "Manifest",
+            "type": "string"
+          },
+          "optimizer": {
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "prompt_hashes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Prompt Hashes",
+            "type": "object"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "optimizer",
+          "version",
+          "prompt_hashes",
+          "manifest",
+          "source"
+        ],
+        "title": "Treatment",
         "type": "object"
       },
       "TurnRecord": {
@@ -15136,7 +15954,7 @@
         "description": "One variation node's act: which node ran, whether it asked a model, and the loci it wrote.",
         "properties": {
           "loci": {
-            "description": "The loci it left different from what it was handed, by `locus_name`: the first one's against the first parent, a later one's against the variation before it.",
+            "description": "The loci it left different from what it was handed, as `node.key`: the first one's against the first parent, a later one's against the variation before it.",
             "items": {
               "type": "string"
             },
@@ -15195,15 +16013,9 @@
         "additionalProperties": false,
         "description": "``verify_pass`` on a served dashboard — one candidate being re-scored on unseen cells.",
         "properties": {
-          "label": {
-            "description": "The candidate the pass re-scores, as its row is labelled.",
-            "title": "Label",
-            "type": "string"
-          },
-          "round": {
-            "description": "That candidate's own round; 0 is the origin.",
-            "title": "Round",
-            "type": "integer"
+          "arm": {
+            "$ref": "#/components/schemas/ArmName",
+            "description": "The candidate the pass re-scores, as its row names it."
           },
           "rows": {
             "description": "Unseen search cells the pass sends.",
@@ -15220,8 +16032,7 @@
           }
         },
         "required": [
-          "label",
-          "round",
+          "arm",
           "rows",
           "strategy"
         ],
@@ -15301,7 +16112,7 @@
             "type": "string"
           },
           "strategy": {
-            "description": "How the fresh cells were picked: `random` from the unmeasured search pool, or `hard` — its highest-δ cells first, which read BELOW the level by construction.",
+            "description": "How the fresh cells were picked: `random` from the unmeasured search split, or `hard` — its highest-δ cells first, which read BELOW the level by construction.",
             "enum": [
               "random",
               "hard"
@@ -15344,7 +16155,7 @@
       },
       "WarmingDashboard": {
         "additionalProperties": false,
-        "description": "What a cycle with no dashboard state serves, at 200 rather than 404 so a surface renders\n\"initialising\" instead of appearing offline: a cycle in check-in — now, or at the moment a\nreplay folds to — has declared nothing to stand a state on (``RunWiringRecord``), and no\nother cycle is without one. The run phase is served here as everywhere — a body with none is\nwhat lets a browser invent one.",
+        "description": "What a cycle with no dashboard state serves, at 200 rather than 404 so a surface renders\n\"initialising\" instead of appearing offline: a cycle replayed to a moment inside the check-in\nits draft's ledger brought in has declared nothing to stand a state on (``RunWiringRecord``),\nand no other cycle is without one. The run phase is served here as everywhere — a body with none is\nwhat lets a browser invent one.",
         "properties": {
           "campaign_id": {
             "title": "Campaign Id",
@@ -15393,7 +16204,7 @@
       },
       "WinnerChainPoint": {
         "additionalProperties": false,
-        "description": "One step of the branch standing behind a subject — the winner chain from the origin up to\nits head, each point read on ITS OWN cells under the selected metric. Opt-in\n(``include_winner_chain``), because every point past the origin opens a round file.\n\n**Named for the chain, never \"trajectory\".** The subsets move between rounds, so this reads\neach point on the evidence that point actually had; the round's own `overlap` line is the\nOPPOSITE basis — that same chain on one shared set of cells. Two readings of one sequence\nthat disagree by construction, and under one word a reader could tell them apart from\nneither name. The word survives where a series genuinely is one (`p_best_trajectory`,\n`parent_level_trajectory`, the Sample-trajectory grid).",
+        "description": "One step of the branch standing behind a subject — the winner chain from the origin up to\nits head, each point read on ITS OWN cells under the selected metric. Opt-in\n(``include_winner_chain``), because every point past the origin opens a round file.\n\n**Named for the chain, never \"trajectory\".** The subsets move between rounds, so this reads\neach point on the evidence that point actually had; the round's own `overlap` line is the\nOPPOSITE basis — that same chain on one shared set of cells. Two readings of one sequence\nthat disagree by construction, and under one word a reader could tell them apart from\nneither name. The word survives where a series genuinely is one (`p_best_trajectory`,\nthe Sample-trajectory grid).",
         "properties": {
           "candidate_id": {
             "title": "Candidate Id",
@@ -15520,6 +16331,25 @@
       "WorkspaceStorageResponse": {
         "additionalProperties": false,
         "properties": {
+          "archive_home_bytes": {
+            "description": "The home's cross-campaign reuse caches (measurements/, optimizer_reuse/, judge_reuse/) — survive delete; under an install-owned home, every account's",
+            "title": "Archive Home Bytes",
+            "type": "integer"
+          },
+          "archive_home_id": {
+            "description": "The archive home this account files into and replays from: its own tenant id, or the install's shared archive",
+            "title": "Archive Home Id",
+            "type": "string"
+          },
+          "archive_home_owner": {
+            "description": "`tenant`: the account's own home, counted in `total_bytes`; `install`: one every account on the install shares, counted in no account's total",
+            "enum": [
+              "tenant",
+              "install"
+            ],
+            "title": "Archive Home Owner",
+            "type": "string"
+          },
           "campaigns": {
             "description": "Fattest-first per-campaign totals (active + archived)",
             "items": {
@@ -15533,20 +16363,17 @@
             "title": "Other Bytes",
             "type": "integer"
           },
-          "shared_cache_bytes": {
-            "description": "Cross-campaign reuse caches (measurements/, optimizer_reuse/, judge_reuse/) — survive delete",
-            "title": "Shared Cache Bytes",
-            "type": "integer"
-          },
           "total_bytes": {
-            "description": "The tenant's real on-disk total — campaigns + caches + other",
+            "description": "What this account holds on disk — campaigns + other, + the archive home when the account owns it",
             "title": "Total Bytes",
             "type": "integer"
           }
         },
         "required": [
           "total_bytes",
-          "shared_cache_bytes",
+          "archive_home_id",
+          "archive_home_owner",
+          "archive_home_bytes",
           "other_bytes",
           "campaigns"
         ],
@@ -15977,7 +16804,7 @@
     },
     "/api/v1/campaigns": {
       "get": {
-        "description": "Every campaign in one store owned by the caller, newest first.\n\nA check-in campaign IS ``active``; ``descend`` enters an inner store exactly as on ``GET /cycles``.",
+        "description": "Every campaign in one store owned by the caller, newest first.\n\n``descend`` enters an inner store exactly as on ``GET /cycles``.",
         "operationId": "list_campaigns_api_v1_campaigns_get",
         "parameters": [
           {
@@ -15999,14 +16826,14 @@
             }
           },
           {
-            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'",
+            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'",
             "in": "query",
             "name": "lifecycle",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/LifecycleFilter",
               "default": "active",
-              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'checkin' — the authoring phase, asked of the root cycle's flag; or 'all'"
+              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'"
             }
           },
           {
@@ -16097,52 +16924,9 @@
         ]
       }
     },
-    "/api/v1/campaigns/{campaign_id}/checkin": {
-      "get": {
-        "description": "Re-open a durable check-in campaign: its draft and its last resolver turn.\n\n404 for a cross-tenant id, and for a campaign with no check-in working state (already started, or never a check-in).",
-        "operationId": "get_campaign_checkin_api_v1_campaigns__campaign_id__checkin_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "campaign_id",
-            "required": true,
-            "schema": {
-              "title": "Campaign Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckinReopenResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Campaign Checkin",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
     "/api/v1/campaigns/{campaign_id}/config-map": {
       "get": {
-        "description": "One campaign's knob coupling and provenance map: what moves which estimand, what overwrites what, which knobs collide.\n\nRead over the config its root runs under, its draft while still authoring; 404 on cross-user reads.",
+        "description": "One campaign's knob coupling and provenance map: what moves which estimand, what overwrites what, which knobs collide.\n\nRead over the config its root runs under; 404 on cross-user reads.",
         "operationId": "get_campaign_config_map_api_v1_campaigns__campaign_id__config_map_get",
         "parameters": [
           {
@@ -16185,7 +16969,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
       "get": {
-        "description": "Live telemetry for the viewed cycle: its own ``dashboard.json``.\n\nThe path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.\nHonors ``If-Modified-Since`` with a 304; a cycle still at check-in answers ``warming_up`` at 200, an absent one 404.\n``at`` is an offset in the LEAF cycle's own ledger, the address a ray item carries: the state as of that line.",
+        "description": "Live telemetry for the viewed cycle: its own ``dashboard.json``.\n\nThe path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.\nHonors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.\n``at`` is an offset in the LEAF cycle's own ledger, the address a ray item carries: the state as of that line.",
         "operationId": "get_cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
         "parameters": [
           {
@@ -17179,66 +17963,6 @@
         ]
       }
     },
-    "/api/v1/commands/replace-dataset": {
-      "post": {
-        "description": "Version-and-repoint a colliding dataset so its name frees for new data.\n\nNothing is overwritten: the old data and every prior campaign's results stay under ``{slug}-vN``.\nThe freed name is re-ingested by a separate ``/datasets/ingest`` call.",
-        "operationId": "replace_dataset_api_v1_commands_replace_dataset_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Idempotency-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CommandEnvelope"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetReplaced"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Replace Dataset",
-        "tags": [
-          "Commands"
-        ]
-      }
-    },
     "/api/v1/commands/resolve-origin": {
       "post": {
         "description": "Run one origin-resolver turn against a draft, synchronously, and return ``{resolution, draft}``.",
@@ -17301,7 +18025,7 @@
     },
     "/api/v1/commands/start-checkin": {
       "post": {
-        "description": "Flip a check-in campaign to ``active``, mint its run cycle and detach the loop.\n\nAn incomplete origin answers 422 and the campaign stays ``checkin``.",
+        "description": "Mint the draft's campaign and root cycle, close the draft and detach the loop.\n\nAn incomplete origin answers 422 and the draft stays open.",
         "operationId": "start_checkin_api_v1_commands_start_checkin_post",
         "parameters": [
           {
@@ -17546,7 +18270,7 @@
     },
     "/api/v1/datasets/draft/candidate-library": {
       "post": {
-        "description": "Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft.\n\n``draft_id`` is the check-in campaign id.",
+        "description": "Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft.",
         "operationId": "upload_candidate_library_api_v1_datasets_draft_candidate_library_post",
         "parameters": [
           {
@@ -17666,7 +18390,7 @@
     },
     "/api/v1/datasets/ingest": {
       "post": {
-        "description": "Parse an uploaded tabular file, mint a durable check-in campaign and return its draft.\n\n``draft_id`` is the ``campaign_id``; nothing runs until ``/commands/start-checkin``.",
+        "description": "Parse an uploaded tabular file into a durable check-in draft; ``/commands/start-checkin`` mints its campaign.",
         "operationId": "ingest_dataset_api_v1_datasets_ingest_post",
         "requestBody": {
           "content": {
@@ -18009,7 +18733,7 @@
     },
     "/api/v1/datasets/{name}/draft": {
       "post": {
-        "description": "Open an authored dataset's files as a prefilled, durable check-in campaign.\n\n``draft_id`` is the ``campaign_id``; nothing runs until ``/commands/start-checkin``.",
+        "description": "Open an authored dataset's files as a prefilled, durable check-in draft.",
         "operationId": "draft_from_existing_dataset_api_v1_datasets__name__draft_post",
         "parameters": [
           {
@@ -18090,6 +18814,71 @@
         "summary": "Get Dataset Pipeline",
         "tags": [
           "Datasets"
+        ]
+      }
+    },
+    "/api/v1/drafts": {
+      "get": {
+        "description": "The caller's open check-ins. A draft is no campaign: Start mints one and closes it.",
+        "operationId": "list_drafts_api_v1_drafts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Drafts",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/drafts/{draft_id}": {
+      "get": {
+        "description": "Re-open a check-in: its draft and its last resolver turn. 404 once started or discarded.",
+        "operationId": "get_draft_api_v1_drafts__draft_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftReopenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Draft",
+        "tags": [
+          "Campaigns"
         ]
       }
     },
@@ -18392,7 +19181,7 @@
     },
     "/api/v1/origins/{origin_id}/draft": {
       "post": {
-        "description": "Open a prior origin as a prefilled check-in campaign; nothing runs until ``/commands/start-checkin``.",
+        "description": "Open a prior origin as a prefilled check-in draft; nothing runs until ``/commands/start-checkin``.",
         "operationId": "post_origin_draft_api_v1_origins__origin_id__draft_post",
         "parameters": [
           {

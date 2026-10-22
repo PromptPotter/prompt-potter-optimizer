@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Iterator, Sequence
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.resume import (
@@ -15,16 +15,15 @@ from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.preflight import (
     refuse_arm_below_round,
-    refuse_below_reasoning_floor,
     run_preflight_checks,
 )
-from promptpotter.application.runner.campaign_ids import cycle_config_identity
 from promptpotter.application.runner.inner.spawn_context import retarget_inner_spawn
 from promptpotter.application.scoring.classification import build_degradation_checks
 from promptpotter.application.scoring.formula import cell_channels_of
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.application.views.ingress import init_enter, init_exit
 from promptpotter.domain.bench import BankPartition, partition_bank, restored_partition
+from promptpotter.domain.campaign import Compare, Optimize
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.measurement_provenance import RunSource
@@ -44,9 +43,12 @@ from promptpotter.infrastructure.llm.telemetry import (
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.store.archive_queries import (
+    ArmOf,
     CampaignWalks,
-    FiledBy,
-    fence_memory,
+    CellOf,
+    OpenAt,
+    bind_memory_scope,
+    memory_scope,
 )
 from promptpotter.judges.registry import build_evaluators
 from promptpotter.shared.errors import ConflictError, DiagnosticError
@@ -56,10 +58,8 @@ if TYPE_CHECKING:
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-    from promptpotter.domain.bench import DatasetSplit, PartitionRecord
+    from promptpotter.domain.bench import PartitionRecord
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.read_model import Moment
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -67,20 +67,17 @@ logger = logging.getLogger(__name__)
 
 def init_cycle(
     session: Session,
-    origin_jsp: JobSearchPoint,
-    dataset: list[Sample],
-    cycle_id_override: str | None,
+    cycle_id: str | None,
     *,
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
     """A present-but-BROKEN cycle propagates: swallowing it re-spends the campaign from scratch."""
 
-    if not session.backend_id:
+    if not session.backend_id or cycle_id is None:
         return None, 1
     store = session.store.campaigns
-    campaign_id = session.campaign_id
-    resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
-    hop = CycleHop(campaign_id=campaign_id, cycle_id=resolved)
+    resolved = cycle_id
+    hop = CycleHop(campaign_id=session.campaign_id, cycle_id=resolved)
     # Re-written on a resume on purpose: the backend may have changed its axes since.
     if session.pipeline_declaration:
         store.write_resolved_pipeline(hop, session.pipeline_declaration)
@@ -108,7 +105,7 @@ def populate_session_scoring(
     session.source = source
     session.scoring.scorer = scorer_of(
         campaign_config,
-        verifier_graded=all_verifier_graded(s.ground_truth for s in session.samples),
+        verifier_graded=all_verifier_graded(s.ground_truth for s in session.bank.samples),
     )
     session.scoring.display_metric = campaign_config.display_metric
     # Assigned unconditionally: `{}` declares no judges, and never means "keep what is armed".
@@ -117,13 +114,20 @@ def populate_session_scoring(
     )
 
 
-def scope_memory(session: Session, *, moment: Moment | None) -> None:
-    """Inside the run's own task: an arm remembers only its campaign's walks (an instrument's cell is
-    fenced at its spawn); any other task re-read at a *moment* remembers nothing filed after it."""
-    if session.controlled:
-        fence_memory(CampaignWalks(session.store.campaigns, session.campaign_id, moment))
-    elif moment is not None:
-        fence_memory(FiledBy(moment))
+def scope_memory(session: Session) -> None:
+    """An L4 cell keeps the scope its spawner bound (`runner/inner/spawn_context.py::enter_inner_cell`)."""
+    if isinstance(memory_scope(), CellOf):
+        return
+    match purpose := session.purpose:
+        case Optimize():
+            bind_memory_scope(OpenAt())
+        case Compare(arm=arm):
+            record = session.store.campaigns.load_head_to_head(arm.head_to_head_id)
+            assert record is not None, "an arm's mint declares its head-to-head"
+            walks = CampaignWalks(session.store.campaigns, session.campaign_id)
+            bind_memory_scope(ArmOf(walks, record.ruler_version))
+        case _:
+            assert_never(purpose)
 
 
 def arm_diagnostic_scoring(
@@ -132,29 +136,32 @@ def arm_diagnostic_scoring(
     *,
     source: RunSource,
 ) -> None:
+    scope_memory(session)
     if bound_spend_book() is None:
         bind_spend_book(unbounded_spend_book())
     configure_and_apply_pipeline(session, campaign_config)
     populate_session_scoring(session, campaign_config, source=source)
-    session.scoring.partition = cycle_partition(
-        session, session.samples, campaign_config.dataset_split
-    )
+    session.scoring.partition = cycle_partition(session, session.bank.samples, campaign_config)
 
 
 def cycle_partition(
-    session: Session, bank: Sequence[Sample], split: DatasetSplit | None
+    session: Session, rows: Sequence[Sample], campaign_config: CampaignConfig
 ) -> BankPartition:
-    """What the cycle's mint drew, restored for every read of it; drawn only where no cycle holds one."""
+    """What the cycle's mint drew, restored off the bank it drew; *rows* are drawn only where no cycle holds one."""
     cycle_id = session.state.cycle_id
     recorded = session.store.campaigns.read_bank_partition(session.hop) if cycle_id else None
-    return partition_bank(bank, split) if recorded is None else _restored(cycle_id, recorded, bank)
+    if recorded is not None:
+        return _restored(session, recorded)
+    return partition_bank(rows, campaign_config.dataset_split, seed=campaign_config.run_seed)
 
 
-def _restored(cycle_id: str, recorded: PartitionRecord, bank: Sequence[Sample]) -> BankPartition:
-    try:
-        return restored_partition(bank, recorded)
-    except ValueError as exc:
-        raise ConflictError(f"cycle {cycle_id}: {exc}.") from exc
+def _restored(session: Session, recorded: PartitionRecord) -> BankPartition:
+    if session.bank.dataset_hash != recorded.dataset_hash:
+        raise ConflictError(
+            f"cycle {session.state.cycle_id} drew bank {recorded.dataset_hash}; this session "
+            f"holds {session.bank.dataset_hash}, so it is not bound to the cycle."
+        )
+    return restored_partition(session.bank.samples, recorded)
 
 
 async def diagnostic_pass(scoring: Awaitable[ScoredWalk]) -> ScoredWalk:
@@ -209,7 +216,7 @@ def measured_cell_usd(
     on_models = {name: {"model": cfg["model"]} for name, cfg in node_configs if cfg.get("model")}
     total, cells = 0.0, 0
     for m in session.store.archive.measurements_for_config(
-        on_models, dataset_name=session.dataset_name, newest=_PRICED_RUNS
+        on_models, dataset_hash=session.bank.dataset_hash, newest=_PRICED_RUNS
     ):
         # An archive row carries no grade, and the price is no formula's reading.
         cost = cell_channels_of(m.cell, None).get("cost")
@@ -220,16 +227,16 @@ def measured_cell_usd(
 
 
 def _campaigns_on_origin(session: Session) -> list[str]:
-    """A cycle id is content-addressed: every other campaign holding it ran this origin."""
-    cycle_id = session.state.cycle_id
-    if not cycle_id:
+    campaigns = session.store.campaigns
+    own = campaigns.load_campaign(session.campaign_id) if session.campaign_id else None
+    if own is None:
         return []
     return sorted(
-        {
-            entry.campaign_id
-            for entry in session.store.campaigns.enumerate_cycles()
-            if entry.cycle_id == cycle_id and entry.campaign_id != session.campaign_id
-        }
+        other.campaign_id
+        for campaign_dir in campaigns.iter_campaign_dirs()
+        if (other := campaigns.load_campaign(campaign_dir.name)) is not None
+        and other.campaign_id != own.campaign_id
+        and other.root_content_hash == own.root_content_hash
     )
 
 
@@ -242,7 +249,11 @@ def _banked_instruments(session: Session) -> list[str]:
         if campaign is None or campaign.dataset_name != dataset_name:
             continue
         origin = campaigns.standing_rounds(campaign.root_hop, moment=None).rounds.get(0)
-        instrument = None if origin is None else inner_origin_of(origin.close.pipeline_params)
+        instrument = (
+            None
+            if origin is None
+            else inner_origin_of(origin.close.origin.individual.pipeline_params)
+        )
         if instrument is not None:
             banked.append(instrument)
     return banked
@@ -258,8 +269,6 @@ async def _emit_preflight_and_init_session(
 
     target_node_configs = list(node_config_items(session.pipeline_params))
     target_models = tuple(str(v["model"]) for _, v in target_node_configs if v.get("model"))
-
-    refuse_below_reasoning_floor(config, session.pipeline_params)
 
     bound = await cell_bound(session, session.pipeline_params or {})
     measured_usd = measured_cell_usd(session, target_node_configs)
@@ -277,7 +286,7 @@ async def _emit_preflight_and_init_session(
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
-    refuse_arm_below_round(session.arm, preflight_warnings, measured_cell_usd=measured_usd)
+    refuse_arm_below_round(session.purpose, preflight_warnings, measured_cell_usd=measured_usd)
     cb.on_phase(
         CampaignPhase.INIT,
         "enter",
@@ -298,29 +307,19 @@ def _build_and_start_cycle(
     origin: CampaignOrigin,
     session: Session,
     config: CampaignConfig,
-    dataset: list[Sample],
     cycle_id: str | None,
     resume_from_round_override: int | None,
 ) -> tuple[Cycle, str | None, int]:
 
-    if origin.resolved_origin is None:
-        raise ValueError("origin.resolved_origin is required; run origin scoring first.")
     cycle = Cycle.start(
-        origin.resolved_origin,
-        origin.report,
+        origin.origin,
         schema=session.pipeline_schema,
         framing=origin.framing,
-        origin_results=origin.origin_results,
         session=session,
         config=config,
     )
-    assert cycle.tracking.current_sp is not None
     resolved_cycle_id, resumed_from_round = init_cycle(
-        session,
-        cycle.tracking.current_sp,
-        dataset,
-        cycle_id,
-        resume_from_round_override=resume_from_round_override,
+        session, cycle_id, resume_from_round_override=resume_from_round_override
     )
     return cycle, resolved_cycle_id, resumed_from_round
 
@@ -368,7 +367,7 @@ def _finalize_loop_state(
     cycle.sample_index = SampleIndex.ensure_for(
         session.store,
         scorer=session.scoring.require_scorer(),
-        dataset_name=session.dataset_name,
+        bank=session.bank,
         sample_ids=session.scoring.require_partition().admitted_ids,
     )
 
@@ -379,8 +378,6 @@ def _finalize_loop_state(
             session.state.ledger = CycleEventLog.open(
                 CycleDir(session.store.campaigns.cycle_dir(session.hop))
             )
-        # The first moment the lock from `Cycle.start` has a cycle id to be written under.
-        cycle.difficulty.persist(round_num=len(cycle.rounds) - 1)
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round
 
@@ -410,7 +407,6 @@ async def init_optimization_loop(
         origin,
         session,
         config,
-        dataset,
         cycle_id,
         resume_from_round_override,
     )

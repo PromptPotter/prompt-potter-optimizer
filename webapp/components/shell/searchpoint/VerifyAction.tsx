@@ -33,14 +33,14 @@ export function VerifyAction({
 
   if (!path || !candidate.label) return null;
 
-  const reading = readings.get(candidate.label) ?? null;
-  const flying = pass !== null && pass.label === candidate.label ? pass : null;
+  const reading = readings.get(candidate.arm) ?? null;
+  const flying = pass !== null && pass.arm.key === candidate.arm ? pass : null;
   const busy = sending || flying !== null;
 
   function run() {
     if (!path) return;
     void cmd.run("verify-candidate", () =>
-      postVerifyCandidate(path, candidate.candidate_id, {
+      postVerifyCandidate(path, candidate.arm, {
         strategy,
         samples: samples === "" ? null : Number(samples),
       }),
@@ -105,7 +105,7 @@ export function VerifyAction({
       {busy && (
         <p className="verify-action-note">
           {flying && unit
-            ? `Measuring ${flying.label} on ${unitCount(flying.rows, unit)} it has never seen, ${VERIFY_STRATEGY_LABELS[flying.strategy]}.`
+            ? `Measuring ${flying.arm.label} on ${unitCount(flying.rows, unit)} it has never seen, ${VERIFY_STRATEGY_LABELS[flying.strategy]}.`
             : `Measuring ${candidate.label} on cells it has never seen.`}{" "}
           This mints no round, so the cycle&rsquo;s own series does not move.
         </p>

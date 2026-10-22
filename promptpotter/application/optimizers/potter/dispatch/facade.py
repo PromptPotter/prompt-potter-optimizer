@@ -5,9 +5,11 @@ import logging
 import sys
 from collections.abc import Iterator
 from dataclasses import replace
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.llm_call import InjectionBreakdown
+from promptpotter.application.optimizers.nodes import AccessKnob, CountKnob
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ArmDigest,
@@ -34,13 +36,22 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
     node_layout,
 )
 from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
-from promptpotter.application.optimizers.potter.knobs import potter_knobs
-from promptpotter.application.optimizers.potter.records import PotterRoundState
-from promptpotter.application.runner.inner.spawn_context import inner_cells
-from promptpotter.application.scoring.evaluators import resolve_cell_formula
+from promptpotter.application.optimizers.potter.knobs import (
+    AdaptiveQueueKnobs,
+    EscalationKnobs,
+    L1GenerateKnobs,
+)
+from promptpotter.application.optimizers.potter.records import (
+    L1Readout,
+    L2Memory,
+    L3Memory,
+    Ladder,
+)
 from promptpotter.domain import ruler
-from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
-from promptpotter.domain.results import rounds_without_advance
+from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
+from promptpotter.domain.optimizer_state import Critique
+from promptpotter.domain.pool import BlockPool, DemoPool
+from promptpotter.domain.results import Cut, Measured, arm_elimination, rounds_without_advance
 from promptpotter.infrastructure.llm.telemetry import (
     emit_round_warning,
     reset_cycle_ledger,
@@ -50,10 +61,13 @@ from promptpotter.shared.errors import PromptCompositionError
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from types import ModuleType
 
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizers.potter.state import PotterState
+    from promptpotter.application.optimizers.nodes import Draw
+    from promptpotter.domain.optimizer_state import StatePart
+    from promptpotter.domain.pool import Pool, PoolEntry
     from promptpotter.domain.results import RoundResult
 
 logger = logging.getLogger(__name__)
@@ -105,7 +119,7 @@ def _cap_runaway(name: str, items: list[Item], cap: int) -> list[Item]:
 class FilledPrompt(NamedTuple):
     """``rendered`` is what the node was SHOWN, after selection, so the ledger's breakdown and the prompt agree."""
 
-    template: PromptTemplate
+    template: OptimizerPromptTemplate
     injection_vars: dict[str, str]
     rendered: dict[str, str]
     coverage: dict[str, PanelCoverage]
@@ -161,14 +175,14 @@ class DispatchHub:
 
     @staticmethod
     def fill(
-        template: PromptTemplate,
+        template: OptimizerPromptTemplate,
         bundle: InjectionBundle,
         *,
         node: str,
     ) -> FilledPrompt:
         """The layout is RESOLVED here, never passed in, so no caller can hand a node another node's panel set."""
         table = injection_table()
-        layout = node_layout(node, bundle.memory)
+        layout = node_layout(node, bundle.l2)
         order = layout.all_placeholders()
         items = {name: DispatchHub.render_items(name, bundle) for name in order}
         budget = NODE_LAYOUTS[node].discretionary_chars if node in NODE_LAYOUTS else _NO_CEILING
@@ -235,96 +249,118 @@ def _arm_digests(latest_round: RoundResult) -> tuple[ArmDigest, ...]:
     return tuple(
         ArmDigest(
             label=c.label,
-            mean_fitness_ci_lo=c.mean_fitness_ci_lo,
-            mean_fitness_ci_hi=c.mean_fitness_ci_hi,
-            scored_samples=c.scored_samples,
+            mean_fitness_ci_lo=None if fold is None else fold.mean_fitness_ci_lo,
+            mean_fitness_ci_hi=None if fold is None else fold.mean_fitness_ci_hi,
+            scored_samples=0 if fold is None else fold.walked,
             expected_samples=c.expected_samples,
-            outcome=c.outcome,
-            gate=c.elimination_context.get("gate"),
+            cut=c.kind if isinstance(c, Cut) else None,
+            gate=elimination.context.get("gate") if (elimination := arm_elimination(c)) else None,
         )
-        for c in latest_round.candidate_scores
+        for key, c in latest_round.panel.items()
+        if isinstance(c, Cut | Measured)
+        for fold in (latest_round.folds.get(key),)
     )
 
 
-def _sample_ids(round_result: RoundResult) -> frozenset[int]:
-    return frozenset(cell.sample_id for cell in round_result.results)
+def _sample_keys(round_result: RoundResult) -> frozenset[str]:
+    return frozenset(cell.key for cell in round_result.results)
 
 
-def build_bundle(ctx: NodeContext[Any], state: PotterState) -> InjectionBundle:
+# What `build_bundle` reads and draws, so every node composing a bundle declares both.
+BUNDLE_READS: frozenset[type[StatePart]] = frozenset(
+    {L2Memory, L3Memory, Ladder, L1Readout, Critique}
+)
+# Every bundle shows the pools as `l1_generate` takes them, so L2 lays out what L1 is shown.
+BUNDLE_DRAWS: Mapping[type[Pool], Draw] = MappingProxyType(
+    {
+        BlockPool: AccessKnob(L1GenerateKnobs, "block_access"),
+        DemoPool: CountKnob(L1GenerateKnobs, "k_max"),
+    }
+)
+
+
+def _by_field(entries: tuple[PoolEntry, ...]) -> dict[str, tuple[PoolEntry, ...]]:
+    out: dict[str, list[PoolEntry]] = {}
+    for entry in entries:
+        out.setdefault(entry.group[0], []).append(entry)
+    return {field: tuple(held) for field, held in out.items()}
+
+
+def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
     """The round under render is the cycle's last on every node: the bench folds a round in before any node reads it."""
-    session = state.session
-    origin_round = ctx.rounds[0]
-    *prior, latest_round = ctx.rounds
-    latest_state = latest_round.optimizer_state.payload_as(PotterRoundState)
-    health = latest_round.health
+    rounds = ctx.rounds
+    origin_round = rounds[0]
+    *prior, latest_round = rounds
+    readout = ctx.recall(L1Readout, latest_round.round)
+    health, latest_fold = latest_round.health, latest_round.fold
 
     current_sp = ctx.parent_point
     current_pp = current_sp.pipeline_params if current_sp is not None else None
-    opt = ctx.config.optimization
-    formula, _ = resolve_cell_formula(
-        session.scoring.require_scorer().per_cell, session.pipeline_schema
-    )
-    knobs = potter_knobs(ctx.optimizer)
-    stall_depth = rounds_without_advance(ctx.rounds)
+    queue = ctx.knobs_of(AdaptiveQueueKnobs)
+    escalation = ctx.knobs_of(EscalationKnobs)
+    generate = ctx.knobs_of(L1GenerateKnobs)
+    stall_depth = rounds_without_advance(rounds)
     cs = CycleSlice(
         round_num=latest_round.round + 1,
         l1_stall_depth=stall_depth,
-        ladder=state.escalation.ladder,
-        exploration_budget=exploration_budget(stall_depth, knobs.escalation.l1_patience).value,
+        ladder=ladder,
+        exploration_budget=exploration_budget(stall_depth, escalation.l1_patience).value,
         pipeline_params=dict(current_pp) if current_pp else {},
-        composite_formula=formula,
+        composite_formula=ctx.cell_formula,
         # A cold ruler forces the frozen prefix however the knob is set, so the knob alone misreports round 0.
         subset_mode=(
             "adaptive"
-            if knobs.adaptive_queue.per_round_resubset and ctx.difficulty.ruler is not None
+            if queue.per_round_resubset and ctx.difficulty.ruler is not None
             else "frozen"
         ),
-        sp_budget_round=knobs.adaptive_queue.sp_budget_round,
-        max_rounds=opt.max_rounds,
-        spend_budget_usd=opt.ceiling.usd,
-        spend_used_usd=session.control.spend_used_usd(),
+        sp_budget_round=queue.sp_budget_round,
+        budget_rounds=ctx.budget_rounds,
+        # Both this cycle's: its share of the campaign's ceiling, and what it has metered of it.
+        spend_budget_usd=ctx.spend_cap_usd(),
+        spend_used_usd=ctx.spend_used_usd(),
     )
 
     origin_per_sample = origin_round.results
-    trajectory_results = tuple(ctx.parent_rows)
-    # Off the view, never `latest_round.ability`: no round banks the two counts beside the reading.
-    frontier = ctx.difficulty.frontier(trajectory_results)
+    trajectory_results = tuple(ctx.frontier_rows)
 
     bundle = InjectionBundle(
         opt_sp=ctx.parent,
-        memory=state.memory,
+        l2=ctx.slice(L2Memory),
+        l3=ctx.slice(L3Memory),
         framing=ctx.framing,
-        pipeline_schema=session.pipeline_schema,
+        pipeline_schema=ctx.schema,
         cycle_slice=cs,
         digest=RoundDigest(
             diagnostics=latest_round.diagnostics,
-            critique=latest_state.critique,
-            l1_yield=latest_state.l1_yield,
+            critique=ctx.recall(Critique, latest_round.round).readout,
+            l1_yield=readout.l1_yield,
+            l1_parse_failure=readout.l1_parse_failure,
             node_failure_rates=health.node_failure_rates if health else {},
-            latest_sample_ids=_sample_ids(latest_round),
-            prev_sample_ids=_sample_ids(prior[-1]) if prior else frozenset(),
-            composite_fitness=latest_round.composite_fitness,
-            evaluators=dict(latest_round.evaluators),
-            ability=frontier.ability,
-            unlinked=frontier.unlinked,
-            pinned_share=frontier.pinned_share,
+            latest_sample_keys=_sample_keys(latest_round),
+            prev_sample_keys=_sample_keys(prior[-1]) if prior else frozenset(),
+            composite_fitness=None if latest_fold is None else latest_fold.composite_fitness,
+            evaluators={} if latest_fold is None else dict(latest_fold.evaluators),
+            ability=ctx.difficulty.scale.frontier(trajectory_results),
             arms=_arm_digests(latest_round),
         ),
-        axes=state.axes(ctx.sample_index),
+        axes=ctx.axes,
         origin_per_sample=origin_per_sample,
         trajectory_results=trajectory_results,
         ruler=ctx.difficulty.ruler,
-        measured_rounds=list(ctx.rounds),
-        prompt_block_catalogue=knobs.l1_generate.prompt_block_catalogue,
-        earned_blocks=state.earned_blocks,
-        rebase_capability=knobs.escalation.rebase_capability,
-        terminate_capability=knobs.escalation.terminate_capability,
-        schema_field_rename=knobs.l1_generate.schema_field_rename,
-        measured_unit=session.backend_client.measured_unit,
-        prompt_delivery=session.backend_client.prompt_delivery(session.pipeline_params),
-        demo_pool=ctx.demo_pool,
-        shot_k_max=knobs.l1_generate.k_max,
-        inner_cells=inner_cells(),
+        measured_rounds=list(rounds),
+        block_access=ctx.access(BlockPool),
+        blocks=_by_field(ctx.drawn(BlockPool)),
+        runtime_failures=tuple(ctx.runtime_failures()),
+        rebase_capability=escalation.rebase_capability,
+        terminate_capability=escalation.terminate_capability,
+        schema_field_rename=generate.schema_field_rename,
+        measured_unit=ctx.measured_unit,
+        prompt_delivery=ctx.prompt_delivery,
+        demo_pool=ctx.drawn(DemoPool),
+        demo_split=ctx.demo_split,
+        shot_k_max=generate.k_max,
+        slot_of=ctx.slot_of,
+        inner_cells=ctx.inner_cells,
     )
     return replace(bundle, silent_l1_panels=_silent_l1_panels(bundle))
 
@@ -335,6 +371,8 @@ def fingerprinted_modules() -> tuple[ModuleType, ...]:
 
 
 __all__ = [
+    "BUNDLE_DRAWS",
+    "BUNDLE_READS",
     "DispatchHub",
     "InjectionRenderError",
     "MandatoryPanelStarvedError",

@@ -10,7 +10,6 @@ import type {
   VendorModels,
 } from "@/lib/api";
 import { CEILING_METER_LABELS } from "@/lib/api/types.generated";
-import { phaseIs } from "@/lib/run-phase";
 import {
   fmtAgo,
   fmtDateTime,
@@ -61,14 +60,26 @@ function settingValue(v: unknown): string {
 
 export const SPEND_STAT_LABEL = "Billed";
 
-export function spendStat(metered: MeteredSpend): RowStat {
+export function cycleSpendStat(metered: MeteredSpend): RowStat {
+  return spendRow(metered, `Counted here against the campaign cap ${fmtUsd(metered.metered_usd)}`);
+}
+
+// `campaignUsd`: what the campaign cap counts over EVERY cycle; `metered` is this line's part.
+export function campaignSpendStat(metered: MeteredSpend, campaignUsd: number): RowStat {
+  return spendRow(
+    metered,
+    `Counted against the campaign cap ${fmtUsd(campaignUsd)}, this line ${fmtUsd(metered.metered_usd)}`,
+  );
+}
+
+function spendRow(metered: MeteredSpend, counted: string): RowStat {
   const priced = ratePricedText(metered.rate_priced_usd, metered.calls_rate_priced);
   return {
     label: SPEND_STAT_LABEL,
     value: spendHeadline(metered),
     sub:
-      `${priced ? `${priced} · ` : ""}Incurred ${fmtUsd(metered.incurred_usd)} · Counted against cap ` +
-      `${fmtUsd(metered.metered_usd)} ${CEILING_METER_LABELS[metered.meter]}: ${meteredBucketsLine(metered)}`,
+      `${priced ? `${priced} · ` : ""}Incurred ${fmtUsd(metered.incurred_usd)} · ${counted} ` +
+      `${CEILING_METER_LABELS[metered.meter]}: ${meteredBucketsLine(metered)}`,
   };
 }
 
@@ -114,7 +125,7 @@ export function campaignLineParts(run: RunGroup): string[] {
   const runsWith = run.campaign.runs_with;
   const parts: string[] = [];
   if (runsWith == null) parts.push("pipeline unreadable");
-  if (!phaseIs(run.line.run_phase, "authoring")) parts.push(run.line.rounds_line);
+  parts.push(run.line.rounds_line);
   const ago = fmtAgo(run.campaign.updated_at);
   if (ago) parts.push(ago);
   return parts;
@@ -175,7 +186,7 @@ export function campaignCard(run: RunGroup, node: CourseNode | null): RowCardFac
 
   const stats: RowStat[] = [
     ...(campaign.bench ? [benchStat(campaign.bench)] : []),
-    spendStat(campaign.spend_metered),
+    campaignSpendStat(campaign.spend_metered, campaign.campaign_metered_usd),
     ...courseStats(run, node),
   ];
 

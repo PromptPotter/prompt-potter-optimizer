@@ -23,28 +23,34 @@ interface Props {
 
 export function RoundFileView({ doc, raw }: Props) {
   const [showRaw, setShowRaw] = useState(false);
-  const { results, scoreboard } = doc;
-  const wonOnTheta = doc.elects_on === "ability";
+  const { scoreboard, election, headline } = doc;
+  const own = headline?.own;
+  const results = headline ? doc.cells[headline.arm.key] : undefined;
+  const wonOnTheta = election?.elects_on === "ability";
 
   return (
     <div className="round-file-view">
       <div className="round-file-summary">
         <div className="round-file-summary-row">
           <Badge className="round-file-badge">round {doc.round}</Badge>
-          <span>accuracy {fmtPct1(doc.accuracy)}</span>
-          <span>composite {fmtNum(doc.composite_fitness)}</span>
-          <span>n {doc.total}</span>
-          {typeof doc.ability?.theta === "number" && (
-            <Term
-              content={`Ability of the adopted lineage on the cycle's fixed δ ruler — the subset-invariant series${wonOnTheta ? " the round was won on" : ""}. The cell count is how much of that ruler was real when this round was read.`}
-            >
-              θ {fmtSigned(doc.ability.theta, 3)}{doc.ability.ruler_n > 0 ? ` (${doc.ability.ruler_n} cells)` : ""}
-            </Term>
+          {own && (
+            <>
+              <span>accuracy {fmtPct1(own.accuracy?.value)}</span>
+              <span>composite {fmtNum(own.composite?.value)}</span>
+              <span>n {own.n}</span>
+            </>
           )}
-          {doc.improved ? <span className="pass">improved</span> : <span className="round-file-dim">no improvement</span>}
+          {/* A round ending on its origin adopted it: it neither selects nor holds. */}
+          {election &&
+            headline?.role !== "origin" &&
+            (election.selected.length > 0 ? (
+              <span className="pass">selected</span>
+            ) : (
+              <span className="round-file-dim">held</span>
+            ))}
         </div>
-        {doc.verdict_reason && (
-          <div className="round-file-summary-row round-file-dim">{doc.verdict_reason}</div>
+        {election?.verdict_reason && (
+          <div className="round-file-summary-row round-file-dim">{election.verdict_reason}</div>
         )}
       </div>
 
@@ -65,10 +71,11 @@ export function RoundFileView({ doc, raw }: Props) {
               </thead>
               <tbody>
                 {scoreboard.map(({ rank, reading: s }, i) => (
-                  <tr key={s.arm.candidate_id || i}>
+                  <tr key={s.arm.key}>
                     <td>{rank ?? i + 1}</td>
                     <td className="round-file-clip wide" title={s.changes_description}>
-                      {s.changes_description || s.arm.candidate_id || "—"}
+                      {s.role === "parent" && <span className="round-file-dim">reference · </span>}
+                      {s.changes_description || s.arm.label}
                     </td>
                     <td>{fmtPct1(s.own?.accuracy?.value)}</td>
                     <td>{fmtNum(s.own?.composite?.value)}</td>
@@ -85,7 +92,7 @@ export function RoundFileView({ doc, raw }: Props) {
         </CardFrame>
       )}
 
-      {results.length > 0 && (
+      {results && results.length > 0 && (
         <CardFrame title={<span>Per-sample results</span>} actions={<Badge>{results.length}</Badge>}>
           <div className="table-wrap">
             <table>
@@ -101,8 +108,8 @@ export function RoundFileView({ doc, raw }: Props) {
               <tbody>
                 {results.map((r, i) => (
                   // A cell measured twice is two rows of one sample.
-                  <tr key={`${r.sample_id}:${i}`}>
-                    <td>{r.sample_id}</td>
+                  <tr key={`${r.position}:${i}`}>
+                    <td>{r.position}</td>
                     <td>{fmtNum(r.fitness)}</td>
                     <td className="round-file-clip" title={r.query}>
                       {r.query || "—"}

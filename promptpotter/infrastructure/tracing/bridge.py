@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.results import Concluded
+from promptpotter.domain.run_records import AnnouncedArms
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.tracing.events import (
     CampaignStart,
@@ -24,13 +26,14 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.run_records import (
-        CandidateScoredRecord,
+        ArmRecord,
         LLMCallRecord,
         LLMCallStartRecord,
         PhaseRecord,
         RoundClosedRecord,
         RoundEnteredRecord,
         RunPhaseRecord,
+        SampleScoredRecord,
     )
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
@@ -51,6 +54,7 @@ class TracingProjection(Projection):
         # A close with no open (a call replayed from cache, a bracket entered before a restart) reaches no sink.
         self._open: set[tuple[int | None, str]] = set()
         self._closed: set[int] = set()
+        self._arms = AnnouncedArms()
 
     @classmethod
     def for_cycle(
@@ -147,6 +151,7 @@ class TracingProjection(Projection):
         )
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
+        self._arms.enter(record)
         self._closed.discard(record.round)
         self._tell("round entered", lambda sink: sink.on_round_entered(self._campaign_id, record))
 
@@ -181,13 +186,21 @@ class TracingProjection(Projection):
             record.round, record.call_id, error=error if isinstance(error, str) else None
         )
 
-    def _handle_candidate_scored(self, record: CandidateScoredRecord) -> None:
-        self._tell(
-            "candidate scored", lambda sink: sink.on_candidate_scored(self._campaign_id, record)
-        )
+    def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
+        self._arms.take(record)
+
+    def _handle_arm(self, record: ArmRecord) -> None:
+        self._arms.announce(record)
+        arm = record.state
+        if isinstance(arm, Concluded):
+            fold = self._arms.fold(record.round, record.arm)
+            self._tell(
+                "arm concluded",
+                lambda sink: sink.on_arm_concluded(self._campaign_id, record.round, arm, fold),
+            )
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
-        # Only a round's FIRST close ends its span: a later one restates it (round 0, once the ruler warms).
+        # Only a round's FIRST close ends its span: a later one restates it.
         if record.round in self._closed:
             return
         self._closed.add(record.round)

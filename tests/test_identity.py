@@ -22,48 +22,61 @@ from typing import Any, cast
 
 import openpyxl
 import pytest
-from factories import inner_cells, pipeline_schema
+from factories import inner_cells, loop_session, minted_campaign, pipeline_schema, prompted
+from offline_world import Router
 from pydantic import ValidationError
 
+from promptpotter.application import optimizers
 from promptpotter.application.bench import llm_call as call_mod
-from promptpotter.application.bench.children import admission_failures, overlay_failures
+from promptpotter.application.bench.children import (
+    admission_failures,
+    carried_writes,
+    overlay_failures,
+)
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import (
     CampaignConfig,
-    DeterminismClamp,
     OptimizationConfig,
+    declare_run,
+    effective_config,
 )
-from promptpotter.application.commands.launching import _parse_cycle_seed
+from promptpotter.application.commands.launching import parse_cycle_seed
 from promptpotter.application.commands.payloads import MintCampaignPayload, StartCheckinPayload
 from promptpotter.application.datasets import ingest
-from promptpotter.application.datasets.draft_campaign import (
-    EditDraftPatch,
-    load_checkin_draft,
-    new_draft,
-)
+from promptpotter.application.datasets.draft_campaign import EditDraftPatch, new_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
-from promptpotter.application.datasets.loaders import samples_from_dicts
+from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
 from promptpotter.application.intelligence.indexes.sample import SampleFoldRow, SampleIndex
 from promptpotter.application.intelligence.rasch import Observation, select_round_subset
-from promptpotter.application.jobs.launcher.checkin import create_checkin_campaign
+from promptpotter.application.jobs.launcher import checkin as checkin_launch
+from promptpotter.application.jobs.mint import (
+    ConfigDriftError,
+    declare,
+    mint_framed_cycle,
+    refuse_drifted_resume,
+    resolve_cycle_plan,
+)
+from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
     resolve_optimizer,
     set_determinism_clamp,
     set_optimizer_prompt_overrides,
 )
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
+from promptpotter.application.optimizers.gepa.members import GepaReflect
+from promptpotter.application.optimizers.gepa.state import ParetoScores
+from promptpotter.application.optimizers.nodes import Proposals, SliceMap
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
     RoundDigest,
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
-from promptpotter.application.optimizers.potter.dispatch.injections.layer_state import (
-    _r_rendered_prompt,
-    _r_task_context,
+from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
+    build_l1_response_schema,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
@@ -71,45 +84,53 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
     load_optimizer_prompt,
 )
 from promptpotter.application.optimizers.potter.l1.population import parse_population
-from promptpotter.application.optimizers.potter.records import L2L3Memory, Ladder
+from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.application.optimizers.potter.validators.l1_strict import L1_SHOTS_IN_DEMO_POOL
 from promptpotter.application.pipeline_resolve import (
-    checkin_campaign_config,
     dataset_pipeline_declaration,
+    defaults_drift,
+    draft_config,
     experiment_outside_run,
     resolve_campaign_config,
     resolve_pipeline_config_params,
     resolved_output_schemas,
 )
-from promptpotter.application.runner.inner.connector import (
-    _extract_experiment,
-    _identity_config,
-    _resolve_panel,
-    promptpotter_wire_adapter,
-)
+from promptpotter.application.run_observers import declare_run_wiring
+from promptpotter.application.runner.arm_gate import _authored
+from promptpotter.application.runner.inner.connector import CONNECTOR, promptpotter_wire_adapter
 from promptpotter.application.runner.inner.spawn import inner_campaign_id
-from promptpotter.application.runner.inner.tasks import InnerTaskSpec
+from promptpotter.application.runner.inner.tasks import (
+    InnerBenchmarkConfig,
+    InnerTasks,
+    InnerTaskSpec,
+    inner_instrument_config,
+)
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import DEFAULT_CONNECTOR, get
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
-from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, RunDeclaration
+from promptpotter.domain.cells import Seat
+from promptpotter.domain.command_kinds import SubmittedArm
+from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import (
-    PROMPT_STRING_FIELDS,
     TEMPLATE_TOKEN_RE,
+    Locus,
+    NodePrompt,
+    OptimizerPromptTemplate,
     OptSearchPoint,
     Variation,
 )
-from promptpotter.domain.pipeline_overlay import fold_output_contract
+from promptpotter.domain.pipeline_overlay import fold_output_contract, normalize_model_id
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     SCHEMA_TOGGLE_PARAM,
     ManifestNodeOverlay,
     NodeConfigParam,
+    NodePromptInfo,
     NodeSearchNarrowing,
     ParamIntent,
     PipelineNode,
@@ -117,27 +138,34 @@ from promptpotter.domain.pipeline_schema import (
     description_key,
     narrowing_of,
 )
+from promptpotter.domain.pool import EARNED_SOURCE
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
-from promptpotter.domain.sample import Sample
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.request import ChatRequest
-from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.infrastructure.llm.registry import default_routes
+from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
+from promptpotter.infrastructure.llm.telemetry import set_cycle_ledger
+from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     ResolvedDataset,
     read_dataset_pipeline,
     resolve_dataset,
 )
-from promptpotter.infrastructure.store.dataset_replace import replace_dataset
 from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.judges.protocol import JudgeSpec, JudgeStage
-from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.hashing import source_facts, stable_hash
+from promptpotter.shared.errors import (
+    ConflictError,
+    ManifestUnreadableError,
+    PayloadInvalidError,
+)
+from promptpotter.shared.hashing import dataset_hash, source_facts, stable_hash
 from promptpotter.shared.identity import default_identity
 
 _L1 = Variation(node="potter:l1_generate", mode="llm")
@@ -151,24 +179,24 @@ def _install(name: str) -> ResolvedDataset:
 _SPEC = InnerTaskSpec(
     inner_dataset="justlogic/d234",
     optimizer_treatment="o",
-    seed=3,
+    run_seed=3,
     n_samples=28,
     n_samples_bench=8,
     n_rounds=4,
 )
 
 
-def _frozen_config(**fields: Any) -> dict[str, Any]:
+def _connector_config(**fields: Any) -> CampaignConfig:
     defaults = dict(get(DEFAULT_CONNECTOR).default_optimization)
     optimization = {**defaults, **fields.pop("optimization", {})}
-    return CampaignConfig.model_validate({"optimization": optimization, **fields}).frozen(arm=False)
+    return CampaignConfig.model_validate({"optimization": optimization, **fields})
 
 
 # 1. Hashes — what a measurement is filed under
 
 
 def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_other(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Router
 ) -> None:
     # A value the canonical form cannot spell is refused, never stringified into a stored key.
     with pytest.raises(TypeError):
@@ -258,14 +286,14 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     ), "declaration order must not re-cut the measurement key"
 
     # An L4 override moves the prompt and the hash of every preset, and the inner campaign it runs.
-    capo = resolve_optimizer("capo", {})
+    capo = resolve_optimizer("capo", {}, gate="off")
     round_ = types.SimpleNamespace(cycle=types.SimpleNamespace(optimizer=capo))
-    ctx: NodeContext[Any] = NodeContext(cast(Any, round_), "capo_mutate")
+    ctx: NodeContext[Any] = NodeContext(cast(Any, round_), optimizers.member("capo_mutate"))
     values = {"task_description": "sort the list", "instruction": "Sort it."}
     mutated = {
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
     }
-    potter = resolve_optimizer("potter", {})
+    potter = resolve_optimizer("potter", {}, gate="off")
     try:
         set_optimizer_prompt_overrides(None)
         sent, capo_hashes, treated = (
@@ -307,46 +335,69 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         "two candidates differing only in one override field share a campaign — "
         "their measurements merge under one id with no error"
     )
-    assert inner_campaign_id(_SPEC.model_copy(update={"seed": 6}), c1) != inner_campaign_id(
+    assert inner_campaign_id(_SPEC.model_copy(update={"run_seed": 6}), c1) != inner_campaign_id(
         _SPEC, c1
     ), "two seeds share one inner campaign"
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
-    as_run, as_cut = (resolve_optimizer("potter", n).treatment().digest for n in ({}, cut))
+    as_run, as_cut = (
+        resolve_optimizer("potter", n, gate="off").treatment().digest for n in ({}, cut)
+    )
     assert inner_campaign_id(
         _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1
     ) != inner_campaign_id(_SPEC.model_copy(update={"optimizer_treatment": as_cut}), c1), (
         "a moved optimizer knob ran under the inner campaign of the unmoved one"
     )
+    rewalked = capo.manifest.model_copy(update={"initial_population_walks": "alone"})
+    assert replace(capo, manifest=rewalked).treatment().digest != capo.treatment().digest, (
+        "a manifest walking its initial population apart ran under the treatment of one racing it"
+    )
+    # A pool its readers could draw nothing from never runs: the silent outcome is a pool-less search.
+    earned_only = ManifestNodeOverlay(config={"active": [f"persona/{EARNED_SOURCE}"]})
+    closed = ManifestNodeOverlay(config={"block_access": "closed"})
+    resolve_optimizer("potter", {"block_pool": earned_only}, gate="off")
+    with pytest.raises(PayloadInvalidError):
+        resolve_optimizer("potter", {"block_pool": earned_only, "l1_generate": closed}, gate="off")
+    stray_shot = ManifestNodeOverlay(config={"active": ["not-a-sample-key"]})
+    named = resolve_optimizer("capo", {"demo_pool": stray_shot}, gate="off")
+    assert named.pool_refusals(demo=[Sample(id=1, query="q", ground_truth="a")]), (
+        "a demo pool naming a key its partition lacks reached a mint"
+    )
 
     # The determinism clamp outranks every other layer and keys the bank.
-    asked: list[ChatRequest] = []
-
-    class _Recorder:
-        async def chat(self, request: ChatRequest, **_: Any) -> LLMResponse:
-            asked.append(request)
-            return LLMResponse(content="ok", model="m")
-
-    monkeypatch.setattr(call_mod, "get_llm_client", lambda _provider: _Recorder())
     reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")
 
-    async def ask(clamp: DeterminismClamp | None) -> None:
-        set_determinism_clamp(clamp)
-        await call_mod.llm_call(
-            [{"role": "user", "content": "q"}],
-            config={"provider": "openrouter", "model": "m", "temperature": 0.9},
-            context=call_mod.LLMCallContext(cache=reuse),
-            temperature=0.7,
-        )
+    def ask(
+        content: str,
+        config: dict[str, Any],
+        clamp: DeterminismClamp | None = None,
+        **override: Any,
+    ) -> Any:
+        """One optimizer call as an entry sends it; the body that reached the provider."""
+
+        async def entered() -> None:
+            set_determinism_clamp(clamp)
+            set_cycle_ledger(CycleEventLog(tmp_path / "asked.jsonl"))
+            with spending_under(unbounded_spend_book()):
+                await call_mod.llm_call(
+                    [{"role": "user", "content": content}],
+                    config=config,
+                    context=call_mod.LLMCallContext(cache=reuse),
+                    **override,
+                )
+
+        asyncio.run(entered())
+        return offline.llm.sent[-1]
 
     pinned = DeterminismClamp(temperature=0.0, seed=7, route_order=["Alibaba"])
+    clamped = {"provider": "openrouter", "model": "m", "temperature": 0.9}
     try:
         for clamp, (temperature, seed, route) in (
             (pinned, (0.0, 7, ["Alibaba"])),
             (pinned.model_copy(update={"route_order": ["Baidu"]}), (0.0, 7, ["Baidu"])),
             (None, (0.7, None, None)),
         ):
-            asyncio.run(ask(clamp))
-            assert (asked[-1].temperature, asked[-1].seed, asked[-1].route_order) == (
+            sent = ask("q", clamped, clamp, temperature=0.7)
+            assert (sent["temperature"], sent.get("seed"), sent["provider"].get("order")) == (
                 temperature,
                 seed,
                 route,
@@ -358,6 +409,102 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         set_determinism_clamp(None)
     assert len(list((tmp_path / "reuse" / "optimizer_reuse").glob("*.json"))) == 3, (
         "the second route replayed the first route's banked answer"
+    )
+
+    # A node left to the gateway's choice of host is filed as, and sent to, the host it is pinned to.
+    routes = default_routes()
+
+    def filed_under(cfg: dict[str, Any]) -> str:
+        routed = parse_pipeline_response(
+            {
+                "nodes": {
+                    "llm_only": {
+                        "type": "llm",
+                        "config": {"model": cfg["model"]},
+                        "prompt_info": {},
+                    }
+                },
+                "pipelines": {"default": ["llm_only"]},
+            }
+        ).model_copy(update={"default_routes": routes})
+        point = prompted("llm_only", instruction="x").configured({"llm_only": cfg}, routed)
+        job = point.to_job_search_point(schema=routed, framing=TaskDecomposition(), demo=[])
+        return archive_entry(job, dataset_hash="d", pipeline_schema=routed).config_key
+
+    # The individual is {locus: value} over the roster: a child written on the SECOND prompt
+    # node's field is scored with it and filed apart, each node rendering its own declared order.
+    chain = parse_pipeline_response(
+        {
+            "nodes": {
+                "extract": {
+                    "type": "llm",
+                    "config": {"model": "m"},
+                    "prompt_info": {"fields": ["instruction", "answer_format"]},
+                },
+                "classify": {
+                    "type": "llm",
+                    "config": {"model": "m"},
+                    "prompt_info": {"fields": ["persona", "instruction"]},
+                },
+            },
+            "pipelines": {"default": ["extract", "classify"]},
+        }
+    )
+    two = OptSearchPoint(
+        prompts={
+            "extract": NodePrompt(fields={"instruction": "Pull the amount.", "answer_format": "N"}),
+            "classify": NodePrompt(fields={"persona": "You book.", "instruction": "Pick a code."}),
+        }
+    ).configured({}, chain)
+    second = OptSearchPoint.derive(
+        [two],
+        schema=chain,
+        variation=_L1,
+        changes={Locus("classify", "instruction"): "Pick the four-digit code."},
+    )
+    assert second.lineage.variations[0].loci == ["classify.instruction"], (
+        "the variation wrote another locus than the second node's instruction"
+    )
+    assert second.prompt("extract") == two.prompt("extract"), "an edit on one node moved another"
+
+    def scored(point: OptSearchPoint) -> tuple[dict[str, Any], str]:
+        job = point.to_job_search_point(schema=chain, framing=TaskDecomposition(), demo=[])
+        key = archive_entry(job, dataset_hash="d", pipeline_schema=chain).config_key
+        return job.pipeline_params, key
+
+    (before, before_key), (after, after_key) = scored(two), scored(second)
+    assert after["classify"]["prompt"] == "You book.\n\nPick the four-digit code.", (
+        "the second node's edited instruction never reached the prompt it scores"
+    )
+    assert after["extract"]["prompt"] == before["extract"]["prompt"] == "Pull the amount.\n\nN", (
+        "the first node's prompt moved, or rendered in another order than it declares"
+    )
+    assert after_key != before_key, "an edit on the second prompt node was filed with its parent"
+
+    for model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b:nitro"):
+        bare = normalize_model_id(model)
+        gateway = next(name for name, pins in routes.items() if bare in pins)
+        pin = routes[gateway][bare]
+        node = {"provider": gateway, "model": model}
+        assert filed_under(node) == filed_under({**node, "route_order": pin}), (
+            f"{model}: an unpinned node was filed apart from the host it is served by"
+        )
+        assert filed_under(node) != filed_under({**node, "route_order": ["Elsewhere"]}), (
+            f"{model}: two hosts answered under one key"
+        )
+        for opted, route in (({}, pin), ({"route_order": []}, None)):
+            sent = ask(model, {"provider": gateway, "model": model, **opted})
+            assert sent.get("provider", {}).get("order") == route, (
+                f"{model} {opted}: an optimizer call went to another host than the one it is "
+                "filed under"
+            )
+
+    # A bank is its rows' content: a question alone tells two banks apart.
+    asked_as = [
+        [Sample(id=0, query="q", ground_truth="g", question=question)] for question in ("a", "b")
+    ]
+    assert dataset_hash(asked_as[0]) != dataset_hash(asked_as[1]), (
+        "two banks differing only in their question share one identity"
     )
 
     # The unframed ablation renders no framing where one is committed, resumed or not.
@@ -374,8 +521,16 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert not campaign_framing(built_stores, unframed, gsm8k), (
         "the ablation arm rendered the committed framing it declared off"
     )
-    frozen = CampaignConfig.model_validate(unframed.frozen(arm=False))
-    assert not campaign_framing(built_stores, frozen, gsm8k), (
+    declared = effective_config(
+        declare_run(
+            unframed,
+            purpose=Optimize(),
+            dataset_hash="bank",
+            connector="termnorm",
+            bench_defaults_pin=bench_defaults_pin(),
+        )
+    )
+    assert not campaign_framing(built_stores, declared, gsm8k), (
         "the campaign manifest lost the declaration, so a resume of the ablation runs framed"
     )
 
@@ -391,7 +546,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         },
         "tasks": [{"kind": "seat", "id": "seed-0"}],
     }
-    campaign = {"optimization": {"max_rounds": 2, "degradation_threshold": 0.4}}
+    campaign = {"optimization": {"budget": {"rounds": 2}, "degradation_threshold": 0.4}}
     for name in ("innerbench", "otherbench"):
         write_yaml(
             built_stores.install_datasets_root / name / DEFINITION_FILE,
@@ -399,9 +554,11 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         )
 
     def keyed(declared: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
-        resolved = _resolve_panel(built_stores, declared)
-        rows = samples_from_dicts(_extract_experiment(resolved))
-        return {s.query: s.key for s in rows}, _identity_config(built_stores, outer, resolved)
+        resolved = CONNECTOR.resolve_experiment(built_stores, declared)
+        rows = samples_from_dicts(CONNECTOR.extract_experiment(resolved))
+        return {s.query: s.key for s in rows}, CONNECTOR.identity_config(
+            built_stores, outer, resolved
+        )
 
     before, fingerprint = keyed(panel)
     other = {"kind": "seat", "id": "other", "inner_dataset": "otherbench"}
@@ -429,10 +586,6 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     )
 
     # A Harbor panel reads its pinned roster and never dials out; upstream repinning re-cuts nothing.
-    def no_fetch(*_a: object, **_k: object) -> None:
-        raise AssertionError("a panel read fetched Harbor's registry")
-
-    monkeypatch.setattr(harbor_connector.httpx, "get", no_fetch)
     for harbor_dataset, version, include in (
         ("spreadsheetbench-verified", "1.0", ["10452", "105-24"]),
         ("terminal-bench-sample", "2.0", ["regex-log"]),
@@ -458,6 +611,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         assert resolved is not None and [t["id"] for t in resolved["tasks"]] == include, (
             f"{harbor_dataset} resolved another panel than its include list"
         )
+    assert not offline.unrouted, f"a panel read fetched Harbor's registry: {offline.unrouted}"
     with pytest.raises(ValueError):
         harbor_connector._resolve_experiment(
             built_stores, {"harbor_dataset": "unpinned", "harbor_dataset_version": "9"}
@@ -524,52 +678,42 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     draft = new_draft(
         tenant_id=built_stores.identity.tenant_id,
+        owner_user_id=str(built_stores.identity.user_id),
         slug="ds",
         n_samples=1,
         sample_preview=[],
         headers=[],
-        source_file="dataset:ds",
+        source_dataset="ds",
     ).patch(optimization_overrides={"optimizer": "capo"})
     live = [n.name for n in schema.nodes]
     picked = draft.patch(pipeline_steps=["llm_only"])
-    chosen = checkin_campaign_config(built_stores, picked, session_chain=live)
+    chosen = draft_config(built_stores, picked, session_chain=live)
     assert sorted(chosen.exclude_nodes) == ["rerank", "web_search"], "a picked chain ran whole"
     assert schema.active_steps_excluding(chosen.exclude_nodes) == ["llm_only"], (
         "the excluded complement runs another chain than was picked"
     )
     assert chosen.optimization.optimizer == "capo", "the draft's optimizer did not reach the mint"
-    assert checkin_campaign_config(built_stores, picked) == chosen, (
-        "what a read serves before Start is not what Start freezes"
+    assert draft_config(built_stores, picked) == chosen, (
+        "what a read serves before Start is not what Start declares"
     )
     assert chosen.scoring == pinned, "the pinned criterion did not reach the mint"
-    dialled = checkin_campaign_config(built_stores, picked.patch(scoring_dials="cost=0.1"))
+    dialled = draft_config(built_stores, picked.patch(scoring_dials="cost=0.1"))
     assert dialled.scoring == {"per_sample": pinned["per_sample"], "dials": "cost=0.1"}, (
         "dials froze another criterion than they spell"
     )
-    untouched = checkin_campaign_config(built_stores, draft, session_chain=live)
+    untouched = draft_config(built_stores, draft, session_chain=live)
     assert untouched.exclude_nodes == [], (
         "`pipeline_steps=[]` is untouched: excluding its complement would close the whole pipeline"
     )
-    campaign_id, _, _ = create_checkin_campaign(built_stores, draft=picked, bank_items=[])
-    replace_dataset(stores=built_stores, slug="ds")
-    write_yaml(
-        root / DEFINITION_FILE,
-        {
-            "pipeline": {"pipelines": dict(schema.pipelines)},
-            "campaign": {"optimization": optimization},
-        },
-    )
-    carried = load_checkin_draft(built_stores, campaign_id)
-    assert (
-        carried is not None and checkin_campaign_config(built_stores, carried).scoring == pinned
-    ), "a replace frees the slug for other rows: the check-in follows the ones it was cut from"
-
     # A draft edit sent as rows freezes the search space the overlay spelled. A REUSED dataset:
     # its file is not the check-in's to write, so the overlay rides the config.
     reused = built_stores.tenant_datasets.dataset_dir("d")
     write_yaml(
         reused / DEFINITION_FILE,
-        {"pipeline": {"backend_type": "termnorm"}, "campaign": _frozen_config()},
+        {
+            "pipeline": {"backend_type": "termnorm"},
+            "campaign": _connector_config().model_dump(mode="json"),
+        },
     )
     declared_node = {
         "type": "llm",
@@ -581,16 +725,17 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     }
     edited = new_draft(
         tenant_id=built_stores.identity.tenant_id,
+        owner_user_id=str(built_stores.identity.user_id),
         slug="d",
         n_samples=1,
         sample_preview=[],
         headers=[],
-        source_file="dataset:d",
+        source_dataset="d",
     ).patch(backend_nodes={"llm_only": declared_node})
 
     def frozen(**patch: Any) -> Any:
         plan = plan_draft_patch(built_stores, edited, EditDraftPatch.model_validate(patch))
-        return checkin_campaign_config(built_stores, apply_draft_patch(edited, plan))
+        return draft_config(built_stores, apply_draft_patch(edited, plan))
 
     rows = [
         {"key": "reasoning_effort", "open": True, "allowed": ["low", "high"]},
@@ -651,24 +796,26 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     dials = {"per_sample": "exact", "dials": "cost: 0.1"}
     write_yaml(
         stores.tenant_datasets.dataset_dir("fz") / DEFINITION_FILE,
-        {"campaign": _frozen_config(optimization={"optimizer": "capo", "max_rounds": 3})},
+        {
+            "campaign": _connector_config(
+                optimization={"optimizer": "capo", "budget": {"rounds": 3}}
+            ).model_dump(mode="json")
+        },
     )
-    campaign = Campaign(
-        campaign_id="fz__000001",
-        dataset_name="fz",
-        created_at="2026-09-27T00:00:00Z",
-        root_cycle_id="cycle_root",
-        owner_user_id=str(stores.identity.user_id),
-        config=_frozen_config(
-            optimization={"max_rounds": 12},
+    campaign = minted_campaign(
+        CycleHop(campaign_id="fz__000001", cycle_id="cycle_root"),
+        config=_connector_config(
+            optimization={"budget": {"rounds": 12}},
             optimizer_narrowing={"a": {"param_keys": ["temperature"]}, "b": {"param_keys": ["k"]}},
             scoring=dials,
         ),
+        dataset_name="fz",
+        owner_user_id=str(stores.identity.user_id),
     )
     stores.campaigns.create_campaign(campaign)
     stores.campaigns.mint_cycle(campaign.root_hop)
     ran = resolve_campaign_config(stores, campaign, campaign.root_hop)
-    assert (ran.optimization.optimizer, ran.optimization.max_rounds) == ("potter", 12), (
+    assert (ran.optimization.optimizer, ran.optimization.budget.rounds) == ("potter", 12), (
         "a campaign ran its dataset file's later config instead of the one it froze"
     )
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(campaign.root_hop)))
@@ -685,11 +832,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         )
     seed = CycleSeed(
         optimizer_narrowing={"a": {"param_keys": []}},
-        config_overrides=ConfigOverrides(max_rounds=4),
+        config_overrides=ConfigOverrides(budget=Budget(rounds=4)),
     )
     stores.campaigns.write_cycle_seed(campaign.root_hop, seed)
     forked = resolve_campaign_config(stores, campaign, campaign.root_hop)
-    assert forked.optimization.max_rounds == 4, "a seed's override did not reach its cycle"
+    assert forked.optimization.budget.rounds == 4, "a seed's override did not reach its cycle"
     assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]], (
         "a seed's narrowing replaced the nodes it did not name"
     )
@@ -707,20 +854,18 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         }
         return {"nodes": {"a": node}, "pipelines": {"default": ["a"]}}
 
-    steered = Campaign(
-        campaign_id="fk__000001",
+    steered = minted_campaign(
+        CycleHop(campaign_id="fk__000001", cycle_id="cycle_root"),
+        config=_connector_config(),
         dataset_name="fk",
-        created_at="2026-09-27T00:00:00Z",
-        root_cycle_id="cycle_root",
         owner_user_id=str(stores.identity.user_id),
-        config=_frozen_config(),
     )
     stores.campaigns.create_campaign(steered)
     fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
     for hop, rungs in ((steered.root_hop, ["low", "high"]), (fork, ["low", "high", "xhigh"])):
         stores.campaigns.mint_cycle(hop)
         stores.campaigns.write_resolved_pipeline(hop, declaring(rungs))
-    fork_seed = _parse_cycle_seed(
+    fork_seed = parse_cycle_seed(
         {"node_narrowing": {"a": rows}},
         resolve_campaign_config(stores, steered, None),
         stores,
@@ -733,6 +878,198 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             param_allowed_values={"reasoning_effort": ["low", "high"]},
         )
     }, "the fork left open a rung its operator closed"
+
+    # Every door declares through ONE seam, and a declaration is a delta over today's defaults: a
+    # moved code default leaves the minted manifest alone and is named when it moves the origin.
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("decl") / DEFINITION_FILE,
+        {
+            "pipeline": {"backend_type": "termnorm"},
+            "campaign": {"optimization": {"degradation_threshold": 0.4}},
+        },
+    )
+    rows_30 = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(30)]
+    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())
+    opened = loop_session(stores, pipeline_schema([solve], name="decl"), rows_30)
+    opened.dataset = resolve_dataset(stores, "decl")
+    door = _connector_config()
+    seat = declare(opened, door, purpose=Optimize())
+    assert effective_config(seat).model_dump() == door.model_dump(), (
+        "a seat runs another config than the one it declared"
+    )
+    plan = resolve_cycle_plan(opened, seat, rows_30, hop=None)
+    for unmeasured in (
+        {"optimization": {"budget": {"usd": 9.0, "rounds": 3}}},
+        {"display_metric": "composite"},
+    ):
+        moved = declare(opened, _connector_config(**copy.deepcopy(unmeasured)), purpose=Optimize())
+        assert (
+            moved != seat
+            and resolve_cycle_plan(opened, moved, rows_30, hop=None).cycle_id == plan.cycle_id
+        ), f"{unmeasured} — a key that bounds spend or display only — moved the root id"
+    assert not seat.budget.named and seat.run_seed is None, (
+        "a declaration restated a budget axis or a seed no layer set"
+    )
+    armed = declare(opened, door, purpose=Compare(arm=Arm(head_to_head_id="h", arm_key="a")))
+    twin = declare(opened, door, purpose=Compare(arm=Arm(head_to_head_id="h", arm_key="b")))
+    assert armed.shared_part() == twin.shared_part(), (
+        "two arms of one declaration hold different shared parts"
+    )
+    arm_plan = resolve_cycle_plan(opened, armed, rows_30, hop=None)
+    assert arm_plan.origin_hash == plan.origin_hash, (
+        "an arm and a seat over one dataset, partition and environment read different origins"
+    )
+    twin_plan = resolve_cycle_plan(opened, twin, rows_30, hop=None)
+    run_ids = {plan.cycle_id, arm_plan.cycle_id, twin_plan.cycle_id}
+    assert len(run_ids) == 3, (
+        "two arms over one content, or an arm and a seat, share a run id every surface keys on"
+    )
+    arming = loop_session(stores, opened.pipeline_schema, rows_30)
+    arming.dataset = opened.dataset
+
+    def minted(declaration: RunDeclaration, campaign_id: str) -> object:
+        return asyncio.run(
+            mint_framed_cycle(arming, declaration, rows_30, campaign_id=campaign_id, task_text=None)
+        )
+
+    minted(armed, "decl__0000h1")
+    with pytest.raises(ConflictError) as off_record:
+        minted(twin.model_copy(update={"bench_defaults_pin": "moved"}), "decl__0000h2")
+    assert off_record.value.details["differs_on"] == ["bench_defaults_pin"], (
+        "an arm declared over other bench defaults joined its head-to-head"
+    )
+    # An L4 seat declares through the door every campaign takes, and an arm so declared runs what a
+    # campaign minted on that declaration resolves to.
+    panel = InnerTasks(
+        inner_benchmark="decl",
+        inner_benchmark_config=InnerBenchmarkConfig(
+            n_samples_per_inner_round=4, n_samples_bench=6, max_inner_rounds=2
+        ),
+        tasks=[Seat(kind="seat", id="decl/seed-3", run_seed=3)],
+    )
+    cells = panel.resolve_cells(stores)
+    (l4_seat,) = cells.cells
+    seat_config = inner_instrument_config(
+        cells.spec(l4_seat),
+        CampaignConfig.model_validate(dict(cells.held(l4_seat).campaign_config)),
+        solver=[solve],
+        n_search=24,
+    )
+    l4 = declare(opened, seat_config, purpose=Optimize())
+    assert effective_config(l4).model_dump() == seat_config.model_dump(), (
+        "an L4 seat runs another config than the one its seat declared"
+    )
+    assert l4.run_seed == 3, "an L4 seat's declaration lost the seed its seat names"
+    l4_arm = declare(
+        opened, seat_config, purpose=Compare(arm=Arm(head_to_head_id="h4", arm_key="a"))
+    )
+    as_campaign = minted_campaign(
+        CycleHop(campaign_id="decl__0000a4", cycle_id="cycle_l4arm"),
+        config=effective_config(l4_arm),
+        purpose=l4_arm.purpose,
+        dataset_name="decl",
+        dataset_hash=opened.bank.dataset_hash,
+        owner_user_id=str(stores.identity.user_id),
+    )
+    stores.campaigns.create_campaign(as_campaign)
+    stores.campaigns.mint_cycle(as_campaign.root_hop)
+    assert (
+        resolve_campaign_config(stores, as_campaign, as_campaign.root_hop).model_dump()
+        == effective_config(l4_arm).model_dump()
+    ), "an arm runs another config than a campaign declared that way"
+    pinned = minted_campaign(
+        CycleHop(campaign_id="decl__000001", cycle_id=plan.cycle_id),
+        config=door,
+        dataset_name="decl",
+        root_content_hash=plan.origin_hash,
+        dataset_hash=opened.bank.dataset_hash,
+        owner_user_id=str(stores.identity.user_id),
+    )
+    assert pinned.declaration == seat, "the manifest holds another declaration than the door made"
+    manifest_path = stores.campaigns.create_campaign(pinned)
+    manifest = json.loads(manifest_path.read_bytes())
+    with pytest.raises(ConflictError):
+        stores.campaigns.create_campaign(pinned.model_copy(update={"root_content_hash": "drift"}))
+    assert json.loads(manifest_path.read_bytes()) == manifest, (
+        "a drifted origin re-minted over the campaign its banked rounds stand on"
+    )
+    stores.campaigns.mint_cycle(pinned.root_hop)
+    refuse_drifted_resume(opened, pinned, pinned.root_hop, rows_30)
+    opened.bind_campaign(pinned.root_hop, purpose=Optimize())
+    wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(pinned.root_hop)))
+    root_cut = Cut(cycle=CycleDir(stores.campaigns.cycle_dir(pinned.root_hop)), hop=pinned.root_hop)
+    # A default nested inside a knob's model moves the pin as a top-level one does.
+    for model, field, moved, origin_moves in (
+        (CampaignConfig, "bench_trigger", "at_end", False),
+        (DatasetSplit, "tolerance", 3, False),
+        (CampaignConfig, "dataset_split", DatasetSplit(bench=6), True),
+    ):
+        declared_field = model.model_fields[field]
+        shipped = declared_field.default
+        try:
+            declared_field.default = moved
+            model.model_rebuild(force=True)
+            CampaignConfig.model_rebuild(force=True)
+            redeclared = declare(opened, _connector_config(), purpose=Optimize())
+            pinned_again = redeclared.model_copy(
+                update={"bench_defaults_pin": seat.bench_defaults_pin}
+            )
+            assert pinned_again == seat, (
+                f"a moved {field} default re-declared the same inputs differently"
+            )
+            reloaded = stores.campaigns.load_campaign(pinned.campaign_id)
+            assert reloaded is not None and reloaded.model_dump(mode="json") == manifest, (
+                f"a moved {field} default rewrote the minted manifest on read"
+            )
+            drift = defaults_drift(pinned)
+            assert drift is not None and drift.moved() == ["bench"], (
+                f"a moved {field} default left the bench defaults pin where it was"
+            )
+            if not origin_moves:
+                refuse_drifted_resume(opened, pinned, pinned.root_hop, rows_30)
+                # The resume runs on, and what it runs under says so on the record every launch writes.
+                declare_run_wiring(opened, effective_config(seat), wired_ledger, tracing=None)
+                served = fold_at(root_cut)
+                assert served is not None and served.defaults_drift == drift, (
+                    f"a launch past a moved {field} default served no drift to read"
+                )
+                continue
+            with pytest.raises(ConfigDriftError) as drifted:
+                refuse_drifted_resume(opened, pinned, pinned.root_hop, rows_30)
+            assert drifted.value.details["defaults_pin_moved"], (
+                "a resume the moved default drifted did not name its defaults pin"
+            )
+        finally:
+            declared_field.default = shipped
+            model.model_rebuild(force=True)
+            CampaignConfig.model_rebuild(force=True)
+    declare_run_wiring(opened, effective_config(seat), wired_ledger, tracing=None)
+    served = fold_at(root_cut)
+    assert served is not None and served.defaults_drift is None, (
+        "a launch on the defaults its declaration was made over served a drift"
+    )
+    # The optimizer's defaults are its whole treatment: a part moved under one declaration is named.
+    reshipped = pinned.treatment.model_copy(update={"manifest": "older"})
+    moved = defaults_drift(pinned.model_copy(update={"treatment": reshipped}))
+    assert moved is not None and moved.moved() == ["manifest"], (
+        "an optimizer whose manifest moved under one declaration drifted nothing, or blamed "
+        "another part"
+    )
+    recut = loop_session(stores, opened.pipeline_schema, rows_30[:-1])
+    recut.dataset = opened.dataset
+    with pytest.raises(ConfigDriftError) as drifted:
+        refuse_drifted_resume(recut, pinned, pinned.root_hop, rows_30[:-1])
+    assert not drifted.value.details["defaults_pin_moved"], (
+        "a resume over an edited bank blamed the defaults pin"
+    )
+    # A manifest in a shape this build does not read is refused by name, never read around.
+    manifest_path.write_text(json.dumps({**manifest, "defaults_pin": "older"}), encoding="utf-8")
+    with pytest.raises(ManifestUnreadableError) as stale:
+        stores.campaigns.load_campaign(pinned.campaign_id)
+    assert Path(stale.value.details["path"]) == manifest_path.relative_to(stores.base_dir), (
+        "an unreadable manifest was refused without naming its file"
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
     # Answering in TEXT sends no contract to answer INTO.
     text_schema = parse_pipeline_response(read_dataset_pipeline(_DATASETS / "justlogic" / "d234"))
@@ -798,25 +1135,160 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ({"l1_critique": {"layout": "hdr"}}, [("l1_critique.layout", "type_mismatch")]),
         ({"l1_critique": {"layout": {"instruction": ["plan"]}}}, []),
     ):
-        found = [(f.axis, f.reason) for f in overlay_failures(overlay, outer_schema)]
+        found = [(f.axis, f.reason) for f in overlay_failures(overlay, outer_schema, running={})]
         assert found == reasons, f"{overlay}: admitted a param the schema does not declare"
-    parent = OptSearchPoint(persona="You grade.", instruction="Answer {{combined_text}}.")
-    wiped = OptSearchPoint.derive([parent], variation=_L1, persona="")
-    assert wiped.lineage.variations[0].loci == ["persona"], (
+    graded = parse_pipeline_response(
+        {
+            **declaration,
+            "nodes": {
+                **declaration["nodes"],
+                "grade": {"type": "llm", "config": {"model": "m"}, "prompt_info": {}},
+            },
+            "pipelines": {"default": [*declaration["pipelines"]["default"], "grade"]},
+        }
+    )
+    parent = prompted("grade", persona="You grade.", instruction="Answer {{combined_text}}.")
+    wiped = OptSearchPoint.derive(
+        [parent], schema=graded, variation=_L1, changes={Locus("grade", "persona"): ""}
+    )
+    assert wiped.lineage.variations[0].loci == ["grade.persona"], (
         "a deletion is a move like any other: an emptied field is a locus the variation wrote"
     )
     assert wiped.lineage.parent_ids == [parent.id], "a wiped field lost its parent"
-    found = admission_failures(wiped, {"l1_generate": {"invented_knob": 1}}, outer_schema)
+    found = admission_failures(wiped, {"l1_generate": {"invented_knob": 1}}, graded, carried=[])
     assert [f.reason for f in found] == ["unknown_param"], "an invented knob was admitted"
+    # Each carrier writes its own kind: a prompt locus the node does not declare, a config key
+    # aimed at a prompt field, and a node the pipeline lacks are all refused on the child.
+    _, config, carried = carried_writes(
+        graded,
+        prompt_loci={
+            Locus("grade", "invented_field"): "x",
+            Locus("grade", "persona"): "You grade strictly.",
+            Locus("ghost", "persona"): "x",
+        },
+        overlay={"grade": {"instruction": "Answer."}},
+        demo=(),
+    )
+    assert sorted((f.axis, f.reason) for f in carried) == [
+        ("ghost", "hallucinated_node"),
+        ("grade.instruction", "unknown_param"),
+        ("grade.invented_field", "unknown_param"),
+    ], "a write off its declared carrier reached the child"
+    assert config == {}, "a prompt field rode the config overlay"
+
+    # A SECOND prompt node, on a roster of its own, is written as the first is — by L1's wire and
+    # an operator's arm — and a member knowing one prompt is refused pre-spend.
+    two = pipeline_schema(
+        [
+            PipelineNode(name="draft", kind="llm", prompt_info=NodePromptInfo(), tunes_llm=True),
+            PipelineNode(
+                name="review",
+                kind="llm",
+                prompt_info=NodePromptInfo(fields=("instruction", "rubric")),
+                tunes_llm=True,
+            ),
+        ]
+    )
+    wire = build_l1_response_schema(two, citable_fields=["critique"], inner_cells=None)
+    offered = wire["properties"]["variants"]["items"]["properties"]["prompt_fields_updates"]
+    assert set(offered["properties"]["review"]["properties"]) == {"instruction", "rubric"}, (
+        "L1 was offered another roster than the second prompt node declares"
+    )
+    origin = OptSearchPoint(
+        prompts={
+            "draft": NodePrompt(fields={"instruction": "Draft it."}),
+            "review": NodePrompt(fields={"instruction": "Review it.", "rubric": "Correctness."}),
+        }
+    )
+    demo = types.SimpleNamespace(
+        require_partition=lambda: types.SimpleNamespace(
+            demo=(Sample(id=7, query="q", ground_truth="a"),)
+        )
+    )
+    gepa = resolve_optimizer("gepa", {}, gate="off")
+    seat = types.SimpleNamespace(
+        round_num=1,
+        cycle=types.SimpleNamespace(
+            optimizer=gepa,
+            opt_sp=origin,
+            population=[origin],
+            slices=SliceMap(gepa.slices),
+            session=types.SimpleNamespace(pipeline_schema=two, scoring=demo),
+        ),
+    )
+    arm = SubmittedArm(
+        prompt_fields={"review": {"rubric": "Cite the clause."}},
+        changes_description="tighten the review",
+    )
+    operator: NodeContext[Any] = NodeContext(cast(Any, seat), gepa.plan.seat)
+    authored = _authored(operator, arm)
+    assert authored.validation_failures == [], "an operator arm on the second node was refused"
+    assert authored.individual.prompts["review"].fields["rubric"] == "Cite the clause.", (
+        "the arm's second-node write did not land"
+    )
+    assert authored.individual.prompts["draft"] == origin.prompts["draft"], "the arm moved node one"
+    stray = SubmittedArm(
+        prompt_fields={"review": {"persona": "x"}, "ghost": {"rubric": "x"}},
+        changes_description="off roster",
+    )
+    refused = _authored(operator, stray)
+    assert len(refused.validation_failures) == 2, "an arm writing off the roster was measured"
+    capo = resolve_optimizer("capo", {}, gate="off")
+    assert optimizers.unfit_pipeline(capo, two) is not None, (
+        "a member rewriting the one prompt node was admitted on a chain of two"
+    )
+    assert optimizers.unfit_pipeline(gepa, two) is None, "GEPA was refused a chain it can walk"
+
+    class _Reflecting(NodeContext[Any]):
+        async def measure_parent(self, individual_id: str, cells: list[Sample]) -> Any:
+            return []
+
+        async def ask(self, prompt: str, idx: int | None = None) -> str:
+            return f"```\nRewritten in round {len(seat.cycle.population)}.\n```"
+
+        def emit(self, output: Any) -> None:
+            return None
+
+    reflected: list[set[str]] = []
+    for _ in range(3):
+        reflecting = _Reflecting(cast(Any, seat), optimizers.member("gepa_reflect"))
+        panel = types.SimpleNamespace(order=[], block_size=0)
+        out = asyncio.run(GepaReflect().propose(reflecting, cast(Any, panel), Proposals([])))
+        (child,) = out.proposals
+        reflected.append(
+            {locus.split(".")[0] for locus in child.individual.lineage.variations[0].loci}
+        )
+        seat.cycle.population = [*seat.cycle.population, child.individual]
+        seat.cycle.slices.put(
+            ParetoScores(scores={child.individual.id: {}}, parent_id=child.individual.id)
+        )
+    assert reflected == [{"draft"}, {"review"}, {"draft"}], (
+        "GEPA's reflection did not round-robin a lineage across the prompt nodes"
+    )
+    rubric_only = pipeline_schema(
+        [
+            PipelineNode(
+                name="review",
+                kind="llm",
+                prompt_info=NodePromptInfo(fields=("rubric",)),
+                tunes_llm=True,
+            )
+        ]
+    )
+    assert optimizers.unfit_pipeline(gepa, rubric_only) is not None, (
+        "a peer was admitted to rewrite a field its prompt node does not declare"
+    )
 
     # The endpoint is the operator's config: a request that names one is refused, not followed.
     termnorm = BackendClient(get("termnorm"), workload=PROBE_WORKLOAD)
     assert termnorm.base_url == settings.TERMNORM_URL.rstrip("/"), "the client left its config"
-    for wire in (StartCheckinPayload, MintCampaignPayload):
+    for wire, named in (
+        (StartCheckinPayload, {"draft_id": "d" * 8}),
+        (MintCampaignPayload, {"dataset_name": "d"}),
+    ):
+        wire.model_validate(named)
         with pytest.raises(ValidationError):
-            wire.model_validate(
-                {"campaign_id": "c" * 8, "dataset_name": "d", "backend_url": "http://evil"}
-            )
+            wire.model_validate({**named, "backend_url": "http://evil"})
 
     # The YAML a config is written to never reinterprets a string it wrote.
     path = tmp_path / "hazards.yaml"
@@ -835,7 +1307,7 @@ _EXPORTED_ROWS = [
 
 
 def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
-    monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Router
 ) -> None:
     # A mis-decoded label grades every cell against text the person never wrote, with no error.
     for filename, blob in (
@@ -937,7 +1409,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     # No held-out row reaches a round panel or an archive view.
     bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(60)]
     split = DatasetSplit(bench=12, demo=6)
-    part = partition_bank(bank, split)
+    part = partition_bank(bank, split, seed=0)
     held = {s.id for s in (*part.bench, *part.demo)}
     assert (len(part.bench), len(part.demo), len(part.search)) == (12, 6, 42), (
         "the partition held out another count than its split declares"
@@ -949,16 +1421,17 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     demo_ids = frozenset(s.id for s in part.demo)
     for leak in (part.search[0].id, part.bench[0].id):
         outcome = L1_SHOTS_IN_DEMO_POOL.check(
-            {"shot_ids": [part.demo[0].id, leak]}, demo_ids=demo_ids, k_max=len(demo_ids)
+            {"classify": [part.demo[0].id, leak]}, demo_ids=demo_ids, k_max=len(demo_ids)
         )
         rejected = [f.value for f in outcome.evidence["failures"]] if outcome else []
         assert rejected == [str(leak)], f"a shot naming scored row {leak} was accepted"
     # Asserts the SUPPORT, never the stream: add, drop and keep each occur over the seeds.
-    pool = sorted(demo_ids)
+    demo_keys = frozenset(s.key for s in part.demo)
+    pool = sorted(demo_keys)
     moves = set()
     for seed in range(60):
         out = mutate_shots(pool[:2], pool, k_max=3, rng=random.Random(seed))
-        assert set(out) <= demo_ids and len(set(out)) == len(out) <= 3, (
+        assert set(out) <= demo_keys and len(set(out)) == len(out) <= 3, (
             f"seed {seed}: a mutated shot list left the demo pool, repeated a shot or overgrew"
         )
         moves.add(len(out) - 2)
@@ -967,12 +1440,16 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         len(mutate_shots(pool[:3], pool, k_max=3, rng=random.Random(s))) <= 3 for s in range(30)
     ), "a full shot list grew past its k_max"
     child = cross_shots([pool[:2], pool[2:6]], rng=random.Random(0))
-    assert len(child) == 3 and set(child) <= demo_ids, "a crossed shot list left the demo pool"
-    assert {s.id for s in partition_bank(bank[::-1], split).bench} == {s.id for s in part.bench}, (
+    assert len(child) == 3 and set(child) <= demo_keys, "a crossed shot list left the demo pool"
+    reversed_bench = partition_bank(bank[::-1], split, seed=0).bench
+    assert {s.id for s in reversed_bench} == {s.id for s in part.bench}, (
         "the bench moved with the bank's row order"
     )
+    assert {s.id for s in partition_bank(bank, split, seed=1).bench} != {
+        s.id for s in part.bench
+    }, "the partition seed drew no other bench"
     twins = [*bank, *(s.model_copy(update={"id": 60 + s.id}) for s in bank)]
-    doubled = partition_bank(twins, split)
+    doubled = partition_bank(twins, split, seed=0)
     assert {s.key for s in doubled.bench}.isdisjoint(s.key for s in doubled.search), (
         "a copy of a held-out sample sits on the search side"
     )
@@ -984,7 +1461,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert extra[0].key == extra[0].model_copy(update={"bench_only": False}).key, (
         "declaring a row bench-only re-keyed it"
     )
-    wide = partition_bank([*bank, *extra], split)
+    wide = partition_bank([*bank, *extra], split, seed=0)
     assert (wide.search, wide.demo) == (part.search, part.demo), "a wider bench moved a paid cell"
     assert wide.bench == (*part.bench, *extra), "a declared bench row was not held out"
     for refused in (
@@ -992,7 +1469,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         ([*bank, bank[0].model_copy(update={"id": 60, "bench_only": True})], split),
     ):
         with pytest.raises(ValueError):
-            partition_bank(*refused)
+            partition_bank(*refused, seed=0)
     # An L4 pool seats a held-out ENVIRONMENT the same way: the seat is out of the pin, so the
     # cell replays once searched, and a pool declaring no split cannot draw it by mistake.
     task = {"kind": "seat", "id": "gsm_hard/8b", "inner_dataset": "gsm_hard", "inner_model": "m"}
@@ -1014,35 +1491,51 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         }
 
     seated, drawn = samples_from_dicts(
-        _extract_experiment(resolved({**task, "held_out": True}, other))
+        CONNECTOR.extract_experiment(resolved({**task, "held_out": True}, other))
     )
-    searched, _ = samples_from_dicts(_extract_experiment(resolved(task, other)))
+    searched, _ = samples_from_dicts(CONNECTOR.extract_experiment(resolved(task, other)))
     assert seated.bench_only and not searched.bench_only, "a held-out environment was searched"
     assert seated.source_pin == {**task, "instrument": "i"} and seated.key == searched.key, (
         "the seat entered the pin, so the held-out cell never replays once searched"
     )
     with pytest.raises(ValueError):
-        partition_bank([seated, drawn], None)
-    environments = partition_bank([seated, drawn], DatasetSplit(bench=0))
+        partition_bank([seated, drawn], None, seed=0)
+    environments = partition_bank([seated, drawn], DatasetSplit(bench=0), seed=0)
     assert (environments.search, environments.bench) == ((drawn,), (seated,)), (
         "a held-out environment was drawn for the search"
     )
     # A cycle's diagnostics read the partition its run init drew: an L4 cell's held-out rows ride
     # its bank as bench-only copies, so re-drawing off its config alone searches them.
     cell = [*bank[:30], *(s.model_copy(update={"bench_only": True}) for s in bank[30:50])]
-    record = partition_bank(cell, DatasetSplit(bench=0)).record(dataset_hash="d")
-    back = restored_partition(bank, record)
-    assert (back.search, back.bench) == (tuple(bank[:30]), tuple(bank[30:50])), (
+    cell_drawn = partition_bank(cell, DatasetSplit(bench=0), seed=0)
+    back = restored_partition(bank, cell_drawn.record(dataset_hash="d"))
+    assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
         "the restored partition is not the one the run drew"
     )
-    assert partition_bank(bank, DatasetSplit(bench=0)).bench == (), "a re-draw held rows out"
-    moved = [*bank[:40], bank[40].model_copy(update={"query": "moved"}), *bank[41:]]
-    with pytest.raises(ValueError):
-        restored_partition(moved, record)
+    assert partition_bank(bank, DatasetSplit(bench=0), seed=0).bench == (), (
+        "a re-draw held rows out"
+    )
+    # A resume after its label was re-cut reads the bank its cycle drew, never the newer one.
+    drawn, recut = Bank.of(cell), Bank.of([*cell[:40], cell[40].model_copy(update={"query": "x"})])
+    for held_bank in (drawn, recut):
+        built_stores.tenant_datasets.put_bank(held_bank)
+    built_stores.tenant_datasets.relabel("recut", recut.dataset_hash)
+    hop = CycleHop(campaign_id="camp-recut", cycle_id="cycle_recut")
+    built_stores.campaigns.write_bank_partition(
+        hop,
+        partition_bank(cell, DatasetSplit(bench=0), seed=0).record(dataset_hash=drawn.dataset_hash),
+    )
+    resumed = loop_session(
+        built_stores,
+        pipeline_schema([]),
+        list(built_stores.tenant_datasets.labelled("recut").samples),
+    )
+    resumed.bind_campaign(hop, purpose=Optimize())
+    assert resumed.bank == drawn, "a resume after a re-cut switched its cycle onto the new bank"
     contaminating = [Observation("bench_arm", s.key, 0.0) for s in (*part.bench, *part.demo)]
     panel = select_round_subset(list(part.search), contaminating, 20, worth={})
     assert held.isdisjoint(s.id for s in panel), "a held-out row reached a round panel"
-    index = SampleIndex(sample_ids=part.admitted_ids)
+    index = SampleIndex(bank=Bank.of(bank), sample_ids=part.admitted_ids)
     for n in range(12):
         index.replay_row(
             SampleFoldRow(
@@ -1061,26 +1554,47 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
 
     # The check-in model reads no held-out row.
     checkin_bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(40)]
-    built_stores.tenant_datasets.save_materialized_rows("heldout", checkin_bank)
+    built_stores.tenant_datasets.put_bank(heldout := Bank.of(checkin_bank))
+    built_stores.tenant_datasets.relabel("heldout", heldout.dataset_hash)
     dataset_dir = built_stores.tenant_datasets.dataset_dir("heldout")
     dataset_dir.mkdir(parents=True)
     (dataset_dir / DEFINITION_FILE).write_text(
-        "pipeline: {}\ncampaign:\n  scoring: label_match(predicted, ground_truth)\n"
+        "pipeline:\n  backend_type: termnorm\ncampaign:\n  scoring: label_match(predicted, ground_truth)\n"
         "  dataset_split:\n    bench: 30\n  optimization:\n    degradation_threshold: 0.4\n",
         encoding="utf-8",
     )
 
-    async def _offline(*_: Any, **__: Any) -> dict[str, Any]:
-        return {}
-
-    monkeypatch.setattr(ingest, "refresh_capabilities", _offline)
-    monkeypatch.setattr(ingest, "fetch_backend_nodes", _offline)
     draft = asyncio.run(ingest.draft_from_dataset(stores=built_stores, dataset_name="heldout"))
     content, _ = build_origin_consultation(draft)
-    bench_rows = partition_bank(checkin_bank, DatasetSplit(bench=30)).bench
+    bench_rows = partition_bank(checkin_bank, DatasetSplit(bench=30), seed=0).bench
     assert not [s.id for s in bench_rows if f'"{s.query}"' in content], (
         "a bench row reached the resolver"
     )
+
+    # An upload's Start asks the mint's refusals of the draft BEFORE its dataset lands, so a refused
+    # Start takes no slug and its retry is refused the same way, never as a collision.
+    uploaded = asyncio.run(
+        ingest.ingest_draft(stores=built_stores, blob=b"q,a\nx,1\ny,2\nz,1\n", filename="tiny.csv")
+    )
+    starved = {"l1_generate": {"config": {"model": "deepseek/deepseek-v4-flash", "max_tokens": 64}}}
+    built_stores.drafts.write_draft(
+        uploaded.draft_id,
+        uploaded.patch(
+            column_query="q",
+            column_ground_truth="a",
+            optimization_overrides={**uploaded.optimization_overrides, "nodes": starved},
+        ).to_disk(),
+    )
+    monkeypatch.setattr(checkin_launch, "assert_origin_ready", lambda _draft: None)
+    for attempt in ("first", "retry"):
+        with pytest.raises(PayloadInvalidError) as refused:
+            asyncio.run(checkin_launch._commit_checkin(built_stores, uploaded.draft_id))
+        assert refused.value.code == "model_below_reasoning_floor", (
+            f"the {attempt} Start of an unrunnable upload was refused as something else"
+        )
+        assert not built_stores.tenant_datasets.slug_exists(uploaded.slug), (
+            f"the {attempt} refused Start committed its dataset"
+        )
 
     # Rewriting the prompt panel cannot accumulate the operator framing.
     upstream = "Raw invoice text is provided directly as the input column."
@@ -1088,15 +1602,21 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         upstream_context=upstream,
         downstream_context="The assigned code books a ledger entry.",
     )
-    opt_sp = OptSearchPoint(
+    opt_sp = prompted(
+        "classify",
         persona="You assign Swiss account codes.",
         problem_description="Assign the four-digit account code for the invoice.",
     )
+    booking = pipeline_schema(
+        [PipelineNode(name="classify", kind="llm", prompt_info=NodePromptInfo(), tunes_llm=True)]
+    )
+    classify = booking.prompt_nodes()[0]
     bundle = InjectionBundle(
         opt_sp=opt_sp,
-        memory=L2L3Memory(),
+        l2=L2Memory(),
+        l3=L3Memory(),
         framing=framing,
-        pipeline_schema=None,
+        pipeline_schema=booking,
         cycle_slice=CycleSlice(
             round_num=1,
             l1_stall_depth=0,
@@ -1105,32 +1625,38 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         ),
         digest=RoundDigest(diagnostics=RoundDiagnostics(n_valid=0, samples=[]), critique=None),
         axes=None,
-        prompt_block_catalogue="guidance",
+        block_access="open",
         rebase_capability=True,
         terminate_capability=True,
         schema_field_rename=False,
         shot_k_max=0,
+        slot_of={},
     )
-    rendered = "\n\n".join(i.text for i in _r_rendered_prompt(bundle))
+    rendered = "\n\n".join(i.text for i in DispatchHub.render_items("rendered_prompt", bundle))
     shown = {
         label.removeprefix("[").removesuffix("]"): body
         for label, _, body in (s.partition("\n") for s in rendered.split("\n\n"))
         if label.startswith("[")
     }
-    rewritten = OptSearchPoint.derive([opt_sp], variation=_L1, **shown)
-    assert rewritten.render_target(framing, demo=()) == opt_sp.render_target(framing, demo=()), (
-        "rewriting the shown panel accumulated the operator framing into the scored prompt"
+    rewritten = OptSearchPoint.derive(
+        [opt_sp],
+        schema=booking,
+        variation=_L1,
+        changes={Locus(*label.split(".", 1)): body for label, body in shown.items()},
     )
-    assert upstream in opt_sp.render_target(framing, demo=()), (
+    assert rewritten.render_target(classify, framing, demo=()) == opt_sp.render_target(
+        classify, framing, demo=()
+    ), "rewriting the shown panel accumulated the operator framing into the scored prompt"
+    assert upstream in opt_sp.render_target(classify, framing, demo=()), (
         "dropping the framing from the target render trades this bug for a blinder one"
     )
-    assert upstream in "".join(i.text for i in _r_task_context(bundle)), (
+    assert upstream in DispatchHub.render("task_context", bundle), (
         "dropping the framing from the task context trades this bug for a blinder one"
     )
 
     # The L4 generator is shown the optimizer prompts it rewrites: the INNER campaign's
     # manifest's, never the outer's own.
-    fields = list(PROMPT_STRING_FIELDS)
+    fields = list(OptimizerPromptTemplate.model_fields)
 
     def outer_schema(nodes: tuple[str, ...]) -> PipelineSchema:
         return pipeline_schema(
@@ -1168,8 +1694,8 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     starved = set(filled.breakdown.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not starved, f"mandatory panel(s) refused by the budget: {sorted(starved)}"
     # A panel mixing two manifests: each outer node is shown, and checked, as its own manifest's.
-    capo = resolve_optimizer("capo", {})
-    potter = resolve_optimizer("potter", {})
+    capo = resolve_optimizer("capo", {}, gate="off")
+    potter = resolve_optimizer("potter", {}, gate="off")
     mixed = inner_cells("potter", "capo")
     mixed_schema = outer_schema((*NODE_LAYOUTS, *capo.llm_nodes))
     mixed_bundle = replace(inner, pipeline_schema=mixed_schema, inner_cells=mixed)
@@ -1199,38 +1725,38 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         proposing = types.SimpleNamespace(
             cycle=types.SimpleNamespace(
                 optimizer=mixed.owners[node],
-                session=types.SimpleNamespace(pipeline_schema=mixed_schema),
+                slices=SliceMap(()),
+                session=types.SimpleNamespace(pipeline_schema=mixed_schema, scoring=no_demo),
             )
         )
-        return NodeContext(cast(Any, proposing), node).child([parent], overlay=overlay)
+        member = optimizers.member(node)
+        return NodeContext(cast(Any, proposing), member).child([parent], overlay=overlay)
 
-    proposals = [proposed(overlay) for overlay in (edit, severed, severed_potter)]
-    parse_population(
-        proposals,
+    no_demo = types.SimpleNamespace(require_partition=lambda: types.SimpleNamespace(demo=()))
+
+    proposals = parse_population(
+        [proposed(overlay) for overlay in (edit, severed, severed_potter)],
         parent,
         None,
         mixed_schema,
         runtime_failures=[],
-        demo_ids=frozenset(),
-        shot_k_max=0,
         inner_cells=mixed,
-        prompt_block_catalogue="guidance",
     )
     assert proposals[0].validation_failures == [], "a valid edit of CAPO's prompt was refused"
     for severing in proposals[1:]:
         assert "dropped_mandatory_placeholder" in [
             f.reason for f in severing.validation_failures
         ], "an edit severing a mixed panel cell's port was measured"
-    assert proposals[0].opt_sp.lineage.variations[0].loci == ["capo_mutate.instruction"], (
+    assert proposals[0].individual.lineage.variations[0].loci == ["capo_mutate.instruction"], (
         "the overlay's locus is missing from the variation that proposed it"
     )
     payload = promptpotter_wire_adapter(
-        "justlogic-d234/seed-0", proposals[0].opt_sp.pipeline_params
+        "justlogic-d234/seed-0", proposals[0].individual.pipeline_params
     )
     try:
         set_optimizer_prompt_overrides(payload["optimizer_prompt_overrides"])
         round_ = types.SimpleNamespace(cycle=types.SimpleNamespace(optimizer=capo))
-        sent = NodeContext(cast(Any, round_), "capo_mutate").fill(
+        sent = NodeContext(cast(Any, round_), optimizers.member("capo_mutate")).fill(
             task_description="sort the list", instruction="Sort it."
         )
     finally:

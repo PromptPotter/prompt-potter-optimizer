@@ -7,12 +7,14 @@ import sys
 from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.datasets.loaders import sample_dataset
+from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.run_observers import declare_gate, declare_running
 from promptpotter.application.runner.measurement import rescore_parent
 from promptpotter.application.runner.operator_hold import hold_for_operator
 from promptpotter.application.runner.round import emit_origin_round
 from promptpotter.application.runner.termination import origin_gate_tripped
 from promptpotter.domain.phases import GateDecision, StopReason
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
@@ -95,7 +97,12 @@ async def _rescore_and_reemit(
     cb: RunCallbacks,
 ) -> None:
     scoring_set = sample_dataset(dataset, config.sp_budget_origin)
-    origin = await rescore_parent(cycle, scoring_set, force_fresh=True)
+    origin = await rescore_parent(
+        RoundContext(cycle=cycle, round_num=0, callbacks=cb),
+        scoring_set,
+        role=MeasurementRole.ORIGIN,
+        force_fresh=True,
+    )
     # Re-graded as a fresh floor, with no prior track record, as the first origin emit was.
     cycle.restamp_origin_round(origin)
     await emit_origin_round(cycle, session, cb)

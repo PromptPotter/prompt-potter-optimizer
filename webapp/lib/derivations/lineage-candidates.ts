@@ -1,4 +1,4 @@
-import type { ArmNode, ArmPointer, CourseNode, LineageNode } from "@/lib/api";
+import type { ArmNode, CourseNode, LineageNode } from "@/lib/api";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
 import { encodeCyclePath, nodeAddress, type CyclePath } from "@/lib/ids";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
@@ -45,10 +45,9 @@ export function nodeKeyOf(node: LineageNode): string {
   return nodeAddress(pathOf(node), node.id);
 }
 
-export function selectedNodeOf(node: LineageNode, cycleId: string): SelectedCandidate {
-  return node.kind === "candidate"
-    ? selectedCandidateOf(cycleId, node.reading.arm.round, node.id, node.reading.arm.label)
-    : selectedCandidateOf(cycleId, 0, node.id, node.label);
+export function selectedNodeOf(node: ArmNode, cycleId: string): SelectedCandidate {
+  const { round, key, label } = node.reading.arm;
+  return selectedCandidateOf(cycleId, round, key, label);
 }
 
 // `course` is null at a fork's address: a fork is not a node, and its arms are its only trace.
@@ -102,16 +101,13 @@ export function armOfId(index: LineageIndex, id: string): ArmNode | null {
   return findArm(index, (c) => c.id === id && c.answers_for_id);
 }
 
-export function armAt(
-  index: LineageIndex,
-  path: CyclePath | null,
-  arm: Pick<ArmPointer, "round" | "label">,
-): ArmNode | null {
-  return (
-    candidatesAtPath(index, path).find(
-      (c) => c.reading.arm.round === arm.round && c.reading.arm.label === arm.label,
-    ) ?? null
-  );
+export function armAt(index: LineageIndex, path: CyclePath | null, key: string): ArmNode | null {
+  return candidatesAtPath(index, path).find((c) => c.reading.arm.key === key) ?? null;
+}
+
+// The row answering for the arm's individual; null for a refused proposal, which measured none.
+export function individualOf(index: LineageIndex, node: ArmNode): ArmNode | null {
+  return node.reading.end === "invalid" ? null : armOfId(index, node.id);
 }
 
 export type LineStep = { kind: "step"; node: ArmNode } | { kind: "held"; round: number };

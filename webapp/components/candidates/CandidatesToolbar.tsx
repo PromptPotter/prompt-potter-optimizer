@@ -180,7 +180,7 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
             )}
             {m.wonOnTheta && m.showTheta && (
               <AbilityHelp
-                model={m.ability?.calibration_model ?? null}
+                model={m.ability?.reading.calibration_model ?? null}
                 caveat={m.ability?.caveat ?? null}
               />
             )}

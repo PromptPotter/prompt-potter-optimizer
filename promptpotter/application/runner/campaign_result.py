@@ -15,11 +15,12 @@ from promptpotter.application.runner.bench import (
 )
 from promptpotter.application.scoring.closed_rounds import cycle_instrument
 from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun
-from promptpotter.domain.campaign import ArmCost, Campaign, CampaignResult, Launch
+from promptpotter.domain.campaign import Campaign, CampaignResult, Launch
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    LedgerSpend,
     scan_bench_passes,
     scan_ledger_spend,
     scan_ledger_wall_clock,
@@ -71,7 +72,6 @@ def bank_campaign_result(
         return
     ledgers = [CycleLayout(stores.campaigns.cycle_dir(h)).ledger for h in line]
     prior = stores.campaigns.load_result(hop.campaign_id)
-    calls = scan_ledger_spend(LedgerSpan(ledger) for ledger in ledgers).calls
     launch = Launch(
         started_at=started_at,
         finished_at=finished_at,
@@ -82,21 +82,15 @@ def bank_campaign_result(
             optimizer_phases=optimizer_phases,
         ),
     )
-    earlier = (
-        [] if prior is None else [r for r in prior.cost.launches if r.started_at != started_at]
-    )
+    earlier = [] if prior is None else [r for r in prior.launches if r.started_at != started_at]
     stores.campaigns.write_result(
-        hop.campaign_id,
-        CampaignResult(
-            cycle_id=hop.cycle_id,
-            cost=ArmCost(calls=calls, launches=[*earlier, launch]),
-        ),
+        hop.campaign_id, CampaignResult(cycle_id=hop.cycle_id, launches=[*earlier, launch])
     )
 
 
-def _bench_counted(spend: SpendRollup) -> tuple[float, int]:
+def _bench_counted(spend: SpendRollup) -> Budget:
     bench = spend.by_kind["bench"]
-    return bench.incurred_usd, bench.input_tokens + bench.output_tokens
+    return Budget.amount(bench.incurred_usd, bench.input_tokens + bench.output_tokens)
 
 
 async def bench_origin(
@@ -124,7 +118,7 @@ async def bench_origin(
         passes = held
     else:
         # The bench bucket's own delta: a search call landing while this pass is out is not reserve.
-        usd_before, tokens_before = _bench_counted(spend)
+        before = _bench_counted(spend)
         origin_pass = await score_on_bench(
             session,
             origin_sp,
@@ -135,12 +129,12 @@ async def bench_origin(
             cb=cb,
         )
         split = session.scoring.require_partition().split
-        usd_after, tokens_after = _bench_counted(spend)
+        after = _bench_counted(spend)
         passes = BenchPasses(
             tolerance=split.tolerance if split is not None else 0,
             origin=origin_pass,
-            reserve_usd=usd_after - usd_before,
-            reserve_tokens=tokens_after - tokens_before,
+            reserve_usd=after.usd_amount - before.usd_amount,
+            reserve_tokens=after.token_amount - before.token_amount,
             # A pass sent beside another reference pairs with nothing on this one.
             selections={},
         )
@@ -150,17 +144,17 @@ async def bench_origin(
         passes.origin,
         subject="origin",
         label=candidate_label(0, 0),
-        reserve=(passes.reserve_usd, passes.reserve_tokens),
+        reserve=Budget.amount(passes.reserve_usd, passes.reserve_tokens),
     )
     return passes
 
 
-def read_line_spend(stores: Stores, campaign: Campaign) -> SpendRollup:
+def read_line_spend(stores: Stores, campaign: Campaign) -> LedgerSpend:
     """Every cycle read WHOLE: what a superseded cycle paid past its cut is the line's cost too."""
     return scan_ledger_spend(
         LedgerSpan(CycleLayout(stores.campaigns.cycle_dir(h)).ledger)
         for h in stores.campaigns.line(campaign.root_hop)
-    ).spend
+    )
 
 
 def line_run(stores: Stores, hop: CycleHop) -> LineRun:
@@ -223,10 +217,10 @@ def bench_line(
         trigger=config.bench_trigger,
         held_out=len(drawn.bench_ids) if drawn is not None else 0 if split is None else split.bench,
         instrument_id=cycle_instrument(
-            campaign.dataset_name, stores.campaigns.standing_rounds(hop, moment=None).rounds
+            drawn, stores.campaigns.standing_rounds(hop, moment=None).rounds
         ),
         run=run,
-        spend=read_line_spend(stores, campaign),
+        spend=read_line_spend(stores, campaign).spend,
     )
 
 

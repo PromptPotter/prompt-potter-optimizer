@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.cycle_listing import list_cycles
+from promptpotter.application.cycle_listing import list_cycles, resolve_campaign_id_hint
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_campaign_hint
+from promptpotter.presentation.cli.commands.workspace import open_stores
 
 __all__ = ["cmd_cycles"]
 
@@ -14,7 +14,11 @@ async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
     listing = list_cycles(
         stores,
         inside=args.inside,
-        campaign_id=resolve_campaign_hint(stores, args.campaign) if args.campaign else None,
+        campaign_id=(
+            resolve_campaign_id_hint(stores, args.campaign, inside=args.inside)
+            if args.campaign
+            else None
+        ),
         attached_only=args.attached,
     )
     cycles = listing.cycles

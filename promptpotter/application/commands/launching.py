@@ -16,12 +16,18 @@ from promptpotter.application.commands.dispatcher import (
     CommandDispatcher,
     refused_on_an_arm,
 )
-from promptpotter.application.commands.draft_editing import reread_draft
+from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.evidence.subjects import SubjectSpec
-from promptpotter.application.jobs.launcher.checkin import CheckinStart, load_checkin_for_start
-from promptpotter.application.jobs.launcher.launch import Inline, Launched, launch
+from promptpotter.application.jobs.launcher.checkin import CheckinStart, start_ready_draft
+from promptpotter.application.jobs.launcher.launch import (
+    Admitted,
+    Inline,
+    Launched,
+    admit,
+    launch,
+)
 from promptpotter.application.jobs.launcher.mint_and_start import (
     ExistingCycle,
     FreshMint,
@@ -32,17 +38,17 @@ from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
     resolve_pipeline_for_campaign,
 )
-from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_schema import ParamIntent, narrowing_of
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import CycleSeed, OriginSource
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import (
     CAMPAIGN_BABYSIT_CAP,
-    acting_principal_id,
+    acting_principal,
     has_capability,
 )
 
@@ -56,6 +62,7 @@ if TYPE_CHECKING:
     )
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -64,6 +71,7 @@ __all__ = [
     "dispatch_start_checkin",
     "fork_cycle",
     "mint_campaign",
+    "parse_cycle_seed",
     "start_checkin",
     "start_run",
     "step_cycle",
@@ -73,7 +81,7 @@ __all__ = [
 _NODE_INTENTS: TypeAdapter[dict[str, list[ParamIntent]]] = TypeAdapter(dict[str, list[ParamIntent]])
 
 
-def _parse_cycle_seed(
+def parse_cycle_seed(
     raw: object, campaign: CampaignConfig, stores: Stores, of: Campaign, hop: CycleHop
 ) -> CycleSeed:
     if not isinstance(raw, dict):
@@ -131,7 +139,10 @@ def start_run(
     return Applier.silent(
         lambda: launch(
             ExistingCycle(
-                _diag_target(dispatcher.stores, hop, payload.mode), campaign, payload.limits
+                _diag_target(dispatcher.stores, hop, payload.mode),
+                campaign,
+                payload.budget,
+                step_rounds=payload.step_rounds,
             ),
             payload.mode,
             stores=dispatcher.stores,
@@ -146,10 +157,10 @@ def step_cycle(
 ) -> Applier[object]:
     if declined := _declined(dispatcher, hop):
         return declined
-    limits = LaunchLimits(step_rounds=payload.rounds)
+    request = ExistingCycle(hop, campaign, Budget(), step_rounds=payload.step_rounds)
     return Applier.silent(
         lambda: launch(
-            ExistingCycle(hop, campaign, limits),
+            request,
             RunMode(),
             stores=dispatcher.stores,
             job_registry=dispatcher.job_registry,
@@ -164,17 +175,14 @@ def fork_cycle(
     if refused := refused_on_an_arm(campaign):
         return refused
     stores = dispatcher.stores
-    if stores.campaigns.in_checkin(campaign.root_hop):
-        return Applier.refusing("A check-in has no round to fork. Start it first.")
-    seed = _parse_cycle_seed(
-        payload.seed, resolve_campaign_config(stores, campaign, None), stores, campaign, hop
-    )
+    campaign_config = resolve_campaign_config(stores, campaign, None)
+    seed = parse_cycle_seed(payload.seed, campaign_config, stores, campaign, hop)
     # ADR-0005 §4 babysit: a steer outside what the node permits; `fork-preview` asks the same call.
-    disallowed = steers_disallowed_model(campaign.config, seed.pipeline_overlay)
+    disallowed = steers_disallowed_model(campaign_config.optimizer_narrowing, seed.pipeline_overlay)
     if disallowed and not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP):
         logger.warning(
             "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
-            acting_principal_id(stores.identity),
+            acting_principal(stores.identity).id,
             CAMPAIGN_BABYSIT_CAP,
         )
         raise NotFoundError("Not found", code="not_found")
@@ -191,9 +199,9 @@ def fork_cycle(
         )
         fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=new_cycle_id)
         try:
-            # Declare no limits — the seed's reconciled ones govern at the runner seam.
+            # Declares no budget: the seed's governs, admitted from what the parent leaves.
             launched = await launch(
-                ExistingCycle(fork, campaign, LaunchLimits()),
+                ExistingCycle(fork, campaign, Budget()),
                 payload.mode,
                 stores=stores,
                 job_registry=dispatcher.job_registry,
@@ -229,14 +237,14 @@ def mint_campaign(dispatcher: CommandDispatcher, payload: MintCampaignPayload) -
     async def _apply_mint() -> Launched:
         request = FreshMint(
             dataset=offered_dataset(dispatcher.stores, payload.dataset_name),
-            limits=payload.limits,
+            budget=payload.budget,
             optimization=payload.optimization_sent,
-            arm=payload.arm,
+            purpose=payload.purpose,
             declared=payload.campaign_config,
             task_text=payload.task_text,
         )
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.
-        request.dataset_campaign_config()
+        request.campaign_config(dispatcher.stores)
         return await launch(
             request,
             RunMode(diag=payload.diag),
@@ -248,40 +256,42 @@ def mint_campaign(dispatcher: CommandDispatcher, payload: MintCampaignPayload) -
     return Applier.silent(_apply_mint)
 
 
-def start_checkin(dispatcher: CommandDispatcher, start: StartCheckinPayload) -> Applier[Launched]:
+def start_checkin(
+    dispatcher: CommandDispatcher, start: StartCheckinPayload, claim: DraftClaim
+) -> Applier[Admitted]:
     stores = dispatcher.stores
-    campaign_id = start.campaign_id
-    draft = reread_draft(stores, campaign_id)
 
-    async def _apply() -> Launched:
+    def _admit() -> Admitted:
+        # The claim rides the admitted job to the end of its hold; a refusal before it ends it here.
         try:
-            hop, gated = load_checkin_for_start(stores, campaign_id)
-            return await launch(
-                CheckinStart(hop=hop, draft=gated, limits=start.limits),
+            draft = start_ready_draft(stores, claim.draft_id)
+            return admit(
+                CheckinStart(claim=claim, slug=draft.slug, budget=start.budget),
                 RunMode(diag=start.diag),
                 stores=stores,
                 job_registry=dispatcher.job_registry,
                 inline=dispatcher.inline,
             )
-        except OriginIncompleteError:
-            # Lifecycle stays ``checkin``, so the operator resolves the gaps and retries.
-            save_checkin_draft(stores, draft)
-            raise
-        except BackendUnreachableError as exc:
-            exc.details["campaign_id"] = campaign_id
+        except BaseException as exc:
+            if isinstance(exc, OriginIncompleteError):
+                # The draft stays, so the operator resolves the gaps and retries.
+                save_checkin_draft(stores, owned_draft(stores, claim.draft_id))
+            claim.release()
             raise
 
-    # The flip from `checkin` to `active` is the retry guard: a second Start is a `LaunchError`.
-    return Applier[Launched](_apply, replay=None)
+    # A second Start on it refuses while this one holds it, and is not found once it minted.
+    return Applier[Admitted](_admit, replay=None, ack="accepted")
 
 
 async def dispatch_start_checkin(
     stores: Stores,
-    call: CommandCall[StartCheckinPayload],
+    start: StartCheckinPayload,
+    idempotency_key: str,
     *,
     job_registry: JobRegistry | None = None,
     inline: Inline | None = None,
 ) -> Launched:
+    """Acked at admission, before the mint moves the draft's ledger into the root cycle."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry, inline=inline)
-    outcome = await dispatcher.dispatch_checkin_command(call)
-    return cast(Launched, outcome.result)
+    outcome = await dispatcher.dispatch_draft_command(CommandCall(start, idempotency_key))
+    return await cast(Admitted, outcome.result).launched()

@@ -15,7 +15,8 @@ from promptpotter.application.views.view_models import (
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import DISPLAY_METRIC_INFO, RunStanding
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
-from promptpotter.domain.spend import RATE_PRICED_LABEL, CloseSpend, calls_rate_priced
+from promptpotter.domain.spend import RATE_PRICED_LABEL, calls_rate_priced
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import LedgerSpend
 from promptpotter.shared.composite import render_composite_fitness_block
 
 
@@ -101,22 +102,23 @@ def _render_round_cost(rd: RoundDigestView) -> str:
 
 
 def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
+    fold = rd.fold
+    composite = None if fold is None else fold.composite_fitness
     parts: list[str] = [
-        f"### Round {rd.round} — {rd.label} ({fmt_pct(rd.accuracy)})",
+        f"### Round {rd.round} — {rd.label} ({fmt_pct(None if fold is None else fold.accuracy)})",
         "",
         f"- improved: **{'yes' if rd.improved else 'no'}**",
-        f"- samples: {rd.total}",
-        f"- composite_fitness: `{fmt_fitness(rd.composite_fitness)}`",
+        f"- samples: {0 if fold is None else fold.total}",
+        f"- composite_fitness: `{fmt_fitness(composite)}`",
     ]
-    if rd.ability is not None:
+    if rd.level is not None:
         parts.append(
-            f"- {DISPLAY_METRIC_INFO['ability'].label}: `{rd.ability.theta:+.3f}` "
-            f"({rd.ability.scale()})"
+            f"- {DISPLAY_METRIC_INFO['ability'].label}: `{rd.level.reading.theta:+.3f}` "
+            f"({rd.level.reading.scale()})"
         )
-        if rd.ability.caveat is not None:
+        if rd.level.caveat is not None:
             parts.append(
-                f"- θ caveat: `{rd.ability.caveat.value}` — "
-                f"{THETA_CAVEAT_INFO[rd.ability.caveat].head}"
+                f"- θ caveat: `{rd.level.caveat.value}` — {THETA_CAVEAT_INFO[rd.level.caveat].head}"
             )
     if series := overlap_series(rd.overlap):
         parts.append(f"- overlap: {series}")
@@ -127,10 +129,10 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
     if rd.changes_description:
         parts.append(f"- changes: {rd.changes_description}")
     parts += [f"- {f.label}: {f.text}" for f in rd.facts if f.kind == "stat"]
-    if rd.composite_fitness is not None:
+    if fold is not None and composite is not None:
         composite_fitness_block = render_composite_fitness_block(
-            rd.composite_fitness,
-            rd.evaluators,
+            composite,
+            fold.evaluators,
             formula,
             reference=rd.composite_floor,
             use_short_names=False,
@@ -156,12 +158,14 @@ def _selection(standing: RunStanding | None) -> str:
     return "nothing selected" if standing is None else standing.selection_line
 
 
-def _spent(spent: CloseSpend) -> str:
-    search = "unpriced" if spent.search_usd is None else f"${spent.search_usd:.4f}"
+def _spent(spent: LedgerSpend) -> str:
+    spend = spent.spend
+    search = spend.search_incurred_usd
     return (
-        f"search {search} · billed ${spent.billed_usd:.4f} · "
-        f"{RATE_PRICED_LABEL} ${spent.rate_priced_usd:.4f} · {spent.calls} calls · "
-        f"{spent.tokens} tokens · {spent.worked_s:.0f}s worked"
+        f"search {'unpriced' if search is None else f'${search:.4f}'} · "
+        f"billed ${spend.total_used_usd:.4f} · "
+        f"{RATE_PRICED_LABEL} ${spend.total_rate_priced_usd:.4f} · {spent.calls} calls · "
+        f"{spend.total_tokens_used} tokens · {spent.worked_s:.0f}s worked"
     )
 
 
@@ -193,9 +197,8 @@ def to_markdown(view: LogMdView) -> str:
         *([f"- optimizer: `{status.optimizer}`"] if status.optimizer else []),
         *_ending_lines(status.stop_reason),
         f"- selection: {_selection(status.standing)}",
+        f"- cost so far: {_spent(status.spent)}",
     ]
-    if status.standing is not None and status.standing.spent is not None:
-        parts.append(f"- cost at the last close: {_spent(status.standing.spent)}")
     scored_rounds = status.rounds_completed - status.gen_only_rounds
     if status.gen_only_rounds:
         parts.append(

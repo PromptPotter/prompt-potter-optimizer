@@ -50,8 +50,7 @@ export function fitnessTrend(rounds: readonly ServedRound[] | undefined): Fitnes
     round: r.round,
     accuracy: r.accuracy,
     composite: r.composite_fitness,
-    // θ on another δ ruler than the series' is a different quantity: dropped, not plotted.
-    theta: r.ability != null && r.ability_on_series_ruler ? r.ability.theta : null,
+    theta: r.level?.theta ?? null,
     bench: r.bench?.level?.value ?? null,
     n: r.total,
   }));

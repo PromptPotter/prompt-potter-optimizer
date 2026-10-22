@@ -50,7 +50,7 @@ A user may mint **sub-principals**, each an `IdentityContext` whose capabilities
 
 **The grant store is sealed** — a sub-principal's grants live in a store it **cannot write**, the identity zone rather than the tenant's own editable space, because a delegate that could edit its own grant would self-escalate and defeat attenuation. Same protected-zone rule as ADR-0004's sign-in blocklist: the file that decides authority is the most protected file in the install.
 
-**How it is enforced** — owned by [`../operations/access-model.md`](../operations/access-model.md) § owner ↔ delegate; what this ADR fixes is that attenuation is re-checked at read, a delegate is audited as itself (`claims["principal"]` → `issued_by_user_id`), and a malformed grant fails secure.
+**How it is enforced** — owned by [`../operations/access-model.md`](../operations/access-model.md) § owner ↔ delegate; what this ADR fixes is that attenuation is re-checked at read, a delegate is audited as itself (`claims["principal"]` → `CommandRecord.issued_by`), and a malformed grant fails secure.
 
 The user's **own AI assistant**, in the host==user case, acts under the user's identity as a co-principal with full caps. An **external assistant or MCP client** is a distinct sub-principal holding an attenuated subset.
 
@@ -62,7 +62,7 @@ A grant is keyed on **(sub-principal, channel)** rather than on the principal al
 
 ### 3. Capability → verb ladder (one enforcement seam) — SHIPPED
 
-Every control-plane verb requires a capability, checked in **one place**: the command dispatcher tests `require_capability(identity, kind.capability)` at the single `_record_and_apply` chokepoint every dispatch method funnels through. The capability is a column of the kind's own row (`domain/command_kinds.py::CommandKind`), so no kind exists without one. Seven capabilities are enumerated once as `CAMPAIGN_CAP_BY_NAME` in `shared/identity.py`, and every first-class principal holds the full owner set, so the gate is a no-op for single-owner installs. Denial is **404**, not 403 — existence-hiding.
+Every control-plane verb requires a capability, checked in **one place**: the command dispatcher tests `require_capability(identity, kind.capability)` at the single `_applier` chokepoint every dispatch method funnels through. The capability is a column of the kind's own row (`domain/command_kinds.py::CommandKind`), so no kind exists without one. Seven capabilities are enumerated once as `CAMPAIGN_CAP_BY_NAME` in `shared/identity.py`, and every first-class principal holds the full owner set, so the gate is a no-op for single-owner installs. Denial is **404**, not 403 — existence-hiding.
 
 | Cap | Gates (real command kinds) | Kind |
 |---|---|---|
@@ -70,13 +70,13 @@ Every control-plane verb requires a capability, checked in **one place**: the co
 | `campaign.run` | `start-run`, `fork-cycle`, `start-checkin`, `verify-candidate`, `grade-bench`, `cancel-queued-run` | autonomous |
 | `campaign.create` | `mint-campaign`, `edit-draft-campaign`, `resolve-origin` | create |
 | `campaign.budget` | `change-run-limits` (raise a ceiling), `set-concurrent-cycles` | budget |
-| `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-campaign-label`, `replace-dataset`, `compact-archive` | destructive |
+| `campaign.lifecycle` | `archive-/delete-/unarchive-campaign`, `delete-cycle`, `cleanup-empty-cycles`, `set-campaign-label`, `compact-archive` | destructive |
 | `campaign.babysit` | a **direct edit** of an optimizer-owned / origin-locked value — wired to the `fork-cycle` axis-unlock (§4) | privileged / provenance-tainting |
 | `campaign.lookahead` | `set-sample-lookahead` — **its own rung, not a share of `babysit`**: it spends the BOX's shared provider rate bucket rather than the campaign's budget, which makes it the one power a host may withhold from a delegate while still granting the run. Not `babysit`, because it taints nothing. See [`../operations/access-model.md`](../operations/access-model.md) § host-admin ↔ user | `lookahead` |
 
 The ladder is the point: a delegate with `campaign.step` but **not** `campaign.run` can advance the search one bounded action at a time, each a small checkable spend, but cannot fire an autonomous loop.
 
-Two deltas from the original strawman, both deliberate. `fork-cycle` sits at **run**, not step, because an operator fork mints *and launches* an autonomous continuation. And `replace-dataset` sits at **lifecycle**, not create, because a dataset slug is part of the measurement cache key, so repointing one re-addresses every campaign that already measured against it.
+One delta from the original strawman, deliberate: `fork-cycle` sits at **run**, not step, because an operator fork mints *and launches* an autonomous continuation.
 
 **A route is the only way to add a verb, so the route set is what the ladder is checked against.** A capability column covers only kinds that dispatch, so a route calling its handler directly would read as covered while gated by nothing and recorded nowhere. `routers/commands.py` therefore paths every typed route by its `CommandKind` member, which makes the gap unwritable rather than merely known.
 
@@ -100,11 +100,11 @@ A steer to a PERMITTED model is a clean human fork: no cap, no taint. The done C
 
 Each grant carries a spend ceiling enforced by the existing spend-cap probe (ADR-0003): `admit_launch` reads a sub-principal's declaration down to the grant (`quota.py::_delegated_spend_ceiling`), and the host wallet then admits or refuses that declaration whole. The ceiling comes from the identity claims the sub-principal carries — no new spend machinery, a narrower input to the one that exists. Per-*channel* ceilings await §2.
 
-**The grant is a bound, never a declaration, in both directions.** A launch declaring NOTHING declares the account's headroom bounded by the grant; composed the other way the grant becomes the declaration, and a delegate whose headroom has fallen below its grant is refused the last of its own allowance. And `clamp_budget_change` composes the grant only into an arm the request SUPPLIED — folded into an absent one it writes a ceiling the caller asked to leave alone, which the `run_limits` file merge then makes stick for the rest of the run.
+**The grant is a bound, never a declaration, in both directions.** A launch declaring NOTHING declares the account's headroom bounded by the grant; composed the other way the grant becomes the declaration, and a delegate whose headroom has fallen below its grant is refused the last of its own allowance. And `clamp_budget_change` composes the grant only into an axis the request NAMED — folded into an unnamed one it writes a ceiling the caller asked to leave alone, which the standing budget record then makes stick for the rest of the run.
 
 ### 6. The bounded step verb — SHIPPED as `step-cycle`
 
-`start-run` is all-or-nothing and `fork-cycle` mints a *sibling*, so there was no discrete "advance N rounds in place" action. Rather than a new verb, this wired the already-declared-not-wired `step-cycle`: resume the cycle in place, run `rounds` clean rounds (default 1), then auto-pause on the existing `StopReason.PAUSED` (cause `step`), resumable so the operator steps again. It reuses the resume launcher wholesale plus one launch limit, `step_rounds`, held on the ledger as `RunLimitsRecord.pause_at_round` beside the ceiling; no new runner path. On the `campaign.step` rung, so a delegate holding step-but-not-run can advance bounded work without firing an autonomous loop.
+`start-run` is all-or-nothing and `fork-cycle` mints a *sibling*, so there was no discrete "advance N rounds in place" action. Rather than a new verb, this wired the already-declared-not-wired `step-cycle`: resume the cycle in place, run `rounds` clean rounds (default 1), then auto-pause on the existing `StopReason.PAUSED` (cause `step`), resumable so the operator steps again. It reuses the resume launcher wholesale plus one launch field, `step_rounds`, held on the ledger as `StandingBudgetRecord.pause_at_round` beside the budget; no new runner path. On the `campaign.step` rung, so a delegate holding step-but-not-run can advance bounded work without firing an autonomous loop.
 
 One full clean L1 round is the unit — the same generate/score/escalation/PoBB machinery as an autonomous round, just bounded. Not sub-round: the round is the atomic scored and selected unit, so a partial round has no clean stop.
 

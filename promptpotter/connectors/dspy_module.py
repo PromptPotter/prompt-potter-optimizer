@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.spend import StepUsage, TokenAccount
@@ -100,6 +100,8 @@ _NOT_THE_PROMPT = frozenset(
 )
 
 _SEND = CallLabel(PROGRAM_NODE, "backend")
+# One run of the caller's program, its resends included.
+_CELL_ENVELOPE_S = 600.0
 
 
 class _CellSends:
@@ -420,6 +422,7 @@ CONNECTOR = Connector(
     name="dspy",
     execution="in_process",
     wire_adapter=dspy_wire_adapter,
+    cell_envelope_s=cell_envelope_of(_CELL_ENVELOPE_S),
     in_process_run=_in_process_run,
     extra=Extra.DSPY,
     holds_own_sends=True,

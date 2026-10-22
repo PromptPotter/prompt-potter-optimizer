@@ -4,12 +4,10 @@ import type { SampleRow } from "@/lib/types";
 import { cx } from "@/lib/cx";
 import { HoverCard } from "@/components/ui";
 
-type Rows = Map<number, SampleRow>;
+type Rows = Map<string, SampleRow>;
 
-function byId(rows: readonly SampleRow[]): Rows {
-  const out: Rows = new Map();
-  for (const r of rows) if (r.sample_id != null) out.set(r.sample_id, r);
-  return out;
+function byKey(rows: readonly SampleRow[]): Rows {
+  return new Map(rows.map((r) => [r.sample_key, r]));
 }
 
 export function SubjectFlips({
@@ -27,7 +25,7 @@ export function SubjectFlips({
   const coverage = vsOrigin?.hit.coverage;
   if (!vsOrigin || !counts || !coverage) return null;
   const { gained, lost } = vsOrigin;
-  const rows = { was: byId(before), now: byId(after) };
+  const rows = { was: byKey(before), now: byKey(after) };
   return (
     <div className="subject-flips">
       <span className="subject-flip-ref">vs origin</span>
@@ -38,8 +36,8 @@ export function SubjectFlips({
           ? ` — scoring, ${partial.scored}${partial.expected === null ? "" : ` of ${partial.expected}`} so far`
           : ""}
       </span>
-      {gained.length > 0 ? <FlipIds label="now right" kind="gained" ids={gained} rows={rows} /> : null}
-      {lost.length > 0 ? <FlipIds label="now wrong" kind="lost" ids={lost} rows={rows} /> : null}
+      {gained.length > 0 ? <FlipKeys label="now right" kind="gained" keys={gained} rows={rows} /> : null}
+      {lost.length > 0 ? <FlipKeys label="now wrong" kind="lost" keys={lost} rows={rows} /> : null}
       <FlipSep />
       <span className="subject-flip-same">
         {gained.length + lost.length === 0
@@ -59,15 +57,15 @@ function FlipSep() {
   );
 }
 
-function FlipIds({
+function FlipKeys({
   label,
   kind,
-  ids,
+  keys,
   rows,
 }: {
   label: string;
   kind: "gained" | "lost";
-  ids: number[];
+  keys: string[];
   rows: { was: Rows; now: Rows };
 }) {
   return (
@@ -77,12 +75,15 @@ function FlipIds({
         className="subject-flip-card"
         content={
           <ul className="subject-flip-list">
-            {ids.map((id) => {
-              const now = rows.now.get(id);
+            {keys.map((key) => {
+              const now = rows.now.get(key);
+              const slot = now?.position ?? rows.was.get(key)?.position;
               return (
-                <li key={id}>
-                  <span className="subject-flip-id">#{String(id).padStart(3, "0")}</span>
-                  <span className="subject-flip-was">{rows.was.get(id)?.predicted || "∅"}</span>
+                <li key={key}>
+                  <span className="subject-flip-id">
+                    {slot === undefined ? "#—" : `#${String(slot).padStart(3, "0")}`}
+                  </span>
+                  <span className="subject-flip-was">{rows.was.get(key)?.predicted || "∅"}</span>
                   <span aria-hidden="true">→</span>
                   <span className="subject-flip-now">{now?.predicted || "∅"}</span>
                   <span className="subject-flip-gt">want {now?.ground_truth_text ?? "—"}</span>
@@ -93,7 +94,7 @@ function FlipIds({
         }
       >
         <span className={cx("subject-flip-line", `is-${kind}`)} tabIndex={0}>
-          <strong>{ids.length}</strong> {label}
+          <strong>{keys.length}</strong> {label}
         </span>
       </HoverCard>
     </>

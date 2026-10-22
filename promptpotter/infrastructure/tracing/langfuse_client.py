@@ -12,9 +12,9 @@ import httpx
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SendBudget, parse_retry_after
-from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.errors import ErrorCategory, graceful
 from promptpotter.shared.extras import Extra, install_hint, installed
+from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
 

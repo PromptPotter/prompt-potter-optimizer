@@ -2,59 +2,59 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.node_context import NodeContext, measure_as_parent
 from promptpotter.application.intelligence.rasch import candidate_abilities
-from promptpotter.application.optimizers.nodes import Measured
-from promptpotter.application.scoring.candidate_report import (
-    arm_id,
-    arm_theta_caveat,
-    build_score_report,
-    fatal_validation_failures,
+from promptpotter.application.optimizers.nodes import MeasuredRound, ReadArm
+from promptpotter.application.scoring.arm_states import (
+    conclude,
+    measuring,
     read_breakage,
-    walk_outcome,
+    refuse,
 )
-from promptpotter.application.scoring.metrics import INVALID_SCORES
+from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.application.scoring.paired import (
     MemberRows,
     fresh_cells,
     grade_measurands,
     read_pair,
 )
-from promptpotter.application.scoring.query_loop import ArmSlot, Walk, run_walks
+from promptpotter.application.scoring.query_loop import Walk, run_walks
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     close_walk,
     open_walk,
     reread_cells,
-    score_search_point,
 )
 from promptpotter.application.scoring.selection import distinct_valid_cells
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
-    ArmPointer,
+    ArmKey,
+    ArmName,
     CellSetName,
     MemberAddress,
 )
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.results import (
-    ArmOutcome,
-    CandidateProposal,
-    ReferenceReading,
-    ScoredCandidate,
-    candidate_label,
+    ArmFit,
+    Concluded,
+    Cut,
+    Measured,
+    ScoreSummary,
+    Skipped,
+    arm_name,
     is_electable,
     is_leader_eligible,
+    walked_short,
 )
-from promptpotter.domain.run_records import CandidateScoredRecord
+from promptpotter.domain.run_records import ArmRecord, SampleScoredRecord
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.validators import BrokenSignal
-from promptpotter.shared.hashing import dataset_hash
 from promptpotter.shared.measurement_context import (
-    NO_ROUND_SLOT,
-    MeasuredCandidate,
+    MeasuredPass,
     MeasurementRole,
     RoleScope,
 )
@@ -72,9 +72,10 @@ if TYPE_CHECKING:
         RoundContext,
         Selector,
     )
-    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.paired_reading import PairedReading
     from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.results import ArmRole, Measuring, Proposed
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
@@ -83,60 +84,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["measure_population", "rescore_parent"]
+__all__ = ["ReferencePairs", "measure_population", "rescore_parent", "skips_on_record"]
 
 
 async def rescore_parent(
-    cycle: Cycle,
+    round_: RoundContext,
     scoring_set: list[Sample],
     *,
+    role: ArmRole,
     force_fresh: bool = False,
-) -> ReferenceReading:
-    session = cycle.session
-    tr = cycle.tracking
-    assert tr.current_sp is not None
-    scored = await score_search_point(
-        tr.current_sp,
+) -> ReadArm:
+    cycle = round_.cycle
+    assert cycle.tracking.current_sp is not None
+    return await measure_as_parent(
+        round_,
+        cycle.opt_sp,
+        cycle.tracking.current_sp,
         scoring_set,
-        session,
-        label=MeasurementRole.PARENT,
-        sample_index=cycle.sample_index,
-        # Ticked, not silenced: a silent whole-panel walk serves `between_samples` and reads as hung.
-        slot=ArmSlot(NO_ROUND_SLOT, 0, cycle.opt_sp.id),
-        measured=MeasuredCandidate(
-            idx=0,
-            candidate_id=cycle.opt_sp.id,
-            label=cycle.rounds[-1].label,
-            role=MeasurementRole.PARENT,
-        ),
+        role=role,
         force_fresh=force_fresh,
-    )
-    # A partial pass is kept: `read_pair` pairs each candidate on the cells both scored.
-    if scored.stopped is not None:
-        logger.warning(
-            "Round parent %s stopped after %d/%d cells (%s); its floor covers only those.",
-            cycle.rounds[-1].label,
-            len(scored.sheet),
-            len(scoring_set),
-            scored.stopped,
-        )
-    return ReferenceReading(
-        opt_sp=cycle.opt_sp,
-        results=scored.sheet,
-        # The gateway's OWN scores: re-running `compute_composite_fitness` drops the evaluators.
-        report=build_score_report(
-            cycle.opt_sp,
-            (),
-            None,
-            scored.scores,
-            scored.sheet.cells,
-            scoring_set,
-            # The parent INDIVIDUAL's label, off the round it won — it reaches disk.
-            label=cycle.rounds[-1].label,
-            sp=tr.current_sp,
-            sp_hash=tr.current_sp.sp_hash(session.pipeline_schema),
-            outcome=walk_outcome(scored),
-        ),
     )
 
 
@@ -146,11 +112,13 @@ async def measure_population(
     panel: Panel,
     eliminator: Eliminator | None,
     selector: Selector,
-) -> Measured:
+) -> MeasuredRound:
     cycle = ctx.cycle
     schema = cycle.session.pipeline_schema
     assert schema is not None, "the measurement requires pipeline_schema"
-    rows, scores, cut = await _walk_population(
+    # Before a cell is bought, so PoBB cuts on the scale the election reads.
+    cycle.difficulty.judge(_judged(cycle, population))
+    arms, rows, cut = await _walk_population(
         ctx, population, panel, eliminator, keep_cut=selector.elects_partial
     )
     # Clamped so a tiny dataset stays electable.
@@ -162,14 +130,8 @@ async def measure_population(
         raise StopLoop(cut)
 
     # The REPLICATION cohort, deliberately the looser predicate: the election admits on `is_electable`.
-    aborted_ids = {cs.candidate_id for cs in scores if not is_leader_eligible(cs)}
-    # By the arm's own id: a rejected proposal's individual can be a measured sibling's.
-    scored = [
-        proposal.opt_sp
-        for idx, proposal in enumerate(population.proposals)
-        if (cid := arm_id(proposal, ctx.round_num, idx)) in rows and cid not in aborted_ids
-    ]
-    cells = selector.parent_cells(NodeContext(ctx, selector.name), panel, rows)
+    scored = [key for key, arm in arms.items() if is_leader_eligible(arm)]
+    cells = selector.parent_cells(NodeContext(ctx, selector), panel, rows)
     if cut is not None:
         # The spent budget buys the parent no cell: it is read where the archive already holds it.
         assert cycle.tracking.current_sp is not None
@@ -178,151 +140,143 @@ async def measure_population(
         )
         if not cells:
             raise StopLoop(cut)
-    parent = await rescore_parent(cycle, cells)
+    parent = await rescore_parent(ctx, cells, role=MeasurementRole.PARENT)
     # Never in a `finally`: an unwound round did not score. Round 0's is `round.py::emit_origin_round`.
     cycle.session.control.spend_sample_lookahead()
     # The shared anchor's single-draw noise is correlated across arms, so it favours none.
-    parent_rows = parent.results
-    pair = _ReferencePairs(
+    pair = ReferencePairs.of_round(
         ctx,
-        scores,
-        bar_cut=parent.report.outcome.ended_early,
-        declared=[cell.key for cell in parent_rows]
+        arms,
+        declared=[cell.key for cell in parent.rows]
         if cycle.config.optimization.lift_reference == "best_so_far"
         else [sample.key for sample in panel.cells],
     )
-    readings, references = await _reference_readings(
-        ctx, population, panel, rows, scores, scored, parent, pair
-    )
-    scores = [
-        cs.model_copy(update={"vs_reference": reading})
-        if (reading := readings.get(cs.candidate_id)) is not None
-        else cs
-        for cs in scores
-    ]
-    cs_by_id = {cs.candidate_id: i for i, cs in enumerate(scores)}
+    readings = await _reference_readings(ctx, panel, arms, rows, scored, parent, pair)
     rejects = eliminator is not None and eliminator.stop_disqualifies
-    electable: list[OptSearchPoint] = []
-    for ind in scored:
-        cs_idx = cs_by_id.get(ind.id)
-        if cs_idx is None:
-            continue
-        cand_rows = rows[ind.id]
+    electable: list[ArmKey] = []
+    for key in scored:
+        arm = arms[key]
         # A collapsed arm is read above and still refused entry — it keeps its reading.
-        if not is_electable(scores[cs_idx], cand_rows.cells):
+        if not is_electable(arm, rows[key].cells):
             continue
-        if rejects and scores[cs_idx].outcome is ArmOutcome.ELIMINATED:
+        if rejects and isinstance(arm, Cut) and arm.kind == "eliminated":
             continue
         # Catches an arm thin for a reason other than elimination: an operator skip.
-        if distinct_valid_cells(cand_rows) < coverage_floor:
+        if distinct_valid_cells(rows[key]) < coverage_floor:
             continue
-        electable.append(ind)
+        electable.append(key)
 
-    # Before the selector, which reads it; the parent rides under its own id so the ruler links it.
-    bar_id = parent.opt_sp.id
-    cycle.calibrate_ruler({**rows, bar_id: rows.get(bar_id, NO_CELLS).merged(parent_rows)})
     # Cold too: a selector elects on that θ, and the round's `AbilityReading.caveat` names it.
     ruler = cycle.difficulty.ruler
     # Fixed δ decouples the arms, so this is the fit `elect_round_winner` takes of the same rows.
-    abilities = candidate_abilities({ind.id: rows[ind.id] for ind in electable}, parent_rows, ruler)
-    scores = [
-        cs.model_copy(
-            update={
-                "theta": abilities.theta[cs.candidate_id],
-                "theta_se": abilities.theta_se[cs.candidate_id],
-            }
+    abilities = candidate_abilities({key: rows[key] for key in electable}, parent.rows, ruler)
+    fit = {
+        key: ArmFit(
+            theta=abilities.theta.get(key),
+            theta_se=abilities.theta_se.get(key),
+            theta_caveat=cycle.difficulty.scale.caveat(rows[key].cells),
+            vs_reference=readings.get(key),
         )
-        if cs.candidate_id in abilities.theta
-        else cs
-        for cs in scores
-    ]
-    scores = [
-        cs.model_copy(
-            update={
-                "theta_caveat": arm_theta_caveat(
-                    rows[cs.candidate_id].cells, ruler, cycle.difficulty.scopes
-                )
-            }
-        )
-        if cs.candidate_id in rows
-        else cs
-        for cs in scores
-    ]
-    return Measured(
+        for key in arms
+    }
+    filed = {key: ctx.walks[key].arm for key in arms} | {
+        key: walk.arm for key, walk in ctx.walks.items() if key not in arms
+    }
+    return MeasuredRound(
+        arms=arms,
         rows=rows,
-        scores=scores,
-        scored=scored,
         parent=parent,
-        parent_rows=parent_rows,
-        references=references,
+        filed=filed,
+        folds=arm_folds(
+            {key: read.state for key, read in filed.items()},
+            {key: read.rows for key, read in filed.items()},
+            schema,
+        ),
+        fit=fit,
         electable=electable,
         coverage_floor=coverage_floor,
         cut=cut,
     )
 
 
+def _judged(cycle: Cycle, population: Proposals) -> set[str]:
+    """The round's arms and every parent they name, by archive address."""
+    session = cycle.session
+    demo = session.scoring.require_partition().demo
+    known = {
+        arm.individual.id: arm.sp_hash
+        for rr in cycle.rounds
+        for arm in rr.arms.values()
+        if isinstance(arm, Concluded)
+    }
+    held = {
+        ind.id: ind.to_job_search_point(
+            schema=session.pipeline_schema, framing=cycle.framing, demo=demo
+        ).sp_hash(session.pipeline_schema)
+        for ind in population.individuals
+    }
+    parents = {
+        known.get(pid) or held.get(pid)
+        for ind in population.individuals
+        for pid in ind.lineage.parent_ids
+    }
+    return {*held.values(), *(address for address in parents if address)}
+
+
 async def _reference_readings(
     ctx: RoundContext,
-    population: Proposals,
     panel: Panel,
-    rows: dict[str, CellSheet],
-    scores: Sequence[ScoredCandidate],
-    scored: list[OptSearchPoint],
-    parent: ReferenceReading,
-    pair: _ReferencePairs,
-) -> tuple[dict[str, PairedReading], dict[str, CellSheet]]:
+    arms: Mapping[ArmKey, Concluded],
+    rows: Mapping[ArmKey, CellSheet],
+    scored: Sequence[ArmKey],
+    parent: ReadArm,
+    pair: ReferencePairs,
+) -> dict[ArmKey, PairedReading]:
     """Only a SCORED arm buys its parents a cell; any other is read on what those already bought."""
     cycle = ctx.cycle
-    parent_rows = parent.results
-    bar_id = parent.opt_sp.id
-    arms = {cs.candidate_id: cs for cs in scores if cs.candidate_id in rows}
+    read = {key: ReadArm(key, arm, rows[key]) for key, arm in arms.items() if key in rows}
     if cycle.config.optimization.lift_reference == "best_so_far":
-        return (
-            {cid: pair.read(arm, rows[cid], bar_id, parent_rows) for cid, arm in arms.items()},
-            {bar_id: parent_rows},
-        )
+        return {key: pair.read(arm, parent.key, parent) for key, arm in read.items()}
 
-    cells_of = {cid: {cell.sample_id for cell in arm_rows} for cid, arm_rows in rows.items()}
-    needed: dict[str, set[int]] = {}
-    for ind in scored:
-        for pid in ind.lineage.parent_ids:
-            needed.setdefault(pid, set()).update(cells_of[ind.id])
+    cells_of = {key: {cell.key for cell in sheet} for key, sheet in rows.items()}
+    needed: dict[str, set[str]] = {}
+    for key in scored:
+        for pid in arms[key].individual.lineage.parent_ids:
+            needed.setdefault(pid, set()).update(cells_of[key])
     # This round's individuals are not banked yet; every earlier one is, in a closed round.
-    populated = {ind.id: ind for ind in population.individuals}
+    populated = {arm.individual.id: arm.individual for arm in arms.values()}
     demo = cycle.session.scoring.require_partition().demo
-    references: dict[str, CellSheet] = {bar_id: parent_rows}
-    for pid, sids in needed.items():
-        if pid == bar_id:
+    for pid, keys in needed.items():
+        if ArmKey(pid) == parent.key:
             continue
-        if pid in populated:
-            sp = populated[pid].to_job_search_point(
-                schema=cycle.session.pipeline_schema, framing=cycle.framing, demo=demo
-            )
-        else:
-            sp = cycle.searchpoint(pid)
-        references[pid] = await measure_as_parent(
-            cycle, sp, pid, [s for s in panel.cells if int(s.id) in sids]
+        individual = populated.get(pid) or cycle.measured(pid).individual
+        sp = individual.to_job_search_point(
+            schema=cycle.session.pipeline_schema, framing=cycle.framing, demo=demo
         )
+        await measure_as_parent(
+            ctx,
+            individual,
+            sp,
+            [s for s in panel.cells if s.key in keys],
+            role=MeasurementRole.PARENT,
+        )
+    walks = ctx.walks
 
-    parents_of = {
-        arm_id(proposal, ctx.round_num, idx): proposal.opt_sp.lineage.parent_ids
-        for idx, proposal in enumerate(population.proposals)
-    }
+    def reference(pid: ArmKey, key: ArmKey) -> ReadArm | None:
+        if (walk := walks.get(pid)) is None:
+            return None
+        rows = walk.arm.rows.where(lambda cell: cell.key in cells_of[key])
+        return ReadArm(pid, walk.arm.state, rows)
 
-    def against_better(cid: str, held: Mapping[str, CellSheet]) -> tuple[str, PairedReading] | None:
+    def against_better(key: ArmKey) -> tuple[ArmKey, PairedReading] | None:
         by_parent = {
-            pid: pair.read(
-                arms[cid],
-                rows[cid],
-                pid,
-                held.get(pid, NO_CELLS).where(lambda cell: cell.sample_id in cells_of[cid]),
-            )
-            for pid in parents_of[cid]
+            ArmKey(pid): pair.read(read[key], ArmKey(pid), reference(ArmKey(pid), key))
+            for pid in read[key].individual.lineage.parent_ids
         }
         if not by_parent:
             return None
 
-        def level(pid: str) -> float:
+        def level(pid: ArmKey) -> float:
             lift = by_parent[pid].lift("fitness")
             return -math.inf if lift is None else lift.rate_a
 
@@ -330,82 +284,67 @@ async def _reference_readings(
         better = max(by_parent, key=level)
         return better, by_parent[better]
 
-    read_against = {
-        ind.id: against
-        for ind in scored
-        if ind.id in arms and (against := against_better(ind.id, references)) is not None
-    }
-    for cid in arms:
-        if cid not in read_against and (against := against_better(cid, references)) is not None:
-            read_against[cid] = against
-    # EVERY parent's rows are banked, the one an arm was not read against included.
-    return {cid: reading for cid, (_, reading) in read_against.items()}, references
+    read_against = {key: against for key in read if (against := against_better(key)) is not None}
+    return {key: reading for key, (_, reading) in read_against.items()}
 
 
-class _ReferencePairs:
-    def __init__(
-        self,
+@dataclass(frozen=True, kw_only=True)
+class ReferencePairs:
+    path: tuple[CycleHop, ...]
+    instrument_id: str
+    scorer_id: str
+    dataset_hash: str
+    declared: Sequence[str]
+    names: Mapping[ArmKey, ArmName]
+
+    @classmethod
+    def of_round(
+        cls,
         ctx: RoundContext,
-        scores: Sequence[ScoredCandidate],
+        arms: Mapping[ArmKey, Concluded],
         *,
-        bar_cut: bool,
         declared: Sequence[str],
-    ) -> None:
+    ) -> ReferencePairs:
         session = ctx.cycle.session
-        self._declared = declared
-        self._path = (session.hop,)
-        self._instrument = session.instrument_id
-        self._scorer = session.scoring.require_scorer().id
-        self._dataset = dataset_hash(session.samples)
-        self._bar_id = ctx.cycle.opt_sp.id
-        self._bar_cut = bar_cut
-        # The arm each individual was FIRST measured as: a later round may read it again.
-        self._arms = {
-            cs.candidate_id: ArmPointer(
-                round=rr.round, label=cs.label, candidate_id=cs.candidate_id
-            )
-            for rr in reversed(ctx.cycle.rounds)
-            for cs in rr.candidate_scores
+        names = {
+            key: arm_name(key, arm, rr.round)
+            for rr in ctx.cycle.rounds
+            for key, arm in rr.arms.items()
         }
-        for cs in scores:
-            self._arms.setdefault(
-                cs.candidate_id,
-                ArmPointer(round=ctx.round_num, label=cs.label, candidate_id=cs.candidate_id),
-            )
+        for key, arm in arms.items():
+            names.setdefault(key, arm_name(key, arm, ctx.round_num))
+        return cls(
+            path=(session.hop,),
+            instrument_id=session.instrument_id,
+            scorer_id=session.scoring.require_scorer().id,
+            dataset_hash=session.bank.dataset_hash,
+            declared=declared,
+            names=names,
+        )
 
-    def read(
-        self,
-        arm: ScoredCandidate,
-        arm_rows: CellSheet,
-        reference_id: str,
-        reference_rows: CellSheet,
-    ) -> PairedReading:
+    def read(self, arm: ReadArm, against: ArmKey, reference: ReadArm | None) -> PairedReading:
+        """*reference* is ``None`` where the round never read the individual *against* names."""
         return read_pair(
             a=self._member(
-                reference_id,
-                MeasurementRole.PARENT,
-                reference_rows,
-                cut=self._bar_cut and reference_id == self._bar_id,
+                against,
+                MeasurementRole.PARENT if reference is None else reference.state.role,
+                NO_CELLS if reference is None else reference.rows,
+                cut=reference is not None and walked_short(reference.state),
             ),
-            b=self._member(
-                arm.candidate_id,
-                MeasurementRole.PANEL,
-                arm_rows,
-                cut=arm.outcome.ended_early,
-            ),
+            b=self._member(arm.key, arm.state.role, arm.rows, cut=walked_short(arm.state)),
             cell_set=CellSetName.REFERENCE_CELLS,
-            cells=self._declared,
+            cells=self.declared,
             masked=False,
-            dataset_hash=self._dataset,
-            measurands=grade_measurands(self._scorer),
+            dataset_hash=self.dataset_hash,
+            measurands=grade_measurands(self.scorer_id),
             spec=ROUND_LIFT_SPEC,
             scope=RoleScope.DECISION,
-            instrument_id=self._instrument,
+            instrument_id=self.instrument_id,
         )
 
     def _member(
         self,
-        individual_id: str,
+        key: ArmKey,
         role: MeasurementRole,
         rows: CellSheet,
         *,
@@ -413,17 +352,17 @@ class _ReferencePairs:
     ) -> MemberRows:
         return MemberRows(
             address=MemberAddress(
-                path=self._path,
-                individual_id=individual_id,
-                arm=self._arms.get(individual_id),
+                path=self.path,
+                individual_id=key,
+                arm=self.names.get(key),
                 pass_role=role,
             ),
             sheet=rows,
             bought=fresh_cells(rows),
             cut=cut,
             scope=RoleScope.DECISION,
-            instrument_id=self._instrument,
-            dataset_hash=self._dataset,
+            instrument_id=self.instrument_id,
+            dataset_hash=self.dataset_hash,
             cell_set_id=None,
         )
 
@@ -435,88 +374,68 @@ async def _walk_population(
     eliminator: Eliminator | None,
     *,
     keep_cut: bool,
-) -> tuple[dict[str, CellSheet], list[ScoredCandidate], StopReason | None]:
+) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopReason | None]:
     cycle = ctx.cycle
     callbacks = ctx.callbacks
     round_num = ctx.round_num
-    proposals = population.proposals
-    n = len(population.individuals)
-    rows: dict[str, CellSheet] = {}
-    reports: dict[int, ScoredCandidate] = {}
+    schema = cycle.session.pipeline_schema
+    proposed = population.arms(round_num)
+    rows: dict[ArmKey, CellSheet] = {}
+    concluded: dict[ArmKey, Concluded] = {}
 
     race: Race | None = (
-        eliminator.race(
-            NodeContext(ctx, eliminator.name), panel, population, partial(_catch_up, cycle)
-        )
+        eliminator.race(NodeContext(ctx, eliminator), panel, population, partial(_catch_up, cycle))
         if eliminator is not None
         else None
     )
-    ids = [arm_id(proposal, round_num, idx) for idx, proposal in enumerate(proposals)]
-    labels = {cid: candidate_label(round_num, idx) for idx, cid in enumerate(ids)}
+    labels = {key: arm.label for key, arm in proposed.items()}
     order = [int(s.id) for s in panel.order]
     demo = cycle.session.scoring.require_partition().demo
-    sps = [
-        ind.to_job_search_point(
-            schema=cycle.session.pipeline_schema, framing=cycle.framing, demo=demo
-        )
-        for ind in population.individuals
-    ]
-    skips = _skips_on_record(cycle.session.state.ledger, round_num)
-    walks: list[Walk | None] = []
-    for idx in range(n):
+    sps = {
+        key: arm.individual.to_job_search_point(schema=schema, framing=cycle.framing, demo=demo)
+        for key, arm in proposed.items()
+    }
+    asked = {key: ctx.asked(key, panel.order) for key in proposed}
+    states = {
+        key: measuring(arm, sps[key], schema, expected=len(asked[key]), sample_order=order)
+        for key, arm in proposed.items()
+    }
+    skips = skips_on_record(cycle.session.state.ledger, round_num)
+    walks: dict[ArmKey, Walk | None] = {}
+    for key, arm in proposed.items():
         checks: list[StopRule] = list(cycle.session.scoring.degradation_checks)
-        # The candidates before this one still being walked may yet become priors.
-        rule = race.rule(list(zip(ids, walks, strict=False))) if race is not None else None
+        # The arms before this one still being walked may yet become priors.
+        rule = race.rule(list(walks.items())) if race is not None else None
         if rule is not None:
             checks.append(rule)
-        walks.append(
-            _open_candidate(
-                ctx, idx, n, proposals[idx], sps[idx], panel.order, checks, skips.get(ids[idx])
-            )
-        )
+        walks[key] = _open_arm(ctx, arm, sps[key], panel.order, checks, skips.get(key))
 
     blocks = race.blocks if race is not None else None
 
-    def on_turn(idx: int, block: int | None) -> None:
+    def on_turn(key: ArmKey, block: int | None) -> None:
         if race is not None:
-            race.open_turn(ids[idx], idx, n)
-        callbacks.announce_candidate(
-            round_num,
-            idx,
-            n,
-            opt_sp=population.individuals[idx],
-            sp=sps[idx],
-            sample_order=order,
-            n_priors=race.n_priors if race is not None else 0,
-            pipeline_overlay=proposals[idx].pipeline_overlay or None,
-            block=None
-            if block is None or blocks is None
-            else {
-                "n": block + 1,
-                "of": -(-len(order) // blocks.block_size),
-                "size": blocks.block_size,
-                "racing": sum(1 for w in walks if w is not None and w.outcome is None),
-            },
+            race.open_turn(key)
+        states[key] = states[key].model_copy(
+            update={
+                "n_priors": race.n_priors if race is not None else 0,
+                "block": None
+                if block is None or blocks is None
+                else {
+                    "n": block + 1,
+                    "of": -(-len(order) // blocks.block_size),
+                    "size": blocks.block_size,
+                    "racing": sum(1 for w in walks.values() if w is not None and w.outcome is None),
+                },
+            }
         )
+        callbacks.on_arm(round_num, key, states[key])
 
-    def on_decided(idx: int) -> None:
-        proposal = proposals[idx]
-        report, results = _conclude_candidate(
-            ctx,
-            idx,
-            proposal,
-            sps[idx],
-            walks[idx],
-            panel.order,
-            ids[idx],
-            race,
-            labels,
-        )
-        rows[ids[idx]] = results
-        if report.runtime_failures:
-            proposal.runtime_failures = [*proposal.runtime_failures, *report.runtime_failures]
-        reports[idx] = report
-        callbacks.on_candidate_scored(idx, n, report)
+    def on_decided(key: ArmKey) -> None:
+        arm, results = _conclude_arm(ctx, states[key], sps[key], walks[key], key, race, labels)
+        rows[key] = results
+        concluded[key] = arm
+        ctx.walked(ReadArm(key, arm, results), asked[key])
+        callbacks.on_arm(round_num, key, arm)
 
     cut = await run_walks(
         walks,
@@ -527,12 +446,12 @@ async def _walk_population(
         on_turn=on_turn,
         on_decided=on_decided,
     )
-    ranked = sorted(reports)
-    return {ids[i]: rows[ids[i]] for i in ranked}, [reports[i] for i in ranked], cut
+    ranked = [key for key in proposed if key in concluded]
+    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut
 
 
-def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior_id: str) -> CatchUp:
-    # No slot (it mints a bogus `C{round}.0` row) and no stop rule (it recurses into the eliminator).
+def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior: ArmKey) -> CatchUp:
+    # No stop rule: it recurses into the eliminator.
     walk = open_walk(
         sp,
         [sample],
@@ -540,12 +459,7 @@ def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior_id: str) -
         label=MeasurementRole.BACKFILL,
         sample_index=cycle.sample_index,
         # The PRIOR being caught up, never the arm whose cell triggered it.
-        measured=MeasuredCandidate(
-            idx=NO_ROUND_SLOT,
-            candidate_id=prior_id,
-            label=f"prior:{prior_id[:8]}",
-            role=MeasurementRole.BACKFILL,
-        ),
+        measured=MeasuredPass(prior, MeasurementRole.BACKFILL),
     )
     walk.release()
     _, cell = walk.launch(1)
@@ -563,82 +477,55 @@ def _catch_up(cycle: Cycle, sp: JobSearchPoint, sample: Sample, prior_id: str) -
     return cell, commit, discard
 
 
-def _open_candidate(
+def _open_arm(
     ctx: RoundContext,
-    idx: int,
-    n: int,
-    proposal: CandidateProposal,
-    candidate_sp: JobSearchPoint,
+    arm: Proposed,
+    sp: JobSearchPoint,
     dataset: list[Sample],
     checks: list[StopRule],
     skip_at: int | None,
 ) -> Walk | None:
-    if fatal_validation_failures(proposal.validation_failures):
+    if arm.refused:
         return None
     return open_walk(
-        candidate_sp,
+        sp,
         dataset,
         ctx.cycle.session,
         label=MeasurementRole.PANEL,
-        slot=ArmSlot(idx, n, proposal.opt_sp.id),
         checks=checks,
         sample_index=ctx.cycle.sample_index,
         # Handed to the gateway rather than bound here, so no re-entrant asker inherits it.
-        measured=MeasuredCandidate(
-            idx=idx,
-            candidate_id=proposal.opt_sp.id,
-            label=candidate_label(ctx.round_num, idx),
-            role=MeasurementRole.PANEL,
-        ),
+        measured=MeasuredPass(arm.individual.id, MeasurementRole.PANEL),
         skip_at=skip_at,
+        held=ctx.held(ArmKey(arm.individual.id)),
     )
 
 
-def _conclude_candidate(
+def _conclude_arm(
     ctx: RoundContext,
-    idx: int,
-    proposal: CandidateProposal,
-    candidate_sp: JobSearchPoint,
+    arm: Measuring,
+    sp: JobSearchPoint,
     walk: Walk | None,
-    dataset: list[Sample],
-    candidate_id: str,
+    key: ArmKey,
     race: Race | None,
-    labels: dict[str, str],
-) -> tuple[ScoredCandidate, CellSheet]:
-    opt_sp_c = proposal.opt_sp
-    label = candidate_label(ctx.round_num, idx)
-    pipeline_overlay = proposal.pipeline_overlay or None
-    # Off the object the gateway hands `archive_entry`: one id for the report and its cells' filing.
-    sp_hash = candidate_sp.sp_hash(ctx.cycle.session.pipeline_schema)
-
+    labels: Mapping[ArmKey, str],
+) -> tuple[Concluded, CellSheet]:
     if walk is None:
-        report = build_score_report(
-            opt_sp_c,
-            proposal.validation_failures,
-            pipeline_overlay,
-            INVALID_SCORES,
-            [],
-            dataset,
-            label=label,
-            sp=candidate_sp,
-            sp_hash=sp_hash,
-            outcome=ArmOutcome.INVALID,
-        )
-        return report.model_copy(update={"candidate_id": candidate_id}), NO_CELLS
+        return refuse(arm), NO_CELLS
 
     scored = close_walk(walk)
     results, signal = scored.sheet, scored.signal
     elimination = (
-        race.judge(signal, candidate_id=candidate_id, results=results.cells, labels=labels)
+        race.judge(signal, key=key, results=results.cells, labels=labels)
         if race is not None
         else None
     )
     breakage = (
         read_breakage(
             signal,
-            effective_pipeline_params=opt_sp_c.pipeline_params,
+            effective_pipeline_params=arm.individual.pipeline_params,
             round_num=ctx.round_num,
-            candidate_label=opt_sp_c.lineage.changes_description or "",
+            changes_description=arm.changes_description,
         )
         if isinstance(signal, BrokenSignal)
         else None
@@ -646,37 +533,24 @@ def _conclude_candidate(
     # Every cell taken, and not a walk the gateway gave up on, whose rows are synthetic.
     gave_up = signal is not None and signal.check_name == SCORING_ERROR_ABORT
     if race is not None and scored.stopped is None and not gave_up:
-        race.admit(candidate_id, results.cells, candidate_sp)
-    report = build_score_report(
-        opt_sp_c,
-        proposal.validation_failures,
-        pipeline_overlay,
-        scored.scores,
-        results.cells,
-        dataset,
-        label=label,
-        sp=candidate_sp,
-        sp_hash=sp_hash,
-        outcome=walk_outcome(scored),
-        elimination_context=None if elimination is None else dict(elimination.context),
-        elimination_reason=None if elimination is None else elimination.reason,
-        breakage=breakage,
-    )
-    return report, results
+        race.admit(key, results.cells, sp)
+    return conclude(arm, scored, elimination=elimination, breakage=breakage), results
 
 
-def _skips_on_record(ledger: CycleEventLog | None, round_num: int) -> dict[str, int]:
-    """Keyed by candidate id: a regenerated round proposes other individuals and drops their skips."""
-    skips: dict[str, int] = {}
+def skips_on_record(ledger: CycleEventLog | None, round_num: int) -> dict[ArmKey, int]:
+    """By arm: a regenerated round proposes other individuals and drops their skips."""
+    skips: dict[ArmKey, int] = {}
     if ledger is None:
         return skips
+    walked: dict[ArmKey, int] = {}
     for _offset, rec in ledger.iter():
-        if not isinstance(rec, CandidateScoredRecord):
-            continue
-        if rec.round != round_num:
-            continue
-        if rec.scores.outcome == ArmOutcome.SKIPPED:
-            skips[rec.scores.candidate_id] = rec.scores.scored_samples
-        else:
-            skips.pop(rec.scores.candidate_id, None)
+        match rec:
+            case SampleScoredRecord(running=ScoreSummary() as running) if (
+                rec.round == round_num and rec.role == MeasurementRole.PANEL
+            ):
+                walked[ArmKey(rec.individual_id)] = running.walked
+            case ArmRecord(state=Cut(reason=Skipped())) if rec.round == round_num:
+                skips[rec.arm] = walked.get(rec.arm, 0)
+            case ArmRecord(state=Cut() | Measured()) if rec.round == round_num:
+                skips.pop(rec.arm, None)
     return skips

@@ -9,16 +9,14 @@ import sys
 import threading
 import uuid
 from collections.abc import Iterator
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
-
-from pydantic import ValidationError
 
 from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
+from promptpotter.application.views.render.phase import render_completion
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.command_kinds import (
@@ -28,11 +26,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.phases import GateDecision, stop_reason_outcome
-from promptpotter.infrastructure.store.io import write_text
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.parsers import launch_limits_from_args
-from promptpotter.presentation.terminal.completion import render_completion
 from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
@@ -40,22 +34,16 @@ if TYPE_CHECKING:
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.launcher.run_job import HeldRun
-    from promptpotter.domain.launch_limits import RunMode
     from promptpotter.domain.results import CycleResult
+    from promptpotter.domain.run_mode import RunMode
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-def prepare_launch(args: argparse.Namespace) -> None:
+def prepare_launch() -> None:
     """Runs BEFORE the loop exists: a prompt or refusal here never meets a run's Ctrl+C handler."""
     # A CLI-only install has no periodic sweep: a launch is where a dead producer's cycle is recorded.
     sweep_dead_cycles(DEFAULT_PROJECTS_ROOT)
-    # argparse bounds none of these: refuse an out-of-range ceiling through the wire's own model.
-    try:
-        launch_limits_from_args(args)
-    except ValidationError as exc:
-        bad = ", ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
-        raise SystemExit(f"invalid run limit — {bad}") from None
     ensure_api_key()
 
 
@@ -104,16 +92,6 @@ def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
             else f"Backend '{exc.backend_type}' at {exc.backend_url} is not reachable."
         ),
     )
-
-
-# The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
-_LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
-
-
-def _point_at_readout(session: Session) -> None:
-    readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
-    with contextlib.suppress(OSError):
-        write_text(_LATEST_READOUT_POINTER, f"{readout}\n")
 
 
 def inline_launch(args: argparse.Namespace) -> Inline:
@@ -192,7 +170,6 @@ def _terminal_inputs(session: Session) -> Iterator[None]:
 
 
 async def run_inline(held: HeldRun, *, mode: RunMode) -> CycleResult:
-    _point_at_readout(held.session)
     with _terminal_inputs(held.session):
         result, _observers = await held.run_inline(
             mode=mode, readout_sink=functools.partial(print, flush=True)

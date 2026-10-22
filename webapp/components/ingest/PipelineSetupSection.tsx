@@ -9,6 +9,7 @@ import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { interiorNodes, searchPoint } from "@/lib/derivations";
+import { draftPrompts } from "@/lib/prompt-fields";
 
 const LLM_ONLY: string[] = ["llm_only"];
 
@@ -73,8 +74,8 @@ function PipelineSetupInner({
   const cv = useConnector();
   const { node: selected, setSelectionForNode } = useSelection();
   const authoring = useMemo(
-    () => ({ overlay: draft.pipeline_overlay, promptFields: draft.origin_prompt_fields }),
-    [draft.pipeline_overlay, draft.origin_prompt_fields],
+    () => ({ overlay: draft.pipeline_overlay, prompts: draftPrompts(draft.origin_prompts) }),
+    [draft.pipeline_overlay, draft.origin_prompts],
   );
 
   const nodes = interiorNodes(cv.view);
@@ -116,8 +117,8 @@ function PipelineSetupInner({
         <CopyButton
           data={{
             pipeline_steps: draft.active_steps,
-            resolved_pipeline_params: draft.pipeline_overlay,
-            prompt_fields: draft.origin_prompt_fields,
+            resolved_params: draft.pipeline_overlay,
+            prompts: draft.origin_prompts,
           }}
           title="Copy this origin as JSON"
         />
@@ -137,7 +138,7 @@ function PipelineSetupInner({
           {llmNode ? (
             <NodeSurface
               node={llmNode}
-              point={searchPoint(draft.origin_prompt_fields, draft.pipeline_overlay)}
+              point={searchPoint(authoring.prompts, draft.pipeline_overlay)}
               overlay={draft.pipeline_overlay}
               schema={cv.schema}
               mode="search-space"

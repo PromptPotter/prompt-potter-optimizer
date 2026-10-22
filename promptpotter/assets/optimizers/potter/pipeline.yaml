@@ -14,7 +14,17 @@ available_models:
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
 nodes:
-  # The round's panel: `select_round_subset` draws `sp_budget_round` cells off the search pool
+  # Run init's, both: the pools `l1_generate` draws from, seeded once before round 0's critique
+  # reads them. The block pool leads with what earlier runs on this answer space earned.
+  block_pool:
+    type: algorithm
+    config:
+      active: ['*']
+  demo_pool:
+    type: algorithm
+    config:
+      active: ['*']
+  # The round's panel: `select_round_subset` draws `sp_budget_round` cells off the search split
   # and `build_round_order` orders them on the parent's grades (`methods/verdict-resolution.md`
   # § The round order).
   adaptive_queue:
@@ -45,7 +55,7 @@ nodes:
       model: openai/gpt-6-luna
       n_variants: 5
       k_max: 5
-      prompt_block_catalogue: guidance
+      block_access: open
       schema_field_rename: false
     # Every llm node runs `openai/gpt-6-luna` on OpenRouter's plain route. Never point a
     # schema-bearing node at a new :nitro route without one call checking it answers an instance
@@ -116,7 +126,8 @@ nodes:
       model: openai/gpt-6-luna
     description: >-
       L3 Plan: rewrites the strategy. Fires on L2 stall.
-  # The stall ladder: picks each round's pipeline below, and when the ladder gives up.
+  # The stall ladder: fires `l2_context` / `l3_plan` at the boundary after a round, and decides
+  # when the ladder gives up; the next round walks `default` under what they wrote.
   escalation:
     type: controller
     config:
@@ -127,28 +138,10 @@ nodes:
       rebase_capability: true
       terminate_capability: true
 pipelines:
+  run_init:
+    - block_pool
+    - demo_pool
   default:
-    - adaptive_queue
-    - l1_generate
-    - pobb
-    - l1_score
-    - theta_election
-    - l1_critique
-    - escalation
-  # The controller's alternatives: the layer each introduces fires at the boundary after a round,
-  # and the next round walks `default` under what it wrote.
-  l2_escalation:
-    - l2_context
-    - adaptive_queue
-    - l1_generate
-    - pobb
-    - l1_score
-    - theta_election
-    - l1_critique
-    - escalation
-  l3_escalation:
-    - l3_plan
-    - l2_context
     - adaptive_queue
     - l1_generate
     - pobb
@@ -216,7 +209,7 @@ resolved_prompts:
         - "targets_rows": the rows this variant's edit must hold for, as `[#id]` ids — at least 2, all from ONE cluster of the CRITIQUE panel where it lists clusters, else rows of one panel that fail the same way. Two variants share a cluster only as two DIFFERENT mechanisms for it.
         - The delta slots, carrying ONLY what changes: omit a field you keep, since an empty string or the current text is no edit.
           * "pipeline_overlay": nested {node: {param: value}}, as its schema description states.
-          * "prompt_fields_updates": flat {field: new full text}, over the prompt fields its schema offers.
+          * "prompt_fields_updates": nested {node: {field: new full text}}, over the prompt fields its schema offers per node.
         - "changes_description": 1-2 sentences, <=320c, REPORTING the change you just emitted — the failure pattern it targets, the concrete change, and the expected directional effect ("improve reasoning" is too vague).
   l1_critique/1:
     persona: You are a pipeline evaluation analyst.

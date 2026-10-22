@@ -1,39 +1,37 @@
 from __future__ import annotations
 
 import functools
-import logging
 import types
 import typing
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
+from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
-from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob, Scope
+from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import MemberCoupling
+    from promptpotter.domain.campaign import RunDeclaration
 
 shapes_optimizer_prompt(__name__)
-
-logger = logging.getLogger(__name__)
 
 __all__ = [
     "COUPLINGS",
     "KNOBS",
     "Coupling",
     "CouplingSeverity",
-    "DiffScope",
+    "bench_defaults_pin",
     "check_couplings",
-    "classify_config_diff",
     "declared_couplings",
+    "measured_address",
     "member_knob_count",
     "resolve_knob_states",
 ]
@@ -127,69 +125,58 @@ def _table(config: CampaignConfig) -> dict[tuple[str, ...], KnobDecl]:
     return {**bench, **_node_decls(select_optimizer(config.optimization))}
 
 
-class DiffScope(StrEnum):
-    """Resume-time diff classification, the union of the diffed leaves' scopes. ``POLICY_ONLY`` keeps
-    past measurements valid; ``TREATMENT``, ``DATA_AFFECTING`` or an unclassified path diverge."""
-
-    NONE = "none"
-    POLICY_ONLY = "policy_only"
-    TREATMENT = "treatment"
-    DATA_AFFECTING = "data_affecting"
-
-
-def _diff_paths(
-    table: dict[tuple[str, ...], KnobDecl],
-    active: Any,
-    frozen: Any,
-    prefix: tuple[str, ...] = (),
-) -> list[tuple[str, ...]]:
-    if prefix in table:
-        return [prefix] if active != frozen else []
-    if isinstance(active, dict) or isinstance(frozen, dict):
-        a = active if isinstance(active, dict) else {}
-        f = frozen if isinstance(frozen, dict) else {}
-        out: list[tuple[str, ...]] = []
-        for key in set(a.keys()) | set(f.keys()):
-            out.extend(_diff_paths(table, a.get(key), f.get(key), (*prefix, key)))
-        return out
-    return [prefix] if active != frozen else []
+def _models_in(annotation: object) -> Iterator[type[BaseModel]]:
+    """Every model a field can hold, through ``Optional``, unions, ``dict`` values and ``list`` items."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        yield annotation
+        return
+    for arg in typing.get_args(annotation):
+        yield from _models_in(arg)
 
 
-def classify_config_diff(
-    config: CampaignConfig, frozen: dict[str, Any], *, arm: bool
-) -> tuple[DiffScope, list[str]]:
-    if not frozen:
-        # A check-in skeleton carries `config: {}`: nothing to diff against, not every leaf changed.
-        return DiffScope.NONE, []
-    active = config.frozen(arm=arm)
-    table = _table(config)
-    diffs = _diff_paths(table, active, frozen)
-    if not diffs:
-        return DiffScope.NONE, []
-    has_data = has_treatment = False
-    diff_strs: list[str] = []
-    for path in diffs:
-        decl = table.get(path)
-        if decl is None and path[: len(_NODES_PATH)] == _NODES_PATH:
-            has_treatment = True
-        elif decl is None:
-            logger.warning(
-                "classify_config_diff: unclassified config path %r — treating as "
-                "DATA_AFFECTING. This campaign's snapshot names a knob the engine no "
-                "longer has; re-stamp it (`promptpotter restamp --apply`).",
-                ".".join(path),
-            )
-            has_data = True
-        elif decl.knob.scope is Scope.DATA:
-            has_data = True
-        elif decl.knob.scope is Scope.IDENTITY:
-            has_treatment = True
-        diff_strs.append(".".join(path))
-    if has_data:
-        return DiffScope.DATA_AFFECTING, diff_strs
-    if has_treatment:
-        return DiffScope.TREATMENT, diff_strs
-    return DiffScope.POLICY_ONLY, diff_strs
+def _leaf_defaults(
+    model_cls: type[BaseModel], prefix: str, within: frozenset[type[BaseModel]] = frozenset()
+) -> Iterator[tuple[str, Any]]:
+    for name, field in model_cls.model_fields.items():
+        path = f"{prefix}{name}"
+        yield path, _default_of(field)
+        for inner in _models_in(field.annotation):
+            if inner not in within:
+                yield from _leaf_defaults(inner, f"{path}<{inner.__name__}>.", within | {model_cls})
+
+
+def bench_defaults_pin() -> str:
+    """Walked LIVE, so any moved code default moves it; the optimizer's are its ``Treatment.manifest``."""
+    bench = {
+        p: d
+        for p, d in _leaf_defaults(CampaignConfig, "")
+        if not p.startswith("optimization.nodes")
+    }
+    return stable_hash(to_jsonable_python(bench))
+
+
+_UNMEASURED = frozenset({Estimand.SPEND, Estimand.DISPLAY})
+
+
+def _measured(loop: Mapping[str, Any], prefix: tuple[str, ...]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in loop.items():
+        path = (*prefix, key)
+        decl = KNOBS.get(path)
+        if decl is not None:
+            if not set(decl.knob.estimands) <= _UNMEASURED:
+                out[key] = value
+        elif isinstance(value, Mapping):
+            out[key] = _measured(value, path)
+        else:
+            out[key] = value
+    return out
+
+
+def measured_address(declaration: RunDeclaration) -> dict[str, Any]:
+    """What a root id addresses: the declaration less its budget, defaults pin and spend- or display-only keys."""
+    dumped = declaration.model_dump(mode="json", exclude={"budget", "bench_defaults_pin", "loop"})
+    return {**dumped, "loop": _measured(declaration.loop, ())}
 
 
 # Gravest first: an ill-defined statistic, a silent waste, knobs that co-move.
@@ -251,22 +238,22 @@ COUPLINGS: tuple[Coupling, ...] = (
     ),
     Coupling(
         name="lives_no_headroom",
-        knobs=("optimization.lives.start", "optimization.max_rounds"),
+        knobs=("optimization.lives.start", "optimization.budget"),
         estimand=Estimand.STOPPING,
         relation=(
             "lives stops a stalling run early, but only when the bank can empty before the "
             "calendar cap does."
         ),
         consequence=(
-            "lives.start ≥ max_rounds, so hearts can never run out first: the run stops on "
+            "lives.start ≥ budget.rounds, so hearts can never run out first: the run stops on "
             "the calendar. Lower lives.start to brake a stalling run early, or raise "
-            "max_rounds to give it room."
+            "budget.rounds to give it room."
         ),
         severity="inert",
         predicate=lambda c: (
             c.optimization.lives is not None
-            and c.optimization.max_rounds is not None
-            and c.optimization.lives.start >= c.optimization.max_rounds
+            and c.optimization.budget.rounds is not None
+            and c.optimization.lives.start >= c.optimization.budget.rounds
         ),
     ),
 )

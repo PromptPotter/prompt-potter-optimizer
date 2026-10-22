@@ -18,6 +18,11 @@ available_models:
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
 nodes:
+  # Run init's: the demo rows `capo_init` and `few_shot` draw shots from, the whole partition.
+  demo_pool:
+    type: algorithm
+    config:
+      active: ['*']
   # b = 30, z_max = 10 (App. C.4); the blocks are the pool's first, never shuffled (App. C.4).
   blocks:
     type: sampler
@@ -44,6 +49,7 @@ nodes:
       model: openai/gpt-6-luna
       # The paper's prompt is one text: the reply replaces the whole prompt.
       rewrites: prompt
+      field: instruction
   # A child's shots are a sample of its parents' union, as many as their mean count (§4).
   shot_crossover:
     type: algorithm
@@ -59,6 +65,7 @@ nodes:
       provider: openrouter
       model: openai/gpt-6-luna
       rewrites: prompt
+      field: instruction
   # k_max = 5 (App. C.4); the shot mutation adds, drops or keeps one shot, then shuffles (§4).
   few_shot:
     type: algorithm
@@ -68,13 +75,11 @@ nodes:
   population_rejoin:
     type: algorithm
     config: {}
-  # α = 0.2, γ = 0.05 (App. C.4); a paired t-test, uncorrected (§4). γ prices the length in
-  # CAPO's objective, which this race and the `population` selector both rank on.
+  # α = 0.2 (App. C.4); a paired t-test, uncorrected (§4).
   paired_t:
     type: eliminator
     config:
       alpha: 0.2
-      length_penalty: 0.05
   score:
     type: measurement
     config: {}
@@ -84,7 +89,8 @@ nodes:
     config:
       size: 10
   # The initial instructions (App. D.2, Table 7), generated once from the task description: μ of
-  # them, each given 0..k_max shots (Alg. 1 lines 3-8).
+  # them, each given 0..k_max shots (Alg. 1 lines 3-8). γ = 0.05 (App. C.4) prices the length in
+  # CAPO's objective, which `paired_t` and `population` both rank on; this node sets it.
   capo_init:
     type: llm
     config:
@@ -97,8 +103,12 @@ nodes:
       model: openai/gpt-6-luna
       size: 10
       k_max: 5
+      length_penalty: 0.05
       rewrites: prompt
+      field: instruction
 pipelines:
+  run_init:
+    - demo_pool
   default:
     - blocks
     - mating

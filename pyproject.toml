@@ -230,7 +230,6 @@ promptpotter = [
     "assets/checkin/*.json",        # + its generated schema registry
     "assets/datasets/**/*.yaml",    # dataset definitions, family and install defaults
     "assets/datasets/**/*.md",      # + task framing and READMEs
-    "assets/datasets/**/*.json",    # + committed rows
     # A BUILD ARTIFACT — a Next.js export — so it cannot sit in the source tree the way
     # assets/optimizers/ does. `scripts/build_release.py` stages it before `uv build`;
     # without that the glob matches nothing silently.
@@ -243,7 +242,7 @@ promptpotter = ["assets/datasets/CLAUDE.md"]  # its links resolve only in a chec
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["tests"]
+pythonpath = ["tests", "scripts"]
 # Test files are named for the code they own (test_scoring, test_spend, test_archive)
 # under the standard `test_` prefix, so default discovery picks them up;
 # `conftest.py` (fixtures, not test fns) is excluded by the underscore prefix.
@@ -338,7 +337,7 @@ extend_exclude = [
     "examples/.*",  # each a distribution of its own, with its own dependency list
 ]
 # `scripts/` is a directory of programs, not a package: one imports a sibling by its bare name.
-known_first_party = ["gate", "last_green", "tests_owning"]
+known_first_party = ["gate", "last_green", "offline_world", "tests_owning"]
 
 # CI installs neither `observability` nor `all`, so deptry cannot read the
 # distribution's metadata and falls back to assuming the module is named after the

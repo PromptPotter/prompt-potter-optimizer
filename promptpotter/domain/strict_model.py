@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
@@ -11,11 +10,8 @@ __all__ = ["StrictModel", "WireFloat", "WireInt"]
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    @classmethod
-    def stored_field_model(cls, key: str, raw: Mapping[str, object]) -> type[BaseModel] | None:
-        return None
+    # A validator builds on first use, so an import pays for no model the process never reads.
+    model_config = ConfigDict(extra="forbid", defer_build=True)
 
 
 def _reject_bool(v: object) -> object:

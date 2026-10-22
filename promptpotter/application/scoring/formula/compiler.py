@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Literal, NamedTuple
 
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
+from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     DEFAULT_SCORER_ID,
@@ -245,6 +246,11 @@ def _own_else_steps(own: float | None, steps: float | None) -> float | None:
     return own if own is not None else steps
 
 
+def _inner(facts: MeasuredCell, read: Callable[[InnerCellFacts], float | None]) -> float | None:
+    inner = facts.pipeline.inner
+    return None if inner is None else _number(read(inner))
+
+
 _CHANNEL_READERS: dict[str, Callable[[MeasuredCell, float | None], float | None]] = {
     "fitness": lambda _facts, fitness: _number(fitness),
     "ground_truth_rank": lambda facts, _fitness: _number(facts.ground_truth_rank),
@@ -252,19 +258,19 @@ _CHANNEL_READERS: dict[str, Callable[[MeasuredCell, float | None], float | None]
     "latency": lambda facts, _fitness: facts.cost_s,
     "unworked": lambda facts, _fitness: facts.pipeline.unworked_s,
     "bench_lift": lambda facts, _fitness: facts.pipeline.mean_bench_lift,
-    "bench_origin": lambda facts, _fitness: facts.pipeline.inner_bench_origin_level,
-    "bench_final_lift": lambda facts, _fitness: facts.pipeline.inner_bench_final_lift,
-    "lift": lambda facts, _fitness: facts.pipeline.mean_round_delta,
-    "origin": lambda facts, _fitness: facts.pipeline.inner_origin_level,
-    "final_lift": lambda facts, _fitness: facts.pipeline.inner_final_lift,
-    "peak_lift": lambda facts, _fitness: facts.pipeline.inner_peak_lift,
-    "rounds": lambda facts, _fitness: _number(facts.pipeline.inner_rounds_ran),
-    "round_budget": lambda facts, _fitness: _number(facts.pipeline.inner_round_budget),
+    "bench_origin": lambda facts, _fitness: _inner(facts, lambda i: i.bench_origin_level),
+    "bench_final_lift": lambda facts, _fitness: _inner(facts, lambda i: i.bench_final_lift),
+    "lift": lambda facts, _fitness: _inner(facts, lambda i: i.mean_round_delta),
+    "origin": lambda facts, _fitness: _inner(facts, lambda i: i.origin_level),
+    "final_lift": lambda facts, _fitness: _inner(facts, lambda i: i.final_lift),
+    "peak_lift": lambda facts, _fitness: _inner(facts, lambda i: i.peak_lift),
+    "rounds": lambda facts, _fitness: _inner(facts, lambda i: i.rounds_ran),
+    "round_budget": lambda facts, _fitness: _inner(facts, lambda i: i.round_budget),
     "cost": lambda facts, _fitness: _own_else_steps(
-        facts.pipeline.inner_sent_usd, _step_cost(facts.pipeline.step_tokens)
+        _inner(facts, lambda i: i.sent_usd), _step_cost(facts.pipeline.step_tokens)
     ),
     "tokens": lambda facts, _fitness: _own_else_steps(
-        _number(facts.pipeline.inner_tokens), _step_tokens(facts.pipeline.step_tokens)
+        _inner(facts, lambda i: i.tokens), _step_tokens(facts.pipeline.step_tokens)
     ),
     # Characters, not tokens: no tokenizer ships.
     "target_prompt_chars": lambda facts, _fitness: _number(facts.pipeline.target_prompt_chars),
@@ -378,7 +384,7 @@ CELL_INTRINSIC_NAMES: frozenset[str] = frozenset(
 
 _INTRINSIC_PROBE = MeasuredCell.from_wire(
     {
-        "sample_id": 0,
+        "sample_key": "_",
         # Maximal: a thinner probe would under-report and let a real collision through.
         "n_candidates": 0,
         "pipeline_data": {"step_tokens": {"_": {}}},

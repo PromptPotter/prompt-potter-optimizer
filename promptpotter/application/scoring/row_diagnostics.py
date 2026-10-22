@@ -65,7 +65,7 @@ def cell_feedback(cell: GradedCell) -> str:
     if grade.unscored is not None:
         return f"Not graded: {grade.unscored}"
     if grade.fitness is None or grade.objective is None:
-        raise KeyError(f"cell_feedback: the cell at slot {facts.sample_id} carries no grade")
+        raise KeyError(f"cell_feedback: the cell of sample {facts.sample_key} carries no grade")
     lines = [f"Score: {grade.objective:.3f}"]
     if grade.fitness != grade.objective:
         lines.append(f"Correctness: {grade.fitness:.3f}")

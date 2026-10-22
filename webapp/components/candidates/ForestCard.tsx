@@ -66,17 +66,17 @@ function ReadForestCard({ dash }: { dash: DashboardSnapshot }) {
       viewedKey: viewedPath ? encodeCyclePath(viewedPath) : null,
       channels: [],
       clip: null,
-      isPicked: (n) =>
-        isSelectedCandidate(candidate, pathLeaf(n.coursePath).cycleId, n.round, n.candidateId),
+      isPicked: (n) => {
+        const own = selectedNodeOf(n.node, pathLeaf(n.coursePath).cycleId);
+        return isSelectedCandidate(candidate, own.cycle_id, own.round, own.arm);
+      },
       onPickCandidate: (n) => {
-        const nodeCycleId = pathLeaf(n.coursePath).cycleId;
+        const own = selectedNodeOf(n.node, pathLeaf(n.coursePath).cycleId);
         if (n.coursePathKey !== (viewedPath ? encodeCyclePath(viewedPath) : null)) {
           navigate(n.coursePath);
         }
         setSelectionForCandidate(
-          isSelectedCandidate(candidate, nodeCycleId, n.round, n.candidateId)
-            ? null
-            : selectedNodeOf(n.node, nodeCycleId),
+          isSelectedCandidate(candidate, own.cycle_id, own.round, own.arm) ? null : own,
         );
       },
     }),

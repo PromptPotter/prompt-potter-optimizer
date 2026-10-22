@@ -15,6 +15,7 @@ from promptpotter.infrastructure.store.io import (
     validate_path_component,
 )
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +57,57 @@ def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
     return WorkspaceDir(projects_root / validate_path_component(tenant_id))
 
 
+ArchiveHomeOwner = Literal["tenant", "install"]
+
+# Beside `projects/`, never in it: no tenant walk can take an install's home for an account.
+_ARCHIVE_HOMES_DIR = ".archives"
+
+
+@dataclass(frozen=True)
+class ArchiveHome:
+    id: str
+    root: Path
+    owner: ArchiveHomeOwner
+
+
+def archive_home(
+    identity: IdentityContext, shared_archive: str, *, shared_root: Path
+) -> ArchiveHome:
+    if not shared_archive:
+        tenant = identity.tenant_id
+        return ArchiveHome(tenant, tenant_workspace(shared_root, tenant), "tenant")
+    named = validate_path_component(shared_archive)
+    return ArchiveHome(named, shared_root.parent / _ARCHIVE_HOMES_DIR / named, "install")
+
+
 def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:
     return tenant_root / "campaigns"
 
 
 def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
     return campaigns_root_dir_for(tenant_root) / validate_path_component(campaign_id)
+
+
+DRAFTS_DIR = "drafts"
+
+
+def drafts_root_dir_for(tenant_root: WorkspaceDir) -> Path:
+    return tenant_root / DRAFTS_DIR
+
+
+def draft_dir_for(tenant_root: WorkspaceDir, draft_id: str) -> Path:
+    return drafts_root_dir_for(tenant_root) / validate_path_component(draft_id)
+
+
+def draft_claim_path(tenant_root: WorkspaceDir, draft_id: str) -> Path:
+    """Beside the draft dir, never in it: a discard removes the dir while holding the claim."""
+    return drafts_root_dir_for(tenant_root) / f".{validate_path_component(draft_id)}.claim"
+
+
+def draft_dirs(tenant_root: WorkspaceDir) -> list[Path]:
+    """Every ledger billed before a campaign holds it; a claim file beside them is none."""
+    root = drafts_root_dir_for(tenant_root)
+    return sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
 
 
 def head_to_head_path(tenant_root: WorkspaceDir, head_to_head_id: str) -> Path:
@@ -75,13 +121,6 @@ def campaign_cycles_dir(campaign_root: Path) -> Path:
 def cycle_dir_for(tenant_root: WorkspaceDir, hop: CycleHop) -> Path:
     campaign_root = campaign_root_dir_for(tenant_root, hop.campaign_id)
     return campaign_cycles_dir(campaign_root) / validate_path_component(hop.cycle_id)
-
-
-MEASUREMENTS_DIR = "measurements"
-OPTIMIZER_REUSE_DIR = "optimizer_reuse"
-JUDGE_REUSE_DIR = "judge_reuse"
-
-SHARED_CACHE_DIRS: tuple[str, ...] = (MEASUREMENTS_DIR, OPTIMIZER_REUSE_DIR, JUDGE_REUSE_DIR)
 
 
 # Flat, off-registry and hash-keyed: nested in its owning cycle, a sandbox exceeds Windows' MAX_PATH.
@@ -321,14 +360,13 @@ def course_validator_ns(cycle_dir: Path) -> int | None:
 
 
 __all__ = [
-    "JUDGE_REUSE_DIR",
-    "MEASUREMENTS_DIR",
-    "OPTIMIZER_REUSE_DIR",
-    "SHARED_CACHE_DIRS",
+    "ArchiveHome",
+    "ArchiveHomeOwner",
     "CampaignLayout",
     "CycleLayout",
     "FileKind",
     "SandboxOwner",
+    "archive_home",
     "campaign_root_dir_for",
     "campaigns_root_dir_for",
     "classify",

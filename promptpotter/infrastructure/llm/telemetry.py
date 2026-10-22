@@ -7,6 +7,7 @@ from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import ScoreSummary
 from promptpotter.domain.run_records import (
@@ -30,7 +31,8 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.scoring import GradedCell, WalkedCell
 from promptpotter.domain.spend import TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.pricing import compute_usd
-from promptpotter.shared.measurement_context import MeasurementRole, measured_candidate
+from promptpotter.shared.identity import Principal
+from promptpotter.shared.measurement_context import MeasurementRole, measured_pass
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -189,7 +191,7 @@ def emit_token_usage(
         mirrored=mirrored,
         cached=cached,
         round=current_round(),
-        role=cand.role if (cand := measured_candidate()) else None,
+        role=cand.role if (cand := measured_pass()) else None,
     )
     return record if _append_record(record) is not None else None
 
@@ -243,7 +245,7 @@ def emit_provider_eased(*, ledger: CycleEventLog, sender: str, held_s: float) ->
 
 
 # Cells (`ReplayFeed.cell_key`) and calls (`call:{reuse key}`), per CAMPAIGN and never per spend
-# book: a nested run spends under its root's book.
+# book: a nested run's book is enclosed by its root's.
 _PRICED: ContextVar[set[str] | None] = ContextVar("priced", default=None)
 
 
@@ -309,7 +311,7 @@ def emit_command(
     kind: str,
     payload: dict[str, Any],
     idempotency_key: str,
-    issued_by_user_id: str = "",
+    issued_by: Principal,
 ) -> int | None:
     return _append_record(
         CommandRecord(
@@ -317,7 +319,7 @@ def emit_command(
             kind=kind,
             payload=dict(payload),
             idempotency_key=idempotency_key,
-            issued_by_user_id=issued_by_user_id,
+            issued_by=issued_by,
         )
     )
 
@@ -376,22 +378,22 @@ QUERY_PREVIEW_CHARS = 120
 
 def emit_sample_started(
     *,
-    candidate_idx: int,
-    candidate_total: int,
+    individual_id: str,
+    role: MeasurementRole,
     sample_idx: int,
     sample_total: int,
-    sample_id: int,
+    position: int,
     query: str,
     sample_lookahead: int,
 ) -> None:
     _append_record(
         SampleStartedRecord(
             round=bound_round(),
-            candidate_idx=candidate_idx,
-            candidate_total=candidate_total,
+            individual_id=individual_id,
+            role=role,
             sample_idx=sample_idx,
             sample_total=sample_total,
-            sample_id=int(sample_id),
+            position=int(position),
             query_preview=query[:QUERY_PREVIEW_CHARS],
             sample_lookahead=int(sample_lookahead),
         )
@@ -400,24 +402,22 @@ def emit_sample_started(
 
 def emit_sample_scored(
     *,
-    candidate_idx: int,
-    candidate_total: int,
     individual_id: str,
     role: MeasurementRole,
     sample_idx: int,
     sample_total: int,
+    position: int,
     cell: GradedCell,
     running: ScoreSummary | None,
 ) -> None:
     _append_record(
         SampleScoredRecord(
             round=bound_round(),
-            candidate_idx=candidate_idx,
-            candidate_total=candidate_total,
             individual_id=individual_id,
             role=role,
             sample_idx=sample_idx,
             sample_total=sample_total,
+            position=int(position),
             result=cell,
             running=running,
         )
@@ -427,18 +427,18 @@ def emit_sample_scored(
 def emit_race_catch_up(
     *,
     member: str,
-    candidate_idx: int,
-    candidate_total: int,
+    arm: ArmKey,
     sample_key: str,
-    cells: dict[str, WalkedCell],
+    position: int,
+    cells: dict[ArmKey, WalkedCell],
 ) -> None:
     _append_record(
         RaceCatchUpRecord(
             round=bound_round(),
-            candidate_idx=candidate_idx,
-            candidate_total=candidate_total,
+            arm=arm,
             member=member,
             sample_key=sample_key,
+            position=int(position),
             cells=cells,
         )
     )

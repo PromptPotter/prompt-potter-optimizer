@@ -64,33 +64,37 @@ class MLflowSink(TraceSink):
         if self._experiment_id is None:
             return
         client = _client()
+        head, fold = record.head, record.fold
         run_id = client.create_run(
             self._experiment_id,
             run_name=f"round_{record.round}",
             tags={
                 _ROUND: str(record.round),
                 "improved": str(record.improved).lower(),
-                "winner_lineage_id": record.opt_sp.id if record.opt_sp is not None else "",
+                "winner_lineage_id": "" if head is None else head.individual.id,
             },
         ).info.run_id
         client.log_param(run_id, "n_candidates", str(record.candidates_scored))
-        client.log_metric(run_id, "total", float(record.total))
+        client.log_metric(run_id, "total", float(0 if fold is None else fold.total))
         # A round that scored nothing has no accuracy, and a metric cannot hold a `None`.
-        if record.accuracy is not None:
-            client.log_metric(run_id, "accuracy", record.accuracy)
+        if fold is not None and fold.accuracy is not None:
+            client.log_metric(run_id, "accuracy", fold.accuracy)
         client.set_terminated(run_id)
 
 
 def register_export(export: PromptExport, *, tenant_id: str) -> None:
-    """One version per (cycle, prompt text): a restated export moves that version's tags.
-
-    No alias is set or moved. Promotion is the host's swap, and ``@latest`` already resolves.
-    """
+    """One version per (cycle, prompt text), whose tags a restated export moves; no alias is ever set."""
     if not settings.MLFLOW_TRACKING_URI:
         return
     client = _client()
-    name = _UNNAMEABLE.sub("-", f"{tenant_id}.{export.dataset_name}")
-    template = export.render()
+    for node in export.prompts:
+        name = _UNNAMEABLE.sub("-", f"{tenant_id}.{export.dataset_name}.{node}")
+        _register_node_prompt(client, name, export.render(node), tenant_id=tenant_id, export=export)
+
+
+def _register_node_prompt(
+    client: MlflowClient, name: str, template: str, *, tenant_id: str, export: PromptExport
+) -> None:
     tags = {
         _CYCLE: export.cycle_id,
         "promptpotter.campaign_id": export.campaign_id,

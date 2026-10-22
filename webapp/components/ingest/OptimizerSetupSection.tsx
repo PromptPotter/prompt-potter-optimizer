@@ -18,9 +18,14 @@ export function OptimizerSetupSection({
   onApply: (patch: DraftPatch) => void;
 }) {
   const { optimizer } = draft.optimization_overrides;
+  const setup = draft.optimizer_setup;
   const fields = useMemo(
-    () => ({ optimizer, schema: { status: "ok" as const, config: null, output: null, isSingleNode: false } }),
-    [optimizer],
+    () => ({
+      optimizer,
+      optimizerSetup: setup,
+      schema: { status: "ok" as const, config: null, output: null, isSingleNode: false },
+    }),
+    [optimizer, setup],
   );
   return (
     <StaticConnectorProvider fields={fields}>
@@ -36,7 +41,7 @@ function OptimizerSetupInner({
   draft: DraftCampaignWire;
   onApply: (patch: DraftPatch) => void;
 }) {
-  const { optimizer, nodes } = draft.optimization_overrides;
+  const { optimizer } = draft.optimization_overrides;
   const { doc, error } = useOptimizerPipeline(useConnector().optimizer);
   const rosterRead = useRead(optimizerRosterRead());
   const roster = readyData(rosterRead);
@@ -103,11 +108,7 @@ function OptimizerSetupInner({
       {shown ? <NodeDetail node={shown} onClose={() => setSelectionForNode(null)} /> : null}
 
       <h4>{optimizer} knobs</h4>
-      <NodeKnobsPanel
-        optimizer={optimizer}
-        nodes={nodes}
-        onChange={(patch) => onApply({ optimization_overrides: { nodes: patch } })}
-      />
+      <NodeKnobsPanel onChange={(patch) => onApply({ optimization_overrides: { nodes: patch } })} />
     </>
   );
 }

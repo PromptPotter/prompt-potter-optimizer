@@ -1,14 +1,12 @@
 "use client";
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/chat-foundation.md`): never hide them.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
-import { useCycleEntry } from "@/lib/registry";
-import { phaseIs } from "@/lib/run-phase";
 import { useIngest } from "@/lib/ingest-flow";
 import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
-import { draftForCampaign, runSummary, type RunSummary } from "@/lib/derivations";
+import { runSummary, type RunSummary } from "@/lib/derivations";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
 import { useSelection } from "@/lib/SelectionContext";
@@ -21,18 +19,9 @@ import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";
 export function ChatPane() {
   const { datasetName } = useHardSamples();
   const { dash } = useCycleStream();
-  const { viewedPath, campaignId, cycleId, leafCampaignId, leafCycleId } = useWorkspace();
-  const checkin = phaseIs(useCycleEntry(campaignId, cycleId)?.run_phase, "authoring");
-  const checkinCampaignId = checkin ? campaignId : null;
-
-  const { flow: ingest, composing } = useIngest();
+  const { viewedPath, cycleId, leafCycleId } = useWorkspace();
+  const { composing } = useIngest();
   const thread = useThread<RunSummary>();
-
-  // Keyed on the campaign alone: `ingest`'s methods close over stable setState.
-  useEffect(() => {
-    if (checkinCampaignId) ingest.reopenCheckin(checkinCampaignId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkinCampaignId]);
 
   // The served `attached`, NOT `isLive`, which is false at the gate.
   const attached = dash?.producer.attached === true;
@@ -81,23 +70,6 @@ export function ChatPane() {
   ];
 
   const { node: selectedNode, setSelectionForNode } = useSelection();
-  // Only for the campaign that draft is: the ingest thread outlives a sidebar selection.
-  const previewDraft = draftForCampaign(
-    ingest.phase.stage === "ready" || ingest.phase.stage === "awaiting-context"
-      ? ingest.phase.draft
-      : null,
-    leafCampaignId,
-  );
-  const authoring = useMemo(
-    () =>
-      previewDraft
-        ? {
-            overlay: previewDraft.pipeline_overlay,
-            promptFields: previewDraft.origin_prompt_fields,
-          }
-        : undefined,
-    [previewDraft],
-  );
   // The remote floats above the composer, so its height is published to the shell the remote hangs off.
   const paneRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -120,11 +92,7 @@ export function ChatPane() {
         <PipelineStack datasetName={datasetName} />
         {selectedNode && (
           <div className="wf-hero-detail">
-            <NodeDetail
-              node={selectedNode}
-              authoring={authoring}
-              onClose={() => setSelectionForNode(null)}
-            />
+            <NodeDetail node={selectedNode} onClose={() => setSelectionForNode(null)} />
           </div>
         )}
       </div>

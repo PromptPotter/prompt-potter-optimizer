@@ -110,9 +110,8 @@ loop = compile_loop(
                                   "l3_patience": 1}},       # L3 replans the strategy L1 works within
         "pobb": {"config": {"epsilon": 0.2}},               # how aggressively trailing candidates are killed
     },
-    max_rounds=5,
+    budget={"rounds": 5, "usd": None},  # what the run stops at, per axis; a named null lifts it
     elimination_n_min=4,      # samples a candidate gets before it may be pruned
-    ceiling={"usd": None},    # what the run stops at, in USD and tokens; a null arm is uncapped
 )
 ```
 
@@ -159,14 +158,10 @@ never reconstructed as a generic `dspy.LM`, which would quietly re-point the mea
 
 ## Why it asks for a name
 
-`dataset_name` plus each example's position in `trainset` keys the measurement cache. Reuse
-the name and a second `compile()` skips every measurement it already paid for — this is what
-makes a re-run cheap.
-
-Because identity is positional, **the order of `trainset` is part of it.** Shuffle it, filter
-it, or swap in new rows, and the rows no longer mean what the cached scores were measured
-against. Every measurement stores the example it was taken against, so a `trainset` that
-disagrees with what a name already measured is refused before the first call rather than
-silently scored from the old rows. **New rows, new name.** The dataset directory the campaign
-resolves by that name is rewritten on every compile: it is a projection of the arguments just
-passed, never config to edit by hand.
+Each example's CONTENT keys the measurement cache, never its name or its position in
+`trainset`: a second `compile()` replays every cell an example already paid for, whatever the
+name and however the rows were shuffled, filtered or extended — this is what makes a re-run
+cheap. Two examples with the same input would share one measurement, so a `trainset` holding
+twins is refused before the first call. `dataset_name` is a label: it names where the campaign
+and its dataset directory live. That directory is rewritten on every compile: it is a projection
+of the arguments just passed, never config to edit by hand.

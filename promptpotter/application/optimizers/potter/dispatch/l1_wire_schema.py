@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.optimizer_manifest import resolve_node_override
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
+    BLOCK_ID_INSTRUCTION,
     LAYOUT_SCHEMA_INSTRUCTION,
     OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
     SCHEMA_DESCRIPTION_MAX_CHARS,
@@ -18,13 +19,13 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     layout_json_schema,
 )
 from promptpotter.application.optimizers.potter.dispatch.schemas import L1GenerateOutput, L1Variant
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
     SCHEMA_RENAME_PARAM,
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -38,9 +39,9 @@ __all__ = [
 ]
 
 # A ceiling on a non-prompt field reads as a live cap while binding nothing.
-assert set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) <= set(PROMPT_STRING_FIELDS), (
+assert set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) <= set(OptimizerPromptTemplate.model_fields), (
     "OPTIMIZER_PROMPT_FIELD_MAX_CHARS declares a ceiling on a non-prompt field: "
-    f"{sorted(set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) - set(PROMPT_STRING_FIELDS))}"
+    f"{sorted(set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) - set(OptimizerPromptTemplate.model_fields))}"
 )
 
 
@@ -96,7 +97,7 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
 _SLOT_PANEL: dict[str, str] = {
     "prompt_fields_updates": "rendered_prompt",
     "pipeline_overlay": "pipeline_param_catalogue",
-    "shot_ids": "demo_pool",
+    "shots": "demo_pool",
 }
 
 
@@ -108,6 +109,7 @@ def build_l1_response_schema(
     silent_panels: Collection[str] = (),
     schema_field_rename: bool = False,
     n_variants: int | None = None,
+    pooled_fields: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
     """Returns the BARE schema: an envelope nests it where the provider reads no ``type`` and every constraint goes inert."""
     raw_schema = L1GenerateOutput.model_json_schema()
@@ -175,21 +177,41 @@ def build_l1_response_schema(
             "additionalProperties": False,
         }
 
-    # With no open field the slot would be write-only; `minLength` because "" is not an edit.
-    if open_fields := pipeline_schema.open_prompt_fields():
+    # Keyed by the roster's prompt nodes, each by ITS open fields; a node with none is write-only,
+    # so it is absent. `minLength` because "" is not an edit.
+    prompt_nodes = pipeline_schema.prompt_nodes()
+    open_by_node = {
+        n.name: {
+            f: (
+                {"type": "string", "minLength": 1}
+                if pooled_fields is None
+                else {"type": "string", "enum": list(pooled_fields[f])}
+            )
+            for f in n.open_prompt_fields
+            if pooled_fields is None or pooled_fields.get(f)
+        }
+        for n in prompt_nodes
+    }
+    if open_by_node := {node: fields for node, fields in open_by_node.items() if fields}:
         variant_props["prompt_fields_updates"].update(
-            properties={field: {"type": "string", "minLength": 1} for field in open_fields},
+            properties={
+                node: {"type": "object", "properties": fields, "additionalProperties": False}
+                for node, fields in open_by_node.items()
+            },
+            additionalProperties=False,
+        )
+        if pooled_fields is not None:
+            variant_props["prompt_fields_updates"]["description"] = BLOCK_ID_INSTRUCTION
+    else:
+        del variant_props["prompt_fields_updates"]
+    if prompt_nodes:
+        shot_list = variant_props["shots"]["additionalProperties"]
+        variant_props["shots"].update(
+            properties={node.name: shot_list for node in prompt_nodes},
             additionalProperties=False,
         )
     else:
-        del variant_props["prompt_fields_updates"]
-    # No `null` arm: omitting the key already keeps the parent's shots.
-    shots = variant_props["shot_ids"]
-    if pipeline_schema.prompt_node_names():
-        array_arm = next(a for a in shots["anyOf"] if a.get("type") == "array")
-        variant_props["shot_ids"] = {**array_arm, "description": shots["description"]}
-    else:
-        del variant_props["shot_ids"]
+        del variant_props["shots"]
 
     for slot, panel in _SLOT_PANEL.items():
         if panel in silent_panels:

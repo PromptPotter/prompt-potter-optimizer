@@ -40,7 +40,7 @@ def get_cycle_dashboard(
     """Live telemetry for the viewed cycle: its own ``dashboard.json``.
 
     The path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.
-    Honors ``If-Modified-Since`` with a 304; a cycle still at check-in answers ``warming_up`` at 200, an absent one 404.
+    Honors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.
     ``at`` is an offset in the LEAF cycle's own ledger, the address a ray item carries: the state as of that line.
     """
     cycle = view_cycle(

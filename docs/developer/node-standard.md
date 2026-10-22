@@ -123,11 +123,11 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 ### All nodes
 
 - **Exit-point declaration** — a node producing candidates declares where its output lives. Enables step-sequence cache reuse and partial run replay.
-- **Stop signals** — return a `StopSignal` naming the arm's `ArmOutcome` to stop a candidate, rather than failing silently.
+- **Stop signals** — return a `StopSignal` naming the arm's `WalkStop` to stop a candidate, rather than failing silently.
 
 ### LLM nodes additionally
 
-- **Prompt exposure** — expose the prompt as a `PromptTemplate`. PromptPotter reads, displays, and optimises it. See [`README.md`](README.md) § 1. Prompt structure.
+- **Prompt exposure** — declare `prompt_info` on the node, its `fields` naming the prompt's parts in render order (omitted, the default six). PromptPotter reads, displays, and optimises each. See [`README.md`](README.md) § 1. Prompt structure.
 - **Optimizer-discoverable parameters** — declare accepted parameters and valid values. PromptPotter picks these up automatically as optimisation axes, with no hardcoding on either side.
 - **Self-healing Wounds 1 and 2** — a `ValidationFailure` caught at L1 parse time, a `RuntimeFailure` attached to the candidate mid-run. **Who heals each** — owned by [`self-healing-internals.md`](self-healing-internals.md) § The wounds, mapped to the two axes.
 - **Warnings → optimizer context** — per-sample warnings surface to the optimizer through the round's `evidence_health` / `diagnostics` panels. They do **not** select samples.
@@ -148,19 +148,21 @@ typed knobs — every field required, so the manifest is the one place a value c
 paper's configuration is a set of those values. No member sees the bench set.
 None is handed `Cycle`, a store or a live client either: each receives the `NodeContext` the bench
 builds for its node (`application/bench/node_context.py`) — its own knobs, typed, the round's
-readings, the optimizer's state, and the seeded draw, llm call and recorded decision the bench
-keeps. **A node shared between manifests reads that context alone**: the parent and its rows, the
-population the run carries (`ctx.population`, kept by a selector through `ctx.keep`), the closed
-rounds and the δ ruler — never `ctx.state`, which is the one optimizer's own and makes the node
-that reads it that optimizer's. A child is made through `OptSearchPoint.derive` / `edited` under
+readings, the state slices it declares, and the seeded draw, llm call and recorded decision the
+bench keeps. **A node shared between manifests reads that context alone**: the parent and its rows,
+the population the run carries (`ctx.population`, kept by a selector through `ctx.keep`), the
+closed rounds, the δ ruler, the state it declares (`reads` / `writes`, reached as `ctx.slice` /
+`ctx.put` / `ctx.emit` / `ctx.recall`) and the members it declares it `consults` (`ctx.consult`,
+`ctx.knobs_of`); a roster where any of those is not closed by exactly one member is refused at
+load. A child is made through `OptSearchPoint.derive` / `edited` under
 `ctx.variation`, so its lineage names every node that wrote it and the loci each one moved. What an optimizer needs of the harness itself is its RUNTIME's (`OptimizerRuntime`, one
-base whose every member but five has a default), which the bench hands the session at `start`.
+base whose every member but four has a default).
 
 | Type | Reads | Returns | Binds it |
 |---|---|---|---|
 | `llm` | its prompt, filled through the dispatch hub | its parsed response — for a proposing node, individuals, each written through `ctx.child` (a later node's change through `ctx.edit`), the one writer of every locus, so its lineage carries its `parent_ids` and every node that wrote it | every child is admitted by the bench as it is written, once (`application/bench/children.py::admission_failures`): forbidden keys, `overlay_failures`, the node's permitted model set, the backend's mandatory placeholders |
 | `measurement` | the round's candidates, the sampler's panel, the eliminator's checks | the round's rows | the bench's scoring gateway, walked unchanged; `config` stays empty |
-| `sampler` | the search pool, the bench's per-sample difficulty, prior rows | the round's panel: ordered sample ids, cut into the blocks an eliminator decides between | draws from the search pool alone; deterministic given its inputs and seed, so resume and fork replay it |
+| `sampler` | the search split, the bench's per-sample difficulty, prior rows | the round's panel: ordered sample ids, cut into the blocks an eliminator decides between | draws from the search split alone; deterministic given its inputs and seed, so resume and fork replay it |
 | `eliminator` | the panel, the candidates, rows as they land | a continue or cut per arm per block, each cut a ledger decision stamped with this node | cuts on evidence about the arm, never on a technical failure — that is the bench's `DegradationCheck`, which runs whatever the eliminator; the `none` member walks every arm to the end |
 | `selector` | the round's rows, lineage, the population on its context (`ctx.population`) | `selected: list[label]`, and the population it keeps (`ctx.keep`) | its choice is what the optimizer keeps, never a score the bench serves |
 | `algorithm` | individuals, and the demo pool when it edits shots | individuals it `edited` or derived under `ctx.variation`, no model call and no measurement | deterministic given its inputs and seed |

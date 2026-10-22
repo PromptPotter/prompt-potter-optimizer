@@ -5,30 +5,19 @@ from __future__ import annotations
 import argparse
 from typing import get_args
 
+from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
-from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import GateDecision
 from promptpotter.domain.results import RescoreCount, VerifyStrategy, rescore_count
-from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS
 from promptpotter.presentation.cli.parsers import (
     ACTIVE_CAMPAIGN,
     ACTIVE_CYCLE,
+    BUDGET_AXES,
     CAMPAIGN_ID,
-    RUNTIME_HALTS,
+    NO_WAIT,
     Arg,
     Verb,
 )
-
-
-def _rounds_cap_arg(raw: str) -> RoundsCap:
-    if raw.strip().lower() == "none":
-        return RoundsCap(max_rounds=None)
-    try:
-        return RoundsCap(max_rounds=int(raw))
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"expected a round count >= 0 or `none`, got {raw!r}"
-        ) from exc
 
 
 def _rescore_count_arg(raw: str) -> RescoreCount:
@@ -101,7 +90,8 @@ VERBS: tuple[Verb, ...] = (
                 default=[],
                 metavar="FIELD=VALUE",
                 help="Repeatable. Both forms take the campaign knobs — `--set optimizer=capo`, "
-                "`--set max_rounds=3`, `--set nodes.<node>.<knob>=VALUE`. The file form also "
+                "`--set budget.rounds=3` (`none` lifts an axis), `--set nodes.<node>.<knob>=VALUE`. "
+                "The file form also "
                 "confirms an origin field, e.g. `--set task_description='map names to codes'` or "
                 "`--set column.query=input`, applied before the resolver runs.",
             ),
@@ -121,7 +111,17 @@ VERBS: tuple[Verb, ...] = (
                 "round 2 (refinement overrides applied, no scoring) → halt. "
                 "index.json::final.mode lands as 'diag'.",
             ),
-            *RUNTIME_HALTS,
+            Arg(
+                "--halt-at",
+                dest="halt_at_accuracy",
+                type=float,
+                default=None,
+                metavar="ACC",
+                help="Halt when the optimizer's declared pick has accuracy ≥ ACC (e.g. 0.66). The "
+                "campaign's own knob, so `--set halt_at_accuracy=ACC` spelled short.",
+            ),
+            NO_WAIT,
+            *BUDGET_AXES,
         ),
     ),
     Verb(
@@ -204,16 +204,8 @@ VERBS: tuple[Verb, ...] = (
                 "it requires the `campaign.babysit` capability and grades the fork's runs C. CLI "
                 "twin of the web steer-fork (`POST /commands/fork-cycle`), same seam + gate.",
             ),
-            Arg(
-                "--steer-max-rounds",
-                dest="steer_max_rounds",
-                type=int,
-                default=None,
-                metavar="N",
-                help="Round ceiling for a `--steer` fork (default: the rounds the parent's cap has "
-                "left; its spend cap likewise). Ignored unless `--steer` is set.",
-            ),
-            *RUNTIME_HALTS,
+            NO_WAIT,
+            *BUDGET_AXES,
         ),
     ),
     Verb(
@@ -242,7 +234,7 @@ VERBS: tuple[Verb, ...] = (
         "reset",
         "reset:cmd_reset",
         help="Drop campaigns/ + active_session.json for the "
-        "selected tenant; preserve the paid caches ("
+        "selected tenant; preserve its archive home's paid caches ("
         + ", ".join(f"{d}/" for d in SHARED_CACHE_DIRS)
         + "). The escape hatch for cycles "
         "obsoleted by code changes — per-sample measurements survive so the "
@@ -280,7 +272,7 @@ VERBS: tuple[Verb, ...] = (
                 "subject",
                 help="The searchpoint, as `evidence` addresses one: "
                 "'candidate:<campaign>/<cycle>/<candidate_id>', with ';in=<c::y~…>' for an L4 inner "
-                "cycle. The id is `candidate_id` on the round file's `candidate_scores` row.",
+                "cycle. The id is the key of its row in the round file's `arms`.",
             ),
             Arg(
                 "--strategy",
@@ -592,39 +584,12 @@ VERBS: tuple[Verb, ...] = (
     Verb(
         "set-limits",
         "lifecycle:cmd_set_limits",
-        help="Raise or lower an EXISTING cycle's spend / token / round ceiling — the same "
+        help="Raise or lower an EXISTING cycle's spend / token / round / wall-clock bound — the same "
         "change-run-limits command the webapp fires. This is how a budget- or round-halted "
-        "cycle is continued: set a higher ceiling, then `resume`. The launch flags only shape a "
-        "launch. Spend is clamped against your account allowance; read the armed value off the "
+        "cycle is continued: set a higher ceiling, then `resume`. The same flags on `new` / "
+        "`resume` set it as that launch starts. Spend is clamped against your account allowance; read the armed value off the "
         "dashboard.",
-        args=(
-            ACTIVE_CAMPAIGN,
-            ACTIVE_CYCLE,
-            Arg(
-                "--max-usd",
-                dest="max_usd",
-                type=float,
-                default=None,
-                help="New USD ceiling. 0 halts after the current round. Omit to leave it untouched.",
-            ),
-            Arg(
-                "--max-tokens",
-                dest="max_tokens",
-                type=int,
-                default=None,
-                help="New token ceiling — the unit that survives an unpriced model. 0 halts after the "
-                "current round. Omit to leave it untouched.",
-            ),
-            Arg(
-                "--max-rounds",
-                dest="rounds_cap",
-                type=_rounds_cap_arg,
-                default=None,
-                metavar="N|none",
-                help="New L1 round cap, read at the next round boundary. `none` lifts it, so the spend "
-                "ceiling governs. Omit to leave it untouched.",
-            ),
-        ),
+        args=(ACTIVE_CAMPAIGN, ACTIVE_CYCLE, *BUDGET_AXES),
     ),
     Verb(
         "archive",
@@ -687,7 +652,8 @@ VERBS: tuple[Verb, ...] = (
                 default=None,
                 metavar="ARMS.YAML",
                 help="A YAML list of arms, each an edit of the round's parent: "
-                "`changes_description` (required), `prompt_fields` ({field: text}), "
+                "`changes_description` (required), `prompt_fields` ({node: {field: text}}), "
+                "`shots` ({node: [sample key]}; [] clears them), "
                 "`pipeline_overlay` ({node: {param: value}}).",
             ),
             Arg(
@@ -770,18 +736,19 @@ VERBS: tuple[Verb, ...] = (
         ),
     ),
     Verb(
-        "replace-dataset",
-        "lifecycle:cmd_replace_dataset",
-        help="Version a dataset slug and repoint what referenced it — the terminal half of what "
-        "the browser offers on a slug collision, where ingest otherwise asks for a new name.",
-        args=(Arg("slug", help="The dataset slug to replace."),),
-    ),
-    Verb(
         "cancel-queued",
         "lifecycle:cmd_cancel_queued",
         help="Withdraw a launch waiting for a machine slot. A terminal run leaves the queue by "
         "Ctrl+C; this reaches the ones that cannot, such as a browser launch behind a full box.",
         args=(Arg("job_id", help="The queued job id, as `machine-status` lists it."),),
+    ),
+    Verb(
+        "discard-draft",
+        "lifecycle:cmd_discard_draft",
+        help="Close an open check-in without minting — the one a `new <file>` that stopped short "
+        "of a complete origin names, or any under the workspace's `drafts/`. Its check-in calls "
+        "stay billed to the workspace.",
+        args=(Arg("draft_id", help="The check-in's id: its directory under `drafts/`."),),
     ),
     Verb(
         "cycles",

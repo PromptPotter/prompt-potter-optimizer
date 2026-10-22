@@ -124,6 +124,13 @@ class RuntimeFailure(StrictModel):
             "node whose config is captured in ``observed_config``."
         ),
     )
+    node: str | None = Field(
+        description=(
+            "The node whose config ``observed_config`` captures: the ``dominant_warning`` "
+            "prefix. ``None`` on a ``scoring_error_abort``, which names an error, not a node, "
+            "and captures the whole config."
+        ),
+    )
     degraded_rate: float = Field(
         description="Fraction of scored samples that emitted any pipeline warning.",
     )
@@ -140,9 +147,9 @@ class RuntimeFailure(StrictModel):
         default=0,
         description="Round number that first recorded this failure (dedup key component).",
     )
-    candidate_label: str = Field(
+    changes_description: str = Field(
         default="",
-        description="Label of the originating candidate; informational, not a join key.",
+        description="What the originating candidate changed; informational, not a join key.",
     )
     owner: NurseOwner = Field(
         default=NurseOwner.L1,
@@ -153,6 +160,14 @@ class RuntimeFailure(StrictModel):
             "stamped ``OPERATOR`` so it escalates instead of churning in-loop."
         ),
     )
+
+
+_NON_FATAL_REASONS = frozenset({"hallucinated_node"})
+assert not INVARIANT_REASONS & _NON_FATAL_REASONS
+
+
+def fatal_validation_failures(failures: Iterable[ValidationFailure]) -> list[ValidationFailure]:
+    return [vf for vf in failures if vf.reason not in _NON_FATAL_REASONS]
 
 
 def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
@@ -172,5 +187,6 @@ __all__ = [
     "ValidationFailure",
     "collapse_counts",
     "collapse_reason",
+    "fatal_validation_failures",
     "rf_dedup_key",
 ]

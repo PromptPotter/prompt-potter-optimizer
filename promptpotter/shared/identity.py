@@ -106,17 +106,10 @@ def require_capability(identity: IdentityContext, capability: str, *, subject: s
     logger.warning(
         "%s denied for principal %s (missing %s)",
         subject,
-        acting_principal_id(identity),
+        acting_principal(identity).id,
         capability,
     )
     raise NotFoundError("Not found", code="not_found")
-
-
-def acting_principal_id(identity: IdentityContext) -> str:
-    principal = identity.claims.get("principal")
-    if isinstance(principal, str) and principal:
-        return principal
-    return str(identity.user_id)
 
 
 def display_name(email: str | None) -> str | None:
@@ -124,6 +117,26 @@ def display_name(email: str | None) -> str | None:
         return None
     local = email.split("@", 1)[0]
     return local.replace(".", " ").replace("_", " ").title() or None
+
+
+@dataclass(frozen=True)
+class Principal:
+    """Who issued an act: the id an audit joins on, and the name a surface shows for it."""
+
+    id: str
+    display: str
+
+
+#: The engine acting on its own: a resume's repair, a divergence fork.
+SYSTEM_PRINCIPAL = Principal("system", "system")
+
+
+def acting_principal(identity: IdentityContext) -> Principal:
+    """A delegate acts as ITSELF in its delegator's account, so it is never shown as the owner."""
+    claimed = identity.claims.get("principal")
+    if isinstance(claimed, str) and claimed and claimed != identity.user_id:
+        return Principal(claimed, claimed)
+    return Principal(identity.user_id, display_name(identity.email) or identity.user_id)
 
 
 __all__ = [
@@ -136,14 +149,16 @@ __all__ = [
     "CAMPAIGN_RUN_CAP",
     "CAMPAIGN_STEP_CAP",
     "OWNER_COMMAND_CAPABILITIES",
+    "SYSTEM_PRINCIPAL",
     "TERMINAL_IDENTITY_ID",
     "AccessState",
     "IdentityContext",
     "Issuer",
+    "Principal",
     "SafeName",
     "TenantId",
     "UserId",
-    "acting_principal_id",
+    "acting_principal",
     "capabilities_from_names",
     "default_identity",
     "display_name",

@@ -1,27 +1,23 @@
-"""Two ``new`` calls on one declaration share origin scores under different ids: ``measurements/`` pools them."""
+"""Two ``new`` calls on one measured declaration share a root cycle id under different campaign
+ids: ``measurements/`` pools their origin scores."""
 
 from __future__ import annotations
 
 import secrets
 from typing import TYPE_CHECKING
 
+from promptpotter.application.knobs import measured_address
 from promptpotter.infrastructure.store.layout import dataset_id_prefix
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from promptpotter.domain.campaign import RunDeclaration
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-
-
-def content_hash_of(jsp: JobSearchPoint, dataset: list[Sample]) -> str:
-    return jsp.content_hash(dataset)[:12]
-
-
-def cycle_config_identity(jsp: JobSearchPoint, dataset: list[Sample]) -> str:
-    return f"cycle_{content_hash_of(jsp, dataset)}"
+    from promptpotter.domain.search_point import TaskDecomposition
 
 
 def mint_campaign_id(dataset_name: str) -> str:
@@ -29,12 +25,7 @@ def mint_campaign_id(dataset_name: str) -> str:
     return f"{prefix}__{secrets.token_hex(3)}"
 
 
-def mint_checkin_cycle_id() -> str:
-    """The PERMANENT root id: the ``cycle_chk_`` prefix carries no separator, so it reads as ``root``."""
-    return f"cycle_chk_{secrets.token_hex(6)}"
-
-
-def build_origin_cycle_id(
+def origin_content_hash(
     opt_sp: OptSearchPoint,
     schema: PipelineSchema,
     dataset: list[Sample],
@@ -44,12 +35,16 @@ def build_origin_cycle_id(
 ) -> str:
     """Config-AWARE, as the measurement key is: a connector-config edit yields a DISTINCT origin."""
     jsp = opt_sp.to_job_search_point(schema=schema, framing=framing, demo=demo)
-    return cycle_config_identity(jsp, dataset)
+    return jsp.content_hash(dataset)[:12]
+
+
+def root_cycle_id_of(origin_hash: str, declaration: RunDeclaration) -> str:
+    """Each arm of a head-to-head is its own run; declarations differing only in spend or display are one."""
+    return f"cycle_{stable_hash([origin_hash, measured_address(declaration)], length=12)}"
 
 
 __all__ = [
-    "build_origin_cycle_id",
-    "cycle_config_identity",
     "mint_campaign_id",
-    "mint_checkin_cycle_id",
+    "origin_content_hash",
+    "root_cycle_id_of",
 ]

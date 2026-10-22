@@ -31,7 +31,7 @@ export function ApplyScenarioPanel({
       "apply-scenario",
       () =>
         postSteerFork([{ campaignId, cycleId }], at, "", {
-          // No `origin_prompt_fields`: the lifted round 0 is the origin, and the server refuses the pair.
+          // No `origin_prompts`: the lifted round 0 is the origin, and the server refuses the pair.
           seed: { config_overrides: { scoring: { per_cell: criterion } } },
           keepRounds: true,
         }),

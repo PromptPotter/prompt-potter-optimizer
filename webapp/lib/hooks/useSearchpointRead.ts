@@ -33,16 +33,16 @@ export function useSearchpointRead(
   const { viewedPath } = useWorkspace();
   const { unfiled, doc, loading, failure } = useRound(viewedPath, point?.round ?? null);
 
-  const label = point?.label ?? null;
+  const key = point?.key ?? null;
   const title = point?.title ?? "";
   // Null while filed, so the memo below does not re-run every poll.
   const liveDash = unfiled ? dash : null;
   const cfg = useMemo(() => {
-    if (label === null) return null;
-    if (!unfiled) return candidateObserveConfig(doc, label, title, nodeId);
-    const live = liveCandidateObserveConfig(liveDash, label, nodeId);
+    if (key === null) return null;
+    if (!unfiled) return candidateObserveConfig(doc, key, title, nodeId);
+    const live = liveCandidateObserveConfig(liveDash, key, nodeId);
     return live && { ...live, label: title };
-  }, [label, title, nodeId, unfiled, liveDash, doc]);
+  }, [key, title, nodeId, unfiled, liveDash, doc]);
 
   const row = point?.row ?? null;
   const rowDash = row?.source === "inflight" ? dash : null;
@@ -51,7 +51,7 @@ export function useSearchpointRead(
     () => (row ? samplesForRow(row, rowDash, doc) : NO_SAMPLES),
     // `row` is rebuilt every poll; these four are what a row's samples are keyed on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [row?.source, arm?.round, arm?.candidate_id, arm?.label, rowDash, doc],
+    [row?.source, arm?.round, arm?.key, rowDash, doc],
   );
 
   return { cfg, samples, loading, failure, unfiled };

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.loop_commands import read_arms_file
 from promptpotter.application.commands.payloads import (
     ArchiveCampaignPayload,
     CancelQueuedRunPayload,
@@ -14,13 +15,14 @@ from promptpotter.application.commands.payloads import (
     CleanupEmptyCyclesPayload,
     DeleteCampaignPayload,
     DeleteCyclePayload,
+    DiscardDraftPayload,
     LifecyclePayload,
-    ReplaceDatasetPayload,
     SetCampaignLabelPayload,
     SetConcurrentCyclesPayload,
     StepCyclePayload,
     UnarchiveCampaignPayload,
 )
+from promptpotter.application.cycle_listing import resolve_campaign_id_hint
 from promptpotter.domain.command_kinds import (
     CyclePayload,
     OriginGateDecisionPayload,
@@ -28,16 +30,14 @@ from promptpotter.domain.command_kinds import (
     SkipSearchpointPayload,
     SubmitArmsPayload,
 )
-from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import GateDecision
-from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import (
     cycle_scoped,
     open_stores,
     refused_by,
-    resolve_campaign_hint,
 )
+from promptpotter.presentation.cli.parsers import budget_from_args
 
 logger = logging.getLogger("promptpotter.presentation.cli.lifecycle")
 
@@ -46,10 +46,10 @@ __all__ = [
     "cmd_cancel_queued",
     "cmd_cycle_verb",
     "cmd_delete",
+    "cmd_discard_draft",
     "cmd_origin_gate",
     "cmd_pause",
     "cmd_rename",
-    "cmd_replace_dataset",
     "cmd_set_concurrent_cycles",
     "cmd_set_limits",
     "cmd_step_cycle",
@@ -64,7 +64,7 @@ async def _dispatch(
     **fields: object,
 ) -> tuple[CommandResult | None, str]:
     stores = open_stores(args)
-    campaign_id = resolve_campaign_hint(stores, args.campaign_id)
+    campaign_id = resolve_campaign_id_hint(stores, args.campaign_id)
     refusal = await refused_by(
         CommandDispatcher(stores).dispatch_campaign_command(
             CommandCall(
@@ -122,16 +122,13 @@ async def cmd_pause(args: argparse.Namespace) -> CommandResult:
 
 
 async def cmd_set_limits(args: argparse.Namespace) -> CommandResult:
-    # All-absent goes through too: "at least one ceiling" is validated once, by the dispatcher.
-    rounds_cap: RoundsCap | None = args.rounds_cap
+    # All-absent goes through too: "at least one axis" is validated once, by the payload.
     payload = await cycle_scoped(
         open_stores(args),
         args,
         ChangeRunLimitsPayload,
         "set limits on",
-        ceiling={"usd": args.max_usd, "tokens": args.max_tokens},
-        # Passed only when given: an explicit `None` here is the LIFT, not "untouched".
-        **({} if rounds_cap is None else {"max_rounds": rounds_cap.max_rounds}),
+        budget=budget_from_args(args),
     )
     if isinstance(payload, CommandResult):
         return payload
@@ -143,7 +140,7 @@ async def cmd_set_limits(args: argparse.Namespace) -> CommandResult:
             "campaign_id": campaign_id,
             "cycle_id": cycle_id,
             "status": "budget_set",
-            **payload.model_dump(mode="json", include={"ceiling", "max_rounds"}),
+            **payload.model_dump(mode="json", include={"budget"}),
         },
         human=(
             f"{campaign_id}/{cycle_id} -> ceiling written. It is clamped against your account "
@@ -228,13 +225,10 @@ async def cmd_origin_gate(args: argparse.Namespace) -> CommandResult:
 
 async def cmd_submit_arms(args: argparse.Namespace) -> CommandResult:
     keep: list[int] = args.keep
-    try:
-        arms = [] if args.file is None else read_yaml(Path(args.file))
-        sent = await cycle_scoped(
-            open_stores(args), args, SubmitArmsPayload, "submit arms to", arms=arms, keep=keep
-        )
-    except (OSError, ValueError) as exc:
-        raise SystemExit(f"ERROR: {exc}") from exc
+    arms = [] if args.file is None else read_arms_file(Path(args.file))
+    sent = await cycle_scoped(
+        open_stores(args), args, SubmitArmsPayload, "submit arms to", arms=arms, keep=keep
+    )
     if isinstance(sent, CommandResult):
         return sent
     campaign_id, cycle_id = sent.campaign_id, sent.cycle_id
@@ -253,7 +247,7 @@ async def cmd_submit_arms(args: argparse.Namespace) -> CommandResult:
 
 async def cmd_step_cycle(args: argparse.Namespace) -> CommandResult:
     rounds: int = max(1, args.rounds)
-    sent = await cycle_scoped(open_stores(args), args, StepCyclePayload, "step", rounds=rounds)
+    sent = await cycle_scoped(open_stores(args), args, StepCyclePayload, "step", step_rounds=rounds)
     if isinstance(sent, CommandResult):
         return sent
     campaign_id, cycle_id = sent.campaign_id, sent.cycle_id
@@ -261,24 +255,6 @@ async def cmd_step_cycle(args: argparse.Namespace) -> CommandResult:
     return CommandResult(
         data={"campaign_id": campaign_id, "cycle_id": cycle_id, "rounds": rounds},
         human=f"{campaign_id}/{cycle_id} -> stepping {rounds} round(s), then stopping again.",
-    )
-
-
-async def cmd_replace_dataset(args: argparse.Namespace) -> CommandResult:
-    slug: str = args.slug.strip()
-    stores = open_stores(args)
-    refused = await refused_by(
-        CommandDispatcher(stores).dispatch_replace_dataset(
-            CommandCall(ReplaceDatasetPayload(slug=slug), uuid.uuid4().hex)
-        ),
-        {"slug": slug},
-    )
-    if refused is not None:
-        return refused
-    logger.info("dataset %s -> replaced (versioned + repointed)", slug)
-    return CommandResult(
-        data={"slug": slug, "status": "replaced"},
-        human=f"{slug} -> replaced; the prior cut is versioned and references repointed.",
     )
 
 
@@ -297,6 +273,23 @@ async def cmd_cancel_queued(args: argparse.Namespace) -> CommandResult:
     return CommandResult(
         data={"job_id": job_id, "status": "cancelled"},
         human=f"{job_id} -> left the queue; nothing ran and nothing was spent.",
+    )
+
+
+async def cmd_discard_draft(args: argparse.Namespace) -> CommandResult:
+    draft_id: str = args.draft_id.strip()
+    refused = await refused_by(
+        CommandDispatcher(open_stores(args)).dispatch_workspace_command(
+            CommandCall(DiscardDraftPayload(draft_id=draft_id), uuid.uuid4().hex)
+        ),
+        {"draft_id": draft_id},
+    )
+    if refused is not None:
+        return refused
+    logger.info("check-in %s -> discarded", draft_id)
+    return CommandResult(
+        data={"draft_id": draft_id, "status": "discarded"},
+        human=f"check-in {draft_id} -> discarded; nothing was minted.",
     )
 
 

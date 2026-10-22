@@ -7,12 +7,12 @@ from promptpotter.domain.dashboard_rows import (
     LiveCandidate,
     sample_status,
 )
-from promptpotter.domain.paired_reading import ArmPointer
 from promptpotter.domain.results import (
-    ArmAbility,
     ArmElection,
     ArmReading,
-    candidate_label,
+    Proposed,
+    arm_name,
+    panel_counts,
     panel_cuts,
 )
 from promptpotter.domain.results_health import terminal_node
@@ -20,6 +20,7 @@ from promptpotter.domain.scoring import SampleStatus, ground_truth_text, is_veri
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.projections.live_dashboard.state import RacingBlock
 from promptpotter.shared.composite import inline_short_formula_values
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.projections.live_dashboard.round_buffer import (
@@ -42,7 +43,8 @@ def sample_row(s: WalkedSample) -> DashboardSample:
     graded_by_verifier = is_verifier_graded(ground_truth)
     account = TokenAccount.from_step_tokens(facts.pipeline.step_tokens)
     return DashboardSample(
-        sample_id=facts.sample_id,
+        position=s.position,
+        sample_key=facts.sample_key,
         status=status,
         fitness=grade.fitness,
         terminal_node=terminal_node(facts),
@@ -61,64 +63,39 @@ def sample_row(s: WalkedSample) -> DashboardSample:
 def build_candidate_rows(
     buffer: RoundBuffer, short_formula_template: str | None
 ) -> list[LiveCandidate]:
-    slots = [buffer.candidates[idx] for idx in sorted(buffer.candidates)]
-    cuts = panel_cuts(
-        [
-            (len(slot.samples), slot.expected_samples)
-            if slot.scores is None
-            else (slot.scores.scored_samples, slot.scores.expected_samples)
-            for slot in slots
-        ]
-    )
+    arms = [
+        (key, arm, buffer.fold(key))
+        for key, arm in buffer.arms()
+        if arm.role != MeasurementRole.PARENT
+    ]
+    cuts = panel_cuts([panel_counts(arm, fold) for _, arm, fold in arms])
+    election = buffer.election
     rows: list[LiveCandidate] = []
-    for slot, cut in zip(slots, cuts, strict=True):
-        report = slot.scores
-        label = candidate_label(buffer.round_num, slot.idx)
-        arm = ArmPointer(
-            round=buffer.round_num,
-            label=label,
-            candidate_id=slot.candidate_id or ("" if report is None else report.candidate_id),
+    for (key, arm, fold), cut in zip(arms, cuts, strict=True):
+        reading = ArmReading.of(
+            arm_name(key, arm, buffer.round_num),
+            arm,
+            fold=fold,
+            cut=cut,
+            election=ArmElection.of(
+                key,
+                held=election is not None,
+                selected=() if election is None else election.selected,
+                leading=None if election is None else election.leading,
+                electable=None if election is None else election.electable,
+            ),
+            fit=None if election is None else election.fit.get(key),
         )
-        election = ArmElection.of(
-            label,
-            held=buffer.elected is not None,
-            selected=buffer.elected or (),
-            leading=None,
-            electable=None,
-        )
-        if report is None:
-            reading = ArmReading.walking(
-                arm,
-                fold=slot.running,
-                scored=len(slot.samples),
-                expected=slot.expected_samples,
-                cached=sum(1 for s in slot.samples if s.facts.cached),
-                cut=cut,
-                election=election,
-                changes_description=slot.changes_description,
-            )
-        else:
-            reading = ArmReading.of(
-                arm,
-                report,
-                cut=cut,
-                election=election,
-                changes_description=slot.changes_description or report.changes_description,
-                ability=ArmAbility.of(report.theta, report.theta_se, report.theta_caveat),
-                vs_reference=report.vs_reference,
-            )
-        served = report or slot.running
         rows.append(
             LiveCandidate(
                 reading=reading,
-                prompt_fields=slot.prompt_fields,
-                node_prompt_fields=slot.node_prompt_fields,
-                resolved_pipeline_params=slot.resolved_pipeline_params,
-                pipeline_overlay=slot.pipeline_overlay,
-                samples=[sample_row(s) for s in slot.samples],
-                validation_failures=[] if report is None else report.validation_failures,
+                prompts=arm.individual.prompts,
+                resolved_params=None if isinstance(arm, Proposed) else arm.resolved_params,
+                pipeline_overlay=arm.overlay,
+                samples=[sample_row(s) for s in buffer.samples[key]],
+                validation_failures=arm.validation_failures,
                 composite_fitness_formula_short=inline_short_formula_values(
-                    short_formula_template, {} if served is None else dict(served.evaluators)
+                    short_formula_template, {} if fold is None else dict(fold.evaluators)
                 ),
             )
         )

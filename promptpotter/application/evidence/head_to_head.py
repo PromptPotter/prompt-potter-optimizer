@@ -6,28 +6,36 @@ from typing import TYPE_CHECKING, NamedTuple, Self
 
 from pydantic import ConfigDict, Field, model_validator
 
+from promptpotter.application.campaign_config import over_the_default
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.evidence.subjects import SubjectReading
-from promptpotter.application.jobs.quota import next_launch_ceiling
+from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.bench import bench_members, pair_on_bench, read_bench
-from promptpotter.application.runner.campaign_result import bench_line, line_passes, line_run
+from promptpotter.application.runner.campaign_result import (
+    bench_line,
+    line_passes,
+    line_run,
+    read_line_spend,
+)
 from promptpotter.application.scoring.paired import MemberRows, as_family
 from promptpotter.domain.bench import BENCH_HEADLINE, BenchColumn, BenchScore
 from promptpotter.domain.campaign import (
-    Arm,
-    ArmBudget,
     BenchSet,
     Campaign,
+    Compare,
+    DeterminismClamp,
     HeadToHeadRecord,
+    Purpose,
+    StoppingRule,
     bench_set_of,
     ceiling_meter,
+    worked_seconds,
 )
 from promptpotter.domain.cycle_listing import RunStatus
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import PairedReading, ReadingState
-from promptpotter.domain.spend import MeteredSpend, SpendRollup
+from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.shared.clock import epoch_seconds
@@ -82,6 +90,7 @@ class GuardDifference(StrEnum):
     MODELS = "models"
     ORIGIN = "origin"
     BUDGET = "budget"
+    DEFAULTS = "defaults"
     OPTIMIZER_MODELS = "optimizer_models"
     HUMAN_INTERVENED = "human_intervened"
     ORIGIN_READING = "origin_reading"
@@ -99,7 +108,13 @@ GUARD_DIFFERENCE_INFO: dict[GuardDifference, str] = {
     GuardDifference.SCORER_ID: "Different scorers graded the headlines.",
     GuardDifference.MODELS: "The target pipelines ran different models.",
     GuardDifference.ORIGIN: "The campaigns started from different origins.",
-    GuardDifference.BUDGET: "The campaigns ran under different budgets.",
+    GuardDifference.BUDGET: (
+        "The campaigns declared different budgets, stopping rules or determinism clamps."
+    ),
+    GuardDifference.DEFAULTS: (
+        "The campaigns were declared over different code defaults, so a key neither set ran "
+        "at different values."
+    ),
     GuardDifference.OPTIMIZER_MODELS: (
         "The optimizers called different models, so a gap between two headlines is the model's "
         "as much as the method's."
@@ -149,12 +164,20 @@ class PairGuard(StrictModel):
 
 
 class GuardMember(NamedTuple):
-    arm: Arm | None
+    purpose: Purpose
     # `None` where the line drew no partition: nothing is held out for it to be graded on.
     bench_set: BenchSet | None
-    budget: ArmBudget
+    budget: Budget
+    stopping: StoppingRule
+    determinism: DeterminismClamp | None
+    # `knobs.py::bench_defaults_pin`; the optimizer's defaults are its treatment, apart by design.
+    bench_defaults_pin: str
     optimizer_models: tuple[str, ...]
     human_intervened: bool
+
+
+def _joins(purpose: Purpose, record: HeadToHeadRecord) -> bool:
+    return isinstance(purpose, Compare) and purpose.arm.head_to_head_id == record.head_to_head_id
 
 
 def _apart(values: Sequence[object]) -> bool:
@@ -168,17 +191,22 @@ def pair_guard(
     origin_read_apart: bool,
 ) -> PairGuard:
     bench_sets = [m.bench_set for m in members if m.bench_set is not None]
-    budgets = [m.budget for m in members]
-    if record is not None:
-        bench_sets.append(record.bench_set)
-        budgets.append(record.budget)
+    budgets = [(m.budget, m.stopping, m.determinism) for m in members]
+    # The mint refused an arm off its record's stopping or clamp; only its budget moves after it.
+    off_record = record is not None and any(
+        m.budget != over_the_default(record.shared.budget) for m in members
+    )
     differs_on = [
         GuardDifference(field)
         for field in BenchSet.model_fields
         if _apart([getattr(bench_set, field) for bench_set in bench_sets])
     ]
-    if _apart(budgets):
+    if _apart(budgets) or off_record:
         differs_on.append(GuardDifference.BUDGET)
+    pins = [m.bench_defaults_pin for m in members]
+    on_record = record is None or all(p == record.shared.bench_defaults_pin for p in pins)
+    if _apart(pins) or not on_record:
+        differs_on.append(GuardDifference.DEFAULTS)
     if len({m.optimizer_models for m in members}) > 1:
         differs_on.append(GuardDifference.OPTIMIZER_MODELS)
     if any(m.human_intervened for m in members):
@@ -186,11 +214,7 @@ def pair_guard(
     if origin_read_apart:
         differs_on.append(GuardDifference.ORIGIN_READING)
     controlled = (
-        bool(members)
-        and record is not None
-        and all(
-            m.arm is not None and m.arm.head_to_head_id == record.head_to_head_id for m in members
-        )
+        bool(members) and record is not None and all(_joins(m.purpose, record) for m in members)
     )
     state = (
         GuardState.DIFFERS
@@ -230,10 +254,13 @@ class HeadToHeadRow(StrictModel):
     campaign_id: str
     optimizer: str
     optimizer_models: list[str]
-    arm: Arm | None
+    purpose: Purpose
     guard: PairGuard
-    treatment_digest: str | None
-    budget: ArmBudget
+    treatment_digest: str
+    budget: Budget
+    stopping: StoppingRule
+    determinism: DeterminismClamp | None
+    bench_defaults_pin: str
     spend_metered: MeteredSpend | None
     human_intervened: bool
     status: RunStatus
@@ -297,11 +324,16 @@ class _Graded(NamedTuple):
 
 def _declared(campaigns: list[tuple[Stores, Campaign]]) -> HeadToHeadRecord | None:
     """The record most arms name; a tie goes to the oldest arm's, so *campaigns* is oldest first."""
-    named = [c.arm.head_to_head_id for _, c in campaigns if c.arm is not None]
+    named = [
+        (s, p.arm.head_to_head_id)
+        for s, c in campaigns
+        if isinstance(p := c.declaration.purpose, Compare)
+    ]
     if not named:
         return None
-    h2h_id = max(dict.fromkeys(named), key=named.count)
-    stores = next(s for s, c in campaigns if c.arm is not None and c.arm.head_to_head_id == h2h_id)
+    ids = [h2h_id for _, h2h_id in named]
+    h2h_id = max(dict.fromkeys(ids), key=ids.count)
+    stores = next(s for s, named_id in named if named_id == h2h_id)
     return stores.campaigns.load_head_to_head(h2h_id)
 
 
@@ -320,13 +352,7 @@ def comparison_grader(campaigns: list[tuple[Stores, Campaign]]) -> Grader:
             "formula grades."
         )
     (scorer,) = graders.values()
-    record = _declared(campaigns)
-    if record is not None and scorer.id != record.bench_set.scorer_id:
-        raise ValueError(
-            f"head-to-head {record.head_to_head_id} declares scorer {record.bench_set.scorer_id}; "
-            f"its arm's config grades as {scorer.id}"
-        )
-    return Grader(scorer, record)
+    return Grader(scorer, _declared(campaigns))
 
 
 def head_to_head(
@@ -358,10 +384,7 @@ def head_to_head(
     ungraded_arms = [
         g.row.campaign_id
         for g in read
-        if g.row.bench.graded is None
-        and record is not None
-        and g.row.arm is not None
-        and g.row.arm.head_to_head_id == record.head_to_head_id
+        if g.row.bench.graded is None and record is not None and _joins(g.row.purpose, record)
     ]
     verdict_absent = (
         ReadingState.UNDER_TWO_CELLS
@@ -407,9 +430,12 @@ def head_to_head(
 def _member(g: _Graded) -> GuardMember:
     row = g.row
     return GuardMember(
-        arm=row.arm,
+        purpose=row.purpose,
         bench_set=row.bench_set,
         budget=row.budget,
+        stopping=row.stopping,
+        determinism=row.determinism,
+        bench_defaults_pin=row.bench_defaults_pin,
         optimizer_models=tuple(row.optimizer_models),
         human_intervened=row.human_intervened,
     )
@@ -478,17 +504,6 @@ def _status(stores: Stores, campaign: Campaign) -> RunStatus:
     return RunStatus.of(run.run_phase, None if index is None else index.stop_reason)
 
 
-def _held_budget(stores: Stores, config: CampaignConfig, hop: CycleHop) -> ArmBudget:
-    ceiling = next_launch_ceiling(config, stores=stores, hop=hop)
-    rounds = stores.campaigns.read_run_limits(hop).rounds
-    return config.optimization.arm_budget.model_copy(
-        update={
-            "usd": ceiling.usd,
-            "max_rounds": config.optimization.max_rounds if rounds is None else rounds.max_rounds,
-        }
-    )
-
-
 def _read(
     entry: HeadToHeadEntry,
     campaign: Campaign,
@@ -512,24 +527,26 @@ def _read(
     origin_round = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(0)
     bench_set = (
         None
-        if drawn is None or campaign.root_content_hash is None
+        if drawn is None
         else bench_set_of(
-            dataset_name=campaign.dataset_name,
             dataset_hash=drawn.dataset_hash,
             split=drawn.split,
             bench_rows=drawn.bench_rows,
             scorer_id=scorer.id,
-            origin_params=None if origin_round is None else origin_round.close.pipeline_params,
+            origin_params=None
+            if origin_round is None
+            else origin_round.close.origin.individual.pipeline_params,
             origin=campaign.root_content_hash,
         )
     )
-    cost = None if result is None else result.cost
-    budget = _held_budget(stores, config, hop)
-    # Live off the line's ledgers: the banked cost is the last ended launch's, so a running arm's lags.
-    spend = None if cost is None else line.spend
+    budget = next_launch_budget(config, stores=stores, hop=hop)
+    optimization = config.optimization
+    # Live off the line's ledgers once a launch has ended: before one, nothing is banked to read.
+    cost = None if result is None else read_line_spend(stores, campaign)
+    spend = None if cost is None else cost.spend
     windows = [
         (start, end)
-        for run in ([] if cost is None else cost.launches)
+        for run in ([] if result is None else result.launches)
         if (start := epoch_seconds(run.started_at)) is not None
         and (end := epoch_seconds(run.finished_at)) is not None
     ]
@@ -539,13 +556,16 @@ def _read(
             campaign_id=reading.campaign_id,
             optimizer=config.optimization.optimizer,
             optimizer_models=optimizer_models,
-            arm=campaign.arm,
+            purpose=campaign.declaration.purpose,
             guard=pair_guard(
                 [
                     GuardMember(
-                        arm=campaign.arm,
+                        purpose=campaign.declaration.purpose,
                         bench_set=bench_set,
                         budget=budget,
+                        stopping=optimization.stopping,
+                        determinism=optimization.determinism,
+                        bench_defaults_pin=campaign.declaration.bench_defaults_pin,
                         optimizer_models=tuple(optimizer_models),
                         human_intervened=reading.human_intervened,
                     )
@@ -553,18 +573,21 @@ def _read(
                 record,
                 origin_read_apart=False,
             ),
-            treatment_digest=None if campaign.treatment is None else campaign.treatment.digest,
+            treatment_digest=campaign.treatment.digest,
             budget=budget,
+            stopping=optimization.stopping,
+            determinism=optimization.determinism,
+            bench_defaults_pin=campaign.declaration.bench_defaults_pin,
             spend_metered=None
             if spend is None
-            else MeteredSpend.of(spend, ceiling_meter(campaign.arm)),
+            else MeteredSpend.of(spend, ceiling_meter(campaign.declaration.purpose)),
             human_intervened=reading.human_intervened,
             status=_status(stores, campaign),
             bench=bench,
             bench_set=bench_set,
             spend=spend,
             calls=None if cost is None else cost.calls,
-            worked_s=None if cost is None else cost.worked_s,
+            worked_s=None if result is None else worked_seconds(result.launches),
             rounds=reading.cycle_rounds_scored,
             incurred_usd_ratio=None,
             optimizer_incurred_usd_ratio=None,
@@ -583,19 +606,25 @@ def _pairs(graded: list[_Graded], record: HeadToHeadRecord | None) -> list[Selec
         for b in graded[i + 1 :]:
             if a.selected is None or b.selected is None:
                 continue
-            digest = a.row.treatment_digest
-            if digest is not None and digest == b.row.treatment_digest:
+            if a.row.treatment_digest == b.row.treatment_digest:
                 continue
             read.append((_across(a.selected, b.selected, a.sample_keys), _guard([a, b], record)))
-    tested = iter(
-        as_family(
-            [pair for pair, guard in read if guard.state is not GuardState.DIFFERS],
-            "bench" if record is None else record.head_to_head_id,
+    # ADR-0009 #6: a controlled and an uncontrolled reading never share a family; one that differs is in none.
+    families = {
+        state: iter(
+            as_family(
+                [pair for pair, guard in read if guard.state is state],
+                record.head_to_head_id
+                if record is not None and state is GuardState.CONTROLLED
+                else "bench",
+            )
         )
-    )
+        for state in (GuardState.CONTROLLED, GuardState.UNCONTROLLED)
+    }
     return [
         SelectionPair(
-            reading=pair if guard.state is GuardState.DIFFERS else next(tested), guard=guard
+            reading=pair if guard.state is GuardState.DIFFERS else next(families[guard.state]),
+            guard=guard,
         )
         for pair, guard in read
     ]

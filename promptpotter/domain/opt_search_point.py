@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Self
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator
 
-from promptpotter.domain.pipeline_overlay import fold_output_contract, node_config_items
+from promptpotter.domain.pipeline_overlay import (
+    apply_node_overlay,
+    fold_output_contract,
+    node_config_items,
+    pin_default_routes,
+)
 from promptpotter.domain.search_point import (
-    PROMPT_STRING_FIELDS,
+    SHOTS_KEY,
     JobSearchPoint,
     TaskDecomposition,
     strip_rendered_prompt,
@@ -17,26 +22,25 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint
 
 __all__ = [
     "FEW_SHOT_BLOCK",
     "OPERATOR_SOURCE",
     "ORIGIN_SOURCE",
-    "SHOTS_LOCUS",
     "TEMPLATE_TOKEN_RE",
     "EvidenceGrounding",
     "IndividualLineage",
     "Locus",
+    "NodePrompt",
     "OptSearchPoint",
     "OptimizerPromptTemplate",
-    "PromptTemplate",
     "Variation",
     "VariationMode",
-    "locus_name",
+    "loci_of",
     "node_source",
+    "render_prompt",
 ]
 
 
@@ -49,24 +53,24 @@ FEW_SHOT_BLOCK: Annotated[str, shapes_optimizer_prompt] = "few_shot_block"
 """The rendered shots' key — last in a target render, and in the wire's ``prompt_fields``."""
 
 
-def _check_render_order(cls: type[PromptTemplate]) -> None:
-    """A field the order omits renders nowhere, silently; ``__init_subclass__`` runs this for every subclass."""
-    if sorted(cls.RENDER_ORDER) != sorted(PROMPT_STRING_FIELDS):
-        raise RuntimeError(
-            f"{cls.__name__}.RENDER_ORDER must be a permutation of "
-            f"PROMPT_STRING_FIELDS: an order chooses SEQUENCE, never membership."
-        )
+@shapes_optimizer_prompt
+def render_prompt(fields: Mapping[str, str], order: Sequence[str]) -> str:
+    """A field *order* omits renders nowhere, so the caller refuses one first."""
+    return "\n\n".join(v for f in order if (v := fields.get(f, "")))
 
 
-class PromptTemplate(StrictModel):
-    def __init_subclass__(cls, **kwargs: Any) -> None:
-        super().__init_subclass__(**kwargs)
-        _check_render_order(cls)
+class OptimizerPromptTemplate(StrictModel):
+    """A prompt the optimizer RUNS ON (`dispatch/llm_call`), never one it produces."""
 
-    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = tuple(
-        PROMPT_STRING_FIELDS
+    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
+        "persona",
+        "task_intent",
+        "instruction",
+        "thinking_style",
+        "answer_format",
+        "problem_description",
     )
-    """The TARGET prompt's order sits inside the archive key: moving it re-cuts every banked cell."""
+    """Prefix-cache order: a value that CHANGES between rounds goes in ``problem_description``, last."""
 
     persona: str = ""
     task_intent: str = ""
@@ -76,13 +80,8 @@ class PromptTemplate(StrictModel):
     answer_format: str = ""
 
     @shapes_optimizer_prompt
-    def _ordered_pairs(self, value_of: Callable[[str], str]) -> list[tuple[str, str]]:
-        return [(f, v) for f in type(self).RENDER_ORDER if (v := value_of(f))]
-
-    @shapes_optimizer_prompt
     def render_fields(self) -> list[tuple[str, str]]:
-        """Each field's OWN value — never a campaign's framing, which ``target_fields`` splices."""
-        return self._ordered_pairs(lambda name: getattr(self, name))
+        return [(f, v) for f in self.RENDER_ORDER if (v := getattr(self, f))]
 
     @shapes_optimizer_prompt
     def render(self) -> str:
@@ -97,25 +96,11 @@ class PromptTemplate(StrictModel):
         return text
 
     def prompt_fields(self) -> dict[str, str]:
-        return {f: v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))}
-
-    @classmethod
-    def from_prompt_fields(cls, fields: dict[str, Any], **kwargs: Any) -> Self:
-        return cls(**fields, **kwargs)
+        return {f: v for f in self.RENDER_ORDER if (v := getattr(self, f))}
 
 
-class OptimizerPromptTemplate(PromptTemplate):
-    """A prompt the optimizer RUNS ON (`dispatch/llm_call`), never one it produces."""
-
-    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
-        "persona",
-        "task_intent",
-        "instruction",
-        "thinking_style",
-        "answer_format",
-        "problem_description",
-    )
-    """Prefix-cache order: a value that CHANGES between rounds goes in ``problem_description``, last."""
+# A field the order omits renders nowhere — silently, in a prompt.
+assert sorted(OptimizerPromptTemplate.RENDER_ORDER) == sorted(OptimizerPromptTemplate.model_fields)
 
 
 class EvidenceGrounding(StrictModel):
@@ -130,21 +115,23 @@ class EvidenceGrounding(StrictModel):
 ORIGIN_SOURCE = "origin"
 OPERATOR_SOURCE = "operator"
 
-SHOTS_LOCUS = "shot_ids"
-"""The shots' locus: one ordered list, so its order is part of its value."""
 
-Locus = str | tuple[str, str]
-"""A prompt field by name, ``SHOTS_LOCUS``, or a ``(node, param)`` of the configuration."""
+class Locus(NamedTuple):
+    """``(node, key)``: a prompt field, the node's shots (``SHOTS_KEY``) or a config param — the roster says which."""
+
+    node: str
+    key: str
+
+    @property
+    def name(self) -> str:
+        return f"{self.node}.{self.key}"
+
 
 VariationMode = Literal["deterministic", "llm", "operator"]
 
 
 def node_source(manifest: str, node: str) -> str:
     return f"{manifest}:{node}"
-
-
-def locus_name(locus: Locus) -> str:
-    return locus if isinstance(locus, str) else ".".join(locus)
 
 
 class Variation(StrictModel):
@@ -162,7 +149,7 @@ class Variation(StrictModel):
     )
     loci: list[str] = Field(
         default_factory=list,
-        description="The loci it left different from what it was handed, by `locus_name`: the "
+        description="The loci it left different from what it was handed, as `node.key`: the "
         "first one's against the first parent, a later one's against the variation before it.",
     )
 
@@ -191,31 +178,44 @@ class IndividualLineage(StrictModel):
         return self.variations[0].node if self.variations else ORIGIN_SOURCE
 
 
+class NodePrompt(StrictModel):
+    """One prompt node's loci: its fields by name and its shots, both written only through ``derive`` / ``edited``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    fields: dict[str, str] = Field(
+        default_factory=dict,
+        description="Each field it sets, by the name its node declares; an empty field is absent.",
+    )
+    shots: list[str] = Field(
+        default_factory=list,
+        description="Its few-shot shots in render order, as `Sample.key`s of the campaign's demo "
+        "pool — resolved to each row's query and ground truth only when the prompt renders.",
+    )
+
+    @field_validator("fields")
+    @classmethod
+    def _empty_is_absent(cls, fields: dict[str, str]) -> dict[str, str]:
+        return {f: text for f, text in fields.items() if text}
+
+    def __bool__(self) -> bool:
+        return bool(self.fields or self.shots)
+
+
 def _resolved_config(pipeline_params: dict[str, Any], schema: PipelineSchema) -> dict[str, Any]:
     """Idempotent."""
     pp = strip_rendered_prompt(pipeline_params)
     if schema.active_steps:
         pp["steps"] = list(schema.active_steps)
-    return fold_output_contract(pp, schema)
+    return pin_default_routes(fold_output_contract(pp, schema), schema)
 
 
-def _refuse_unwritable(names: Iterable[str]) -> None:
-    """A configuration locus is written through a whole resolved configuration alone, never by name."""
-    if unknown := [name for name in names if name not in (*PROMPT_STRING_FIELDS, SHOTS_LOCUS)]:
-        raise ValueError(f"an individual is written by prompt field and shots, not {unknown}")
+class OptSearchPoint(StrictModel):
+    """The individual: a value per locus of the roster — prompt fields and shots per prompt node, node config — plus its lineage."""
 
-
-class OptSearchPoint(PromptTemplate):
-    """The individual: a configuration of prompt fields, shots and node config, plus its lineage."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    shot_ids: list[int] = Field(
-        default_factory=list,
-        description=(
-            "Its few-shot shots, in render order, as ids of the campaign's demo pool — resolved "
-            "to each row's query and ground truth only when the target prompt renders."
-        ),
+    prompts: dict[str, NodePrompt] = Field(
+        default_factory=dict,
+        description="Per prompt node, the loci it sets there; a node it sets nothing on is absent.",
     )
     pipeline_params: dict[str, Any] = Field(
         default_factory=dict,
@@ -226,38 +226,59 @@ class OptSearchPoint(PromptTemplate):
     )
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
 
+    @field_validator("prompts")
+    @classmethod
+    def _unset_is_absent(cls, prompts: dict[str, NodePrompt]) -> dict[str, NodePrompt]:
+        return {node: prompt for node, prompt in prompts.items() if prompt}
+
     @property
     def id(self) -> str:
         """The individual IS its content, never stored: one configuration reached twice is one id."""
-        return stable_hash([self.prompt_field_dict(), self.pipeline_params])
+        return stable_hash([self.prompts_dump(), self.pipeline_params])
+
+    def prompts_dump(self) -> dict[str, Any]:
+        return {node: prompt.model_dump(mode="json") for node, prompt in self.prompts.items()}
 
     def configured(self, pipeline_params: dict[str, Any] | None, schema: PipelineSchema) -> Self:
         resolved = _resolved_config(pipeline_params or {}, schema)
         return self.model_copy(update={"pipeline_params": resolved})
 
-    def prompt_field_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = dict(self.prompt_fields())
-        if self.shot_ids:
-            d["shot_ids"] = list(self.shot_ids)
-        return d
+    def prompt(self, node: str) -> NodePrompt:
+        return self.prompts.get(node) or NodePrompt()
 
     @shapes_optimizer_prompt
-    def _render_few_shot_block(self, demo: Sequence[Sample]) -> str:
-        rows = {s.id: s for s in demo}
-        if missing := [i for i in self.shot_ids if i not in rows]:
-            raise ValueError(f"shot ids {missing} are not in the demo pool this render was handed")
-        return "\n".join(
-            f"Input: {rows[i].query}\nOutput: {rows[i].ground_truth}" for i in self.shot_ids
-        )
+    def fields_of(self, node: PipelineNode) -> dict[str, str]:
+        """Its own text on *node*, refusing a field the node does not declare (it would render nowhere)."""
+        fields = self.prompt(node.name).fields
+        if undeclared := sorted(set(fields) - set(node.prompt_fields)):
+            raise ValueError(
+                f"node {node.name!r} declares the prompt fields {list(node.prompt_fields)}; this "
+                f"individual sets {undeclared} there, which would render nowhere"
+            )
+        return fields
 
     @shapes_optimizer_prompt
-    def target_fields(
-        self, framing: TaskDecomposition, *, demo: Sequence[Sample]
+    def render(self, node: PipelineNode) -> str:
+        """Its own fields on *node* — never the campaign's framing nor its shots, which ``scored_prompts`` adds."""
+        return render_prompt(self.fields_of(node), node.prompt_fields)
+
+    @shapes_optimizer_prompt
+    def _render_few_shot_block(self, node: str, demo: Sequence[Sample]) -> str:
+        rows = {s.key: s for s in demo}
+        shots = self.prompt(node).shots
+        if missing := [k for k in shots if k not in rows]:
+            raise ValueError(f"shots {missing} are not in the demo pool this render was handed")
+        return "\n".join(f"Input: {rows[k].query}\nOutput: {rows[k].ground_truth}" for k in shots)
+
+    @shapes_optimizer_prompt
+    def _target_fields(
+        self, node: PipelineNode, framing: TaskDecomposition, *, demo: Sequence[Sample]
     ) -> list[tuple[str, str]]:
-        """What is SCORED, not ``render()``; an EMPTY ``problem_description`` still renders the framing."""
+        """What is SCORED on *node*, in its declared order; an EMPTY ``problem_description`` still renders the framing."""
+        fields = self.fields_of(node)
 
         def value_of(name: str) -> str:
-            v: str = getattr(self, name)
+            v = fields.get(name, "")
             if name != "problem_description":
                 return v
             if not (framing.upstream_context or framing.downstream_context):
@@ -265,14 +286,44 @@ class OptSearchPoint(PromptTemplate):
             parts = (framing.upstream_context, v, framing.downstream_context)
             return "\n\n".join(part for part in parts if part)
 
-        pairs = self._ordered_pairs(value_of)
-        if block := self._render_few_shot_block(demo):
+        pairs = [(f, v) for f in node.prompt_fields if (v := value_of(f))]
+        if block := self._render_few_shot_block(node.name, demo):
             pairs.append((FEW_SHOT_BLOCK, block))
         return pairs
 
     @shapes_optimizer_prompt
-    def render_target(self, framing: TaskDecomposition, *, demo: Sequence[Sample]) -> str:
-        return "\n\n".join(v for _, v in self.target_fields(framing, demo=demo))
+    def render_target(
+        self, node: PipelineNode, framing: TaskDecomposition, *, demo: Sequence[Sample]
+    ) -> str:
+        return "\n\n".join(v for _, v in self._target_fields(node, framing, demo=demo))
+
+    @shapes_optimizer_prompt
+    def scored_prompts(
+        self, schema: PipelineSchema, framing: TaskDecomposition, *, demo: Sequence[Sample]
+    ) -> dict[str, dict[str, str]]:
+        """Per prompt node, what is scored there; the framing splices into the ONE node declaring ``problem_description``."""
+        prompt_nodes = schema.prompt_nodes()
+        if off_roster := sorted(set(self.prompts) - {node.name for node in prompt_nodes}):
+            raise ValueError(
+                f"this individual sets prompt loci on {off_roster}, which the pipeline's chain "
+                f"holds no prompt node for ({[node.name for node in prompt_nodes]})"
+            )
+        framed = [n.name for n in prompt_nodes if "problem_description" in n.prompt_fields]
+        if (framing.upstream_context or framing.downstream_context) and len(framed) != 1:
+            raise ValueError(
+                "the campaign's framing splices into the one prompt node declaring "
+                f"`problem_description`, and this pipeline's chain has {len(framed)}: {framed}"
+            )
+        unframed = TaskDecomposition()
+        return {
+            node.name: dict(pairs)
+            for node in prompt_nodes
+            if (
+                pairs := self._target_fields(
+                    node, framing if [node.name] == framed else unframed, demo=demo
+                )
+            )
+        }
 
     def to_job_search_point(
         self,
@@ -282,83 +333,82 @@ class OptSearchPoint(PromptTemplate):
         demo: Sequence[Sample],
     ) -> JobSearchPoint:
         pp = _resolved_config(self.pipeline_params, schema)
-        prompt_nodes = schema.prompt_node_names()
-        prompt_node = prompt_nodes[0] if prompt_nodes else ""
-        pairs = self.target_fields(framing, demo=demo)
-        rendered = "\n\n".join(v for _, v in pairs)
-        if rendered and prompt_node:
-            pp.setdefault(prompt_node, {})["prompt"] = rendered
-
-        pf: dict[str, Any] = {}
-        if rendered and prompt_node:
-            pf = self.prompt_fields()
-            if block := dict(pairs).get(FEW_SHOT_BLOCK):
-                pf[FEW_SHOT_BLOCK] = block
-
-        return JobSearchPoint(
-            pipeline_params=pp,
-            prompt_fields=pf,
-        )
-
-    def node_prompt_fields(self, sp: JobSearchPoint) -> dict[str, dict[str, Any]]:
-        """Its own fields under the node *sp* renders them into; any other node's ride that node's config."""
-        by_node: dict[str, dict[str, Any]] = {}
-        for node, config in node_config_items(sp.pipeline_params):
-            fields = (
-                self.prompt_field_dict()
-                if "prompt" in config
-                else {f: config[f] for f in PROMPT_STRING_FIELDS if f in config}
-            )
-            if fields:
-                by_node[node] = fields
-        return by_node
+        scored = self.scored_prompts(schema, framing, demo=demo)
+        for node, fields in scored.items():
+            pp.setdefault(node, {})["prompt"] = "\n\n".join(fields.values())
+        return JobSearchPoint(pipeline_params=pp, prompt_fields=scored)
 
     def as_origin(self, *, changes_description: str) -> OptSearchPoint:
         lineage = IndividualLineage(changes_description=changes_description)
         return self.model_copy(update={"lineage": lineage})
 
     def loci(self) -> dict[Locus, Any]:
-        loci: dict[Locus, Any] = {f: getattr(self, f) for f in PROMPT_STRING_FIELDS}
-        loci[SHOTS_LOCUS] = tuple(self.shot_ids)
+        loci: dict[Locus, Any] = {}
+        for node, prompt in self.prompts.items():
+            for field, text in prompt.fields.items():
+                loci[Locus(node, field)] = text
+            if prompt.shots:
+                loci[Locus(node, SHOTS_KEY)] = tuple(prompt.shots)
         for node, config in node_config_items(self.pipeline_params):
             for param, value in config.items():
-                loci[(node, param)] = value
+                if (locus := Locus(node, param)) in loci:
+                    raise ValueError(f"{locus.name} is a prompt locus, and the config sets it too")
+                loci[locus] = value
         return loci
 
     def loci_moved_from(self, before: OptSearchPoint) -> list[str]:
         mine, theirs = self.loci(), before.loci()
         return [
-            locus_name(locus)
+            locus.name
             for locus in dict.fromkeys((*theirs, *mine))
             if (locus in mine, mine.get(locus)) != (locus in theirs, theirs.get(locus))
         ]
+
+    def _written(self, writes: Mapping[Locus, Any], schema: PipelineSchema) -> OptSearchPoint:
+        """A config locus is laid on as an overlay is, so a new model drops the old one's route."""
+        fields = {node: dict(prompt.fields) for node, prompt in self.prompts.items()}
+        shots = {node: list(prompt.shots) for node, prompt in self.prompts.items()}
+        overlay: dict[str, dict[str, Any]] = {}
+        for locus, value in writes.items():
+            match schema.locus_kind(*locus):
+                case "prompt":
+                    fields.setdefault(locus.node, {})[locus.key] = value
+                case "shots":
+                    shots[locus.node] = list(value)
+                case "config":
+                    overlay.setdefault(locus.node, {})[locus.key] = value
+        written = OptSearchPoint(
+            prompts={
+                node: NodePrompt(fields=fields.get(node, {}), shots=shots.get(node, []))
+                for node in sorted(fields.keys() | shots.keys())
+            },
+            pipeline_params=self.pipeline_params,
+            lineage=self.lineage,
+        )
+        if not overlay:
+            return written
+        return written.configured(apply_node_overlay(self.pipeline_params, overlay, schema), schema)
 
     @classmethod
     def derive(
         cls,
         parents: Sequence[OptSearchPoint],
         *,
+        schema: PipelineSchema,
         variation: Variation,
-        take: Mapping[str, int] | None = None,
-        config: tuple[dict[str, Any], PipelineSchema] | None = None,
+        take: Mapping[Locus, int] | None = None,
+        changes: Mapping[Locus, Any] | None = None,
         changes_description: str = "",
         evidence_grounding: EvidenceGrounding | None = None,
-        **changes: Any,
     ) -> OptSearchPoint:
-        """*take* maps a locus to its donor's position in *parents*; a configuration locus comes from *config* alone."""
+        """*take* maps a locus to its donor's position in *parents*; a donor that sets none empties it."""
         base = parents[0]
-        values = base.loci()
-        _refuse_unwritable((*(take or {}), *changes))
+        writes: dict[Locus, Any] = {}
         for locus, donor in (take or {}).items():
-            values[locus] = parents[donor].loci()[locus]
-        values.update(changes)
-        child = cls(
-            **{f: values[f] for f in PROMPT_STRING_FIELDS},
-            shot_ids=list(values[SHOTS_LOCUS]),
-            pipeline_params=base.pipeline_params,
-        )
-        if config is not None:
-            child = child.configured(*config)
+            held = parents[donor].loci()
+            writes[locus] = held[locus] if locus in held else _unset(locus, schema)
+        writes.update(changes or {})
+        child = base._written(writes, schema)
         lineage = IndividualLineage(
             parent_ids=[p.id for p in parents],
             changes_description=changes_description,
@@ -371,11 +421,11 @@ class OptSearchPoint(PromptTemplate):
         self,
         variation: Variation,
         *,
+        schema: PipelineSchema,
+        changes: Mapping[Locus, Any],
         changes_description: str | None = None,
-        **changes: Any,
     ) -> OptSearchPoint:
-        _refuse_unwritable(changes)
-        after = self.model_copy(update=changes)
+        after = self._written(changes, schema)
         written = after.loci_moved_from(self)
         update: dict[str, Any] = {}
         if written:
@@ -386,4 +436,18 @@ class OptSearchPoint(PromptTemplate):
         return after.model_copy(update={"lineage": self.lineage.model_copy(update=update)})
 
 
-_check_render_order(PromptTemplate)
+def _unset(locus: Locus, schema: PipelineSchema) -> Any:
+    match schema.locus_kind(*locus):
+        case "prompt":
+            return ""
+        case "shots":
+            return ()
+        case "config":
+            raise KeyError(f"no donor value for {locus.name}: a config locus has no empty value")
+
+
+def loci_of(edits: Mapping[str, Mapping[str, Any]]) -> dict[Locus, Any]:
+    """``{node: {key: value}}`` — the nesting every node-keyed edit arrives in — as loci."""
+    return {
+        Locus(node, key): value for node, keyed in edits.items() for key, value in keyed.items()
+    }

@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import random
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from pydantic import Field
@@ -11,16 +10,18 @@ from pydantic import Field
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.capo import prompts
-from promptpotter.application.optimizers.capo.state import CAPO_MANIFEST, CapoRoundState
+from promptpotter.application.optimizers.capo.state import CAPO_MANIFEST, CapoObjective
 from promptpotter.application.optimizers.descriptors import prompt_chars
 from promptpotter.application.optimizers.paper_templates import RewriteKnobs, rewrite, rewritten
-from promptpotter.application.scoring.candidate_report import fatal_validation_failures
 from promptpotter.config.paths import optimizers_root
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import ArmOutcome, CandidateProposal, OptimizerFact
+from promptpotter.domain.pool import DemoPool
+from promptpotter.domain.results import Cut, Elimination, OptimizerFact, Proposal
 from promptpotter.domain.run_records import CheckpointKind
-from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES
+from promptpotter.domain.scoring import NO_CELLS
+from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.statistics import paired_mean_t
@@ -34,18 +35,20 @@ if TYPE_CHECKING:
         ReplayContext,
         Replayer,
     )
-    from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
-        BankedState,
         CatchUpFn,
-        Measured,
+        Draw,
+        MeasuredRound,
         Panel,
+        PromptArity,
         Proposals,
         Selection,
     )
     from promptpotter.application.scoring.query_loop import Walk
+    from promptpotter.domain.opt_search_point import VariationMode
+    from promptpotter.domain.optimizer_state import StatePart
+    from promptpotter.domain.pool import Pool
     from promptpotter.domain.results import DisplayMetric, RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
@@ -79,8 +82,8 @@ class FewShotKnobs(StrictModel):
 
 
 def mutate_shots(
-    shots: Sequence[int], pool: Sequence[int], *, k_max: int, rng: random.Random
-) -> list[int]:
+    shots: Sequence[str], pool: Sequence[str], *, k_max: int, rng: random.Random
+) -> list[str]:
     out = list(shots)
     move = rng.randrange(3)
     unused = [i for i in pool if i not in out]
@@ -92,7 +95,7 @@ def mutate_shots(
     return out
 
 
-def cross_shots(parents: Sequence[Sequence[int]], *, rng: random.Random) -> list[int]:
+def cross_shots(parents: Sequence[Sequence[str]], *, rng: random.Random) -> list[str]:
     union = list(dict.fromkeys(i for shots in parents for i in shots))
     n = sum(len(shots) for shots in parents) // len(parents)
     return rng.sample(union, min(n, len(union)))
@@ -101,21 +104,33 @@ def cross_shots(parents: Sequence[Sequence[int]], *, rng: random.Random) -> list
 class FewShot:
     name: ClassVar[str] = "few_shot"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
+    prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = False
+    variation_mode: ClassVar[VariationMode] = "deterministic"
     knobs: ClassVar[type[StrictModel]] = FewShotKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = {DemoPool: nodes.CountKnob(FewShotKnobs, "k_max")}
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
 
     async def propose(
         self, ctx: NodeContext[FewShotKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
         k_max = ctx.knobs.k_max
-        pool = [s.id for s in ctx.demo_pool]
+        pool = [s.key for s in ctx.drawn(DemoPool)]
+        node = ctx.prompt_node.name
         return nodes.Proposals(
             [
                 ctx.edit(
                     proposal,
-                    shot_ids=mutate_shots(
-                        proposal.opt_sp.shot_ids, pool, k_max=k_max, rng=ctx.rng(f":{i}")
-                    ),
+                    prompt_loci={
+                        Locus(node, SHOTS_KEY): mutate_shots(
+                            proposal.individual.prompt(node).shots,
+                            pool,
+                            k_max=k_max,
+                            rng=ctx.rng(f":{i}"),
+                        )
+                    },
                 )
                 for i, proposal in enumerate(proposals.proposals)
             ]
@@ -130,7 +145,7 @@ class BlocksKnobs(StrictModel):
     )
     max_blocks: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         ge=1,
-        description="The most blocks a round's panel holds — fewer where the search pool cannot "
+        description="The most blocks a round's panel holds — fewer where the search split cannot "
         "fill them.",
     )
 
@@ -140,19 +155,23 @@ class Blocks:
 
     name: ClassVar[str] = "blocks"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = BlocksKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     size_knob: ClassVar[str | None] = None
 
-    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
-        knobs = selected.knobs_of(self.name, BlocksKnobs)
-        return min(knobs.max_blocks, pool // knobs.block_size) * knobs.block_size
+    def round_cells(self, knobs: BlocksKnobs, search: int) -> int:
+        return min(knobs.max_blocks, search // knobs.block_size) * knobs.block_size
 
     def draw(self, ctx: NodeContext[BlocksKnobs], pool: list[Sample]) -> Panel:
         knobs = ctx.knobs
         n_blocks = min(knobs.max_blocks, len(pool) // knobs.block_size)
         if n_blocks == 0:
             raise ValueError(
-                f"blocks: the search pool holds {len(pool)} rows, fewer than one block of "
+                f"blocks: the search split holds {len(pool)} rows, fewer than one block of "
                 f"{knobs.block_size}"
             )
         cells = pool[: n_blocks * knobs.block_size]
@@ -167,46 +186,9 @@ class PairedTKnobs(StrictModel):
         "scores above this one on the cells both measured. Larger → more arms read as beaten → "
         "earlier cuts.",
     )
-    length_penalty: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.STOPPING)] = (
-        Field(
-            ge=0.0,
-            description="The paper's gamma: what CAPO's objective charges per cell for the "
-            "prompt's length over the longest initial prompt's. The race and the population both "
-            "rank on that objective; the campaign's formula still scores every arm.",
-        )
-    )
 
 
-@dataclass(frozen=True)
-class _Objective:
-    """Unclamped, so a long prompt can take a cell below zero."""
-
-    length_penalty: float
-    length_norm: int
-
-    def of(self, cell: GradedCell, chars: int) -> float:
-        fitness = float(ROW_GRADES["fitness"].read(cell))
-        return fitness - self.length_penalty * chars / self.length_norm
-
-
-def _objective(ctx: NodeContext[Any]) -> _Objective:
-    working = nodes.state_as(ctx, CapoRoundState)
-    length_norm = working.payload.length_norm
-    if length_norm is None:
-        # First asked by round 1's race, when the population is still the initial one.
-        if not ctx.population:
-            raise ValueError(
-                "CAPO's objective divides by the longest initial prompt's length, and no initial "
-                "population was generated before its race"
-            )
-        length_norm = max(
-            len(ind.render_target(ctx.framing, demo=ctx.demo_pool)) for ind in ctx.population
-        )
-        working.payload = CapoRoundState(length_norm=length_norm)
-    return _Objective(ctx.knobs_of(PairedT.name, PairedTKnobs).length_penalty, length_norm)
-
-
-def _cell_objectives(cells: Sequence[GradedCell], objective: _Objective) -> dict[str, float]:
+def _cell_objectives(cells: Sequence[GradedCell], objective: CapoObjective) -> dict[str, float]:
     graded = [cell for cell in cells if cell.scored]
     if not graded:
         return {}
@@ -219,26 +201,26 @@ def _cell_objectives(cells: Sequence[GradedCell], objective: _Objective) -> dict
 
 
 def _rank_survivors(
-    survivors: Sequence[str],
-    rows: Mapping[str, CellSheet],
+    survivors: Sequence[ArmKey],
+    rows: Mapping[ArmKey, CellSheet],
     *,
     size: int,
-    objective: _Objective,
-) -> list[str]:
-    readings = {cid: _cell_objectives(rows[cid].cells, objective) for cid in survivors}
+    objective: CapoObjective,
+) -> list[ArmKey]:
+    readings = {key: _cell_objectives(rows[key].cells, objective) for key in survivors}
     shared = set.intersection(*(set(r) for r in readings.values())) if readings else set()
 
-    def mean(cid: str) -> float:
-        return sum(readings[cid][s] for s in shared) / len(shared) if shared else 0.0
+    def mean(key: ArmKey) -> float:
+        return sum(readings[key][s] for s in shared) / len(shared) if shared else 0.0
 
     return sorted(survivors, key=mean, reverse=True)[:size]
 
 
 def _readings(
-    arm: Mapping[str, float], rivals: Mapping[str, Mapping[str, float]]
-) -> dict[str, tuple[float, int]]:
+    arm: Mapping[str, float], rivals: Mapping[ArmKey, Mapping[str, float]]
+) -> dict[ArmKey, tuple[float, int]]:
     """A rival sharing under two cells with *arm* was not tested, and is absent from the result."""
-    out: dict[str, tuple[float, int]] = {}
+    out: dict[ArmKey, tuple[float, int]] = {}
     for pid, rival in rivals.items():
         shared = [sid for sid in arm if sid in rival]
         _, _, _, p, n = paired_mean_t(
@@ -264,7 +246,7 @@ class PairedTRace(nodes.NoCatchUps):
         survivors: int,
         block_size: int,
         n_cells: int,
-        objective: _Objective,
+        objective: CapoObjective,
     ) -> None:
         self._ctx = ctx
         self.node = ctx.node
@@ -273,9 +255,7 @@ class PairedTRace(nodes.NoCatchUps):
         self._objective = objective
         self._block_size = block_size
         self._n_cells = n_cells
-        self._arms: dict[int, str] = {}
-        self._n_arms = 0
-        self._racing: set[int] = set()
+        self._racing: set[ArmKey] = set()
 
     @property
     def n_priors(self) -> int:
@@ -289,19 +269,18 @@ class PairedTRace(nodes.NoCatchUps):
     def block_size(self) -> int:
         return self._block_size
 
-    def rule(self, ahead: Sequence[tuple[str, Walk | None]]) -> None:
+    def rule(self, ahead: Sequence[tuple[ArmKey, Walk | None]]) -> None:
         return None
 
-    def open_turn(self, candidate_id: str, idx: int, n: int) -> None:
-        self._arms[idx] = candidate_id
-        self._n_arms = n
-        self._racing.add(idx)
+    def open_turn(self, key: ArmKey) -> None:
+        self._racing.add(key)
 
-    def close(self, rows: Mapping[int, Sequence[GradedCell]]) -> dict[int, StopSignal]:
-        readings = {self._arms[i]: _cell_objectives(r, self._objective) for i, r in rows.items()}
-        stops: dict[int, StopSignal] = {}
-        for i, arm_rows in rows.items():
-            cid = self._arms[i]
+    def close(self, rows: Mapping[ArmKey, Sequence[GradedCell]]) -> dict[ArmKey, StopSignal]:
+        readings: dict[ArmKey, dict[str, float]] = {
+            cid: _cell_objectives(r, self._objective) for cid, r in rows.items()
+        }
+        stops: dict[ArmKey, StopSignal] = {}
+        for cid, arm_rows in rows.items():
             rivals = {pid: reading for pid, reading in readings.items() if pid != cid}
             tested = _readings(readings[cid], rivals)
             if not tested:
@@ -312,15 +291,13 @@ class PairedTRace(nodes.NoCatchUps):
             }
             p_best = min(p for p, _ in tested.values())
             snapshot = nodes.RaceSnapshot(p_best, cid, len(arm_rows), breakdown, True)
-            self._ctx.callbacks.on_race_standing(
-                self.node, self._ctx.round_num, i, self._n_arms, snapshot
-            )
+            self._ctx.callbacks.on_race_standing(self.node, self._ctx.round_num, snapshot)
             # Uncorrected for the multiple tests, as CAPO races: a correction makes cuts rarer.
             beaten_by = sorted(pid for pid, (p, _) in tested.items() if p < self._alpha)
             if len(beaten_by) >= self._survivors:
-                stops[i] = StopSignal(
+                stops[cid] = StopSignal(
                     self.node,
-                    ArmOutcome.ELIMINATED,
+                    "eliminated",
                     {
                         "gate": self.gate,
                         "queries_scored": len(arm_rows),
@@ -331,37 +308,37 @@ class PairedTRace(nodes.NoCatchUps):
                         "paired_breakdown": breakdown,
                     },
                 )
-        left = [i for i in rows if i not in stops]
+        left = [cid for cid in rows if cid not in stops]
         if len(left) <= self._survivors:
-            for i in left:
-                if len(rows[i]) < self._n_cells:
-                    stops[i] = StopSignal(
+            for cid in left:
+                if len(rows[cid]) < self._n_cells:
+                    stops[cid] = StopSignal(
                         self.node,
-                        ArmOutcome.LOCKED_IN,
+                        "locked_in",
                         {
                             "gate": self.settled,
-                            "queries_scored": len(rows[i]),
+                            "queries_scored": len(rows[cid]),
                             "total_samples": self._n_cells,
-                            "raced_against": sorted(self._arms[j] for j in rows if j != i),
+                            "raced_against": sorted(pid for pid in rows if pid != cid),
                         },
                     )
-        self._racing = set(left) - set(stops)
+        self._racing = {cid for cid in left if cid not in stops}
         return stops
 
     def judge(
         self,
         signal: StopSignal | None,
         *,
-        candidate_id: str,
+        key: ArmKey,
         results: Sequence[GradedCell],
-        labels: dict[str, str],
-    ) -> nodes.EliminationReading | None:
+        labels: Mapping[ArmKey, str],
+    ) -> Elimination | None:
         if signal is None or signal.check_name != self.node:
             return None
         cr = signal.check_result
 
-        def walk_order(pids: list[str]) -> list[str]:
-            return [label for pid, label in labels.items() if pid in pids]
+        def walk_order(keys: list[ArmKey]) -> list[ArmKey]:
+            return [key for key in labels if key in keys]
 
         context: dict[str, Any] = {
             "gate": cr["gate"],
@@ -375,14 +352,14 @@ class PairedTRace(nodes.NoCatchUps):
             f"at block {context['block']}/{context['blocks']} "
             f"(q{cr['queries_scored']}/{cr['total_samples']})"
         )
-        if signal.outcome is not ArmOutcome.ELIMINATED:
+        if signal.outcome != "eliminated":
             reason = f"settled {where}: {self._survivors} or fewer left racing"
-            return nodes.EliminationReading(reason=reason, context=context)
+            return Elimination(reason=reason, context=context)
         # The rivals are named, not their rows: a replay reads every arm off the rescored round.
         self._ctx.decide(
             CapoCheckpointKind.PAIRED_T_CUT,
             {
-                "candidate_id": candidate_id,
+                "arm": key,
                 "round_num": self._ctx.round_num,
                 "queries_scored": cr["queries_scored"],
                 "alpha": self._alpha,
@@ -396,20 +373,29 @@ class PairedTRace(nodes.NoCatchUps):
         )
         context["outscored_by"] = walk_order(cr["outscored_by"])
         outscored, raced = context["outscored_by"], context["raced_against"]
-        reason = f"outscored {where} by {len(outscored)} of {len(raced)}: {_labels(outscored)}"
-        return nodes.EliminationReading(reason=reason, context=context)
+        named = _labels([labels[k] for k in outscored])
+        reason = f"outscored {where} by {len(outscored)} of {len(raced)}: {named}"
+        return Elimination(reason=reason, context=context)
 
-    def admit(self, candidate_id: str, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
+    def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
         return None
 
 
 class PairedT:
     name: ClassVar[str] = "paired_t"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = PairedTKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset({CapoObjective})
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
     # Cut once μ others are significantly better: it can no longer be among the μ kept.
     stop_disqualifies: ClassVar[bool] = True
+
+    @property
+    def consults(self) -> frozenset[type]:
+        return frozenset({PopulationSelector})
 
     def race(
         self,
@@ -420,10 +406,10 @@ class PairedT:
     ) -> PairedTRace:
         return PairedTRace(
             ctx,
-            survivors=ctx.knobs_of(PopulationSelector.name, PopulationKnobs).size,
+            survivors=ctx.knobs_of(PopulationKnobs).size,
             block_size=panel.block_size,
             n_cells=len(panel.order),
-            objective=_objective(ctx),
+            objective=ctx.slice(CapoObjective),
         )
 
 
@@ -434,13 +420,29 @@ class CapoInitKnobs(RewriteKnobs):
     k_max: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         ge=0, description="The most demo-pool shots an initial individual is given."
     )
+    length_penalty: Annotated[float, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.STOPPING)] = (
+        Field(
+            ge=0.0,
+            description="The paper's gamma: what CAPO's objective charges per cell for the "
+            "prompt's length over the longest initial prompt's. The race and the population both "
+            "rank on that objective; the campaign's formula still scores every arm.",
+        )
+    )
 
 
 class CapoInit:
+    """Draws the initial population, which sets the objective every later race and selection ranks on."""
+
     name: ClassVar[str] = "capo_init"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = True
+    variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = CapoInitKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset({CapoObjective})
+    draws: ClassVar[Mapping[type[Pool], Draw]] = {DemoPool: nodes.CountKnob(CapoInitKnobs, "k_max")}
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
 
     async def propose(
         self, ctx: NodeContext[CapoInitKnobs], panel: Panel, proposals: Proposals
@@ -452,20 +454,36 @@ class CapoInit:
         if not isinstance(listed, list) or not all(isinstance(s, str) for s in listed):
             raise ValueError(f"{self.name} answered no array of instructions: {raw[:300]!r}")
         instructions = [s.strip() for s in listed if s.strip()]
-        pool = [s.id for s in ctx.demo_pool]
+        pool = [s.key for s in ctx.drawn(DemoPool)]
+        node = ctx.prompt_node
+        shots = Locus(node.name, SHOTS_KEY)
         rng = ctx.rng()
         drawn = rng.sample(instructions, min(knobs.size, len(instructions)))
-        return nodes.Proposals(
+        initial = nodes.Proposals(
             [
                 ctx.child(
                     [ctx.origin],
+                    prompt_loci={
+                        **rewritten(ctx, node, text),
+                        shots: rng.sample(pool, min(rng.randint(0, knobs.k_max), len(pool))),
+                    },
                     changes_description=f"initial instruction {n + 1}",
-                    **rewritten(text, knobs.rewrites),
-                    shot_ids=rng.sample(pool, min(rng.randint(0, knobs.k_max), len(pool))),
                 )
                 for n, text in enumerate(drawn)
             ]
         )
+        live = [p.individual for p in initial.proposals if not p.refused]
+        if not live:
+            raise ValueError(f"{self.name} drew no initial individual that passed validation")
+        ctx.put(
+            CapoObjective(
+                length_penalty=knobs.length_penalty,
+                length_norm=max(
+                    len(ind.render_target(node, ctx.framing, demo=ctx.demo_split)) for ind in live
+                ),
+            )
+        )
+        return initial
 
 
 class MatingKnobs(StrictModel):
@@ -481,8 +499,14 @@ class Mating:
 
     name: ClassVar[str] = "mating"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
+    prompt_arity: ClassVar[PromptArity] = "none"
     opens: ClassVar[bool] = True
+    variation_mode: ClassVar[VariationMode] = "deterministic"
     knobs: ClassVar[type[StrictModel]] = MatingKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
 
     async def propose(
         self, ctx: NodeContext[MatingKnobs], panel: Panel, proposals: Proposals
@@ -502,7 +526,7 @@ class Mating:
 
 def _mated(ctx: NodeContext[Any], proposals: Proposals) -> list[list[OptSearchPoint]]:
     carried = {individual.id: individual for individual in ctx.population}
-    return [[carried[pid] for pid in p.opt_sp.lineage.parent_ids] for p in proposals.proposals]
+    return [[carried[pid] for pid in p.individual.lineage.parent_ids] for p in proposals.proposals]
 
 
 class CapoCrossoverKnobs(RewriteKnobs):
@@ -512,8 +536,14 @@ class CapoCrossoverKnobs(RewriteKnobs):
 class CapoCrossover:
     name: ClassVar[str] = "capo_crossover"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = False
+    variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = CapoCrossoverKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
 
     async def propose(
         self, ctx: NodeContext[CapoCrossoverKnobs], panel: Panel, proposals: Proposals
@@ -536,16 +566,30 @@ class ShotCrossoverKnobs(StrictModel):
 class ShotCrossover:
     name: ClassVar[str] = "shot_crossover"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
+    prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = False
+    variation_mode: ClassVar[VariationMode] = "deterministic"
     knobs: ClassVar[type[StrictModel]] = ShotCrossoverKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
 
     async def propose(
         self, ctx: NodeContext[ShotCrossoverKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
         rng = ctx.rng()
+        node = ctx.prompt_node.name
         return nodes.Proposals(
             [
-                ctx.edit(p, shot_ids=cross_shots([m.shot_ids for m in mates], rng=rng))
+                ctx.edit(
+                    p,
+                    prompt_loci={
+                        Locus(node, SHOTS_KEY): cross_shots(
+                            [m.prompt(node).shots for m in mates], rng=rng
+                        )
+                    },
+                )
                 for p, mates in zip(proposals.proposals, _mated(ctx, proposals), strict=True)
             ]
         )
@@ -560,23 +604,25 @@ class CapoMutate:
 
     name: ClassVar[str] = "capo_mutate"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = False
+    variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = CapoMutateKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
 
     async def propose(
         self, ctx: NodeContext[CapoMutateKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
-        live = [
-            i
-            for i, p in enumerate(proposals.proposals)
-            if not fatal_validation_failures(p.validation_failures)
-        ]
+        live = [i for i, p in enumerate(proposals.proposals) if not p.refused]
         answers = await ctx.ask_each(
             {i: prompts.mutation_prompt(ctx, proposals.individuals[i]) for i in live}
         )
         mutated = list(proposals.proposals)
         for i, raw in zip(live, answers, strict=True):
-            was = mutated[i].opt_sp.lineage.changes_description
+            was = mutated[i].individual.lineage.changes_description
             mutated[i] = rewrite(ctx, mutated[i], raw, f"{was}, rephrased")
         return nodes.Proposals(mutated)
 
@@ -590,15 +636,21 @@ class PopulationRejoin:
 
     name: ClassVar[str] = "population_rejoin"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
+    prompt_arity: ClassVar[PromptArity] = "none"
     opens: ClassVar[bool] = False
+    variation_mode: ClassVar[VariationMode] = "deterministic"
     knobs: ClassVar[type[StrictModel]] = PopulationRejoinKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
 
     async def propose(
         self, ctx: NodeContext[PopulationRejoinKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
         return nodes.Proposals(
             [
-                *(CandidateProposal(opt_sp=m) for m in ctx.population),
+                *(Proposal(individual=m) for m in ctx.population),
                 *proposals.proposals,
             ]
         )
@@ -616,7 +668,12 @@ class PopulationKnobs(StrictModel):
 class PopulationSelector:
     name: ClassVar[str] = "population"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = PopulationKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset({CapoObjective})
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     elects_on: ClassVar[DisplayMetric] = "accuracy"
     elects_partial: ClassVar[bool] = True
 
@@ -624,19 +681,20 @@ class PopulationSelector:
         self,
         ctx: NodeContext[PopulationKnobs],
         panel: Panel,
-        rows: Mapping[str, CellSheet],
+        rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         # The incumbent's reading is the cells it walked as a member; round 1's origin reads block one.
-        walked = {cell.sample_id for cell in rows.get(ctx.parent.id, NO_CELLS)}
-        return [s for s in panel.cells if s.id in walked] or panel.cells[: panel.block_size]
+        walked = {cell.key for cell in rows.get(ArmKey(ctx.parent.id), NO_CELLS)}
+        return [s for s in panel.cells if s.key in walked] or panel.cells[: panel.block_size]
 
     def select(
-        self, ctx: NodeContext[PopulationKnobs], measured: Measured, proposals: Proposals
+        self, ctx: NodeContext[PopulationKnobs], measured: MeasuredRound, proposals: Proposals
     ) -> Selection:
         size = ctx.knobs.size
-        survivors = [ind.id for ind in measured.electable]
-        objective = _objective(ctx)
-        kept = _rank_survivors(survivors, measured.rows, size=size, objective=objective)
+        survivors = measured.electable
+        objective = ctx.slice(CapoObjective)
+        rows = {key: measured.rows[key] for key in survivors}
+        kept = _rank_survivors(survivors, rows, size=size, objective=objective)
         ctx.decide(
             CapoCheckpointKind.POPULATION_KEPT,
             {
@@ -648,25 +706,21 @@ class PopulationSelector:
             },
             kept,
         )
-        by_id = {ind.id: ind for ind in measured.electable}
-        labels = {cs.candidate_id: cs.label for cs in measured.scores}
-        best = kept[0] if kept else ""
-        selected_id = best if best and best != ctx.parent.id else ""
+        best = kept[0] if kept else None
         if kept:
-            ctx.keep([by_id[cid] for cid in kept])
+            ctx.keep([measured.arms[key].individual for key in kept])
         carried = ctx.population
         verdict = (
             f"kept {len(kept)} of {len(survivors)} surviving arms (μ {size}) by mean objective "
             f"(length penalty {objective.length_penalty}) on their shared cells; "
-            f"best {labels[best]}"
-            if kept
+            f"best {measured.labels[best]}"
+            if best is not None
             else f"no arm survived the race; the population of {len(carried)} stands"
         )
         return nodes.Selection(
-            selected_id=selected_id,
+            selected=best if best is not None and best != ctx.parent.id else None,
             # The race's best survivor, which the incumbent may be: it races as an arm.
-            leading_id=best,
-            scores=list(measured.scores),
+            leading=best,
             verdict_reason=verdict,
         )
 
@@ -674,13 +728,15 @@ class PopulationSelector:
 def _replay_paired_t_cut(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
 ) -> bool:
-    rows = ctx.round_data.all_candidate_results
+    rows = ctx.round_data.rows
     objective = _recorded_objective(inputs_ref)
     arm = _cell_objectives(
-        rows[inputs_ref["candidate_id"]].cells[: int(inputs_ref["queries_scored"])], objective
+        rows(ArmKey(inputs_ref["arm"])).cells[: int(inputs_ref["queries_scored"])],
+        objective,
     )
     rivals = {
-        pid: _cell_objectives(rows[pid].cells, objective) for pid in inputs_ref["raced_against"]
+        ArmKey(pid): _cell_objectives(rows(ArmKey(pid)).cells, objective)
+        for pid in inputs_ref["raced_against"]
     }
     alpha = float(inputs_ref["alpha"])
     beaten = sum(1 for p, _ in _readings(arm, rivals).values() if p < alpha)
@@ -689,17 +745,21 @@ def _replay_paired_t_cut(
 
 def _replay_population_kept(
     ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
-) -> list[str]:
+) -> list[ArmKey]:
+    survivors = [ArmKey(str(key)) for key in inputs_ref["survivors"]]
     return _rank_survivors(
-        list(inputs_ref["survivors"]),
-        ctx.round_data.all_candidate_results,
+        survivors,
+        {key: ctx.round_data.rows(key) for key in survivors},
         size=int(inputs_ref["size"]),
         objective=_recorded_objective(inputs_ref),
     )
 
 
-def _recorded_objective(inputs_ref: Mapping[str, Any]) -> _Objective:
-    return _Objective(float(inputs_ref["length_penalty"]), int(inputs_ref["length_norm"]))
+def _recorded_objective(inputs_ref: Mapping[str, Any]) -> CapoObjective:
+    return CapoObjective(
+        length_penalty=float(inputs_ref["length_penalty"]),
+        length_norm=int(inputs_ref["length_norm"]),
+    )
 
 
 class CapoRuntime(nodes.OptimizerRuntime):
@@ -730,25 +790,22 @@ class CapoRuntime(nodes.OptimizerRuntime):
         )
     }
 
-    def start(
-        self, session: Session, config: CampaignConfig, origin_results: CellSheet
-    ) -> BankedState[CapoRoundState]:
+    def refuse_origin(self, origin_results: CellSheet) -> None:
         if prompt_chars(origin_results) is None:
             raise ValueError(
                 "CAPO's objective charges each cell for its prompt's length, and this pipeline's "
                 "rows carry no target_prompt_chars: it renders no prompt node CAPO could edit"
             )
-        return nodes.BankedState(CapoRoundState(length_norm=None))
 
     def arms(self, selected: SelectedOptimizer) -> int:
         # The population races beside the round's offspring (`PopulationRejoin`).
         size = selected.knobs_of(PopulationSelector.name, PopulationKnobs).size
         return size + selected.knobs_of(Mating.name, MatingKnobs).offspring
 
-    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
+    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
         # Round 1's origin is no member: its reading is one block beside the arms'.
         block = selected.knobs_of(Blocks.name, BlocksKnobs).block_size
-        panel = selected.round_cells(pool)
+        panel = selected.round_cells(search)
         return self.arms(selected) * panel + block if panel else 0
 
     def round_facts(
@@ -756,14 +813,14 @@ class CapoRuntime(nodes.OptimizerRuntime):
     ) -> list[OptimizerFact]:
         if round_result.round == 0:
             return []
-        arms = round_result.candidate_scores
-        cut = sum(1 for cs in arms if cs.outcome is ArmOutcome.ELIMINATED)
+        arms = round_result.panel
+        cut = sum(1 for arm in arms.values() if isinstance(arm, Cut) and arm.kind == "eliminated")
         block_size = selected.knobs_of(Blocks.name, BlocksKnobs).block_size
         deepest = max(
-            (-(-len(rows) // block_size) for rows in round_result.all_candidate_results.values()),
+            (-(-len(round_result.rows(key)) // block_size) for key in arms),
             default=0,
         )
-        kept = len(round_result.optimizer_state.population)
+        kept = len(round_result.closed_state.population)
         size = selected.knobs_of(PopulationSelector.name, PopulationKnobs).size
         return [
             OptimizerFact(

@@ -51,7 +51,7 @@ To strip this down to a generic chat + tool-activity app, remove:
 - **The host** — `components/chat/ChatPane.tsx` is PromptPotter's composition: the pipeline
   hero, ingest's items, the live tail and the run card. Replace it with a host that hands
   `Thread` your own items.
-- **The optimizer-specific readings** in `domain/activity.py` — the `candidate_scored` /
+- **The optimizer-specific readings** in `domain/activity.py` — the `arm` /
   `sample_scored` cases, the `phase` round headline and the held-out pass (`candidate`, `round`
   `ActivityKind`s). Keep the generic `running`/`done`/`progress`/`warning`/`error`/`merge`
   readings; rewire them to your own tool's event records.

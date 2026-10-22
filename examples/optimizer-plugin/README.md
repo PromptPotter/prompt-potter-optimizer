@@ -7,7 +7,7 @@ The smallest optimizer the bench runs, registered through entry points alone —
 |---|---|
 | `pyproject.toml` | The registration: one `promptpotter.optimizer_nodes` entry per member, one `promptpotter.optimizer_runtimes` entry for the manifest. |
 | `example_optimizer/pipeline.yaml` | The manifest. `default` walks a sampler, the proposing node `propose`, the bench's measurement and a selector — the least a round takes. |
-| `example_optimizer/members.py` | The three members, the round payload and the runtime. Every arm `propose` makes carries the variation `example:propose` in its lineage. |
+| `example_optimizer/members.py` | The three members and the runtime. Every arm `propose` makes carries the variation `example:propose` in its lineage. |
 | `example_optimizer/prompts.py` | What `propose` sends. |
 
 ## Install and check
@@ -39,10 +39,10 @@ Everything `members.py` and `prompts.py` use, and nothing else:
 | A member per manifest node | The Protocol of its node type in `promptpotter/application/optimizers/nodes.py` — here `Sampler`, `Proposer`, `Selector`. Each states `name`, `kind`, `knobs` and its type's own members. |
 | The round, inside a member | `ctx: NodeContext[YourKnobs]` (`promptpotter/application/bench/node_context.py`): `ctx.knobs`, typed; the readings `ctx.parent`, `ctx.round_num` and `ctx.population` — the individuals the run carries, which a selector replaces with `ctx.keep(...)`; `ctx.variation`, this node's own entry for a child's lineage; `ctx.rng()` for a draw a resume repeats; `ctx.fill(**values)` for the node's template; `ctx.ask_each({idx: prompt})` for its llm calls; `ctx.decide(kind, inputs, outcome)` to put a decision on the record. |
 | What a member returns | `nodes.Panel`, `nodes.Proposals`, `nodes.Selection`; a selector reads `nodes.Measured`. |
-| An arm, from a reply | `paper_templates.child(ctx, parents, raw, changes)`, which writes it through `ctx.child` — the one writer of an individual, which stamps `ctx.variation` and has the bench admit the child as it is made (`promptpotter/application/bench/children.py`); a node later in the walk changes one through `ctx.edit`. A knobs model subclassing `paper_templates.RewriteKnobs` declares whether the reply replaces the whole prompt or the `instruction` alone. `paper_templates.task_description(ctx)` is the campaign's framing for a template. |
+| An arm, from a reply | `paper_templates.child(ctx, node, parents, raw, changes)`, which writes it through `ctx.child` — the one writer of an individual, which stamps `ctx.variation` and has the bench admit the child as it is made (`promptpotter/application/bench/children.py`); a node later in the walk changes one through `ctx.edit`. A knobs model subclassing `paper_templates.RewriteKnobs` declares whether the reply replaces the node's whole prompt or one `field` alone, and which field that is; the member's `prompt_arity` (`none` / `one` / `each`) says how many prompt nodes it writes, and both are checked against the pipeline before a mint spends. A member of arity `one` reads its node as `ctx.prompt_node`. `paper_templates.task_description(ctx, node)` is the campaign's framing for a template. |
 | The state a round banks | The population is the bench's and needs no code. |
-| What else a round banks | A `RoundPayload` subclass named for the manifest, carried in `nodes.BankedState` and read back with `nodes.state_as`. |
-| The runtime | `nodes.OptimizerRuntime`: `name`, `manifest_dir`, `prompt_sources`, `start`, `arms`. Every other member has a default. |
+| What else a round banks | A `StateSlice` subclass per kind of state (`promptpotter/domain/optimizer_state.py`), registered under its `kind`. A member declares the parts it `reads` and `writes` (here none: `nodes.NO_STATE`) and reaches them as `ctx.slice(Kind)` / `ctx.put(value)`; the roster's members ARE the declaration, and a roster leaving a read kind unwritten, or written twice, is refused at load. A member reaching another's knobs or decisions names its class under `consults` (here none: `nodes.NO_CONSULTS`). |
+| The runtime | `nodes.OptimizerRuntime`: `name`, `manifest_dir`, `prompt_sources`, `arms`. Every other member has a default. |
 
 A plugin is trusted code loaded into the process, it may not take a name a built-in holds, and one
 that fails to import stops PromptPotter at startup.

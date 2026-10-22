@@ -9,10 +9,12 @@ from promptpotter.domain.bench import BenchScore, BenchSubject
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import LiveCandidate, RoundSummary, RunLimits
+from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.results import DisplayMetric, RunStanding
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
-from promptpotter.domain.run_records import RunWiringRecord
+from promptpotter.domain.ruler import LevelSeries
+from promptpotter.domain.run_records import DefaultsDrift, RunWiringRecord
 from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -35,10 +37,11 @@ class CatchUpLogEntry(StrictModel):
 
     member: str
     round: int
-    candidate_idx: int
-    candidate_total: int
-    sample_id: int
-    prior_ids: list[str]
+    arm: ArmKey
+    # The arm's label as the round names it.
+    label: str
+    position: int
+    prior_ids: list[ArmKey]
 
 
 class BackendWarning(StrictModel):
@@ -79,7 +82,8 @@ class BenchPassProgress(StrictModel):
     """The held-out pass in flight; its rows are no round's cells."""
 
     subject: BenchSubject
-    label: str = Field(description="The candidate the pass grades, as its row is labelled.")
+    arm: ArmKey = Field(description="The arm the pass grades — the join to its row.")
+    label: str = Field(description="That arm's label, to render.")
     sp_hash: str = Field(description="The searchpoint scored — the archive's `prompt_fields_id`.")
     round: int = Field(description="The round whose selection is graded; 0 is the origin.")
     rows: int = Field(description="Bench rows the pass sends.")
@@ -127,7 +131,8 @@ class DashboardFacts(StrictModel):
     stop_reason: StopReason | None = None
 
     round: int = 0
-    candidate: str = ""
+    # The arm the oldest open cell is walked for; ``None`` between walks and on a pass of no arm.
+    measuring_arm: ArmName | None = None
     run_standing: RunStanding | None = None
 
     rounds: list[RoundSummary] = Field(default_factory=list)
@@ -150,7 +155,7 @@ class DashboardFacts(StrictModel):
     total_backend_calls: int = 0
 
     current_query_payload: str | None = None
-    open_sample_ids: list[int] = Field(default_factory=list)
+    open_positions: list[int] = Field(default_factory=list)
 
     sample_lookahead_discards: int = 0
     in_flight: int = 0
@@ -174,6 +179,12 @@ class DashboardFacts(StrictModel):
 
     # As DECLARED; what binds now is ``ServedDashboard.run_limits``.
     run_limits: RunLimits
+    defaults_drift: DefaultsDrift | None = Field(
+        default=None,
+        description="Set where the bench defaults or the treatment the campaign's declaration is a "
+        "delta over moved since it was declared, under an unchanged origin: this launch runs "
+        "today's values.",
+    )
 
     catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
 
@@ -186,7 +197,9 @@ class LiveDashboardState(DashboardFacts):
     # Says "running" forever after a kill: the answer is ``ServedDashboard.run_phase``.
     declared_phase: RunPhase = RunPhase.RUNNING
 
-    current_sample_id: int | None = None
+    current_position: int | None = None
+    # The last close's; served only as each `ServedRound`'s readings of it.
+    level_series: LevelSeries | None = None
     # A PLAN: an eliminator can stop a candidate before the tail is reached.
     declared_sample_order: list[int] = Field(default_factory=list)
 
@@ -220,6 +233,7 @@ class LiveDashboardState(DashboardFacts):
             "measured_unit": wiring.measured_unit,
             "langfuse_trace_url": wiring.langfuse_trace_url,
             "run_limits": wiring.run_limits,
+            "defaults_drift": wiring.defaults_drift,
         }
 
     @classmethod
@@ -237,8 +251,8 @@ class LiveDashboardState(DashboardFacts):
             "bench_pass": None,
             "current_round": CurrentRound.unentered(),
             "current_query_payload": None,
-            "current_sample_id": None,
-            "open_sample_ids": [],
+            "current_position": None,
+            "open_positions": [],
             "declared_sample_order": [],
         }
         return prior.model_copy(update=mine)

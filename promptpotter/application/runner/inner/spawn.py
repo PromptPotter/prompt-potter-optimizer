@@ -7,11 +7,17 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.campaign_config import CampaignConfig
+from promptpotter.application.campaign_config import CampaignConfig, effective_config
 from promptpotter.application.diagnostics.seed_screen import class_floor, draw_bank, draw_bench
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.mint import prepare_fresh_cycle, resolve_cycle_plan
-from promptpotter.application.jobs.quota import unadmitted_limits
+from promptpotter.application.jobs.launcher.admission import inner_share
+from promptpotter.application.jobs.mint import (
+    ConfigDriftError,
+    declare,
+    mint,
+    refuse_drifted_resume,
+    resolve_cycle_plan,
+)
 from promptpotter.application.optimizer_manifest import (
     resolved_overrides,
     set_optimizer_prompt_overrides,
@@ -35,18 +41,18 @@ from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
-    PARENT_LEVEL_SE_KEY,
     bench_level_series,
     compute_outer_proxies,
     effective_round_budget,
     floor_reason,
     inner_cell_facts,
-    mean_parent_level_se,
     parent_level_series,
+    parent_levels,
+    series_reason,
 )
-from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.phases import REFUSAL_STOPS, StopReason
-from promptpotter.domain.results import ArmOutcome, candidate_label
+from promptpotter.domain.results import ArmFit, Cut, Measured, order_floor
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
 from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.telemetry import current_round
@@ -65,12 +71,15 @@ from promptpotter.shared.measurement_context import (
     MAX_INSTRUMENT_DEPTH,
     MeasurementRole,
     instrument_depth,
-    measured_candidate,
-    measured_candidate_context,
+    measured_pass,
+    measured_pass_context,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -92,14 +101,10 @@ Overrides = dict[str, dict[str, Any]]
 
 
 def _spawn_provenance(round_num: int | None, query: str) -> dict[str, Any]:
-    cand = measured_candidate()
+    cand = measured_pass()
     return {
         "round": round_num,
-        "candidate_idx": cand.idx if cand else None,
-        "candidate_id": cand.candidate_id if cand else None,
-        "candidate_label": (
-            cand.label if cand else (candidate_label(0, 0) if round_num == 0 else None)
-        ),
+        "individual_id": cand.individual_id if cand else None,
         "role": cand.role.value if cand else None,
         "task": query,
     }
@@ -132,28 +137,35 @@ def _inner_narrative(result: CycleResult, head: str) -> str:
             f"{head}: {floor} — scored at the floor "
             f"(optimizer-prompt-owned); stop={result.stop_reason}."
         )
-    # All three guaranteed by `compute_outer_proxies`, which ran first.
-    assert result.origin_level is not None and result.bench_origin_level is not None
-    origin = result.origin_level
-    levels = result.round_levels
-    # The budget-held series, not `levels`: the law averages over the round BUDGET, not the rounds run.
-    series = parent_level_series(result)
+    # Both guaranteed by `compute_outer_proxies`, which ran first.
+    assert result.bench_origin_level is not None
     bench = bench_level_series(result)
     assert bench
-    mean = sum(series) / len(series)
     bench_origin = result.bench_origin_level
     bench_mean = sum(bench) / len(bench)
+    held = parent_levels(result)
+    levels = [] if held is None else held[1]
+    if held is None:
+        search = f" | search-split th: withheld — {series_reason(result)}"
+    else:
+        origin = held[0]
+        # The budget-held series, not `levels`: the law averages over the round BUDGET.
+        series = parent_level_series(result)
+        mean = sum(series) / len(series)
+        search = (
+            f" | search-split th: floor {origin:+.2f} -> mean D{mean - origin:+.3f}"
+            f", ended {levels[-1]:+.2f}, peak {max(levels):+.2f}"
+            f" over {result.n_rounds_after_origin} of {len(series)} rounds"
+        )
     lines = [
         f"{head}: held-out {result.bench.bench_size} rows:"
         f" floor {bench_origin:.3f} -> mean-over-rounds B{bench_mean - bench_origin:+.3f}"
         f" (the scored lift), ended {bench[-1]:.3f} (B{bench[-1] - bench_origin:+.3f})"
-        f" | search-pool th: floor {origin:+.2f} -> mean D{mean - origin:+.3f}"
-        f", ended {levels[-1]:+.2f}, peak {max(levels):+.2f}"
-        f" over {result.n_rounds_after_origin} of {len(series)} rounds; stop={result.stop_reason}.",
+        f"{search}; stop={result.stop_reason}.",
         _lift_shape(result),
     ]
     by_round = {rnd.round: rnd for rnd in result.rounds}
-    critiques = {r: rnd.optimizer_state.payload.feedback() for r, rnd in by_round.items()}
+    critiques = {r: rnd.closed_state.feedback() for r, rnd in by_round.items()}
     highlight = next(
         (
             f"{cluster['mechanism']}: {cluster['claim']}"
@@ -175,24 +187,34 @@ def _inner_narrative(result: CycleResult, head: str) -> str:
         steer = critiques.get(rnd.round - 1)
         if steer and steer.get("priority_fix"):
             parts.append(f"steer: {_clip(steer['priority_fix'], 130)}")
-        scored = [c for c in rnd.candidate_scores if c.outcome is not ArmOutcome.INVALID]
+        fits = {key: rnd.fit(key) or ArmFit() for key in rnd.panel}
+        scored = [
+            (key, c, fold)
+            for key, c in rnd.panel.items()
+            if isinstance(c, Cut | Measured) and (fold := rnd.folds.get(key)) is not None
+        ]
         if scored:
             # Lift over the MATCHED parent only: an arm that never covered its panel has no lift.
             floors = {
-                c.label: c.vs_reference.reference_level("fitness") if c.vs_reference else None
-                for c in scored
+                key: reading.reference_level("fitness")
+                if (reading := fits[key].vs_reference)
+                else None
+                for key, _, _ in scored
             }
             margins = {
-                c.label: float("-inf")
-                if (matched := floors[c.label]) is None or c.accuracy is None
-                else c.accuracy - matched
-                for c in scored
+                key: float("-inf")
+                if (matched := floors[key]) is None or fold.accuracy is None
+                else fold.accuracy - matched
+                for key, _, fold in scored
             }
-            top = max(scored, key=lambda c: (margins[c.label], c.composite_fitness))
-            reference = floors[top.label]
+            top_key, top, top_fold = max(
+                scored, key=lambda kc: (margins[kc[0]], order_floor(kc[2].composite_fitness))
+            )
+            reference = floors[top_key]
+            fit = fits[top_key]
             theta = (
-                f", th {top.theta:.2f}+/-{top.theta_se:.2f}"
-                if top.theta is not None and top.theta_se is not None
+                f", th {fit.theta:.2f}+/-{fit.theta_se:.2f}"
+                if fit.theta is not None and fit.theta_se is not None
                 else ""
             )
             versus = (
@@ -201,12 +223,12 @@ def _inner_narrative(result: CycleResult, head: str) -> str:
                 else " (stopped before it covered the origin's samples, so nothing to compare)"
             )
             parts.append(
-                f"tried {top.label} (acc {fmt_pct(top.accuracy, '{:.3f}')}{versus}{theta}): "
+                f"tried {top.label} (acc {fmt_pct(top_fold.accuracy, '{:.3f}')}{versus}{theta}): "
                 f"{_clip(top.changes_description, 100)}"
             )
         else:
             parts.append("no scored candidates")
-        collapses = collapse_counts(c.validation_failures for c in rnd.candidate_scores)
+        collapses = collapse_counts(c.validation_failures for c in rnd.panel.values())
         anomalies = [
             f"{tag} x{n}"
             for tag, n in (
@@ -269,7 +291,7 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
     cells = _cells(ctx)
     cell = panel_cell(sample)
     arm = cells.own(cell, payload.get("optimizer_prompt_overrides") or {})
-    role = cand.role if (cand := measured_candidate()) else MeasurementRole.PANEL
+    role = cand.role if (cand := measured_pass()) else MeasurementRole.PANEL
     spec = cells.spec(cell)
     return _InnerCell(ctx, cell, spec, arm, role, inner_campaign_id(spec, arm, role))
 
@@ -316,32 +338,38 @@ def inner_cell_hop(sample: Sample, payload: dict[str, Any]) -> CycleHop | None:
     return None if campaign is None else store.line_holder(campaign.root_hop)
 
 
-def _continue_inner_campaign(session: Session, root: CycleHop) -> None:
-    """Continues unless something is LIVE on it: ``stop_reason_outcome`` governs scoring, never resumption."""
+def _continue_inner_campaign(
+    session: Session, campaign: Campaign, train_data: Sequence[Sample]
+) -> None:
+    """``stop_reason_outcome`` governs scoring, never resumption."""
     store = session.store.campaigns
     # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
-    hop = store.line_holder(root)
-    existing = store.load(hop, moment=None)
-    if existing is None:
+    hop = store.line_holder(campaign.root_hop)
+    run = derive_run_state(store.cycle_dir(hop))
+    if store.load(hop, moment=None) is None:
         raise CellUnscoreableError(
-            f"its campaign {root.campaign_id} names successor {hop.cycle_id}, which has no index",
+            f"its campaign {campaign.campaign_id} names successor {hop.cycle_id}, which has no "
+            "index",
             spent={},
         )
-    run = derive_run_state(store.cycle_dir(hop))
     if not run.resumable:
         raise CellUnscoreableError(
-            f"its campaign {root.campaign_id}/{hop.cycle_id} reads {run.run_phase} — another "
+            f"its campaign {campaign.campaign_id}/{hop.cycle_id} reads {run.run_phase} — another "
             "producer owns it, and two runs writing one cycle is not a measurement",
             spent={},
         )
+    try:
+        refuse_drifted_resume(session, campaign, hop, train_data)
+    except ConfigDriftError as drift:
+        raise CellUnscoreableError(str(drift), spent={}) from drift
 
-    session.bind_campaign(hop, arm=None)
+    session.bind_campaign(hop, purpose=campaign.declaration.purpose)
     save_active_pointer(session.store.base_dir, hop)
     logger.info(
         "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
-        root.campaign_id,
+        campaign.campaign_id,
         hop.cycle_id,
-        _banked_inner_rounds(store, root),
+        _banked_inner_rounds(store, campaign.root_hop),
         run.run_phase,
     )
 
@@ -361,9 +389,7 @@ class _Opened(NamedTuple):
 
 async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
     ctx, spec = cell.ctx, cell.spec
-    enter_inner_cell(
-        store.campaigns, cell.campaign_id, ruler=ctx.rulers.get(spec.inner_dataset), moment=None
-    )
+    enter_inner_cell(ctx, store.campaigns, cell.campaign_id)
     # enable_tracing=False: cloud traces of an ephemeral measurement pile spans in process memory.
     session = await init_services(
         dataset_name=spec.inner_dataset,
@@ -372,13 +398,13 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
         enable_tracing=False,
     )
     session.control = RunControl(enclosing=ctx.enclosing)
-    all_samples = session.samples
+    all_samples = session.bank.samples
     if not all_samples:
         raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
     n = min(max(spec.n_samples, spec.n_samples_origin or 0), len(all_samples))
     # The draw `seed-screen` chose the seeds under: drawn differently, the bank is one nobody screened.
-    search = draw_bank(all_samples, n, spec.seed)
-    bench = draw_bench(all_samples, search, spec.n_samples_bench, spec.seed)
+    search = draw_bank(all_samples, n, spec.run_seed)
+    bench = draw_bench(all_samples, search, spec.n_samples_bench, spec.run_seed)
     if len(bench) < spec.n_samples_bench:
         # Before anything is minted or sent: a short bench is a panel geometry error, not a measurement.
         raise CellUnscoreableError(
@@ -393,18 +419,19 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> _Opened:
         CampaignConfig.model_validate(
             dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)
         ),
-        llm_node=session.llm_node_name(),
+        solver=session.pipeline_schema.prompt_nodes(),
         n_search=len(search),
     )
-    root = CycleHop(
-        campaign_id=cell.campaign_id,
-        cycle_id=resolve_cycle_plan(session, config, train_data).cycle_id,
-    )
-    if session.store.campaigns.load(root, moment=None) is None:
-        prepare_fresh_cycle(session, config, train_data, campaign_id=cell.campaign_id, arm=None)
+    declaration = declare(session, config, purpose=ctx.purpose)
+    # The campaign that exists decides, never an id its origin content derives: a drifted origin
+    # reaches the drift refusal rather than a fresh root.
+    campaign = session.store.campaigns.load_campaign(cell.campaign_id)
+    if campaign is None:
+        plan = resolve_cycle_plan(session, declaration, train_data, hop=None)
+        mint(session, plan, campaign_id=cell.campaign_id, billed=None)
     else:
-        _continue_inner_campaign(session, root)
-    return _Opened(session, config, train_data, class_floor(search))
+        _continue_inner_campaign(session, campaign, train_data)
+    return _Opened(session, effective_config(declaration), train_data, class_floor(search))
 
 
 async def _run_inner_campaign(
@@ -422,20 +449,21 @@ async def _run_inner_campaign(
         minted.append(session.hop)
     observers = build_run_observers(session=session, campaign_config=config)
     try:
-        result = await run_optimization(
-            opened.train_data,
+        # Each send is admitted by its own book AND the ROOT's; its share bounds it at every checkpoint.
+        with inner_share(
             config,
-            session=session,
-            observers=observers,
-            # Declares no ceiling of its own: the inner cycle spends under the ROOT's book.
-            limits=unadmitted_limits(
+            stores=session.store,
+            dataset_name=cell.spec.inner_dataset,
+            hop=session.hop if session.state.cycle_id else None,
+        ) as held:
+            result = await run_optimization(
+                opened.train_data,
                 config,
-                stores=session.store,
-                hop=session.hop if session.state.cycle_id else None,
-                requested=LaunchLimits(),
-            ),
-            mode=RunMode(),
-        )
+                session=session,
+                observers=observers,
+                budget=held,
+                mode=RunMode(),
+            )
     finally:
         # The optimizer LLM clients and the Langfuse SDK are process-SHARED: never shut either down.
         with contextlib.suppress(Exception):
@@ -465,7 +493,7 @@ async def _run_inner_campaign(
 def _narrative_head(spec: InnerTaskSpec) -> str:
     # Two cells of a pool share a dataset and a seed, so the model is what tells them apart.
     env = f"{spec.inner_dataset} on {spec.inner_model}" if spec.inner_model else spec.inner_dataset
-    return f"INNER {env} seed-{spec.seed}"
+    return f"INNER {env} seed-{spec.run_seed}"
 
 
 async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, Any]:
@@ -489,7 +517,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     # Its wait beats on the outer ledger through the measuring call's own heartbeat (`cell_hop`).
     inner_task = asyncio.create_task(
         _run_inner_campaign(cell, minted, spawned_by),
-        context=measured_candidate_context(None),
+        context=measured_pass_context(None),
     )
     try:
         result = await inner_task
@@ -516,17 +544,14 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     # Raises `CellUnscoreableError` on every other no-evidence shape, which `measure_sample` resolves.
     proxies = compute_outer_proxies(result)
     facts = inner_cell_facts(result)
+    delta = "—" if facts.mean_round_delta is None else f"{facts.mean_round_delta:+.3f}"
 
     data: dict[str, Any] = {
         # A summary line, not an answer to be matched: this cell carries no label, so add no hit/miss reader.
-        INNER_RESULT_KEY: [
-            f"inner:{query} B{proxies.mean_bench_lift:+.3f} D{proxies.mean_round_delta:+.3f}"
-        ],
+        INNER_RESULT_KEY: [f"inner:{query} B{proxies.mean_bench_lift:+.3f} D{delta}"],
         "reasoning_trace": _inner_narrative(result, _narrative_head(cell.spec)),
         **proxies.model_dump(),
-        # An INFRA key, NOT an `OuterSampleProxies` field: those reach the scoring formula's namespace.
-        PARENT_LEVEL_SE_KEY: mean_parent_level_se(result),
-        **(facts.model_dump(mode="json") if facts is not None else {}),
+        "inner": facts.model_dump(mode="json"),
         # An inner campaign consumes its optimizer's ENTIRE outer config, so the stamp is its terminal.
         "terminal_node": _cells(cell.ctx).terminal(cell.cell),
         # No `step_tokens`: every call was billed as it settled, and returning it bills the cell twice.

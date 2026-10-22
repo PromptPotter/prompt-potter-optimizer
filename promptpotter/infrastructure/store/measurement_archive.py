@@ -14,6 +14,7 @@ from typing import Any, ClassVar, NamedTuple
 
 from filelock import BaseFileLock, FileLock, Timeout
 
+from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, meets_grade
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import ArchiveEntry, FiledAnswer
@@ -24,12 +25,10 @@ from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_lines,
     replace_lines,
-    rewrite_lines,
     rewrite_pair,
     unlink_robust,
     write_json,
 )
-from promptpotter.infrastructure.store.layout import MEASUREMENTS_DIR
 from promptpotter.infrastructure.store.read_model import (
     append_row,
     file_sig,
@@ -40,7 +39,7 @@ from promptpotter.shared.hashing import ADDRESS_HEX, CANONICAL_PIN, stable_hash
 ANSWER_KEY = "answer"
 _INDEX_FOLD_KEY = "k"
 # What an entry says of its dataset and first answer, never of its configuration.
-_INDEXED_ONLY = frozenset({"dataset_name", "name", "created_at"})
+_INDEXED_ONLY = frozenset({"dataset_hash", "name", "created_at"})
 _CELLS_SUFFIX = ".jsonl"
 _COLD_SUFFIX = ".jsonl.gz"
 _FILES_MAX_BYTES = 32 << 20
@@ -59,8 +58,8 @@ def _cell_key(node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -
     return stable_hash([node_configs, sample_key], length=ADDRESS_HEX)
 
 
-def _fold_key(key: str, dataset_name: str | None) -> str:
-    return f"{key}|{dataset_name or ''}"
+def _fold_key(key: str, dataset_hash: str) -> str:
+    return f"{key}|{dataset_hash}"
 
 
 def _file_keys(entry: ArchiveEntry) -> list[str]:
@@ -115,15 +114,15 @@ def answer_line(answer: FiledAnswer) -> str:
     return json.dumps(answer.wire(), separators=(",", ":"), ensure_ascii=False) + "\n"
 
 
-def standing(answers: Iterable[FiledAnswer]) -> dict[int, FiledAnswer]:
-    taken: dict[int, tuple[bool, FiledAnswer]] = {}
+def standing(answers: Iterable[FiledAnswer]) -> dict[str, FiledAnswer]:
+    taken: dict[str, tuple[bool, FiledAnswer]] = {}
     for answer in answers:
-        sid = answer.cell.sample_id
+        key = answer.cell.sample_key
         live = not (answer.cell.errored or is_deprecated(answer.cell))
-        held = taken.get(sid)
+        held = taken.get(key)
         if held is None or live or not held[0]:
-            taken[sid] = (live, answer)
-    return {sid: answer for sid, (_, answer) in taken.items()}
+            taken[key] = (live, answer)
+    return {key: answer for key, (_, answer) in taken.items()}
 
 
 class MovedFields(NamedTuple):
@@ -346,7 +345,7 @@ class MeasurementArchive:
                 FiledAnswer(
                     replace(cell, answer=ref),
                     config_key=entry.config_key,
-                    dataset_name=entry.dataset_name,
+                    dataset_hash=entry.dataset_hash,
                     role=role,
                     source=source,
                     provenance=provenance,
@@ -366,7 +365,7 @@ class MeasurementArchive:
         config_path = self._configs_dir() / f"{entry.config_key}.json"
         if not config_path.exists():
             write_json(config_path, entry.model_dump(mode="json", exclude=set(_INDEXED_ONLY)))
-        fold_key = _fold_key(entry.config_key, entry.dataset_name)
+        fold_key = _fold_key(entry.config_key, entry.dataset_hash)
         if fold_key in self._live_rows():
             return
         append_row(self._index_path(), {_INDEX_FOLD_KEY: fold_key, **entry.model_dump(mode="json")})
@@ -389,19 +388,31 @@ class MeasurementArchive:
                 answer
                 for file_key in _file_keys(entry)
                 for answer in self._file(file_key).rows
-                if answer.dataset_name == entry.dataset_name
+                if answer.dataset_hash == entry.dataset_hash
             ]
         found.sort(key=lambda answer: answer.created_at)
         return found
 
-    def list_all(self, *, dataset_name: str | None = None) -> list[ArchiveEntry]:
-        entries = list(self._live_rows().values())
-        if dataset_name is None:
-            return entries
-        return [e for e in entries if e.dataset_name == dataset_name]
+    def measured(self, entry: ArchiveEntry, sample_keys: frozenset[str]) -> list[FiledAnswer]:
+        """The configuration's answers on *sample_keys*, under every bank that measured them."""
+        with self._lock:
+            found = [
+                answer
+                for file_key in _file_keys(entry)
+                for answer in self._file(file_key).rows
+                if answer.cell.sample_key in sample_keys
+            ]
+        found.sort(key=lambda answer: answer.created_at)
+        return found
 
-    def entry(self, key: str, dataset_name: str | None) -> ArchiveEntry | None:
-        return self._live_rows().get(_fold_key(key, dataset_name))
+    def list_all(self, *, dataset_hash: str | None = None) -> list[ArchiveEntry]:
+        entries = list(self._live_rows().values())
+        if dataset_hash is None:
+            return entries
+        return [e for e in entries if e.dataset_hash == dataset_hash]
+
+    def entry(self, key: str, dataset_hash: str) -> ArchiveEntry | None:
+        return self._live_rows().get(_fold_key(key, dataset_hash))
 
     def cell_signatures(self) -> dict[str, tuple[int, int]]:
         out: dict[str, tuple[int, int]] = {}
@@ -489,7 +500,7 @@ class MeasurementArchive:
         undescribed = 0
         for file_key in self.file_keys():
             for answer in self._file(file_key).rows:
-                fold_key = _fold_key(answer.config_key, answer.dataset_name)
+                fold_key = _fold_key(answer.config_key, answer.dataset_hash)
                 held = first.get(fold_key)
                 if held is not None and held.created_at <= answer.created_at:
                     continue
@@ -500,7 +511,7 @@ class MeasurementArchive:
                 first[fold_key] = ArchiveEntry.model_validate(
                     {
                         **described,
-                        "dataset_name": answer.dataset_name,
+                        "dataset_hash": answer.dataset_hash,
                         "name": answer.role,
                         "created_at": answer.created_at,
                     }
@@ -513,39 +524,16 @@ class MeasurementArchive:
         ]
         return lines, {"indexed": len(indexed), "undescribed": undescribed}
 
-    def restamp_dataset(self, old_name: str, new_name: str) -> int:
-        touched = {e.config_key for e in self.list_all(dataset_name=old_name)}
-        if not touched:
-            return 0
-
-        def restamped(lines: list[str]) -> tuple[list[str] | None, None]:
-            out: list[str] = []
-            moved = False
-            for line in lines:
-                answer = answer_of(line)
-                if answer is not None and answer.dataset_name == old_name:
-                    line = answer_line(replace(answer, dataset_name=new_name))
-                    moved = True
-                out.append(line)
-            return (out if moved else None), None
-
-        with self._lock:
-            for file_key in self.file_keys():
-                rewrite_lines(self._cell_path(file_key), restamped)
-            self._files.clear()
-        self.reindex()
-        return len(touched)
-
     def measurements_for_config(
         self,
         predicate: dict[str, dict[str, Any]],
         *,
-        dataset_name: str | None = None,
+        dataset_hash: str | None = None,
         newest: int | None = None,
     ) -> Iterator[FiledAnswer]:
         matching = [
             entry
-            for entry in self.list_all(dataset_name=dataset_name)
+            for entry in self.list_all(dataset_hash=dataset_hash)
             if _matches_subset(entry.node_configs, predicate)
         ]
         if newest is not None:

@@ -2,35 +2,41 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
+from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
-from promptpotter.domain.sample import Sample
+from promptpotter.domain.sample import Bank
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
     ORIGIN_FILE,
-    ROWS_FILE,
     render_framing_file,
 )
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     read_yaml_optional,
+    validate_path_component,
     write_bytes,
     write_json,
     write_text,
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import validate_dataset_name
+from promptpotter.infrastructure.store.read_model import append_row, derived, file_sig, fold_jsonl
 from promptpotter.shared.clock import utcnow_iso
 
-if TYPE_CHECKING:
-    from promptpotter.domain.sample import Sample
-
-# What a definition's `source:` materialized for this tenant: fetched rows and built panels.
+# Panels a definition's `source:` built for this tenant, and the task directories they name.
 MATERIALIZED_DIR = "materialized"
+# Every bank, ONCE, under its `dataset_hash`; `labels.jsonl` beside them maps each name onto one.
+BANKS_DIR = "banks"
+# Every file uploaded, under its own content: an upload definition's `source:` reads it from here.
+UPLOADS_DIR = "uploads"
+_LABELS_FILE = "labels.jsonl"
+# Which bank each fetched `source:` recipe cut: a content fact, so an inner sandbox shares it.
+_CUTS_FILE = "cuts.jsonl"
 
 
 class TenantDatasetStore:
@@ -72,52 +78,85 @@ class TenantDatasetStore:
                 return candidate
             n += 1
 
-    def suggest_free_version(self, slug: str) -> str:
-        n = 1
-        while True:
-            candidate = f"{slug}-v{n}"
-            if not self.slug_exists(candidate):
-                return candidate
-            n += 1
+    def _labels_path(self) -> Path:
+        return self._base_dir / BANKS_DIR / _LABELS_FILE
 
-    def migrations_dir(self) -> Path:
-        return self.committed_datasets_root() / ".migrations"
+    def _bank_path(self, digest: str) -> Path:
+        return self._base_dir / BANKS_DIR / f"{validate_path_component(digest)}.json"
 
-    def load_dataset(self, slug: str) -> dict[str, Any] | None:
-        return read_json_optional(self.dataset_dir(slug) / ROWS_FILE)
+    def put_bank(self, bank: Bank) -> None:
+        rows = bank.banked()
+        held = self._banked_rows(bank.dataset_hash)
+        if held is None:
+            write_json(self._bank_path(bank.dataset_hash), {"items": rows})
+        elif held != rows:
+            raise RuntimeError(f"bank {bank.dataset_hash} on disk holds other rows than its hash")
 
-    def materialized_rows_path(self, name: str) -> Path:
-        validate_dataset_name(name)
-        return self._base_dir / MATERIALIZED_DIR / f"{name}.json"
+    def relabel(self, label: str, digest: str) -> None:
+        """A label moves; no bank and no measurement filed under either hash is rewritten."""
+        validate_dataset_name(label)
+        if self.hash_of(label) != digest:
+            append_row(
+                self._labels_path(),
+                {"label": label, "dataset_hash": digest, "labelled_at": utcnow_iso()},
+            )
 
-    def load_materialized_rows(self, name: str) -> dict[str, Any] | None:
-        return read_json_optional(self.materialized_rows_path(name))
+    def labels(self) -> dict[str, str]:
+        return {
+            label: str(row["dataset_hash"])
+            for label, row in fold_jsonl(self._labels_path(), "label").items()
+        }
+
+    def hash_of(self, label: str) -> str | None:
+        return self.labels().get(label)
+
+    def _banked_rows(self, digest: str) -> list[dict[str, Any]] | None:
+        data = read_json_optional(self._bank_path(digest))
+        return None if data is None else list(data["items"])
+
+    def bank(self, digest: str) -> Bank | None:
+        rows = self._banked_rows(digest)
+        return None if rows is None else Bank.read(rows)
+
+    def labelled(self, label: str) -> Bank | None:
+        digest = self.hash_of(label)
+        return None if digest is None else self.bank(digest)
+
+    def record_cut(self, source: str, bank: Bank) -> None:
+        self.put_bank(bank)
+        append_row(
+            self._base_dir / BANKS_DIR / _CUTS_FILE,
+            {"source": source, "dataset_hash": bank.dataset_hash},
+        )
+
+    def cut(self, source: str) -> Bank | None:
+        row = fold_jsonl(self._base_dir / BANKS_DIR / _CUTS_FILE, "source").get(source)
+        return None if row is None else self.bank(str(row["dataset_hash"]))
+
+    def banks_sharing(self, keys: frozenset[str]) -> frozenset[str]:
+        """Every held bank measuring any of *keys*: a re-cut shares its rows' history by content."""
+        root = self._base_dir / BANKS_DIR
+        found: set[str] = set()
+        for path in sorted(root.glob("*.json")) if root.is_dir() else ():
+            held = derived(("bank_keys", path), sig=file_sig(path), compute=partial(_keys, path))
+            if held is not None and not held.isdisjoint(keys):
+                found.add(path.stem)
+        return frozenset(found)
 
     def materialized_panel_dir(self, name: str) -> Path:
         """Where a panel recipe materializes a connector panel and the task directories it names."""
         validate_dataset_name(name)
         return self._base_dir / MATERIALIZED_DIR / name
 
-    def save_materialized_rows(self, name: str, items: Sequence[Sample | dict[str, Any]]) -> Path:
-        serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
-        path = self.materialized_rows_path(name)
-        write_json(
-            path,
-            {
-                "name": name,
-                "created_at": utcnow_iso(),
-                "row_count": len(serialized),
-                "items": serialized,
-            },
-        )
-        return path
-
     def keep_upload(self, blob: bytes, extension: str) -> Path:
         """Every upload, kept BEFORE it is parsed, so a file the parser refused or crashed on can be re-read."""
         suffix = f".{extension}" if extension.isalnum() and len(extension) <= 8 else ""
-        path = self._base_dir / "uploads" / f"{hashlib.sha256(blob).hexdigest()[:16]}{suffix}"
+        path = self.upload_path(f"{hashlib.sha256(blob).hexdigest()}{suffix}")
         write_bytes(path, blob)
         return path
+
+    def upload_path(self, name: str) -> Path:
+        return self._base_dir / UPLOADS_DIR / validate_path_component(name)
 
     def task_context_path(self, name: str) -> Path:
         validate_dataset_name(name)
@@ -134,51 +173,11 @@ class TenantDatasetStore:
         write_yaml(path, framing.to_dict())
         return path
 
-    def version_dataset(self, slug: str, versioned: str) -> Path:
-        src = self.dataset_dir(slug)
-        dst = self.dataset_dir(versioned)
-        if not src.is_dir():
-            if dst.is_dir():
-                return dst
-            raise FileNotFoundError(slug)
-        if dst.exists():
-            raise FileExistsError(versioned)
-        src.rename(dst)
-        return dst
-
-    def write_committed_dataset(
-        self,
-        slug: str,
-        *,
-        samples: Sequence[Sample | dict[str, Any]],
-        source_file: str,
-        headers: Sequence[str],
-        sample_order_seed: str | None = None,
-    ) -> Path:
-        """The rows alone: the directory is a dataset only once :meth:`write_definition` lands."""
-        dst = self.dataset_dir(slug)
-        if dst.exists():
-            raise FileExistsError(slug)
-        serialized = [s.model_dump() if isinstance(s, Sample) else s for s in samples]
-        write_json(
-            dst / ROWS_FILE,
-            {
-                "name": slug,
-                "created_at": utcnow_iso(),
-                "source_file": source_file,
-                "headers": list(headers),
-                "row_count": len(serialized),
-                # Which permutation minted the ids below (`null` = delivered order); re-seeding is a re-cut, never an edit.
-                "sample_order_seed": sample_order_seed,
-                "items": serialized,
-            },
-        )
-        return dst
-
     def write_definition(
         self,
         slug: str,
         *,
+        source: dict[str, Any],
         pipeline: dict[str, Any],
         campaign: dict[str, Any],
         description: str,
@@ -191,7 +190,9 @@ class TenantDatasetStore:
         if origin:
             write_yaml(dst / ORIGIN_FILE, origin)
         # Last: the definition file is what makes the directory a dataset.
-        write_yaml(dst / DEFINITION_FILE, {"pipeline": pipeline, "campaign": campaign})
+        write_yaml(
+            dst / DEFINITION_FILE, {"source": source, "pipeline": pipeline, "campaign": campaign}
+        )
         return dst
 
     def write_candidate_library(self, slug: str, library: Sequence[str]) -> Path:
@@ -200,4 +201,11 @@ class TenantDatasetStore:
         return path
 
 
-__all__ = ["MATERIALIZED_DIR", "TenantDatasetStore"]
+def _keys(path: Path) -> frozenset[str]:
+    rows = read_json_optional(path)
+    return (
+        frozenset() if rows is None else frozenset(s.key for s in Bank.read(rows["items"]).samples)
+    )
+
+
+__all__ = ["BANKS_DIR", "MATERIALIZED_DIR", "UPLOADS_DIR", "TenantDatasetStore"]

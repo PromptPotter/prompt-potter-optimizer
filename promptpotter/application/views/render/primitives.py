@@ -6,13 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import ArmOutcome, overlap_line, scoreboard_rank_key
+from promptpotter.domain.results import overlap_line
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.domain.bench import BenchColumn
     from promptpotter.domain.paired_reading import Coverage
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import ArmReading, OverlapReading
@@ -45,7 +44,7 @@ def overlap_series(overlap: OverlapReading) -> str:
         if member is not None
     )
     paid = f", +{bought} measured" if bought else ""
-    return f"origin panel of {len(overlap.sample_ids)}{paid}: {arms}"
+    return f"origin panel of {len(overlap.positions)}{paid}: {arms}"
 
 
 def fmt_ci(lower: float | None, upper: float | None, *, spec: str) -> str:
@@ -209,26 +208,10 @@ def _round_rule(label: str, label_right: str = "", width: int = _NW) -> str:
     return f"{rule}\n{inner}\n{rule}"
 
 
-def _scoreboard(arms: Sequence[ArmReading]) -> str:
-    """Δ is blank where a row has no matched floor: the full-set rate is a different basis."""
-    if not arms:
+def _scoreboard(ranked: Sequence[ArmReading]) -> str:
+    """In the round's own rank; Δ is blank where a row has no matched floor."""
+    if not ranked:
         return ""
-
-    def level(arm: ArmReading, column: BenchColumn) -> float | None:
-        banded = None if arm.own is None else arm.own.of(column)
-        return None if banded is None else banded.value
-
-    ranked = sorted(
-        arms,
-        key=lambda s: scoreboard_rank_key(
-            level(s, "composite"),
-            level(s, "accuracy"),
-            None if s.ability is None else s.ability.theta,
-            is_leading=s.election.leading,
-            is_partial=s.outcome is ArmOutcome.SKIPPED,
-        ),
-        reverse=True,
-    )
     w = 108
 
     hdr = (
@@ -240,6 +223,7 @@ def _scoreboard(arms: Sequence[ArmReading]) -> str:
     for i, s in enumerate(ranked, 1):
         label = s.arm.label[:8]
         accuracy = None if s.own is None else s.own.accuracy
+        composite = None if s.own is None else s.own.composite
         ci_str = fmt_ci(
             None if accuracy is None else accuracy.ci_lo,
             None if accuracy is None else accuracy.ci_hi,
@@ -248,8 +232,8 @@ def _scoreboard(arms: Sequence[ArmReading]) -> str:
         lift = s.vs_reference.on_whole_set if s.vs_reference else None
         delta = None if lift is None else lift.estimate.value
         delta_str = f"{delta:+.1%}" if delta is not None and abs(delta) >= 0.001 else "---"
-        if s.outcome is not None and s.outcome.cut_short:
-            winner_mark = f"  {YELLOW}({s.outcome}){RESET}"
+        if s.state == "cut":
+            winner_mark = f"  {YELLOW}({s.end}){RESET}"
         elif s.election.selected:
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
@@ -264,7 +248,8 @@ def _scoreboard(arms: Sequence[ArmReading]) -> str:
         acc_str = "—" if accuracy is None else f"{accuracy.value:.1%}"
         row = (
             f"{i:<4d}{label:<8s}{cells:>7s}   {acc_str:>8s}   {ci_str:>16s}   "
-            f"{fmt_fitness(level(s, 'composite')):>9s}   {theta_str:>9s}   {delta_str:>7s}{winner_mark}"
+            f"{fmt_fitness(None if composite is None else composite.value):>9s}   "
+            f"{theta_str:>9s}   {delta_str:>7s}{winner_mark}"
         )
         lines.append(f"  {_box_line(row, width=w)}")
 

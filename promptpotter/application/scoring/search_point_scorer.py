@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.scoring.metrics import compute_composite_fitness
-from promptpotter.application.scoring.query_loop import ArmSlot, QueryLoopState, Walk, run_walks
+from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
 from promptpotter.domain.measurement_provenance import grade_answer
 from promptpotter.domain.phases import WalkEnd
-from promptpotter.domain.results import ArmOutcome, ScoreSummary, degradation_reading
+from promptpotter.domain.results import ScoreSummary, degradation_reading
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, WalkedCell
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, MeasuredCell, WalkedCell
 from promptpotter.domain.spend import ROLE_SPEND_KIND
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
@@ -24,8 +24,11 @@ from promptpotter.infrastructure.llm.spend_book import bound_spend_book
 from promptpotter.infrastructure.llm.telemetry import current_round, filed_as
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import DatasetIdentityError
-from promptpotter.shared.measurement_context import MeasuredCandidate, measured_candidate_context
+from promptpotter.shared.measurement_context import (
+    RECORDED_ROLES,
+    MeasuredPass,
+    measured_pass_context,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -43,6 +46,7 @@ __all__ = [
     "ScoredWalk",
     "close_walk",
     "open_walk",
+    "replayable_on",
     "reread_cells",
     "score_search_point",
 ]
@@ -73,7 +77,7 @@ def _build_scoring_error_signal(results: Sequence[GradedCell]) -> BrokenSignal:
     warning_types = Counter(str(facts.error_category) for facts in real_errors)
     return BrokenSignal(
         check_name=SCORING_ERROR_ABORT,
-        outcome=ArmOutcome.BROKEN,
+        outcome="broken",
         check_result=degradation_reading(
             source=SCORING_ERROR_ABORT,
             degraded_count=len(real_errors),
@@ -92,30 +96,11 @@ def _split_off_deprecated_samples(
     return kept, deprecated
 
 
-def _replayable_on(
-    dataset: list[Sample],
-    reusable: dict[str, FiledAnswer],
-    dataset_name: str | None,
+def replayable_on(
+    dataset: list[Sample], reusable: dict[str, FiledAnswer]
 ) -> dict[int, MeasuredCell]:
-    """Readers key by ``(dataset_name, sample_id)``: a slot holding another sample means rows re-cut under a used name."""
-    here = {s.id: s for s in dataset}
-    for prior in reusable.values():
-        if not dataset_name or prior.dataset_name != dataset_name:
-            continue
-        stored = prior.cell
-        sample = here.get(stored.sample_id)
-        if sample is not None and sample.key != stored.sample_key:
-            raise DatasetIdentityError(
-                dataset_name=dataset_name,
-                sample_id=stored.sample_id,
-                stored=(stored.query, stored.ground_truth),
-                current=(sample.query, sample.ground_truth or ""),
-            )
-    return {
-        s.id: replace(held.cell, sample_id=s.id)
-        for s in dataset
-        if (held := reusable.get(s.key)) is not None
-    }
+    """A cell replays on its sample's key alone, whichever bank filed it."""
+    return {s.id: held.cell for s in dataset if (held := reusable.get(s.key)) is not None}
 
 
 def _resolve_prior_cache(
@@ -127,7 +112,7 @@ def _resolve_prior_cache(
 ) -> tuple[dict[int, MeasuredCell], dict[int, MeasuredCell]]:
     cached_sample_results: dict[int, MeasuredCell] = {}
     if feed is not None:
-        cached_sample_results = _replayable_on(dataset, feed.advance(), session.dataset_name)
+        cached_sample_results = replayable_on(dataset, feed.advance())
 
     cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
     if deprecated_samples:
@@ -166,7 +151,7 @@ async def _claim_cell(
             claim = feed.claim(sample.key)
             if claim is not None:
                 try:
-                    held = _replayable_on(dataset, feed.advance(), session.dataset_name)
+                    held = replayable_on(dataset, feed.advance())
                     cached.update({sid: f for sid, f in held.items() if not is_deprecated(f)})
                 except BaseException:
                     claim.release()
@@ -176,7 +161,7 @@ async def _claim_cell(
                 claim.release()
                 return row, None
             if (measured := feed.claimed_cell(sample.key)) is not None:
-                return replace(measured, sample_id=sample.id), None
+                return measured, None
             if waiting is None:
                 waiting = asyncio.create_task(
                     heartbeat(
@@ -259,10 +244,10 @@ async def score_search_point(
     session: Session,
     *,
     label: str,
-    slot: ArmSlot | None = None,
     sample_index: SampleIndex | None = None,
-    measured: MeasuredCandidate | None,
+    measured: MeasuredPass | None,
     force_fresh: bool = False,
+    held: CellSheet = NO_CELLS,
 ) -> ScoredWalk:
     """``measured`` has NO default on purpose: it decides what the numbers MEAN."""
     # Opened inside the filing too: the walk's cells run in a copy of the context taken here.
@@ -272,12 +257,12 @@ async def score_search_point(
             dataset,
             session,
             label=label,
-            slot=slot,
             sample_index=sample_index,
             measured=measured,
             force_fresh=force_fresh,
+            held=held,
         )
-        await run_walks([walk], session, keep_cut=False)
+        await run_walks({label: walk}, session, keep_cut=False)
     return close_walk(walk)
 
 
@@ -294,14 +279,17 @@ def open_walk(
     session: Session,
     *,
     label: str,
-    slot: ArmSlot | None = None,
     checks: Sequence[StopRule] = (),
     sample_index: SampleIndex | None = None,
-    measured: MeasuredCandidate | None,
+    measured: MeasuredPass | None,
     force_fresh: bool = False,
     skip_at: int | None = None,
+    held: CellSheet = NO_CELLS,
 ) -> Walk:
-    """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace."""
+    """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace.
+
+    Its sample records are written iff ``measured`` names a role a round records; a walk continuing
+    one that holds *held* folds those rows into each record's running fold."""
     source = session.source
     assert source is not None, "populate_session_scoring arms the run source before any scoring"
     store = session.store
@@ -309,7 +297,7 @@ def open_walk(
     pipeline_schema = session.pipeline_schema
 
     entry = archive_entry(
-        search_point, dataset_name=session.dataset_name, pipeline_schema=pipeline_schema
+        search_point, dataset_hash=session.bank.dataset_hash, pipeline_schema=pipeline_schema
     )
     replaying = bool(backend_id) and not force_fresh
     node_configs = entry.node_configs if replaying else []
@@ -328,7 +316,7 @@ def open_walk(
         search_point=search_point,
         session=session,
         cached_sample_results=cached_sample_results,
-        slot=slot,
+        recorded=measured if measured is not None and measured.role in RECORDED_ROLES else None,
         role=str(label),
         sample_index=sample_index,
         deprecated_samples=deprecated_samples,
@@ -346,12 +334,13 @@ def open_walk(
         ),
         cell_keys=cell_keys,
         rereads=rereads,
+        held=held,
     )
     return Walk(
         dataset=dataset,
         ctx=ctx,
         checks=checks,
-        context=measured_candidate_context(measured),
+        context=measured_pass_context(measured),
         skip_at=skip_at,
     )
 

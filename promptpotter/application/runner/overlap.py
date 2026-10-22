@@ -15,7 +15,6 @@ from promptpotter.application.scoring.paired import (
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
-    ArmPointer,
     CellSet,
     CellSetBasis,
     CellSetName,
@@ -32,14 +31,15 @@ from promptpotter.domain.results import (
     measured_cells,
     origin_panel,
 )
-from promptpotter.shared.hashing import dataset_hash
-from promptpotter.shared.measurement_context import MeasuredCandidate, MeasurementRole, RoleScope
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet
+    from promptpotter.domain.scoring import CellSheet, GradedCell
 
 logger = logging.getLogger(__name__)
 
@@ -50,22 +50,22 @@ async def measure_overlap(
     cycle: Cycle, round_result: RoundResult, scoring_pool: list[Sample]
 ) -> tuple[OverlapReading, dict[str, CellSheet]]:
     """Called after the election, ruler extension, panel gate and fold: that ordering IS the quarantine."""
-    if round_result.opt_sp is None:
+    if round_result.head is None:
         return OverlapReading.unpaired(
             ReadingState.NO_SELECTION, round_result.round, round_result.improved
         ), {}
     pairs = _OriginPanelPairs(cycle, scoring_pool)
     # The line INCLUDING this round, which may have made its own result the new best.
-    ordered = sorted(best_line(cycle.rounds), key=lambda s: s.round)
+    ordered = sorted(best_line(cycle.rounds), key=lambda s: s.arm.round)
     held = InRunCells(cycle.rounds)
     origin = ordered[0]
     # The origin's OWN round, never every cell read since: a later re-score would move the exam.
-    origin_round = next(rr for rr in cycle.rounds if rr.round == origin.round)
+    origin_round = next(rr for rr in cycle.rounds if rr.round == origin.arm.round)
     scopes = cycle.difficulty.scopes
     panel = origin_panel(
-        measured_cells(origin_round.results),
+        pairs.measured(origin_round.results),
         line_cells=set[int]().union(
-            *(measured_cells(pairs.cells_of(s, held)) for s in ordered[1:])
+            *(pairs.measured(pairs.cells_of(s, held)) for s in ordered[1:])
         ),
         poolable={s.id for s in scoring_pool},
         scope_of={s.id: scopes.by_key[s.key] for s in scoring_pool},
@@ -77,7 +77,7 @@ async def measure_overlap(
         return OverlapReading.of(
             round_result.round,
             round_result.improved,
-            sample_ids=panel,
+            positions=panel,
             lead=pairs.absent(state, origin, ordered[-1], held, keep, bought),
             earlier=(),
         )
@@ -94,7 +94,7 @@ async def measure_overlap(
 
     bought: dict[str, CellSheet] = {}
     for step in ordered:
-        gaps = sorted(keep - measured_cells(pairs.cells_of(step, held)))
+        gaps = sorted(keep - pairs.measured(pairs.cells_of(step, held)))
         if not gaps:
             continue
         fresh = await _measure_gaps(cycle, gaps, scoring_pool, step=step)
@@ -104,19 +104,19 @@ async def measure_overlap(
                 ReadingState.PASS_STOPPED,
                 {cid: fresh_cells(rows) for cid, rows in bought.items()},
             ), {}
-        bought[step.candidate_id] = fresh
+        bought[step.opt_sp.id] = fresh
 
     # Read again off the round as it will CLOSE, so what was bought joins by the one read.
     closing = round_result.model_copy(update={"overlap_results": bought})
     closed = [closing if rr.round == round_result.round else rr for rr in cycle.rounds]
-    c0, *picks = sorted(best_line(closed), key=lambda s: s.round)
+    c0, *picks = sorted(best_line(closed), key=lambda s: s.arm.round)
     topped_up = InRunCells(closed)
     paid = {cid: fresh_cells(rows) for cid, rows in bought.items()}
     readings = [pairs.read(c0, pick, topped_up, keep, paid) for pick in picks]
     reading = OverlapReading.of(
         round_result.round,
         round_result.improved,
-        sample_ids=panel,
+        positions=panel,
         lead=readings[-1],
         earlier=readings[:-1],
     )
@@ -129,12 +129,17 @@ class _OriginPanelPairs:
         self._path = (session.hop,)
         self._instrument = session.instrument_id
         self._scorer = session.scoring.require_scorer().id
-        self._dataset = dataset_hash(session.samples)
+        self._dataset = session.bank.dataset_hash
         self._key_of = {int(s.id): s.key for s in scoring_pool}
+        self._slot_of = session.bank.slot_of
 
     @staticmethod
     def cells_of(step: LineStep, held: InRunCells) -> CellSheet:
-        return held.sheet(step.candidate_id, RoleScope.REPORT)
+        return held.sheet(step.opt_sp.id, RoleScope.REPORT)
+
+    def measured(self, rows: Iterable[GradedCell]) -> set[int]:
+        """By bank slot: the panel is served as the sample ids the operator selects on."""
+        return {self._slot_of[key] for key in measured_cells(rows)}
 
     def read(
         self,
@@ -169,8 +174,8 @@ class _OriginPanelPairs:
         def member(step: LineStep) -> PairMember:
             return PairMember(
                 address=self._address(step),
-                n=len(measured_cells(self.cells_of(step, held)) & panel),
-                bought=paid.get(step.candidate_id, 0),
+                n=len(self.measured(self.cells_of(step, held)) & panel),
+                bought=paid.get(step.opt_sp.id, 0),
             )
 
         return absent_pair(
@@ -191,8 +196,8 @@ class _OriginPanelPairs:
     def _address(self, step: LineStep) -> MemberAddress:
         return MemberAddress(
             path=self._path,
-            individual_id=step.candidate_id,
-            arm=ArmPointer(round=step.round, label=step.label, candidate_id=step.candidate_id),
+            individual_id=step.opt_sp.id,
+            arm=step.arm,
             # A fold over every pass report scope may see, so no one pass names it.
             pass_role=None,
         )
@@ -201,7 +206,7 @@ class _OriginPanelPairs:
         return MemberRows(
             address=self._address(step),
             sheet=self.cells_of(step, held),
-            bought=paid.get(step.candidate_id, 0),
+            bought=paid.get(step.opt_sp.id, 0),
             # The top-up is what completes a member an eliminator stopped short of the panel.
             cut=False,
             scope=RoleScope.REPORT,
@@ -226,7 +231,7 @@ async def _measure_gaps(
     samples = [s for s in scoring_pool if s.id in want]
     logger.info(
         "overlap: measuring %s on %d cell(s) of the origin panel it had not sat",
-        step.label,
+        step.arm.label,
         len(samples),
     )
     scored = await score_search_point(
@@ -241,17 +246,12 @@ async def _measure_gaps(
         label=MeasurementRole.OVERLAP,
         # No sample history: a report-only pass re-sends no degraded cached cell.
         sample_index=None,
-        measured=MeasuredCandidate(
-            idx=0,
-            candidate_id=step.candidate_id,
-            label=step.label,
-            role=MeasurementRole.OVERLAP,
-        ),
+        measured=MeasuredPass(individual_id=step.opt_sp.id, role=MeasurementRole.OVERLAP),
     )
     if scored.stopped is not None:
         logger.warning(
             "overlap: %s stopped after %d/%d cell(s) (%s); no reading this round",
-            step.label,
+            step.arm.label,
             len(scored.sheet),
             len(samples),
             scored.stopped,

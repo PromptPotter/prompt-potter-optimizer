@@ -9,7 +9,7 @@ from uuid import uuid4
 import yaml
 
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.spend import StepUsage
@@ -82,7 +82,7 @@ _DB_DEFAULT_URLS = {
 }
 _DB_DEFAULT_USERS = {"typedb": "admin", "neo4j": "neo4j"}
 
-_CELL_WAIT_S = 3600.0
+_CELL_ENVELOPE_S = 3600.0
 _NOTE_CAP = 300
 _TURN_CAP = 1200
 
@@ -418,7 +418,7 @@ async def _in_process_run(
             args += ["-e", key]
         args += ["-v", f"{work}:{_WORK}", str(image), "sh", "-c", cut, "sh", str(template)]
         with machine_step():
-            code, log = await run_cell_container(name, *args, env=env, timeout=_CELL_WAIT_S)
+            code, log = await run_cell_container(name, *args, env=env, timeout=_CELL_ENVELOPE_S)
         try:
             written = json.loads((work / "out.json").read_text(encoding="utf-8"))
             records = list(written["questions"][0]["dbs"][db]["results"])
@@ -462,6 +462,7 @@ CONNECTOR = Connector(
     name="dbllmbench",
     execution="in_process",
     wire_adapter=dbllmbench_wire_adapter,
+    cell_envelope_s=cell_envelope_of(_CELL_ENVELOPE_S),
     extract_experiment=_extract_experiment,
     in_process_run=_in_process_run,
     preflight=_preflight,
@@ -469,7 +470,6 @@ CONNECTOR = Connector(
     # Every cell queries the same database, so the ceiling is this machine's.
     max_cells_in_flight=2,
     cells_hold_the_machine=True,
-    cell_wait_s=_CELL_WAIT_S,
     required_observation_keys=(accuracy_key(0),),
     answer_key=ANSWER_KEY,
     default_pipeline=(WRITER_NODE,),

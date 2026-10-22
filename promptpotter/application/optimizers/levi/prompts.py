@@ -19,7 +19,7 @@ __all__ = ["paradigm_shift_prompt", "refine_prompt"]
 
 
 def _prompt(ctx: NodeContext[Any], individual: OptSearchPoint) -> str:
-    return f"--- PROMPT START ---\n{shown(ctx, individual)}\n--- PROMPT END ---"
+    return f"--- PROMPT START ---\n{shown(ctx, individual, ctx.prompt_node)}\n--- PROMPT END ---"
 
 
 def _score(score: float) -> str:
@@ -36,7 +36,10 @@ def paradigm_shift_prompt(
         + f"\n{_prompt(ctx, individual)}"
         for n, (individual, score) in enumerate(shown, start=1)
     ]
-    return ctx.fill(problem_description=task_description(ctx), representatives="\n\n".join(blocks))
+    return ctx.fill(
+        problem_description=task_description(ctx, ctx.prompt_node),
+        representatives="\n\n".join(blocks),
+    )
 
 
 def _failures(rows: Sequence[GradedCell], n: int, rng: random.Random) -> str:
@@ -73,10 +76,11 @@ def refine_prompt(
 ) -> str:
     """E.6; meta-advice stays empty: the paper publishes no template for it (App. B)."""
     individual, score = parent
+    node = ctx.prompt_node
     return ctx.fill(
-        problem_description=task_description(ctx),
+        problem_description=task_description(ctx, node),
         parent_score=_score(score),
-        parent_prompt=shown(ctx, individual),
+        parent_prompt=shown(ctx, individual, node),
         feedback_section=_failures(parent_rows, n_failures, rng),
         inspirations_section=_inspirations(ctx, inspirations),
         meta_advice_section="",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from contextlib import suppress
 from enum import StrEnum
 from typing import (
     TYPE_CHECKING,
@@ -23,14 +22,15 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
-    ArmPointer,
+    ArmKey,
+    ArmName,
     PairedReading,
     ReadingState,
     ReadingStateKind,
 )
 from promptpotter.domain.phases import ErrorRecord, StopReason
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
-from promptpotter.domain.ruler import AbilityReading, ThetaCaveat, theta_band
+from promptpotter.domain.ruler import LevelSeries, RulerStamp, ThetaCaveat, theta_band
 from promptpotter.domain.scoring import (
     NO_CELLS,
     CellSheet,
@@ -40,9 +40,13 @@ from promptpotter.domain.scoring import (
     is_answer_collapsed,
 )
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.spend import CloseSpend, PrefixReading, SpendRollup, TokenAccount
+from promptpotter.domain.spend import PrefixReading, SpendRollup, TokenAccount
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
+from promptpotter.domain.wounds import (
+    RuntimeFailure,
+    ValidationFailure,
+    fatal_validation_failures,
+)
 from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.measurement_context import SCOPE_ROLES, MeasurementRole, RoleScope
@@ -59,44 +63,65 @@ __all__ = [
     "VERIFY_STRATEGY_LABELS",
     "ArmAbility",
     "ArmElection",
-    "ArmOutcome",
+    "ArmEnd",
+    "ArmFit",
     "ArmPanel",
     "ArmReading",
-    "ArmSpend",
+    "ArmRole",
+    "ArmSlot",
+    "ArmState",
+    "ArmStateKind",
     "ArmVerdict",
     "BankedSearchPointError",
-    "CandidateProposal",
+    "Broken",
     "CellFold",
+    "Concluded",
     "Crown",
+    "Cut",
+    "CutKind",
+    "CutReason",
     "CycleResult",
     "DegradationContext",
     "DegradationHealth",
     "DiagnosticRunRecord",
     "DisplayMetric",
+    "Election",
+    "Eliminated",
+    "Elimination",
     "HardSampleOrder",
     "InRunCells",
     "IndividualWalk",
+    "Invalid",
     "LineRate",
     "LineStep",
     "LivesReading",
+    "Measured",
+    "Measuring",
     "OptimizerFact",
     "OverlapReading",
-    "ReferenceReading",
+    "Proposal",
+    "Proposed",
     "RescoreCount",
     "RoundAdvance",
     "RoundAdvanceInfo",
+    "RoundCells",
     "RoundClocks",
+    "RoundOutcome",
     "RoundResult",
     "RunStanding",
     "ScoreSummary",
     "ScoreboardRankKey",
     "ScoreboardRow",
-    "ScoredCandidate",
+    "Skipped",
     "StallEffect",
     "VerifyHeldAbsent",
     "VerifyPass",
     "VerifyReading",
     "VerifyStrategy",
+    "arm_elimination",
+    "arm_end",
+    "arm_key",
+    "arm_name",
     "arm_verdict",
     "best_line",
     "candidate_label",
@@ -106,16 +131,16 @@ __all__ = [
     "individual_cells",
     "is_electable",
     "is_floor_pinned",
-    "is_leader_eligible",
     "line_by_individual",
+    "measured_arm",
     "measured_cells",
     "measured_searchpoint",
     "merge_known_outcomes",
     "order_floor",
     "origin_panel",
     "overlap_line",
+    "panel_counts",
     "panel_cuts",
-    "parse_candidate_label",
     "pick_line",
     "recall_at",
     "rescore_count",
@@ -124,29 +149,8 @@ __all__ = [
     "rounds_without_advance",
     "scoreboard_rank_key",
     "unscoreable_cells",
+    "walked_short",
 ]
-
-
-class ArmOutcome(StrEnum):
-    """How an arm's measurement ended, and whose decision ended it."""
-
-    MEASURED = "measured"
-    INVALID = "invalid"  # rejected before it cost a cell; the scores beside it are synthetic
-    SKIPPED = "skipped"
-    BROKEN = "broken"
-    # `Eliminator.stop_disqualifies` says whether the stop is a rejection.
-    ELIMINATED = "eliminated"
-    LOCKED_IN = "locked_in"
-
-    @property
-    def cut_short(self) -> bool:
-        """Stopped before its panel against the arm — by the operator, the bench or a cut."""
-        return self in (ArmOutcome.SKIPPED, ArmOutcome.BROKEN, ArmOutcome.ELIMINATED)
-
-    @property
-    def ended_early(self) -> bool:
-        """Stopped before its panel for the arm or against it — what a stopped-walk badge marks."""
-        return self.cut_short or self is ArmOutcome.LOCKED_IN
 
 
 class DegradationContext(TypedDict, total=False):
@@ -188,24 +192,6 @@ def candidate_label(round_num: int, idx: int) -> str:
     return f"C{round_num}.{idx + 1}"
 
 
-def parse_candidate_label(label: str) -> tuple[int, int]:
-    """Labels are 1-indexed, the on-disk candidate list 0-indexed."""
-    if label == "C0":
-        return 0, 0
-    round_part, _, idx_part = label[1:].partition(".")
-    if not label.startswith("C") or not idx_part:
-        raise ValueError(f"bad candidate label {label!r}; expected C0 or C{{round}}.{{n}}.")
-    try:
-        round_num, idx_one_based = int(round_part), int(idx_part)
-    except ValueError:
-        raise ValueError(
-            f"bad candidate label {label!r}; expected C0 or C{{round}}.{{n}}."
-        ) from None
-    if idx_one_based < 1:
-        raise ValueError(f"candidate index in {label!r} must be >= 1.")
-    return round_num, idx_one_based - 1
-
-
 def closed_after_origin(rounds: Sequence[int]) -> int:
     return sum(1 for number in rounds if number > 0)
 
@@ -219,98 +205,263 @@ class CellFold(StrictModel):
     accuracy: float | None
     composite_fitness: float | None
     deprecated: int
+    degraded: int
+    # :func:`recall_at`; empty where the backend ranks nothing.
+    recall_at: dict[int, float]
 
 
 class ScoreSummary(CellFold):
+    """An arm's fold of its cells: what it walked, and its level on them."""
+
+    # Every cell taken, errored and deprecated ones included; ``cached`` of them replayed.
+    walked: int
+    cached: int
     evaluators: dict[str, float]
     # Student-t CI on the mean per-cell FITNESS, whatever the formula; ``None`` under two cells.
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
+    # BACKEND tokens only, replayed rows excluded: judge and optimizer spend carry no arm.
+    tokens: TokenAccount | None
 
 
-class ScoredCandidate(ScoreSummary):
-    """One candidate's score report: its cells folded, beside what the round knows of the arm.
+#: Why an arm stopped short of its panel AGAINST it: refused before a cell, by the operator, by the
+#: bench's run-health rules, or by the eliminator (`Eliminator.stop_disqualifies` says if that rejects).
+CutKind = Literal["invalid", "skipped", "broken", "eliminated"]
+#: How an arm's walk ended short of its panel: cut against it, or locked in for it.
+ArmEnd = Literal[CutKind, "locked_in"]
+#: Where an arm's walk stands: each ``ArmState`` member's discriminator.
+ArmStateKind = Literal["proposed", "measuring", "cut", "measured"]
+#: What an arm IS in its round: the origin, a proposal, or a reference re-read on the round's cells.
+ArmRole = Literal[MeasurementRole.ORIGIN, MeasurementRole.PANEL, MeasurementRole.PARENT]
 
-    ``accuracy`` IS mean fitness, so there is no ``hits``.
-    """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+class ArmSlot(StrictModel):
+    """Where an individual was first walked as an arm: the ``idx``-th of its round's ``total``."""
 
-    candidate_id: str
-    label: str
-    changes_description: str = ""
-    pipeline_overlay: dict[str, Any] | None = None
-    # Origin floor ⊕ this candidate's delta; ``pipeline_overlay`` above is the sparse fork transport.
-    resolved_pipeline_params: dict[str, Any] | None = None
-    # Stamped, never re-derived: it covers each node's rendered ``prompt``, stripped from the above.
-    sp_hash: str = ""
-    prompt_fields: dict[str, Any] = Field(default_factory=dict)
-    node_prompt_fields: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        description="The prompt fields each node runs, by node: the individual's own under the "
-        "node its prompt is rendered into, and under any other node the ones that node's config "
-        "carries. A node with none is absent.",
-    )
-    outcome: ArmOutcome
-    scored_samples: int = 0
-    expected_samples: int = 0
-    cached_samples: int = 0
-    # BACKEND tokens only: judge and optimizer spend carry no candidate.
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    cache_read_tokens: int | None = None
+    model_config = ConfigDict(frozen=True)
+
+    round: int
+    idx: int
+    total: int
+
+    @property
+    def label(self) -> str:
+        return candidate_label(self.round, self.idx)
+
+
+def arm_key(
+    individual: OptSearchPoint, failures: Iterable[ValidationFailure], round_num: int, idx: int
+) -> ArmKey:
+    """A refused proposal is keyed by its SLOT: its content is often its parent's or a sibling's."""
+    if fatal_validation_failures(failures):
+        return ArmKey(stable_hash([round_num, idx, individual.id]))
+    return ArmKey(individual.id)
+
+
+class Proposal(StrictModel):
+    """What a proposer hands the round: an individual, its sparse overlay, and why it is refused."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    individual: OptSearchPoint
+    # The sparse fork transport; the individual's own params are the resolved whole.
+    overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
-    runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
-    # The eliminator's own keys, opaque to the bench (potter's: `pobb/checks.py::EliminationContext`).
-    elimination_context: dict[str, Any] = Field(default_factory=dict)
-    elimination_reason: str | None = None
-    degradation_context: DegradationContext = Field(default_factory=DegradationContext)
-    # ``None`` on the origin, on an arm with no parent, and until the round has read every arm.
-    vs_reference: PairedReading | None = None
-    # Rasch ability on the round's joint-fit scale; `None` outside the election fit.
-    theta: float | None = None
-    theta_se: float | None = None
-    # This ARM's own caveat; the round-scale ones ride ``RoundResult.ability``.
-    theta_caveat: ThetaCaveat | None = None
 
+    @property
+    def refused(self) -> bool:
+        return bool(fatal_validation_failures(self.validation_failures))
+
+    def key(self, round_num: int, idx: int) -> ArmKey:
+        return arm_key(self.individual, self.validation_failures, round_num, idx)
+
+
+class _Arm(StrictModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    role: ArmRole
+    # Its FIRST walk as an arm; ``None``: a reference no round of this cycle walked as an arm.
+    slot: ArmSlot | None
+    individual: OptSearchPoint
+    overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    validation_failures: list[ValidationFailure] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _only_a_parent_is_unwalked(self) -> Self:
+        if self.slot is None and self.role != MeasurementRole.PARENT:
+            raise ValueError(f"a {self.role} arm is walked: it holds its slot")
+        return self
+
+    @property
+    def label(self) -> str:
+        return "parent" if self.slot is None else self.slot.label
+
+    @property
+    def refused(self) -> bool:
+        return bool(fatal_validation_failures(self.validation_failures))
+
+    @property
+    def changes_description(self) -> str:
+        return self.individual.lineage.changes_description or ""
+
+
+class Proposed(_Arm):
+    state: Literal["proposed"] = "proposed"
+
+
+class _Walked(_Arm):
+    # Stamped, never re-derived: it covers each node's rendered ``prompt``.
+    sp_hash: str
+    # Origin floor ⊕ this individual's delta, schema-resolved: what a steered fork seeds from.
+    resolved_params: dict[str, Any]
+    expected_samples: int
+
+
+class Measuring(_Walked):
+    """What is known as the walk opens; its cells and their fold land on their own records."""
+
+    state: Literal["measuring"] = "measuring"
+    sample_order: list[int] = Field(default_factory=list)
+    n_priors: int = 0
+    # The turn's place in a block race — ``n`` of ``of``, ``size`` cells, ``racing`` arms live.
+    block: dict[str, int] | None = None
+
+
+class Elimination(StrictModel):
+    """The eliminator's reading of a stop it made, for the arm or against it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    reason: str
+    # Opaque to the bench (potter's: `pobb/checks.py::EliminationContext`).
+    context: dict[str, Any]
+
+
+class Eliminated(StrictModel):
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["eliminated"] = "eliminated"
+    elimination: Elimination
+
+
+class Broken(StrictModel):
+    """The bench's run-health rules stopped it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["broken"] = "broken"
+    failure: RuntimeFailure
+    degradation: DegradationContext
+
+
+class Invalid(StrictModel):
+    """Refused before a cell: the reasons are the arm's own fatal ``validation_failures``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["invalid"] = "invalid"
+
+
+class Skipped(StrictModel):
+    """The operator stopped it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: Literal["skipped"] = "skipped"
+
+
+CutReason = Annotated[Eliminated | Broken | Invalid | Skipped, Field(discriminator="kind")]
+
+
+class _Concluded(_Walked):
     def searchpoint(
         self, *, schema: PipelineSchema, framing: TaskDecomposition, demo: Sequence[Sample]
     ) -> JobSearchPoint:
-        if self.resolved_pipeline_params is None:
-            raise BankedSearchPointError(f"{self.label}'s round file carries no resolved config.")
-        sp = OptSearchPoint.from_prompt_fields(
-            self.prompt_fields, pipeline_params=self.resolved_pipeline_params
-        ).to_job_search_point(schema=schema, framing=framing, demo=demo)
-        if self.sp_hash and sp.sp_hash(schema) != self.sp_hash:
+        sp = self.individual.to_job_search_point(schema=schema, framing=framing, demo=demo)
+        if sp.sp_hash(schema) != self.sp_hash:
             raise BankedSearchPointError(
-                f"{self.label} rebuilds from its round file as searchpoint "
-                f"{sp.sp_hash(schema)[:12]}, not the {self.sp_hash[:12]} its rows were measured "
-                "under: the pipeline schema, framing or demo pool has moved under it."
+                f"{self.label} rebuilds as searchpoint {sp.sp_hash(schema)[:12]}, not the "
+                f"{self.sp_hash[:12]} its rows were measured under: the pipeline schema, framing "
+                "or demo pool has moved under it."
             )
         return sp
+
+
+class Cut(_Concluded):
+    """Stopped short of its panel against it."""
+
+    state: Literal["cut"] = "cut"
+    reason: CutReason
+
+    @property
+    def kind(self) -> CutKind:
+        return self.reason.kind
+
+
+class Measured(_Concluded):
+    state: Literal["measured"] = "measured"
+    # Stopped FOR it: the eliminator settled it before its panel ran out.
+    locked_in: Elimination | None
+
+
+Concluded = Cut | Measured
+ArmState = Annotated[Proposed | Measuring | Cut | Measured, Field(discriminator="state")]
+
+assert {r.model_fields["kind"].default for r in get_args(get_args(CutReason)[0])} == set(
+    get_args(CutKind)
+), "CutKind is the cut reasons' discriminators"
+assert {a.model_fields["state"].default for a in get_args(get_args(ArmState)[0])} == set(
+    get_args(ArmStateKind)
+), "ArmStateKind is the arm states' discriminators"
+
+
+def arm_end(arm: ArmState) -> ArmEnd | None:
+    match arm:
+        case Cut(reason=reason):
+            return reason.kind
+        case Measured(locked_in=Elimination()):
+            return "locked_in"
+        case _:
+            return None
+
+
+def walked_short(arm: ArmState) -> bool:
+    """Stopped before its panel ran out, for it or against it; an ``invalid`` arm never started one."""
+    return arm_end(arm) not in (None, "invalid")
+
+
+@shapes_optimizer_prompt
+def arm_elimination(arm: ArmState) -> Elimination | None:
+    """The eliminator's verdict on an arm it settled, cut or locked in."""
+    match arm:
+        case Cut(reason=Eliminated(elimination=elimination)) | Measured(locked_in=elimination):
+            return elimination
+        case _:
+            return None
+
+
+def is_leader_eligible(arm: ArmState) -> bool:
+    """Measured or eliminated: the bench's own stops and a refusal leave no reading."""
+    return isinstance(arm, Measured) or (isinstance(arm, Cut) and arm.kind == "eliminated")
 
 
 class BankedSearchPointError(ConflictError):
     code = "banked_searchpoint_moved"
 
 
-def is_leader_eligible(cs: ScoredCandidate) -> bool:
-    return cs.outcome not in (ArmOutcome.BROKEN, ArmOutcome.SKIPPED)
-
-
-def is_electable(cs: ScoredCandidate, rows: Sequence[GradedCell]) -> bool:
+def is_electable(arm: ArmState, rows: Sequence[GradedCell]) -> bool:
     """NOT the whole election rule: the coverage floor is `scoring/selection.py::distinct_valid_cells`."""
-    return is_leader_eligible(cs) and bool(rows) and not is_answer_collapsed(rows)
+    return is_leader_eligible(arm) and bool(rows) and not is_answer_collapsed(rows)
 
 
 def round_document_digest(rr: RoundResult) -> str:
     """The WHOLE outcome, never a chosen subset: under-firing goes stale in silence."""
     outcome = rr.model_dump(mode="json", include=set(RoundOutcome.model_fields))
-    return stable_hash([outcome, rr.cells().model_dump(mode="json")])
+    return stable_hash([outcome, rr.addresses().model_dump(mode="json")])
 
 
 def unscoreable_cells(results: Iterable[GradedCell]) -> int:
-    """Never ``scored_samples - total``, which counts a PoBB stop and a deprecated row as holes."""
+    """Never ``walked - total``, which counts a deprecated row as a hole."""
     return sum(1 for r in results if r.facts.errored)
 
 
@@ -328,12 +479,13 @@ def merge_known_outcomes(
     prior: Iterable[GradedCell], incoming: Iterable[GradedCell]
 ) -> list[GradedCell]:
     """Never score this pool: its rows were measured by DIFFERENT configurations."""
-    by_sid = {cell.sample_id: cell for cell in prior}
+    by_key = {cell.key: cell for cell in prior}
     for cell in incoming:
-        by_sid[cell.sample_id] = cell
-    return list(by_sid.values())
+        by_key[cell.key] = cell
+    return list(by_key.values())
 
 
+@shapes_optimizer_prompt
 def order_floor(score: float | None) -> float:
     return score if score is not None else -math.inf
 
@@ -367,25 +519,6 @@ class ScoreboardRow(StrictModel):
 
     rank: int
     reading: ArmReading
-
-
-class CandidateProposal(StrictModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    opt_sp: OptSearchPoint
-    pipeline_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    validation_failures: list[ValidationFailure] = Field(default_factory=list)
-    runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
-
-
-class ReferenceReading(StrictModel):
-    """A round's reference individual re-read on the round's panel; potter's is its parent."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
-
-    opt_sp: OptSearchPoint
-    report: ScoredCandidate
-    results: CellSheet = NO_CELLS
 
 
 class StallEffect(StrEnum):
@@ -501,7 +634,7 @@ def stalls_left(rounds: Sequence[RoundOutcome], lives: tuple[int, int]) -> int:
     start, cap = lives
     bank = max(0, min(cap, start))
     for rr in rounds:
-        if rr.round == 0 or rr.generation_only or rr.electable_count == 0:
+        if rr.round == 0 or rr.election is None or rr.election.electable == 0:
             continue
         promoted = ROUND_ADVANCE_INFO[rr.overlap.advance].promoted
         bank = max(0, min(cap, bank + (1 if promoted else -1)))
@@ -546,7 +679,7 @@ class OverlapReading(StrictModel):
     model_config = ConfigDict(frozen=True)
 
     # :func:`origin_panel`, by sample slot, ascending; empty where no pass was sent.
-    sample_ids: tuple[int, ...]
+    positions: tuple[int, ...]
     lead: PairedReading = Field(
         description="The standing pick (`b`) over C0 (`a`) on the origin panel, in report scope. "
         "`bought` on each member is what this round paid to put it back on the whole panel."
@@ -562,12 +695,12 @@ class OverlapReading(StrictModel):
         round_num: int,
         improved: bool,
         *,
-        sample_ids: Sequence[int],
+        positions: Sequence[int],
         lead: PairedReading,
         earlier: Sequence[PairedReading],
     ) -> OverlapReading:
         return cls(
-            sample_ids=tuple(sample_ids),
+            positions=tuple(positions),
             lead=lead,
             earlier=tuple(earlier),
             advance=round_advance(round_num, improved, lead, earlier),
@@ -576,7 +709,7 @@ class OverlapReading(StrictModel):
     @classmethod
     def unpaired(cls, state: ReadingState, round_num: int, improved: bool) -> OverlapReading:
         return cls.of(
-            round_num, improved, sample_ids=(), lead=PairedReading.unread(state), earlier=()
+            round_num, improved, positions=(), lead=PairedReading.unread(state), earlier=()
         )
 
 
@@ -585,7 +718,7 @@ class LineRate(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    arm: ArmPointer
+    arm: ArmName
     rate: float = Field(description="Its rate over the panel cells it and C0 both scored.")
     n: int = Field(description="How many of the panel's cells it holds scoreable.")
 
@@ -605,15 +738,13 @@ def overlap_line(overlap: OverlapReading) -> list[LineRate]:
 class LineStep(NamedTuple):
     """``opt_sp`` re-measures the member: another arm's prompt would read under this one's label."""
 
-    round: int
-    candidate_id: str
-    label: str
+    arm: ArmName
     opt_sp: OptSearchPoint
 
 
 @shapes_optimizer_prompt
-def measured_cells(rows: Iterable[GradedCell]) -> set[int]:
-    return {cell.sample_id for cell in rows if cell.scored}
+def measured_cells(rows: Iterable[GradedCell]) -> set[str]:
+    return {cell.key for cell in rows if cell.scored}
 
 
 def is_floor_pinned(rows: Iterable[GradedCell]) -> bool:
@@ -626,31 +757,19 @@ def is_floor_pinned(rows: Iterable[GradedCell]) -> bool:
 
 def best_line(rounds: Sequence[RoundResult]) -> list[LineStep]:
     """The declared picks, never a high-water of each round's composite: those sat different rows."""
-    individuals = {rr.opt_sp.id: rr.opt_sp for rr in rounds if rr.opt_sp is not None}
-    return [
-        LineStep(
-            round=arm.round,
-            candidate_id=arm.candidate_id,
-            label=arm.label,
-            opt_sp=individuals[arm.candidate_id],
-        )
-        for arm in pick_line(rounds)
-    ]
+    individuals = {
+        head.individual.id: head.individual for rr in rounds if (head := rr.head) is not None
+    }
+    return [LineStep(arm=arm, opt_sp=individuals[arm.key]) for arm in pick_line(rounds)]
 
 
-def pick_line(rounds: Sequence[RoundOutcome]) -> list[ArmPointer]:
-    labels: dict[str, str] = {}
-    became: dict[str, int] = {}
+def pick_line(rounds: Sequence[RoundOutcome]) -> list[ArmName]:
+    picks: dict[ArmKey, ArmName] = {}
     for rr in rounds:
-        for cs in rr.candidate_scores:
-            labels.setdefault(cs.candidate_id, cs.label)
-        if rr.opt_sp is not None and rr.selected_labels:
-            became.setdefault(rr.opt_sp.id, rr.round)
-    # `R{n}` only where an individual was never a scored candidate: an anomaly.
-    return [
-        ArmPointer(round=rnd, label=labels.get(cid) or f"R{rnd}", candidate_id=cid)
-        for cid, rnd in became.items()
-    ]
+        if rr.election is not None and rr.election.selected:
+            key = rr.election.ended_on
+            picks.setdefault(key, arm_name(key, rr.arms[key], rr.round))
+    return list(picks.values())
 
 
 def origin_panel(
@@ -694,7 +813,13 @@ def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | Non
     to_ceiling: int | None = None
     if accuracy_ceiling is not None:
         target = CEILING_FRACTION * accuracy_ceiling
-        to_ceiling = first(lambda r: r.accuracy is not None and r.accuracy >= target)
+        to_ceiling = first(
+            lambda r: (
+                (fold := r.fold) is not None
+                and fold.accuracy is not None
+                and fold.accuracy >= target
+            )
+        )
     return RoundClocks(
         rounds_to_separable=first(lambda r: r.overlap.advance is RoundAdvance.ADVANCED),
         rounds_to_improved=first(lambda r: r.improved),
@@ -762,23 +887,19 @@ class OptimizerFact(StrictModel):
 
 
 class RoundCells(StrictModel):
-    """A :class:`RoundResult`'s four row fields as archive addresses, in walk order."""
+    """A :class:`RoundResult`'s rows as archive addresses, in walk order."""
 
     model_config = ConfigDict(frozen=True)
 
-    head: list[WalkedCell] = Field(default_factory=list)
-    arms: dict[str, list[WalkedCell]] = Field(default_factory=dict)
-    references: dict[str, list[WalkedCell]] = Field(default_factory=dict)
+    arms: dict[ArmKey, list[WalkedCell]] = Field(default_factory=dict)
     overlap: dict[str, list[WalkedCell]] = Field(default_factory=dict)
 
-    def walks(self, ended_on: OptSearchPoint | None) -> list[IndividualWalk[WalkedCell]]:
-        return _round_walks(
-            ended_on,
-            head=self.head,
-            arms=self.arms,
-            references=self.references,
-            overlap=self.overlap,
-        )
+    def walks(self) -> list[IndividualWalk[WalkedCell]]:
+        return _round_walks(arms=self.arms, overlap=self.overlap)
+
+    def sample_keys(self) -> set[str]:
+        walked = [*self.arms.values(), *self.overlap.values()]
+        return {key for cells in walked for key, _, _ in cells}
 
 
 class IndividualWalk[C: tuple[Any, ...]](NamedTuple):
@@ -791,25 +912,20 @@ class IndividualWalk[C: tuple[Any, ...]](NamedTuple):
 
 # The WALK's role, never the answer's `role` stamp: that names who FILED it, and a replay reads it.
 _ROW_SET_ROLES: dict[str, frozenset[MeasurementRole]] = {
-    "head": SCOPE_ROLES[RoleScope.DECISION],
     "arms": SCOPE_ROLES[RoleScope.DECISION],
-    "references": SCOPE_ROLES[RoleScope.DECISION],
     "overlap": frozenset({MeasurementRole.OVERLAP}),
 }
 assert _ROW_SET_ROLES.keys() == RoundCells.model_fields.keys()
 
 
 def _round_walks[C: tuple[Any, ...]](
-    ended_on: OptSearchPoint | None,
-    *,
-    head: Sequence[C],
-    **by_individual: Mapping[str, Sequence[C]],
+    **by_individual: Mapping[ArmKey, Sequence[C]] | Mapping[str, Sequence[C]],
 ) -> list[IndividualWalk[C]]:
-    keyed = {**by_individual, "head": {} if ended_on is None else {ended_on.id: head}}
+    """An arm's cells are its individual's: a refused arm walked none, so its slot key holds none."""
     return [
         IndividualWalk(individual_id, _ROW_SET_ROLES[row_set], cells)
-        for row_set in ("arms", "references", "head", "overlap")
-        for individual_id, cells in keyed[row_set].items()
+        for row_set in ("arms", "overlap")
+        for individual_id, cells in by_individual[row_set].items()
     ]
 
 
@@ -860,124 +976,188 @@ if set(DISPLAY_METRIC_INFO) != set(get_args(DisplayMetric)):
     raise RuntimeError("DISPLAY_METRIC_INFO is out of step with DisplayMetric (domain/results.py)")
 
 
+class ArmFit(StrictModel):
+    """What the election read of one arm: θ lives here and nowhere else."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # Rasch ability on the round's joint-fit scale; `None` outside the election fit.
+    theta: float | None = None
+    theta_se: float | None = None
+    # This ARM's own reason θ is not ability (`bench/difficulty.py::AbilityScale.caveat`).
+    theta_caveat: ThetaCaveat | None = None
+    # This arm over the individual it was judged against; `None` on an arm with no reference.
+    vs_reference: PairedReading | None = None
+
+
+class Election(StrictModel):
+    """What a round's selector decided over its arms, by key; empty ``selected`` = the round HELD."""
+
+    model_config = ConfigDict(frozen=True)
+
+    # Round 0 selects the origin it adopted.
+    selected: list[ArmKey]
+    leading: ArmKey | None = Field(
+        description="The ONE arm this round is read off, as its selector named it and never "
+        "re-ranked: the selection where there is one, on a held round the challenger that came "
+        "closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. "
+        "`null` where the selector could read no arm. NOT whose numbers the headline carries: "
+        "that is `ended_on`."
+    )
+    ended_on: ArmKey = Field(
+        description="WHOSE numbers the round's headline carries: the selection where the round "
+        "selected; on a held round the retained parent, re-read on this round's cells as its "
+        "reference arm — never the leading challenger."
+    )
+    # Arms that entered the election. Zero says the proposer made no testable variant, not a stall.
+    electable: int
+    fit: dict[ArmKey, ArmFit] = Field(default_factory=dict)
+    # `Selector.elects_on`: the column of `scoreboard` the round was WON on.
+    elects_on: DisplayMetric
+    # The selector's own reason; ``None`` on the origin round, which chose between nobody.
+    verdict_reason: str | None = None
+    # The δ scale the election read, whether or not a θ was fit on it.
+    ruler: RulerStamp
+
+
 class RoundOutcome(StrictModel):
     """``RoundClosedRecord`` carries exactly this: a field declared here reaches the ledger."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     round: int
-    label: str = Field(
-        description="WHOSE numbers this round's headline (`accuracy`, `composite_fitness`, "
-        "`total`, `evaluators`, `results`) carries: the candidate label (`C0`, `C3.1`) of the "
-        "individual the round ENDED on. Equal to `leading_label` where the round selected; on a "
-        "held round it is the retained PARENT, re-scored on this round's cells, and names an arm "
-        "of an earlier round — so the headline is never the leading challenger's."
-    )
-    # Not defaulted: a MISSING key must fail rather than quietly become a rate.
-    accuracy: float | None
-    composite_fitness: float | None
-    total: int
-    improved: bool
-    # `None` only before the election runs.
-    verdict_reason: str | None = None
-    # `Selector.elects_on`: the column of `scoreboard` this round was WON on.
-    elects_on: DisplayMetric
-    degraded_samples: int = 0
-    not_attempted: int = 0
-    # Cells of the winner's panel measured and ungraded: re-graded off the banked row, never re-run.
-    unscored: int = 0
-    # Fatal-warning samples discarded from total/accuracy on the winner's run.
-    deprecated: int = 0
-    # :func:`recall_at`; empty where the backend ranks nothing.
-    recall_at: dict[int, float] = Field(default_factory=dict)
-    # `None` = never fit. Its SE is a precision, never a penalty: no rank key, no `mean - λ·se`.
-    ability: AbilityReading | None = None
-    prompt_fields: dict[str, Any]
-    pipeline_params: dict[str, Any] | None = None
-    candidates_scored: int
-    # Arms that entered the election. Zero says the proposer made no testable variant, not a stall.
-    electable_count: int = 0
-    candidate_scores: list[ScoredCandidate] = Field(default_factory=list)
-    # By LABEL; empty when the round HELD, and round 0 selects the ``C0`` it adopted.
-    selected_labels: list[str]
-    leading_label: str | None = Field(
-        description="The ONE arm of `candidate_scores` this round is read off, by LABEL, as its "
-        "selector named it (`Selection.leading_id`) and never re-ranked: the selection where "
-        "there is one, on a held round the challenger that came closest on the selector's own "
-        "objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector "
-        "could read no arm. NOT whose numbers the headline carries: that is `label`."
-    )
-    evaluators: dict[str, float] = Field(default_factory=dict)
-    # Not `improved` above, the selector's point estimate. `pending` until the overlap pass lands.
+    # Its panel arms in slot order, then each reference the round re-read: one key, one state.
+    arms: dict[ArmKey, ArmState] = Field(default_factory=dict)
+    # Each arm's fold of the cells the round files for it, taken once as the round is measured
+    # (`MeasuredRound.folds`); none for an arm refused before a cell.
+    folds: dict[ArmKey, ScoreSummary]
+    # ``None``: a diag round, its variants generated and never scored.
+    election: Election | None
+    # Not `improved`, the selector's point estimate. `pending` until the overlap pass lands.
     overlap: OverlapReading
     diagnostics: RoundDiagnostics | None = None
+    # Graded against the rounds before it, so it is stamped, never re-derived from this one.
     health: DegradationHealth | None = None
-    # Resume rebuilds `Cycle.opt_sp` from it. None only on a round that never closed.
-    opt_sp: OptSearchPoint | None = None
-    optimizer_state: OptimizerState
+    # Built once, at the round's close (`Cycle.close_state`); `None` from its election until then.
+    optimizer_state: OptimizerState | None = None
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
-    # A diag round: variants generated, never scored.
-    generation_only: bool = False
 
     @property
-    def origin(self) -> ScoredCandidate:
-        """Round 0's arm, addressed by the individual the round ended on, never by position."""
-        assert self.round == 0 and self.opt_sp is not None, "round 0 ends on the origin"
-        return {c.candidate_id: c for c in self.candidate_scores}[self.opt_sp.id]
-
-    def _arm(self, scored: ScoredCandidate) -> ArmPointer:
-        return ArmPointer(round=self.round, label=scored.label, candidate_id=scored.candidate_id)
+    def closed_state(self) -> OptimizerState:
+        if self.optimizer_state is None:
+            raise ValueError(
+                f"round {self.round} holds no optimizer state: it has not closed, or it is a "
+                "member's view, whose parts open through `NodeContext.recall`"
+            )
+        return self.optimizer_state
 
     @property
-    def ended_on(self) -> ArmPointer | None:
-        """`label` as an arm, in the round that MINTED it: an earlier one where this round held."""
-        if self.opt_sp is None:
+    def generation_only(self) -> bool:
+        return self.election is None
+
+    @property
+    def head(self) -> Concluded | None:
+        """The arm the round ENDED on: the headline is its numbers."""
+        if self.election is None:
             return None
-        minted = self.round
-        if all(c.label != self.label for c in self.candidate_scores):
-            with suppress(ValueError):
-                minted = parse_candidate_label(self.label)[0]
-        return ArmPointer(round=minted, label=self.label, candidate_id=self.opt_sp.id)
+        arm = self.arms[self.election.ended_on]
+        assert isinstance(arm, Concluded), "a round ends on an arm it concluded"
+        return arm
 
     @property
-    def leading_arm(self) -> ArmPointer | None:
-        """`leading_label` as an arm; ``None`` where the selector could read none."""
-        return next(
-            (self._arm(c) for c in self.candidate_scores if c.label == self.leading_label), None
+    def fold(self) -> ScoreSummary | None:
+        """The headline: the fold of the arm the round ENDED on, never a field of its own."""
+        return None if self.election is None else self.folds.get(self.election.ended_on)
+
+    @property
+    def improved(self) -> bool:
+        """A promotion, on a bare point estimate; round 0 adopts its origin and promotes nothing."""
+        return self.round > 0 and self.election is not None and bool(self.election.selected)
+
+    @property
+    def ruler(self) -> RulerStamp | None:
+        return None if self.election is None else self.election.ruler
+
+    @property
+    def panel(self) -> dict[ArmKey, ArmState]:
+        """The arms the round PROPOSED, in slot order: no reference it re-read."""
+        return {key: arm for key, arm in self.arms.items() if arm.role != MeasurementRole.PARENT}
+
+    @property
+    def candidates_scored(self) -> int:
+        return sum(1 for arm in self.panel.values() if is_leader_eligible(arm))
+
+    @property
+    def origin(self) -> Concluded:
+        head = self.head
+        assert self.round == 0 and head is not None, "round 0 ends on the origin"
+        return head
+
+    def fit(self, key: ArmKey) -> ArmFit | None:
+        return None if self.election is None else self.election.fit.get(key)
+
+    def arm_election(self, key: ArmKey, *, held: bool = True) -> ArmElection:
+        election = self.election
+        return ArmElection.of(
+            key,
+            held=held and election is not None,
+            selected=() if election is None else election.selected,
+            leading=None if election is None else election.leading,
+            electable=None if election is None else election.electable,
         )
 
-    @property
-    def selected_arms(self) -> list[ArmPointer]:
-        """`selected_labels` as arms, in that order; empty on a round that held."""
-        return [self._arm(c) for c in self.selected_scores]
-
-    def arm_reading(self, scored: ScoredCandidate, *, cut: bool) -> ArmReading:
-        return ArmReading.of(
-            self._arm(scored),
-            scored,
-            cut=cut,
-            changes_description=scored.changes_description,
-            ability=ArmAbility.of(scored.theta, scored.theta_se, scored.theta_caveat),
-            vs_reference=scored.vs_reference,
-            election=ArmElection.of(
-                scored.label,
-                held=True,
-                selected=self.selected_labels,
-                leading=self.leading_label,
-                electable=self.electable_count,
-            ),
-        ).on_line(line_by_individual(self.overlap))
-
     def arm_readings(self) -> list[ArmReading]:
-        scored = self.candidate_scores
-        cuts = panel_cuts([(c.scored_samples, c.expected_samples) for c in scored])
-        return [self.arm_reading(c, cut=cut) for c, cut in zip(scored, cuts, strict=True)]
+        counts = {key: panel_counts(arm, self.folds.get(key)) for key, arm in self.arms.items()}
+        panel = list(self.panel)
+        cuts = dict(zip(panel, panel_cuts([counts[key] for key in panel]), strict=True))
+        # A reference reads the cells its readers asked, so no panel arm's fuller walk cuts it.
+        cuts |= {key: panel_cuts([counts[key]])[0] for key in self.arms if key not in cuts}
+        line = line_by_individual(self.overlap)
+        return [
+            ArmReading.of(
+                arm_name(key, arm, self.round),
+                arm,
+                fold=self.folds.get(key),
+                cut=cuts[key],
+                election=self.arm_election(key),
+                fit=self.fit(key),
+            ).on_line(line)
+            for key, arm in self.arms.items()
+        ]
 
-    @property
-    def selected_scores(self) -> list[ScoredCandidate]:
-        """The selected arms' rows, in ``selected_labels`` order."""
-        by_label = {c.label: c for c in self.candidate_scores}
-        return [by_label[label] for label in self.selected_labels if label in by_label]
+    def ranked(self) -> list[ScoreboardRow]:
+        """THE rank: the leading arm first, then θ where the round was won on it, then composite."""
+        leading = None if self.election is None else self.election.leading
+        on_theta = self.election is not None and self.election.elects_on == "ability"
+
+        def rank(reading: ArmReading) -> ScoreboardRankKey:
+            own = reading.own
+            ability = reading.ability
+            return scoreboard_rank_key(
+                None if own is None or own.composite is None else own.composite.value,
+                None if own is None or own.accuracy is None else own.accuracy.value,
+                ability.theta if on_theta and ability is not None else None,
+                is_leading=reading.arm.key == leading,
+                is_partial=reading.end == "skipped",
+            )
+
+        ranked = sorted(self.arm_readings(), key=rank, reverse=True)
+        return [ScoreboardRow(rank=i, reading=r) for i, r in enumerate(ranked, start=1)]
+
+
+def arm_name(key: ArmKey, arm: ArmState, round_num: int) -> ArmName:
+    """An arm by its FIRST walk; a parent no round of the cycle walked is the one *round_num* read."""
+    if arm.slot is None:
+        return ArmName(key=key, round=round_num, label=arm.label)
+    return ArmName(key=key, round=arm.slot.round, label=arm.slot.label)
+
+
+def panel_counts(arm: ArmState, fold: ScoreSummary | None) -> tuple[int | None, int | None]:
+    match arm:
+        case Proposed():
+            return None, None
+        case Measuring() | Cut() | Measured():
+            return (None if fold is None else fold.walked), arm.expected_samples
 
 
 class RoundResult(RoundOutcome):
@@ -988,11 +1168,9 @@ class RoundResult(RoundOutcome):
 
     # Offset of its own ``RoundClosedRecord``. ``None`` where no ledger was bound: 0 is a real offset.
     at_offset: int | None = None
-    results: CellSheet = NO_CELLS
-    all_candidate_results: dict[str, CellSheet] = Field(default_factory=dict)
-    # Its own field: `all_candidate_results.values()` is walked as arms. Keyed by `vs_reference.a`.
-    reference_results: dict[str, CellSheet] = Field(default_factory=dict)
-    # Keyed by the MEASURED individual, never flat; outside the two arm maps — see `OverlapReading`.
+    # By arm: a reference re-read on the round's cells is an arm, so a held round's head is here.
+    cells: dict[ArmKey, CellSheet] = Field(default_factory=dict)
+    # Keyed by the MEASURED individual; outside the arms — see `OverlapReading`.
     overlap_results: dict[str, CellSheet] = Field(default_factory=dict)
 
     @computed_field  # type: ignore[prop-decorator]
@@ -1000,46 +1178,46 @@ class RoundResult(RoundOutcome):
     def round_id(self) -> str:
         return f"round_{self.round}"
 
-    def cells(self) -> RoundCells:
+    @property
+    def results(self) -> CellSheet:
+        """The rows of the arm the round ENDED on: the headline's own."""
+        return NO_CELLS if self.election is None else self.rows(self.election.ended_on)
+
+    def rows(self, key: ArmKey) -> CellSheet:
+        return self.cells.get(key, NO_CELLS)
+
+    def reference_rows(self, key: ArmKey) -> CellSheet:
+        """The rows of the arm *key* was judged against, re-read on this round's cells."""
+        fit = self.fit(key)
+        against = None if fit is None or fit.vs_reference is None else fit.vs_reference.a
+        return NO_CELLS if against is None else self.rows(ArmKey(against.address.individual_id))
+
+    def addresses(self) -> RoundCells:
         return RoundCells(
-            head=self.results.addresses(),
-            arms={k: v.addresses() for k, v in self.all_candidate_results.items()},
-            references={k: v.addresses() for k, v in self.reference_results.items()},
+            arms={k: v.addresses() for k, v in self.cells.items()},
             overlap={k: v.addresses() for k, v in self.overlap_results.items()},
         )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def scoreboard(self) -> list[ScoreboardRow]:
-        """The rank-ordered display table: rank 1 is `leading_label`, then θ, then composite."""
-        cuts = dict(
-            zip(
-                (c.label for c in self.candidate_scores),
-                panel_cuts([(c.scored_samples, c.expected_samples) for c in self.candidate_scores]),
-                strict=True,
-            )
-        )
-        ranked = sorted(
-            self.candidate_scores,
-            key=lambda c: scoreboard_rank_key(
-                c.composite_fitness,
-                c.accuracy,
-                # θ orders the table only where the round was won on it.
-                c.theta if self.elects_on == "ability" else None,
-                is_leading=c.label == self.leading_label,
-                is_partial=c.outcome is ArmOutcome.SKIPPED,
-            ),
-            reverse=True,
-        )
-        return [
-            ScoreboardRow(rank=i, reading=self.arm_reading(c, cut=cuts[c.label]))
-            for i, c in enumerate(ranked, start=1)
-        ]
+        """`ranked`, served: the ledger's `RoundOutcome` cannot carry a computed field."""
+        return self.ranked()
 
     @computed_field(  # type: ignore[prop-decorator]
-        description="How many scored rows of `results` graded into each tenth of [0, 1], lowest "
-        "first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in the tenth. A row "
-        "carrying no verdict is in none — an uncharged error's 0.0 is a floor, not a low score."
+        description="The arm the round ENDED on (`election.ended_on`), read: the headline's "
+        "numbers are its own. Null on a diag round, which elects nothing."
+    )
+    @property
+    def headline(self) -> ArmReading | None:
+        ended_on = None if self.election is None else self.election.ended_on
+        return next((r for r in self.arm_readings() if r.arm.key == ended_on), None)
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="How many scored rows of the `headline` arm's cells graded into each tenth of "
+        "[0, 1], lowest first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in "
+        "the tenth. A row carrying no verdict is in none — an uncharged error's 0.0 is a floor, "
+        "not a low score."
     )
     @property
     def fitness_bands(self) -> list[int]:
@@ -1055,10 +1233,7 @@ class InRunCells:
             walk
             for rr in rounds
             for walk in _round_walks(
-                rr.opt_sp,
-                head=_by_sample(rr.results),
-                arms={k: _by_sample(v) for k, v in rr.all_candidate_results.items()},
-                references={k: _by_sample(v) for k, v in rr.reference_results.items()},
+                arms={k: _by_sample(v) for k, v in rr.cells.items()},
                 overlap={k: _by_sample(v) for k, v in rr.overlap_results.items()},
             )
         ]
@@ -1075,10 +1250,10 @@ def _by_sample(sheet: CellSheet) -> list[tuple[str, GradedCell, str]]:
 
 
 def declared_selection[R: RoundOutcome](rounds: Sequence[R]) -> R:
-    return next(rr for rr in reversed(rounds) if rr.selected_labels)
+    return next(rr for rr in reversed(rounds) if rr.election is not None and rr.election.selected)
 
 
-def _selection_line(selection: ArmPointer | None, pair: PairedReading) -> str:
+def _selection_line(selection: ArmName | None, pair: PairedReading) -> str:
     if selection is None:
         return "nothing selected"
     name = f"{selection.label} (round {selection.round})"
@@ -1103,11 +1278,11 @@ class RunStanding(StrictModel):
         description="`stalls_left` of `stalls_left_cap`, read: the pips and their words, as the "
         "readout prints them. Null where the campaign banks no lives."
     )
-    selection: ArmPointer | None = Field(
+    selection: ArmName | None = Field(
         description="The optimizer's declared pick (`declared_selection`), as the arm it was "
         "first measured as: the origin until a round selects. Null before round 0 closes."
     )
-    parent: ArmPointer | None = Field(
+    parent: ArmName | None = Field(
         description="The pick `selection` was promoted over. Null while it is the origin."
     )
     vs_origin: PairedReading = Field(
@@ -1126,11 +1301,6 @@ class RunStanding(StrictModel):
         description="Of those, how many closed `advanced`: their pick separated from C0 on the "
         "origin panel — the verdict clock. Never summed with `improved`."
     )
-    spent: CloseSpend | None = Field(
-        description="What the cycle had cost at this close. Null before round 0 closes, and "
-        "on a run with no ledger to fold."
-    )
-
     selection_line: str = Field(
         description="The ONE text reading of the selection: who, and both rates on the origin "
         "panel — or the reason there is no pair. Never the selection's rate alone. The readout, "
@@ -1157,7 +1327,6 @@ class RunStanding(StrictModel):
             rounds_closed=0,
             improved=0,
             advanced=0,
-            spent=None,
             selection_line=_selection_line(None, unread),
         )
 
@@ -1167,12 +1336,11 @@ class RunStanding(StrictModel):
         rounds: Sequence[RoundOutcome],
         *,
         lives: tuple[int, int] | None,
-        spent: CloseSpend | None,
     ) -> RunStanding:
         declared = declared_selection(rounds)
-        picked = [rr.opt_sp.id for rr in rounds if rr.selected_labels and rr.opt_sp is not None]
+        picked = [rr.election.ended_on for rr in rounds if rr.election and rr.election.selected]
         chosen = picked[-1]
-        arms = {arm.candidate_id: arm for arm in pick_line(rounds)}
+        arms: dict[str, ArmName] = {arm.key: arm for arm in pick_line(rounds)}
         before = [individual for individual in picked if individual != chosen]
         vs_origin = next(
             (
@@ -1198,7 +1366,6 @@ class RunStanding(StrictModel):
             rounds_closed=closed_after_origin([rr.round for rr in rounds]),
             improved=sum(1 for rr in after_origin if rr.improved),
             advanced=sum(1 for rr in after_origin if rr.overlap.advance is RoundAdvance.ADVANCED),
-            spent=spent,
             selection_line=_selection_line(arms[chosen], vs_origin),
         )
 
@@ -1211,10 +1378,16 @@ def measured_searchpoint(
     framing: TaskDecomposition,
     demo: Sequence[Sample],
 ) -> JobSearchPoint:
+    return measured_arm(rounds, individual_id).searchpoint(
+        schema=schema, framing=framing, demo=demo
+    )
+
+
+def measured_arm(rounds: Sequence[RoundOutcome], individual_id: str) -> Concluded:
     for rr in reversed(rounds):
-        for cs in rr.candidate_scores:
-            if cs.candidate_id == individual_id and cs.resolved_pipeline_params is not None:
-                return cs.searchpoint(schema=schema, framing=framing, demo=demo)
+        arm = rr.arms.get(ArmKey(individual_id))
+        if isinstance(arm, Concluded):
+            return arm
     raise KeyError(f"no closed round measured individual {individual_id}")
 
 
@@ -1226,21 +1399,17 @@ class CycleResult(StrictModel):
     result_round: int
     # On its OWN round-0 rows. `None`, not a 0.0 level, on a cycle that never started.
     origin: OwnLevel | None
-    # θ levels of the PARENT each round ended on, never the proposals, and NOT floored at origin.
-    origin_level: float | None = None
-    round_levels: list[float] = Field(default_factory=list)
-    # Precision only. `origin_level_se` has no reader BY DESIGN: `test_ruler.py`'s negative control.
-    origin_level_se: float | None = None
-    round_level_ses: list[float] = Field(default_factory=list)
+    # The individual each round ended on, never the proposals; `None` on a cycle that never started.
+    level_series: LevelSeries | None
     # The held-out bench: the origin's headline on its rows, then per L1 round the STANDING
     # selection's on the same rows, held forward across rounds that held. ``None`` in the series
     # is a round whose selection pass read nothing or was never sent; ``None`` origin, no bench
     # pass read.
     bench_origin_level: float | None = None
     bench_round_levels: list[float | None] = Field(default_factory=list)
-    # From config, never ``len(round_levels)``: `lives` stops a stalling cycle short. ``None`` = no cap.
+    # From config, never the rounds that ran: `lives` stops a stalling cycle short. ``None`` = no cap.
     round_budget: int | None = None
-    result_prompt_fields: dict[str, Any]
+    result_prompt_fields: dict[str, dict[str, str]]
     result_pipeline_params: dict[str, Any] | None = None
     stop_reason: StopReason
     started_at: str
@@ -1270,19 +1439,17 @@ class VerifyPass(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    label: str
-    candidate_id: str
-    round: int
+    arm: ArmName
     sp_hash: str
     cells: list[WalkedCell]
-    sample_ids: list[int]
+    positions: list[int]
     strategy: VerifyStrategy
     seed: int | None
     # The grader that stamped its live reading; a reader re-grades under its own.
     scorer_id: str
 
     def walk(self) -> IndividualWalk[WalkedCell]:
-        return IndividualWalk(self.candidate_id, frozenset({MeasurementRole.VERIFY}), self.cells)
+        return IndividualWalk(self.arm.key, frozenset({MeasurementRole.VERIFY}), self.cells)
 
 
 VerifyHeldAbsent = Literal["hard_picks", "under_two_fresh"]
@@ -1299,7 +1466,7 @@ class VerifyReading(StrictModel):
         "that reading: a reader under another grader reads the pass again, never this."
     )
     strategy: VerifyStrategy = Field(
-        description="How the fresh cells were picked: `random` from the unmeasured search pool, "
+        description="How the fresh cells were picked: `random` from the unmeasured search split, "
         "or `hard` — its highest-δ cells first, which read BELOW the level by construction."
     )
     fresh: OwnLevel = Field(description="The level on the fresh cells alone, with its band.")
@@ -1366,7 +1533,7 @@ class ArmPanel(StrictModel):
     )
     cut: bool = Field(
         description="Stopped short of its round's panel (`panel_cuts`): under its own `expected`, "
-        "or under the fullest panel an arm of its round reached."
+        "or, for a panel arm, under the fullest panel a panel arm of its round reached."
     )
 
     @classmethod
@@ -1375,32 +1542,6 @@ class ArmPanel(StrictModel):
     ) -> ArmPanel:
         share = cached / scored if scored and cached is not None else None
         return cls(scored=scored, expected=expected, cached=cached, cached_share=share, cut=cut)
-
-
-class ArmSpend(StrictModel):
-    """What measuring one arm consumed: the BACKEND bucket alone, replayed rows excluded."""
-
-    model_config = ConfigDict(frozen=True)
-
-    input_tokens: int
-    output_tokens: int
-    prefix: PrefixReading = Field(
-        description="The provider's prefix-cache reading of `input_tokens`, read rather than left "
-        "as a third count for a surface to divide."
-    )
-
-    @classmethod
-    def of(
-        cls, input_tokens: int | None, output_tokens: int | None, cache_read_tokens: int | None
-    ) -> ArmSpend | None:
-        if input_tokens is None or output_tokens is None:
-            return None
-        account = TokenAccount(input=input_tokens, cache_read=cache_read_tokens)
-        return cls(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            prefix=account.prefix(replayed=False),
-        )
 
 
 class ArmAbility(StrictModel):
@@ -1440,29 +1581,29 @@ class ArmElection(StrictModel):
     )
     selected: bool
     leading: bool = Field(
-        description="The ONE arm its round is read off, as the selector named it at the close "
-        "(`RoundOutcome.leading_label`); false until then."
+        description="The ONE arm its round is read off, as the selector named it "
+        "(`Election.leading`); false until the election."
     )
     crown: Crown | None = Field(
-        description="How a selected arm advanced. Read off the electable count the round's CLOSE "
-        "banks, so null on a selected arm whose round has not closed, and on every other arm."
+        description="How a selected arm advanced, read off the election's electable count; null "
+        "on every arm the election did not select."
     )
 
     @classmethod
     def of(
         cls,
-        label: str,
+        key: ArmKey,
         *,
         held: bool,
-        selected: Collection[str],
-        leading: str | None,
+        selected: Collection[ArmKey],
+        leading: ArmKey | None,
         electable: int | None,
     ) -> ArmElection:
-        won = label in selected
+        won = key in selected
         crown: Crown | None = None
         if won and electable is not None:
             crown = "elected" if electable > 1 else "uncontested"
-        return cls(held=held, selected=won, leading=label == leading, crown=crown)
+        return cls(held=held, selected=won, leading=key == leading, crown=crown)
 
 
 ArmVerdict = Literal[
@@ -1492,12 +1633,11 @@ assert ARM_VERDICT_LABELS.keys() == set(get_args(ArmVerdict))
 
 
 def arm_verdict(reading: ArmReading, *, retired: bool) -> ArmVerdict:
-    """An arm with no ``outcome`` and no individual is a branch's stand-in row, owed no report."""
     if retired:
         return "retired"
-    if reading.outcome == ArmOutcome.INVALID:
+    if reading.end == "invalid":
         return "invalid"
-    if reading.arm.round == 0:
+    if reading.role == MeasurementRole.ORIGIN:
         return "origin"
     election = reading.election
     if election.crown is not None:
@@ -1506,8 +1646,7 @@ def arm_verdict(reading: ArmReading, *, retired: bool) -> ArmVerdict:
         return "selected"
     if election.held:
         return "not_elected"
-    unmeasured = reading.outcome is None and bool(reading.arm.candidate_id)
-    return "unmeasured" if unmeasured else "awaiting"
+    return "unmeasured" if reading.state in ("proposed", "measuring") else "awaiting"
 
 
 def _own_level(
@@ -1537,26 +1676,43 @@ class ArmReading(StrictModel):
 
     model_config = ConfigDict(frozen=True)
 
-    arm: ArmPointer = Field(
-        description="THE key: `(round, label)` names the arm, `candidate_id` its individual — "
-        "empty only on an arm its round carried, until its score report lands."
+    arm: ArmName = Field(description="THE key, and where the arm was first walked.")
+    role: ArmRole = Field(
+        description="What the arm IS in this round: its origin, one of its proposals, or a "
+        "`parent` re-read on its cells as a reference — never one of the round's proposals, "
+        "whatever round `arm` names."
     )
     sp_hash: str = Field(
         description="The archive address of this arm's measurements (`prompt_fields_id`). Not a "
         "key: a re-proposed configuration shares it across rounds. Empty before it is measured."
     )
     changes_description: str
-    outcome: ArmOutcome | None = Field(
-        description="How the arm's walk ended; null until that is decided."
+    state: ArmStateKind = Field(
+        description="Where the arm's walk stands: proposed, being measured, or ended — cut "
+        "short against it, or measured."
+    )
+    end: ArmEnd | None = Field(
+        description="How its walk ended short of its panel: cut against it (`invalid` refused it "
+        "before a cell), or `locked_in` — settled FOR it by the eliminator. Null on a walk still "
+        "running and one that ran its panel."
+    )
+    walked_short: bool = Field(
+        description="`end` names a stop of its walk, for it or against it: false on an `invalid` "
+        "arm, which never started one."
     )
     own: OwnLevel | None = Field(
         description="The arm's own level on its round's cells: accuracy with the band the "
         "gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null "
-        "before the first row is graded, and on an `invalid` arm, whose scores are synthetic."
+        "before the first row is graded, and on an `invalid` arm, which holds no cell."
     )
     panel: ArmPanel
-    spend: ArmSpend | None = Field(
-        description="What measuring it consumed; null until its score report folds an account."
+    tokens: TokenAccount | None = Field(
+        description="What measuring it consumed, the BACKEND bucket alone, replayed rows "
+        "excluded; null until its score report folds an account."
+    )
+    prefix: PrefixReading | None = Field(
+        description="The provider's prefix-cache reading of `tokens.input`; null beside a null "
+        "`tokens`."
     )
     ability: ArmAbility | None = Field(description="Null outside the round's election fit.")
     vs_reference: PairedReading | None = Field(
@@ -1577,73 +1733,52 @@ class ArmReading(StrictModel):
     )
 
     @classmethod
-    def walking(
+    def of(
         cls,
-        arm: ArmPointer,
+        name: ArmName,
+        arm: ArmState,
         *,
         fold: ScoreSummary | None,
-        scored: int | None,
-        expected: int | None,
-        cached: int | None,
         cut: bool,
         election: ArmElection,
-        changes_description: str = "",
+        fit: ArmFit | None,
     ) -> ArmReading:
+        """*fold* is its round's, or `AnnouncedArms.fold` in flight; *fit* the election's, ``None`` until held."""
+        match arm:
+            case Proposed():
+                sp_hash, expected = "", None
+            case Measuring() | Cut() | Measured():
+                sp_hash, expected = arm.sp_hash, arm.expected_samples
+        tokens = None if fold is None else fold.tokens
+        panel = ArmPanel.of(
+            None if fold is None else fold.walked,
+            expected,
+            None if fold is None else fold.cached,
+            cut=cut,
+        )
         return cls(
-            arm=arm,
-            sp_hash="",
-            changes_description=changes_description,
-            outcome=None,
+            arm=name,
+            role=arm.role,
+            sp_hash=sp_hash,
+            changes_description=arm.changes_description,
+            state=arm.state,
+            end=arm_end(arm),
+            walked_short=walked_short(arm),
             own=None
             if fold is None
             else _own_level(
                 fold.accuracy,
                 fold.composite_fitness,
                 (fold.mean_fitness_ci_lo, fold.mean_fitness_ci_hi),
-                n=fold.total or scored or 0,
+                n=fold.total,
             ),
-            panel=ArmPanel.of(scored, expected, cached, cut=cut),
-            spend=None,
-            ability=None,
-            vs_reference=None,
-            election=election,
-            bench=None,
-            verify=None,
-            on_origin_panel=None,
-        )
-
-    @classmethod
-    def of(
-        cls,
-        arm: ArmPointer,
-        report: ScoredCandidate,
-        *,
-        cut: bool,
-        election: ArmElection,
-        changes_description: str,
-        ability: ArmAbility | None,
-        vs_reference: PairedReading | None,
-    ) -> ArmReading:
-        """The keyword facts are those a surface may hold a NEWER copy of than *report*."""
-        return cls(
-            arm=arm,
-            sp_hash=report.sp_hash,
-            changes_description=changes_description,
-            outcome=report.outcome,
-            own=None
-            if report.outcome == ArmOutcome.INVALID
-            else _own_level(
-                report.accuracy,
-                report.composite_fitness,
-                (report.mean_fitness_ci_lo, report.mean_fitness_ci_hi),
-                n=report.total or report.scored_samples,
-            ),
-            panel=ArmPanel.of(
-                report.scored_samples, report.expected_samples, report.cached_samples, cut=cut
-            ),
-            spend=ArmSpend.of(report.input_tokens, report.output_tokens, report.cache_read_tokens),
-            ability=ability,
-            vs_reference=vs_reference,
+            panel=panel,
+            tokens=tokens,
+            prefix=None if tokens is None else tokens.prefix(replayed=False),
+            ability=None
+            if fit is None
+            else ArmAbility.of(fit.theta, fit.theta_se, fit.theta_caveat),
+            vs_reference=None if fit is None else fit.vs_reference,
             election=election,
             bench=None,
             verify=None,
@@ -1651,15 +1786,15 @@ class ArmReading(StrictModel):
         )
 
     def on_line(self, line: Mapping[str, LineRate]) -> ArmReading:
-        return self.model_copy(update={"on_origin_panel": line.get(self.arm.candidate_id)})
+        return self.model_copy(update={"on_origin_panel": line.get(self.arm.key)})
 
 
 def line_by_individual(overlap: OverlapReading | None) -> dict[str, LineRate]:
     """Only members holding the WHOLE panel: a rate over a shorter denominator sat a different exam."""
     if overlap is None:
         return {}
-    whole = len(overlap.sample_ids)
-    return {r.arm.candidate_id: r for r in overlap_line(overlap) if r.n == whole}
+    whole = len(overlap.positions)
+    return {r.arm.key: r for r in overlap_line(overlap) if r.n == whole}
 
 
 class DiagnosticRunRecord(StrictModel):

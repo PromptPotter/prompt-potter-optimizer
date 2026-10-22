@@ -24,16 +24,41 @@ export interface ArchiveReport {
   bytes_freed: number;
 }
 
+/** What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale only through */
+export interface RulerScope {
+  scorer: string;
+  dataset: string;
+}
+
+/** The δ scale a reading was taken on: the tenant ruler at ``version`` less the rows of */
+export interface RulerStamp {
+  id: string;
+  version: number;
+  scope: RulerScope;
+  excluded: string[];
+}
+
 /** A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing. */
 export interface AbilityReading {
   theta: number;
   se: number | null;
-  ruler_id: string | null;
-  ruler_n: number;
+  ruler: RulerStamp;
+  cells: number;
   ruler_span: number | null;
   round_span: number | null;
   calibration_model: '1PL' | '2PL' | null;
-  caveat: 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
+  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  unlinked: number;
+  pinned_share: number | null;
+}
+
+/** A round's level as its series read it, under the one caveat that withholds it. */
+export interface SeriesReading {
+  /** The round's level: the individual it ended on, read on the series' one scale */
+  reading: AbilityReading;
+  /** The level's own caveat, else its series'. Null, and it differences any other
+   * level of the series that is null too. */
+  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones. */
@@ -42,7 +67,7 @@ export interface VerifyReading {
   /** The grader every number here was read under. A stored copy is a cache of that
    * reading: a reader under another grader reads the pass again, never this. */
   scorer_id: string;
-  /** How the fresh cells were picked: `random` from the unmeasured search pool, or
+  /** How the fresh cells were picked: `random` from the unmeasured search split, or
    * `hard` — its highest-δ cells first, which read BELOW the level by
    * construction. */
   strategy: 'random' | 'hard';
@@ -69,6 +94,18 @@ export interface VerifyReading {
   held_absent: 'hard_picks' | 'under_two_fresh' | null;
 }
 
+/** One arm of the run: its key, and where it was first walked. */
+export interface ArmName {
+  /** THE join: the individual's content id, or the slot hash of a proposal rejected
+   * before it cost a cell. */
+  key: string;
+  /** The round the arm was first walked in; 0 is the origin. */
+  round: number;
+  /** `C0` or `C{round}.{n}`, off the slot it was first walked in: a display name,
+   * never a join. */
+  label: string;
+}
+
 /** The cells one arm's walk holds of the panel its round asked of it. */
 export interface ArmPanel {
   /** Cells the walk holds. Null on an arm with no score report — never measured,
@@ -82,7 +119,8 @@ export interface ArmPanel {
   /** `cached` over `scored`. Null where either is, and on a walk holding no cell. */
   cached_share: number | null;
   /** Stopped short of its round's panel (`panel_cuts`): under its own `expected`,
-   * or under the fullest panel an arm of its round reached. */
+   * or, for a panel arm, under the fullest panel a panel arm of its round
+   * reached. */
   cut: boolean;
 }
 
@@ -95,15 +133,6 @@ export interface PrefixReading {
   badge: string;
 }
 
-/** What measuring one arm consumed: the BACKEND bucket alone, replayed rows excluded. */
-export interface ArmSpend {
-  input_tokens: number;
-  output_tokens: number;
-  /** The provider's prefix-cache reading of `input_tokens`, read rather than left
-   * as a third count for a surface to divide. */
-  prefix: PrefixReading;
-}
-
 /** One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale. */
 export interface ArmAbility {
   theta: number | null;
@@ -114,7 +143,7 @@ export interface ArmAbility {
   /** Upper bound of the same interval. */
   ci_hi: number | null;
   /** Why `theta` is not this arm's ability, of the ARM's own scope. */
-  caveat: 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
+  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** What one arm's round decided about it. Built by :meth:`of` alone. */
@@ -124,35 +153,49 @@ export interface ArmElection {
    * apart. */
   held: boolean;
   selected: boolean;
-  /** The ONE arm its round is read off, as the selector named it at the close
-   * (`RoundOutcome.leading_label`); false until then. */
+  /** The ONE arm its round is read off, as the selector named it
+   * (`Election.leading`); false until the election. */
   leading: boolean;
-  /** How a selected arm advanced. Read off the electable count the round's CLOSE
-   * banks, so null on a selected arm whose round has not closed, and on every
-   * other arm. */
+  /** How a selected arm advanced, read off the election's electable count; null on
+   * every arm the election did not select. */
   crown: 'elected' | 'uncontested' | null;
 }
 
 /** One arm of one round, read: the one carrier every surface that lists or ranks arms embeds. */
 export interface ArmReading {
-  /** THE key: `(round, label)` names the arm, `candidate_id` its individual — empty
-   * only on an arm its round carried, until its score report lands. */
-  arm: ArmPointer;
+  /** THE key, and where the arm was first walked. */
+  arm: ArmName;
+  /** What the arm IS in this round: its origin, one of its proposals, or a `parent`
+   * re-read on its cells as a reference — never one of the round's proposals,
+   * whatever round `arm` names. */
+  role: 'origin' | 'panel' | 'parent';
   /** The archive address of this arm's measurements (`prompt_fields_id`). Not a
    * key: a re-proposed configuration shares it across rounds. Empty before it
    * is measured. */
   sp_hash: string;
   changes_description: string;
-  /** How the arm's walk ended; null until that is decided. */
-  outcome: 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in' | null;
+  /** Where the arm's walk stands: proposed, being measured, or ended — cut short
+   * against it, or measured. */
+  state: 'proposed' | 'measuring' | 'cut' | 'measured';
+  /** How its walk ended short of its panel: cut against it (`invalid` refused it
+   * before a cell), or `locked_in` — settled FOR it by the eliminator. Null
+   * on a walk still running and one that ran its panel. */
+  end: 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in' | null;
+  /** `end` names a stop of its walk, for it or against it: false on an `invalid`
+   * arm, which never started one. */
+  walked_short: boolean;
   /** The arm's own level on its round's cells: accuracy with the band the gateway
    * folds per cell, the composite beside it, over `n` rows carrying a
    * verdict. Null before the first row is graded, and on an `invalid` arm,
-   * whose scores are synthetic. */
+   * which holds no cell. */
   own: OwnLevel | null;
   panel: ArmPanel;
-  /** What measuring it consumed; null until its score report folds an account. */
-  spend: ArmSpend | null;
+  /** What measuring it consumed, the BACKEND bucket alone, replayed rows excluded;
+   * null until its score report folds an account. */
+  tokens: TokenAccount | null;
+  /** The provider's prefix-cache reading of `tokens.input`; null beside a null
+   * `tokens`. */
+  prefix: PrefixReading | null;
   /** Null outside the round's election fit. */
   ability: ArmAbility | null;
   /** This arm (`b`) over the individual it was judged against (`a`), on the cells
@@ -177,9 +220,11 @@ export interface DashboardCandidate {
 
 /** One scored sample as `dashboard.json` serves it, display-trimmed and one shape in any state. */
 export interface DashboardSample {
-  /** Dataset sample id, which diverges from the row's position in the walk once the
-   * hard-sample sorter drives the order. Null where the row carries none. */
-  sample_id: number | null;
+  /** The sample's slot in the bank the cycle drew, which diverges from the row's
+   * position in the walk once the hard-sample sorter drives the order. */
+  position: number;
+  /** What the sample IS (`Sample.key`). */
+  sample_key: string;
   /** The grading verdict. */
   status: 'HIT' | 'MISS' | 'ERR' | 'UNSC';
   /** The graded per-cell score `status` is the verdict OF — the same number
@@ -251,7 +296,7 @@ export interface PanelPrecision {
 
 /** The best-so-far line on the ORIGIN PANEL: each pick paired with C0 on one set of cells. */
 export interface OverlapReading {
-  sample_ids: number[];
+  positions: number[];
   /** The standing pick (`b`) over C0 (`a`) on the origin panel, in report scope.
    * `bought` on each member is what this round paid to put it back on the
    * whole panel. */
@@ -263,7 +308,7 @@ export interface OverlapReading {
 
 /** One member of the best-so-far line as an overlap reading holds it. */
 export interface LineRate {
-  arm: ArmPointer;
+  arm: ArmName;
   /** Its rate over the panel cells it and C0 both scored. */
   rate: number;
   /** How many of the panel's cells it holds scoreable. */
@@ -287,13 +332,12 @@ export interface ServedRound {
    * challenger `verdict_reason` names as its best, at round 0 the origin.
    * `panel_precision` is measured on it. Null where the selector could read
    * no arm. */
-  leading: ArmPointer | null;
+  leading: ArmName | null;
   /** The arms the election crowned; empty on a round that held. */
-  selected: ArmPointer[];
+  selected: ArmName[];
   accuracy: number | null;
   composite_fitness: number | null;
   total: number;
-  ability: AbilityReading | null;
   bench: BenchReading | null;
   improved: boolean | null;
   verdict_reason: string | null;
@@ -306,9 +350,6 @@ export interface ServedRound {
   overlap: OverlapReading;
   panel_precision: PanelPrecision | null;
   optimizer_facts: OptimizerFact[];
-  /** Whether `ability` is on the scale the cycle's θ series is drawn on, the first
-   * ruler a round stamped (`AbilityReading.comparable_to`). */
-  ability_on_series_ruler: boolean;
   /** `overlap` as its members and rates, C0 first; empty where the lead was not
    * read. */
   overlap_line: LineRate[];
@@ -319,6 +360,12 @@ export interface ServedRound {
   /** How each sample of `selection` moved against the round before it that measured
    * any, position for position with `selection` (`sample_movements`). */
   selection_movement: ('new' | 'readded' | 'gained' | 'lost' | 'kept')[];
+  /** This round's level on the cycle's `LevelSeries`, the one two rounds may
+   * difference: null where `series_reading` carries a caveat. */
+  level: AbilityReading | null;
+  /** That level as read, under the caveat that withholds it, for a surface that
+   * shows θ under its caveat; null where no scored cell sits on the scale. */
+  series_reading: SeriesReading | null;
 }
 
 /** An L1 output that broke a parse-time invariant, scoring its candidate a synthetic zero. */
@@ -368,6 +415,10 @@ export interface RuntimeFailure {
    * candidate's measurements; the prefix selects the node whose config is
    * captured in ``observed_config``. */
   dominant_warning: string;
+  /** The node whose config ``observed_config`` captures: the ``dominant_warning``
+   * prefix. ``None`` on a ``scoring_error_abort``, which names an error, not
+   * a node, and captures the whole config. */
+  node: string | null;
   /** Fraction of scored samples that emitted any pipeline warning. */
   degraded_rate: number;
   /** Sample count with at least one warning. */
@@ -380,8 +431,8 @@ export interface RuntimeFailure {
   observed_config: Record<string, unknown>;
   /** Round number that first recorded this failure (dedup key component). */
   first_seen_round: number;
-  /** Label of the originating candidate; informational, not a join key. */
-  candidate_label: string;
+  /** What the originating candidate changed; informational, not a join key. */
+  changes_description: string;
   /** Who heals this runtime failure. Defaults to ``L1`` (a rate-based degradation
    * L1 retunes the node config around); a deterministic-for-config break
    * whose only fix is a locked surface (schema/model) is stamped ``OPERATOR``
@@ -400,42 +451,135 @@ export interface DegradationContext {
   source?: string;
 }
 
-/** One candidate's score report: its cells folded, beside what the round knows of the arm. */
-export interface ScoredCandidate {
+/** Where an individual was first walked as an arm: the ``idx``-th of its round's ``total``. */
+export interface ArmSlot {
+  round: number;
+  idx: number;
+  total: number;
+}
+
+export interface Proposed {
+  role: 'origin' | 'panel' | 'parent';
+  slot: ArmSlot | null;
+  individual: OptSearchPoint;
+  overlay: Record<string, Record<string, unknown>>;
+  validation_failures: ValidationFailure[];
+  state: 'proposed';
+}
+
+/** An arm's fold of its cells: what it walked, and its level on them. */
+export interface ScoreSummary {
   total: number;
   accuracy: number | null;
   composite_fitness: number | null;
   deprecated: number;
+  degraded: number;
+  recall_at: Record<string, number>;
+  walked: number;
+  cached: number;
   evaluators: Record<string, number>;
   mean_fitness_ci_lo: number | null;
   mean_fitness_ci_hi: number | null;
-  candidate_id: string;
-  label: string;
-  changes_description: string;
-  pipeline_overlay: Record<string, unknown> | null;
-  resolved_pipeline_params: Record<string, unknown> | null;
-  sp_hash: string;
-  prompt_fields: Record<string, unknown>;
-  /** The prompt fields each node runs, by node: the individual's own under the node
-   * its prompt is rendered into, and under any other node the ones that
-   * node's config carries. A node with none is absent. */
-  node_prompt_fields: Record<string, Record<string, unknown>>;
-  outcome: 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in';
-  scored_samples: number;
-  expected_samples: number;
-  cached_samples: number;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  cache_read_tokens: number | null;
+  tokens: TokenAccount | null;
+}
+
+/** What is known as the walk opens; its cells and their fold land on their own records. */
+export interface Measuring {
+  role: 'origin' | 'panel' | 'parent';
+  slot: ArmSlot | null;
+  individual: OptSearchPoint;
+  overlay: Record<string, Record<string, unknown>>;
   validation_failures: ValidationFailure[];
-  runtime_failures: RuntimeFailure[];
-  elimination_context: Record<string, unknown>;
-  elimination_reason: string | null;
-  degradation_context: DegradationContext;
-  vs_reference: PairedReading | null;
+  sp_hash: string;
+  resolved_params: Record<string, unknown>;
+  expected_samples: number;
+  state: 'measuring';
+  sample_order: number[];
+  n_priors: number;
+  block: Record<string, number> | null;
+}
+
+/** The eliminator's reading of a stop it made, for the arm or against it. */
+export interface Elimination {
+  reason: string;
+  context: Record<string, unknown>;
+}
+
+export interface Eliminated {
+  kind: 'eliminated';
+  elimination: Elimination;
+}
+
+/** The bench's run-health rules stopped it. */
+export interface Broken {
+  kind: 'broken';
+  failure: RuntimeFailure;
+  degradation: DegradationContext;
+}
+
+/** Refused before a cell: the reasons are the arm's own fatal ``validation_failures``. */
+export interface Invalid {
+  kind: 'invalid';
+}
+
+/** The operator stopped it. */
+export interface Skipped {
+  kind: 'skipped';
+}
+
+/** Stopped short of its panel against it. */
+export interface Cut {
+  role: 'origin' | 'panel' | 'parent';
+  slot: ArmSlot | null;
+  individual: OptSearchPoint;
+  overlay: Record<string, Record<string, unknown>>;
+  validation_failures: ValidationFailure[];
+  sp_hash: string;
+  resolved_params: Record<string, unknown>;
+  expected_samples: number;
+  state: 'cut';
+  reason: Eliminated | Broken | Invalid | Skipped;
+}
+
+export interface Measured {
+  role: 'origin' | 'panel' | 'parent';
+  slot: ArmSlot | null;
+  individual: OptSearchPoint;
+  overlay: Record<string, Record<string, unknown>>;
+  validation_failures: ValidationFailure[];
+  sp_hash: string;
+  resolved_params: Record<string, unknown>;
+  expected_samples: number;
+  state: 'measured';
+  locked_in: Elimination | null;
+}
+
+/** What the election read of one arm: θ lives here and nowhere else. */
+export interface ArmFit {
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned' | null;
+  theta_caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  vs_reference: PairedReading | null;
+}
+
+/** What a round's selector decided over its arms, by key; empty ``selected`` = the round HELD. */
+export interface Election {
+  selected: string[];
+  /** The ONE arm this round is read off, as its selector named it and never re-
+   * ranked: the selection where there is one, on a held round the challenger
+   * that came closest on the selector's own objective, at round 0 the origin.
+   * Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT
+   * whose numbers the headline carries: that is `ended_on`. */
+  leading: string | null;
+  /** WHOSE numbers the round's headline carries: the selection where the round
+   * selected; on a held round the retained parent, re-read on this round's
+   * cells as its reference arm — never the leading challenger. */
+  ended_on: string;
+  electable: number;
+  fit: Record<string, ArmFit>;
+  elects_on: 'accuracy' | 'composite' | 'ability';
+  verdict_reason: string | null;
+  ruler: RulerStamp;
 }
 
 /** One rank-ordered row of a round's scoreboard: an arm's reading at its rank. */
@@ -460,7 +604,7 @@ export interface Variation {
   /** `deterministic`: a function of its inputs and the run's seed. `llm`: a model's
    * reply. `operator`: a person's own edit, submitted at the arm gate. */
   mode: 'deterministic' | 'llm' | 'operator';
-  /** The loci it left different from what it was handed, by `locus_name`: the first
+  /** The loci it left different from what it was handed, as `node.key`: the first
    * one's against the first parent, a later one's against the variation
    * before it. */
   loci: string[];
@@ -480,26 +624,29 @@ export interface IndividualLineage {
   evidence_grounding: EvidenceGrounding | null;
 }
 
-/** The one envelope every optimizer's state rides: its own payload beside the bench's population. */
+/** The one envelope every optimizer's state rides: its parts by kind beside the bench's population. */
 export interface OptimizerState {
   manifest: string;
   population: OptSearchPoint[];
   prompt_hashes: Record<string, string>;
-  payload: Record<string, unknown>;
+  slices: Record<string, Record<string, unknown>>;
+  outputs: Record<string, Record<string, unknown>>;
 }
 
-/** The individual: a configuration of prompt fields, shots and node config, plus its lineage. */
-export interface OptSearchPoint {
-  persona: string;
-  task_intent: string;
-  problem_description: string;
-  instruction: string;
-  thinking_style: string;
-  answer_format: string;
-  /** Its few-shot shots, in render order, as ids of the campaign's demo pool —
-   * resolved to each row's query and ground truth only when the target prompt
+/** One prompt node's loci: its fields by name and its shots, both written only through ``derive`` / ``edited``. */
+export interface NodePrompt {
+  /** Each field it sets, by the name its node declares; an empty field is absent. */
+  fields: Record<string, string>;
+  /** Its few-shot shots in render order, as `Sample.key`s of the campaign's demo
+   * pool — resolved to each row's query and ground truth only when the prompt
    * renders. */
-  shot_ids: number[];
+  shots: string[];
+}
+
+/** The individual: a value per locus of the roster — prompt fields and shots per prompt node, node config — plus its lineage. */
+export interface OptSearchPoint {
+  /** Per prompt node, the loci it sets there; a node it sets nothing on is absent. */
+  prompts: Record<string, NodePrompt>;
   /** Its node configuration, resolved: the active steps named, the output contract
    * folded, no rendered prompt. `configured` is the one writer. */
   pipeline_params: Record<string, unknown>;
@@ -555,6 +702,45 @@ export interface JudgeReadingRecord {
   why?: string;
 }
 
+/** Carried BESIDE the measurement, never as ``OuterSampleProxies`` fields the formula could score. */
+export interface InnerCellFacts {
+  /** The origin's θ on the search split's level series; null where `series_reason`
+   * names why */
+  origin_level: number | null;
+  /** The last round's level less the origin's; null where `series_reason` names why */
+  final_lift: number | null;
+  /** The best round's level less the origin's; null where `series_reason` names why */
+  peak_lift: number | null;
+  /** The mean level less the origin's, the last level held forward to the round
+   * budget; bounded for plausibility only, logit abilities differing without
+   * bound; null where `series_reason` names why */
+  mean_round_delta: number | null;
+  /** Why the level series differences nothing; null where it does */
+  series_reason: string | null;
+  /** The mean SE of the levels past the origin: this arm's own half of a paired
+   * difference, the shared origin level cancelling; a precision, never a
+   * penalty */
+  mean_parent_level_se: number | null;
+  /** The rounds the inner cycle closed past its origin */
+  rounds_ran: number;
+  /** The round budget, never below the rounds it ran */
+  round_budget: number;
+  /** Why the inner cycle stopped */
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+  /** The share of origin rows still missed: 0 is a cell no arm can lift, however
+   * sharply it reads */
+  origin_headroom: number | null;
+  /** The origin's headline on the held-out rows */
+  bench_origin_level: number | null;
+  /** The last standing selection's held-out headline less the origin's */
+  bench_final_lift: number | null;
+  /** Dollars sent, cumulative across attempts; reporting only, billed per call and
+   * entering no ledger */
+  sent_usd: number | null;
+  /** Tokens used, cumulative across attempts; reporting only, as `sent_usd` */
+  tokens: number | null;
+}
+
 /** The flat ``pipeline_data`` record, as :meth:`PipelineData.wire` writes it. */
 export interface PipelineRecord {
   total_time?: number;
@@ -564,7 +750,7 @@ export interface PipelineRecord {
   diagnostics?: DiagnosticsRecord;
   unworked_s?: number;
   mean_bench_lift?: number;
-  mean_round_delta?: number;
+  inner?: InnerCellFacts;
   error?: string;
   result_ranking?: unknown[];
   reasoning_trace?: string;
@@ -574,18 +760,6 @@ export interface PipelineRecord {
   judge_readings?: Record<string, JudgeReadingRecord>;
   target_prompt_chars?: number;
   question?: string;
-  mean_parent_level_se?: number;
-  inner_origin_level?: number;
-  inner_final_lift?: number;
-  inner_peak_lift?: number;
-  inner_rounds_ran?: number;
-  inner_round_budget?: number;
-  inner_stop_reason?: string;
-  inner_origin_headroom?: number;
-  inner_bench_origin_level?: number;
-  inner_bench_final_lift?: number;
-  inner_sent_usd?: number;
-  inner_tokens?: number;
   [key: string]: unknown;
 }
 
@@ -598,7 +772,6 @@ export interface RerunComparison {
 
 /** One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it. */
 export interface SheetRow {
-  sample_id: number;
   sample_key: string;
   query: string;
   ground_truth: string;
@@ -606,9 +779,10 @@ export interface SheetRow {
   error: string | null;
   pipeline_data: PipelineRecord | null;
   cached: boolean;
+  position: number;
   status: 'HIT' | 'MISS' | 'ERR' | 'UNSC';
   ground_truth_text: string;
-  error_category?: 'CLIENT' | 'SERVER' | 'CONNECTION' | 'PROVIDER_CREDIT' | 'PROVIDER_THROTTLED' | 'SPEND_CEILING' | 'TOKEN_CEILING' | 'PRICE_LIST_UNREACHABLE' | 'NO_RATE' | 'PIPELINE' | 'HALTED' | 'UNSCOREABLE' | 'UNKNOWN' | null;
+  error_category?: 'CLIENT' | 'SERVER' | 'CONNECTION' | 'PROVIDER_CREDIT' | 'PROVIDER_THROTTLED' | 'SPEND_CEILING' | 'TOKEN_CEILING' | 'WALL_CLOCK' | 'PRICE_LIST_UNREACHABLE' | 'NO_RATE' | 'PIPELINE' | 'HALTED' | 'UNSCOREABLE' | 'UNKNOWN' | null;
   ground_truth_rank?: number | null;
   n_candidates?: number;
   answer?: string;
@@ -629,59 +803,27 @@ export interface SheetRow {
 /** A round with its rows, which is the round file itself. */
 export interface RoundResult {
   round: number;
-  /** WHOSE numbers this round's headline (`accuracy`, `composite_fitness`, `total`,
-   * `evaluators`, `results`) carries: the candidate label (`C0`, `C3.1`) of
-   * the individual the round ENDED on. Equal to `leading_label` where the
-   * round selected; on a held round it is the retained PARENT, re-scored on
-   * this round's cells, and names an arm of an earlier round — so the
-   * headline is never the leading challenger's. */
-  label: string;
-  accuracy: number | null;
-  composite_fitness: number | null;
-  total: number;
-  improved: boolean;
-  verdict_reason: string | null;
-  elects_on: 'accuracy' | 'composite' | 'ability';
-  degraded_samples: number;
-  not_attempted: number;
-  unscored: number;
-  deprecated: number;
-  recall_at: Record<string, number>;
-  ability: AbilityReading | null;
-  prompt_fields: Record<string, unknown>;
-  pipeline_params: Record<string, unknown> | null;
-  candidates_scored: number;
-  electable_count: number;
-  candidate_scores: ScoredCandidate[];
-  selected_labels: string[];
-  /** The ONE arm of `candidate_scores` this round is read off, by LABEL, as its
-   * selector named it (`Selection.leading_id`) and never re-ranked: the
-   * selection where there is one, on a held round the challenger that came
-   * closest on the selector's own objective, at round 0 the origin. Rank 1 of
-   * `scoreboard`. `null` where the selector could read no arm. NOT whose
-   * numbers the headline carries: that is `label`. */
-  leading_label: string | null;
-  evaluators: Record<string, number>;
+  arms: Record<string, Proposed | Measuring | Cut | Measured>;
+  folds: Record<string, ScoreSummary>;
+  election: Election | null;
   overlap: OverlapReading;
   diagnostics: unknown | null;
   health: DegradationHealth | null;
-  opt_sp: OptSearchPoint | null;
-  optimizer_state: OptimizerState;
+  optimizer_state: OptimizerState | null;
   optimizer_facts: OptimizerFact[];
-  generation_only: boolean;
   at_offset: number | null;
-  results: SheetRow[];
-  all_candidate_results: Record<string, SheetRow[]>;
-  reference_results: Record<string, SheetRow[]>;
+  cells: Record<string, SheetRow[]>;
   overlap_results: Record<string, SheetRow[]>;
   round_id: string;
-  /** The rank-ordered display table: rank 1 is `leading_label`, then θ, then
-   * composite. */
+  /** `ranked`, served: the ledger's `RoundOutcome` cannot carry a computed field. */
   scoreboard: ScoreboardRow[];
-  /** How many scored rows of `results` graded into each tenth of [0, 1], lowest
-   * first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in
-   * the tenth. A row carrying no verdict is in none — an uncharged error's
-   * 0.0 is a floor, not a low score. */
+  /** The arm the round ENDED on (`election.ended_on`), read: the headline's numbers
+   * are its own. Null on a diag round, which elects nothing. */
+  headline: ArmReading | null;
+  /** How many scored rows of the `headline` arm's cells graded into each tenth of
+   * [0, 1], lowest first: a band is closed above, so a 0.5 counts in the
+   * fifth and a 1.0 in the tenth. A row carrying no verdict is in none — an
+   * uncharged error's 0.0 is a floor, not a low score. */
   fitness_bands: number[];
 }
 
@@ -768,19 +910,14 @@ export interface LifetimeSpend {
   unreported_usd: number;
 }
 
-/** What a cycle's rounds cap and spend cap have left, which an offshoot takes as its own caps. */
+/** What a cycle's rounds cap has left, which an offshoot takes as its own. Spend is no */
 export interface ForkRemainder {
-  /** Rounds closed AFTER the origin — what `max_rounds` counts */
+  /** Rounds closed AFTER the origin — what `budget.rounds` counts */
   rounds_closed: number;
-  parent_max_rounds: number | null;
-  /** `parent_max_rounds` less `rounds_closed`, never under 1 */
-  max_rounds: number | null;
-  /** What the cycle's spend cap has counted */
-  metered_usd: number | null;
-  parent_ceiling: SpendCeilings;
-  /** `parent_ceiling.usd` less `metered_usd`, never under 0; the token arm is not
-   * remaindered, so it is null and the offshoot inherits the parent's */
-  ceiling: SpendCeilings;
+  /** The cycle's rounds cap; null where it has none */
+  parent_rounds: number | null;
+  /** `parent_rounds` less `rounds_closed`, never under 1 */
+  rounds: number | null;
 }
 
 /** A provider hold as served: the banked reading with both clocks read at the response. */
@@ -829,7 +966,7 @@ export interface LoopWarning {
 export interface DashboardError {
   kind: string;
   message: string;
-  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
   label: string;
   next_step: string;
 }
@@ -843,35 +980,46 @@ export interface OptimizerLimit {
   integer: boolean;
 }
 
-/** What a run may spend, in the two units spend is metered in; a null arm is unmetered. */
-export interface SpendCeilings {
-  usd: number | null;
-  tokens: number | null;
+/** What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits. */
+export interface Budget {
+  /** The campaign's USD, in its ceiling meter: one book its live cycles share. */
+  usd?: number | null;
+  /** The campaign's billed tokens, shared like `usd`; the axis that still binds
+   * where a model has no rate on file. */
+  tokens?: number | null;
+  /** Closed rounds after the origin, per cycle, read at each round boundary; 0
+   * measures the origin only. */
+  rounds?: number | null;
+  /** Seconds ONE launch runs, its clock afresh at every launch; a remote cell still
+   * open at the edge is cut and the run stops `wall_clock`. */
+  wall_clock_s?: number | null;
 }
 
-/** The ceilings a launch declared; a served dashboard lays the standing operator ceiling over them. */
+/** The budget a launch declared, beside its optimizer's own bounds; a served dashboard lays */
 export interface RunLimits {
-  max_rounds: number | null;
-  ceiling: SpendCeilings;
+  budget: Budget;
   optimizer: OptimizerLimit[];
 }
 
-/** What a cycle's history had cost when a round closed, a fork's inherited prefix included. */
-export interface CloseSpend {
-  /** What the search incurred, replays priced (`SpendRollup.search_incurred_usd`).
-   * Null where a search call carries tokens no rate priced. */
-  search_usd: number | null;
-  /** What providers reported they billed. */
-  billed_usd: number;
-  /** What our rate table prices the calls no provider billed. Never spent. */
-  rate_priced_usd: number;
-  /** Calls that reached a provider. */
-  calls: number;
-  /** Billed tokens. */
-  tokens: number;
-  /** Summed seconds of those calls — work, never clock: it exceeds the clock where
-   * cells ran concurrently. */
-  worked_s: number;
+/** Two runs are one treatment only where ``digest`` agrees; no measurement key reads it. */
+export interface Treatment {
+  optimizer: string;
+  version: string;
+  prompt_hashes: Record<string, string>;
+  manifest: string;
+  source: string;
+}
+
+/** What a declaration is a delta over, in two halves: the bench's defaults, which every arm of */
+export interface DefaultsPin {
+  bench: string;
+  treatment: Treatment;
+}
+
+/** Something the run's declaration is a delta over moved since it was declared, so the launch */
+export interface DefaultsDrift {
+  declared: DefaultsPin;
+  running: DefaultsPin;
 }
 
 /** A run's life bank as every surface shows it. Built by :meth:`of` alone. */
@@ -894,9 +1042,9 @@ export interface RunStanding {
   /** The optimizer's declared pick (`declared_selection`), as the arm it was first
    * measured as: the origin until a round selects. Null before round 0
    * closes. */
-  selection: ArmPointer | null;
+  selection: ArmName | null;
   /** The pick `selection` was promoted over. Null while it is the origin. */
-  parent: ArmPointer | null;
+  parent: ArmName | null;
   /** `selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap
    * reading of that pair. The state says why where there is none:
    * `same_individual` while the selection is the origin. */
@@ -910,9 +1058,6 @@ export interface RunStanding {
   /** Of those, how many closed `advanced`: their pick separated from C0 on the
    * origin panel — the verdict clock. Never summed with `improved`. */
   advanced: number;
-  /** What the cycle had cost at this close. Null before round 0 closes, and on a
-   * run with no ledger to fold. */
-  spent: CloseSpend | null;
   /** The ONE text reading of the selection: who, and both rates on the origin panel
    * — or the reason there is no pair. Never the selection's rate alone. The
    * readout, `log.md`, the activity feed and every screen print this. Stamped
@@ -924,9 +1069,9 @@ export interface RunStanding {
 export interface CatchUpLogEntry {
   member: string;
   round: number;
-  candidate_idx: number;
-  candidate_total: number;
-  sample_id: number;
+  arm: string;
+  label: string;
+  position: number;
   prior_ids: string[];
 }
 
@@ -941,10 +1086,10 @@ export interface RacingBlock {
 /** A candidate of the round in flight, with its searchpoint, sample tape and rejection reason. */
 export interface LiveCandidate {
   reading: ArmReading;
-  prompt_fields: Record<string, unknown> | null;
-  /** `ScoredCandidate.node_prompt_fields`, from its seeding. */
-  node_prompt_fields: Record<string, Record<string, unknown>>;
-  resolved_pipeline_params: Record<string, unknown> | null;
+  /** `OptSearchPoint.prompts`; with the resolved params, what a steered fork seeds
+   * from. Null until the candidate is announced. */
+  prompts: Record<string, NodePrompt> | null;
+  resolved_params: Record<string, unknown> | null;
   pipeline_overlay: Record<string, unknown> | null;
   samples: DashboardSample[];
   validation_failures: ValidationFailure[];
@@ -1030,7 +1175,9 @@ export interface CurrentRound {
 /** The held-out pass in flight; its rows are no round's cells. */
 export interface BenchPassProgress {
   subject: 'origin' | 'selected';
-  /** The candidate the pass grades, as its row is labelled. */
+  /** The arm the pass grades — the join to its row. */
+  arm: string;
+  /** That arm's label, to render. */
   label: string;
   /** The searchpoint scored — the archive's `prompt_fields_id`. */
   sp_hash: string;
@@ -1046,23 +1193,11 @@ export interface BenchPassProgress {
 
 /** ``verify_pass`` on a served dashboard — one candidate being re-scored on unseen cells. */
 export interface VerifyPassProgress {
-  /** The candidate the pass re-scores, as its row is labelled. */
-  label: string;
-  /** That candidate's own round; 0 is the origin. */
-  round: number;
+  /** The candidate the pass re-scores, as its row names it. */
+  arm: ArmName;
   /** Unseen search cells the pass sends. */
   rows: number;
   strategy: 'random' | 'hard';
-}
-
-/** One arm of the run, named the three ways a surface joins on it. */
-export interface ArmPointer {
-  /** The round the arm was measured in; 0 is the origin. */
-  round: number;
-  /** `C0` or `C{round}.{n}` — the ARM's key; an id names its individual. */
-  label: string;
-  /** The individual's lineage id. */
-  candidate_id: string;
 }
 
 /** What a producer's state raises on its own, worded once for every surface. */
@@ -1120,7 +1255,7 @@ export interface RunAdmission {
 
 /** Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach. */
 export interface PauseReading {
-  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound';
   /** Who or what asked, in the declarer's own words. */
   detail: string;
@@ -1162,9 +1297,9 @@ export interface ServedDashboard {
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
   optimizer_step: string | null;
   state_since: string;
-  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
-  candidate: string;
+  measuring_arm: ArmName | null;
   run_standing: RunStanding | null;
   rounds: ServedRound[];
   bench_score: BenchScore | null;
@@ -1180,7 +1315,7 @@ export interface ServedDashboard {
   total_queries_scored: number;
   total_backend_calls: number;
   current_query_payload: string | null;
-  open_sample_ids: number[];
+  open_positions: number[];
   sample_lookahead_discards: number;
   in_flight: number;
   lookahead_allowed: number;
@@ -1195,12 +1330,16 @@ export interface ServedDashboard {
   arms_per_round: number | null;
   sp_budget_round: number;
   run_limits: RunLimits;
+  /** Set where the bench defaults or the treatment the campaign's declaration is a
+   * delta over moved since it was declared, under an unchanged origin: this
+   * launch runs today's values. */
+  defaults_drift: DefaultsDrift | null;
   catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
   error: DashboardError | null;
   /** The cycle's phase, derived at the read (`derive_run_state`) — never the
    * runner's own `declared_phase`, which says `running` forever after a kill. */
-  run_phase: 'checkin' | 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** How the cycle reads: `run_phase` and `stop_reason` as one word and one mark. */
   status: RunStatus;
   /** What the operator does now, as the cycle's `stop_reason` states it
@@ -1255,11 +1394,23 @@ export interface ServedDashboard {
   spend_metered: MeteredSpend | null;
   /** `spend_metered` per round, in round order. */
   spend_metered_by_round: Record<string, MeteredSpend> | null;
+  /** What the campaign's ceiling has counted in its meter, every cycle of it once,
+   * deleted ones included — the figure `run_limits.budget.usd` binds, of
+   * which `spend_metered` is this cycle's own. Null on a replay and where the
+   * manifest is gone. */
+  campaign_metered_usd: number | null;
+  /** The same count in billed tokens, the figure `run_limits.budget.tokens` binds;
+   * null with `campaign_metered_usd`. */
+  campaign_metered_tokens: number | null;
+  /** This cycle's share of the campaign's ceiling — the most it may have metered in
+   * all, and what its run's book binds; null where no run holds a share, and
+   * on a replay. */
+  allotment: Budget | null;
   /** What an offshoot of this cycle starts under; null on a replay. */
   fork_remainder: ForkRemainder | null;
   /** The arm a surface following the run shows (`_observed`); null before any arm
    * exists. */
-  observed: ArmPointer | null;
+  observed: ArmName | null;
   /** The scoring walk in flight; null where no producer is appending, and on a
    * replay. */
   walk: SampleWalk | null;
@@ -1271,7 +1422,7 @@ export interface WarmingDashboard {
   warming_up: true;
   campaign_id: string;
   cycle_id: string;
-  run_phase: 'checkin' | 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   producer: ProducerReading;
   run_admission: RunAdmission;
   pause: PauseReading | null;
@@ -1284,7 +1435,7 @@ export interface MemberAddress {
   /** The individual's content id. */
   individual_id: string;
   /** The arm the individual was measured as; null for a pass that is no arm. */
-  arm: ArmPointer | null;
+  arm: ArmName | null;
   /** Which pass, where the same individual is read by more than one. */
   pass_role: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | null;
 }
@@ -1403,14 +1554,13 @@ export interface PairedReading {
 }
 
 export interface DatasetItem {
-  sample_id: number;
+  position: number;
   query: string;
   /** The row's label, or `null` where the cell is VERIFIER-GRADED — a harbor
    * episode graded by its own task verifier, an L4 inner cycle graded by its
    * proxies. Same declaration `Sample.ground_truth` makes; a placeholder
    * string would read as a miss on every row of such a bank. */
   ground_truth: string | null;
-  task: string | null;
   /** 1-based position in the served hard-sample ranking under this response's
    * `order`. THE ordering — a client renders rows in it and never re-derives
    * one, since an ordering is a score and a locally-sorted one silently
@@ -1465,7 +1615,7 @@ export interface CellCandidate {
 
 /** One cell as a table row — enough to scan, sort by the served order and open. */
 export interface CellRow {
-  sample_id: number;
+  position: number;
   /** The address of the answer this row read — what opens it. */
   answer: string;
   /** `CellCandidate.key` of the candidate that measured it. */
@@ -1486,8 +1636,8 @@ export interface CellRow {
 /** Whether a scope has a δ ruler, and which one. */
 export interface RulerStanding {
   state: 'fitted' | 'not_fitted';
-  /** The anchor every θ and δ of this scope is read on (`AbilityReading.ruler_id`).
-   * Null while not fitted. */
+  /** The scale every θ and δ of this scope is read on (`RulerStamp.id`). Null while
+   * not fitted. */
   ruler_id: string | null;
   /** Null while not fitted. */
   calibration_model: '1PL' | '2PL' | null;
@@ -1561,13 +1711,14 @@ export interface CellSpan {
 /** One answer opened — the detail panel's whole read. */
 export interface Cell {
   answer: string;
-  /** Its slot in the dataset that measured it. */
-  sample_id: number;
-  dataset_name: string | null;
+  /** Its sample's slot in the dataset the read names. */
+  position: number;
+  /** The bank that measured it, by content. */
+  dataset_hash: string;
   /** Why the pass that measured it ran. */
   role: string;
   created_at: string | null;
-  /** The configuration's address (`ScoredCandidate.sp_hash`). */
+  /** The configuration's address (a measured arm's `sp_hash`). */
   prompt_fields_id: string | null;
   query: string;
   /** The label the answer was graded against; null where the cell is verifier-
@@ -1696,24 +1847,19 @@ export interface SpawnedBy {
   /** Outer round; 0 is the origin (C0). Null when the spawn came from outside any
    * round (the noise-floor diagnostic). */
   round: number | null;
-  /** Position in the outer round's population; null for the origin. */
-  candidate_idx: number | null;
-  /** The outer candidate's `OptSearchPoint.id` — stable across rounds; null for the
-   * origin. */
-  candidate_id: string | null;
-  /** Canonical label (`C0` for the origin, else `C{round}.{idx+1}`) — the same
-   * string the round file and console use. */
-  candidate_label: string | null;
+  /** The outer individual's `OptSearchPoint.id` — stable across rounds, and the
+   * outer ARM's key where `role` is an arm's. Null outside a measured pass. */
+  individual_id: string | null;
   /** WHY this cell ran (`MeasurementRole`). A backfill is spawned outside the
    * round's shared order to fill a paired comparison, and reading one as the
-   * candidate's own panel cell makes a repaired round unreproducible. Null
-   * for the origin. */
+   * individual's own panel cell makes a repaired round unreproducible. Null
+   * outside a measured pass. */
   role: string | null;
   /** The panel cell this run measured — the outer query, e.g.
-   * `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The candidate
-   * fields do NOT identify a run: every task runs for every candidate, so one
-   * candidate's spawns are as many as the panel has cells and are told apart
-   * only by this. */
+   * `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The
+   * individual does NOT identify a run: every task runs for every individual,
+   * so one individual's spawns are as many as the panel has cells and are
+   * told apart only by this. */
   task: string;
 }
 
@@ -1763,7 +1909,7 @@ export interface BenchReading {
 /** Why a bench pass holds fewer rows than it was sent on. */
 export interface PassStop {
   /** The walk's own end, or the run stop that cut the pass before it was sent. */
-  cause: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
+  cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
   /** The backend's dominant warning, where errors ended the pass. */
   warning: string | null;
 }
@@ -1857,7 +2003,7 @@ export interface CycleListEntry {
   is_root: boolean;
   /** Why the cycle ended; null while it has not. Label, outcome and next step
    * derive from the one STOP_REASON_INFO table — never re-mapped per surface. */
-  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   /** The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a
    * supersede cut. This is the successor pointer — follow it to find which
    * cycle answers for the campaign; it is a fact of its own precisely so it
@@ -1867,9 +2013,9 @@ export interface CycleListEntry {
   superseded_by: string | null;
   /** The single run-state value (RunPhase). Computed once by derive_run_state from
    * lifecycle + control flags + freshness; every picker dot and badge reads
-   * this, none re-derive it. 'checkin' wins first (the campaign hasn't run);
-   * 'terminal' pairs with `stop_reason` for the reason label. */
-  run_phase: 'checkin' | 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+   * this, none re-derive it. 'terminal' pairs with `stop_reason` for the
+   * reason label. */
+  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** A process holds this cycle (`ProducerReading.attached`, derived with
    * `run_phase`): running, holding for the operator, or running out a pause.
    * What the dock counts as in flight. */
@@ -1907,7 +2053,7 @@ export interface CycleListEntry {
 /** How a run reads on a row: one word and the mark drawn beside it. */
 export interface RunStatus {
   label: string;
-  mark: 'archived' | 'running' | 'starting' | 'queued' | 'gate' | 'paused' | 'checkin' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+  mark: 'archived' | 'running' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
 }
 
 /** A campaign's line as one value: the cycle that answers for it now, and how that cycle stands. */
@@ -1918,24 +2064,24 @@ export interface LineStanding {
    * holder's run state as `run_phase_label` words it. */
   status: RunStatus;
   /** The holder's derived run state, as `/cycles` serves. */
-  run_phase: 'checkin' | 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   producer_attached: boolean;
   /** Why the holder ended; null while it has not. */
-  stop_reason: 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   /** Where the holder's run stands; null until its round 0 closes. */
   standing: RunStanding | null;
   /** Rounds the holder closed AFTER the origin. */
   rounds_closed: number;
-  /** The rounds cap binding the holder: what its last launch declared with the
-   * standing operator ceiling laid over, as its dashboard's `run_limits`
-   * reads; before any launch, the cap its campaign declares. 0 is origin
-   * only; null is no cap. */
-  max_rounds: number | null;
-  /** `rounds_closed` against `max_rounds` as a campaign row prints it
+  /** The `budget.rounds` binding the holder: what its last launch declared with the
+   * standing operator budget laid over, as its dashboard's `run_limits`
+   * reads; before any launch, its campaign's. 0 is origin only; null is no
+   * rounds axis. */
+  budget_rounds: number | null;
+  /** `rounds_closed` against `budget_rounds` as a campaign row prints it
    * (`rounds_line`). */
   rounds_line: string;
-  /** What `max_rounds` says beside a rounds count (`rounds_cap_note`); null where
-   * no cap binds. */
+  /** What `budget_rounds` says beside a rounds count (`rounds_cap_note`); null
+   * where no rounds axis binds. */
   rounds_cap_note: string | null;
   human_intervened: boolean;
 }
@@ -1953,14 +2099,7 @@ export interface CommandAcceptedBody {
   command_id: string;
 }
 
-/** What a launch ASKS, never what the run holds: ``HeldLimits`` is a different type on purpose. */
-export interface LaunchLimits {
-  halt_at_accuracy: number | null;
-  ceiling: SpendCeilings;
-  step_rounds: number | null;
-}
-
-/** The SHAPE a run takes, on the wire and in the runner alike. How far it goes is a limit. */
+/** The SHAPE a run takes, on the wire and in the runner alike. How far it goes is its ``Budget``. */
 export interface RunMode {
   /** Rewind in place to this round before running; unset continues the ledger. */
   from_round: number | null;
@@ -1973,20 +2112,21 @@ export interface RunMode {
   diag: boolean;
 }
 
-/** The draft says what the campaign IS; ``limits`` bounds what THIS launch spends, and no */
+/** The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no */
 export interface StartCheckinPayload {
-  campaign_id: string;
-  limits: LaunchLimits;
+  draft_id: string;
+  budget: Budget;
   /** Run the diagnostic shape. */
   diag: boolean;
 }
 
-/** A run of an existing cycle: what bounds it (``limits``) and the shape it takes (``mode``). */
+/** A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it */
 export interface StartRunPayload {
   campaign_id: string;
   cycle_id: string;
   descend: string | null;
-  limits: LaunchLimits;
+  budget: Budget;
+  step_rounds: number | null;
   mode: RunMode;
 }
 
@@ -2017,15 +2157,26 @@ export interface CampaignRunsWith {
   vendors: VendorModels[];
   /** The optimizer manifest the root course runs */
   optimizer: string;
-  /** The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited */
-  max_rounds: number | null;
+  /** The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = no
+   * rounds axis */
+  budget_rounds: number | null;
 }
 
-/** The head-to-head a campaign is an arm of, frozen at mint; its presence makes it controlled. */
+/** The head-to-head a campaign is an arm of, frozen at mint. */
 export interface Arm {
   head_to_head_id: string;
   arm_key: string;
-  treatment_digest: string;
+}
+
+/** Every measurement and steer on disk is admissible. */
+export interface Optimize {
+  kind: 'optimize';
+}
+
+/** A run of *arm*, and every L4 cell spawned under it: it reads only what a fresh run would. */
+export interface Compare {
+  kind: 'compare';
+  arm: Arm;
 }
 
 export interface CampaignSummary {
@@ -2042,26 +2193,27 @@ export interface CampaignSummary {
    * tail. */
   id_suffix: string | null;
   /** The campaign's line: the cycle answering for it now and how that cycle stands
-   * — its run state, its standing, its rounds and the cap binding them. Null
-   * while the root cycle is not on disk yet. Its `max_rounds` is null where
-   * the root config did not resolve. */
+   * — its run state, its standing, its rounds and the budget binding them.
+   * Null while the root cycle is not on disk yet. Its `budget_rounds` is null
+   * where the root config did not resolve. */
   line: LineStanding | null;
   /** ISO 8601 creation timestamp */
   created_at: string;
   /** The newest activity on any of the campaign's cycles, `created_at` where none
    * has any. The list is served in this order, newest first. */
   updated_at: string;
-  /** The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the
-   * campaign's ORIGIN identity. Campaigns on one declaration share it and
-   * differ only in the random `campaign_id` suffix, which is what makes them
-   * separate RUNS of that origin; the sidebar groups the forest by this key. */
+  /** The campaign's root cycle id — the content address of its origin and its run
+   * declaration together. Campaigns on one origin under one declaration share
+   * it and differ only in the random `campaign_id` suffix, which is what
+   * makes them separate RUNS of it; two arms of a head-to-head never share
+   * one. The sidebar groups the forest by this key. */
   root_cycle_id: string;
   /** Backend this campaign optimizes against */
   backend_id: string;
   /** Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …),
-   * FROZEN on the manifest at mint. Re-pointing or deleting the dataset dir
-   * never changes it: a campaign outlives its dataset dir, and what it RAN is
-   * a fact about the campaign. */
+   * FROZEN in its declaration's environment at mint. Re-pointing or deleting
+   * the dataset dir never changes it: a campaign outlives its dataset dir,
+   * and what it RAN is a fact about the campaign. */
   backend_type: string;
   /** This campaign optimizes the optimizer itself (L4), answered off `backend_type`
    * by the connector registry. The one test a surface draws the 'inner loops'
@@ -2078,25 +2230,31 @@ export interface CampaignSummary {
    * of its cycles was deleted. A wider scope than `spend_metered`, which
    * reads the campaign's line alone. */
   spend_lifetime: LifetimeSpend;
-  /** What the campaign's spend cap counts along its LINE — the root and every cycle
-   * a rebase handed it to — by bucket: the bill, or the search's incurred USD
-   * for a controlled arm. The number a surface sets beside a cap, live. */
+  /** The campaign's LINE — the root and every cycle a rebase handed it to — in the
+   * ceiling's meter, by bucket: the bill, or the search's incurred USD for a
+   * controlled arm. Part of `campaign_metered_usd`, which also counts every
+   * other cycle. */
   spend_metered: MeteredSpend;
+  /** What the campaign's money ceiling counts, in its meter: every cycle's own
+   * spend once, siblings and deleted cycles included. The number a surface
+   * sets beside the campaign's cap. */
+  campaign_metered_usd: number;
+  /** `campaign_metered_usd` in billed tokens, the figure the token ceiling binds. */
+  campaign_metered_tokens: number;
   /** The headline (`architecture.md` § The bench score is not an optimizer's
    * selection), read off the campaign's result (`result.json`) under the
    * formula its line runs — whichever cycle rebases handed the line to.
    * `status` says where it stands and whether its pass may be asked for;
    * `selected` is null until the line grades its pick. Null where the root
-   * config did not resolve — a check-in whose dataset is gone, a manifest
-   * this build cannot read. */
+   * config did not resolve — a manifest this build cannot read. */
   bench: BenchScore | null;
   /** What the ROOT course runs with — a second transport of the answer `GET
    * /campaigns/{id}/pipeline` gives at the root, never a second source. Null
-   * when the root pipeline did not resolve. `max_rounds` is the DECLARED
-   * rounds cap; 0 means origin only. */
+   * when the root pipeline did not resolve. `budget_rounds` is the DECLARED
+   * `budget.rounds`; 0 means origin only. */
   runs_with: CampaignRunsWith | null;
-  /** Whether the campaign is a CONTROLLED arm of a head-to-head
-   * (`campaign.json::arm`, frozen at mint), as one sentence
+  /** Whether the campaign is a CONTROLLED arm of a head-to-head (its declaration's
+   * `compare` purpose, frozen at mint), as one sentence
    * (`domain/campaign.py::comparison_line`): an arm reads no other campaign's
    * measurements, refuses a steer and spends its declared budget; an ordinary
    * campaign optimizes with everything that helps. */
@@ -2125,11 +2283,12 @@ export interface CampaignPipelineResponse {
    * reads which optimizer's graph, knobs and analytics apply by, a check-in's
    * draft included */
   optimizer: string;
-  /** That optimizer's knob values per node as the addressed course runs them — the
-   * manifest's under the campaign's and the cycle seed's overlays */
-  optimizer_knobs: Record<string, Record<string, unknown>>;
-  /** Resolved config as the engine holds it — the bytes a round file carries as
-   * `resolved_pipeline_params`, which makes that field this endpoint's check */
+  /** That optimizer as the addressed course runs it — the manifest's knobs under
+   * the campaign's and the cycle seed's overlays, its arms and its pools */
+  optimizer_setup: OptimizerSetup;
+  /** Resolved config as the engine holds it — the bytes each arm of a round file
+   * carries as `resolved_params`, which makes that field this endpoint's
+   * check */
   params: Record<string, unknown>;
   node_config_schema: Record<string, NodeConfigParam[]>;
   view: PipelineView | null;
@@ -2145,16 +2304,16 @@ export interface CampaignPipelineResponse {
 
 /** What `POST /commands/fork-cycle` would decide about this steer, asked without forking. */
 export interface ForkPreviewResponse {
-  /** The overlay picks a responder the campaign's frozen `optimizer_narrowing`
+  /** The overlay picks a responder the campaign's declared `optimizer_narrowing`
    * never sanctioned, or touches a cost lever, which no permitted set can
    * sanction. True means the fork is the ADR-0005 babysit act: it needs
    * `campaign.babysit` (404 without it) and stamps the branch grade C. */
   steers_disallowed_model: boolean;
-  /** What the verdict above was compared AGAINST, per node — this campaign's frozen
-   * `optimizer_narrowing[node].param_allowed_values.model`. Served beside the
-   * verdict so a surface naming the permitted models cannot name a different
-   * set than the one that decided. A node absent from it sanctions nothing,
-   * which is why any model steer there counts. */
+  /** What the verdict above was compared AGAINST, per node — this campaign's
+   * declared `optimizer_narrowing[node].param_allowed_values.model`. Served
+   * beside the verdict so a surface naming the permitted models cannot name a
+   * different set than the one that decided. A node absent from it sanctions
+   * nothing, which is why any model steer there counts. */
   permitted_models: Record<string, string[]>;
 }
 
@@ -2342,13 +2501,13 @@ export interface SubjectReading {
   arm_id: string | null;
   authorship: string;
   human_intervened: boolean;
-  /** Where the resolved searchpoint stands, in the lineage tree's own words.
-   * `minted` = it has no score report yet: its walk is still open (or ended
-   * with its producer), so `n_cells`, `values` and `cell_means` cover only
-   * the cells it has scored SO FAR and every reading here is a prefix, of
-   * `expected_samples`. `measured` = its walk ended and these are all its
-   * cells. */
-  status: 'minted' | 'measured' | 'invalid';
+  /** Where the resolved searchpoint's arm stands, in the lineage tree's own words.
+   * `proposed` / `measuring` = its walk is still open (or ended with its
+   * producer), so `n_cells`, `values` and `cell_means` cover only the cells
+   * it has scored SO FAR and every reading here is a prefix, of
+   * `expected_samples`. `cut` = its walk stopped short of its panel;
+   * `measured` = its walk ended and these are all its cells. */
+  status: 'proposed' | 'measuring' | 'cut' | 'measured';
   /** How many cells the point's walk was sized for — the denominator `n_cells` is
    * read against. The score report's own once it lands; before that, what the
    * walk last announced, which a racing arm raises block by block. Null until
@@ -2388,10 +2547,10 @@ export interface PairwiseComparison {
    * each other. */
   hit: PairedReading;
   /** The cells `hit` counts as gained — `subject_a` missed, `subject_b` hit — as
-   * sample ids in `subject_b`'s numbering. */
-  gained: number[];
-  /** The cells `hit` counts as lost, numbered the same way. */
-  lost: number[];
+   * `Sample.key`s. */
+  gained: string[];
+  /** The cells `hit` counts as lost, as `Sample.key`s. */
+  lost: string[];
 }
 
 /** The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a */
@@ -2445,14 +2604,10 @@ export interface DatasetSplit {
   /** Distinct samples held out as the bench set, with every row that repeats one:
    * no optimizer node ever reads one, and the headline is scored on them. */
   bench: number;
-  /** Distinct samples reserved as the demo pool — the rows an individual's
-   * `shot_ids` name, rendered into its prompt as query and ground truth,
+  /** Distinct samples reserved as the demo pool — the rows an individual's `shots`
+   * name by `Sample.key`, rendered into its prompt as query and ground truth,
    * never scored. */
   demo: number;
-  /** Seeds which rows fall where. Membership ranks each row by its content
-   * (`Sample.key`), never its slot, so a reordered bank holds out the same
-   * rows. */
-  seed: number;
   /** Bench rows a pass may end with no verdict on — a provider fault, or a cell the
    * formula cannot grade — and still be a reading. Past it the pass reads
    * nothing: a headline over a population other than the one sent is not the
@@ -2471,13 +2626,33 @@ export interface BenchSet {
   origin: string;
 }
 
-/** What each arm of a head-to-head may spend, equal by declaration. */
-export interface ArmBudget {
-  usd: number | null;
-  max_rounds: number | null;
-  determinism: Record<string, unknown> | null;
+/** What stops a run short of its budget, so no arm outlasts another on a stall the other was */
+export interface StoppingRule {
   lives: Record<string, number> | null;
   convergence_patience: number | null;
+}
+
+/** What a campaign PINS on every optimizer call — how the draw is made and which host makes */
+export interface DeterminismClamp {
+  /** Sampling temperature EVERY optimizer node runs at, overriding its own —
+   * including `l1_generate`'s `temperature`, the dominant run-to-run noise
+   * source. `None` (default) leaves each node the value its pipeline file
+   * declares. */
+  temperature: number | null;
+  /** Sampling seed every optimizer node sends, or draws its per-call seed from
+   * where it asks several things in one step, so concurrent asks stay
+   * distinct draws. Temperature 0 pins the distribution and not the draw, so
+   * without a seed the provider is still free to sample differently on
+   * identical input. It rides `hash_call`, so two campaigns differing only
+   * here bank separate replies rather than serving one campaign's answer
+   * under the other's name. `None` (default) sends none. */
+  seed: number | null;
+  /** The upstream HOSTS behind the gateway, in order, every optimizer call is
+   * routed to (the gateway's own `provider_name`s — read them off `served_by`
+   * in the ledger, never from a catalogue). Hosts of one model disagree
+   * systematically, so an unpinned route makes a measurement whose producer
+   * nothing can name. `None` (default) lets the gateway re-rank per call. */
+  route_order: string[] | null;
 }
 
 /** The comparability guard: whether the bench headlines it is taken over — a pair's, a row's */
@@ -2490,7 +2665,7 @@ export interface PairGuard {
   head_to_head_id: string | null;
   /** Every campaign it is taken over is an arm of that head-to-head. */
   controlled: boolean;
-  differs_on: ('instrument_id' | 'dataset_hash' | 'split' | 'bench_rows' | 'scorer_id' | 'models' | 'origin' | 'budget' | 'optimizer_models' | 'human_intervened' | 'origin_reading')[];
+  differs_on: ('instrument_id' | 'dataset_hash' | 'split' | 'bench_rows' | 'scorer_id' | 'models' | 'origin' | 'budget' | 'defaults' | 'optimizer_models' | 'human_intervened' | 'origin_reading')[];
 }
 
 /** One campaign's bench headline beside what it cost to reach. */
@@ -2499,10 +2674,13 @@ export interface HeadToHeadRow {
   campaign_id: string;
   optimizer: string;
   optimizer_models: string[];
-  arm: Arm | null;
+  purpose: Optimize | Compare;
   guard: PairGuard;
-  treatment_digest: string | null;
-  budget: ArmBudget;
+  treatment_digest: string;
+  budget: Budget;
+  stopping: StoppingRule;
+  determinism: DeterminismClamp | null;
+  bench_defaults_pin: string;
   spend_metered: MeteredSpend | null;
   human_intervened: boolean;
   status: RunStatus;
@@ -2685,7 +2863,7 @@ export interface ArmNode {
    * nothing. */
   origin_row: number | null;
   /** The column the selector elects on. Candidate: the declaration its round's
-   * election carried (`RoundResult.elects_on`), null on a round that never
+   * election carried (`Election.elects_on`), null on a round that never
    * elected. Course: the declaration its own elections carried. `ability`:
    * the rounds are won on theta, not on accuracy. */
   elects_on: 'accuracy' | 'composite' | 'ability' | null;
@@ -2803,7 +2981,7 @@ export interface CourseNode {
    * nothing. */
   origin_row: number | null;
   /** The column the selector elects on. Candidate: the declaration its round's
-   * election carried (`RoundResult.elects_on`), null on a round that never
+   * election carried (`Election.elects_on`), null on a round that never
    * elected. Course: the declaration its own elections carried. `ability`:
    * the rounds are won on theta, not on accuracy. */
   elects_on: 'accuracy' | 'composite' | 'ability' | null;
@@ -2812,7 +2990,7 @@ export interface CourseNode {
   course_kind: 'root' | 'fork' | 'diag' | 'inner';
   /** The ONE server-owned run-state (`derive_run_state`), the same value `/cycles`
    * serves. */
-  run_phase: 'checkin' | 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** How the course reads on a row — its phase and why it ended as one word and one
    * mark, as `/cycles` serves it. */
   status: RunStatus;
@@ -2887,7 +3065,7 @@ export interface RayResponse {
 /** One outbound SSE frame, whose receiver treats an unknown field as a drift signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'backend_warning' | 'candidate_minted' | 'candidate_scored' | 'candidate_started' | 'checkin_closed' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'intervention' | 'launch_claim' | 'launch_released' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'optimizer_state' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_standing' | 'round_warning' | 'ruler' | 'run_limits' | 'run_phase' | 'run_wiring' | 'sample_order' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'backend_warning' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'intervention' | 'launch_claim' | 'launch_released' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'optimizer_state' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_standing' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -2916,8 +3094,8 @@ export interface ActivityItem {
   tone: 'good' | 'warn' | 'bad' | 'muted';
   /** The round the record names. */
   round: number | null;
-  /** The candidate the record is about, by the label its course minted. */
-  candidate: string | null;
+  /** The arm the record is about, by its key; `label` renders it. */
+  arm: string | null;
 }
 
 /** One labelled line of the evidence behind a hold. */
@@ -2931,7 +3109,7 @@ export interface DecisionFact {
 export interface DecisionAction {
   label: string;
   variant: 'primary' | 'ghost' | 'danger';
-  kind: 'pause-cycle' | 'origin-gate-decision' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'step-cycle' | 'fork-cycle' | 'mint-campaign' | 'start-checkin' | 'verify-candidate' | 'grade-bench' | 'change-run-limits' | 'set-concurrent-cycles' | 'cancel-queued-run' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'set-campaign-label' | 'replace-dataset' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin';
+  kind: 'pause-cycle' | 'origin-gate-decision' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'step-cycle' | 'fork-cycle' | 'mint-campaign' | 'start-checkin' | 'verify-candidate' | 'grade-bench' | 'change-run-limits' | 'set-concurrent-cycles' | 'cancel-queued-run' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'set-campaign-label' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'discard-draft';
   /** The whole command payload, the cycle's address and `descend` tail included. */
   payload: Record<string, unknown>;
 }
@@ -2982,7 +3160,7 @@ export interface MeResponse {
   terms_accepted_version: string | null;
 }
 
-/** An account's usage against the limits its next launch is gated on. */
+/** Usage against the next launch's gates: spend and tokens LIFETIME, campaigns per day. */
 export interface QuotaStatus {
   spend_lifetime: LifetimeSpend;
   spend_budget_usd_total: number | null;
@@ -3339,11 +3517,19 @@ export interface WorkspaceStorageEntry {
 }
 
 export interface WorkspaceStorageResponse {
-  /** The tenant's real on-disk total — campaigns + caches + other */
+  /** What this account holds on disk — campaigns + other, + the archive home when
+   * the account owns it */
   total_bytes: number;
-  /** Cross-campaign reuse caches (measurements/, optimizer_reuse/, judge_reuse/) —
-   * survive delete */
-  shared_cache_bytes: number;
+  /** The archive home this account files into and replays from: its own tenant id,
+   * or the install's shared archive */
+  archive_home_id: string;
+  /** `tenant`: the account's own home, counted in `total_bytes`; `install`: one
+   * every account on the install shares, counted in no account's total */
+  archive_home_owner: 'tenant' | 'install';
+  /** The home's cross-campaign reuse caches (measurements/, optimizer_reuse/,
+   * judge_reuse/) — survive delete; under an install-owned home, every
+   * account's */
+  archive_home_bytes: number;
   /** Everything else under the tenant: sessions, workspace ledger, dataset/backend
    * stores */
   other_bytes: number;
@@ -3420,6 +3606,47 @@ export interface KnobRow {
   value: unknown;
 }
 
+/** What the selected optimizer runs under a config, derived once for check-in and campaign. */
+export interface OptimizerSetup {
+  /** Every member's knob values, the manifest's under the config's overlays */
+  knobs: Record<string, Record<string, unknown>>;
+  /** Arms each round tests */
+  arms_per_round: number;
+  /** The nodes making each round's arms, in walk order */
+  proposers: string[];
+  /** What the members draw from */
+  pools: PoolRow[];
+}
+
+export interface PoolRow {
+  /** The pool's state kind, e.g. `block_pool` */
+  pool: string;
+  /** Where its entries come from */
+  source: 'library' | 'partition';
+  /** The run-init node writing it once, before round 0 */
+  initializer: string;
+  /** The initializer's `active` paths: the entries in play */
+  active: string[];
+  drawn_by: PoolDraw[];
+}
+
+export interface PoolDraw {
+  /** A node drawing from the pool, in walk order */
+  node: string;
+  /** How it draws under this config: `off` not at all, `open` a window to suggest
+   * from, `closed` an entry's id only */
+  access: 'off' | 'open' | 'closed';
+  /** The knob that sets `access` */
+  switch: KnobSwitch;
+}
+
+export interface KnobSwitch {
+  /** The node whose knob sets a reader's access */
+  node: string;
+  /** That knob, under `nodes.{node}.config` */
+  knob: string;
+}
+
 /** The optimizers this install can run, the default first: one per runtime the registry holds. */
 export interface OptimizerRoster {
   /** What a campaign naming no `optimization.optimizer` runs */
@@ -3491,8 +3718,7 @@ export interface ConfigMapResponse {
 
 /** A fork's campaign-config delta, in which an absent field inherits the parent's value. */
 export interface ConfigOverrides {
-  max_rounds: number | null;
-  ceiling: SpendCeilings;
+  budget: Budget;
   nodes: Record<string, ManifestNodeOverlay>;
   scoring: string | Record<string, string> | null;
 }
@@ -3510,7 +3736,8 @@ export interface NodeSearchNarrowing {
 
 /** ``pipeline_overlay`` merges ON TOP of the dataset overlay for this cycle only. */
 export interface CycleSeed {
-  origin_prompt_fields: Record<string, unknown>;
+  /** C0's prompt loci, per prompt node; empty when the seed carries no origin. */
+  origin_prompts: Record<string, NodePrompt>;
   pipeline_overlay: Record<string, unknown>;
   /** Per-fork search-space lock edits (param-key subset + allowed-values) —
    * overrides the campaign's mint-time narrowing for this cycle only, the
@@ -3532,10 +3759,24 @@ export interface OriginGateDecisionPayload {
   decision: 'rescore' | 'proceed' | 'abort';
 }
 
-/** The ``max_rounds`` bound gates the operator EDIT path only; the trusted internal */
+/** The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal */
 export interface OptimizationOverrides {
-  /** Round ceiling for the campaign. 0 = measure the origin and stop. */
-  max_rounds: number;
+  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
+   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
+   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
+   * closed rounds after the origin (0 measures the origin and stops; null
+   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
+   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
+   * account admits the result whole or refuses the launch. A null axis is
+   * unbounded. ``tokens`` is unset by default: a token is worth a different
+   * amount on every route, so set it only where a backend bills but reports
+   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+  budget: Budget;
+  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
+   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
+   * only on its record's rule. */
+  halt_at_accuracy: number | null;
   /** The optimizer manifest this campaign runs — a directory under
    * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
    * nothing selects it install-wide. */
@@ -3585,7 +3826,7 @@ export interface EditDraftPatch {
   pipeline_steps: string[] | null;
   column_query: string | null;
   column_ground_truth: string | null;
-  origin_prompt_fields: Record<string, unknown> | null;
+  origin_prompts: Record<string, Record<string, string>> | null;
   optimization_overrides: Record<string, unknown> | null;
   candidate_library: string[] | null;
 }
@@ -3620,7 +3861,7 @@ export interface DraftDependency {
   fulfilled: boolean;
 }
 
-/** A check-in campaign's draft as every check-in route answers it. ``draft_id`` IS the owning */
+/** A check-in's draft as every check-in route answers it; Start mints its campaign. No */
 export interface DraftCampaignWire {
   draft_id: string;
   slug: string;
@@ -3636,6 +3877,8 @@ export interface DraftCampaignWire {
   /** `term=weight` dials joined by commas; empty scores correctness alone. */
   scoring_dials: string;
   optimization_overrides: OptimizationOverrides;
+  /** The optimizer as this draft's config runs it, as a campaign serves it. */
+  optimizer_setup: OptimizerSetup;
   raw_task_description: string;
   pipeline_overlay: Record<string, unknown>;
   headers: string[];
@@ -3643,8 +3886,9 @@ export interface DraftCampaignWire {
   column_ground_truth: string;
   /** By checklist field id. Nothing reaches mint until `confirmed`. */
   field_provenance: Record<string, 'unset' | 'proposed' | 'confirmed'>;
-  /** `OptSearchPoint.prompt_field_dict()` shape; empty until the check-in fills it. */
-  origin_prompt_fields: Record<string, unknown>;
+  /** Per active step, its starting prompt's fields by name; empty until the check-
+   * in fills it. A step bearing no prompt reads none. */
+  origin_prompts: Record<string, Record<string, string>>;
   /** A count, not the list: a library runs to tens of thousands of entries. */
   candidate_library_size: number;
   created_at: string;
@@ -3712,7 +3956,7 @@ export interface RaisedCommand {
   evidence: string;
 }
 
-/** The checklist state ``cache.json::resolution`` holds, and the last resolver turn beside it. */
+/** The checklist state ``checkin.json::resolution`` holds, and the last resolver turn beside it. */
 export interface OriginResolution {
   complete: boolean;
   provenance: Record<string, 'unset' | 'proposed' | 'confirmed'>;
@@ -3734,7 +3978,7 @@ export interface ResolveOriginResponse {
 }
 
 /** A re-opened check-in: its draft and what the last resolver turn left. */
-export interface CheckinReopenResponse {
+export interface DraftReopenResponse {
   draft: DraftCampaignWire;
   /** The last resolver turn's output; null when none ran. */
   resolution: OriginLastResolution | null;
@@ -3743,27 +3987,27 @@ export interface CheckinReopenResponse {
   raised: RaisedCommand[];
 }
 
-/** What a Start answers: the campaign, the cycle its loop runs and the job holding its slot. */
-export interface StartCheckinResponse {
-  campaign_id: string;
-  cycle_id: string;
-  job_id: string;
-}
-
-/** The ``replace-dataset`` response: the subject echoed, nothing more — the counts and the */
-export interface DatasetReplaced {
-  /** The dataset name now free for new data. */
+export interface DraftSummary {
+  draft_id: string;
   slug: string;
+  n_samples: number;
+  updated_at: string;
 }
 
-// How an arm's measurement ended (domain/results.py::ArmOutcome).
-export type ArmOutcome = 'measured' | 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in';
+/** The caller's open check-ins, most recently edited first. */
+export interface DraftListResponse {
+  drafts: DraftSummary[];
+}
 
-// The outcomes whose walk stopped before its panel (domain/results.py::ArmOutcome.ended_early).
-export const ARM_OUTCOMES_ENDED_EARLY: readonly ArmOutcome[] = ['skipped', 'broken', 'eliminated', 'locked_in'];
+/** What a Start answers: the job holding its slot, and the cycle it minted. */
+export interface StartCheckinResponse {
+  job_id: string;
+  /** Null while the job is queued: the campaign is minted once it holds a slot. */
+  hop: CycleHop | null;
+}
 
 // The coarse run-state axis (domain/phases.py::RunPhase).
-export type RunPhase = 'checkin' | 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+export type RunPhase = 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
 
 // What a cycle's producer is doing now (domain/phases.py::ProducerState).
 export type ProducerState = 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'claimed' | 'absent';
@@ -3772,13 +4016,13 @@ export type ProducerState = 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'cl
 export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
 
 // `GET /campaigns?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'.
-export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'checkin' | 'all';
+export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'edit-draft-campaign' | 'fork-cycle' | 'grade-bench' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'replace-dataset' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'submit-arms' | 'unarchive-campaign' | 'verify-candidate';
+export type CommandKind = 'archive-campaign' | 'cancel-queued-run' | 'change-run-limits' | 'cleanup-empty-cycles' | 'compact-archive' | 'delete-campaign' | 'delete-cycle' | 'discard-draft' | 'edit-draft-campaign' | 'fork-cycle' | 'grade-bench' | 'mint-campaign' | 'origin-gate-decision' | 'pause-cycle' | 'resolve-origin' | 'set-campaign-label' | 'set-concurrent-cycles' | 'set-sample-lookahead' | 'skip-searchpoint' | 'start-checkin' | 'start-run' | 'step-cycle' | 'submit-arms' | 'unarchive-campaign' | 'verify-candidate';
 
 // Why a cycle ended (domain/phases.py::StopReason).
-export type StopReason = 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+export type StopReason = 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 
 // Whether a stop SUCCEEDED, and the only half of the table that decides anything —
 // `StopOutcome`, where `paused` is the one non-terminal member. Ask it rather than
@@ -3786,7 +4030,7 @@ export type StopReason = 'perfect_score' | 'max_rounds' | 'lives_exhausted' | 'p
 export type StopOutcome = 'success' | 'halted' | 'failed' | 'paused';
 export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {
   'perfect_score': 'success',
-  'max_rounds': 'success',
+  'rounds_budget': 'success',
   'target_hit': 'success',
   'lives_exhausted': 'success',
   'hard_cap_reached': 'success',
@@ -3799,6 +4043,7 @@ export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {
   'optimizer_abort': 'halted',
   'spend_budget': 'halted',
   'token_budget': 'halted',
+  'wall_clock': 'halted',
   'origin_gate': 'halted',
   'backend_unreachable': 'halted',
   'provider_credit_exhausted': 'halted',
@@ -3819,7 +4064,7 @@ export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {
 export type StopCategory = 'search' | 'limit' | 'budget' | 'operator' | 'external' | 'failure';
 export const STOP_REASON_CATEGORIES: Record<StopReason, StopCategory> = {
   'perfect_score': 'search',
-  'max_rounds': 'limit',
+  'rounds_budget': 'limit',
   'target_hit': 'search',
   'lives_exhausted': 'search',
   'hard_cap_reached': 'limit',
@@ -3832,6 +4077,7 @@ export const STOP_REASON_CATEGORIES: Record<StopReason, StopCategory> = {
   'optimizer_abort': 'search',
   'spend_budget': 'budget',
   'token_budget': 'budget',
+  'wall_clock': 'budget',
   'origin_gate': 'operator',
   'backend_unreachable': 'external',
   'provider_credit_exhausted': 'external',
@@ -3853,21 +4099,19 @@ export interface RunPhaseInfo {
   label: string;
   walks: boolean;
   settled: boolean;
-  authoring: boolean;
   awaits_operator: boolean;
   dock_priority: number;
   parked: string;
   parked_attached: string;
 }
 export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
-  'checkin': { label: "Check-in", walks: false, settled: false, authoring: true, awaits_operator: false, dock_priority: 3, parked: "", parked_attached: "" },
-  'queued': { label: "Queued", walks: false, settled: false, authoring: false, awaits_operator: false, dock_priority: 2, parked: "waiting for a machine slot", parked_attached: "waiting for a machine slot" },
-  'starting': { label: "Starting", walks: false, settled: false, authoring: false, awaits_operator: false, dock_priority: 1, parked: "coming up", parked_attached: "coming up" },
-  'running': { label: "Running", walks: true, settled: false, authoring: false, awaits_operator: false, dock_priority: 1, parked: "", parked_attached: "" },
-  'paused': { label: "Paused", walks: false, settled: false, authoring: false, awaits_operator: false, dock_priority: 2, parked: "resumable", parked_attached: "stopping at its next checkpoint" },
-  'gate': { label: "Holding", walks: false, settled: false, authoring: false, awaits_operator: true, dock_priority: 0, parked: "awaiting your decision", parked_attached: "awaiting your decision" },
-  'detached': { label: "Detached", walks: false, settled: false, authoring: false, awaits_operator: false, dock_priority: 3, parked: "producer gone", parked_attached: "producer gone" },
-  'terminal': { label: "Ended", walks: false, settled: true, authoring: false, awaits_operator: false, dock_priority: 3, parked: "", parked_attached: "writing its last files" },
+  'queued': { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, parked: "waiting for a machine slot", parked_attached: "waiting for a machine slot" },
+  'starting': { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, parked: "coming up", parked_attached: "coming up" },
+  'running': { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, parked: "", parked_attached: "" },
+  'paused': { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, parked: "resumable", parked_attached: "stopping at its next checkpoint" },
+  'gate': { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, parked: "awaiting your decision", parked_attached: "awaiting your decision" },
+  'detached': { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, parked: "producer gone", parked_attached: "producer gone" },
+  'terminal': { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, parked: "", parked_attached: "writing its last files" },
 };
 
 // What a run asked to pause is finishing, per `dashboard.json::state`. Mirror of
@@ -4011,11 +4255,11 @@ export const RATE_PRICED_LABEL = 'priced at our rate';
 // wording; the terminal prints the same `head`.
 export const THETA_CAVEAT_INFO: Record<'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | 'floor_pinned', { head: string; body: string }> = {
   'disjoint_scopes': { head: "θ mixes datasets that share no scale", body: "These cells measure more than one dataset, and a difficulty is only ever fitted within one, so θ here averages scales that never met. Read each dataset's cells on their own; a lift paired on the same cells still holds." },
-  'cold_ruler': { head: "θ is not ability yet", body: "No difficulty ruler has been fitted, so θ is plain accuracy on the logit scale, read on each candidate's own cells. These θ compare to each other and to nothing else." },
+  'cold_ruler': { head: "θ is not ability yet", body: "No difficulty ruler could be fitted from what this account measured before the round, so θ is plain accuracy on the logit scale. A candidate and the parent it is judged against are read on the cells both answered, so their lift holds; a θ compared across rounds or against another candidate's does not." },
   'flat_ruler': { head: "θ is not ability here", body: "The ruler itself spans almost nothing, so every cell counts the same and θ is accuracy plus a constant. That is the instrument, not this round's draw — no round could have read wider." },
   'collapsed_band': { head: "θ is not ability this round", body: "This round bought a thin slice of a wide ruler. Inside a band that narrow every cell is equally hard, so ranking on θ ranks on accuracy. That is the draw, not the instrument." },
-  'prior_pinned': { head: "θ is not ability here", body: "The ruler gave most of this round's cells one shared difficulty, its prior, because every candidate that saw them answered the same way. That pinned value moves as the ruler grows, so a higher θ than before can be the scale shifting, not the prompt improving. Compare within a round; don't read the level across rounds." },
-  'unmeasured_delta': { head: "θ skips some of these cells", body: "The ruler does not carry some of these cells, because no candidate already on the scale answered them. θ leaves them out, so it is read on fewer cells than the accuracy beside it, and two candidates can be read on different ones. A later round places a cell on the scale once such a candidate answers it." },
+  'prior_pinned': { head: "θ is not ability here", body: "The ruler gave most of this round's cells one shared difficulty, its prior, because every candidate that saw them answered the same way. That pinned value moves as the ruler takes in new rounds, so a higher θ than before can be the scale shifting, not the prompt improving. Compare within a round; don't read the level across rounds." },
+  'unmeasured_delta': { head: "θ skips some of these cells", body: "The ruler does not carry some of these cells, because no candidate outside this round's judging had answered them when the round opened. θ leaves them out, so it is read on fewer cells than the accuracy beside it, and two candidates can be read on different ones. A later round reads them once this round's answers have joined the ruler." },
   'floor_pinned': { head: "θ reads nothing for an all-miss arm", body: "This arm missed every cell it answered. With no hit the fit has nothing to read: every all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken from it, is not a measurement. The ruler, the election and the other arms' θ are unaffected." },
 };
 
@@ -4166,15 +4410,3 @@ export const CYCLE_PATH_HOP_SEP = "~";
 export const CYCLE_PATH_UNIT_SEP = "::";
 export const ID_COMPONENT_RE = /^[a-zA-Z0-9_.-]+$/;
 export const ALL_DOTS_RE = /^\.+$/;
-
-// The PromptTemplate decomposition field SET. Mirror of
-// domain/search_point.py::PROMPT_STRING_FIELDS — canonical MEMBERSHIP only, since each
-// prompt kind orders its own render (PromptTemplate.RENDER_ORDER). Don't hand-list these.
-export const PROMPT_STRING_FIELDS = [
-  "persona",
-  "task_intent",
-  "problem_description",
-  "instruction",
-  "thinking_style",
-  "answer_format",
-] as const;

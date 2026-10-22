@@ -25,6 +25,7 @@ from promptpotter.infrastructure.llm.send_pacing import (
     drawn_budget,
     get_abort_check,
     held_wait,
+    loop_now,
     report_throttle_stall,
 )
 from promptpotter.infrastructure.llm.spend_book import (
@@ -38,7 +39,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     reserved,
 )
 from promptpotter.infrastructure.llm.telemetry import emit_backend_warning
-from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellThrottledError,
@@ -46,8 +46,11 @@ from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
 )
+from promptpotter.shared.tls import tls_context
 
 _OUTAGE_POLL_S = 5.0
+# How long a cell waits for a backend that stopped answering; the cell's own clock may end it sooner.
+_OUTAGE_WAIT_S = 600.0
 _HTTP_TIMEOUT_S = 30.0
 
 # (reply data, refused before generation) -> (what it billed, `None` = reports nothing; caller's read).
@@ -128,9 +131,9 @@ class MachineSlots:
         while (held := take()) is None:
             if abort is not None and abort():
                 raise asyncio.CancelledError("machine-slot wait aborted")
-            started = time.monotonic()
+            started = loop_now()
             await asyncio.sleep(HELD_POLL_S)
-            report_throttle_stall(time.monotonic() - started)
+            report_throttle_stall(loop_now() - started)
         return held
 
     @asynccontextmanager
@@ -204,11 +207,8 @@ class BackendClient:
     def derives_spend_bounds(self) -> bool:
         return self._connector.sent_spend_bound is not None
 
-    def cell_envelope_s(
-        self, sample: Sample, pipeline_params: dict[str, Any] | None
-    ) -> float | None:
-        envelope = self._connector.cell_envelope_s
-        return None if envelope is None else envelope(sample, pipeline_params)
+    def cell_envelope_s(self, sample: Sample, pipeline_params: dict[str, Any] | None) -> float:
+        return self._connector.cell_envelope_s(sample, pipeline_params)
 
     def cell_hop(self, sample: Sample, pipeline_params: dict[str, Any] | None) -> CycleHop | None:
         hop = self._connector.cell_hop
@@ -272,13 +272,13 @@ class BackendClient:
 
     async def _reachable_within(self, down_since: float) -> bool:
         abort = get_abort_check()
-        while time.monotonic() - down_since < self._connector.cell_wait_s:
+        while loop_now() - down_since < _OUTAGE_WAIT_S:
             if abort is not None and abort():
                 raise asyncio.CancelledError("backend outage wait aborted")
-            started = time.monotonic()
+            started = loop_now()
             await asyncio.sleep(_OUTAGE_POLL_S)
             answered = (await self.check_status()).get("status") != "unreachable"
-            report_throttle_stall(time.monotonic() - started)
+            report_throttle_stall(loop_now() - started)
             if answered:
                 return True
         return False
@@ -381,10 +381,9 @@ class BackendClient:
             async with self.backpressure.send() as ticket:
                 with admitted(CELL, bound, model=None, provider=None) as admission:
                     try:
+                        # The cell's envelope and the run's wall clock end the wait, as a HALTED cut.
                         resp = await client.post(
-                            f"{self.base_url}/matches",
-                            json=payload,
-                            timeout=self._connector.cell_wait_s,
+                            f"{self.base_url}/matches", json=payload, timeout=None
                         )
                     except httpx.TransportError as exc:
                         outcome = failed_send(exc)
@@ -461,15 +460,13 @@ class BackendClient:
     async def _wait_out_outage(self, unreachable: httpx.TransportError, sends: _CellSends) -> None:
         error_class = unreachable.__class__.__name__
         if sends.down_since is None:
-            sends.down_since = time.monotonic()
+            sends.down_since = loop_now()
             logger.warning(
                 "Backend unreachable (%s); waiting up to %.0fs for it to answer",
                 error_class,
-                self._connector.cell_wait_s,
+                _OUTAGE_WAIT_S,
             )
-            sends.warn(
-                "transport_error", wait_s=self._connector.cell_wait_s, error_class=error_class
-            )
+            sends.warn("transport_error", wait_s=_OUTAGE_WAIT_S, error_class=error_class)
         if not await self._reachable_within(sends.down_since):
             sends.warn("transport_error", wait_s=0.0, error_class=error_class, final=True)
             raise unreachable

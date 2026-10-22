@@ -45,7 +45,7 @@ export function SearchpointDrillIn({
       {cfg ? (
         <NodeSurface
           node={null}
-          point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
+          point={{ origin_prompts: cfg.prompts, pipeline_overlay: {} }}
           overlay={overlay ?? cfg.config}
           schema={schema}
           mode="values"
@@ -125,25 +125,27 @@ export function SearchpointDrillIn({
             <Fact
               k="winner"
               v={
-                !reading.election.selected
-                  ? "no"
-                  : reading.election.crown === "uncontested"
-                    ? "yes — uncontested"
-                    : "yes"
+                !reading.election.held
+                  ? "not yet elected"
+                  : !reading.election.selected
+                    ? "no"
+                    : reading.election.crown === "uncontested"
+                      ? "yes — uncontested"
+                      : "yes"
               }
             />
             {/* "measured on", never "cost": BACKEND spend alone — judge and optimizer carry no candidate. */}
-            {reading.spend != null && (
-              <>
-                <Fact
-                  k="measured on"
-                  v={`${fmtTokens(reading.spend.input_tokens)} in · ${fmtTokens(reading.spend.output_tokens)} out${
-                    reading.panel.cached ? ` · ${reading.panel.cached} replayed` : ""
-                  }`}
-                  hint={TERMS.cache_replayed}
-                />
-                <Fact k="prefix" v={reading.spend.prefix.badge} hint={TERMS.cache_prefix} />
-              </>
+            {reading.tokens != null && (
+              <Fact
+                k="measured on"
+                v={`${fmtTokens(reading.tokens.input)} in · ${fmtTokens(reading.tokens.output)} out${
+                  reading.panel.cached ? ` · ${reading.panel.cached} replayed` : ""
+                }`}
+                hint={TERMS.cache_replayed}
+              />
+            )}
+            {reading.prefix != null && (
+              <Fact k="prefix" v={reading.prefix.badge} hint={TERMS.cache_prefix} />
             )}
           </>
         )}

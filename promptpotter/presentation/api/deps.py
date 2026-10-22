@@ -5,11 +5,11 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
+from promptpotter.application.account import registered_or_default_identity
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
-from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import (
     BadRequestError,

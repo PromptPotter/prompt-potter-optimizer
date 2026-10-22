@@ -9,6 +9,7 @@ export interface FieldSchema {
   description?: string;
   enum?: string[];
   minimum?: number;
+  exclusiveMinimum?: number;
   maximum?: number;
   minLength?: number;
   maxLength?: number;
@@ -60,6 +61,7 @@ function parse(field: FieldSchema, text: string, required: boolean): unknown {
   if (field.type === "integer" || field.type === "number") {
     const n = Number(s);
     if (!Number.isFinite(n) || (field.type === "integer" && !Number.isInteger(n))) return INVALID;
+    if (field.exclusiveMinimum !== undefined && n <= field.exclusiveMinimum) return INVALID;
     return n;
   }
   return field.pattern && !new RegExp(`^(?:${field.pattern})$`).test(s) ? INVALID : s;

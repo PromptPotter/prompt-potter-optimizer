@@ -16,9 +16,10 @@ from promptpotter.application.optimizers.potter.validators.behavior_base import 
     CheckFn,
     ValidatorContext,
 )
+from promptpotter.domain.opt_search_point import Locus, OptimizerPromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.round_audit import NodeBlock, RoundAudit
-from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, PROMPT_STRING_FIELDS
+from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 __all__ = [
     "CHECK_REGISTRY",
@@ -54,15 +55,18 @@ _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 def _variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
     """Prose rides two carriers by campaign kind: reading one answers inverted on the other."""
+    updates = variant.get("prompt_fields_updates") or {}
     written = {
-        f: str(v)
-        for f, v in (variant.get("prompt_fields_updates") or {}).items()
-        if f in PROMPT_STRING_FIELDS and v
+        Locus(n, f).name: str(v)
+        for n, fields in updates.items()
+        if isinstance(fields, dict)
+        for f, v in fields.items()
+        if v
     }
     for n, cfg in node_config_items(variant.get("pipeline_overlay")):
         for p, v in cfg.items():
-            if p in PROMPT_STRING_FIELDS and v:
-                written[f"{n}.{p}"] = str(v)
+            if p in OptimizerPromptTemplate.model_fields and v:
+                written[Locus(n, p).name] = str(v)
     return written
 
 
@@ -116,7 +120,7 @@ def _check_param_scope_discipline(audit: RoundAudit, ctx: ValidatorContext) -> C
     if not variants:
         return CheckResult("param_scope_discipline", True, "no variants emitted")
 
-    stale_field = _stale_prompt_field(ctx, _held_prompt_fields(audit))
+    stale_field = _stale_prompt_field(ctx, _shown_prompt_loci(audit))
     if stale_field is None:
         return CheckResult("param_scope_discipline", True, "unlocked: no stale prompt field")
 
@@ -188,7 +192,8 @@ def _check_not_only_param_variants(audit: RoundAudit, ctx: ValidatorContext) -> 
     variants = extract_l1_variants(audit)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
-    if _held_prompt_fields(audit) >= set(PROMPT_STRING_FIELDS):
+    shown = _shown_prompt_loci(audit)
+    if shown and all(shown.values()):
         return CheckResult("not_only_param_variants", True, "every prompt field is held")
 
     for v in variants:
@@ -369,22 +374,30 @@ def _touches_param_scope(pipeline_overlay: dict[str, Any]) -> bool:
     return False
 
 
-def _held_prompt_fields(audit: RoundAudit) -> frozenset[str]:
-    """Read off the prompt the round rendered: a held field is not stale."""
-    shown = _shown_l1_prompt(audit)
-    return frozenset(f for f in PROMPT_STRING_FIELDS if f"[{f}{HELD_PROMPT_FIELD_MARK}]" in shown)
+# One `[node.field]` section header per prose locus `rendered_prompt` showed, marked when held.
+_LOCUS_SECTION_RE = re.compile(
+    r"^\[([\w\-]+\.\w+)(" + re.escape(HELD_PROMPT_FIELD_MARK) + r")?\]$", re.MULTILINE
+)
 
 
-def _stale_prompt_field(ctx: ValidatorContext, held: frozenset[str]) -> str | None:
+def _shown_prompt_loci(audit: RoundAudit) -> dict[str, bool]:
+    """Read off the prompt the round rendered, in its order: locus → held. A held field is not stale."""
+    block = _l1_block(audit)
+    fields = {} if block is None else block.input.template_fields
+    return {
+        m.group(1): m.group(2) is not None
+        for text in fields.values()
+        if isinstance(text, str)
+        for m in _LOCUS_SECTION_RE.finditer(text)
+    }
+
+
+def _stale_prompt_field(ctx: ValidatorContext, shown: dict[str, bool]) -> str | None:
     if len(ctx.prior_rounds) < 2:
         return None
     recent_two = ctx.prior_rounds[-2:]
-    mutated_fields: set[str] = set()
+    mutated: set[str] = set()
     for r in recent_two:
         for v in extract_l1_variants(r):
-            # Leaf of `field` / `node.field` — same axis either carrier wrote it through.
-            mutated_fields.update(k.rpartition(".")[2] for k in _variant_prose_written(v))
-    for field_name in PROMPT_STRING_FIELDS:
-        if field_name not in mutated_fields and field_name not in held:
-            return field_name
-    return None
+            mutated.update(_variant_prose_written(v))
+    return next((locus for locus, held in shown.items() if not held and locus not in mutated), None)

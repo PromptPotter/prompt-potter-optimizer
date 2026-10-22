@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, cast
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
-from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext, bank_proposals
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
@@ -13,16 +12,15 @@ from promptpotter.application.bench.round_analysis import compute_round_diagnost
 from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import (
-    INITIAL_POPULATION,
     Proposals,
     RoundContext,
     RoundOpening,
     RoundWalk,
-    round_state,
 )
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.arm_gate import arm_gate_mode, operator_arms
 from promptpotter.application.runner.bench import grade_round_selection, reserve_selection_pass
+from promptpotter.application.runner.inner.spawn_context import pin_inner_ruler
 from promptpotter.application.runner.measurement import measure_population
 from promptpotter.application.runner.output import (
     write_hard_samples_artifacts,
@@ -31,13 +29,12 @@ from promptpotter.application.runner.output import (
 )
 from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
-from promptpotter.application.scoring.candidate_report import arm_id, fatal_validation_failures
-from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.primitives import overlap_series
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import panel_precision
-from promptpotter.domain.paired_reading import READING_STATE_INFO, ReadingState
+from promptpotter.domain.optimizer_state import RoundOutput
+from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState
 from promptpotter.domain.phase_views import MeasureEnterView
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -45,63 +42,44 @@ from promptpotter.domain.phases import (
     StopLoop,
     StopReason,
 )
-from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import (
     ROUND_ADVANCE_INFO,
-    ArmOutcome,
-    CandidateProposal,
+    ArmState,
+    Concluded,
+    Election,
+    Measured,
     OverlapReading,
+    Proposal,
     RoundAdvance,
     RoundResult,
     RunStanding,
-    ScoredCandidate,
-    candidate_label,
     is_leader_eligible,
-    recall_at,
     stalls_left,
     unscoreable_cells,
 )
-from promptpotter.domain.results_health import (
-    assemble_prior_healths,
-    compute_round_health,
-    is_deprecated,
-)
-from promptpotter.domain.run_records import (
-    BenchCheckpointKind,
-    CandidateMintedRecord,
-    ResumeCheckpointRecord,
-)
-from promptpotter.domain.scoring import NO_CELLS
+from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
+from promptpotter.domain.run_records import BenchCheckpointKind, ResumeCheckpointRecord
+from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.wounds import collapse_counts
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import close_spend
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import SendRefusedError, graceful
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
+    from promptpotter.application.optimizer_manifest import RoundPlan
     from promptpotter.application.optimizers.nodes import (
-        Adapter,
-        Controller,
-        Eliminator,
-        Measured,
+        MeasuredRound,
         Panel,
         Proposer,
-        Sampler,
         Selection,
-        Selector,
     )
-    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.results import DisplayMetric
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "RoundPlan",
     "announce_opening",
     "announce_population",
     "bank_walk",
@@ -111,110 +89,82 @@ __all__ = [
     "flush_pending_decisions",
     "persist_round",
     "post_round",
-    "proposal_summaries",
     "propose_population",
-    "round_plan",
+    "run_init",
+    "settle_owed_outputs",
 ]
 
 
-# Top-level manifest key: whether `initial_population` is a round of its own or heads round 1.
-SEEDS_WALK = "initial_population_walks"
-_SEEDS_WALKS = ("alone", "before_default")
+OWED_WRITE_ATTEMPTS = 3
+"""Each is a whole call: the client's backpressure and 5xx retries sit INSIDE one attempt and do not count against this."""
 
 
-@dataclass(frozen=True)
-class RoundPlan:
-    measurement: str
-    sampler: Sampler
-    seeders: tuple[Proposer, ...]
-    # Its own round, read against C0 (LEVI's calibration); else the seeds race round 1's offspring (CAPO).
-    seeds_alone: bool
-    proposers: tuple[Proposer, ...]
-    eliminator: Eliminator | None
-    selector: Selector
-    adapters: tuple[Adapter, ...]
-    controller: Controller | None
-
-    def walk(self, population: Sequence[OptSearchPoint]) -> RoundWalk:
-        """A round seeds only where no population stands: a resumed one restores its own."""
-        if not self.seeders or population:
-            return RoundWalk("default", (), self.proposers)
-        if self.seeds_alone:
-            return RoundWalk(INITIAL_POPULATION, (), self.seeders)
-        return RoundWalk("default", self.seeders, self.proposers)
-
-    def proposing_llm_nodes(self, population: Sequence[OptSearchPoint]) -> frozenset[str]:
-        """``propose_population`` calls no other llm node."""
-        return frozenset(m.name for m in self.walk(population).members if m.kind is NodeKind.LLM)
+def run_init(cycle: Cycle, cb: RunCallbacks) -> None:
+    """Once per cycle, before round 0's adapters: a cycle whose origin closed already holds what it wrote."""
+    if cycle.origin_round.optimizer_state is not None:
+        return
+    ctx = RoundContext(cycle=cycle, round_num=0, callbacks=cb)
+    for initializer in cycle.optimizer.plan.initializers:
+        initializer.initialize(NodeContext(ctx, initializer))
 
 
-def round_plan(selected: SelectedOptimizer) -> RoundPlan:
-    walk = selected.schema.pipelines["default"]
-    kinds = [selected.node(name).kind for name in walk]
-    measured_at = kinds.index(NodeKind.GATEWAY)
-    selected_at = next((i for i, kind in enumerate(kinds) if kind is NodeKind.SELECTOR), len(kinds))
-    samplers: list[Sampler] = []
-    proposers: list[Proposer] = []
-    eliminators: list[Eliminator] = []
-    selectors: list[Selector] = []
-    adapters: list[Adapter] = []
-    controllers: list[Controller] = []
-    for at, (name, kind) in enumerate(zip(walk, kinds, strict=True)):
-        if kind is NodeKind.GATEWAY:
+async def settle_owed_outputs(ctx: RoundContext) -> None:
+    """Before a walk: an adapter that landed nothing on the round before is re-run onto it, and the walk HALTS (``PAUSED``, resumable) where it never lands."""
+    cycle = ctx.cycle
+    prior = cycle.rounds[-1]
+    # A replayed walk makes no call, so nothing it would read is re-sent.
+    if prior.round == 0 or not prior.results or cycle.banked_proposals(ctx.round_num) is not None:
+        return
+    at_prior = replace(ctx, round_num=prior.round)
+    for adapter in cycle.optimizer.plan.adapters:
+        owed = [
+            kind
+            for kind in adapter.writes
+            if issubclass(kind, RoundOutput) and cycle.output(kind, prior.round) == kind()
+        ]
+        if not owed:
             continue
-        member = optimizers.member(name)
-        if kind is NodeKind.SAMPLER and at < measured_at:
-            samplers.append(cast("Sampler", member))
-        elif kind in (NodeKind.LLM, NodeKind.ALGORITHM) and at < measured_at:
-            proposers.append(cast("Proposer", member))
-        elif kind is NodeKind.ELIMINATOR and at < measured_at:
-            eliminators.append(cast("Eliminator", member))
-        elif kind is NodeKind.SELECTOR and at > measured_at:
-            selectors.append(cast("Selector", member))
-        elif kind is NodeKind.LLM and at > selected_at:
-            adapters.append(cast("Adapter", member))
-        elif kind is NodeKind.CONTROLLER and at > measured_at:
-            controllers.append(cast("Controller", member))
+        last: Exception | None = None
+        for attempt in range(1, OWED_WRITE_ATTEMPTS + 1):
+            try:
+                await adapter.adapt(NodeContext(at_prior, adapter), prior)
+                break
+            # A refused send is decided: swallowed, it halts as a PAUSE that `resume` re-enters forever.
+            except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
+                raise
+            except Exception as exc:
+                last = exc
+                logger.warning(
+                    "round %d %s re-run %d/%d failed: %s",
+                    prior.round,
+                    adapter.name,
+                    attempt,
+                    OWED_WRITE_ATTEMPTS,
+                    exc,
+                )
         else:
-            raise ValueError(
-                f"optimizer {selected.name!r}: `default` walks {kind} node {name!r} where the "
-                f"bench has no role for it (the {NodeKind.GATEWAY} node is at {measured_at})."
+            emit_round_warning(
+                kind="adapter_output_unavailable",
+                message=(
+                    f"round {prior.round}'s {adapter.name} landed no "
+                    f"{[k.kind for k in owed]} and {OWED_WRITE_ATTEMPTS} re-runs failed — halting "
+                    f"rather than walking round {ctx.round_num} without it; `resume` re-runs it"
+                ),
+                severity="error",
+                detail={
+                    "prior_round": prior.round,
+                    "node": adapter.name,
+                    "attempts": OWED_WRITE_ATTEMPTS,
+                    "error": str(last)[:200],
+                },
             )
-    if len(samplers) != 1 or len(selectors) != 1 or not proposers or len(eliminators) > 1:
-        raise ValueError(
-            f"optimizer {selected.name!r}: `default` must walk one sampler, at least one "
-            "proposer and at most one eliminator before its measurement, and one selector after "
-            f"it — it walks {walk}."
+            raise StopLoop(StopReason.PAUSED)
+        logger.info(
+            "Round %d's %s landed late; round %d reads it.",
+            prior.round,
+            adapter.name,
+            ctx.round_num,
         )
-    seeders = [
-        cast("Proposer", optimizers.member(name))
-        for name in selected.schema.pipelines.get(INITIAL_POPULATION, ())
-    ]
-    for pipeline, walked in (("default", proposers), (INITIAL_POPULATION, seeders)):
-        if misplaced := [p.name for at, p in enumerate(walked) if p.opens is not (at == 0)]:
-            raise ValueError(
-                f"optimizer {selected.name!r}: `{pipeline}` must walk a proposer that makes the "
-                f"round's arms first and only ones editing them after — {misplaced} of "
-                f"{[p.name for p in walked]} are out of place."
-            )
-    seeds_walk = selected.document.get(SEEDS_WALK)
-    if bool(seeders) != (seeds_walk is not None) or seeds_walk not in (None, *_SEEDS_WALKS):
-        raise ValueError(
-            f"optimizer {selected.name!r}: a manifest walking `{INITIAL_POPULATION}` declares "
-            f"`{SEEDS_WALK}` as one of {list(_SEEDS_WALKS)}, and only such a manifest does — it "
-            f"walks {[p.name for p in seeders]} and declares {seeds_walk!r}."
-        )
-    return RoundPlan(
-        measurement=walk[measured_at],
-        sampler=samplers[0],
-        seeders=tuple(seeders),
-        seeds_alone=seeds_walk == "alone",
-        proposers=tuple(proposers),
-        eliminator=eliminators[0] if eliminators else None,
-        selector=selectors[0],
-        adapters=tuple(adapters),
-        controller=controllers[0] if controllers else None,
-    )
 
 
 def _warn_not_advanced(round_result: RoundResult) -> None:
@@ -228,10 +178,11 @@ def _warn_not_advanced(round_result: RoundResult) -> None:
         else f"lift interval [{lead.headline.estimate.ci_lo:+.3f}, "
         f"{lead.headline.estimate.ci_hi:+.3f}] on {overlap_series(overlap)}"
     )
+    head = round_result.head
     emit_round_warning(
         kind="round_not_advanced",
         message=(
-            f"round {round_result.round} selected {round_result.label}: "
+            f"round {round_result.round} selected {'no arm' if head is None else head.label}: "
             f"{ROUND_ADVANCE_INFO[overlap.advance].sentence} {evidence}"
         ),
         detail={"advance": overlap.advance.value, "lead_state": lead.state.value},
@@ -240,117 +191,91 @@ def _warn_not_advanced(round_result: RoundResult) -> None:
 
 def _round_result(
     ctx: RoundContext,
-    measured: Measured,
+    measured: MeasuredRound,
     selection: Selection,
     *,
     elects_on: DisplayMetric,
 ) -> RoundResult:
-    # A held round headlines the parent RE-SCORED on this panel, never `tracking.current_*`, a union.
-    parent = measured.parent
-    winner_id = selection.selected_id
-    scores = selection.scores
-    cs_by_id = {cs.candidate_id: cs for cs in scores}
-    if winner_id and selection.leading_id != winner_id:
+    winner, leading = selection.selected, selection.leading
+    if winner is not None and leading != winner:
         raise ValueError(
-            f"round {ctx.round_num}: the selector kept {winner_id[:12]} and named "
-            f"{selection.leading_id[:12] or 'no arm'} as the one the round is read off"
+            f"round {ctx.round_num}: the selector kept {winner[:12]} and named "
+            f"{(leading or 'no arm')[:12]} as the one the round is read off"
         )
-    elected: ScoredCandidate = parent.report
-    best_opt_sp: OptSearchPoint = parent.opt_sp
-    best_results: CellSheet = measured.parent_rows
-    if winner_id:
-        elected = cs_by_id[winner_id]
-        best_opt_sp = next(ind for ind in measured.electable if ind.id == winner_id)
-        best_results = measured.rows[winner_id]
-    not_attempted = max(0, elected.expected_samples - elected.scored_samples) if winner_id else 0
-    # Counted off the rows: an ungraded cell is already inside `scored_samples`.
-    unscored = sum(1 for cell in best_results if cell.grade.unscored is not None)
     cycle = ctx.cycle
+    arms: dict[ArmKey, ArmState] = {key: read.state for key, read in measured.filed.items()}
+    cells = {key: read.rows for key, read in measured.filed.items()}
+    # A held round headlines the parent RE-SCORED on this panel, never `tracking.current_*`, a union.
+    ended_on = winner or measured.parent.key
+    head, head_rows = arms[ended_on], cells[ended_on]
+    assert isinstance(head, Concluded)
+    not_attempted = max(0, head.expected_samples - len(head_rows)) if winner else 0
     elected_round = RoundResult(
         round=ctx.round_num,
-        label=elected.label,
-        accuracy=elected.accuracy,
-        composite_fitness=elected.composite_fitness,
-        total=elected.total,
-        not_attempted=not_attempted,
-        unscored=unscored,
+        arms=arms,
+        folds=measured.folds,
+        cells=cells,
+        election=Election(
+            selected=[] if winner is None else [winner],
+            leading=leading,
+            ended_on=ended_on,
+            electable=len(measured.electable),
+            fit=measured.fit,
+            elects_on=elects_on,
+            verdict_reason=selection.verdict_reason,
+            ruler=cycle.difficulty.stamp,
+        ),
         health=compute_round_health(
-            results=best_results.cells,
+            results=head_rows.cells,
             prior_healths=assemble_prior_healths(ctx.cycle.rounds, ctx.round_num),
             not_attempted=not_attempted,
-            unscored=unscored,
+            # Counted off the rows: an ungraded cell is already inside `fold.walked`.
+            unscored=sum(1 for cell in head_rows if cell.grade.unscored is not None),
         ),
-        improved=bool(winner_id),
         # Until `measure_overlap` lands, after every pick this round makes.
-        overlap=OverlapReading.unpaired(ReadingState.PENDING, ctx.round_num, bool(winner_id)),
-        verdict_reason=selection.verdict_reason,
-        elects_on=elects_on,
-        prompt_fields=best_opt_sp.prompt_field_dict(),
-        pipeline_params=best_opt_sp.pipeline_params,
-        results=best_results,
-        all_candidate_results=dict(measured.rows),
-        reference_results=dict(measured.references),
-        candidates_scored=len(measured.scored),
-        electable_count=len(measured.electable),
-        candidate_scores=scores,
-        selected_labels=[elected.label] if winner_id else [],
-        leading_label=cs_by_id[selection.leading_id].label if selection.leading_id else None,
-        degraded_samples=count_degraded_samples(best_results.cells),
-        deprecated=sum(1 for cell in best_results if is_deprecated(cell.facts)),
-        recall_at=recall_at(best_results),
-        ability=cycle.ability_after(best_results),
-        evaluators=dict(elected.evaluators),
-        # A HELD round ends on the parent the cycle already stands on, lineage and all.
-        opt_sp=best_opt_sp if best_opt_sp.id != cycle.opt_sp.id else cycle.opt_sp,
-        optimizer_state=round_state(
-            cycle.optimizer, cycle.working_state.round_payload(), cycle.population
-        ),
+        overlap=OverlapReading.unpaired(ReadingState.PENDING, ctx.round_num, winner is not None),
     )
     diagnostics = compute_round_diagnostics(
-        elected_round, [*cycle.rounds, elected_round], cycle.session.pipeline_schema
+        elected_round,
+        [*cycle.rounds, elected_round],
+        cycle.session.pipeline_schema,
+        cycle.session.bank.slot_of,
     )
     return elected_round.model_copy(update={"diagnostics": diagnostics})
 
 
-def _unbought_cells(arm: ScoredCandidate, cut: StopReason | None) -> int:
+def _unbought_cells(arm: ArmState, rows: CellSheet, cut: StopReason | None) -> int:
     # Under a cut, a MEASURED arm short of its panel was stopped by no rule and no operator.
-    if cut is None or arm.outcome is not ArmOutcome.MEASURED:
+    if cut is None or not isinstance(arm, Measured) or arm.locked_in is not None:
         return 0
-    return max(0, arm.expected_samples - arm.scored_samples)
+    return max(0, arm.expected_samples - len(rows))
 
 
 def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | None) -> None:
     session = ctx.cycle.session
     round_num = ctx.round_num
-    arm_rows = round_result.all_candidate_results
-    unbought = {c.candidate_id: _unbought_cells(c, cut) for c in round_result.candidate_scores}
-    holes = {
-        c.candidate_id: unscoreable_cells(arm_rows.get(c.candidate_id, NO_CELLS))
-        + unbought[c.candidate_id]
-        for c in round_result.candidate_scores
+    panel = round_result.panel
+    unbought = {
+        key: _unbought_cells(arm, round_result.rows(key), cut) for key, arm in panel.items()
     }
+    holes = {key: unscoreable_cells(round_result.rows(key)) + unbought[key] for key in panel}
     # A broken arm also carries error rows, but its own outcome already charges it.
-    holed = sorted(
-        c.candidate_id
-        for c in round_result.candidate_scores
-        if is_leader_eligible(c) and holes[c.candidate_id]
-    )
+    holed = sorted(key for key, arm in panel.items() if is_leader_eligible(arm) and holes[key])
     # Sink is the LEDGER: the halt below unwinds before `persist_round`.
     ledger = session.state.ledger
     assert ledger is not None, "build_run_observers must bind state.ledger before a round runs"
     record_decision(
         ledger,
         BenchCheckpointKind.PANEL_COVERAGE,
-        {
-            "candidate_ids": [c.candidate_id for c in round_result.candidate_scores],
-            "round_num": round_num,
-        },
+        {"arms": list(panel), "round_num": round_num},
         holed,
         node=None,
-        data={"holes_by_candidate": holes},
+        data={"holes_by_arm": holes},
         round=round_num,
     )
-    holed_rows = [(cid, cell) for cid in holed for cell in arm_rows[cid] if cell.facts.errored]
+    holed_rows = [
+        (key, cell) for key in holed for cell in round_result.rows(key) if cell.facts.errored
+    ]
     reason = panel_gate_tripped(
         [cell for _, cell in holed_rows],
         cut if any(unbought[cid] for cid in holed) else None,
@@ -358,12 +283,13 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
     )
     if reason is None:
         return
+    slot_of = ctx.cycle.session.bank.slot_of
     for cid, cell in holed_rows:
         logger.warning(
             "round %d panel HOLE: candidate %s, sample %s — %s",
             round_num,
             cid,
-            cell.sample_id,
+            slot_of[cell.key],
             cell.facts.error or cell.facts.error_category,
         )
     for cid in holed:
@@ -381,27 +307,10 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
         "— a resume re-runs it, replays the cached candidates and re-measures the holes. %s",
         round_num,
         len(holed),
-        sum(1 for c in round_result.candidate_scores if is_leader_eligible(c)),
+        round_result.candidates_scored,
         STOP_REASON_INFO[reason].next_step,
     )
     raise StopLoop(reason)
-
-
-def proposal_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict[str, Any]]:
-    summaries = []
-    for i, cp in enumerate(proposals):
-        prompt_fields = cp.opt_sp.prompt_fields()
-        summary: dict[str, Any] = {
-            "idx": i,
-            "label": candidate_label(round_num, i),
-            "changes_description": cp.opt_sp.lineage.changes_description or "",
-        }
-        if cp.pipeline_overlay:
-            summary["pipeline_overlay"] = cp.pipeline_overlay
-        if prompt_fields:
-            summary["prompt_fields"] = prompt_fields
-        summaries.append(summary)
-    return summaries
 
 
 def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
@@ -419,40 +328,23 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
             round=ctx.round_num,
             node=node,
             opening=opening,
-            max_rounds=cycle.config.optimization.max_rounds,
+            budget_rounds=cycle.config.optimization.budget.rounds,
             parent_accuracy=cycle.tracking.current_accuracy,
-            prompt_preview=cycle.opt_sp.render()[:120],
+            prompt_preview="\n\n".join(
+                cycle.opt_sp.render(prompt_node)
+                for prompt_node in cycle.session.pipeline_schema.prompt_nodes()
+            )[:120],
             model=cycle.optimizer.model(node),
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
-            parent_prompt_fields=cycle.opt_sp.prompt_field_dict(),
+            parent_prompts=cycle.opt_sp.prompts,
         ),
     )
     return opening
 
 
-def announce_population(
-    ctx: RoundContext, opening: RoundOpening, proposals: list[CandidateProposal]
-) -> None:
-    """A mint is an EDGE SET: a held individual is minted again only for a parent no earlier mint names."""
-    if (ledger := ctx.cycle.session.state.ledger) is not None:
-        minted: dict[str, set[str]] = {}
-        for _, rec in ledger.iter():
-            if isinstance(rec, CandidateMintedRecord):
-                minted.setdefault(rec.candidate_id, set()).update(rec.lineage.parent_ids)
-        for idx, proposal in enumerate(proposals):
-            lineage = proposal.opt_sp.lineage
-            candidate_id = arm_id(proposal, ctx.round_num, idx)
-            if candidate_id in minted and minted[candidate_id].issuperset(lineage.parent_ids):
-                continue
-            ledger.append(
-                CandidateMintedRecord(
-                    round=ctx.round_num,
-                    idx=idx,
-                    candidate_id=candidate_id,
-                    label=candidate_label(ctx.round_num, idx),
-                    lineage=lineage,
-                )
-            )
+def announce_population(ctx: RoundContext, opening: RoundOpening, population: Proposals) -> None:
+    for key, arm in population.arms(ctx.round_num).items():
+        ctx.callbacks.on_arm(ctx.round_num, key, arm)
     ctx.callbacks.on_phase(
         CampaignPhase.PROPOSE,
         "exit",
@@ -461,8 +353,8 @@ def announce_population(
             ctx.callbacks.view_context,
             round=ctx.round_num,
             opening=opening,
-            candidates=proposal_summaries(proposals, ctx.round_num),
-            collapses=collapse_counts(cp.validation_failures for cp in proposals),
+            proposals=population.proposals,
+            collapses=collapse_counts(cp.validation_failures for cp in population.proposals),
         ),
     )
 
@@ -470,61 +362,58 @@ def announce_population(
 async def _walk(ctx: RoundContext, proposers: Sequence[Proposer], panel: Panel) -> Proposals:
     proposals = Proposals([])
     for proposer in proposers:
-        proposals = await proposer.propose(NodeContext(ctx, proposer.name), panel, proposals)
+        proposals = await proposer.propose(NodeContext(ctx, proposer), panel, proposals)
     return proposals
 
 
-def _one_arm_each(ctx: RoundContext, proposals: list[CandidateProposal]) -> list[CandidateProposal]:
-    seen: dict[str, CandidateProposal] = {}
+def _one_arm_each(ctx: RoundContext, proposals: list[Proposal]) -> list[Proposal]:
+    seen: dict[ArmKey, Proposal] = {}
     for idx, proposal in enumerate(proposals):
-        candidate_id = arm_id(proposal, ctx.round_num, idx)
-        if (arm := seen.get(candidate_id)) is None:
-            seen[candidate_id] = proposal
+        key = proposal.key(ctx.round_num, idx)
+        if (arm := seen.get(key)) is None:
+            seen[key] = proposal
             continue
         logger.info(
             "round %d: proposal %d reaches %s, which this round already measures — one arm",
             ctx.round_num,
             idx + 1,
-            candidate_id[:12],
+            key[:12],
         )
-        edges = list(
-            dict.fromkeys([*arm.opt_sp.lineage.parent_ids, *proposal.opt_sp.lineage.parent_ids])
-        )
-        if edges != arm.opt_sp.lineage.parent_ids:
-            lineage = arm.opt_sp.lineage.model_copy(update={"parent_ids": edges})
-            arm.opt_sp = arm.opt_sp.model_copy(update={"lineage": lineage})
+        lineage = arm.individual.lineage
+        edges = list(dict.fromkeys([*lineage.parent_ids, *proposal.individual.lineage.parent_ids]))
+        if edges != lineage.parent_ids:
+            individual = arm.individual.model_copy(
+                update={"lineage": lineage.model_copy(update={"parent_ids": edges})}
+            )
+            seen[key] = arm.model_copy(update={"individual": individual})
     return list(seen.values())
 
 
-def bank_walk(ctx: RoundContext, walk: RoundWalk, proposals: list[CandidateProposal]) -> None:
+def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
     """Once per round: a resume re-walking a banked round reads its record and writes no second."""
     session = ctx.cycle.session
     # An EMPTY bank replays as zero arms on every resume: a permanent failure to propose.
-    if ctx.detached or not session.state.cycle_id or not proposals:
+    if not session.state.cycle_id or not proposals:
         return
     if session.store.campaigns.round_proposals(session.hop, ctx.round_num) is None:
-        bank_proposals(ctx, proposals, walk=walk.pipeline, submitted=False)
+        bank_proposals(ctx, proposals, submitted=False)
 
 
 async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -> Proposals:
     gate = arm_gate_mode(ctx)
+    walk = plan.walk(ctx.cycle.population)
     if gate == "author":
         population = Proposals([])
     else:
-        walk = plan.walk(ctx.cycle.population)
         if walk.seeds:
             seeded = await _walk(ctx, walk.seeds, panel)
-            # Even on a detached round: the walk after it mates from this population.
-            ctx.cycle.population = [
-                p.opt_sp
-                for p in seeded.proposals
-                if not fatal_validation_failures(p.validation_failures)
-            ]
+            ctx.cycle.population = [p.individual for p in seeded.proposals if not p.refused]
         population = await _walk(ctx, walk.proposers, panel)
-        bank_walk(ctx, walk, population.proposals)
+        bank_walk(ctx, population.proposals)
     arms = _one_arm_each(ctx, population.proposals)
-    if gate != "off":
-        arms = _one_arm_each(ctx, await operator_arms(ctx, arms))
+    if gate == "off":
+        return replace(population, proposals=arms)
+    arms = _one_arm_each(ctx, await operator_arms(ctx, arms))
     return replace(population, proposals=arms)
 
 
@@ -533,7 +422,9 @@ async def _adapt(ctx: RoundContext, plan: RoundPlan, round_result: RoundResult) 
         return
     ctx.callbacks.on_phase(CampaignPhase.ADAPT, "enter", round=ctx.round_num)
     for adapter in plan.adapters:
-        await adapter.adapt(NodeContext(ctx, adapter.name), round_result)
+        # Survived here: the next walk re-runs it first (`settle_owed_outputs`).
+        with graceful(f"round {ctx.round_num} {adapter.name} landed nothing"):
+            await adapter.adapt(NodeContext(ctx, adapter), round_result)
     ctx.callbacks.on_phase(CampaignPhase.ADAPT, "exit", round=ctx.round_num)
 
 
@@ -545,16 +436,20 @@ async def execute_round(
     *,
     is_final_round: bool = False,
 ) -> tuple[RoundResult, StopReason | None]:
-    plan = round_plan(cycle.optimizer)
+    plan = cycle.optimizer.plan
     ctx = RoundContext(
         cycle=cycle, round_num=round_num, callbacks=callbacks, is_final_round=is_final_round
     )
+    await settle_owed_outputs(ctx)
 
-    panel = plan.sampler.draw(NodeContext(ctx, plan.sampler.name), pool)
+    # Before the draw, which reads the scale the election will, and before an arm spawns a cell.
+    cycle.difficulty.open_round(cycle.rounds)
+    pin_inner_ruler(cycle.difficulty.stamp.version)
+    panel = plan.sampler.draw(NodeContext(ctx, plan.sampler), pool)
     opening = announce_opening(ctx, plan.walk(cycle.population))
     population = await propose_population(ctx, plan, panel)
     assert cycle.tracking.current_sp is not None
-    announce_population(ctx, opening, population.proposals)
+    announce_population(ctx, opening, population)
 
     callbacks.on_phase(
         CampaignPhase.MEASURE,
@@ -569,7 +464,7 @@ async def execute_round(
     measured = await measure_population(ctx, population, panel, plan.eliminator, plan.selector)
     callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=round_num)
     callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
-    selection = plan.selector.select(NodeContext(ctx, plan.selector.name), measured, population)
+    selection = plan.selector.select(NodeContext(ctx, plan.selector), measured, population)
     round_result = _round_result(ctx, measured, selection, elects_on=plan.selector.elects_on)
     callbacks.on_phase(
         CampaignPhase.SELECT,
@@ -579,8 +474,10 @@ async def execute_round(
     )
     _panel_gate(ctx, round_result, measured.cut)
     # AFTER the panel gate: a round halted on a holed panel is unwound and re-run, never crowned.
-    callbacks.on_election(round_result)
+    assert round_result.election is not None
+    callbacks.on_election(round_num, round_result.election)
     cycle.absorb_round(round_result)
+    cycle.difficulty.fold(round_result)
 
     overlap = asyncio.create_task(measure_overlap(cycle, round_result, pool))
     try:
@@ -597,24 +494,27 @@ async def execute_round(
         overlap.cancel()
         raise
     reading, bought = await overlap
+    # Re-read: an adapter emits onto the round it adapts to.
     round_result = cycle.seat(
-        round_result.model_copy(update={"overlap": reading, "overlap_results": bought})
+        cycle.rounds[-1].model_copy(update={"overlap": reading, "overlap_results": bought})
     )
     _warn_not_advanced(round_result)
     return round_result, measured.cut
 
 
 async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) -> None:
-    round_result = cycle.origin_round
-    if round_result.results:
+    if cycle.origin_round.results:
         await _adapt(
             RoundContext(cycle=cycle, round_num=0, callbacks=cb),
-            round_plan(cycle.optimizer),
-            round_result,
+            cycle.optimizer.plan,
+            cycle.origin_round,
         )
+    round_result = cycle.origin_round
 
-    # Here, never from `close_round`, which round 0 reaches TWICE.
-    cb.on_election(round_result)
+    # As `execute_round` does: the election and its fold land before the close.
+    assert round_result.election is not None, "round 0 elects the origin it adopted"
+    cb.on_election(0, round_result.election)
+    cycle.difficulty.fold(round_result)
     # Unspent here, a look-ahead press during the origin's scoring widens round 1 too.
     session.control.spend_sample_lookahead()
     await close_round(cycle, round_result, 0, session, cb)
@@ -634,9 +534,10 @@ def persist_round(
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
             ledger.append(d)
-        round_result = cycle.seat(
-            round_result.model_copy(update={"at_offset": cb.on_round_close(round_result)})
+        offset = cb.on_round_close(
+            round_result, cycle.rounds, session.bank.slot_of, cycle.difficulty
         )
+        round_result = cycle.seat(round_result.model_copy(update={"at_offset": offset}))
 
     if session.state.cycle_id:
         write_hard_samples_artifacts(session, cycle)
@@ -672,52 +573,27 @@ async def close_round(
     session: Session,
     cb: RunCallbacks,
 ) -> tuple[RoundResult, RunStanding]:
-    if cycle.origin_restamped:
-        # A ruler that warmed this round gave round 0 a θ it could not have had at its own close.
-        cycle.origin_restamped = False
-        persist_round(cycle, cycle.origin_round, session, cb)
-    state = round_result.optimizer_state.model_copy(
-        update={"payload": cycle.working_state.round_payload()}
-    )
-    stood = round_result.model_copy(update={"optimizer_state": state})
+    stood = round_result.model_copy(update={"optimizer_state": cycle.close_state(round_num)})
     facts = cycle.optimizer.runtime.round_facts(cycle.optimizer, stood)
     round_result = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
     lives = cycle.config.optimization.lives
-    standing = RunStanding.after(
-        cycle.rounds,
-        lives=None if lives is None else lives.bank,
-        spent=close_spend(
-            ledger_chain(CycleDir(session.store.campaigns.cycle_dir(session.hop)), moment=None)
-        )
-        if session.state.cycle_id
-        else None,
-    )
+    standing = RunStanding.after(cycle.rounds, lives=None if lives is None else lives.bank)
     # The close first: a subscriber of the standing reads the round it names off that record.
     round_result = persist_round(cycle, round_result, session, cb)
-    leading = next(
-        (
-            c.candidate_id
-            for c in round_result.candidate_scores
-            if round_result.round and c.label == round_result.leading_label
-        ),
-        None,
-    )
+    election = round_result.election
+    leading = None if election is None or not round_result.round else election.leading
     origin = cycle.origin_round
     cb.on_round_complete(
         round_result,
         standing,
         None
         if leading is None
-        else panel_precision(
-            round_result.all_candidate_results.get(leading, NO_CELLS).cells,
-            origin.all_candidate_results[origin.origin.candidate_id].cells,
-        ),
+        else panel_precision(round_result.rows(leading).cells, origin.results.cells),
     )
     if cycle.sample_index is not None:
         cycle.sample_index.refresh(
             session.store,
             scorer=session.scoring.require_scorer(),
-            dataset_name=session.dataset_name,
         )
     return round_result, standing
 
@@ -731,26 +607,27 @@ async def post_round(
     *,
     is_final_round: bool = False,
 ) -> None:
-    controller = round_plan(cycle.optimizer).controller
-    acts = False
+    controller = cycle.optimizer.plan.controller
+    rule: str | None = None
     if controller is not None:
         ctx = NodeContext[Any](
             RoundContext(
                 cycle=cycle, round_num=round_num, callbacks=cb, is_final_round=is_final_round
             ),
-            controller.name,
+            controller,
         )
-        acts = controller.observe(ctx, round_result)
+        rule = controller.observe(ctx, round_result)
 
     round_result, standing = await close_round(cycle, round_result, round_num, session, cb)
 
     # Before the stop below, so a perfect round that also ends the campaign still gets its check.
+    fold, election = round_result.fold, round_result.election
     await verify_on_saturation(
         stores=session.store,
         hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.state.cycle_id),
         round_num=round_num,
-        accuracy=round_result.accuracy,
-        winner_id=next((c.candidate_id for c in round_result.selected_scores), None),
+        accuracy=None if fold is None else fold.accuracy,
+        winner_id=None if election is None else next(iter(election.selected), None),
         control=session.control,
     )
     await grade_round_selection(cycle, session, round_result, cb=cb)
@@ -758,6 +635,6 @@ async def post_round(
 
     if (stop := standing_tripped(cycle, standing)) is not None:
         raise StopLoop(stop)
-    if acts and not is_final_round:
+    if rule is not None and not is_final_round:
         assert controller is not None
-        await controller.act(ctx)
+        await controller.act(ctx, rule)

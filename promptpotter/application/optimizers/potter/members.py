@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
-from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     CellReading,
     build_round_order,
@@ -18,20 +18,37 @@ from promptpotter.application.intelligence.rasch import (
     select_round_subset,
 )
 from promptpotter.application.optimizers import nodes
+from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, POBB
 from promptpotter.application.optimizers.potter.dispatch.bundle import injection_registry
-from promptpotter.application.optimizers.potter.dispatch.facade import fingerprinted_modules
+from promptpotter.application.optimizers.potter.dispatch.facade import (
+    BUNDLE_DRAWS,
+    BUNDLE_READS,
+    fingerprinted_modules,
+)
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import injection_table
-from promptpotter.application.optimizers.potter.dispatch.layout import LayoutNode
+from promptpotter.application.optimizers.potter.dispatch.layout import (
+    NODE_LAYOUTS,
+    LayoutNode,
+    coerce_l1_layout,
+    unplaceable_edit,
+    validate_l1_layout,
+)
+from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1CritiqueOutput,
     L1GenerateOutput,
+    L2ContextOutput,
+    L3PlanOutput,
+    build_l2_response_model,
 )
 from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.escalation.firing import (
     FORCED_BY_DIAG,
-    L2,
-    L3,
+    Fire,
+    LayerCall,
+    LayerKnobs,
+    TransitionResult,
     escalate_l2,
 )
 from promptpotter.application.optimizers.potter.escalation.rules import (
@@ -39,6 +56,12 @@ from promptpotter.application.optimizers.potter.escalation.rules import (
     DEFAULT_ESCALATION_RULES,
     HEAL_RULES,
     NextAction,
+)
+from promptpotter.application.optimizers.potter.escalation.state import (
+    PotterPhase,
+    l2_fired,
+    l3_fired,
+    observe,
 )
 from promptpotter.application.optimizers.potter.generation_only import run_generation_only_round
 from promptpotter.application.optimizers.potter.knobs import (
@@ -48,37 +71,43 @@ from promptpotter.application.optimizers.potter.knobs import (
     L1GenerateKnobs,
     PoBBKnobs,
     ThetaElectionKnobs,
-    potter_knobs,
 )
 from promptpotter.application.optimizers.potter.l1.candidate_source import (
     propose_l1_population,
     variants_this_round,
 )
-from promptpotter.application.optimizers.potter.l1.critique import critique_owed, run_l1_critique
+from promptpotter.application.optimizers.potter.l1.critique import distil_critique
 from promptpotter.application.optimizers.potter.l1.stats import review_reading, round_facts
 from promptpotter.application.optimizers.potter.pobb.checks import ABORT_LENS_SUPPRESS
 from promptpotter.application.optimizers.potter.race import PoBBRace
 from promptpotter.application.optimizers.potter.records import (
     POTTER_MANIFEST,
+    L1Layout,
+    L1Readout,
+    L2Memory,
+    L3Memory,
+    Ladder,
     PotterCheckpointKind,
-    PotterRoundState,
 )
 from promptpotter.application.optimizers.potter.resume import (
     POTTER_REPLAYERS,
     rederive_critiques,
     round_packages,
 )
-from promptpotter.application.optimizers.potter.state import PotterState, potter_state
+from promptpotter.application.optimizers.potter.validators.l3_output import run_l3_output_validators
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
+from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
 from promptpotter.config.paths import optimizers_root
-from promptpotter.config.prompt_blocks import block_library, library_identity
 from promptpotter.domain.dashboard_rows import OptimizerLimit
+from promptpotter.domain.optimizer_state import Critique
+from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
+from promptpotter.domain.results import rounds_without_advance
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.errors import graceful
-from promptpotter.shared.hashing import stable_hash
+from promptpotter.domain.validators import ValidatorOutcome
+from promptpotter.shared.answer_text import truncate
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,20 +116,26 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.bench.resume_and_fork.replayers import Replayer
-    from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         CatchUpFn,
-        Measured,
+        Draw,
+        MeasuredRound,
         Panel,
+        PromptArity,
         Proposals,
         ReviewReading,
         RoundContext,
         Selection,
     )
+    from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
     from promptpotter.domain.cycle_paths import CycleHop
+    from promptpotter.domain.opt_search_point import VariationMode
+    from promptpotter.domain.optimizer_state import StatePart
+    from promptpotter.domain.paired_reading import ArmKey
+    from promptpotter.domain.pool import Pool
     from promptpotter.domain.results import DisplayMetric, OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
@@ -110,22 +145,36 @@ if TYPE_CHECKING:
 __all__ = ["MEMBERS", "RUNTIME"]
 
 
+logger = logging.getLogger(__name__)
+
+
 class L1CritiqueKnobs(StrictModel):
     """The critique's call config is all it has; it takes no knob of its own."""
 
 
-def _origin_readings(rounds: Sequence[RoundResult]) -> dict[int, CellReading]:
+def _origin_readings(
+    rounds: Sequence[RoundResult], slot_of: Mapping[str, int]
+) -> dict[int, CellReading]:
     """The ORIGIN's rows alone: the one arm every cell shares, so no edit under test moves a cell's rank."""
     if not rounds:
         return {}
     out: dict[int, CellReading] = {}
     for cell in rounds[0].results:
         facts = cell.facts
-        se, headroom = facts.pipeline.mean_parent_level_se, facts.pipeline.inner_origin_headroom
+        inner = facts.pipeline.inner
         usd, seconds = cell_channels_of(facts, cell.grade.fitness).get("cost"), facts.cost_s
-        if not cell.scored or se is None or headroom is None or usd is None or seconds is None:
+        slot = slot_of.get(cell.key)
+        if (
+            slot is None
+            or not cell.scored
+            or inner is None
+            or inner.mean_parent_level_se is None
+            or inner.origin_headroom is None
+            or usd is None
+            or seconds is None
+        ):
             continue
-        out[cell.sample_id] = CellReading(se, headroom, usd, seconds)
+        out[slot] = CellReading(inner.mean_parent_level_se, inner.origin_headroom, usd, seconds)
     return out
 
 
@@ -144,33 +193,38 @@ class AdaptiveQueue:
 
     name: ClassVar[str] = "adaptive_queue"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = AdaptiveQueueKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     size_knob: ClassVar[str | None] = "sp_budget_round"
 
-    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
-        # Unclamped: a budget above the pool is the finding preflight reports.
-        return potter_knobs(selected).adaptive_queue.sp_budget_round
+    def round_cells(self, knobs: AdaptiveQueueKnobs, search: int) -> int:
+        # Unclamped: a budget above the search split is the finding preflight reports.
+        return knobs.sp_budget_round
 
     def draw(self, ctx: NodeContext[AdaptiveQueueKnobs], pool: list[Sample]) -> Panel:
         view = ctx.difficulty
         knobs = ctx.knobs
-        readings = _origin_readings(ctx.rounds)
+        readings = _origin_readings(ctx.rounds, ctx.slot_of)
         worth = information_per_price(readings)
         own = build_observations(list(ctx.rounds))
 
         def pick(stratum: list[Sample], budget: int) -> list[Sample]:
+            # Purpose reaches the draw through the ruler alone: every arm of a head-to-head reads
+            # the one version it froze at open.
             if not knobs.per_round_resubset or view.ruler is None:
                 # On a COLD ruler a re-picked subset is difficulty-blind; freezing warms it fastest.
                 return select_round_subset(stratum, [], budget, worth=worth)
             return select_round_subset(
                 stratum,
-                [*view.observations, *own],
+                own,
                 budget,
                 ruler=view.ruler,
-                # Enough anchored cells for the next extension to equate against.
-                anchor_floor=ctx.config.optimization.elimination_n_min,
-                # Only THIS cycle's arms are in the race the panel has to separate.
-                leader_ids={o.candidate_id for o in own},
+                # Enough cells the ruler carries that θ is read on δ, not on the prior.
+                anchor_floor=ctx.elimination_n_min,
                 worth=worth,
             )
 
@@ -182,7 +236,7 @@ class AdaptiveQueue:
                 PotterCheckpointKind.PRICED_DRAW,
                 {
                     "round_num": ctx.round_num,
-                    "ruler": view.ruler.anchor_id if view.ruler is not None else None,
+                    "ruler": view.stamp.id,
                     # Per cell: what its origin row reported, then the rank value read off it.
                     "cells": {
                         str(s.id): {
@@ -197,7 +251,7 @@ class AdaptiveQueue:
                 [int(s.id) for s in cells],
             )
         order = build_round_order(
-            parent_grades(ctx.parent_rows), view.ruler, {int(s.id): s.key for s in cells}
+            parent_grades(ctx.parent_own_rows), view.ruler, {int(s.id): s.key for s in cells}
         )
         by_id = {int(s.id): s for s in cells}
         # Every cell closes a block: PoBB decides after each one.
@@ -206,22 +260,36 @@ class AdaptiveQueue:
 
 class L1Generate(LayoutNode):
     name: ClassVar[str] = "l1_generate"
+    prompt_arity: ClassVar[PromptArity] = "each"
     opens: ClassVar[bool] = True
+    variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = L1GenerateKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout})
+    draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L1GenerateOutput
     # L2 moves this node's panels, so the outer's only lever here is its output schema's names.
     outer_levers: ClassVar[Mapping[str, str]] = {SCHEMA_RENAME_PARAM: "object"}
 
+    @property
+    def consults(self) -> frozenset[type]:
+        return frozenset({AdaptiveQueue, Escalation})
+
     async def propose(
         self, ctx: NodeContext[L1GenerateKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
-        return await propose_l1_population(ctx, potter_state(ctx.state))
+        return await propose_l1_population(ctx)
 
 
 class PoBB:
     name: ClassVar[str] = "pobb"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = PoBBKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = ABORT_LENS_SUPPRESS
     # A PoBB stop ends the buying of an arm; θ still reads what it measured.
     stop_disqualifies: ClassVar[bool] = False
@@ -239,7 +307,12 @@ class PoBB:
 class ThetaElection:
     name: ClassVar[str] = "theta_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = ThetaElectionKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     elects_on: ClassVar[DisplayMetric] = "ability"
     elects_partial: ClassVar[bool] = True
 
@@ -247,66 +320,265 @@ class ThetaElection:
         self,
         ctx: NodeContext[ThetaElectionKnobs],
         panel: Panel,
-        rows: Mapping[str, CellSheet],
+        rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells
 
     def select(
-        self, ctx: NodeContext[ThetaElectionKnobs], measured: Measured, proposals: Proposals
+        self, ctx: NodeContext[ThetaElectionKnobs], measured: MeasuredRound, proposals: Proposals
     ) -> Selection:
         return elect_on_theta(ctx, measured, proposals)
 
 
 class L1Critique(LayoutNode):
-    """A malformed response is survived: the next round re-sends it (`ensure_prior_critique`)."""
+    """A malformed response is survived: the next walk re-runs it (`round.py::settle_owed_outputs`)."""
 
     name: ClassVar[str] = "l1_critique"
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = L1CritiqueKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Critique})
+    draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L1CritiqueOutput
 
+    @property
+    def consults(self) -> frozenset[type]:
+        return frozenset({AdaptiveQueue, Escalation, L1Generate})
+
     async def adapt(self, ctx: NodeContext[L1CritiqueKnobs], round_result: RoundResult) -> None:
-        state = potter_state(ctx.state)
-        failed = (
-            "Origin critique failed; round 1 proceeds without seeded feedback"
-            if ctx.round_num == 0
-            else "L1 critique failed; the next round re-sends it before generating"
+        ctx.emit(await distil_critique(ctx))
+
+
+class L2Context(LayoutNode):
+    name: ClassVar[str] = "l2_context"
+    prompt_arity: ClassVar[PromptArity] = "none"
+    knobs: ClassVar[type[StrictModel]] = LayerKnobs
+    layer_id: ClassVar[Literal["L2", "L3"]] = "L2"
+    reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L2Memory})
+    draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
+    response_model: ClassVar[type[BaseModel] | None] = L2ContextOutput
+    phase: ClassVar[OptimizerPhase] = OptimizerPhase(
+        phase=PotterPhase.REFINE_STRATEGY, node="l2_context", activity="refining strategy"
+    )
+    # `l1_generate`'s empty manifest `param_keys` say L1 does not search its own config; L2 does.
+    steers: ClassVar[Mapping[str, frozenset[str]]] = {
+        L1Generate.name: frozenset({"temperature", "n_variants"})
+    }
+
+    @property
+    def consults(self) -> frozenset[type]:
+        return frozenset({AdaptiveQueue, Escalation, L1Generate})
+
+    def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
+        return build_l2_response_model(bundle.silent_l1_panels)
+
+    def parse(self, ctx: NodeContext[LayerKnobs], raw: L2ContextOutput) -> TransitionResult:
+        # An absent reason is REPORTED, never replaced by a sentence that reads as L2's own.
+        rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
+        # Filtered here: a landed steer is carried forward on every later fire and never pruned.
+        steer: dict[str, Any] = {
+            key: value
+            for key, value in raw.l1_overrides.items()
+            if key in self.steers[L1Generate.name]
+            and isinstance(value, int | float)
+            and not isinstance(value, bool)
+        }
+
+        prior = node_layout("l1_generate", ctx.slice(L2Memory))
+        layout_outcomes: list[ValidatorOutcome] = []
+        accepted_layout: L1Layout | None = None
+        layout_refused = False
+        if breach := unplaceable_edit(raw.l1_layout):
+            layout_outcomes = [breach]
+            layout_refused = True
+        elif proposed_layout := coerce_l1_layout(raw.l1_layout, base=prior):
+            layout_result = validate_l1_layout(
+                proposed_layout, spec=NODE_LAYOUTS["l1_generate"], prior_layout=prior
+            )
+            layout_outcomes = list(layout_result.outcomes)
+            if layout_result.is_valid:
+                accepted_layout = proposed_layout
+                # Whole, never the edit: a move lands relative to where each panel then sat.
+                steer["layout"] = proposed_layout.model_dump(mode="json")
+            else:
+                layout_refused = True
+
+        if layout_outcomes:
+            logger.warning(
+                "L2 layout %s — %d outcome(s): %s",
+                "REFUSED" if layout_refused else "accepted with reports",
+                len(layout_outcomes),
+                ", ".join(o.validator_id for o in layout_outcomes),
+            )
+
+        return TransitionResult(
+            described=f"L2: {rationale}",
+            steer=steer,
+            axis_targeted=raw.axis_targeted,
+            l1_layout=accepted_layout,
+            l1_layout_refused=layout_refused,
+            l2_guard_breaches=layout_outcomes,
+            fork_proposal=raw.fork_proposal,
+            terminate_proposal=raw.terminate_proposal,
         )
-        with graceful(failed):
-            state.critiqued(await run_l1_critique(ctx, state))
+
+    def land(self, ctx: NodeContext[LayerKnobs], result: TransitionResult) -> None:
+        memory = ctx.slice(L2Memory)
+        steered = memory.steered_onto("l1_generate", result.steer) if result.steer else memory
+        ctx.put(steered.model_copy(update={"guard_breaches": list(result.l2_guard_breaches)}))
+        ctx.restate(L2Memory)
+
+    def record(self, ladder: Ladder, fire: Fire) -> Ladder:
+        assert fire.ask is not None, "only L3 heals"
+        return l2_fired(ladder, fire.ask.l2)
+
+    def enter_view(self, ctx: NodeContext[LayerKnobs], fire: Fire) -> OptimizerStepEnterView:
+        items = [(k, str(v)) for k, v in ctx.slice(L2Memory).steered("l1_generate").items()]
+        if items:
+            shown = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
+            more = f", +{len(items) - 5} more" if len(items) > 5 else ""
+            overrides = f"l1_overrides: {', '.join(shown)}{more}"
+        else:
+            overrides = "l1_overrides: (none)"
+        return OptimizerStepEnterView(
+            node=self.name,
+            activity=self.phase.activity,
+            title="L2 REFINE CONTEXT",
+            tag=f"L2 fire {ctx.slice(Ladder).l2.fires + 1}",
+            lines=(
+                f"rule={fire.cause}  |  "
+                f"L1 stalled {rounds_without_advance(ctx.rounds)} rounds  |  "
+                f"acc={fmt_pct(ctx.parent_accuracy)}  "
+                f"peak fitness={fmt_fitness(fire.best.composite_fitness)}",
+                overrides,
+                "LLM analyzing failure patterns...",
+            ),
+        )
+
+    def exit_view(
+        self, ctx: NodeContext[LayerKnobs], result: TransitionResult
+    ) -> OptimizerStepExitView:
+        layout = ", l1_layout edited" if result.l1_layout is not None else ""
+        axis = f", axis={result.axis_targeted}" if result.axis_targeted else ""
+        changed = len(ctx.slice(L2Memory).steered("l1_generate"))
+        return OptimizerStepExitView(
+            headline=f"L2 decision: {changed} param changes{layout}{axis}",
+            details=(result.described,),
+            audit=("L2 call", self.name),
+        )
+
+
+class L3Plan(LayoutNode):
+    name: ClassVar[str] = "l3_plan"
+    prompt_arity: ClassVar[PromptArity] = "none"
+    knobs: ClassVar[type[StrictModel]] = LayerKnobs
+    layer_id: ClassVar[Literal["L2", "L3"]] = "L3"
+    reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L3Memory})
+    draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
+    response_model: ClassVar[type[BaseModel] | None] = L3PlanOutput
+    phase: ClassVar[OptimizerPhase] = OptimizerPhase(
+        phase=PotterPhase.MODIFY_PLAN, node="l3_plan", activity="replanning"
+    )
+
+    @property
+    def consults(self) -> frozenset[type]:
+        return frozenset({AdaptiveQueue, Escalation, L1Generate})
+
+    def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
+        return L3PlanOutput
+
+    def parse(self, ctx: NodeContext[LayerKnobs], raw: L3PlanOutput) -> TransitionResult:
+        rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
+        failures = run_l3_output_validators({"plan": raw.plan}, prior_plan=ctx.slice(L3Memory).plan)
+        if failures:
+            logger.warning(
+                "L3 output failed %d validator(s): %s",
+                len(failures),
+                ", ".join(o.validator_id for o in failures),
+            )
+        return TransitionResult(
+            described=f"L3: {rationale}",
+            plan=raw.plan,
+            l3_note=raw.note,
+            l3_guard_breaches=failures,
+            fork_proposal=raw.fork_proposal,
+            terminate_proposal=raw.terminate_proposal,
+        )
+
+    def land(self, ctx: NodeContext[LayerKnobs], result: TransitionResult) -> None:
+        ctx.put(
+            L3Memory(
+                plan=result.plan,
+                note=result.l3_note,
+                guard_breaches=list(result.l3_guard_breaches),
+            )
+        )
+        ctx.restate(L3Memory)
+
+    def record(self, ladder: Ladder, fire: Fire) -> Ladder:
+        return l3_fired(ladder, None if fire.ask is None else fire.ask.l3)
+
+    def enter_view(self, ctx: NodeContext[LayerKnobs], fire: Fire) -> OptimizerStepEnterView:
+        return OptimizerStepEnterView(
+            node=self.name,
+            activity=self.phase.activity,
+            title="L3 MODIFY PLAN",
+            tag=f"L3 fire {ctx.slice(Ladder).l3.fires + 1}",
+            lines=(
+                "Healing L2's refused l1_layout edit"
+                if fire.ask is None
+                else f"L2 stalled {fire.ask.l2.stall_count} rounds",
+                f"Current plan: {truncate(ctx.slice(L3Memory).plan[:120], 55, '...')}",
+                "LLM designing new strategy...",
+            ),
+        )
+
+    def exit_view(
+        self, ctx: NodeContext[LayerKnobs], result: TransitionResult
+    ) -> OptimizerStepExitView:
+        return OptimizerStepExitView(
+            headline=f"New plan: {truncate(result.plan[:120], 55, '...')}",
+            details=(result.described,),
+            audit=None,
+        )
 
 
 class Escalation:
     name: ClassVar[str] = "escalation"
     kind: ClassVar[NodeKind] = NodeKind.CONTROLLER
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = EscalationKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout, Ladder})
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Ladder})
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
+    fires: ClassVar[frozenset[type]] = frozenset({L2Context, L3Plan})
 
-    def observe(self, ctx: NodeContext[EscalationKnobs], round_result: RoundResult) -> bool:
-        state = potter_state(ctx.state)
+    def observe(self, ctx: NodeContext[EscalationKnobs], round_result: RoundResult) -> str | None:
         knobs = ctx.knobs
-        axes = state.axes(ctx.sample_index)
+        axes = ctx.axes
         axes_with_positive_yield = (
             None
             if axes is None
             else sum(1 for r in axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
         )
-        if axes is not None:
-            axes.record_flips_from_rounds(list(ctx.rounds), ctx.round_num)
         # Structural, not a stall: heals L2 now instead of burning l1_patience rounds.
         l1_mandatory_breach = any(
             vf.reason == DROPPED_MANDATORY_PLACEHOLDER
-            for sc in round_result.candidate_scores
-            for vf in sc.validation_failures
+            for arm in round_result.panel.values()
+            for vf in arm.validation_failures
         )
-        # The same structural fault with empty `candidate_scores`, so it rides `l1_parse_failure`.
-        l1_zero_candidates = (
-            round_result.optimizer_state.payload_as(PotterRoundState).l1_parse_failure is not None
-        )
+        # The same structural fault with an empty panel, so it rides `l1_parse_failure`.
+        l1_zero_candidates = ctx.recall(L1Readout, round_result.round).l1_parse_failure is not None
         # The stamped grade's own rates, so routing and verdict cannot diverge.
         health = round_result.health
         evidence_starved = (
             health is not None and evidence_starved_node(health.node_failure_rates) is not None
         )
-        event = state.escalation.observe_round(
+        ladder, event = observe(
+            ctx.slice(Ladder),
             advance=round_result.overlap.advance,
             l1_patience=knobs.l1_patience,
             escalation_ladder=knobs.escalation_ladder,
@@ -315,13 +587,19 @@ class Escalation:
             l1_zero_candidates=l1_zero_candidates,
             evidence_starved=evidence_starved,
         )
-        return event.next_action == NextAction.FIRE_L2
+        ctx.put(ladder)
+        return event.rule if event.next_action == NextAction.FIRE_L2 else None
 
-    async def act(self, ctx: NodeContext[EscalationKnobs]) -> None:
-        await self._fire(ctx, cause=potter_state(ctx.state).escalation.matched_rule)
+    async def act(self, ctx: NodeContext[EscalationKnobs], cause: str) -> None:
+        await self._fire(ctx, cause=cause)
 
     async def _fire(self, ctx: NodeContext[EscalationKnobs], *, cause: str) -> None:
-        if stop := await escalate_l2(ctx, potter_state(ctx.state), cause=cause):
+        if stop := await escalate_l2(
+            ctx,
+            cause=cause,
+            l2=LayerCall(L2, ctx.fire(L2Context)),
+            l3=LayerCall(L3, ctx.fire(L3Plan)),
+        ):
             raise StopLoop(stop)
 
     async def diagnose(self, ctx: NodeContext[EscalationKnobs]) -> None:
@@ -344,22 +622,16 @@ class PotterRuntime(nodes.OptimizerRuntime):
         PoBB.name: POBB,
     }
 
-    def start(
-        self, session: Session, config: CampaignConfig, origin_results: CellSheet
-    ) -> PotterState:
-        return PotterState.start(session, config, origin_results)
-
     def arms(self, selected: SelectedOptimizer) -> int:
-        return potter_knobs(selected).l1_generate.n_variants
+        return selected.knobs_of(L1Generate.name, L1GenerateKnobs).n_variants
 
-    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
-        # The sampler's draw is unclamped where the budget exceeds the pool; a round's is not.
-        knobs = potter_knobs(selected)
-        return (self.arms(selected) + 1) * min(knobs.adaptive_queue.sp_budget_round, pool)
+    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
+        # The sampler's draw is unclamped where the budget exceeds the search split; a round's is not.
+        budget = selected.knobs_of(AdaptiveQueue.name, AdaptiveQueueKnobs).sp_budget_round
+        return (self.arms(selected) + 1) * min(budget, search)
 
     def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
-        knobs = potter_knobs(selected)
-        esc = knobs.escalation
+        esc = selected.knobs_of(Escalation.name, EscalationKnobs)
         patiences = [
             ("l1_patience", "L1 patience", esc.l1_patience),
             ("l2_patience", "L2 patience", esc.l2_patience),
@@ -376,27 +648,20 @@ class PotterRuntime(nodes.OptimizerRuntime):
                 node=PoBB.name,
                 knob="epsilon",
                 label="PoBB ε",
-                value=knobs.pobb.epsilon,
+                value=selected.knobs_of(PoBB.name, PoBBKnobs).epsilon,
                 integer=False,
             ),
         )
 
     def opening(self, ctx: RoundContext, walk: nodes.RoundWalk) -> nodes.RoundOpening:
         cycle = ctx.cycle
-        state = potter_state(cycle.working_state)
-        knobs = potter_knobs(cycle.optimizer)
-        replayed = NodeContext[Any](ctx, L1Generate.name).banked_proposals() is not None
+        selected = cycle.optimizer
+        replayed = cycle.banked_proposals(ctx.round_num) is not None
         # At patience 0 L2 fires every round, which "stall 1/0" would state as a riddle.
-        patience = knobs.escalation.l1_patience
-        stall = state.escalation.ladder.l1_stall_count
+        patience = selected.knobs_of(Escalation.name, EscalationKnobs).l1_patience
+        stall = cycle.slices.get(Ladder).l1_stall_count
         standing = "L2 every round" if patience == 0 else f"stall {stall}/{patience} → L2"
-        prior = (
-            cycle.rounds[-1].optimizer_state.payload_as(PotterRoundState) if cycle.rounds else None
-        )
-        handed = (prior is not None and bool(prior.critique)) or (
-            not replayed and critique_owed(cycle.rounds)
-        )
-        if handed:
+        if ctx.round_num and cycle.output(Critique, ctx.round_num - 1).readout:
             critique = f"from R{ctx.round_num - 1}"
         elif ctx.round_num <= 1:
             critique = "none yet (first round)"
@@ -405,18 +670,13 @@ class PotterRuntime(nodes.OptimizerRuntime):
         return nodes.RoundOpening(
             standing=standing,
             note=f"Prior critique: {critique}",
-            arms=variants_this_round(knobs.l1_generate.n_variants, state),
+            arms=variants_this_round(self.arms(selected), cycle.slices.get(L2Memory)),
             proposer="L1",
             replayed=replayed,
         )
 
     def complete(self) -> None:
         injection_table()
-
-    def source_digest(self, *covered: ModuleType) -> str:
-        # The block library is prompt MATERIAL stored as data, which no module digest reads.
-        library = library_identity(block_library())
-        return stable_hash([super().source_digest(*covered), library])
 
     def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
         return round_packages(cycle, rounds)
@@ -449,6 +709,9 @@ class PotterRuntime(nodes.OptimizerRuntime):
     ) -> list[OptimizerFact]:
         return round_facts(round_result)
 
+
+L2 = L2Context()
+L3 = L3Plan()
 
 MEMBERS = (
     AdaptiveQueue(),

@@ -8,6 +8,7 @@ from fastapi import Query, Request, Response
 
 from promptpotter.application.evidence.metric_catalogue import MEASURAND
 from promptpotter.application.evidence.read import Evidence, select_evidence
+from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -118,7 +119,7 @@ def get_evidence(
     try:
         evidence = select_evidence(
             stores,
-            subjects=subject,
+            subjects=[parse_subject(raw) for raw in subject],
             dataset=dataset,
             grid=grid,
             include_ranking=ranking,

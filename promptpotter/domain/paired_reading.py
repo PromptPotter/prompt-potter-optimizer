@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Collection
 from enum import StrEnum
-from typing import Annotated, Literal, NamedTuple, Self
+from typing import Annotated, Literal, NamedTuple, NewType, Self
 
 from pydantic import ConfigDict, Field, model_validator
 
@@ -18,7 +18,8 @@ from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 __all__ = [
     "READING_STATE_INFO",
     "ROUND_LIFT_SPEC",
-    "ArmPointer",
+    "ArmKey",
+    "ArmName",
     "CellSet",
     "CellSetBasis",
     "CellSetName",
@@ -174,10 +175,10 @@ LiftSide = Literal["above", "below", "spans"]
 LiftReference = Literal["best_so_far", "parents"]
 
 
-def instrument_of(dataset_name: str, pipeline_params: object) -> str:
+def instrument_of(dataset_hash: str, pipeline_params: object) -> str:
     """*pipeline_params* is any searchpoint of the cycle: the stamp is the cycle's."""
     inner = inner_origin_of(pipeline_params)
-    return dataset_name if inner is None else f"{dataset_name}@{inner}"
+    return dataset_hash if inner is None else f"{dataset_hash}@{inner}"
 
 
 def interval_side(
@@ -189,16 +190,24 @@ def interval_side(
     return "above" if lo > null_value else "below" if hi < null_value else "spans"
 
 
-class ArmPointer(StrictModel):
-    """One arm of the run, named the three ways a surface joins on it."""
+# An individual's content id; a proposal rejected before it cost a cell is keyed by its slot.
+ArmKey = NewType("ArmKey", str)
+
+
+class ArmName(StrictModel):
+    """One arm of the run: its key, and where it was first walked."""
 
     model_config = ConfigDict(frozen=True)
 
-    round: int = Field(description="The round the arm was measured in; 0 is the origin.")
-    label: str = Field(
-        description="`C0` or `C{round}.{n}` — the ARM's key; an id names its individual."
+    key: ArmKey = Field(
+        description="THE join: the individual's content id, or the slot hash of a proposal "
+        "rejected before it cost a cell."
     )
-    candidate_id: str = Field(description="The individual's lineage id.")
+    round: int = Field(description="The round the arm was first walked in; 0 is the origin.")
+    label: str = Field(
+        description="`C0` or `C{round}.{n}`, off the slot it was first walked in: a display "
+        "name, never a join."
+    )
 
 
 class MemberAddress(StrictModel):
@@ -210,7 +219,7 @@ class MemberAddress(StrictModel):
         min_length=1, description="The cycle the member was read in, root to leaf."
     )
     individual_id: str = Field(description="The individual's content id.")
-    arm: ArmPointer | None = Field(
+    arm: ArmName | None = Field(
         description="The arm the individual was measured as; null for a pass that is no arm."
     )
     pass_role: MeasurementRole | None = Field(

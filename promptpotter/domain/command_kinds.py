@@ -14,7 +14,6 @@ from promptpotter.domain.phases import (
     INNER_SKIP_REFUSAL,
     GateDecision,
 )
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.domain.strict_model import StrictModel, WireInt
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
@@ -86,7 +85,7 @@ class CommandKind(StrEnum):
     STEP_CYCLE = "step-cycle", "launching:step_cycle", CAMPAIGN_STEP_CAP, "step-cycle"
     FORK_CYCLE = "fork-cycle", "launching:fork_cycle", CAMPAIGN_RUN_CAP, "resume"
     MINT_CAMPAIGN = "mint-campaign", "launching:mint_campaign", CAMPAIGN_CREATE_CAP, "new"
-    START_CHECKIN = "start-checkin", "launching:start_checkin", CAMPAIGN_RUN_CAP, "new"
+    START_CHECKIN = "start-checkin", "launching:start_checkin", CAMPAIGN_CREATE_CAP, "new"
     # A verify SPENDS on real cells, so it sits with the verbs that buy measurement, not the step verbs.
     VERIFY_CANDIDATE = (
         "verify-candidate",
@@ -152,13 +151,6 @@ class CommandKind(StrEnum):
         CAMPAIGN_LIFECYCLE_CAP,
         "rename",
     )
-    # A dataset slug is in the measurement cache key: repointing one re-addresses every campaign on it.
-    REPLACE_DATASET = (
-        "replace-dataset",
-        "workspace_edits:replace_dataset",
-        CAMPAIGN_LIFECYCLE_CAP,
-        "replace-dataset",
-    )
     # Its purge step destroys paid spend.
     COMPACT_ARCHIVE = (
         "compact-archive",
@@ -173,13 +165,20 @@ class CommandKind(StrEnum):
         "new",
     )
     RESOLVE_ORIGIN = "resolve-origin", "origin_resolving:resolve_origin", CAMPAIGN_CREATE_CAP, "new"
+    # Its apply removes the draft's ledger, so it is recorded on the workspace's.
+    DISCARD_DRAFT = (
+        "discard-draft",
+        "draft_editing:discard_draft",
+        CAMPAIGN_CREATE_CAP,
+        "discard-draft",
+    )
 
 
 class CommandPayload(StrictModel):
     """Base of every payload on the generic ``POST /commands/{kind}`` route. ``StrictModel`` forbids
     extras, so THE MODEL IS the accepted-key set — there is no list to fall out of step with it.
     A payload's address base is its target ledger: ``CyclePayload`` the cycle's, ``CampaignPayload``
-    and a bare one the workspace's, a check-in's (``payloads.py::CheckinPayload``) its root cycle's."""
+    and a bare one the workspace's, a draft edit's (``payloads.py::DraftPayload``) its draft's."""
 
 
 class CampaignPayload(CommandPayload):
@@ -235,10 +234,15 @@ class OriginGateDecisionPayload(LoopPayload):
 class SubmittedArm(StrictModel):
     """One arm an operator wrote: an EDIT of the round's parent, never a whole individual."""
 
-    prompt_fields: dict[str, str] = Field(
+    prompt_fields: dict[str, dict[str, str]] = Field(
         default_factory=dict,
-        description="The prompt fields this arm rewrites, by name; every other one is the "
-        "parent's.",
+        description="`{node: {field: text}}`: the prompt fields this arm rewrites, each under the "
+        "prompt node that declares it; every other one is the parent's.",
+    )
+    shots: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="`{node: [sample key]}`: the demo-pool shots this arm sets on each prompt node, "
+        "in render order; `[]` clears them, and a node absent keeps the parent's.",
     )
     pipeline_overlay: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
@@ -248,9 +252,7 @@ class SubmittedArm(StrictModel):
 
     @model_validator(mode="after")
     def _edits_the_parent(self) -> SubmittedArm:
-        if unknown := sorted(set(self.prompt_fields) - set(PROMPT_STRING_FIELDS)):
-            raise ValueError(f"an arm rewrites prompt fields {PROMPT_STRING_FIELDS}, not {unknown}")
-        if not self.prompt_fields and not self.pipeline_overlay:
+        if not self.prompt_fields and not self.shots and not self.pipeline_overlay:
             raise ValueError("an arm that edits nothing is the round's parent")
         return self
 

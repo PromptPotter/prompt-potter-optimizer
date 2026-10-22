@@ -33,32 +33,18 @@ is the history layer. **Never the root of a patch just shipped** — that root s
 
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
-- **NEXT — the arm gate holds for an operator whose arms GEPA cannot race.** Under
-  `optimization.arm_gate: author` GEPA stops at `optimizers/gepa/members.py::MinibatchGate.race`
-  (it reads its own proposer's `Reflected`) AFTER the operator answered. The root is the typed slice of
-  [`variation-and-pools.md`](variation-and-pools.md): an operator's arms are a proposer's output like
-  any other, so the gate is a registered member a manifest names and every reader takes its slice
-  from, never a branch in `runner/round.py::propose_population`. Owed with it: `review` and the
-  resume replay of a banked answer, neither driven by a test or a run. Re-test: the authored-round
-  test parametrized over every registered optimizer.
-
-- **NEXT — the prompt cache is a cost lever only on a route that stays on ONE host, and nothing
-  makes a route stay.** `infrastructure/llm/openai_compat.py`, `connectors/harbor.py` and
-  `connectors/dbllmbench.py` pin hosts only where a node config names `route_order` by hand. An
-  OpenRouter `session_id` was tried and dropped: measured 2026-10-08 on `xiaomi/mimo-v2.6-flash`
-  over a ~15k-token head, it hopped hosts within three calls and billed $0.055–0.077 per M input
-  against $0.026 pinned to `xiaomi`. So any design that counts on the cache — a cost term in
-  fitness, a spend estimate, a search front on cached price — holds only under a pin. Action: a
-  default host pin per model that no node has to author, or a refusal to price on the cache
-  without one. **Decided: the pin is a trial, never an assumption** — a model is pinned by
-  default to try the cache, its realized cache share and effective $/M are read off the spend
-  ledger, and the pin and any cache-shaped prompting stay only where that reading is cheaper than
-  running uncached; otherwise the model drops caching. Per model, decided by data, not yet decided
-  for any. **Rides with:** any change to the request builder in `openai_compat.py`, a
-  connector's route handling, or the caching arc (`.scratch/caching-arc-state.md`). **Re-test:**
-  the per-node table in an unpinned campaign's `review.md` (`domain/spend.py::SpendRollup.by_node`)
-  beside a pinned one on the same model — a prefix-cache share well below the pinned one means the
-  default route still scatters.
+- **NEXT — the default host pin is a trial with no verdict.** A model's default host
+  (`registry.py::_MODEL_PROFILES`, `default_route`) is written into every node config before it is
+  keyed (`domain/pipeline_overlay.py::pin_default_routes`, optimizer calls through
+  `bench/llm_call.py`); a node naming `route_order`, `[]` included, opts out. Unpinned, the cache
+  is no lever: an OpenRouter `session_id` hopped hosts within three calls and billed $0.055–0.077
+  per M input against $0.026 pinned (2026-10-08, `xiaomi/mimo-v2.6-flash`, ~15k-token head).
+  **Decided:** a model keeps its pin only where its realized cache share and effective $/M beat
+  running uncached; otherwise it drops the pin and the caching. Action: read both per model and
+  host off a pinned campaign and its twin at `route_order: []`. **Rides with:** the next supervised
+  campaign on a pinned model, or the caching arc (`.scratch/caching-arc-state.md`). **Re-test:**
+  the per-node table in each twin's `review.md` (`domain/spend.py::SpendRollup.by_node`); no pair
+  read per pinned model means it stands.
 
 - **The responsive walk records no Lighthouse score, and sizes the candidates card at no width.**
   The six-width sweep (`e2e/walk/responsive.spec.ts`) catches content DELETED by an
@@ -119,20 +105,14 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   and `git grep -hoE 'from "next(/[a-z/-]+)?"' -- webapp | sort | uniq -c` recounts the imports,
   which is the size of the job.
 
-- **The journeys hand-write what the engine has no seam to produce.** `tests/test_archive.py::_stand_round`
-  and `tests/test_scoring.py::_h2h_campaign` append the ledger sequence a closed round leaves (entered,
-  minted, scored, election, closed, standing), which only `runner/` otherwise writes;
-  `test_scoring.py::_peer_cycle` stands a `Cycle` up over a fake backend by hand and `_reference_reading`
-  drives `runner/measurement.py::_ReferencePairs` through namespaces; `test_ruler.py` § 2 builds an
-  `AbilityReading` beside `bench/difficulty.py::_reading`; `test_security.py` § 1 reaches
-  `_render_guard_breaches`, `_require_capability_for` and `_guard_and_release` by private name. Each is
-  a second writer or reader of a shape the engine owns, so a change to the shape can pass the suite and
-  break the run, or the reverse. Action: one public seam per line — a round close that appends the
-  sequence, a `read_reference_pair` over two cell sheets, a `difficulty.reading(theta, ruler, …)`, a
-  public guard-breach render — and the journey calls it. **Rides with:** any change to the record
-  sequence a round appends, to `_ReferencePairs`, to `difficulty._reading` or to the guard render.
-  **Re-test:** `grep -nE "_stand_round|_h2h_campaign|_peer_cycle|_ReferencePairs|_render_guard_breaches|_require_capability_for|_guard_and_release" tests/*.py`
-  — a hit is a journey still writing the engine's shape itself.
+- **`tests/test_scoring.py::_peer_cycle` stands a `Cycle` up by hand, origin included.** It banks
+  a C0 report the origin path (`application/origin.py::establish_campaign_origin`) cannot produce:
+  the bench journey needs accuracy 0 beside a composite of 0.9, which the formula it declares cannot
+  reach, and the lives journey's report reads accuracy 0 over rows that all hit. Action: rebuild
+  those journeys on a backend whose answers produce the origin they assert, then start the cycle
+  through run init. **Rides with:** any change to how run init scores the origin.
+  **Re-test:** `grep -n "_peer_cycle" tests/test_scoring.py` — a hit is a journey still standing
+  the cycle itself.
 
 ## Open — surfaced by the head-to-head arc
 
@@ -145,7 +125,8 @@ and delete the entry if the answer is no.
 - **A reserved cell's bill is on no ledger, so a re-armed book holds its first such cell whole.**
   A cell that reserves (`Connector.holds_own_sends`) writes no hold of its own, so
   `spend_book.py::unreported_on` can re-teach a book its sends and never the cell they made up.
-  **Blocker:** a per-cell record is stored shape — it rides the stored-shape batch below.
+  Action: a hold record per reserved cell. **Rides with:** any change to `spend_book.py::reserved`
+  or to how a harbor cell is admitted.
   **Re-test:** `grep -n "emit_spend_hold" promptpotter/infrastructure/llm/spend_book.py` — none
   inside `reserved` means a resumed harbor run still opens one cell deep under a tight ceiling.
 - **The bench pass runs at look-ahead depth 1 because the depth is a press a ROUND spends.** Both
@@ -164,7 +145,7 @@ and delete the entry if the answer is no.
   resumes with every decision equal. The re-close itself is declared (`runner/loop.py::run_round_loop`:
   until an L1 round closes, every launch re-closes round 0, since a stopped run's file passed no
   gate); open is whether the critique re-send should read the banked `optimizer_state` instead. **Rides with:** any change to
-  `projection.py::resolve_resume_state` or the origin round in `runner/entry.py`. **Re-test:**
+  `projection.py::resolve_resume_state` or the origin round in `runner/run_prep.py`. **Re-test:**
   `scripts/offline_run.py --rounds 1 --rows 60` — `decisions MOVED` on the resume line means it
   still does.
 - **INVESTIGATE — two items filed with their re-tests in `.scratch/debug-arc-seed.md`**: errored
@@ -196,13 +177,22 @@ means it stands.
 
 **Structure**
 
-- `application/optimizer_manifest.py` holds a manifest as a dict until its members read it — no
-  `StrictModel` at load, no typed node override. Behavioural. **Rides with:** the next
-  digest-moving edit to that module. **Re-test:**
-  `grep -n "dict\[str, Any\] = read_yaml" promptpotter/application/optimizer_manifest.py`.
 - `judges/` and `application/` import each other, and the connector, judge and optimizer
   registries are three hand-written loaders over `shared/plugin_registry.py`. **Rides with:** any
-  change to plugin loading. **Re-test:** `gate.py --only layering` names the pair it exempts.
+  change to plugin loading. **Re-test:** `grep -rn "from promptpotter.application"
+  promptpotter/judges` — a hit means the pair stands; `gate.py --only layering` holds no rule for
+  it, so it passes either way.
+- `domain/results.py::RoundOutcome.health` is still optional and `potter/dispatch/facade.py`
+  tolerates `None`; the subset mode a round ran under is derived again on every call
+  (`facade.py`, `subset_mode=`), never banked on the round. **Rides with:** any change to
+  `RoundOutcome`. **Re-test:** `grep -n "health: DegradationHealth | None"
+  promptpotter/domain/results.py`, and `grep -n subset_mode promptpotter/domain/results.py` — no
+  hit means it is still derived.
+- The webapp's poll, fork-dialog and compare seams and the identity follow-up seam are owed a
+  re-read against the code. The write-ups are `.scratch/root-hunt/webapp.md`
+  and `presentation.md` in the main checkout. Action: re-read each against the code, then take it
+  or delete it. **Rides with:** any change to a component or route a write-up names. **Re-test:**
+  the `file::symbol` each write-up names.
 - `domain/phases.py` holds the stop-reason table and the producer reading for about two fifths of
   its length; `phases` no longer names them. A split adds modules and removes no cycle — measured,
   declined; a rename re-points some forty-six files. **Rides with:** a pass that already moves the
@@ -215,13 +205,13 @@ means it stands.
 
 **A path that goes around the mechanism the rest of the code rides, and re-derives the answer
 itself.** The entries below are filed
-TOGETHER rather than patched one by one on purpose: read side by side they sort into two shapes,
-and each shape names an upstream redesign that makes the class hard to write at all. Patched
+TOGETHER rather than patched one by one on purpose: read side by side they share one shape,
+and that shape names an upstream redesign that makes the class hard to write at all. Patched
 singly, each fix is one more local copy of the rule it restores. **Rides with:** that redesign.
 A pass already rewriting one of these symbols may take its entry, but takes the shape's remedy,
 never a local patch. **Re-test:** each entry's command; a hit means it still stands.
 
-**Shape 1 — a send made ON OUR BEHALF re-derives what `_admitted_send` decides for our own.**
+**The shape — a send made ON OUR BEHALF re-derives what `_admitted_send` decides for our own.**
 The classifier and the settle rule are one (`infrastructure/llm/spend_book.py::SendOutcome`,
 `Admission.close`); what stands is the half no edit on this side reaches: a relay's own retry loop
 runs on its own budget and reports its attempts as a count.
@@ -232,53 +222,11 @@ runs on its own budget and reports its attempts as a count.
   `grep -n "unreported" backend-api/core/pipeline_context.py` in the TermNorm checkout — a per-node
   count beside `attempts` closes it, and `_uncounted_attempts` then reads that count instead.
 - A unit of work's one budget (`send_pacing.py::SendBudget`) stops at the relay's door: TermNorm's
-  `_MAX_ATTEMPTS` and terminus-2 × litellm each still count under one of our attempts, and a
-  remote cell waits out `Connector.cell_wait_s` rather than the budget's clock. **Decided: a
-  remote cell ends on the budget's clock** — a timed-out cell becomes a
-  `HALTED` cut, not an unreported send. Still the relay's own code: the retry loops inside
-  TermNorm and terminus-2 × litellm. **Re-test:** `grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
-  — a literal means that budget is still its own; `Connector.cell_wait_s` still bounding a remote
-  cell means our side stands too.
-
-**Shape 2 — an act or a reading lives in ONE adapter, so the entry points disagree.** The
-canonical mechanisms are ones an adapter may call, not the only path an act can take. Remedy:
-every operator act runs one application pipeline (validate → admit → apply → record) whose
-exemptions are parameters rather than skipped calls; every reading an operator acts on is one
-served field behind one read facade; `presentation/` imports facades only, and no route returns
-an untyped dict.
-- The CLI's own compositions still import `promptpotter.infrastructure` past its composition root
-  (`build_stores`): `cli/campaign_runner.py` (the first-run check), `reset.py` and `cli/commands/verbs.py` (`SHARED_CACHE_DIRS`),
-  `new.py` (the dataset gateway), `launch.py` (the latest-readout pointer), `verify.py` (its own
-  `descend_store`, where `pipeline_resolve.py::resolve_pipeline_at` descends for its caller), and
-  beside the CLI `teleprompter.py`, `terminal/completion.py` and `admin_bot.py`. Each moves into
-  the application function its verb already calls, as the routers did; the gate then takes
-  `presentation/cli` under the rule `gate.py::_layering` holds the routers to.
-  `grep -rnE "^(from|import) promptpotter\.infrastructure" promptpotter/presentation --include=*.py | grep -vE "api/|store\.stores import (Stores|build_stores|Stores, build_stores)$"`.
+  `_MAX_ATTEMPTS` and terminus-2 × litellm each still count under one of our attempts — retry
+  loops in the relay's own code. **Re-test:** `grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
+  — a literal means that budget is still its own.
 
 ## Blocked — named blocker
-
-- **The stored-shape batch — every item below changes what a round file, ledger record or cache
-  holds, and lands as ONE pass with the workspace wipe.** **Unblocked: every campaign on disk is
-  disposable** except `c794fd` and the seed-screen records. **Re-test:**
-  re-check each item below against the code, since the structure pass took several (the crown and
-  `BenchScore.headline` are served now; `electable_count` / `overlap` sit on `RoundClosedRecord`).
-  - *Authorship.* The author's display name is stored beside `issued_by`, so "Steered by" stops
-    serving the issuer id; the authoring act and issuer ride the candidate's ledger record
-    (`authorship_of` reads every C0 as `origin`).
-  - *Round file.* `RoundResult.health` is required (`generation_only.py` writes `None`, and
-    `dispatch/facade.py` tolerates it); `RoundResult.subset_mode`; `RuntimeFailure.node`;
-    `ability.unlinked` / `pinned_share`; a ledger discriminator for restamped rounds.
-  - *Served rows that re-derive.* The crown on `DashboardCandidate` / `ScoreboardRow`;
-    the headline pick on the
-    stored `BenchScore`; `electable_count` + `overlap` on
-    `ElectionRecord`; `verdict` on `PanelPrecision`.
-  - *Race lineage.* The race parent id `R{n}_winner` becomes the lineage id (the ELIMINATION_CUT /
-    LEADER_LOCK_IN records, `race_catch_up`, `elimination_context`).
-  - *Cell identity.* Harbor's `_REASONING_CHANNEL` still spells `openrouter:` and is hashed into
-    every harbor cell; `.cache/model_capabilities.json` stores a catalogue `pricing` nothing reads.
-  - *Seams.* `spawn.py`'s sixth site + `prepare_fresh_cycle(arm=)`; the identity follow-up seam;
-    the webapp's poll, fork-dialog and compare seams.
-  The per-item write-ups are `.scratch/root-hunt/*.md`.
 
 - **`infrastructure/llm/anthropic.py::AnthropicClient` cannot run an optimizer node on a current
   Claude model.** It refuses a set `reasoning_effort` (no mapping onto `output_config.effort`),
@@ -289,14 +237,6 @@ an untyped dict.
   per-model fact `registry.py::_MODEL_PROFILES` admits only as a measurement.
   **Re-test:** `settings.ANTHROPIC_API_KEY` is empty; once it holds a key, `probe-reasoning` a
   Claude model and this is one pass.
-
-- **Concurrent sibling cycles of one campaign each spend up to the whole ceiling.**
-  `optimization.ceiling` binds a CYCLE (`runner/entry.py::_arm_spend_book` seeds its book off that
-  cycle's folded history), so two forks launched side by side are each admitted the full ceiling
-  and the campaign can spend twice it. **Decided: the ceiling is the campaign's** — one book per campaign, shared by its live cycles through the job registry the
-  account wallet already reads; a per-cycle bound is a possible future knob, not this one.
-  **Rides with:** the stored-shape batch's wipe. **Re-test:** `grep -n "ceiling" promptpotter/application/runner/entry.py`
-  — a book seeded off one cycle's history means it stands.
 
 - **A head-to-head's arms do not share one optimizer model**, so "the only difference is the
   optimizer" is false at the proposer: each preset under `promptpotter/assets/optimizers/` pins its

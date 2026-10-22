@@ -1,8 +1,8 @@
 import type {
   ArmElection,
   ArmNode,
+  ArmName,
   ArmPanel,
-  ArmPointer,
   ArmReading,
   CourseNode,
   CurrentRound,
@@ -10,12 +10,13 @@ import type {
   DashboardSample,
   DegradationHealth,
   LiveCandidate,
+  Measured,
+  NodePrompt,
   OverlapReading,
   PairedReading,
   ProducerReading,
   RoundResult,
   RunStanding,
-  ScoredCandidate,
   ServedDashboard,
   ServedRound,
 } from "@/lib/api/types";
@@ -68,7 +69,7 @@ export function pairedReading(
 
 export function unreadOverlap(over: Partial<OverlapReading> = {}): OverlapReading {
   return {
-    sample_ids: [],
+    positions: [],
     lead: {
       state: "not_held",
       a: null,
@@ -92,13 +93,13 @@ export function runStanding(
   label: string,
   over: Partial<RunStanding> = {},
 ): RunStanding {
-  const origin = { round: 0, label: "C0", candidate_id: "c0" };
+  const origin = { round: 0, label: "C0", key: "c0" };
   return {
     rounds_without_advance: 0,
     stalls_left: null,
     stalls_left_cap: null,
     lives: null,
-    selection: round === 0 ? origin : { round, label, candidate_id: label },
+    selection: round === 0 ? origin : { round, label, key: label },
     parent: round === 0 ? null : origin,
     vs_origin: {
       ...unreadOverlap().lead,
@@ -107,7 +108,6 @@ export function runStanding(
     rounds_closed: round,
     improved: 0,
     advanced: 0,
-    spent: null,
     selection_line: `${round === 0 ? "C0" : label} (round ${round}) — served wording`,
     ...over,
   };
@@ -170,25 +170,29 @@ export function health(
 
 export function armReading(
   over: Partial<Omit<ArmReading, "arm" | "panel" | "election">> & {
-    arm?: Partial<ArmPointer>;
+    arm?: Partial<ArmName>;
     panel?: Partial<ArmPanel>;
     election?: Partial<ArmElection>;
   } = {},
 ): ArmReading {
   const { arm, panel, election, ...rest } = over;
   return {
+    role: "panel",
     sp_hash: "",
     changes_description: "",
-    outcome: null,
+    state: "measuring",
+    end: null,
+    walked_short: false,
     own: null,
-    spend: null,
+    tokens: null,
+    prefix: null,
     ability: null,
     vs_reference: null,
     bench: null,
     verify: null,
     on_origin_panel: null,
     ...rest,
-    arm: { round: 1, label: "C1.1", candidate_id: "", ...arm },
+    arm: { round: 1, label: "C1.1", key: "", ...arm },
     panel: { scored: null, expected: null, cached: null, cached_share: null, cut: false, ...panel },
     election: { held: false, selected: false, leading: false, crown: null, ...election },
   };
@@ -215,7 +219,7 @@ export function armNode(over: Partial<ArmNode> & Pick<ArmNode, "id">, round = 0)
     answers_for_id: true,
     elects_on: "ability",
     reading: armReading({
-      arm: { round, label: over.label ?? over.id, candidate_id: over.id },
+      arm: { round, label: over.label ?? over.id, key: over.id },
       election: { held: true },
     }),
     superseded_by: null,
@@ -262,7 +266,8 @@ export function courseNode(over: Partial<CourseNode> & Pick<CourseNode, "id">): 
 
 export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample {
   return {
-    sample_id: null,
+    position: 0,
+    sample_key: "k0",
     status: "HIT",
     fitness: null,
     terminal_node: null,
@@ -297,9 +302,8 @@ export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
 export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
   return {
     reading: armReading(),
-    prompt_fields: null,
-    node_prompt_fields: {},
-    resolved_pipeline_params: null,
+    prompts: null,
+    resolved_params: null,
     pipeline_overlay: null,
     samples: [],
     validation_failures: [],
@@ -308,39 +312,25 @@ export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
   };
 }
 
-export function scored(over: Partial<ScoredCandidate> = {}): ScoredCandidate {
+export function measuredArm({
+  prompts = {},
+  ...over
+}: Partial<Measured> & { prompts?: Record<string, NodePrompt> } = {}): Measured {
   return {
-    candidate_id: "c",
-    label: "C1.1",
-    changes_description: "",
-    accuracy: 0,
-    composite_fitness: 0,
-    deprecated: 0,
-    total: 0,
-    evaluators: {},
-    sp_hash: "",
-    pipeline_overlay: null,
-    resolved_pipeline_params: null,
-    prompt_fields: {},
-    node_prompt_fields: {},
-    outcome: "measured",
-    scored_samples: 0,
-    expected_samples: 0,
-    cached_samples: 0,
-    input_tokens: null,
-    output_tokens: null,
-    cache_read_tokens: null,
+    role: "panel",
+    slot: null,
+    individual: {
+      prompts,
+      pipeline_params: {},
+      lineage: { parent_ids: [], changes_description: "", variations: [], evidence_grounding: null },
+    },
+    overlay: {},
     validation_failures: [],
-    runtime_failures: [],
-    elimination_context: {},
-    elimination_reason: null,
-    degradation_context: {},
-    vs_reference: null,
-    theta: null,
-    theta_se: null,
-    theta_caveat: null,
-    mean_fitness_ci_lo: null,
-    mean_fitness_ci_hi: null,
+    sp_hash: "",
+    resolved_params: {},
+    expected_samples: 0,
+    state: "measured",
+    locked_in: null,
     ...over,
   };
 }
@@ -350,65 +340,43 @@ export function roundDoc(over: Partial<RoundResult> = {}): RoundResult {
     round: 0,
     // `null` as a diagnostic replay writes, never 0, which is a real record.
     at_offset: null,
-    label: "C0",
-    leading_label: null,
-    accuracy: 0,
-    composite_fitness: 0,
-    recall_at: {},
-    total: 0,
-    improved: false,
-    elects_on: "ability",
-    electable_count: 0,
-    verdict_reason: null,
-    degraded_samples: 0,
-    not_attempted: 0,
-    unscored: 0,
-    deprecated: 0,
-    ability: null,
-    prompt_fields: {},
-    pipeline_params: null,
-    results: [],
+    arms: {},
+    folds: {},
+    election: null,
+    cells: {},
     fitness_bands: NO_FITNESS_BANDS,
-    all_candidate_results: {},
-    reference_results: {},
-    candidates_scored: 0,
-    candidate_scores: [],
-    selected_labels: [],
-    evaluators: {},
     diagnostics: null,
     health: null,
-    opt_sp: null,
     optimizer_state: {
       manifest: "potter",
       population: [],
       prompt_hashes: {},
-      payload: {
-        memory: {
-          wounds: {
-            l3_note: "",
-            validation_failures: [],
-            runtime_failures: [],
-            l2_guard_breaches: [],
-            l3_guard_breaches: [],
-          },
-          l1_layout: { persona: [], task_intent: [], thinking_style: [], problem_description: [] },
-          l1_overrides: {},
-          plan: "",
-        },
-        critique: null,
-        l1_yield: 1,
-        l1_parse_failure: null,
-        axis_memory_peaked: [],
-      },
+      slices: {},
+      outputs: {},
     },
     optimizer_facts: [],
-    generation_only: false,
     overlap: unreadOverlap({ advance: "origin" }),
     overlap_results: {},
     round_id: "round_0",
     scoreboard: [],
+    headline: null,
     ...over,
   };
+}
+
+// The scoreboard names each arm, in the order given, as the wire keys `arms` by it.
+export function roundOfArms(
+  round: number,
+  arms: { key: string; label: string; arm: Measured }[],
+): RoundResult {
+  return roundDoc({
+    round,
+    arms: Object.fromEntries(arms.map(({ key, arm }) => [key, arm])),
+    scoreboard: arms.map(({ key, label }, i) => ({
+      rank: i + 1,
+      reading: armReading({ arm: { round, label, key }, state: "measured" }),
+    })),
+  });
 }
 
 export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
@@ -426,7 +394,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     next_step: "",
     stop_reason: null,
     round: 0,
-    candidate: "",
+    measuring_arm: null,
     run_standing: null,
     rounds: [],
     overlap_line_round: null,
@@ -447,7 +415,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     total_queries_scored: 0,
     total_backend_calls: 0,
     current_query_payload: null,
-    open_sample_ids: [],
+    open_positions: [],
     sample_lookahead: 1,
     sample_lookahead_auto: false,
     sample_lookahead_discards: 0,
@@ -474,10 +442,14 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     wallclock_serialized_at: null,
     arms_per_round: 0,
     sp_budget_round: 0,
-    run_limits: { max_rounds: null, ceiling: { usd: null, tokens: null }, optimizer: [] },
+    run_limits: { budget: {}, optimizer: [] },
+    defaults_drift: null,
     spend_metered: null,
     fork_remainder: null,
     spend_metered_by_round: null,
+    campaign_metered_usd: null,
+    campaign_metered_tokens: null,
+    allotment: null,
     catch_up_log: [],
     current_round: currentRound(),
     error: null,
@@ -496,8 +468,8 @@ export const servedLabel = (round: number, idx: number) =>
 export function summaryCandidate(over: Partial<DashboardCandidate> = {}): DashboardCandidate {
   return {
     reading: armReading({
-      arm: { candidate_id: "c" },
-      outcome: "measured",
+      arm: { key: "c" },
+      state: "measured",
       own: ownLevel(0),
       panel: { scored: 0, expected: 0, cached: 0 },
       election: { held: true },
@@ -514,8 +486,6 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
     accuracy: 0,
     composite_fitness: 0,
     total: 0,
-    ability: null,
-    ability_on_series_ruler: false,
     bench: null,
     improved: null,
     verdict_reason: null,
@@ -528,6 +498,8 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
     panel_precision: null,
     panel_precision_verdict: null,
     selection_movement: [],
+    level: null,
+    series_reading: null,
     optimizer_facts: [],
     ...over,
   };

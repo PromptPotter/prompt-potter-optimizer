@@ -16,7 +16,12 @@ REPO = Path(__file__).resolve().parents[1]
 # No prose is among them, so a docs edit reruns nothing that only RUNS the engine.
 ENGINE_RUNTIME = ("promptpotter/", "datasets/", "examples/", "pyproject.toml", "uv.lock")
 OFFLINE_RUN = "offline-run"
-OFFLINE_RUN_READS = (*ENGINE_RUNTIME, "scripts/offline_run.py", "scripts/last_green.py")
+OFFLINE_RUN_READS = (
+    *ENGINE_RUNTIME,
+    "scripts/offline_run.py",
+    "scripts/offline_world.py",
+    "scripts/last_green.py",
+)
 
 
 def reads(rel: str, prefixes: Sequence[str]) -> bool:

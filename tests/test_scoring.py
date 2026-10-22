@@ -11,25 +11,31 @@ import asyncio
 import dataclasses
 import json
 import math
+import os
 import types
+from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from itertools import product
-from pathlib import Path
+from itertools import count, product
 from statistics import mean, stdev
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
 from factories import (
+    PARENT,
+    arm_state,
+    jumping_clock,
+    level_series,
     loop_session,
     measurement,
     measurements,
+    minted_campaign,
     optimizer_state,
     pipeline_schema,
     pobb_knobs,
+    prompted,
     round_result,
-    scored_candidate,
     sheet,
     spend_book,
     walking_cycle,
@@ -39,10 +45,12 @@ from factories import (
 from promptpotter.application import optimizers
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
+from promptpotter.application.evidence.head_to_head import GuardDifference
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.intelligence.rasch import (
@@ -50,32 +58,42 @@ from promptpotter.application.intelligence.rasch import (
     responses_of,
     theta_lift_over_parent,
 )
-from promptpotter.application.optimizer_manifest import bind_optimizer
+from promptpotter.application.optimizer_manifest import bind_optimizer, resolve_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
 from promptpotter.application.optimizers import paper_templates
 from promptpotter.application.optimizers.capo import prompts as capo_prompts
+from promptpotter.application.optimizers.capo.state import CapoObjective
+from promptpotter.application.optimizers.gepa.members import _GateRace
+from promptpotter.application.optimizers.gepa.state import MinibatchBar, MinibatchBars
+from promptpotter.application.optimizers.nodes import ReadArm, RoundContext
+from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     coerce_l1_layout,
 )
-from promptpotter.application.optimizers.potter.escalation.firing import L2, L3, TransitionResult
+from promptpotter.application.optimizers.potter.dispatch.schemas import L3PlanOutput
 from promptpotter.application.optimizers.potter.escalation.rules import (
     EscalationInputs,
     NextAction,
     decide_escalation,
 )
 from promptpotter.application.optimizers.potter.escalation.state import (
-    EscalationFSM,
+    HighWater,
     LadderAsk,
     LayerReading,
+    _improved,
+    as_read_by,
+    ask_l2_escalation,
+    l2_fired,
+    l3_fired,
+    observe,
 )
 from promptpotter.application.optimizers.potter.knobs import EscalationLadder
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate, PoBBCheck
-from promptpotter.application.optimizers.potter.records import L2L3Memory, Ladder
-from promptpotter.application.optimizers.potter.state import PotterState
+from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner import bench as bench_runner
-from promptpotter.application.runner import operator_hold
 from promptpotter.application.runner.bench import (
     BenchLine,
     bench_selection,
@@ -84,9 +102,10 @@ from promptpotter.application.runner.bench import (
     score_on_bench,
 )
 from promptpotter.application.runner.campaign_result import bank_campaign_result
-from promptpotter.application.runner.entry import _build_cycle_result
-from promptpotter.application.runner.measurement import _ReferencePairs
-from promptpotter.application.runner.round import execute_round
+from promptpotter.application.runner.cycle_close import build_cycle_result
+from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
+from promptpotter.application.runner.measurement import ReferencePairs
+from promptpotter.application.runner.round import execute_round, run_init
 from promptpotter.application.runner.termination import standing_tripped, target_tripped
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
@@ -105,15 +124,7 @@ from promptpotter.application.scoring.formula import (
     parse_dials,
     realize_dials,
 )
-from promptpotter.application.scoring.formula.matchers import (
-    _aime_match,
-    _blocksworld_plan_match,
-    _em_match,
-    _gsm8k_match,
-    _label_match,
-    _math_match,
-    _meeting_plan_match,
-)
+from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.application.scoring.metrics import compute_composite_fitness, fold_cells
 from promptpotter.application.scoring.paired import (
     MemberRows,
@@ -142,15 +153,14 @@ from promptpotter.domain.bench import (
     PassStop,
     partition_bank,
 )
-from promptpotter.domain.campaign import Arm, ArmBudget, Campaign, HeadToHeadRecord
+from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
 from promptpotter.domain.command_kinds import SubmitArmsPayload, SubmittedArm
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.optimizer_state import RoundPayload
+from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     ROUND_LIFT_SPEC,
-    ArmPointer,
+    ArmName,
     CellSetName,
     CoverageState,
     EstimatorSpec,
@@ -161,16 +171,20 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
     ReadingState,
 )
-from promptpotter.domain.phase_views import BenchGradedView, ViewAnchors
+from promptpotter.domain.phase_views import BenchGradedView
 from promptpotter.domain.phases import CampaignPhase, StopLoop, StopReason, WalkEnd
-from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode
+from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodePromptInfo, PipelineNode
+from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import (
-    ArmOutcome,
+    ArmFit,
+    ArmKey,
+    ArmSlot,
+    CutKind,
     IndividualWalk,
     InRunCells,
     OverlapReading,
+    Proposed,
     RoundAdvance,
-    RoundCells,
     RoundResult,
     RunStanding,
     VerifyPass,
@@ -188,16 +202,13 @@ from promptpotter.domain.results import (
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import DeltaRuler, anchor_id_of
 from promptpotter.domain.run_records import (
-    CandidateMintedRecord,
-    CandidateScoredRecord,
     OptimizerStateRecord,
     PhaseRecord,
     RoundClosedRecord,
-    RoundStandingRecord,
     SampleScoredRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.sample import ArchiveEntry, Sample
+from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.scoring import (
     NO_RESULT,
     ROW_GRADES,
@@ -214,10 +225,12 @@ from promptpotter.domain.scoring import (
     turn_scalars,
 )
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.spend import SpendCeilings, StepUsage
+from promptpotter.domain.spend import Budget, StepUsage
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
+from promptpotter.infrastructure.llm.spend_book import Hold, spending_under
 from promptpotter.infrastructure.llm.telemetry import (
     at_round,
+    bound_ledger,
     reset_cycle_ledger,
     set_cycle_ledger,
 )
@@ -229,11 +242,10 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.measurement_archive import config_key
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.judges import call as judge_call
 from promptpotter.judges.grounding import ANSWER_GROUNDING
 from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 from promptpotter.shared.answer_text import extract_gsm8k_number
-from promptpotter.shared.errors import ConflictError, ErrorCategory
+from promptpotter.shared.errors import ConflictError, ErrorCategory, PayloadInvalidError
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
 
@@ -266,7 +278,7 @@ def _pair_member(
         )
         if address is None
         else address,
-        sheet=sheet((_keyed(row, key_of[row.sample_id]) for row in rows), scorer_id),
+        sheet=sheet((_keyed(row, key_of[int(row.key)]) for row in rows), scorer_id),
         bought=0,
         cut=False,
         scope=scope,
@@ -303,10 +315,9 @@ def _filed(
     entry = ArchiveEntry(
         config_key=config_key([("", {"individual": individual})]),
         prompt_fields_id=sp_hash or individual,
-        rendered_prompt_hash="",
         node_configs=[],
         pipeline_params={},
-        dataset_name="ds",
+        dataset_hash="ds",
     )
     keyed = [row.facts for row in rows]
     answers = stores.archive.file_answers(
@@ -316,15 +327,24 @@ def _filed(
         source="optimization_loop",
         created_at="",
     )
-    return [
-        (facts.sample_key, facts.sample_id, answer, False)
-        for facts, answer in zip(keyed, answers, strict=True)
-    ]
+    return [(facts.sample_key, answer, False) for facts, answer in zip(keyed, answers, strict=True)]
 
 
-def _announced(cell: WalkedCell) -> dict[str, Any]:
-    key, sample_id, answer, _ = cell
-    return {"sample_key": key, "sample_id": sample_id, "answer": answer}
+def _origin_proposed() -> Proposed:
+    return Proposed(
+        role=MeasurementRole.ORIGIN, slot=ArmSlot(round=0, idx=0, total=1), individual=prompted()
+    )
+
+
+def _origin_scored(cell: WalkedCell, slot: int) -> SampleScoredRecord:
+    key, answer, _ = cell
+    return SampleScoredRecord(
+        round=0,
+        individual_id="c0",
+        role=MeasurementRole.ORIGIN,
+        position=slot,
+        result={"sample_key": key, "answer": answer},
+    )
 
 
 # 1. Scorer formulas
@@ -350,9 +370,10 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     monkeypatch,
 ) -> None:
     # Each matcher grades an answer against its gold.
+    matcher = SCORING_FUNCTIONS
     for match, args, expected in (
         (
-            _blocksworld_plan_match,
+            matcher["blocksworld_plan_match"],
             (
                 "Clear orange first.\n[PLAN]\nunstack the yellow block from on top of the orange "
                 "block\nput down the yellow block\npick up the orange block\nstack the orange block "
@@ -363,7 +384,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         ),
         # The final layout reads right, but the hand still held yellow when orange was picked up.
         (
-            _blocksworld_plan_match,
+            matcher["blocksworld_plan_match"],
             (
                 "[PLAN]\nunstack the yellow block from on top of the orange block\npick up the "
                 "orange block\nstack the orange block on top of the red block\n[PLAN END]",
@@ -372,7 +393,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
             0.0,
         ),
         (
-            _meeting_plan_match,
+            matcher["meeting_plan_match"],
             (
                 "Go early and wait. SOLUTION: You start at Marina District at 9:00AM. You travel to "
                 "Mission District in 20 minutes and arrive at 9:20AM. You wait until 10:30AM. You "
@@ -383,7 +404,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         ),
         # No wait: the replay reaches Stephanie at 9:20AM, before her window opens.
         (
-            _meeting_plan_match,
+            matcher["meeting_plan_match"],
             (
                 "SOLUTION: You start at Marina District at 9:00AM. You travel to Mission District "
                 "in 20 minutes and arrive at 9:20AM. You meet Stephanie for 120 minutes from 9:20AM "
@@ -392,41 +413,49 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
             ),
             0.0,
         ),
-        (_aime_match, (r"First: \boxed{10}. Rechecking: \boxed{42}", "42"), 1.0),
-        (_aime_match, (r"\boxed{undefined} The answer is 42", "42"), 1.0),
-        (_aime_match, ("no numbers", "42"), 0.0),
+        (matcher["aime_match"], (r"First: \boxed{10}. Rechecking: \boxed{42}", "42"), 1.0),
+        (matcher["aime_match"], (r"\boxed{undefined} The answer is 42", "42"), 1.0),
+        (matcher["aime_match"], ("no numbers", "42"), 0.0),
         (extract_gsm8k_number, ("#### 1,234",), 1234.0),
         (extract_gsm8k_number, ("I calculated 99 but #### 42",), 42.0),
         (extract_gsm8k_number, ("no numbers",), None),
-        (_gsm8k_match, ("42.0", "#### 42"), 1.0),
-        (_gsm8k_match, ("#### 99", "#### 42"), 0.0),
-        (_label_match, ("First try **No**. Corrected: **Yes**", "yes"), 1.0),
-        (_label_match, ("plain text answer", "Plain Text Answer"), 1.0),
-        (_label_match, ("foo", "bar"), 0.0),
-        (_label_match, ("so the answer is **D**", "(D)"), 1.0),
-        (_label_match, ("**(b)**", "B"), 1.0),
-        (_label_match, ("**C**", "(D)"), 0.0),
+        (matcher["gsm8k_match"], ("42.0", "#### 42"), 1.0),
+        (matcher["gsm8k_match"], ("#### 99", "#### 42"), 0.0),
+        (matcher["label_match"], ("First try **No**. Corrected: **Yes**", "yes"), 1.0),
+        (matcher["label_match"], ("plain text answer", "Plain Text Answer"), 1.0),
+        (matcher["label_match"], ("foo", "bar"), 0.0),
+        (matcher["label_match"], ("so the answer is **D**", "(D)"), 1.0),
+        (matcher["label_match"], ("**(b)**", "B"), 1.0),
+        (matcher["label_match"], ("**C**", "(D)"), 0.0),
         # Bolds nothing: the last non-empty line answers, the reasoning above it does not.
         (
-            _label_match,
+            matcher["label_match"],
             ("The story is about a merger, a business matter.\n\nBusiness\n", "Business"),
             1.0,
         ),
-        (_label_match, ("The story is about a merger.\n\nBusiness\n\nWorld", "Business"), 0.0),
+        (
+            matcher["label_match"],
+            ("The story is about a merger.\n\nBusiness\n\nWorld", "Business"),
+            0.0,
+        ),
         # SQuAD's normalizer, articles and all, but a number keeps its own point and sign.
-        (_em_match, ("so it is **the Beatles**", "Beatles"), 1.0),
-        (_em_match, ("**A.**", "a"), 1.0),
-        (_em_match, ("", "a"), 0.0),
-        (_em_match, ("**the**", "a"), 1.0),
-        (_em_match, ("**13**", "1.3"), 0.0),
-        (_em_match, ("**.5**", "-.5"), 0.0),
-        (_em_match, ("**-5 points.**", "-5 points"), 1.0),
+        (matcher["em_match"], ("so it is **the Beatles**", "Beatles"), 1.0),
+        (matcher["em_match"], ("**A.**", "a"), 1.0),
+        (matcher["em_match"], ("", "a"), 0.0),
+        (matcher["em_match"], ("**the**", "a"), 1.0),
+        (matcher["em_match"], ("**13**", "1.3"), 0.0),
+        (matcher["em_match"], ("**.5**", "-.5"), 0.0),
+        (matcher["em_match"], ("**-5 points.**", "-5 points"), 1.0),
         # The last box wins, braces nest, and the Hendrycks string rules equate spellings.
-        (_math_match, (r"\boxed{\dfrac{1}{2}} so \boxed{\left( 1, 2 \right)}", "(1,2)"), 1.0),
-        (_math_match, (r"\boxed{\dfrac{3}{4}}", r"\frac34"), 1.0),
-        (_math_match, (r"\boxed{10\text{ cm}}", "10"), 1.0),
-        (_math_match, ("**x = 5**", "5"), 1.0),
-        (_math_match, (r"\boxed{0.75}", r"\frac{3}{4}"), 0.0),
+        (
+            matcher["math_match"],
+            (r"\boxed{\dfrac{1}{2}} so \boxed{\left( 1, 2 \right)}", "(1,2)"),
+            1.0,
+        ),
+        (matcher["math_match"], (r"\boxed{\dfrac{3}{4}}", r"\frac34"), 1.0),
+        (matcher["math_match"], (r"\boxed{10\text{ cm}}", "10"), 1.0),
+        (matcher["math_match"], ("**x = 5**", "5"), 1.0),
+        (matcher["math_match"], (r"\boxed{0.75}", r"\frac{3}{4}"), 0.0),
     ):
         assert match(*args) == expected, f"{match.__name__}{args!r} must grade {expected}"
 
@@ -449,7 +478,6 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
 
     # A cell read off the wire keeps its facts and drops any grade it arrived with.
     banked = {
-        "sample_id": 7,
         "sample_key": "k7",
         "query": "q",
         "ground_truth": "a",
@@ -488,7 +516,6 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         step="n", code="c", message="m", kind="transient", details=(1, {"a": 2}), stats={"x": 1}
     )
     cell = MeasuredCell(
-        sample_id=1,
         sample_key="k",
         predicted="p",
         cached=True,
@@ -511,7 +538,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
             observations={"final_ranking": [1], "env_reward": 0.0, "opened": False},
         ),
     )
-    for held in (usage, warning, cell.pipeline, cell, MeasuredCell(sample_id=0)):
+    for held in (usage, warning, cell.pipeline, cell, MeasuredCell(sample_key="k0")):
         wire = json.loads(json.dumps(held.wire()))
         read = type(held).from_wire(wire)
         assert read == held and read.wire() == wire, f"a {type(held).__name__} lost a field"
@@ -715,7 +742,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
 
 
 def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_zero(
-    monkeypatch,
+    offline,
 ) -> None:
     # A round that measured every sample and failed them all IS a 0.0; an unmeasured one is not.
     for rate in (compute_accuracy, compute_error_rate, compute_degraded_rate):
@@ -769,22 +796,17 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
     )
 
     # A judge never grades a cell whose `predicted` is the NO_RESULT sentinel.
-    billed: list[str] = []
-
-    async def _ask(*_a: Any, **_k: Any) -> tuple[str, str]:
-        billed.append("asked a model")
-        return "A", ""
-
-    monkeypatch.setattr(judge_call, "ask", _ask)
+    offline.llm.says = lambda _body: "A"
     # A cell that RAN and left a trace, so the no-trace arm cannot be what fired.
     traced = MeasuredCell(
-        sample_id=0,
+        sample_key="k0",
         predicted=NO_RESULT,
         pipeline=PipelineData(reasoning_trace="searched the docs, found the founding date"),
     )
-    spec = JudgeSpec(name="answer_grounding", stages=[JudgeStage(model="m", provider="p")])
+    spec = JudgeSpec(name="answer_grounding", stages=[JudgeStage(model="m", provider="openai")])
     verdict = asyncio.run(ANSWER_GROUNDING.grade(spec, traced))
     assert verdict.score is None, f"a sentinel answer was graded as {verdict.label!r}"
+    billed = offline.llm.sent
     assert billed == [], f"a cell with no answer was billed a grading: {billed}"
 
     # A merge never shrinks what was already measured.
@@ -792,7 +814,7 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
     winner = sheet(
         measurements([1.0 if sid in {10, 12, 15} else 0.0 for sid in range(10, 18)], range(10, 18))
     )
-    by_sid = {r.sample_id: r for r in merge_known_outcomes(prior, winner)}
+    by_sid = {int(r.key): r for r in merge_known_outcomes(prior, winner)}
     assert set(by_sid) == set(range(20)), "a merge dropped a measured cell"
     assert [by_sid[i].hit for i in (10, 11, 19)] == [True, False, False], "the later read stands"
     assert all(by_sid[i].hit is True for i in range(10)), "a merge rewrote an untouched cell"
@@ -826,24 +848,35 @@ def _ruler(
     )
 
 
+_PEER_BANK = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(16)]
+# Each search row's place in the order the search reads it, under the peer cycle's own split.
+_PEER_READ_ORDER = {
+    s.id: n
+    for n, s in enumerate(partition_bank(_PEER_BANK, DatasetSplit(bench=0, demo=2), seed=0).search)
+}
+
+
+_PEER_HOP = CycleHop(campaign_id="peer", cycle_id="cycle_peer")
+
+
 @contextmanager
 def _peer_cycle(
     stores: Stores,
-    ledger_dir: Path,
+    hop: CycleHop,
     monkeypatch: Any,
     optimizer: str,
     nodes: dict,
     solves: Callable[[str, Sample], bool | None],
     *,
     bench: int = 0,
-    origin_composite: float = 0.0,
+    control: RunControl | None = None,
     **optimization: Any,
 ) -> Iterator[Cycle]:
     """Bound as a run seam binds it; the backend answers right where ``solves`` says, errs on None."""
-    ledger = CycleEventLog.open(CycleDir(ledger_dir))
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     bound = set_cycle_ledger(ledger)
     with at_round(1):
-        bank = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(16)]
+        bank = _PEER_BANK
         schema = pipeline_schema(
             name=f"{optimizer}-e2e",
             nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
@@ -861,20 +894,23 @@ def _peer_cycle(
             }
         )
         session = loop_session(stores, schema, bank)
+        if control is not None:
+            session.control = control
+        session.bind_campaign(hop, purpose=Optimize())
         session.state.ledger = ledger
+        publish_inner_spawn_context(session)
         # The campaign's composite REWARDS length, the opposite of CAPO's objective.
         session.scoring.scorer = compile_scorer(
             "label_match(predicted, ground_truth)",
             "fitness * min(1.0, target_prompt_chars / 200.0)",
             verifier_graded=False,
         )
-        session.scoring.partition = partition_bank(bank, config.dataset_split)
+        session.scoring.partition = partition_bank(bank, config.dataset_split, seed=config.run_seed)
 
         async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:
             prompt = pipeline_params["solve"]["prompt"]
             solved = solves(prompt, sample)
             row: dict[str, Any] = {
-                "sample_id": sample.id,
                 "sample_key": sample.key,
                 "query": sample.query,
                 "ground_truth": sample.ground_truth,
@@ -889,7 +925,11 @@ def _peer_cycle(
 
         monkeypatch.setattr(query_loop, "measure_sample", _measure)
         origin = OptSearchPoint(
-            instruction="Answer.", answer_format="Reply with the letter."
+            prompts={
+                "solve": NodePrompt(
+                    fields={"instruction": "Answer.", "answer_format": "Reply with the letter."}
+                )
+            }
         ).configured(None, schema)
         framing = TaskDecomposition(pipeline_purpose="Answer each query with its letter.")
         origin_rows = [
@@ -900,42 +940,52 @@ def _peer_cycle(
             schema=schema, framing=framing, demo=session.scoring.require_partition().demo
         )
         cycle = Cycle.start(
-            origin,
-            scored_candidate(
-                origin.id,
-                label="C0",
-                accuracy=0.0,
-                composite_fitness=origin_composite,
-                prompt_fields=origin.prompt_field_dict(),
-                resolved_pipeline_params=sp.config_params,
-                sp_hash=sp.sp_hash(schema),
+            ReadArm(
+                ArmKey(origin.id),
+                arm_state(
+                    "C0",
+                    slot=ArmSlot(round=0, idx=0, total=1),
+                    individual=origin,
+                    resolved_params=sp.config_params or {},
+                    sp_hash=sp.sp_hash(schema),
+                ),
+                session.scoring.require_scorer().sheet(origin_rows),
             ),
             schema=schema,
             framing=framing,
-            origin_results=session.scoring.require_scorer().sheet(origin_rows),
             session=session,
             config=config,
         )
         bind_optimizer(cycle.optimizer)
+        run_init(cycle, _QUIET_CALLBACKS)
         try:
-            yield cycle
+            with spending_under(session.control.book):
+                yield cycle
         finally:
             reset_cycle_ledger(bound)
 
 
+def _asked(body: dict[str, Any]) -> str:
+    """What an optimizer call sent the provider, every message of it."""
+    return "\n".join(str(m["content"]) for m in body["messages"])
+
+
 _noop = lambda *_a, **_k: None  # noqa: E731
+
+
+def _announce(round_num: int, key: ArmKey, state: Any) -> None:
+    # The ledger refuses a cell whose arm no record announced.
+    if (ledger := bound_ledger("an arm")) is not None:
+        RunCallbacks(ledger).on_arm(round_num, key, state)
+
+
 _QUIET_CALLBACKS = types.SimpleNamespace(
     view_context=ViewContext(),
     on_phase=_noop,
-    announce_candidate=_noop,
-    on_candidate_scored=_noop,
+    on_arm=_announce,
     on_race_standing=_noop,
     on_election=_noop,
 )
-
-
-class _ComposedPayload(RoundPayload, manifest="ga-composition"):
-    """The payload of a manifest no package ships: it keeps nothing of its own."""
 
 
 def _bench_pass(
@@ -965,7 +1015,7 @@ def _bench_pass(
 
 
 def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, offline
 ) -> None:
     # The election reads θ on one δ ruler: easy cells {0..19} sit low, hard {20..39} high.
     ruler = _ruler({i: (-1.5 if i < 20 else 1.5) for i in range(40)})
@@ -990,9 +1040,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     deep = sheet(measurements([1.0] * 21 + [0.0] * 7))
     shallow = sheet(measurements([1.0] * 5 + [0.0]))
     ab = candidate_abilities({"deep": deep, "shallow": shallow}, half, flat)
-    assert ab.parent is not None
-    theta_p, se_p = ab.parent
-    p = {c: p_exceeds(ab.theta[c], ab.theta_se[c], theta_p, se_p) for c in ("deep", "shallow")}
+    p = {c: p_exceeds(ab.theta[c], ab.theta_se[c], *ab.bar[c]) for c in ("deep", "shallow")}
     assert ab.theta["shallow"] > ab.theta["deep"], "the thin arm's POINT lift is the larger"
     assert ab.theta_se["shallow"] > 1.8 * ab.theta_se["deep"], "on nearly twice the SE"
     assert p["deep"] > p["shallow"], "so it demonstrated less"
@@ -1005,21 +1053,17 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 
     # The bar is what the parent can do, not the draw that crowned it.
     def won(*, se: float | None, electable: int) -> RoundResult:
-        return round_result(
-            1,
-            electable_count=electable,
-            selected_labels=["w"],
-            candidate_scores=[scored_candidate("w", theta=0.5, theta_se=se)],
-        )
+        fit = {ArmKey("c0"): ArmFit(theta=0.5, theta_se=se)}
+        return round_result(1, selected=["c0"], voted={"electable": electable, "fit": fit})
 
-    unelected = round_result(1, prompt_fields={})
+    unelected = round_result(1, improved=False)
     root_pi = 1 / math.sqrt(math.pi)
     for se, abs_tol in ((1.0, 5e-5), (0.25, 2e-5)):
         assert parent_selection_bias([won(se=se, electable=2)]) == pytest.approx(
             se * root_pi, abs=abs_tol
         ), "E[max of two standard normals] is 1/√π"
     assert parent_selection_bias([won(se=0.9, electable=1)]) == 0.0, "a LONE arm has no curse"
-    assert parent_selection_bias([round_result(1, selected_labels=["c0"])]) == 0.0, (
+    assert parent_selection_bias([round_result(1, selected=["c0"])]) == 0.0, (
         "a defaulted `electable_count` clamps to one arm"
     )
     assert parent_selection_bias([won(se=1.0, electable=99)]) == pytest.approx(
@@ -1036,7 +1080,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     tie = sheet(measurements([1.0] * 15 + [0.0] * 13))
     assert theta_lift_over_parent(candidate_abilities({"c": trailing}, parent, flat), "c") < 0.0
     for bias in (0.0, parent_selection_bias([won(se=5.0, electable=6)])):
-        for arm, elected in ((trailing, ""), (tie, ""), (leading, "c")):
+        for arm, elected in ((trailing, None), (tie, None), (leading, "c")):
             assert (
                 elect_round_winner(["c"], {"c": arm}, parent, 6, flat, parent_bias=bias)[0]
                 == elected
@@ -1051,9 +1095,10 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     }
     held_id, held_abilities = elect_round_winner(list(arms), arms, twenty, 6, flat, parent_bias=0.3)
     reads = readable_lifts(list(arms), arms, twenty, 6, held_abilities, 0.3)
-    assert held_id == "", "no arm cleared the bar"
-    assert held_abilities.parent is not None
-    assert held_abilities.theta["thin"] > held_abilities.parent[0], "the floor, not θ, bars thin"
+    assert held_id is None, "no arm cleared the bar"
+    assert held_abilities.theta["thin"] > held_abilities.bar["thin"][0], (
+        "the floor, not θ, bars thin"
+    )
     assert set(reads) == {"near", "deep"}, "an arm under the floor is not readable"
     assert reads["deep"][0] < reads["near"][0] <= 0.0
     assert sum(reads["deep"]) > sum(reads["near"]), "the credit orders them the other way"
@@ -1062,36 +1107,23 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 
     # A STOP IS NOT A VERDICT: only an invalid measurement bars an arm from leading.
     for arm, eligible in (
+        (arm_state("C1.3", cut="broken"), False),
+        (arm_state("C1.5", invalid_reason="no_op_variant"), False),
         (
-            scored_candidate(
-                "C1.3",
-                accuracy=0.8333,
-                outcome=ArmOutcome.BROKEN,
-                degradation_context={"fatal": True, "dominant_warning": "llm_only:empty_response"},
-            ),
-            False,
-        ),
-        (
-            scored_candidate(
+            arm_state(
                 "C1.2",
-                accuracy=0.40,
-                outcome=ArmOutcome.ELIMINATED,
-                elimination_context={"p_best": 0.048, "epsilon": 0.05, "gate": "epsilon"},
+                cut="eliminated",
+                elimination={"p_best": 0.048, "epsilon": 0.05, "gate": "epsilon"},
             ),
             True,
         ),
         (
-            scored_candidate(
-                "C1.1",
-                accuracy=0.55,
-                outcome=ArmOutcome.LOCKED_IN,
-                elimination_context={"p_best": 0.96, "gate": "lock_in"},
-            ),
+            arm_state("C1.1", locked_in=True, elimination={"p_best": 0.96, "gate": "lock_in"}),
             True,
         ),
-        (scored_candidate("C1.4", accuracy=0.45), True),
+        (arm_state("C1.4"), True),
     ):
-        assert is_leader_eligible(arm) is eligible, f"{arm.outcome} decides leading wrongly"
+        assert is_leader_eligible(arm) is eligible, f"{arm.label} decides leading wrongly"
 
     # A round the budget cuts elects only past the panel gate and stands only once closed.
     # Round 1 races the seeds with its offspring; its parent is the origin, never bought a cell.
@@ -1110,15 +1142,13 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         root = tmp_path / f"cut-{cut_round}-{panel_gate}"
         minted: list[str] = []
 
-        async def _capo_llm(messages: list[dict], **_kw: Any) -> Any:
-            if "Create overall 15 prompts" in messages[0]["content"]:
-                text = json.dumps(
+        def capo_says(body: dict[str, Any]) -> str:
+            if "Create overall 15 prompts" in _asked(body):
+                return json.dumps(
                     ["Solve the task, A.", "Solve the task, B.", "Solve the task, C."]
                 )
-            else:
-                minted.append(f"Go {len(minted)}.")
-                text = f"<prompt>{minted[-1]}</prompt>"
-            return types.SimpleNamespace(content=text)
+            minted.append(f"Go {len(minted)}.")
+            return f"<prompt>{minted[-1]}</prompt>"
 
         paid: list[int] = []
         book = spend_book(None, usd_reserve=None)
@@ -1129,19 +1159,19 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             if running:
                 paid.append(sample.id)
                 if cycle.session.control.book is book and len(paid) >= budget:
-                    book.declared = SpendCeilings(0.0, None)
-            return sample.id % 2 == 0
+                    book.hold_of = Hold(Budget(usd=0.0), book.reserve)
+            return _PEER_READ_ORDER[sample.id] % 2 == 0
 
         with _peer_cycle(
             workspace(root),
-            root / "cycle",
+            _PEER_HOP,
             monkeypatch,
             "capo",
             capo_nodes,
             even_cells,
             panel_gate=panel_gate,
         ) as cycle:
-            monkeypatch.setattr(node_context, "llm_call", _capo_llm)
+            offline.llm.says = capo_says
             session = cycle.session
             running.append(True)
             # A backend to file under, so the kept population replays and only offspring are bought.
@@ -1162,6 +1192,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 _, uncut = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))
                 assert uncut is None, f"{case}: round 1 ran inside its budget"
             paid.clear()
+            parent = ArmKey(cycle.opt_sp.id)
             session.control = RunControl(book=book)
             cutting = execute_round(cycle, cut_round, search, _QUIET_CALLBACKS)
             if panel_gate == "strict":
@@ -1176,66 +1207,92 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 return
             closed, cut = asyncio.run(cutting)
             assert cut is StopReason.SPEND_BUDGET, f"{case}: the round names its cut"
-            rows = closed.all_candidate_results
-            assert sum(len(arm) for arm in rows.values()) == replayed + len(paid), (
-                f"{case}: a cell nobody elects on"
+            rows = {key: closed.rows(key) for key in closed.panel}
+            assert sum(len(closed.rows(key)) for key in closed.arms) == (
+                replayed + len(paid) + parent_cells
+            ), f"{case}: a cell nobody elects on, or a parent read where the archive lacks it"
+            assert (parent in closed.panel) is (cut_round == 2), (
+                f"{case}: a retained parent is ONE arm, its re-read folded into its own cells"
             )
-            [reference] = closed.reference_results.values()
-            assert len(reference) == parent_cells, (
-                f"{case}: the parent is read where the archive holds it"
+            folded: list[Any] = []
+            monkeypatch.setattr(session.store.ruler, "fold", lambda _s, got: folded.extend(got))
+            cycle.difficulty.fold(closed)
+            observed = [cell for walked, cell, _ in folded if walked == closed.arms[parent].sp_hash]
+            assert len(observed) == len(set(observed)) == len(closed.rows(parent)), (
+                f"{case}: the δ fit takes each of the parent's observations ONCE"
             )
-            [short] = [cs for cs in closed.candidate_scores if len(rows[cs.candidate_id]) == 1]
-            assert short.accuracy == 1.0, f"{case}: the cut arm reads perfect on its one cell"
-            carried = [ind.id for ind in closed.optimizer_state.population]
-            assert len(carried) == 3 and short.candidate_id not in carried, (
-                f"{case}: elected below the floor"
+            [short] = [key for key in rows if len(rows[key]) == 1]
+            assert closed.folds[short].accuracy == 1.0, (
+                f"{case}: the cut arm reads perfect on its one cell"
             )
-            full = next(cs for cs in closed.candidate_scores[3:] if cs is not short)
-            assert full.candidate_id in carried, (
-                f"{case}: an offspring the budget paid for in full was dropped"
-            )
+            carried = [ind.id for ind in cycle.population]
+            assert len(carried) == 3 and short not in carried, f"{case}: elected below the floor"
+            full = next(key for key in list(rows)[3:] if key != short)
+            assert full in carried, f"{case}: an offspring the budget paid for in full was dropped"
             assert cycle.rounds[-1].round == cut_round
             cycle.unwind_unclosed()
             assert [rr.round for rr in cycle.rounds] == [0] and cycle.selection.round == 0, (
                 f"{case}: a stop between this election and its close leaves no result"
             )
 
-    for cut_round, budget, replayed, parent_cells in ((1, 17, 0, 2), (2, 5, 12, 4)):
+    # Round 2's parent is a retained member: its re-read lands on cells its own walk holds.
+    for cut_round, budget, replayed, parent_cells in ((1, 17, 0, 2), (2, 5, 12, 0)):
         for panel_gate in ("strict", "off"):
             cut_by_budget(cut_round, budget, replayed, parent_cells, panel_gate)
 
-    # One round composes a peer's crossover with potter's racing selector.
+    # A survey round's K starts and its reference are arms, and its banked matrix is their cells.
+    starts = {ArmKey(f"c{i}"): sheet(measurements([1.0, 0.0, float(i % 2)])) for i in range(3)} | {
+        PARENT: sheet(measurements([0.0] * 3))
+    }
+    survey = round_result(1, candidates_scored=3, improved=False, cells=starts)
+    assert {key: survey.rows(key) for key in survey.arms} == starts, (
+        "a survey arm's rows are its cells, the reference's among them"
+    )
+    assert survey.results == starts[PARENT], "a held survey headlines its reference's cells"
+    assert [c.key for c in InRunCells([survey]).sheet("c1", RoleScope.DECISION)] == [
+        c.key for c in starts[ArmKey("c1")]
+    ], "a decision reads a survey start off the same cells"
+
+    # One round composes a peer's crossover and its state-reading selector with potter's race.
     name = "ga-composition"
     capo = yaml.safe_load((optimizers_root() / "capo" / "pipeline.yaml").read_text("utf-8"))
     potter = yaml.safe_load((optimizers_root() / "potter" / "pipeline.yaml").read_text("utf-8"))
     seed = ["capo_init"]
-    walk = ["blocks", "mating", "capo_crossover", "pobb", "score", "theta_election"]
+    walk = ["blocks", "mating", "capo_crossover", "pobb", "score", "population"]
     manifest_dir = tmp_path / name
     manifest_dir.mkdir()
     (manifest_dir / "resolved_schemas.json").write_text("{}", "utf-8")
-    (manifest_dir / "pipeline.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "name": name,
-                "version": "v0",
-                "available_models": capo["available_models"],
-                "nodes": {n: (capo["nodes"] | potter["nodes"])[n] for n in (*seed, *walk)},
-                "pipelines": {"default": walk, "initial_population": seed},
-                "initial_population_walks": "before_default",
-                "resolved_prompts": {
-                    key: capo["resolved_prompts"][key]
-                    for key in ("capo_init/1", "capo_crossover/1")
-                },
-            }
-        ),
-        "utf-8",
-    )
+
+    writes = count(1)
+
+    def composed(walk: list[str], seed: list[str] = seed, unwalked: tuple[str, ...] = ()) -> None:
+        # The demo pool's initializer is the shared pools package's, a third registrant beside the two.
+        init = ["demo_pool"]
+        nodes = {n: (capo["nodes"] | potter["nodes"])[n] for n in (*init, *seed, *walk, *unwalked)}
+        manifest = manifest_dir / "pipeline.yaml"
+        manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "name": name,
+                    "version": "v0",
+                    "available_models": capo["available_models"],
+                    "nodes": nodes,
+                    "pipelines": {"run_init": init, "default": walk, "initial_population": seed},
+                    "initial_population_walks": "before_default",
+                    "resolved_prompts": {
+                        key: capo["resolved_prompts"][key]
+                        for key in ("capo_init/1", "capo_crossover/1")
+                    },
+                }
+            ),
+            "utf-8",
+        )
+        # The manifest cache keys on mtime, which two writes inside one clock tick share.
+        stamp = manifest.stat().st_mtime_ns + next(writes) * 1_000_000_000
+        os.utime(manifest, ns=(stamp, stamp))
 
     class Composed(node_contract.OptimizerRuntime):
         prompt_sources = (paper_templates, capo_prompts)
-
-        def start(self, *_a: Any) -> Any:
-            return node_contract.BankedState(_ComposedPayload())
 
         def arms(self, selected: Any) -> int:
             return 2
@@ -1245,14 +1302,43 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     monkeypatch.setattr(
         optimizers, "_load_runtimes", lambda: ({**shipped, name: Composed()}, origins)
     )
+    open_rosters: dict[str, tuple[list[str], tuple[str, ...]]] = {
+        "a race reading its μ off a selector the roster lacks": (
+            ["blocks", "mating", "capo_crossover", "paired_t", "score", "theta_election"],
+            (),
+        ),
+        "a controller firing layers that consult members the roster lacks": (
+            [*walk, "escalation"],
+            (),
+        ),
+        "a declared member no walk reaches, whose knobs a run would carry unread": (
+            walk,
+            ("theta_election",),
+        ),
+    }
+    for case, (open_walk, unwalked) in open_rosters.items():
+        composed(open_walk, unwalked=unwalked)
+        with pytest.raises(PayloadInvalidError) as refused:
+            resolve_optimizer(name, {}, gate="off")
+        assert refused.value.code == "optimizer_roster_open", f"{case} reached round 1"
+    composed(["adaptive_queue", *walk[1:]])
+    queued = resolve_optimizer(
+        name, {"adaptive_queue": ManifestNodeOverlay(config={"sp_budget_round": 7})}, gate="off"
+    )
+    assert queued.round_cells(40) == 7, (
+        "potter's queue, the one potter member in a peer's roster, sized its panel off another's knobs"
+    )
+    composed(walk)
     replies = iter(["Merged.", "Other."])
 
-    async def _crossover_llm(messages: list[dict], **_kw: Any) -> Any:
-        asked = messages[0]["content"]
+    crossed: list[str] = []
+
+    def crossover_says(body: dict[str, Any]) -> str:
+        asked = _asked(body)
         if "Create overall 15 prompts" in asked:
-            return types.SimpleNamespace(content=json.dumps(["Solve it, A.", "Solve it, B."]))
-        assert "Solve it, A." in asked and "Solve it, B." in asked, "a crossover saw one parent"
-        return types.SimpleNamespace(content=f"<prompt>{next(replies)}</prompt>")
+            return json.dumps(["Solve it, A.", "Solve it, B."])
+        crossed.append(asked)
+        return f"<prompt>{next(replies)}</prompt>"
 
     composed_nodes = {
         "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
@@ -1262,102 +1348,45 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     root = tmp_path / "composition"
     with _peer_cycle(
         workspace(root),
-        root / "cycle",
+        _PEER_HOP,
         monkeypatch,
         name,
         composed_nodes,
         lambda prompt, _s: "Merged." in prompt,
     ) as cycle:
-        monkeypatch.setattr(node_context, "llm_call", _crossover_llm)
+        offline.llm.says = crossover_says
         session = cycle.session
         session.backend_id = "composition-e2e"
         assert not cycle.population
         search = list(session.scoring.require_partition().search)
         closed, cut = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))
     assert cut is None
-    minted = [r for _, r in session.state.ledger.iter() if isinstance(r, CandidateMintedRecord)]
-    assert {r.candidate_id for r in minted} == {cs.candidate_id for cs in closed.candidate_scores}
-    for record in minted:
-        assert [(made.node, made.mode) for made in record.lineage.variations] == [
+    assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
+        "a crossover saw one parent"
+    )
+    assert cycle.slices.get(CapoObjective).length_norm, (
+        "CAPO's initial population banked no length norm for the objective its selector ranks on"
+    )
+    for arm in closed.panel.values():
+        lineage = arm.individual.lineage
+        assert [(made.node, made.mode) for made in lineage.variations] == [
             (f"{name}:mating", "deterministic"),
             (f"{name}:capo_crossover", "llm"),
         ], "an arm's lineage names the peer's mating and crossover"
-        assert len(set(record.lineage.parent_ids)) == 2, "a crossover child has two parents"
-    [winner] = closed.selected_labels
-    crowned = next(cs for cs in closed.candidate_scores if cs.label == winner)
-    assert "Merged." in crowned.prompt_fields["instruction"], "potter's selector elected it"
-    assert [ind.id for ind in closed.optimizer_state.population] == [crowned.candidate_id], (
-        "the individual the next round mutates from is not the population the run carries"
+        assert len(set(lineage.parent_ids)) == 2, "a crossover child has two parents"
+    [winner] = closed.election.selected
+    assert "Merged." in closed.arms[winner].individual.prompts["solve"].fields["instruction"], (
+        "CAPO's selector elected it off potter's race"
+    )
+    assert cycle.population[0].id == winner, (
+        "the individual the next round mutates from does not lead the population the run carries"
     )
 
-    # An authored round measures the operator's arm and asks no proposer.
-    authored = workspace(tmp_path / "authored")
-    hop, cycle_dir = walking_cycle(authored)
-    measured: list[str] = []
-
-    def operator_solves(prompt: str, _sample: Sample) -> bool:
-        measured.append(prompt)
-        return "Operator" in prompt
-
-    async def _no_proposer(*_a: Any, **_k: Any) -> Any:
-        raise AssertionError("an authored round asked a generator for an arm")
-
-    def submit(key: str) -> Any:
-        payload = SubmitArmsPayload(
-            campaign_id=hop.campaign_id,
-            cycle_id=hop.cycle_id,
-            arms=[
-                SubmittedArm(
-                    prompt_fields={"instruction": "Operator wrote this."},
-                    changes_description="the operator's own wording",
-                )
-            ],
-        )
-        return CommandDispatcher(authored).dispatch_cycle_command(
-            CommandCall(payload, key), expected_version=None
-        )
-
-    try:
-        with _peer_cycle(
-            authored, cycle_dir, monkeypatch, "potter", {}, operator_solves, arm_gate="author"
-        ) as cycle:
-            monkeypatch.setattr(node_context, "llm_call", _no_proposer)
-            monkeypatch.setattr(operator_hold, "_POLL_S", 0.0)
-            session = cycle.session
-            session.campaign_id, session.state.cycle_id = hop.campaign_id, hop.cycle_id
-            session.control = RunControl(cycle_dir=cycle_dir)
-            search = list(session.scoring.require_partition().search)
-            measured.clear()
-
-            async def at_the_hold() -> RoundResult:
-                with pytest.raises(ConflictError):
-                    await submit("arms-before-the-hold")
-
-                async def answer() -> None:
-                    while derive_run_state(cycle_dir).gate != "arms":
-                        await asyncio.sleep(0)
-                    await submit("arms-at-the-hold")
-
-                (held_round, held_cut), _ = await asyncio.gather(
-                    execute_round(cycle, 1, search, _QUIET_CALLBACKS), answer()
-                )
-                assert held_cut is None
-                return held_round
-
-            closed = asyncio.run(at_the_hold())
-    finally:
-        release_cycle(cycle_dir)
-    [arm] = closed.candidate_scores
-    assert arm.prompt_fields["instruction"] == "Operator wrote this.", "the operator's arm ran"
-    assert any("Operator wrote this." in prompt for prompt in measured), "it was measured"
-    [record] = [r for _, r in session.state.ledger.iter() if isinstance(r, CandidateMintedRecord)]
-    assert [made.mode for made in record.lineage.variations] == ["operator"]
-
     # The bench grades the pick the optimizer declared, over a higher-composite round.
-    async def _bench_llm(messages: list[dict], **_kw: Any) -> Any:
-        if "Create overall 15 prompts" in messages[0]["content"]:
-            return types.SimpleNamespace(content=json.dumps(["Solve it GOOD.", "Solve it OK."]))
-        return types.SimpleNamespace(content="<prompt>Solve it BAD.</prompt>")
+    def bench_says(body: dict[str, Any]) -> str:
+        if "Create overall 15 prompts" in _asked(body):
+            return json.dumps(["Solve it GOOD.", "Solve it OK."])
+        return "<prompt>Solve it BAD.</prompt>"
 
     bench_nodes = {
         "blocks": {"config": {"block_size": 4, "max_blocks": 2}},
@@ -1369,32 +1398,29 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     root = tmp_path / "bench"
     with _peer_cycle(
         workspace(root),
-        root / "cycle",
+        _PEER_HOP,
         monkeypatch,
         "capo",
         bench_nodes,
         lambda prompt, s: "GOOD" in prompt or ("OK" in prompt and s.id % 2 == 0),
         bench=4,
-        origin_composite=0.9,
     ) as cycle:
-        monkeypatch.setattr(node_context, "llm_call", _bench_llm)
+        offline.llm.says = bench_says
         session = cycle.session
         search = list(session.scoring.require_partition().search)
         picked = asyncio.run(execute_round(cycle, 1, search, _QUIET_CALLBACKS))[0]
-        assert picked.composite_fitness < cycle.origin_round.composite_fitness
-        assert picked.opt_sp is not None and picked.accuracy is not None
-        [crowned] = picked.selected_scores
-        [bar] = picked.reference_results.values()
-        cold = candidate_abilities(
-            {crowned.candidate_id: picked.all_candidate_results[crowned.candidate_id]}, bar, None
-        )
-        assert (crowned.theta, crowned.theta_se) == (
-            cold.theta[crowned.candidate_id],
-            cold.theta_se[crowned.candidate_id],
+        head, fold = picked.head, picked.fold
+        assert head is not None and fold is not None and fold.accuracy is not None
+        [crowned] = picked.election.selected
+        [bar] = [picked.rows(key) for key in picked.arms if key not in picked.panel]
+        cold = candidate_abilities({crowned: picked.rows(crowned)}, bar, None)
+        fit = picked.fit(crowned)
+        assert fit is not None and (fit.theta, fit.theta_se) == (
+            cold.theta[crowned],
+            cold.theta_se[crowned],
         ), "a cold ruler still reads a θ, and an arm carries the one an election takes of its rows"
-        assert target_tripped(cycle, picked.accuracy) is StopReason.TARGET_HIT
-        origin = cycle.origin_round.opt_sp
-        assert origin is not None
+        assert target_tripped(cycle, fold.accuracy) is StopReason.TARGET_HIT
+        origin = cycle.origin_round.origin.individual
         session.backend_id = "capo-e2e"
         origin_pass = asyncio.run(
             score_on_bench(
@@ -1424,13 +1450,13 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 
         passes = graded()
         [taken] = passes.selections.values()
-        assert (taken.candidate_id, taken.round, taken.stop) == (picked.opt_sp.id, 1, None), (
+        assert (taken.candidate_id, taken.round, taken.stop) == (head.individual.id, 1, None), (
             "the bench grades the pick the optimizer declared"
         )
         assert graded(taken).selections[taken.candidate_id] is taken, "a held pass was sent again"
         left = taken.model_copy(update={"sp_hash": "a pick the line left"})
         resent = graded(left).selections[taken.candidate_id]
-        assert [c[:3] for c in resent.cells] == [c[:3] for c in taken.cells]
+        assert [c[:2] for c in resent.cells] == [c[:2] for c in taken.cells]
         assert all(replayed for *_, replayed in resent.cells), "a resent pass bought a cell again"
         earlier = taken.model_copy(update={"round": 7, "candidate_id": "an earlier pick"})
 
@@ -1465,10 +1491,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 instrument_id="capo-e2e",
                 run=LineRun(
                     selecting=False,
-                    ending=StopReason.MAX_ROUNDS,
-                    selection=ArmPointer(
-                        round=1, label=picked.selected_labels[0], candidate_id=taken.candidate_id
-                    ),
+                    ending=StopReason.ROUNDS_BUDGET,
+                    selection=ArmName(key=ArmKey(taken.candidate_id), round=1, label=head.label),
                     rounds_closed=1,
                 ),
                 spend=None,
@@ -1476,10 +1500,10 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         )
         assert bench.selected is not None and bench.origin is not None
         assert (bench.selected.accuracy.value, bench.origin.accuracy.value) == (1.0, 0.0)
-        result = _build_cycle_result(
+        result = build_cycle_result(
             cycle,
             session,
-            stop_reason=StopReason.MAX_ROUNDS,
+            stop_reason=StopReason.ROUNDS_BUDGET,
             cycle_error=None,
             started_at="",
             finished_at="",
@@ -1491,7 +1515,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 
     # A bench line reads the pick it holds, or says why it reads nothing.
     line_stores = workspace(tmp_path / "line")
-    pick = OptSearchPoint(instruction="the declared pick")
+    pick = prompted(instruction="the declared pick")
     spent = PassStop(cause=StopReason.SPEND_BUDGET, warning=None)
     refused = PassStop(cause=WalkEnd.CLIENT_ERROR, warning="HTTP 403 :: model is not allowed")
     line_scorer = compile_scorer(_H2H_FORMULA, verifier_graded=False)
@@ -1579,8 +1603,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             instrument_id="i",
             run=LineRun(
                 selecting=run.get("selecting", False),
-                ending=run.get("ending", StopReason.MAX_ROUNDS),
-                selection=ArmPointer(round=1, label="C1.1", candidate_id=selection),
+                ending=run.get("ending", StopReason.ROUNDS_BUDGET),
+                selection=ArmName(key=ArmKey(selection), round=1, label="C1.1"),
                 rounds_closed=1,
             ),
             spend=None,
@@ -1592,11 +1616,137 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert line_bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
         if stopped == "origin":
             assert "model is not allowed" in line_bench.status.sentence, f"{case}: says why"
-        on_line = round_result(1, selected_labels=["C1.1"], opt_sp=pick, all_candidate_results={})
+        picked = arm_state("C1.1", slot=ArmSlot(round=1, idx=0, total=1), individual=pick)
+        on_line = round_result(1, arms={ArmKey(pick.id): picked}, selected=[pick.id], cells={})
         assert bench_series(line_stores, passes, line_scorer, rounds=[on_line]) == series, case
 
 
-# 4. Elimination — who is cut, and when
+# 4. An authored round — the operator's arm in the seat a proposer fills
+
+
+def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
+    tmp_path, monkeypatch, offline
+) -> None:
+    authored = workspace(tmp_path / "authored")
+    hop, cycle_dir = walking_cycle(authored)
+    measured: list[str] = []
+
+    def operator_solves(prompt: str, _sample: Sample) -> bool:
+        measured.append(prompt)
+        return "Operator" in prompt
+
+    def submit(key: str) -> Any:
+        payload = SubmitArmsPayload(
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
+            arms=[
+                SubmittedArm(
+                    prompt_fields={"solve": {"instruction": "Operator wrote this."}},
+                    changes_description="the operator's own wording",
+                )
+            ],
+        )
+        return CommandDispatcher(authored).dispatch_cycle_command(
+            CommandCall(payload, key), expected_version=None
+        )
+
+    # Only a roster whose every read has a walked writer runs authored: the seat writes no state.
+    for optimizer, closes in (("potter", True), ("capo", False), ("gepa", False), ("levi", True)):
+        try:
+            resolve_optimizer(optimizer, {}, gate="author")
+            refused = None
+        except PayloadInvalidError as exc:
+            refused = exc.code
+        assert (refused is None) is closes and refused in (None, "optimizer_roster_open"), (
+            f"{optimizer} under `arm_gate: author`: a gate reading what no walked member writes "
+            "reached round 1"
+        )
+    # What earlier runs earned on this answer space reaches the origin's critique, not round 1 alone.
+    monkeypatch.setattr(
+        node_context, "earned_blocks_for", lambda *_a: {"persona": ("Answer tersely.",)}
+    )
+    try:
+        with _peer_cycle(
+            authored,
+            hop,
+            monkeypatch,
+            "potter",
+            {},
+            operator_solves,
+            control=RunControl(cycle_dir=cycle_dir),
+            arm_gate="author",
+        ) as cycle:
+            offline.llm.says = lambda _body: "ok"
+            session = cycle.session
+            session.campaign_id, session.state.cycle_id = hop.campaign_id, hop.cycle_id
+            search = list(session.scoring.require_partition().search)
+            at_origin = RoundContext(cycle=cycle, round_num=0, callbacks=_QUIET_CALLBACKS)
+            origin_read = build_bundle(
+                NodeContext(at_origin, optimizers.member("l1_critique")), Ladder()
+            )
+            assert [b.text for b in origin_read.block_window().get("persona", ())[:1]] == [
+                "Answer tersely."
+            ], "round 0's critique composed before the block pool was seeded"
+            measured.clear()
+
+            async def at_the_hold() -> RoundResult:
+                with pytest.raises(ConflictError):
+                    await submit("arms-before-the-hold")
+
+                async def answer() -> None:
+                    while derive_run_state(cycle_dir).gate != "arms":
+                        await asyncio.sleep(0)
+                    await submit("arms-at-the-hold")
+
+                (held_round, held_cut), _ = await asyncio.gather(
+                    execute_round(cycle, 1, search, _QUIET_CALLBACKS), answer()
+                )
+                assert held_cut is None
+                return held_round
+
+            # The hold polls on the loop's clock, which jumps past each wait.
+            offline.llm.sent.clear()
+            closed = jumping_clock(at_the_hold())
+            # The critique still reads the round; every other call it made filled the seat.
+            critique = optimizers.member("l1_critique").response_model.__name__
+            asked = [
+                body.get("response_format", {}).get("json_schema", {}).get("name")
+                for body in offline.llm.sent
+            ]
+            assert all(name == critique for name in asked), (
+                f"an authored round called a model beside its critique: {asked}"
+            )
+            # A resume re-seats the pool its banked round names, never one a later write left.
+            banked = closed.model_copy(update={"optimizer_state": cycle.close_state(1)})
+            cycle.slices.put(BlockPool(entries=()))
+            cycle.replay_priors([banked])
+            resumed = build_bundle(
+                NodeContext(
+                    dataclasses.replace(at_origin, round_num=2), optimizers.member("l1_generate")
+                ),
+                Ladder(),
+            )
+            assert [b.text for b in resumed.block_window().get("persona", ())[:1]] == [
+                "Answer tersely."
+            ], "a resumed run handed its proposer a pool its banked round does not name"
+            l3: Any = optimizers.member("l3_plan")
+            replanning = NodeContext(at_origin, l3)
+            cycle.slices.put(L3Memory(plan="attack the default label"))
+            l3.land(replanning, l3.parse(replanning, L3PlanOutput(plan="")))
+            assert cycle.slices.get(L3Memory).plan == "", (
+                "an empty replan kept the plan it replaced: every later prompt read a dropped strategy"
+            )
+    finally:
+        release_cycle(cycle_dir)
+    [arm] = closed.panel.values()
+    assert arm.individual.prompts["solve"].fields["instruction"] == "Operator wrote this.", (
+        "the operator's arm ran"
+    )
+    assert any("Operator wrote this." in prompt for prompt in measured), "it was measured"
+    assert [made.mode for made in arm.individual.lineage.variations] == ["operator"]
+
+
+# 5. Elimination — who is cut, and when
 
 
 def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
@@ -1616,7 +1766,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
 
     def behind_perfect_prior(n: int, misses: int) -> Any:
         check = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None)
-        check.register_completed(sheet(measurements([1.0] * 28)), candidate_id="winner")
+        check.register_completed(sheet(measurements([1.0] * 28)), key="winner")
         check.set_current("arm")
         return check.check(sheet(measurements([0.0] * misses + [1.0] * (n - misses))).cells)
 
@@ -1632,11 +1782,11 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
         "two behind is still cut at the floor: the reprieve is for a width, not for a loser"
     )
     late = behind_perfect_prior(26, 4)
-    assert late is not None and late.outcome is ArmOutcome.ELIMINATED
+    assert late is not None and late.outcome == "eliminated"
     assert late.check_result["epsilon"] == pytest.approx(0.30)
     unpaired = PoBBCheck(pobb_knobs(epsilon=0.05), n_min=4, n_samples=20, ruler=None)
     unpaired.register_completed(
-        sheet(measurements([1.0] * 8, sample_ids=list(range(8)))), candidate_id="lucky_leader"
+        sheet(measurements([1.0] * 8, sample_ids=list(range(8)))), key="lucky_leader"
     )
     unpaired.set_current("challenger")
     challenger = sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8]))
@@ -1648,7 +1798,6 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
         return [
             GradedCell.from_wire(
                 {
-                    "sample_id": i,
                     "sample_key": str(i),
                     "ground_truth": "",
                     "predicted": "done",
@@ -1678,7 +1827,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
     labelled = [
         GradedCell.from_wire(
             {
-                "sample_id": i,
+                "sample_key": str(i),
                 "fitness": 1.0 if i % 2 == 0 else 0.0,
                 "predicted": "Uncertain",
                 "ground_truth": "TRUE" if i % 2 == 0 else "FALSE",
@@ -1790,7 +1939,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
             measurement(0, 1.0),
             measurement(1, None, error="no verdict", error_category=category),
         ]
-        return round_result(1, candidates_scored=1, all_candidate_results={"c0": sheet(rows)})
+        return round_result(1, candidates_scored=1, cells={ArmKey("c0"): sheet(rows)})
 
     assert repair_cut([bounded(ErrorCategory.HALTED)]).rounds == [], (
         "a cell a declared bound CUT is settled: the same bound cuts the next attempt"
@@ -1799,8 +1948,28 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails() -> None:
         "a cell that ran to its own end can answer differently on a re-measure"
     )
 
+    # GEPA's gate tests each arm against the minibatch scores of ITS parent, never one round bar.
+    gate_ctx = types.SimpleNamespace(
+        node="minibatch_gate", round_num=1, decide=lambda *a, **k: None
+    )
+    bars = MinibatchBars(
+        bars={
+            "weak_parent_child": MinibatchBar(parent_id="p1", objectives={"0": 0.1, "1": 0.1}),
+            "strong_parent_child": MinibatchBar(parent_id="p2", objectives={"0": 0.9, "1": 0.9}),
+        }
+    )
+    weak, strong, unbarred = (ArmKey(cid) for cid in (*bars.bars, "unbarred_child"))
+    race = _GateRace(cast(Any, gate_ctx), bars=bars, block_size=2, n_cells=2)
+    level = [measurement(i, 1.0, objective=0.5) for i in range(2)]
+    stops = race.close({weak: level, strong: level})
+    assert list(stops) == [strong] and stops[strong].check_result["parent_id"] == "p2", (
+        "one arm's parent bar decided another arm's gate"
+    )
+    with pytest.raises(KeyError):
+        race.close({unbarred: level})
 
-# 5. Escalation and stop — live, and folded back on resume
+
+# 6. Escalation and stop — live, and folded back on resume
 
 
 def _line_read(
@@ -1815,18 +1984,16 @@ def _line_read(
 
     def member(label: str, grades: list[float | None]) -> MemberRows:
         rnd = int(label[1:].split(".")[0])
-        arm = ArmPointer(round=rnd, label=label, candidate_id=(ids or {}).get(label, label.lower()))
+        arm = ArmName(key=ArmKey((ids or {}).get(label, label.lower())), round=rnd, label=label)
         return _pair_member(
-            arm.candidate_id,
+            arm.key,
             [
                 measurement(i, g, **({} if g is not None else {"error_category": "SERVER"}))
                 for i, g in enumerate(grades)
             ],
             bank,
             scope=RoleScope.REPORT,
-            address=MemberAddress(
-                path=(hop,), individual_id=arm.candidate_id, arm=arm, pass_role=None
-            ),
+            address=MemberAddress(path=(hop,), individual_id=arm.key, arm=arm, pass_role=None),
         )
 
     readings = [
@@ -1841,7 +2008,7 @@ def _line_read(
         for label, grades in picks
     ]
     return OverlapReading.of(
-        round_num, improved, sample_ids=range(len(c0)), lead=readings[-1], earlier=readings[:-1]
+        round_num, improved, positions=range(len(c0)), lead=readings[-1], earlier=readings[:-1]
     )
 
 
@@ -1862,13 +2029,23 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         (0.6248, 0.3498, 0.198),
     ]
 
+    def high_water(comp: float | None, thetas: list[float], se: float | None) -> HighWater:
+        # Round i read thetas[i] on one series; the peak is the FIRST round at the max.
+        origin, *rest = thetas or [None]
+        return HighWater(
+            composite_fitness=comp,
+            series=level_series(origin, rest, origin_se=se, ses=[se] * len(rest)),
+            theta_round=max(range(len(thetas)), key=thetas.__getitem__) if thetas else None,
+        )
+
     def climb(*, with_se: bool) -> list[str]:
-        fsm, actions = EscalationFSM(), []
-        for comp, theta, se in stall_rounds:
-            asked = fsm.ask_l2_escalation(
-                current_composite_fitness=comp,
-                current_theta=theta,
-                current_theta_se=se if with_se else None,
+        ladder, actions = Ladder(), []
+        for upto, (comp, _, se) in enumerate(stall_rounds):
+            asked = ask_l2_escalation(
+                ladder,
+                best=high_water(
+                    comp, [t for _, t, _ in stall_rounds[: upto + 1]], se if with_se else None
+                ),
                 escalation_ladder=EscalationLadder.FULL,
                 l2_patience=2,
                 l3_patience=1,
@@ -1876,7 +2053,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             actions.append(str(asked.next_action))
             if asked.next_action != NextAction.FIRE_L2:
                 break
-            fsm.record_l2_fired(asked.l2)
+            ladder = l2_fired(ladder, asked.l2)
         return actions
 
     assert climb(with_se=True) == ["fire_l2", "fire_l2", "fire_l2", "fire_l3"], (
@@ -1884,9 +2061,11 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     )
     assert NextAction.FIRE_L3 not in climb(with_se=False)
     # The SE bar applies on the θ scale only: a composite-scale verdict has no error term.
-    assert EscalationFSM._improved(0.0, 0.0, 0.35, 0.34, 0.20)[0] is False
-    assert EscalationFSM._improved(0.0, 0.0, 0.60, 0.34, 0.20)[0] is True
-    assert EscalationFSM._improved(0.7, 0.6, None, None, 0.20) == (True, "composite")
+    series = level_series(0.34, [0.35, 0.60], ses=[0.20, 0.20])
+    read = {rnd: series.reading(rnd).reading for rnd in series.rounds}
+    assert _improved(0.0, 0.0, read[1], read[0])[0] is False
+    assert _improved(0.0, 0.0, read[2], read[0])[0] is True
+    assert _improved(0.7, 0.6, None, None) == (True, "composite")
 
     # The L1-only arm can reach no layer above it, over the WHOLE predicate space: a deferral that
     # never fires in one run is no suppression.
@@ -1914,46 +2093,63 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     assert NextAction.FIRE_L2 in actions(EscalationLadder.FULL), (
         "not vacuous: the full ladder fires"
     )
+    # `--diag` asks the climb with no `observe` before it: on the L1 arm that composes no layer.
+    diag_asks = {
+        ask_l2_escalation(
+            ladder,
+            best=high_water(fitness, [], None),
+            escalation_ladder=EscalationLadder.L1,
+            l2_patience=l2_patience,
+            l3_patience=l3_patience,
+        ).next_action
+        for ladder in (Ladder(), l2_fired(Ladder(), LayerReading(5, 0.5, None, None)))
+        for fitness in (None, 0.5)
+        for l2_patience in (0, 2)
+        for l3_patience in (None, 0, 1)
+    }
+    assert diag_asks == {NextAction.CONTINUE}, "--diag fired a layer the L1 arm cannot reach"
 
     # A heal fire spends no L3 patience.
-    healed = EscalationFSM()
+    healed = Ladder()
+    seen: list[float] = []
 
     def stretch(theta: float, *, heal_first: bool) -> LadderAsk:
+        nonlocal healed
         asks: list[LadderAsk] = []
         while not asks or asks[-1].next_action is NextAction.FIRE_L2:
-            asked = healed.ask_l2_escalation(
-                current_composite_fitness=0.5,
-                current_theta=theta,
-                current_theta_se=0.2,
+            seen.append(theta)
+            asked = ask_l2_escalation(
+                healed,
+                best=high_water(0.5, seen, 0.2),
                 escalation_ladder=EscalationLadder.FULL,
                 l2_patience=2,
                 l3_patience=1,
             )
             asks.append(asked)
             if asked.next_action is NextAction.FIRE_L2:
-                healed.record_l2_fired(asked.l2)
+                healed = l2_fired(healed, asked.l2)
                 if heal_first and len(asks) == 1:
-                    healed.record_l3_fired(None)
+                    healed = l3_fired(healed, None)
         return asks[-1]
 
     gate = stretch(0.3, heal_first=True)
     assert gate.next_action is NextAction.FIRE_L3, (
         "the heal wiped L2; the gate reached is L3's FIRST"
     )
-    healed.record_l3_fired(gate.l3)
+    healed = l3_fired(healed, gate.l3)
     gate = stretch(0.6, heal_first=True)
     assert gate.next_action is NextAction.FIRE_L3, "a later heal must not re-base the comparison"
-    healed.record_l3_fired(gate.l3)
+    healed = l3_fired(healed, gate.l3)
     assert stretch(0.6, heal_first=False).next_action is NextAction.STOP_L3_PATIENCE, (
         "the patience a heal did not spend still binds a flat run"
     )
 
     # A landed fire moves the ladder, and an unlanded one moves nothing.
-    landed = EscalationFSM()
+    landed = Ladder()
     trace: list[tuple[int, int, float | None, int, int, float | None, int]] = []
 
     def snapshot() -> None:
-        held = landed.ladder
+        held = landed
         trace.append(
             (
                 held.l2.fires,
@@ -1967,26 +2163,29 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         )
 
     def ask_at(fitness: float) -> LadderAsk:
-        return landed.ask_l2_escalation(
-            current_composite_fitness=fitness,
+        return ask_l2_escalation(
+            landed,
+            best=high_water(fitness, [], None),
             escalation_ladder=EscalationLadder.FULL,
             l2_patience=3,
             l3_patience=2,
         )
 
-    landed.record_l2_fired(ask_at(0.60).l2)
+    landed = l2_fired(landed, ask_at(0.60).l2)
     snapshot()
-    landed.record_l2_fired(ask_at(0.60).l2)  # an unimproved ask reads a stall the landing commits
+    landed = l2_fired(
+        landed, ask_at(0.60).l2
+    )  # an unimproved ask reads a stall the landing commits
     snapshot()
     unlanded = ask_at(0.60)
     assert unlanded.l2.stall_count == 2, "the ask read the stall"
-    assert landed.as_read_by(unlanded).ladder.l2.stall_count == 2, (
+    assert as_read_by(landed, unlanded).l2.stall_count == 2, (
         "the prompt that fire composed still reported the verdict that asked for it"
     )
     snapshot()
-    landed.record_l3_fired(None)  # a heal: it bumps L3, the patience ratchet stays unset
+    landed = l3_fired(landed, None)  # a heal: it bumps L3, the patience ratchet stays unset
     snapshot()
-    landed.record_l3_fired(ask_at(0.75).l3)
+    landed = l3_fired(landed, ask_at(0.75).l3)
     snapshot()
     assert trace == [
         (1, 0, 0.60, 0, 0, None, 0),
@@ -1999,19 +2198,23 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     # The L1 stall and the lives bank read the same rounds.
     def close(rnd: int, *, improved: bool, electable: int = 2) -> RoundClosedRecord:
         return RoundClosedRecord.of(
-            round_result(
-                rnd, improved=improved, electable_count=electable, all_candidate_results={}
-            )
+            round_result(rnd, improved=improved, voted={"electable": electable}, cells={}),
+            {},
+            level_series(0.0, []),
         )
 
     sequence = [(True, 2), (True, 2), (True, 2), (True, 2), (False, 0), (False, 2), (False, 2)]
     closes = [close(i, improved=up, electable=n) for i, (up, n) in enumerate(sequence, start=1)]
-    stalled = EscalationFSM()
-    for closed in closes:
-        stalled.observe_round(
-            advance=closed.overlap.advance, l1_patience=99, escalation_ladder=EscalationLadder.FULL
-        )
-    assert stalled.ladder.l1_stall_count == 3, (
+
+    def observed(advances: list[RoundAdvance]) -> Ladder:
+        ladder = Ladder()
+        for advance in advances:
+            ladder, _ = observe(
+                ladder, advance=advance, l1_patience=99, escalation_ladder=EscalationLadder.FULL
+            )
+        return ladder
+
+    assert observed([c.overlap.advance for c in closes]).l1_stall_count == 3, (
         "three trailing non-improving rounds, one uncompared — all three advance the stall"
     )
     origin_close = close(0, improved=False, electable=0)
@@ -2021,7 +2224,6 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     )
     drained = [close(i, improved=False) for i in (8, 9)]
     assert stalls_left([*ledger, *drained], (2, 4)) == 0
-    unresolved = EscalationFSM()
     lines = [
         _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL),
         _line_read(2, True, ("C2.1", _TIED_PANEL), c0=_C0_PANEL),
@@ -2032,11 +2234,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         RoundAdvance.NOT_SEPARATED,
         RoundAdvance.NOT_SEPARATED,
     ]
-    for line in lines:
-        unresolved.observe_round(
-            advance=line.advance, l1_patience=99, escalation_ladder=EscalationLadder.FULL
-        )
-    assert unresolved.ladder.l1_stall_count == 2, (
+    assert observed([line.advance for line in lines]).l1_stall_count == 2, (
         "a round that crowned a winner and resolved NOTHING advances L1 patience"
     )
 
@@ -2046,7 +2244,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     stopped = OverlapReading.of(
         3,
         True,
-        sample_ids=won.sample_ids,
+        positions=won.positions,
         lead=absent_pair(
             state=ReadingState.PASS_STOPPED,
             a=lead.a,
@@ -2069,12 +2267,9 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         "the unread round neither clears the held round nor adds to it"
     )
     assert rounds_without_advance([*rounds, round_result(4, improved=False)]) == 2
-    clock = EscalationFSM()
-    for rr in rounds[1:]:
-        clock.observe_round(
-            advance=rr.overlap.advance, l1_patience=99, escalation_ladder=EscalationLadder.FULL
-        )
-    assert clock.ladder.l1_stall_count == 1, "the live stall reads what the standing reads"
+    assert observed([rr.overlap.advance for rr in rounds[1:]]).l1_stall_count == 1, (
+        "the live stall reads what the standing reads"
+    )
     holed = _line_read(1, True, ("C1.1", [*_CLEAN_PANEL[:8], None]), c0=_C0_PANEL)
     assert holed.lead.coverage is not None and holed.lead.headline is not None
     assert (holed.lead.coverage.scored, holed.lead.coverage.excluded_faulted) == (8, 1)
@@ -2119,7 +2314,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     root = tmp_path / "peer"
     with _peer_cycle(
         workspace(root),
-        root / "cycle",
+        _PEER_HOP,
         monkeypatch,
         "capo",
         {},
@@ -2129,25 +2324,19 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     ) as cycle:
         lives = cycle.config.optimization.lives
         assert lives is not None
-        origin = round_result(
-            0,
-            improved=False,
-            opt_sp=cycle.opt_sp,
-            candidate_scores=[scored_candidate(cycle.opt_sp.id, label="C0")],
-            candidates_scored=1,
-            all_candidate_results={},
-            selected_labels=["C0"],
-        )
+        origin_key = ArmKey(cycle.opt_sp.id)
+        origin_arm = arm_state("C0", slot=ArmSlot(round=0, idx=0, total=1), individual=cycle.opt_sp)
+        origin = round_result(0, arms={origin_key: origin_arm}, selected=[origin_key], cells={})
 
         def stop_after(*closes: tuple[bool, int]) -> tuple[int | None, StopReason | None]:
             cycle.rounds = [
                 origin,
                 *(
-                    round_result(n, improved=improved, electable_count=electable)
+                    round_result(n, improved=improved, voted={"electable": electable})
                     for n, (improved, electable) in enumerate(closes, 1)
                 ),
             ]
-            standing = RunStanding.after(cycle.rounds, lives=lives.bank, spent=None)
+            standing = RunStanding.after(cycle.rounds, lives=lives.bank)
             return standing.stalls_left, standing_tripped(cycle, standing)
 
         held, promoted, uncompared = (False, 2), (True, 2), (False, 0)
@@ -2192,64 +2381,70 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         )
         assert outcome(1.0, RoundAdvance.ADVANCED) is StopReason.PERFECT
 
-
-def test_a_fire_after_the_round_closed_is_kept_on_resume_and_rewound_with_its_round(
-    tmp_path,
-) -> None:
-    # A layer fires AFTER the round it reads has closed, so what it authors is on no close.
-    cycle_dir = CycleDir(tmp_path)
+    # Folded back on resume: a layer fires AFTER the round it reads has closed, so what it
+    # authors is on no close.
+    cycle_dir = CycleDir(tmp_path / "fired")
     ledger = CycleEventLog.open(cycle_dir)
-    # No cycle id: the restate below is appended here, as the store appends it.
-    live = PotterState(session=types.SimpleNamespace(state=types.SimpleNamespace(cycle_id="")))  # type: ignore[arg-type]
+    # Appended here, as the store appends a restate.
+    carried = resolve_optimizer("potter", {}, gate="off").slices
+    live = node_contract.SliceMap(carried)
     closed = round_result(1, optimizer_state=optimizer_state())
     for rr in (round_result(0, optimizer_state=optimizer_state()), closed):
-        ledger.append(RoundClosedRecord.of(rr.model_copy(update={"all_candidate_results": {}})))
+        ledger.append(
+            RoundClosedRecord.of(rr.model_copy(update={"cells": {}}), {}, level_series(0.0, []))
+        )
 
     def restate() -> None:
-        state = closed.optimizer_state.model_copy(update={"payload": live.restated(closed)})
+        state = closed.closed_state.holding(
+            live.get(L2Memory), live.get(L3Memory), live.get(Ladder)
+        )
         ledger.append(OptimizerStateRecord(round=1, optimizer_state=state))
+
+    def fired(record: Callable[[Ladder], Ladder]) -> None:
+        live.put(record(live.get(Ladder)))
 
     floor = NODE_LAYOUTS["l1_generate"].floor
     moved = coerce_l1_layout({"persona": ["critique"]}, base=floor)
     assert moved is not None and moved != floor
-    handed = live.memory
-    steer = {"layout": moved.model_dump(mode="json"), "n_variants": 5}
-    live.memory = L2.write(handed, TransitionResult(described="L2", steer=steer))
-    assert handed == L2L3Memory() and live.memory != handed, (
+    handed = live.get(L2Memory)
+    live.put(
+        handed.steered_onto(
+            "l1_generate", {"layout": moved.model_dump(mode="json"), "n_variants": 5}
+        )
+    )
+    assert handed == L2Memory() and live.get(L2Memory) != handed, (
         "a fire answers the NEXT memory: the one it was handed is what the closed round banked"
     )
-    live.escalation.record_l2_fired(LayerReading(1, 0.5, None, None))
+    fired(lambda ladder: l2_fired(ladder, LayerReading(1, 0.5, None, None)))
     restate()
-    live.memory = L3.write(
-        live.memory, TransitionResult(described="L3", plan="attack the default label")
-    )
-    live.escalation.record_l3_fired(None)
+    live.put(L3Memory(plan="attack the default label"))
+    fired(lambda ladder: l3_fired(ladder, None))
     restate()
 
-    def resumed(last: int) -> PotterState:
+    def resumed(last: int) -> tuple[L2Memory, L3Memory, Ladder]:
         standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
-        state = PotterState(session=types.SimpleNamespace())  # type: ignore[arg-type]
-        state.replay(round_result(last, optimizer_state=standing[last].close.optimizer_state))
-        return state
+        state = node_contract.SliceMap(carried)
+        state.seat(standing[last].close.closed_state)
+        return state.get(L2Memory), state.get(L3Memory), state.get(Ladder)
 
     kept = resumed(1)
-    assert (kept.memory, kept.escalation.ladder) == (live.memory, live.escalation.ladder), (
+    assert kept == (live.get(L2Memory), live.get(L3Memory), live.get(Ladder)), (
         "paused inside round 2: both fires belong to the boundary the resume keeps"
     )
-    assert kept.escalation.ladder.l3.fires == 1 and kept.memory.plan
-    rewound = resumed(0)
-    assert (rewound.memory, rewound.escalation.ladder) == (L2L3Memory(), Ladder()), (
+    assert kept[2].l3.fires == 1 and kept[1].plan
+    assert resumed(0) == (L2Memory(), L3Memory(), Ladder()), (
         "rewound to re-run round 1: the fires are discarded with it"
     )
 
 
-# 6. Paired readings over shared cells
+# 7. Paired readings over shared cells
 
 
 def _reference_reading(
-    reference: list[float | None], arm: list[float | None], *, outcome: ArmOutcome
+    reference: list[float | None], arm: list[float | None], *, cut: CutKind | None
 ) -> PairedReading:
     bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(len(reference))]
+    scorer = compile_scorer("label_match(predicted, ground_truth)", verifier_graded=False)
 
     def rows(grades: list[float | None]) -> CellSheet:
         return sheet(
@@ -2258,32 +2453,54 @@ def _reference_reading(
                 for s, g in zip(bank, grades, strict=True)
                 if g is not None
             ),
-            "s",
+            scorer.id,
         )
 
-    scorer = Scorer(id="s", per_cell=None, fitness=lambda _row: 0.0, objective=None)
+    bar = OptSearchPoint()
+    key, scored = ArmKey("c1"), arm_state("C1.1", slot=ArmSlot(round=1, idx=0, total=1), cut=cut)
+    reference_rows = rows(reference)
     session = types.SimpleNamespace(
         hop=CycleHop(campaign_id="camp", cycle_id="cyc"),
         instrument_id="i",
         scoring=types.SimpleNamespace(require_scorer=lambda: scorer),
-        samples=bank,
+        bank=Bank.of(bank),
     )
-    cycle = types.SimpleNamespace(session=session, opt_sp=OptSearchPoint(), rounds=[])
-    scored = scored_candidate("C1.1", outcome=outcome)
-    reference_rows = rows(reference)
-    pairs = _ReferencePairs(
-        types.SimpleNamespace(cycle=cycle, round_num=1),  # type: ignore[arg-type]
-        [scored],
-        bar_cut=False,
+    ctx = types.SimpleNamespace(
+        round_num=1, cycle=types.SimpleNamespace(session=session, rounds=[], opt_sp=bar)
+    )
+    pairs = ReferencePairs.of_round(
+        ctx,  # type: ignore[arg-type]
+        {key: scored},
         declared=[cell.key for cell in reference_rows],
     )
-    return pairs.read(scored, rows(arm), cycle.opt_sp.id, reference_rows)
+    against = ArmKey(bar.id)
+    reference = ReadArm(against, arm_state("parent"), reference_rows)
+    return pairs.read(ReadArm(key, scored, rows(arm)), against, reference)
 
 
 _H2H_BANK = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(12)]
 
 
-def _h2h_campaign(
+def _h2h_config(
+    optimizer: str, seed: int, scoring: str, proposer_model: str | None
+) -> CampaignConfig:
+    return CampaignConfig.model_validate(
+        {
+            "optimization": {
+                "optimizer": optimizer,
+                "degradation_threshold": 0.0,
+                "nodes": {}
+                if proposer_model is None
+                else {"l1_generate": {"config": {"model": proposer_model}}},
+            },
+            "dataset_split": {"bench": 6},
+            "run_seed": seed,
+            "scoring": scoring,
+        }
+    )
+
+
+def _evidence_campaign(
     stores: Stores,
     cid: str,
     n: int,
@@ -2297,35 +2514,23 @@ def _h2h_campaign(
     loop: float = 0.05,
     wall: int = 100,
     rebased: bool = False,
-    arm: Arm | None = None,
+    purpose: Purpose = Optimize(),  # noqa: B008 — frozen
     proposer_model: str | None = None,
     graded: bool = True,
     steered: bool = False,
 ) -> SubjectSpec:
     if stores.campaigns.load_campaign(cid) is not None:
         return SubjectSpec("campaign", cid)
-    split = DatasetSplit(bench=6, seed=seed)
-    partition = partition_bank(_H2H_BANK, split)
+    split = DatasetSplit(bench=6)
+    partition = partition_bank(_H2H_BANK, split, seed=seed)
     root = CycleHop(campaign_id=cid, cycle_id=f"cycle_{cid}")
     stores.campaigns.create_campaign(
-        Campaign(
-            campaign_id=cid,
+        minted_campaign(
+            root,
+            config=_h2h_config(cid.split("_")[0], seed, scoring, proposer_model),
+            purpose=purpose,
             dataset_name="ds",
             created_at=f"2026-09-26T00:00:{n:02d}Z",
-            root_cycle_id=root.cycle_id,
-            root_content_hash="origin",
-            arm=arm,
-            config={
-                "optimization": {
-                    "optimizer": cid.split("_")[0],
-                    "degradation_threshold": 0.0,
-                    "nodes": {}
-                    if proposer_model is None
-                    else {"l1_generate": {"config": {"model": proposer_model}}},
-                },
-                "dataset_split": split.model_dump(),
-                "scoring": scoring,
-            },
         )
     )
     hop = CycleHop(campaign_id=cid, cycle_id=f"{root.cycle_id}_fork_r1") if rebased else root
@@ -2334,7 +2539,7 @@ def _h2h_campaign(
             s.id,
             None,
             query=s.query,
-            sample_key=f"key:{s.query}",
+            sample_key=s.key,
             pipeline_data={"env_reward": 0.5},
         )
         for s in partition.search[:4]
@@ -2342,53 +2547,51 @@ def _h2h_campaign(
     walked = _filed(stores, f"panel_{cid}", panel, sp_hash="origin")
     # A rebase fork replays its own origin and redraws the one partition.
     ledgers: dict[CycleHop, CycleEventLog] = {}
+    held = Bank.of(_H2H_BANK)
+    stores.tenant_datasets.put_bank(held)
     for cycle in {root, hop}:
         stores.campaigns.mint_cycle(cycle)
-        stores.campaigns.write_bank_partition(cycle, partition.record(dataset_hash="bank"))
+        stores.campaigns.write_bank_partition(
+            cycle, partition.record(dataset_hash=held.dataset_hash)
+        )
         origin_walk = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(cycle)))
         ledgers[cycle] = origin_walk
-        origin_walk.append(CandidateMintedRecord(round=0, idx=0, candidate_id="c0", label="C0"))
-        for cell in walked:
-            origin_walk.append(
-                SampleScoredRecord(
-                    round=0,
-                    candidate_idx=0,
-                    candidate_total=1,
-                    individual_id="c0",
-                    role=MeasurementRole.ORIGIN,
-                    result=_announced(cell),
-                )
-            )
+        RunCallbacks(origin_walk).on_arm(0, ArmKey("c0"), _origin_proposed())
+        for cell, sample in zip(walked, partition.search, strict=False):
+            origin_walk.append(_origin_scored(cell, sample.id))
     if rebased:
         stores.campaigns.mark_superseded(root, hop.cycle_id)
     if graded:
         unread = READING_STATE_INFO[ReadingState.NO_SELECTION].sentence
         standing = RunStanding.opening(None).model_copy(
             update={
-                "selection": ArmPointer(round=1, label="C1.1", candidate_id=f"{cid}:selected"),
+                "selection": ArmName(key=ArmKey(f"{cid}:selected"), round=1, label="C1.1"),
                 "rounds_closed": 1,
                 # The line is the standing's own wording, and a read back refuses another.
                 "selection_line": f"C1.1 (round 1) — {unread}",
             }
         )
-        pick = scored_candidate(f"{cid}:selected", label="C1.1")
+        key, pick = (
+            ArmKey(f"{cid}:selected"),
+            arm_state("C1.1", slot=ArmSlot(round=1, idx=0, total=1)),
+        )
+        answered = sheet(
+            cell.filed(dataclasses.replace(cell.facts, answer=answer))
+            for cell, (_, answer, _) in zip(panel, walked, strict=True)
+        )
+        closed = round_result(1, arms={key: pick}, selected=[key], cells={key: answered})
+        callbacks = RunCallbacks(ledgers[hop])
+        callbacks.on_round_entered(1)
+        callbacks.on_arm(
+            1, key, Proposed(role=pick.role, slot=pick.slot, individual=pick.individual)
+        )
+        with at_round(1):
+            callbacks.on_arm(1, key, pick)
+        callbacks.on_election(1, closed.election)
         ledgers[hop].append(
-            CandidateMintedRecord(round=1, idx=0, candidate_id=pick.candidate_id, label="C1.1")
+            RoundClosedRecord.of(closed, dict(held.slot_of), level_series(0.0, [0.0]))
         )
-        ledgers[hop].append(
-            CandidateScoredRecord(round=1, candidate_idx=0, candidate_total=1, scores=pick)
-        )
-        closed = RoundClosedRecord.of(
-            round_result(
-                1, candidate_scores=[pick], selected_labels=["C1.1"], all_candidate_results={}
-            )
-        )
-        ledgers[hop].append(
-            closed.model_copy(update={"cells": RoundCells(arms={pick.candidate_id: walked})})
-        )
-        ledgers[hop].append(
-            RoundStandingRecord(round=1, run_standing=standing, anchors=ViewAnchors())
-        )
+        callbacks.on_round_complete(closed, standing, None)
     if steered:
         stores.campaigns.record_intervention(hop, kind="skip")
     passes: dict[str, BenchPass] = {}
@@ -2400,7 +2603,7 @@ def _h2h_campaign(
                 s.id,
                 None,
                 query=s.query,
-                sample_key=f"key:{s.query}",
+                sample_key=s.key,
                 pipeline_data={"env_reward": level + 0.1 * (s.id % 2)},
             )
             for s in partition.bench
@@ -2412,7 +2615,7 @@ def _h2h_campaign(
             cells=_filed(
                 stores, f"bench_{individual}_{seed}_{level}", rows, role="bench", sp_hash=individual
             ),
-            sample_keys=[f"key:{s.query}" for s in partition.bench],
+            sample_keys=[s.key for s in partition.bench],
             stop=None,
             scorer_id=scoring,
             reads_before=int(role == "selected") * n,
@@ -2683,12 +2886,12 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
 
     # An arm is read on the cells its reference was read on.
     whole_panel: list[float | None] = [1.0, 0.0, 1.0, 0.0, 1.0, 0.0]
-    for ref_grades, arm_grades, outcome, state, scored, size, rates, level in (
+    for ref_grades, arm_grades, cut, state, scored, size, rates, level in (
         # The reference sat four of the six cells: 5/6 over the arm's own walk, 3/4 on those four.
         (
             [1.0, 0.0, 1.0, 0.0, None, None],
             [1.0, 1.0, 1.0, 0.0, 1.0, 1.0],
-            ArmOutcome.MEASURED,
+            None,
             CoverageState.COMPLETE,
             4,
             4,
@@ -2699,7 +2902,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         (
             whole_panel,
             [None, 1.0, None, 1.0, None, 1.0],
-            ArmOutcome.ELIMINATED,
+            "eliminated",
             CoverageState.SELECTED_BY_STOP,
             3,
             6,
@@ -2710,7 +2913,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         (
             whole_panel,
             [1.0, 1.0, 1.0, 0.0, 1.0, None],
-            ArmOutcome.MEASURED,
+            None,
             CoverageState.PARTIAL,
             5,
             6,
@@ -2718,7 +2921,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             None,
         ),
     ):
-        on_reference = _reference_reading(ref_grades, arm_grades, outcome=outcome)
+        on_reference = _reference_reading(ref_grades, arm_grades, cut=cast(CutKind | None, cut))
         lift, coverage, set_read = (
             on_reference.headline,
             on_reference.coverage,
@@ -2736,33 +2939,27 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     # A verify reads its fresh cells alone and pairs its lift over the origin.
     def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerifyPass:
         return VerifyPass(
-            label="C3.1",
-            candidate_id="c",
-            round=round_num,
+            arm=ArmName(key=ArmKey("c"), round=round_num, label="C3.1"),
             sp_hash="h",
-            cells=[(f"k{sid}", sid, f"r.{sid}", False) for sid in range(100, 110)],
-            sample_ids=list(range(100, 110)),
+            cells=[(f"k{sid}", f"r.{sid}", False) for sid in range(100, 110)],
+            positions=list(range(100, 110)),
             strategy=strategy,
             seed=1,
             scorer_id="s",
         )
 
     def keyed(rows: list[GradedCell]) -> CellSheet:
-        return sheet((_keyed(row, f"k{row.sample_id}") for row in rows), "s")
+        return sheet((_keyed(row, f"k{row.key}") for row in rows), "s")
 
     recorded = keyed(measurements([1.0] * 20))
     fresh = keyed(measurements([1.0, 0.0] * 5, range(100, 110)))
     # The origin: half the round's cells, none of the fresh ones.
     c0_rows = keyed([*measurements([0.0, 1.0] * 10), *measurements([0.0] * 10, range(100, 110))])
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
-    c0 = ArmPointer(round=0, label="C0", candidate_id="c0")
+    c0 = ArmName(key=ArmKey("c0"), round=0, label="C0")
 
     def verified(pass_: VerifyPass, fresh_rows: CellSheet = fresh) -> Any:
-        arm = (
-            c0
-            if pass_.round == 0
-            else ArmPointer(round=pass_.round, label=pass_.label, candidate_id=pass_.candidate_id)
-        )
+        arm = c0 if pass_.arm.round == 0 else pass_.arm
         return verify_reading(
             pass_,
             fresh=fresh_rows,
@@ -2805,39 +3002,38 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             for sid, g in graded.items()
         )
 
-    origin_sp, edit_sp = OptSearchPoint(instruction="origin"), OptSearchPoint(instruction="edit")
+    origin_sp, edit_sp = prompted(instruction="origin"), prompted(instruction="edit")
     as_origin = walk("r0", {0: 1.0, 1: 0.0, 2: 1.0})
     rounds = [
-        round_result(
-            0,
-            candidates_scored=0,
-            opt_sp=origin_sp,
-            results=as_origin,
-            all_candidate_results={origin_sp.id: as_origin},
-        ),
+        round_result(0, candidates_scored=0, cells={ArmKey(origin_sp.id): as_origin}),
         round_result(
             1,
             candidates_scored=0,
-            opt_sp=edit_sp,
-            results=walk("c1", {2: 1.0, 3: 1.0}),
-            all_candidate_results={edit_sp.id: walk("c1", {2: 1.0, 3: 1.0})},
-            reference_results={origin_sp.id: walk("r1", {2: 0.0, 3: 1.0})},
+            cells={
+                ArmKey(edit_sp.id): walk("c1", {2: 1.0, 3: 1.0}),
+                ArmKey(origin_sp.id): walk("r1", {2: 0.0, 3: 1.0}),
+            },
             overlap_results={origin_sp.id: walk("ov", {4: 1.0, 5: 1.0})},
         ),
     ]
     in_run = InRunCells(rounds)
 
-    def origin_read(scope: RoleScope) -> dict[int, float]:
-        return {c.sample_id: c.grade.fitness for c in in_run.sheet(origin_sp.id, scope)}
+    def origin_read(scope: RoleScope) -> dict[str, float | None]:
+        return {c.key: c.grade.fitness for c in in_run.sheet(origin_sp.id, scope)}
 
-    assert origin_read(RoleScope.REPORT) == {0: 1.0, 1: 0.0, 2: 0.0, 3: 1.0, 4: 1.0, 5: 1.0}, (
-        "ONE set: the later reading of cell 2 stands, and the overlap rows are the origin's own"
-    )
-    assert origin_read(RoleScope.DECISION) == {0: 1.0, 1: 0.0, 2: 0.0, 3: 1.0}, (
+    assert origin_read(RoleScope.REPORT) == {
+        "k0": 1.0,
+        "k1": 0.0,
+        "k2": 0.0,
+        "k3": 1.0,
+        "k4": 1.0,
+        "k5": 1.0,
+    }, "ONE set: the later reading of cell 2 stands, and the overlap rows are the origin's own"
+    assert origin_read(RoleScope.DECISION) == {"k0": 1.0, "k1": 0.0, "k2": 0.0, "k3": 1.0}, (
         "a decision reads 2/4, never the two bought after it"
     )
     assert origin_read(RoleScope.BENCH) == {}
-    assert [cell.sample_id for cell in rounds[1].sheet_of(origin_sp.id)] == [2, 3]
+    assert [cell.key for cell in rounds[1].sheet_of(origin_sp.id)] == ["k2", "k3"]
 
     # A cell is its sample's content, whatever query it shares or slot it holds.
     asks_one_thing = [
@@ -2852,18 +3048,9 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             measurement(slot, None, query=s.query, sample_key=s.key) for slot, s in slots.items()
         ]
         cycle_ledger = CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(cycle_hop)))
-        cycle_ledger.append(CandidateMintedRecord(round=0, idx=0, candidate_id="c0", label="C0"))
-        for cell in _filed(built_stores, f"keyed_{cycle_id}", rows):
-            cycle_ledger.append(
-                SampleScoredRecord(
-                    round=0,
-                    candidate_idx=0,
-                    candidate_total=1,
-                    individual_id="c0",
-                    role=MeasurementRole.ORIGIN,
-                    result=_announced(cell),
-                )
-            )
+        RunCallbacks(cycle_ledger).on_arm(0, ArmKey("c0"), _origin_proposed())
+        for cell, slot in zip(_filed(built_stores, f"keyed_{cycle_id}", rows), slots, strict=True):
+            cycle_ledger.append(_origin_scored(cell, slot))
         return scan_ledger_walks(
             ledger_chain(CycleDir(built_stores.campaigns.cycle_dir(cycle_hop)), moment=None)
         )
@@ -2872,33 +3059,39 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert len(individual_cells(first, "c0", RoleScope.REPORT)) == 2, "one query, two cells"
     second = filed_cycle("cycle_b", {7: asks_one_thing[1], 9: asks_one_thing[0]})
     folded = individual_cells([*first, *second], "c0", RoleScope.REPORT)
-    assert {key: slot for key, slot, _, _ in folded} == {
-        asks_one_thing[0].key: 9,
-        asks_one_thing[1].key: 7,
+    later = individual_cells(second, "c0", RoleScope.REPORT)
+    assert {key: answer for key, answer, _ in folded} == {
+        key: answer for key, answer, _ in later
     }, "the same two samples at other slots are still two cells, at the later read"
+    assert len(later) == 2
 
     # A run stands on its selection, read against the origin it was promoted from.
     origin, first_pick, second_pick, third_pick = (
-        OptSearchPoint(instruction=text) for text in ("origin", "one", "three", "five")
+        prompted(instruction=text) for text in ("origin", "one", "three", "five")
     )
-    ids = {"C0": origin.id, "C1.1": first_pick.id, "C3.2": second_pick.id, "C5.1": third_pick.id}
+    named = {"C0": origin, "C1.1": first_pick, "C3.2": second_pick, "C5.1": third_pick}
+    ids = {label: sp.id for label, sp in named.items()}
 
     def closed(rnd: int, on: OptSearchPoint, *arms: str, selected: str = "", **reading: Any) -> Any:
+        """A held round ends on its parent *on*, re-read as the reference arm."""
+        proposed = {
+            ArmKey(sp.id): arm_state(
+                label, slot=ArmSlot(round=rnd, idx=idx, total=len(arms)), individual=sp
+            )
+            for idx, label in enumerate(arms)
+            for sp in [named.get(label) or prompted(instruction=label)]
+        }
         return round_result(
             rnd,
-            improved=bool(selected) and rnd > 0,
-            opt_sp=on,
-            candidate_scores=[
-                scored_candidate(ids.get(arm, arm.lower()), label=arm) for arm in arms
-            ],
-            candidates_scored=len(arms),
-            all_candidate_results={},
-            selected_labels=[selected] if selected else [],
+            arms={ArmKey(on.id): arm_state("parent", individual=on)} | proposed,
+            selected=[ids[selected]] if selected else [],
+            voted={} if selected else {"ended_on": on.id},
+            cells={},
             **reading,
         )
 
     def stands(run: list[Any]) -> RunStanding:
-        return RunStanding.after(run, lives=None, spent=None)
+        return RunStanding.after(run, lives=None)
 
     # C0 is re-read between the lines: the panel cell it took in round 1 it misses by round 3.
     first_line = _line_read(1, True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL, ids=ids)
@@ -2924,9 +3117,9 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert held.vs_origin == first_line.lead
     standing_now = stands(run)
     assert standing_now.selection.model_dump() == {
+        "key": second_pick.id,
         "round": 3,
         "label": "C3.2",
-        "candidate_id": second_pick.id,
     }
     assert standing_now.parent.label == "C1.1"
     assert (standing_now.rounds_closed, standing_now.improved, standing_now.advanced) == (
@@ -2959,20 +3152,27 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     h2h_stores = workspace(tmp_path / "h2h")
     potter_a, capo_b = SubjectSpec("campaign", "potter_a"), SubjectSpec("campaign", "capo_b")
     potter_course = SubjectSpec("course", "potter_a", "cycle_potter_a_fork_r1")
-    _h2h_campaign(h2h_stores, "potter_a", 1, selected=0.5, rebased=True)
-    _h2h_campaign(h2h_stores, "capo_b", 2, selected=0.7, incurred=0.3, loop=0.15, wall=50)
+    _evidence_campaign(h2h_stores, "potter_a", 1, selected=0.5, rebased=True)
+    _evidence_campaign(h2h_stores, "capo_b", 2, selected=0.7, incurred=0.3, loop=0.15, wall=50)
     shared = subject_evidence(h2h_stores, [potter_a, capo_b]).head_to_head
     assert shared is not None and shared.rows[0].bench_set is not None
-    budget = ArmBudget(
-        usd=2.0, max_rounds=3, determinism=None, lives=None, convergence_patience=None
-    )
-    for h2h_id in ("real4", "real5", "real6", "real7"):
+    declared = minted_campaign(
+        CycleHop(campaign_id="arm", cycle_id="cycle_arm"),
+        config=_h2h_config("potter", 0, _H2H_FORMULA, None),
+        purpose=Compare(arm=Arm(head_to_head_id="any", arm_key="any")),
+    ).declaration
+    for h2h_id in ("real4", "real5", "real6", "real7", "real8"):
+        alike = declared.shared_part()
+        if h2h_id == "real8":
+            # Declared over defaults its arms no longer run under.
+            alike = alike.model_copy(update={"bench_defaults_pin": "moved"})
         h2h_stores.campaigns.declare_head_to_head(
             HeadToHeadRecord(
                 head_to_head_id=h2h_id,
                 created_at="",
-                bench_set=shared.rows[0].bench_set,
-                budget=budget,
+                origin="origin",
+                shared=alike,
+                ruler_version=0,
             )
         )
     for subjects, third, verdict, differs_on, family in (
@@ -2983,7 +3183,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             (potter_a, capo_b),
             {"cid": "gepa_c", "n": 3, "seed": 1},
             False,
-            ["split", "bench_rows", "optimizer_models"],
+            ["bench_rows", "optimizer_models"],
             1,
         ),
         (
@@ -2994,7 +3194,8 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             1,
         ),
         ((potter_a, capo_b), {"cid": "capo_h", "n": 8, "scoring": "0.5 * env_reward"}, None, [], 0),
-        ((potter_a, capo_b), {"cid": "capo_f", "n": 6, "at": 1}, True, [], 3),
+        # capo_b and capo_f run one treatment, so they contrast nothing and never pair.
+        ((potter_a, capo_b), {"cid": "capo_f", "n": 6, "at": 1}, True, [], 2),
         (
             (potter_a, capo_b),
             {"cid": "potter_g", "n": 7, "proposer_model": "other/model"},
@@ -3013,7 +3214,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         case = f"{subjects} beside {third}"
         asked = [*subjects]
         if third is not None:
-            asked.append(_h2h_campaign(h2h_stores, **{"selected": 0.7, **third}))
+            asked.append(_evidence_campaign(h2h_stores, **{"selected": 0.7, **third}))
         if not family:
             with pytest.raises(ValueError):
                 subject_evidence(h2h_stores, asked)
@@ -3070,6 +3271,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             ["controlled", "controlled", "uncontrolled", "differs"],
         ),
         ("real7", ("potter", "capo", "waiting"), None, ["controlled"] * 3),
+        ("real8", ("potter", "capo"), False, ["differs"] * 2),
     ):
         case = f"{h2h_id} over {arms}"
         declared = []
@@ -3077,27 +3279,34 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             optimizer, hour = optimizer_hour[key]
             record = "real5" if key == "levi" else h2h_id
             declared.append(
-                _h2h_campaign(
+                _evidence_campaign(
                     h2h_stores,
                     f"{optimizer}_{key}_{record}",
                     hour,
                     selected=0.6,
-                    arm=Arm(head_to_head_id=record, arm_key=key, treatment_digest=key),
+                    purpose=Compare(arm=Arm(head_to_head_id=record, arm_key=key)),
                     graded=key != "waiting",
                 )
             )
         if "capped" in arms:
             capped = f"capo_capped_{h2h_id}"
-            h2h_stores.campaigns.write_run_limits(
-                CycleHop(campaign_id=capped, cycle_id=f"cycle_{capped}"),
-                SpendCeilings(1.0, None),
-                rounds=None,
-                pause_at_round=None,
-                reserve=SpendCeilings(),
-            )
+            h2h_stores.campaigns.update_campaign(capped, standing_budget=Budget(usd=1.0))
         h2h = subject_evidence(h2h_stores, declared).head_to_head
         assert h2h is not None and h2h.guard.head_to_head_id == h2h_id, case
-        assert [r.guard.state.value for r in h2h.rows] == guards, case
+        assert [r.guard.state.value for r in h2h.rows] == guards, (
+            f"{case}: {[r.guard.differs_on for r in h2h.rows]}"
+        )
         assert h2h.verdict is verdict, case
+        tested_by_state = Counter(
+            p.guard.state for p in h2h.pairs if p.reading.headline is not None
+        )
+        for pair in h2h.pairs:
+            if pair.reading.headline is not None and pair.reading.headline.family is not None:
+                assert pair.reading.headline.family.n_tests == tested_by_state[pair.guard.state], (
+                    f"{case}: a controlled and an uncontrolled pair were corrected as one family"
+                )
+        assert (GuardDifference.DEFAULTS in h2h.guard.differs_on) is (h2h_id == "real8"), (
+            f"{case}: arms run under defaults their record was not declared over, unsaid"
+        )
         if verdict is None:
             assert h2h.verdict_absent is ReadingState.PENDING, f"{case}: a waiting arm is pending"

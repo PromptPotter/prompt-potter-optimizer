@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.loop_start import diagnostic_trace
 from promptpotter.application.jobs.launcher.admission import paid_pass
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.pipeline_overlay import normalize_model_id
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.capabilities import STANDARD_EFFORT_LADDER
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_DEFAULT_EFFORT
-from promptpotter.infrastructure.llm.registry import get_llm_client, normalize_model_id
+from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
@@ -78,7 +79,7 @@ async def probe_reasoning(
     client = get_llm_client(provider)
     # Every send at its cap, every attempt: the prompt's length in chars bounds its tokens from above.
     bound = (len(rungs) + 1) * SEND_ATTEMPTS * (_MAX_TOKENS + len(_PROMPT))
-    declared = SpendCeilings(None, bound)
+    declared = Budget(tokens=bound)
     async with paid_pass(stores=stores, verb="probe-reasoning", hop=None, declared=declared):
         with diagnostic_trace(stores, None):
             readings = [await _one(client, model, None)]

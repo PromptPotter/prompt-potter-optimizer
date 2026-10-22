@@ -1,63 +1,95 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, cast, overload
 
+from promptpotter.application import optimizers
 from promptpotter.application.bench.children import (
     DROPPED_MANDATORY_PLACEHOLDER,
     admission_failures,
+    carried_writes,
     placeholder_failures,
 )
-from promptpotter.application.bench.llm_call import LLMCallContext, llm_call
+from promptpotter.application.bench.llm_call import InjectionBreakdown, LLMCallContext, llm_call
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
+from promptpotter.application.intelligence.earned_blocks import (
+    answer_space_signature,
+    earned_blocks_for,
+)
+from promptpotter.application.mask.backprop import select_rewind_round
+from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
-from promptpotter.application.scoring.query_loop import ArmSlot
+from promptpotter.application.optimizers.nodes import ReadArm
+from promptpotter.application.runner.inner.spawn_context import inner_cells
+from promptpotter.application.scoring.arm_states import conclude, measuring
+from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.domain.opt_search_point import OptSearchPoint, Variation, node_source
-from promptpotter.domain.pipeline_overlay import merge_pipeline_params
-from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import CandidateProposal, round_document_digest
-from promptpotter.domain.run_records import RoundProposedRecord
+from promptpotter.domain.opt_search_point import (
+    OPERATOR_SOURCE,
+    Locus,
+    OptSearchPoint,
+    Variation,
+    loci_of,
+    node_source,
+)
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.pipeline_schema import PipelineNode
+from promptpotter.domain.pool import BlockPool, DemoPool, Pool, PoolEntry
+from promptpotter.domain.results import (
+    ArmRole,
+    Proposal,
+    Proposed,
+    merge_known_outcomes,
+    round_document_digest,
+)
+from promptpotter.domain.run_records import LLMCallRecord, RoundProposedRecord
+from promptpotter.domain.scoring import CellSheet
+from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import SendRefusedError, graceful
-from promptpotter.shared.measurement_context import (
-    NO_ROUND_SLOT,
-    MeasuredCandidate,
-    MeasurementRole,
-)
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.difficulty import DifficultyView
-    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import RoundContext, WorkingState
+    from promptpotter.application.optimizers.nodes import (
+        Controller,
+        NodeMember,
+        Proposer,
+        RoundContext,
+    )
     from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.application.runner.inner.tasks import InnerCells
     from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.opt_search_point import EvidenceGrounding
-    from promptpotter.domain.optimizer_state import RoundPayload
+    from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.pool import Access
     from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.ruler import LevelSeries
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet, GradedCell
+    from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.domain.wounds import ValidationFailure
+    from promptpotter.domain.value_tree import Delivery
+    from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["NodeContext", "bank_proposals", "measure_as_parent"]
 
 
-def bank_proposals(
-    round_: RoundContext, proposals: Sequence[CandidateProposal], *, walk: str, submitted: bool
-) -> None:
+def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submitted: bool) -> None:
     """Banked beside what they were composed from, so a resume asks whether that round still says the same."""
     ledger = round_.cycle.session.state.ledger
-    if round_.detached or ledger is None:
+    if ledger is None:
         return
     rounds = round_.cycle.rounds
     ledger.append(
@@ -66,37 +98,69 @@ def bank_proposals(
             consumed=round_document_digest(rounds[-1]) if rounds else "",
             proposals=list(proposals),
             submitted=submitted,
-            walk=walk,
         )
     )
 
 
 async def measure_as_parent(
-    cycle: Cycle, sp: JobSearchPoint, individual_id: str, cells: list[Sample]
-) -> CellSheet:
+    round_: RoundContext,
+    individual: OptSearchPoint,
+    sp: JobSearchPoint,
+    cells: list[Sample],
+    *,
+    role: ArmRole,
+    force_fresh: bool = False,
+) -> ReadArm:
+    """A reference read is an arm of the round whoever asked; a re-read continues that arm's walk."""
+    cycle = round_.cycle
+    session = cycle.session
+    key = ArmKey(individual.id)
+    asked = round_.asked(key, cells)
+    walking = round_.walks.get(key)
+    # A panel arm keeps its panel state: a read of it adds only its cells' records.
+    announce = walking is None or walking.arm.state.role == MeasurementRole.PARENT
+    arm = measuring(
+        Proposed(role=role, slot=cycle.first_slot(key), individual=individual),
+        sp,
+        session.pipeline_schema,
+        expected=len(asked),
+        sample_order=[s.id for s in cells],
+    )
+    if announce:
+        round_.callbacks.on_arm(round_.round_num, key, arm)
     walked = await score_search_point(
         sp,
         cells,
-        cycle.session,
-        label=MeasurementRole.PARENT,
+        session,
+        label=role,
         sample_index=cycle.sample_index,
-        slot=ArmSlot(NO_ROUND_SLOT, 0, individual_id),
-        measured=MeasuredCandidate(
-            idx=NO_ROUND_SLOT,
-            candidate_id=individual_id,
-            label=f"parent:{individual_id[:8]}",
-            role=MeasurementRole.PARENT,
-        ),
+        measured=MeasuredPass(individual.id, role),
+        force_fresh=force_fresh,
+        held=round_.held(key),
     )
-    return walked.sheet
+    # A partial pass is kept: `read_pair` pairs each arm on the cells both scored.
+    if walked.stopped is not None:
+        logger.warning(
+            "Parent %s stopped after %d/%d cells (%s); its floor covers only those.",
+            arm.label,
+            len(walked.sheet),
+            len(cells),
+            walked.stopped,
+        )
+    read = ReadArm(key, conclude(arm, walked), walked.sheet)
+    if announce:
+        round_.callbacks.on_arm(round_.round_num, key, read.state)
+    round_.walked(read, asked)
+    return read
 
 
 class NodeContext[K: StrictModel]:
-    """Nothing here hands out the cycle, its session or a store."""
+    """Nothing here hands out the cycle, its session, a store, the manifest or the config: only what this node declares, and its own."""
 
-    def __init__(self, round_: RoundContext, node: str) -> None:
+    def __init__(self, round_: RoundContext, member: NodeMember) -> None:
         self._round = round_
-        self.node = node
+        self._member = member
+        self.node = member.name
 
     @property
     def round_num(self) -> int:
@@ -106,29 +170,93 @@ class NodeContext[K: StrictModel]:
     def is_final_round(self) -> bool:
         return self._round.is_final_round
 
-    # A DETACHED round replays nothing, and nothing it keeps, banks or decides lands on the cycle.
+    def banked_proposals(self) -> list[Proposal] | None:
+        return self._round.cycle.banked_proposals(self.round_num)
 
-    def banked_proposals(self) -> list[CandidateProposal] | None:
-        session = self._round.cycle.session
-        if self._round.detached or not session.state.cycle_id:
-            return None
-        proposed = session.store.campaigns.round_proposals(session.hop, self.round_num)
-        return None if proposed is None else list(proposed.proposals)
+    @property
+    def _selected(self) -> SelectedOptimizer:
+        return self._round.cycle.optimizer
 
-    def restate(self, payload: RoundPayload) -> None:
+    def _declares(self, kind: type[StatePart], *, writes: bool) -> None:
+        member = self._member
+        if kind not in (member.writes if writes else member.reads | member.writes):
+            verb = "writes" if writes else "reads"
+            raise KeyError(f"{self.node!r} {verb} the {kind.kind!r} state and does not declare it")
+
+    def knobs_of[T: StrictModel](self, kind: type[T]) -> T:
+        return self._selected.reached_knobs(self._member, kind)
+
+    def fire(self, member: type) -> NodeContext[Any]:
+        """The context a fired member runs under, its own, declared by this controller's ``fires``."""
+        if member not in cast("Controller", self._member).fires:
+            raise KeyError(f"{self.node!r} fires {member.__name__} and does not declare it")
+        return NodeContext(self._round, optimizers.member(self._selected.roster_one(member)))
+
+    def slice[S: StateSlice](self, kind: type[S]) -> S:
+        self._declares(kind, writes=False)
+        return self._round.cycle.slices.get(kind)
+
+    def put(self, value: StateSlice) -> None:
+        self._declares(type(value), writes=True)
+        self._round.cycle.slices.put(value)
+
+    def recall[O: RoundOutput](self, kind: type[O], round_num: int) -> O:
+        self._declares(kind, writes=False)
+        return self._round.cycle.output(kind, round_num)
+
+    def emit(self, output: RoundOutput) -> None:
+        """Onto this context's round: banked at its close, or restated there where it already closed."""
+        self._declares(type(output), writes=True)
+        if (restated := self._round.cycle.emit(output, self.round_num)) is not None:
+            self._bank(restated)
+
+    def restate(self, *kinds: type[StateSlice]) -> None:
+        """Bank what this node now holds of *kinds* onto the closed round: a write landing after its close."""
+        for kind in kinds:
+            self._declares(kind, writes=True)
         cycle = self._round.cycle
         closed = cycle.rounds[-1]
-        state = closed.optimizer_state.model_copy(update={"payload": payload})
-        restated = cycle.seat(closed.model_copy(update={"optimizer_state": state}))
-        session = cycle.session
-        if self._round.detached or not session.state.cycle_id:
+        state = closed.closed_state.holding(*(cycle.slices.get(kind) for kind in kinds))
+        self._bank(cycle.seat(closed.model_copy(update={"optimizer_state": state})))
+
+    def earned_blocks(self) -> Mapping[str, tuple[str, ...]]:
+        """By prompt field, the blocks runs sharing the origin's answer space measured as a lift."""
+        session = self._round.cycle.session
+        signature = answer_space_signature(
+            (cell.facts.ground_truth for cell in self._round.cycle.origin_round.results),
+            dataset=session.measured_dataset,
+        )
+        return earned_blocks_for(session.store, signature)
+
+    def access(self, kind: type[Pool]) -> Access:
+        return self._selected.access(self._member, kind)
+
+    @overload
+    def drawn(self, kind: type[DemoPool]) -> tuple[Sample, ...]: ...
+    @overload
+    def drawn(self, kind: type[BlockPool]) -> tuple[PoolEntry, ...]: ...
+    def drawn(self, kind: type[Pool]) -> tuple[Any, ...]:
+        """The one reading of a pool, by its reader's declared draw: its entries in draw order, none under ``off``."""
+        if self.access(kind) == "off":
+            return ()
+        return self._round.cycle.slices.get(kind).drawn({s.key: s for s in self.demo_split})
+
+    def _bank(self, restated: RoundResult) -> None:
+        session = self._round.cycle.session
+        if restated.at_offset is None or not session.state.cycle_id:
             return
         with graceful(f"round {restated.round} optimizer state not restated"):
             session.store.campaigns.restate_optimizer_state(session.hop, restated)
 
     @property
-    def schema(self) -> PipelineSchema | None:
+    def schema(self) -> PipelineSchema:
         return self._round.cycle.session.pipeline_schema
+
+    @property
+    def prompt_node(self) -> PipelineNode:
+        """The ONE prompt node a ``prompt_arity: one`` member rewrites; ``preflight.py::refuse_unfit_pipeline`` refused any other roster before the mint."""
+        (node,) = self.schema.prompt_nodes()
+        return node
 
     def child(
         self,
@@ -136,75 +264,155 @@ class NodeContext[K: StrictModel]:
         *,
         overlay: dict[str, dict[str, Any]] | None = None,
         failures: Sequence[ValidationFailure] = (),
-        take: Mapping[str, int] | None = None,
+        take: Mapping[Locus, int] | None = None,
+        prompt_loci: Mapping[Locus, Any] | None = None,
         changes_description: str = "",
         evidence_grounding: EvidenceGrounding | None = None,
-        **changes: Any,
-    ) -> CandidateProposal:
-        """The ONE way a child is written, so the bench admits it as it is made; *overlay* lays over the FIRST parent's."""
+    ) -> Proposal:
+        """The ONE way a child is written, so the bench admits it as it is made; *overlay* lays config over the FIRST parent's."""
         schema = self.schema
         asked = overlay or {}
-        merged = (
-            merge_pipeline_params(parents[0].pipeline_params, asked, schema)
-            if asked and schema
-            else None
+        prompts, config, carried = carried_writes(
+            schema,
+            prompt_loci=prompt_loci or {},
+            overlay=asked,
+            demo=self._demo_keys(prompt_loci or {}),
         )
         individual = OptSearchPoint.derive(
             parents,
+            schema=schema,
             variation=self.variation,
             take=take,
-            config=None if merged is None or schema is None else (merged, schema),
+            changes={**loci_of(config), **prompts},
             changes_description=changes_description,
             evidence_grounding=evidence_grounding,
-            **changes,
         )
-        admitted = admission_failures(individual, asked, schema) if schema else []
-        return CandidateProposal(
-            opt_sp=individual,
-            pipeline_overlay=asked,
+        admitted = admission_failures(individual, config, schema, carried=carried)
+        return Proposal(
+            individual=individual,
+            overlay=asked,
             validation_failures=[*failures, *admitted],
         )
 
     def edit(
         self,
-        proposal: CandidateProposal,
+        proposal: Proposal,
         *,
+        prompt_loci: Mapping[Locus, Any],
         changes_description: str | None = None,
-        **changes: Any,
-    ) -> CandidateProposal:
-        individual = proposal.opt_sp.edited(
-            self.variation, changes_description=changes_description, **changes
-        )
-        failures = proposal.validation_failures
+    ) -> Proposal:
         schema = self.schema
-        if schema and individual.prompt_fields() != proposal.opt_sp.prompt_fields():
+        prompts, _, carried = carried_writes(
+            schema, prompt_loci=prompt_loci, overlay={}, demo=self._demo_keys(prompt_loci)
+        )
+        individual = proposal.individual.edited(
+            self.variation, schema=schema, changes=prompts, changes_description=changes_description
+        )
+        failures = [*proposal.validation_failures, *carried]
+        if individual.prompts != proposal.individual.prompts:
             failures = [
                 *(f for f in failures if f.reason != DROPPED_MANDATORY_PLACEHOLDER),
                 *placeholder_failures(individual, schema),
             ]
-        return proposal.model_copy(update={"opt_sp": individual, "validation_failures": failures})
+        return proposal.model_copy(
+            update={"individual": individual, "validation_failures": failures}
+        )
+
+    def _demo_keys(self, loci: Mapping[Locus, Any]) -> frozenset[str] | None:
+        """The shots this member may write: what it draws of the demo pool, asked only where *loci* write one; ``None`` where it draws none."""
+        if DemoPool not in self._member.draws:
+            return None
+        if not any(locus.key == SHOTS_KEY for locus in loci):
+            return frozenset()
+        return frozenset(s.key for s in self.drawn(DemoPool))
 
     @property
-    def optimizer(self) -> SelectedOptimizer:
-        return self._round.cycle.optimizer
+    def optimizer_name(self) -> str:
+        return self._selected.name
 
     @property
     def knobs(self) -> K:
-        return cast("K", self.optimizer.knobs(self.node))
-
-    def knobs_of[T: StrictModel](self, node: str, kind: type[T]) -> T:
-        return self.optimizer.knobs_of(node, kind)
-
-    def sibling(self, node: str) -> NodeContext[Any]:
-        return NodeContext(self._round, node)
+        return cast("K", self._selected.knobs(self.node))
 
     @property
-    def config(self) -> CampaignConfig:
-        return self._round.cycle.config
+    def node_config(self) -> dict[str, Any]:
+        """Its own node's config as the manifest and overlay resolve it."""
+        return self._selected.node_config(self.node)
 
     @property
-    def state(self) -> WorkingState:
-        return self._round.cycle.working_state
+    def model(self) -> str:
+        return self._selected.model(self.node)
+
+    @property
+    def elimination_n_min(self) -> int:
+        return self._round.cycle.config.optimization.elimination_n_min
+
+    @property
+    def budget_rounds(self) -> int | None:
+        return self._round.cycle.config.optimization.budget.rounds
+
+    @property
+    def inner_cells(self) -> InnerCells | None:
+        """The cells an L4 outer's arms are measured on; ``None`` off the recursion."""
+        return inner_cells()
+
+    @property
+    def axes(self) -> AxisIndex | None:
+        return self._round.cycle.axes()
+
+    def runtime_failures(self) -> list[RuntimeFailure]:
+        return self._round.cycle.runtime_failures()
+
+    def call_context(
+        self, *, round_num: int | None = None, injections: InjectionBreakdown | None = None
+    ) -> LLMCallContext:
+        session = self._round.cycle.session
+        return LLMCallContext(
+            ledger=session.state.ledger,
+            round_num=self.round_num if round_num is None else round_num,
+            cache=session.store.optimizer_reuse,
+            injections=InjectionBreakdown() if injections is None else injections,
+        )
+
+    def note_synthesized_call(self, payload: dict[str, Any]) -> None:
+        """Where a round makes no call, so the audit trail and dashboard still see the node."""
+        if (ledger := self._round.cycle.session.state.ledger) is not None:
+            ledger.append(
+                LLMCallRecord(
+                    node=self.node,
+                    round=self.round_num,
+                    payload_kind="synthesized",
+                    payload=payload,
+                )
+            )
+
+    @property
+    def cell_formula(self) -> str | None:
+        session = self._round.cycle.session
+        formula, _ = resolve_cell_formula(
+            session.scoring.require_scorer().per_cell, session.pipeline_schema
+        )
+        return formula
+
+    def spend_cap_usd(self) -> float | None:
+        return self._round.cycle.session.control.spend_cap_usd()
+
+    def spend_used_usd(self) -> float:
+        return self._round.cycle.session.control.spend_used_usd()
+
+    @property
+    def prompt_delivery(self) -> Delivery:
+        session = self._round.cycle.session
+        return session.backend_client.prompt_delivery(session.pipeline_params)
+
+    def rewind_round(self) -> int | None:
+        """Where a rewind of this cycle lands (UCB over the campaign's lineage); ``None`` where no ancestor stands."""
+        cycle = self._round.cycle
+        return select_rewind_round(
+            load_lineage_spine(cycle.difficulty),
+            cycle_id=cycle.session.state.cycle_id or "",
+            current_round=self.round_num,
+        )
 
     @property
     def callbacks(self) -> RunCallbacks:
@@ -219,16 +427,15 @@ class NodeContext[K: StrictModel]:
         return self._round.cycle.population
 
     def keep(self, individuals: Sequence[OptSearchPoint]) -> None:
-        if not self._round.detached:
-            self._round.cycle.population = list(individuals)
+        self._round.cycle.population = list(individuals)
 
     @property
     def variation(self) -> Variation:
-        selected = self.optimizer
-        llm = selected.node(self.node).kind is NodeKind.LLM
-        return Variation(
-            node=node_source(selected.name, self.node), mode="llm" if llm else "deterministic"
+        mode = cast("Proposer", self._member).variation_mode
+        node = (
+            OPERATOR_SOURCE if mode == "operator" else node_source(self._selected.name, self.node)
         )
+        return Variation(node=node, mode=mode)
 
     @property
     def measured_unit(self) -> MeasuredUnit:
@@ -239,9 +446,19 @@ class NodeContext[K: StrictModel]:
         return self._round.cycle.tracking.current_sp
 
     @property
-    def parent_rows(self) -> list[GradedCell]:
-        """The cycle's frontier: each sample's latest cell, of WHICHEVER individual measured it."""
+    def frontier_rows(self) -> list[GradedCell]:
+        """Each sample's latest cell, of WHICHEVER individual measured it."""
         return self._round.cycle.tracking.current_results
+
+    @property
+    def parent_own_rows(self) -> list[GradedCell]:
+        """Each sample's latest cell of the parent ITSELF, never one another individual answered."""
+        cycle = self._round.cycle
+        key = ArmKey(cycle.opt_sp.id)
+        rows: list[GradedCell] = []
+        for rr in cycle.rounds:
+            rows = merge_known_outcomes(rows, rr.rows(key))
+        return rows
 
     @property
     def parent_accuracy(self) -> float | None:
@@ -250,25 +467,38 @@ class NodeContext[K: StrictModel]:
 
     @property
     def origin(self) -> OptSearchPoint:
-        origin = self._round.cycle.origin_round.opt_sp
-        assert origin is not None, "round 0 closes with the origin's individual"
-        return origin
+        return self._round.cycle.origin_round.origin.individual
 
     @property
     def rounds(self) -> Sequence[RoundResult]:
-        return self._round.cycle.rounds
+        """Sealed: a round's optimizer state opens only through ``recall`` / ``slice``, which check what this node declares."""
+        return [rr.model_copy(update={"optimizer_state": None}) for rr in self._round.cycle.rounds]
 
     @property
     def framing(self) -> Any:
         return self._round.cycle.framing
 
     @property
-    def demo_pool(self) -> tuple[Sample, ...]:
+    def demo_split(self) -> tuple[Sample, ...]:
+        """The demo partition whole, which resolves the shots an individual already holds; a reader draws through ``drawn``."""
         return self._round.cycle.session.scoring.require_partition().demo
+
+    @property
+    def slot_of(self) -> Mapping[str, int]:
+        return self._round.cycle.session.bank.slot_of
 
     @property
     def difficulty(self) -> DifficultyView:
         return self._round.cycle.difficulty
+
+    @property
+    def level_series(self) -> LevelSeries:
+        """Every θ a member reads across rounds is the last close's, off the ledger, never its own fit."""
+        session = self._round.cycle.session
+        series = session.store.campaigns.standing_rounds(session.hop, moment=None).level_series
+        if series is None:
+            raise LookupError(f"round {self.round_num} reads a level series no close has banked")
+        return series
 
     @property
     def sample_index(self) -> SampleIndex | None:
@@ -283,10 +513,9 @@ class NodeContext[K: StrictModel]:
         seed = cycle.session.campaign_id if pinned is None else pinned
         return random.Random(f"{seed}:{self.round_num}:{self.node}{tag}")
 
-    def fill(self, node: str | None = None, /, **values: str) -> str:
-        name = node or self.node
-        selected = self.optimizer
-        template = running_prompt(name, selected.node_config(name), selected.document)
+    def fill(self, **values: str) -> str:
+        selected = self._selected
+        template = running_prompt(self.node, selected.node_config(self.node), selected.manifest)
         return template.compile_prompt(**values)
 
     async def ask(self, prompt: str, idx: int | None = None) -> str:
@@ -322,21 +551,24 @@ class NodeContext[K: StrictModel]:
 
     async def measure_parent(self, individual_id: str, cells: list[Sample]) -> CellSheet:
         cycle = self._round.cycle
-        return await measure_as_parent(
-            cycle, cycle.searchpoint(individual_id), individual_id, cells
+        individual = cycle.measured(individual_id).individual
+        sp = cycle.searchpoint(individual_id)
+        read = await measure_as_parent(
+            self._round, individual, sp, cells, role=MeasurementRole.PARENT
         )
+        return read.rows
 
     async def show_next_round(self) -> None:
         shown = self.round_num + 1
         with at_round(shown):
-            await self.optimizer.runtime.show_round(replace(self._round, round_num=shown))
+            await self._selected.runtime.show_round(replace(self._round, round_num=shown))
 
     def decide(
         self, kind: str, inputs: dict[str, Any], outcome: Any, *, data: dict[str, Any] | None = None
     ) -> Any:
         """A resume re-derives it only where the runtime registers a replayer for *kind*; else it is archived."""
         return record_decision(
-            [] if self._round.detached else self._round.cycle.pending_decisions,
+            self._round.cycle.pending_decisions,
             kind,
             inputs,
             outcome,

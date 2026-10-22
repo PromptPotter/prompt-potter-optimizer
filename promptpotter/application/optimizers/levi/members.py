@@ -20,13 +20,15 @@ from promptpotter.application.optimizers.descriptors import (
 from promptpotter.application.optimizers.levi import prompts
 from promptpotter.application.optimizers.levi.state import (
     LEVI_MANIFEST,
+    DescriptorCalibration,
     DescriptorStats,
+    EliteArchive,
     LeviCalibration,
     LeviElite,
-    LeviRoundState,
 )
 from promptpotter.application.optimizers.paper_templates import RewriteKnobs, child
 from promptpotter.config.paths import optimizers_root
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.run_records import CheckpointKind
@@ -43,18 +45,19 @@ if TYPE_CHECKING:
         ReplayContext,
         Replayer,
     )
-    from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
-        BankedState,
-        Measured,
+        Draw,
+        MeasuredRound,
         Panel,
+        PromptArity,
         Proposals,
         Selection,
     )
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.results import CandidateProposal, DisplayMetric, RoundResult
+    from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
+    from promptpotter.domain.optimizer_state import StatePart
+    from promptpotter.domain.pool import Pool
+    from promptpotter.domain.results import DisplayMetric, Proposal, RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
 
@@ -80,7 +83,7 @@ _LLOYD_ITERATIONS = 100
 class ProxyCssKnobs(StrictModel):
     discovery: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         ge=1,
-        description="The discovery set: the search-pool cells, first in bank order, the "
+        description="The discovery set: the search-split cells, first in bank order, the "
         "calibration round scores every calibration prompt on and the proxy is chosen among.",
     )
     size: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
@@ -112,7 +115,7 @@ class ProxyCssKnobs(StrictModel):
 
 
 def choose_proxy(
-    knobs: ProxyCssKnobs, rows_by_arm: Mapping[str, CellSheet], order: list[str]
+    knobs: ProxyCssKnobs, rows_by_arm: Mapping[ArmKey, CellSheet], order: list[str]
 ) -> list[str]:
     graded = [cell_objectives(rows) for rows in rows_by_arm.values()]
     cells = [key for key in order if all(key in g for g in graded)]
@@ -133,28 +136,32 @@ class ProxyCss:
 
     name: ClassVar[str] = "proxy_css"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = ProxyCssKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration})
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
     size_knob: ClassVar[str | None] = None
 
-    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
-        knobs = selected.knobs_of(self.name, ProxyCssKnobs)
-        # The proxy is chosen among the discovery set, which the pool must hold whole.
-        return knobs.size if knobs.discovery <= pool else 0
+    def round_cells(self, knobs: ProxyCssKnobs, search: int) -> int:
+        # The proxy is chosen among the discovery set, which the search split must hold whole.
+        return knobs.size if knobs.discovery <= search else 0
 
     def draw(self, ctx: NodeContext[ProxyCssKnobs], pool: list[Sample]) -> Panel:
-        calibration = nodes.state_as(ctx, LeviRoundState).payload.calibration
+        calibration = ctx.slice(DescriptorCalibration).calibration
         if calibration is None:
             knobs = ctx.knobs
             if knobs.discovery > len(pool):
                 raise ValueError(
-                    f"proxy_css: a discovery set of {knobs.discovery} cells needs a search pool "
+                    f"proxy_css: a discovery set of {knobs.discovery} cells needs a search split "
                     f"that large, and this one holds {len(pool)}"
                 )
             discovery = pool[: knobs.discovery]
             return nodes.Panel(cells=discovery, order=list(discovery), block_size=len(discovery))
         by_key = {s.key: s for s in pool}
         if missing := [key for key in calibration.proxy if key not in by_key]:
-            raise ValueError(f"proxy_css: {len(missing)} proxy cells left the search pool")
+            raise ValueError(f"proxy_css: {len(missing)} proxy cells left the search split")
         cells = [by_key[key] for key in calibration.proxy]
         return nodes.Panel(cells=cells, order=list(cells), block_size=len(cells))
 
@@ -229,15 +236,15 @@ class MapElitesKnobs(StrictModel):
 
 def _calibrate(
     ctx: NodeContext[MapElitesKnobs],
-    offered: list[tuple[OptSearchPoint, CellSheet]],
+    offered: list[tuple[ArmKey, OptSearchPoint, CellSheet]],
     order: list[str],
 ) -> LeviCalibration:
     """Alg. 1 lines 8-14."""
-    proxy_knobs = ctx.knobs_of(ProxyCss.name, ProxyCssKnobs)
+    proxy_knobs = ctx.knobs_of(ProxyCssKnobs)
     knobs = ctx.knobs
-    rows_by_arm = {ind.id: rows for ind, rows in offered}
+    rows_by_arm = {key: rows for key, _, rows in offered}
     proxy = choose_proxy(proxy_knobs, rows_by_arm, order)
-    ctx.sibling(ProxyCss.name).decide(
+    ctx.decide(
         LeviCheckpointKind.PROXY_SELECTED,
         {
             "calibration_ids": list(rows_by_arm),
@@ -249,7 +256,7 @@ def _calibrate(
     )
     placed = [
         d
-        for _, rows in offered
+        for _, _, rows in offered
         if (d := behaviour_descriptor(rows, proxy, knobs.descriptors)) is not None
     ]
     if not placed:
@@ -272,7 +279,12 @@ def _calibrate(
 class MapElites:
     name: ClassVar[str] = "map_elites"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
+    prompt_arity: ClassVar[PromptArity] = "none"
     knobs: ClassVar[type[StrictModel]] = MapElitesKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = frozenset({ProxyCss})
     elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
 
@@ -280,30 +292,31 @@ class MapElites:
         self,
         ctx: NodeContext[MapElitesKnobs],
         panel: Panel,
-        rows: Mapping[str, CellSheet],
+        rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells
 
     def select(
-        self, ctx: NodeContext[MapElitesKnobs], measured: Measured, proposals: Proposals
+        self, ctx: NodeContext[MapElitesKnobs], measured: MeasuredRound, proposals: Proposals
     ) -> Selection:
-        banked = nodes.state_as(ctx, LeviRoundState)
-        state = banked.payload
         knobs = ctx.knobs
-        offered = [(ind, measured.rows[ind.id]) for ind in measured.electable]
-        calibration = state.calibration
+        offered = [
+            (key, measured.arms[key].individual, measured.rows[key]) for key in measured.electable
+        ]
+        calibration = ctx.slice(DescriptorCalibration).calibration
         if calibration is None:
             # The origin is the fifth calibration prompt (App. A).
-            offered.insert(0, (measured.parent.opt_sp, measured.parent_rows))
+            parent = measured.parent
+            offered.insert(0, (parent.key, parent.individual, parent.rows))
             order = [cell.key for cell in measured.parent_rows]
             calibration = _calibrate(ctx, offered, order)
         stats = calibration.stats
-        elites = {e.cell: e for e in state.elites}
+        elites = {e.cell: e for e in ctx.slice(EliteArchive).elites}
         placed = kept = 0
-        arms = {cs.candidate_id for cs in measured.scores}
-        placed_scores: dict[str, float] = {}
+        arms = set(measured.arms)
+        placed_scores: dict[ArmKey, float] = {}
         # Alg. 2's TRYINSERT, in walk order.
-        for ind, rows in offered:
+        for key, ind, rows in offered:
             graded = cell_objectives(rows)
             x = behaviour_descriptor(rows, calibration.proxy, knobs.descriptors)
             if x is None or any(c not in graded for c in calibration.proxy):
@@ -312,8 +325,8 @@ class MapElites:
             stats = _welford(stats, x)
             cell = _nearest(calibration.centroids, _normalized(stats, x))
             score = sum(graded[c] for c in calibration.proxy) / len(calibration.proxy)
-            if ind.id in arms:
-                placed_scores[ind.id] = score
+            if key in arms:
+                placed_scores[key] = score
             if cell not in elites or score > elites[cell].score:
                 kept += 1
                 elites[cell] = LeviElite(
@@ -321,25 +334,25 @@ class MapElites:
                 )
         calibration = calibration.model_copy(update={"stats": stats})
         archive = sorted(elites.values(), key=lambda e: e.cell)
-        held = {ind.id: ind for ind in (*ctx.population, *(ind for ind, _ in offered))}
+        held = {ind.id: ind for ind in (*ctx.population, *(ind for _, ind, _ in offered))}
         ctx.keep([held[cid] for cid in dict.fromkeys(e.individual_id for e in archive)])
         top = max((e.score for e in archive), default=None)
         leaders = {e.individual_id for e in archive if e.score == top}
         # A tie never advances: the incumbent holds, then the first arm walked.
-        walked = [ind.id for ind, _ in offered if ind.id in leaders]
+        walked = [key for key, ind, _ in offered if ind.id in leaders]
         if leaders and not walked and ctx.parent.id not in leaders:
             raise ValueError("map_elites: the best elite is neither the incumbent nor this round's")
-        selected_id = walked[0] if walked and ctx.parent.id not in leaders else ""
+        selected = walked[0] if walked and ctx.parent.id not in leaders else None
         verdict = (
             f"placed {placed} of {len(offered)} arms, {kept} into an empty or outscored cell; the "
             f"archive holds {len(archive)} of {len(calibration.centroids)} cells"
             + (f", best {top:.3f}" if top is not None else "")
         )
-        banked.payload = LeviRoundState(calibration=calibration, elites=archive)
+        ctx.put(DescriptorCalibration(calibration=calibration))
+        ctx.put(EliteArchive(elites=archive))
         return nodes.Selection(
-            selected_id=selected_id,
-            leading_id=selected_id or max(placed_scores, key=placed_scores.__getitem__, default=""),
-            scores=list(measured.scores),
+            selected=selected,
+            leading=selected or max(placed_scores, key=placed_scores.__getitem__, default=None),
             verdict_reason=verdict,
         )
 
@@ -369,21 +382,27 @@ class LeviSeed:
 
     name: ClassVar[str] = "levi_seed"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = True
+    variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
 
     async def propose(
         self, ctx: NodeContext[LeviSeedKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
         origin = ctx.origin
         shown: list[tuple[OptSearchPoint, float | None]] = [(origin, None)]
-        seeds: list[CandidateProposal] = []
+        seeds: list[Proposal] = []
         for i in range(ctx.knobs.n_diverse_seeds):
             raw = await ctx.ask(prompts.paradigm_shift_prompt(ctx, shown), i)
-            proposal = child(ctx, [origin], raw, f"diverse seed {i + 1}")
+            proposal = child(ctx, ctx.prompt_node, [origin], raw, f"diverse seed {i + 1}")
             seeds.append(proposal)
             if not proposal.validation_failures:
-                shown.append((proposal.opt_sp, None))
+                shown.append((proposal.individual, None))
         return nodes.Proposals(seeds)
 
 
@@ -392,33 +411,36 @@ class LeviParadigmShift:
 
     name: ClassVar[str] = "levi_paradigm_shift"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = False
+    variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviParadigmShiftKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = nodes.NO_CONSULTS
 
     async def propose(
         self, ctx: NodeContext[LeviParadigmShiftKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
-        state = nodes.state_as(ctx, LeviRoundState).payload
-        shift = await self._shift(ctx, state, ctx.knobs.n_clusters, len(proposals.proposals))
+        shift = await self._shift(ctx, ctx.knobs.n_clusters, len(proposals.proposals))
         return nodes.Proposals([*proposals.proposals, shift])
 
     async def _shift(
-        self,
-        ctx: NodeContext[LeviParadigmShiftKnobs],
-        state: LeviRoundState,
-        n_clusters: int,
-        idx: int,
-    ) -> CandidateProposal:
-        if state.calibration is None:
+        self, ctx: NodeContext[LeviParadigmShiftKnobs], n_clusters: int, idx: int
+    ) -> Proposal:
+        calibration = ctx.slice(DescriptorCalibration).calibration
+        if calibration is None:
             raise ValueError(
                 "levi_paradigm_shift: no calibration stands, so no elite to shift from"
             )
-        centroids = np.asarray(state.calibration.centroids)
-        occupied = np.asarray([centroids[e.cell] for e in state.elites])
-        k = min(n_clusters, len(state.elites))
+        elites = ctx.slice(EliteArchive).elites
+        centroids = np.asarray(calibration.centroids)
+        occupied = np.asarray([centroids[e.cell] for e in elites])
+        k = min(n_clusters, len(elites))
         _, labels = _lloyd(occupied, k, _generator(ctx))
         clusters: dict[int, list[LeviElite]] = {}
-        for elite, label in zip(state.elites, labels.tolist(), strict=True):
+        for elite, label in zip(elites, labels.tolist(), strict=True):
             clusters.setdefault(label, []).append(elite)
         representatives = sorted(
             (max(members, key=lambda e: e.score) for members in clusters.values()),
@@ -431,6 +453,7 @@ class LeviParadigmShift:
         )
         return child(
             ctx,
+            ctx.prompt_node,
             regions,
             await ctx.ask(prompt, idx),
             f"paradigm shift from {len(representatives)} regions",
@@ -466,37 +489,48 @@ class LeviRefine:
 
     name: ClassVar[str] = "levi_refine"
     kind: ClassVar[NodeKind] = NodeKind.LLM
+    prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = True
+    variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviRefineKnobs
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
+    writes: ClassVar[frozenset[type[StatePart]]] = nodes.NO_STATE
+    draws: ClassVar[Mapping[type[Pool], Draw]] = nodes.NO_DRAWS
+    consults: ClassVar[frozenset[type]] = frozenset({LeviParadigmShift})
 
     async def propose(
         self, ctx: NodeContext[LeviRefineKnobs], panel: Panel, proposals: Proposals
     ) -> Proposals:
-        state = nodes.state_as(ctx, LeviRoundState).payload
-        shift = ctx.knobs_of(LeviParadigmShift.name, LeviParadigmShiftKnobs)
-        asked = [self._refinement(ctx, state, i) for i in range(shift.interval - 1)]
+        calibration = ctx.slice(DescriptorCalibration).calibration
+        elites = ctx.slice(EliteArchive).elites
+        shift = ctx.knobs_of(LeviParadigmShiftKnobs)
+        asked = [self._refinement(ctx, calibration, elites, i) for i in range(shift.interval - 1)]
         replies = await ctx.ask_each({i: p for i, (_, p) in enumerate(asked)})
         return nodes.Proposals(
             [
-                child(ctx, [parent], raw, f"refine {parent.id[:6]}")
+                child(ctx, ctx.prompt_node, [parent], raw, f"refine {parent.id[:6]}")
                 for (parent, _), raw in zip(asked, replies, strict=True)
             ]
         )
 
     def _refinement(
-        self, ctx: NodeContext[LeviRefineKnobs], state: LeviRoundState, idx: int
+        self,
+        ctx: NodeContext[LeviRefineKnobs],
+        calibration: LeviCalibration | None,
+        elites: Sequence[LeviElite],
+        idx: int,
     ) -> tuple[OptSearchPoint, str]:
-        assert state.calibration is not None
+        assert calibration is not None
         knobs = ctx.knobs
         rng = ctx.rng(f":{idx}")
-        parent = _softmax_pick(state.elites, rng.choice(knobs.sampler_temperatures), rng)
-        others = [e for e in state.elites if e is not parent]
+        parent = _softmax_pick(elites, rng.choice(knobs.sampler_temperatures), rng)
+        others = [e for e in elites if e is not parent]
         inspirations = (
             []
             if rng.random() < knobs.inspiration_drop
             else rng.sample(others, min(knobs.n_inspirations, len(others)))
         )
-        proxy = set(state.calibration.proxy)
+        proxy = set(calibration.proxy)
         measured_in = next(rr for rr in ctx.rounds if rr.round == parent.round)
         rows = measured_in.sheet_of(parent.individual_id)
         held = {ind.id: ind for ind in ctx.population}
@@ -532,11 +566,6 @@ class LeviRuntime(nodes.OptimizerRuntime):
         LeviCheckpointKind.PROXY_SELECTED: _replay_proxy_selected,
     }
 
-    def start(
-        self, session: Session, config: CampaignConfig, origin_results: CellSheet
-    ) -> BankedState[LeviRoundState]:
-        return nodes.BankedState(LeviRoundState(calibration=None, elites=[]))
-
     def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
         return nodes.rows_read_packages(rounds, _PROPOSERS)
 
@@ -546,11 +575,11 @@ class LeviRuntime(nodes.OptimizerRuntime):
             seeds, selected.knobs_of(LeviParadigmShift.name, LeviParadigmShiftKnobs).interval
         )
 
-    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
+    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
         shift = selected.knobs_of(LeviParadigmShift.name, LeviParadigmShiftKnobs)
         seeds = selected.knobs_of(LeviSeed.name, LeviSeedKnobs).n_diverse_seeds
         discovery = selected.knobs_of(ProxyCss.name, ProxyCssKnobs).discovery
-        proxy = selected.round_cells(pool)
+        proxy = selected.round_cells(search)
         if not proxy:
             return 0
         return max((seeds + 1) * discovery, (shift.interval + 1) * proxy)
@@ -558,10 +587,10 @@ class LeviRuntime(nodes.OptimizerRuntime):
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult
     ) -> list[OptimizerFact]:
-        state = round_result.optimizer_state.payload_as(LeviRoundState)
-        if (calibration := state.calibration) is None:
+        state = round_result.closed_state
+        if (calibration := state.slice(DescriptorCalibration).calibration) is None:
             return []
-        elites, k = len(state.elites), len(calibration.proxy)
+        elites, k = len(state.slice(EliteArchive).elites), len(calibration.proxy)
         # Calibration is round 1, and every round after it runs one paradigm shift.
         shifts = round_result.round - 1
         return [

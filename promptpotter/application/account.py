@@ -11,7 +11,15 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import NamedTuple
 
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.run_records import AccountEvent, AccountEventRecord
+from promptpotter.infrastructure.identity import blocklist, migration
+from promptpotter.infrastructure.identity.grants import (
+    grant_principal,
+    list_grants,
+    revoke_principal,
+)
+from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.account_trail import (
     TrailLine,
@@ -19,7 +27,7 @@ from promptpotter.infrastructure.store.account_trail import (
     workspace_lines,
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import (
     AccountDir,
     ConsentRecord,
@@ -28,14 +36,14 @@ from promptpotter.infrastructure.store.user_store import (
     read_accounts,
 )
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
-from promptpotter.shared.identity import acting_principal_id
+from promptpotter.shared.identity import IdentityContext, acting_principal, default_identity
 
 
 def _record(stores: Stores, event: AccountEvent, *, at: str, subject: str = "") -> None:
     CycleEventLog.open_workspace(stores.base_dir).append(
         AccountEventRecord(
             event=event,
-            user_id=acting_principal_id(stores.identity),
+            user_id=acting_principal(stores.identity).id,
             subject=subject,
             timestamp=at,
         )
@@ -104,7 +112,7 @@ class Trail(NamedTuple):
 
 def tenant_trail(stores: Stores) -> Trail:
     return Trail(
-        frozenset({acting_principal_id(stores.identity)}),
+        frozenset({acting_principal(stores.identity).id}),
         in_time_order(workspace_lines(stores.campaigns)),
         [],
     )
@@ -180,6 +188,64 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
     return trails, unreadable
 
 
+def registered_user_id() -> str | None:
+    return migration.registered_user_id(default_identity_paths().default_claim_marker)
+
+
+def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:
+    if explicit_tenant:
+        return default_identity(tenant_id=explicit_tenant)
+    uid = registered_user_id()
+    return default_identity(tenant_id=uid, user_id=uid) if uid else default_identity()
+
+
+def local_stores(*, tenant: str | None) -> Stores:
+    return build_stores(registered_or_default_identity(tenant), projects_root=DEFAULT_PROJECTS_ROOT)
+
+
+def blocked_emails() -> list[str]:
+    return blocklist.list_blocked(default_identity_paths().blocklist)
+
+
+def block_email(email: str, *, actor: str) -> list[str]:
+    paths = default_identity_paths()
+    return blocklist.block_email(
+        paths.blocklist, email, actor=actor, audit_path=paths.blocklist_audit
+    )
+
+
+def unblock_email(email: str, *, actor: str) -> list[str]:
+    paths = default_identity_paths()
+    return blocklist.unblock_email(
+        paths.blocklist, email, actor=actor, audit_path=paths.blocklist_audit
+    )
+
+
+def grants() -> dict[str, dict[str, object]]:
+    return list_grants(default_identity_paths().grants)
+
+
+def revoke_grant(sub_user_id: str, *, actor: str) -> bool:
+    paths = default_identity_paths()
+    return revoke_principal(
+        paths.grants, sub_principal_user_id=sub_user_id, actor=actor, audit_path=paths.grants_audit
+    )
+
+
+def grant(sub_user_id: str, *, delegator: str, capabilities: frozenset[str], actor: str) -> None:
+    paths = default_identity_paths()
+    grant_principal(
+        paths.grants,
+        sub_principal_user_id=sub_user_id,
+        delegated_by_user_id=delegator,
+        capabilities=capabilities,
+        spend_ceiling_usd=None,
+        note=f"via {actor}",
+        actor=actor,
+        audit_path=paths.grants_audit,
+    )
+
+
 __all__ = [
     "AccountTrail",
     "Arrival",
@@ -187,10 +253,19 @@ __all__ = [
     "accept_terms",
     "account_of",
     "arrive",
+    "block_email",
+    "blocked_emails",
+    "grant",
+    "grants",
+    "local_stores",
     "record_refusal",
     "record_upload",
+    "registered_or_default_identity",
+    "registered_user_id",
+    "revoke_grant",
     "sign_in",
     "tenant_trail",
     "trail_by_email",
     "trails_since",
+    "unblock_email",
 ]

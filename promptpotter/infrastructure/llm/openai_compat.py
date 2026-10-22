@@ -28,8 +28,8 @@ from promptpotter.infrastructure.llm.send_pacing import (
     raise_if_request_too_large,
 )
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
-from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.answer_text import truncate
+from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -68,7 +68,7 @@ def reply_cost(response: ChatCompletion) -> float | None:
     return float(cost) if cost is not None else None
 
 
-def _billed_cost(first: float | None, second: float | None) -> float | None:
+def billed_cost(first: float | None, second: float | None) -> float | None:
     if first is None and second is None:
         return None
     return (first or 0.0) + (second or 0.0)
@@ -224,7 +224,7 @@ def _llm_response(landed: _ParsedReply) -> LLMResponse:
         ),
         model=response.model,
         usage=billed,
-        cost_usd=_billed_cost(landed.first_cost, reply_cost(response)),
+        cost_usd=billed_cost(landed.first_cost, reply_cost(response)),
         served_by=reply_served_by(response),
         finish_reason=_finish_reason(response),
         parsed=landed.parsed,
@@ -435,7 +435,7 @@ class OpenAICompatibleClient(LLMClientBase):
             if isinstance(result, LLMResponse):
                 result.schema_repair_errors = list(repair_errors)
                 result.usage = result.usage + first
-                result.cost_usd = _billed_cost(first_cost, result.cost_usd)
+                result.cost_usd = billed_cost(first_cost, result.cost_usd)
                 return result
             response, content, validation_err, parsed = result
             if validation_err is None:
@@ -463,7 +463,7 @@ class OpenAICompatibleClient(LLMClientBase):
                 )
                 raise err from validation_err
             first = first + reply_usage(response)
-            first_cost = _billed_cost(first_cost, reply_cost(response))
+            first_cost = billed_cost(first_cost, reply_cost(response))
         return _ParsedReply(response, content, parsed, first, first_cost, repair_errors)
 
     async def _one_attempt(
@@ -541,6 +541,7 @@ __all__ = [
     "PROVIDER_DEFAULT_EFFORT",
     "PROVIDER_REQUEST_PARAMS",
     "OpenAICompatibleClient",
+    "billed_cost",
     "gateway_body",
     "reply_bill",
     "reply_cost",

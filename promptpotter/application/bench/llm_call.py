@@ -14,7 +14,8 @@ from promptpotter.application.optimizer_manifest import (
     llm_node_config,
     resolve_node_override,
 )
-from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.pipeline_overlay import pinned_route
 from promptpotter.domain.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
@@ -26,7 +27,7 @@ from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,
 )
-from promptpotter.infrastructure.llm.registry import get_llm_client
+from promptpotter.infrastructure.llm.registry import default_routes, get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -172,6 +173,9 @@ def _merged_config(
         # Except the seed a call brings: `NodeContext.ask` draws it FROM the clamp's, one per call.
         if "seed" in overrides:
             merged["seed"] = overrides["seed"]
+    # Keyed and sent as the host it gets, as a target node is (`pin_default_routes`).
+    if route := pinned_route(merged, merged["provider"], default_routes()):
+        merged["route_order"] = route
     return merged
 
 
@@ -415,7 +419,7 @@ async def llm_call(
 async def run_optimizer_node(
     *,
     template_name: str,
-    template: PromptTemplate,
+    template: OptimizerPromptTemplate,
     prompt_vars: dict[str, Any],
     response_model: type[BaseModel] | None,
     temperature: float | None = None,

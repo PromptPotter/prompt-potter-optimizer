@@ -68,10 +68,7 @@ async def ingest_dataset(
     ],
     slug: Annotated[str | None, Form(description="Optional slug override.")] = None,
 ) -> DraftCampaignWire:
-    """Parse an uploaded tabular file, mint a durable check-in campaign and return its draft.
-
-    ``draft_id`` is the ``campaign_id``; nothing runs until ``/commands/start-checkin``.
-    """
+    """Parse an uploaded tabular file into a durable check-in draft; ``/commands/start-checkin`` mints its campaign."""
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
 
     try:
@@ -100,10 +97,7 @@ async def upload_candidate_library(
     ],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> DraftCampaignWire:
-    """Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft.
-
-    ``draft_id`` is the check-in campaign id.
-    """
+    """Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft."""
     idemp = ensure_idempotency_key(idempotency_key)
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
     terms = parse_candidate_library(blob, file.filename or "")
@@ -113,7 +107,7 @@ async def upload_candidate_library(
 class _BuildLibraryBody(StrictModel):
     """Body for building a candidate library from one of the draft's own columns."""
 
-    # `draft_id` is the owning `campaign_id`: bounded as `commands/payloads.py::_CheckinPayload` bounds it.
+    # Bounded as `commands/payloads.py::_OnDraft` bounds it.
     draft_id: str = Field(min_length=8, max_length=128)
     column: str = Field(min_length=1, max_length=256)
 
@@ -132,9 +126,6 @@ async def build_candidate_library_from_column(
 
 @datasets_router.post("/{name:path}/draft", response_model=DraftCampaignWire)
 async def draft_from_existing_dataset(name: str, stores: StoresDep) -> DraftCampaignWire:
-    """Open an authored dataset's files as a prefilled, durable check-in campaign.
-
-    ``draft_id`` is the ``campaign_id``; nothing runs until ``/commands/start-checkin``.
-    """
+    """Open an authored dataset's files as a prefilled, durable check-in draft."""
     draft = await draft_from_dataset_name(stores=stores, dataset_name=name)
     return draft_wire(stores, draft)

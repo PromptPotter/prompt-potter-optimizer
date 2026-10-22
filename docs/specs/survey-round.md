@@ -1,7 +1,8 @@
 # Survey round — the optimizer finds the band before it descends
 
 > Read [`../architecture.md`](../architecture.md) § Bench and optimizer first; a survey is a round
-> kind inside its *A round is a neutral envelope*. **Nothing on this page is built** — status is
+> kind inside its *A round is a neutral envelope*, which already holds the round's own row
+> addresses (`RoundCells`). **Nothing on this page is built** — status is
 > [`roadmap.md`](roadmap.md)'s; this page is the contract the build is measured against.
 
 **Whatever configuration a run starts from is assumed far from the region where the search can
@@ -44,7 +45,7 @@ the shape with the fewest new concepts first and rewrites its section here when 
 A survey round:
 
 1. Has the manifest's own proposer write **K starting candidates** — for potter that is `l1_generate`,
-   the node that writes every round's candidates, asked for K starts instead of K edits; no new seeder.
+   the node that writes every round's candidates, asked for K starts instead of K edits; no new proposer.
    `capo_init` and `levi_seed` become survey members unchanged.
 2. Adds the **standing reference** as one arm. At init the given origin is always measured.
 3. Measures every arm on **one shared order** drawn by the manifest's sampler.
@@ -84,7 +85,7 @@ Computed by the backend and served; no surface recomputes it.
 - **The verdict** is a typed enum in `domain/`, its thresholds knobs on the `survey` node, so the
   focus band and the L4 admission band are two settings of one predicate, not two documents.
 - **L4:** each environment's origin cell carries the floor and modal share beside
-  `domain/l4/proxies.py::InnerCellFacts.inner_origin_headroom`; the admitted set is banked as a decision
+  `domain/l4/inner_facts.py::InnerCellFacts.origin_headroom`; the admitted set is banked as a decision
   the way `PRICED_DRAW` is (`optimizers/potter/members.py::AdaptiveQueue.draw`), and later draws read
   it. **A held-out seat is never admitted or rejected by a survey** — it is the bench, so the lift the
   pool reports stays transfer.
@@ -93,13 +94,13 @@ Computed by the backend and served; no surface recomputes it.
 
 ### At run init
 
-With `at_init` on, **round 1 is a survey round**: `runner/round.py::RoundPlan.walk` returns the
+With `at_init` on, **round 1 is a survey round**: `optimizer_manifest.py::RoundPlan.walk` returns the
 `survey` walk where no population stands — today's seeding branch, generalized. Round 0 stays the
 origin, so **C0 is still the given configuration** and every lift is read against it.
 
-The top-level manifest key `initial_population_walks` (`runner/round.py::SEEDS_WALK`) is deleted; its
+The top-level manifest key `initial_population_walks` (`optimizer_manifest.py::PipelineManifest`) goes; its
 `alone` / `before_default` split becomes the survey node's `races_offspring` knob (LEVI `false`, CAPO
-`true`) — the setting moves onto the member that reads it.
+`true`), so the setting sits on the member that reads it.
 
 The origin gate reads the band verdict beside health: `runner/termination.py::origin_gate_tripped`
 takes it, so a `strict` gate holds on `below_floor`, `collapsed` or `saturated` before any proposer
@@ -117,7 +118,7 @@ renders empty when off — the property the other two bits have.
 
 It is handled at the post-apply seam in `optimizers/potter/escalation/firing.py`, after terminate and
 before fork (terminate outranks both). Accepted — non-blank reason, capability on, survey share left —
-it writes a **pending survey** on `PotterState.memory`, restated on the ledger as every fire already
+it writes a **pending survey** on the `l3_memory` slice, restated on the ledger as every fire already
 is, so a resume or fork keeps it. Refused, the reason lands on the warnings channel. It raises no
 `StopLoop` and mints no cycle. The next round reads it — `RoundPlan.walk(population, survey_pending)`
 returns the survey walk with the current parent as standing reference — and consumes it.
@@ -153,7 +154,7 @@ off answers whether a surveyed start helps; `survey_capability` on vs off whethe
   candidate environment at one inner round, and an admitted seat's later round continues the same inner
   campaign.
 - **`share` bounds every survey in a cycle together, on both axes** (`<one-budget>`): at most
-  `share × ceiling.usd` and the same fraction of the wall-clock limit. Priced before the first send from
+  `share × budget.usd` and the same fraction of `budget.wall_clock_s`. Priced before the first send from
   the archive's cell price (`initialization/loop_start.py::measured_cell_usd`, `cell_bound`) × rows ×
   (K + 1), and refused before it when the bound exceeds what is left — the shape
   `application/preflight.py::refuse_arm_below_round` already has. Racing makes the realised cost
@@ -169,7 +170,6 @@ off answers whether a surveyed start helps; `survey_capability` on vs off whethe
 | Hand-curated pool admission (`promptpotter-self/pool/dataset.yaml::panel` comments) | The panel lists candidates; admission is the served verdict, banked per run. |
 | The band in [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md) § Selection criteria and [`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured | One served verdict; the docs keep the rule and name the knob. |
 | Origin gate on health alone | Health plus the band verdict. |
-| `decision-bank-c794fd` | Retired as a launch target — it is transfer — and the `Decision` cell kind with it. Its measurements stay. |
 
 **Not absorbed:** `noise-floor` (retest noise of one configuration), `probe-reasoning` (a model's
 capability card), `accuracy_ceiling` (a declared claim).
@@ -211,7 +211,7 @@ Each is the operator's; the recommendation is not a decision.
 3. **DECIDED 2026-10-16, as recommended — the `seed-screen` verb.** Delete it; the survey's band record replaces its
    sidecar and an environment screen becomes a one-round run. The cost: a screen then mints a campaign.
 4. **DECIDED 2026-10-16 — the `Decision` cell kind is deleted** with the bank; a seat is the one cell
-   kind. The bank's measurements stay on disk as data.
+   kind.
 5. **DECIDED 2026-10-16, as recommended — an operator twin for the escalation's way in:** a `survey-next-round`
    command kind with a CLI verb, declared in [`api-openapi.yaml`](api-openapi.yaml) first, writing the
    same pending survey the layer writes, so the operator and L2/L3 share one channel
@@ -232,8 +232,9 @@ Each is the operator's; the recommendation is not a decision.
 
 Each stage closes on a verification.
 
-1. **The verdict in `domain/`.** *Closes when* it, recomputed free off the archive over the banked
-   seed-screen sidecars, reproduces every recorded seat and rejection.
+1. **The verdict in `domain/`.** *Closes when* it reproduces every seat and rejection the kept
+   seed-screen sidecars record. Their cells were wiped with the workspace, so the recompute buys
+   its own rows.
 2. **The rename and `races_offspring`.** *Closes when* CAPO's and LEVI's offline legs
    ([`../developer/offline-run.md`](../developer/offline-run.md)) decide and send exactly what they did.
 3. **`l1_generate` writing starts, `at_init`, and the gate reading the verdict.** *Closes when* potter's offline leg

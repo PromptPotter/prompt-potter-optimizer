@@ -14,8 +14,8 @@ from promptpotter.domain.command_kinds import (
     SkipSearchpointPayload,
     SubmitArmsPayload,
 )
-from promptpotter.domain.opt_search_point import IndividualLineage
 from promptpotter.domain.optimizer_state import OptimizerState
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import (
     BenchGradedView,
     InitEnterView,
@@ -25,21 +25,18 @@ from promptpotter.domain.phase_views import (
 )
 from promptpotter.domain.phases import CampaignPhase, ErrorRecord, GateKind, RunPhase
 from promptpotter.domain.results import (
-    ArmOutcome,
+    ArmState,
     IndividualWalk,
     RoundCells,
     RunStanding,
-    ScoredCandidate,
+    ScoreSummary,
     VerifyPass,
     VerifyReading,
 )
-from promptpotter.domain.ruler import DeltaRuler, RulerScope
+from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import (
-    CandidateMintedRecord,
-    CandidateScoredRecord,
-    CandidateStartedRecord,
-    CandidateState,
-    CheckinClosedRecord,
+    AnnouncedArms,
+    ArmRecord,
     CommandAckRecord,
     CommandRecord,
     CycleFinalRecord,
@@ -54,7 +51,6 @@ from promptpotter.domain.run_records import (
     InterventionRecord,
     LaunchClaimRecord,
     LaunchReleasedRecord,
-    LedgerCandidate,
     OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
@@ -64,19 +60,23 @@ from promptpotter.domain.run_records import (
     RoundEnteredRecord,
     RoundProposedRecord,
     RoundStandingRecord,
-    RulerRecord,
-    RunLimitsRecord,
     RunPhaseRecord,
     RunWiringRecord,
     SampleScoredRecord,
     ScoringLockedRecord,
     SpawnedBy,
     SpawnedRecord,
+    StandingBudgetRecord,
     TokenUsageRecord,
     WallClock,
 )
 from promptpotter.domain.scoring import WalkedCell
-from promptpotter.domain.spend import CloseSpend, SpendRollup
+from promptpotter.domain.spend import (
+    Budget,
+    CeilingMeter,
+    SpendRollup,
+    metered,
+)
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
     LedgerIndex,
@@ -85,6 +85,7 @@ from promptpotter.infrastructure.store.read_model import (
     RecordClasses,
 )
 from promptpotter.shared.clock import epoch_seconds
+from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import MeasurementRole
 
 
@@ -101,22 +102,21 @@ class _CycleSeed:
         return self._found
 
 
-class _RunLimits:
-    records: ClassVar[RecordClasses] = (RunLimitsRecord,)
+class _StandingBudget:
+    records: ClassVar[RecordClasses] = (StandingBudgetRecord,)
 
     def __init__(self) -> None:
-        self._found = RunLimitsRecord()
+        self._found = StandingBudgetRecord()
 
-    def feed(self, offset: int, record: RunLimitsRecord) -> None:
+    def feed(self, offset: int, record: StandingBudgetRecord) -> None:
         self._found = record
 
-    def value(self) -> RunLimitsRecord:
+    def value(self) -> StandingBudgetRecord:
         return self._found.model_copy()
 
 
 class CycleFacts(NamedTuple):
     minted: CycleMintedRecord | None = None
-    checkin_closed: bool = False
     ended: RunPhaseRecord | None = None
     paused: RunPhaseRecord | None = None
     final: CycleFinalRecord | None = None
@@ -129,10 +129,6 @@ class CycleFacts(NamedTuple):
     updated_at: str = ""
 
     @property
-    def checkin(self) -> bool:
-        return self.minted is not None and self.minted.checkin and not self.checkin_closed
-
-    @property
     def fork(self) -> ForkSpec | None:
         spec = None if self.minted is None else self.minted.fork
         if spec is None or self.direction is None:
@@ -142,7 +138,6 @@ class CycleFacts(NamedTuple):
 
 _CycleFact = (
     CycleMintedRecord
-    | CheckinClosedRecord
     | CycleFinalRecord
     | CycleSupersededRecord
     | ForkGradedRecord
@@ -166,8 +161,6 @@ class _CycleFacts:
         match record:
             case CycleMintedRecord():
                 held = held._replace(minted=record)
-            case CheckinClosedRecord():
-                held = held._replace(checkin_closed=True)
             case RunPhaseRecord(run_phase=RunPhase.TERMINAL):
                 held = held._replace(ended=record, paused=None)
             case RunPhaseRecord():
@@ -208,7 +201,7 @@ class _CycleFacts:
 
 class PauseAsk(NamedTuple):
     command_id: str
-    issued_by: str
+    issued_by: Principal
     at: str
 
 
@@ -271,9 +264,7 @@ class _Controls:
             case PauseCyclePayload():
                 if held.pause is not None:
                     return
-                held = held._replace(
-                    pause=PauseAsk(command_id, asked.issued_by_user_id, asked.timestamp)
-                )
+                held = held._replace(pause=PauseAsk(command_id, asked.issued_by, asked.timestamp))
             case SkipSearchpointPayload():
                 held = held._replace(skips=(*held.skips, command_id))
             case OriginGateDecisionPayload(decision=decision):
@@ -341,19 +332,6 @@ class _LaunchClaim:
         return self._found
 
 
-class _Rulers:
-    records: ClassVar[RecordClasses] = (RulerRecord,)
-
-    def __init__(self) -> None:
-        self._held: dict[RulerScope, DeltaRuler] = {}
-
-    def feed(self, offset: int, record: RulerRecord) -> None:
-        self._held[record.scope] = record.ruler
-
-    def value(self) -> dict[RulerScope, DeltaRuler]:
-        return dict(self._held)
-
-
 class Progress(NamedTuple):
     progressed_at: float | None = None
     waiting_since: float | None = None
@@ -384,31 +362,12 @@ class _Progress:
         return self._held
 
 
-class ArmWalk(NamedTuple):
+class StandingArm(NamedTuple):
+    """One arm of one round as its records left it; ``fold`` is `AnnouncedArms.fold`."""
+
+    state: ArmState
     cells: dict[str, WalkedCell]
-    # ``None`` for an arm the round CARRIED: never minted into it, named by its score report.
-    minted: CandidateMintedRecord | None = None
-    announced: CandidateStartedRecord | None = None
-    report: ScoredCandidate | None = None
-    walk_length: int | None = None
-
-    @property
-    def candidate_id(self) -> str:
-        if self.report is not None:
-            return self.report.candidate_id
-        return "" if self.minted is None else self.minted.candidate_id
-
-    @property
-    def label(self) -> str:
-        if self.report is not None:
-            return self.report.label
-        return "" if self.minted is None else self.minted.label
-
-    @property
-    def state(self) -> CandidateState:
-        if self.report is None:
-            return "minted"
-        return "invalid" if self.report.outcome == ArmOutcome.INVALID else "measured"
+    fold: ScoreSummary | None
 
 
 class StandingRound(NamedTuple):
@@ -441,11 +400,13 @@ class StandingRounds(NamedTuple):
     # The operator's answer at the arm gate, beside the drafts it answered and never over them.
     submitted: dict[int, RoundProposedRecord]
     restated: dict[int, OptimizerState]
-    arms: dict[tuple[int, int], ArmWalk]
+    # An individual is an arm of every round that walked it: ``(round, key)`` is the join.
+    arms: dict[tuple[int, ArmKey], StandingArm]
+    # Every pass no arm walks: a bench pass, an overlap top-up.
     passes: dict[_Pass, dict[str, WalkedCell]]
-    # No entry = never elected; elected-and-crowned-nobody is an entry with no selected label.
+    # No entry = never elected; elected-and-crowned-nobody is an entry with no selected arm.
     elections: dict[int, ElectionRecord]
-    # Keyed on the record's round STAMP, never ledger position: round 0 closes twice.
+    # Keyed on the record's round STAMP, never ledger position: a round can close more than once.
     decisions: dict[int, list[ResumeCheckpointRecord]]
     entered: int | None = None
     rewound: int | None = None
@@ -475,7 +436,7 @@ class StandingRounds(NamedTuple):
                 )
         for n, made in later.decisions.items():
             prefix.decisions[n] = [*prefix.decisions.get(n, []), *made]
-        # A round closed again without being entered (round 0, ruler warm) keeps its first standing.
+        # A round closed again without being entered keeps its first standing.
         closed = {
             n: held._replace(standing=kept.standing)
             if held.standing is None and (kept := prefix.rounds.get(n)) is not None
@@ -487,7 +448,7 @@ class StandingRounds(NamedTuple):
             proposals={**prefix.proposals, **later.proposals},
             submitted={**prefix.submitted, **later.submitted},
             restated={},
-            arms=dict(sorted({**prefix.arms, **later.arms}.items())),
+            arms={**prefix.arms, **later.arms},
             passes={**prefix.passes, **later.passes},
             elections={**prefix.elections, **later.elections},
             decisions=prefix.decisions,
@@ -500,28 +461,14 @@ class StandingRounds(NamedTuple):
         return self.rounds[max(self.rounds)].standing if self.rounds else None
 
     @property
-    def crowns(self) -> dict[int, str]:
-        return {
-            n: election.selected_labels[0]
-            for n, election in self.elections.items()
-            if election.selected_labels
-        }
+    def level_series(self) -> LevelSeries | None:
+        return self.rounds[max(self.rounds)].close.level_series if self.rounds else None
 
-    def candidates(self) -> list[LedgerCandidate]:
-        """``(round, idx)`` is the join, NOT the id: an individual can be an arm of several rounds."""
-        return [
-            LedgerCandidate(
-                round=rnd,
-                idx=idx,
-                candidate_id=arm.candidate_id,
-                label=arm.label,
-                lineage=IndividualLineage() if arm.minted is None else arm.minted.lineage,
-                walk_length=arm.walk_length,
-                report=arm.report,
-            )
-            for (rnd, idx), arm in self.arms.items()
-            if arm.candidate_id and arm.label
-        ]
+    @property
+    def crowns(self) -> dict[int, ArmKey]:
+        return {
+            n: election.selected[0] for n, election in self.elections.items() if election.selected
+        }
 
 
 def _walked_cell(scored: SampleScoredRecord) -> WalkedCell | None:
@@ -540,9 +487,6 @@ def _take(taken: dict[str, WalkedCell], cell: WalkedCell) -> None:
     taken[cell[0]] = cell
 
 
-_ArmStep = (
-    CandidateMintedRecord | CandidateStartedRecord | CandidateScoredRecord | SampleScoredRecord
-)
 _RoundStep = (
     RoundEnteredRecord
     | ElectionRecord
@@ -551,7 +495,8 @@ _RoundStep = (
     | RoundStandingRecord
     | RoundProposedRecord
     | OptimizerStateRecord
-    | _ArmStep
+    | ArmRecord
+    | SampleScoredRecord
 )
 
 
@@ -561,6 +506,8 @@ class _Standing:
     def __init__(self) -> None:
         self._held = StandingRounds.none()
         self._entered_at: dict[int, int] = {}
+        self._arms = AnnouncedArms()
+        self._cells: dict[tuple[int, ArmKey], dict[str, WalkedCell]] = {}
 
     def feed(self, offset: int, record: _RoundStep) -> None:
         rnd = record.round
@@ -575,14 +522,21 @@ class _Standing:
                     entered=_earliest(held.entered, rnd),
                     rewound=_earliest(held.rewound, rewound),
                 )
+                self._arms.enter(record)
+                self._cells = _before(self._cells, rnd)
             case ElectionRecord():
                 held.elections[rnd] = record
             case ResumeCheckpointRecord():
                 held.decisions.setdefault(rnd, []).append(record)
             case RoundClosedRecord():
+                self._arms.close(record)
+                for arm_key in record.arms:
+                    self._cells.setdefault((rnd, arm_key), {})
                 before = held.rounds.get(rnd)
-                held.rounds[rnd] = StandingRound(
-                    record, offset, None if before is None else before.standing
+                held.rounds[rnd] = (
+                    StandingRound(record, offset)
+                    if before is None
+                    else before._replace(close=record, at_offset=offset)
                 )
                 held.restated.pop(rnd, None)
             case RoundStandingRecord():
@@ -601,43 +555,34 @@ class _Standing:
                             update={"optimizer_state": record.optimizer_state}
                         )
                     )
-            case _:
-                self._walk(rnd, record)
-
-    def _walk(self, rnd: int, record: _ArmStep) -> None:
-        held = self._held
-        idx = record.idx if isinstance(record, CandidateMintedRecord) else record.candidate_idx
-        cell = _walked_cell(record) if isinstance(record, SampleScoredRecord) else None
-        if idx < 0:
-            if isinstance(record, SampleScoredRecord) and cell is not None:
-                _take(held.passes.setdefault((rnd, record.individual_id, record.role), {}), cell)
-            return
-        key = (rnd, idx)
-        match record:
-            case CandidateMintedRecord():
-                # A mint REPLACES its slot: the origin is minted again on every launch.
-                held.arms[key] = ArmWalk({}, record)
-            case CandidateStartedRecord():
-                held.arms[key] = held.arms.setdefault(key, ArmWalk({}))._replace(announced=record)
-            case CandidateScoredRecord():
-                held.arms[key] = held.arms.setdefault(key, ArmWalk({}))._replace(
-                    report=record.scores
-                )
+            case ArmRecord():
+                self._arms.announce(record)
+                self._cells.setdefault((rnd, record.arm), {})
             case SampleScoredRecord():
-                arm = held.arms.setdefault(key, ArmWalk({}))
-                if cell is not None:
-                    _take(arm.cells, cell)
-                    if record.sample_total is not None:
-                        held.arms[key] = arm._replace(walk_length=record.sample_total)
+                walking = self._arms.take(record)
+                if (cell := _walked_cell(record)) is None:
+                    return
+                if walking is not None:
+                    _take(self._cells[rnd, walking], cell)
+                else:
+                    _take(
+                        held.passes.setdefault((rnd, record.individual_id, record.role), {}), cell
+                    )
 
     def value(self) -> StandingRounds:
         held = self._held
+        arms = self._arms
         return held._replace(
             rounds=dict(held.rounds),
             proposals=dict(held.proposals),
             submitted=dict(held.submitted),
             restated=dict(held.restated),
-            arms={key: arm._replace(cells=dict(arm.cells)) for key, arm in held.arms.items()},
+            arms={
+                (rnd, key): StandingArm(
+                    arms.state(rnd, key), dict(self._cells[rnd, key]), arms.fold(rnd, key)
+                )
+                for rnd, key in arms
+            },
             passes={k: dict(taken) for k, taken in held.passes.items()},
             elections=dict(held.elections),
             decisions={n: list(made) for n, made in held.decisions.items()},
@@ -663,7 +608,7 @@ class _Answers:
             case SampleScoredRecord():
                 walked = [] if (cell := _walked_cell(record)) is None else [cell]
             case RoundClosedRecord():
-                walks = record.cells.walks(record.opt_sp)
+                walks = record.cells.walks()
                 walked = [cell for walk in walks for cell in walk.cells]
             case RaceCatchUpRecord():
                 walked = list(record.cells.values())
@@ -671,7 +616,7 @@ class _Answers:
                 walked = list(banked.walk().cells)
             case PhaseRecord():
                 return
-        named = [answer for _, _, answer, _ in walked]
+        named = [answer for _, answer, _ in walked]
         if not self._found.issuperset(named):
             self._found.update(named)
             self._frozen = None
@@ -703,7 +648,7 @@ class _DeclaredPhase:
 
 
 class VerifyLedger(NamedTuple):
-    graded: dict[str, tuple[VerifyPass, VerifyReading]]
+    graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]]
     open: VerifyEnterView | None
     # EVERY graded pass, oldest first: a later one buys other cells and retires none.
     passes: list[VerifyPass]
@@ -713,7 +658,7 @@ class _Verify:
     records: ClassVar[RecordClasses] = (PhaseRecord,)
 
     def __init__(self) -> None:
-        self._graded: dict[str, tuple[VerifyPass, VerifyReading]] = {}
+        self._graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]] = {}
         self._open: VerifyEnterView | None = None
         self._passes: list[VerifyPass] = []
 
@@ -724,7 +669,7 @@ class _Verify:
             case VerifyEnterView() as entered:
                 self._open = entered
             case VerifyGradedView(verify_pass=banked, reading=reading):
-                self._graded[banked.label] = banked, reading
+                self._graded[banked.arm.key] = banked, reading
                 self._passes.append(banked)
         if record.event == "exit":
             self._open = None
@@ -765,6 +710,26 @@ class _Spend:
             self._calls,
             self._worked_s,
         )
+
+
+class _Metered:
+    """A running total per ceiling meter: a campaign's ceiling read adds one per cycle."""
+
+    records: ClassVar[RecordClasses] = (TokenUsageRecord,)
+
+    def __init__(self) -> None:
+        self._usd: dict[CeilingMeter, float] = dict.fromkeys(get_args(CeilingMeter), 0.0)
+        self._tokens: dict[CeilingMeter, int] = dict.fromkeys(get_args(CeilingMeter), 0)
+
+    def feed(self, offset: int, usage: TokenUsageRecord) -> None:
+        for meter in self._usd:
+            usd, tokens = metered(usage, meter)
+            if usd is not None:
+                self._usd[meter] += usd
+            self._tokens[meter] += tokens
+
+    def value(self) -> dict[CeilingMeter, Budget]:
+        return {meter: Budget.amount(self._usd[meter], self._tokens[meter]) for meter in self._usd}
 
 
 class _RunWiring:
@@ -872,16 +837,16 @@ class _Timeline:
 
 LEDGER_FOLDS = (
     _CycleSeed,
-    _RunLimits,
+    _StandingBudget,
     _CycleFacts,
     _Controls,
     _LaunchClaim,
-    _Rulers,
     _Standing,
     _Answers,
     _DeclaredPhase,
     _Verify,
     _Spend,
+    _Metered,
     _RunWiring,
     _Bench,
     _ScoringLock,
@@ -898,8 +863,8 @@ def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
     return _view(ledger_path, _CycleSeed)
 
 
-def scan_ledger_run_limits(ledger_path: Path) -> RunLimitsRecord:
-    return _view(ledger_path, _RunLimits)
+def scan_ledger_standing_budget(ledger_path: Path) -> StandingBudgetRecord:
+    return _view(ledger_path, _StandingBudget)
 
 
 def scan_ledger_controls(ledger_path: Path) -> Controls:
@@ -936,9 +901,9 @@ def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
     return held
 
 
-def scan_bench_readings(spans: Iterable[LedgerSpan]) -> dict[tuple[int, str], BenchReading]:
+def scan_bench_readings(spans: Iterable[LedgerSpan]) -> dict[tuple[int, ArmKey], BenchReading]:
     return {
-        (view.reading.round, view.label): view.reading
+        (view.reading.round, ArmKey(view.bench_pass.candidate_id)): view.reading
         for span in spans
         for view in LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Bench, span.until)
         if view.reading is not None
@@ -964,14 +929,6 @@ def scan_ledger_progress(ledger_path: Path) -> Progress:
     return LineIndex.of(ledger_path, PROGRESS_FOLDS).view(_Progress)
 
 
-def scan_ledger_ruler(spans: Iterable[LedgerSpan], scope: RulerScope) -> DeltaRuler | None:
-    ruler: DeltaRuler | None = None
-    for span in spans:
-        held = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Rulers, span.until)
-        ruler = held.get(scope, ruler)
-    return ruler
-
-
 def scan_standing_rounds(spans: Iterable[LedgerSpan]) -> StandingRounds:
     standing = StandingRounds.none()
     for span in spans:
@@ -985,11 +942,13 @@ def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[Walked
     chain = list(spans)
     standing = scan_standing_rounds(chain)
     closed = standing.rounds
-    walks = [walk for held in closed.values() for walk in held.close.cells.walks(held.close.opt_sp)]
-    for (round_num, _), arm in standing.arms.items():
-        if round_num in closed or not arm.candidate_id:
-            continue
-        walks += RoundCells(arms={arm.candidate_id: list(arm.cells.values())}).walks(None)
+    walks = [walk for held in closed.values() for walk in held.close.cells.walks()]
+    # Per round: one individual walked in two open rounds is two walks.
+    open_rounds: dict[int, dict[ArmKey, list[WalkedCell]]] = {}
+    for (round_num, key), fold in standing.arms.items():
+        if round_num not in closed and fold.cells:
+            open_rounds.setdefault(round_num, {})[key] = list(fold.cells.values())
+    walks += [walk for arms in open_rounds.values() for walk in RoundCells(arms=arms).walks()]
     walks += [
         IndividualWalk(individual_id, frozenset({role}), list(taken.values()))
         for (round_num, individual_id, role), taken in standing.passes.items()
@@ -1145,6 +1104,11 @@ def scan_ledger_spend(spans: Iterable[LedgerSpan]) -> LedgerSpend:
     return LedgerSpend(spend, calls, worked_s)
 
 
+def scan_ledger_metered(ledger_path: Path) -> dict[CeilingMeter, Budget]:
+    """This ledger's OWN appends, never a fork's walked prefix, in every ceiling meter."""
+    return _view(ledger_path, _Metered)
+
+
 def scan_ledger_spend_by_round(spans: Iterable[LedgerSpan]) -> dict[int, SpendRollup]:
     """Not clamped by a rewind: a round measured twice cost money both times."""
     by_round: dict[int, SpendRollup] = {}
@@ -1161,18 +1125,6 @@ def scan_ledger_run_wiring(spans: Iterable[LedgerSpan]) -> RunWiringRecord | Non
         own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_RunWiring, span.until)
         found = found if own is None else own
     return found
-
-
-def close_spend(spans: Iterable[LedgerSpan]) -> CloseSpend:
-    spend, calls, worked_s = scan_ledger_spend(spans)
-    return CloseSpend(
-        search_usd=spend.search_incurred_usd,
-        billed_usd=spend.total_used_usd,
-        rate_priced_usd=spend.total_rate_priced_usd,
-        calls=calls,
-        tokens=spend.total_tokens_used,
-        worked_s=round(worked_s, 3),
-    )
 
 
 def scan_ledger_wall_clock(
@@ -1215,7 +1167,6 @@ def scan_ledger_wall_clock(
 
 
 __all__ = [
-    "ArmWalk",
     "Controls",
     "CycleFacts",
     "DeclaredPhase",
@@ -1223,11 +1174,11 @@ __all__ = [
     "LookaheadAsk",
     "PauseAsk",
     "Progress",
+    "StandingArm",
     "StandingProposal",
     "StandingRound",
     "StandingRounds",
     "VerifyLedger",
-    "close_spend",
     "scan_bench_passes",
     "scan_bench_readings",
     "scan_cell_formula",
@@ -1236,8 +1187,8 @@ __all__ = [
     "scan_ledger_controls",
     "scan_ledger_cycle_seed",
     "scan_ledger_declared_phase",
+    "scan_ledger_metered",
     "scan_ledger_progress",
-    "scan_ledger_ruler",
     "scan_ledger_run_wiring",
     "scan_ledger_scoring_lock",
     "scan_ledger_spend",

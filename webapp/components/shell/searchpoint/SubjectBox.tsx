@@ -38,7 +38,7 @@ export function SubjectBox() {
       <SubjectSignals origin={evidence.origin} shown={evidence.shown} compare={evidence.compare} />
       <div className="subject-head">
         <SubjectHeadline
-          metered={readSpend(dash).metered}
+          spend={readSpend(dash)}
           reading={row?.reading ?? null}
           bench={subject.state === "best" ? (dash.bench_score?.vs_origin ?? null) : null}
         />
@@ -82,7 +82,7 @@ export function SubjectBox() {
       <SubjectFlips
         vsOrigin={evidence.vsOrigin}
         partial={
-          evidence.shown?.status === "minted"
+          evidence.shown?.status === "proposed" || evidence.shown?.status === "measuring"
             ? { scored: evidence.shown.n_cells, expected: evidence.shown.expected_samples }
             : null
         }

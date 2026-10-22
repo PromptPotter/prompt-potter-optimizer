@@ -3,23 +3,21 @@ from __future__ import annotations
 import contextvars
 import enum
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
-if TYPE_CHECKING:
-    from promptpotter.domain.ruler import DeltaRuler
-
 __all__ = [
+    "ARM_ROLES",
     "MAX_INSTRUMENT_DEPTH",
-    "NO_ROUND_SLOT",
-    "MeasuredCandidate",
+    "RECORDED_ROLES",
+    "MeasuredPass",
     "MeasurementRole",
     "enter_instrument_mode",
     "instrument_depth",
     "instrument_mode",
-    "measured_candidate",
-    "measured_candidate_context",
+    "measured_pass",
+    "measured_pass_context",
 ]
 
 # L4 is depth 1, and nothing else stops L5+.
@@ -28,27 +26,24 @@ MAX_INSTRUMENT_DEPTH = 2
 
 @dataclass(frozen=True)
 class InstrumentMode:
-    """``ruler`` is the δ scale the SPAWNER fixed; without it a cell fits one from the arms.
-    ``root_round`` is the depth-0 run's round the cell spends under: its bills land on that ledger."""
+    """``root_round`` is the depth-0 run's round the cell spends under: its bills land on that ledger."""
 
     depth: int
-    ruler: DeltaRuler | None
     root_round: int | None
 
 
-# Never reset: `_MODE` must cover FINALIZE, or archive reads and the ruler de-hermeticize.
+# Never reset: `_MODE` must cover FINALIZE, or a late bill lands on the cell's own ledger.
 _MODE: Annotated[contextvars.ContextVar[InstrumentMode | None], shapes_optimizer_prompt] = (
     contextvars.ContextVar("instrument_mode", default=None)
 )
 
 
-def enter_instrument_mode(*, ruler: DeltaRuler | None, spawned_in: int | None) -> InstrumentMode:
+def enter_instrument_mode(*, spawned_in: int | None) -> InstrumentMode:
     """Call INSIDE the inner cycle's own ``asyncio.Task``, or the mode leaks to the spawner.
     *spawned_in* is the spawner's round, which only a depth-1 cell takes as its root's."""
     outer = _MODE.get()
     mode = InstrumentMode(
         depth=instrument_depth() + 1,
-        ruler=ruler,
         root_round=spawned_in if outer is None else outer.root_round,
     )
     _MODE.set(mode)
@@ -97,31 +92,31 @@ SCOPE_ROLES: dict[RoleScope, frozenset[MeasurementRole]] = {
 }
 
 
-# Every reader keyed by slot BRANCHES on it; it still drives the per-sample tick.
-NO_ROUND_SLOT = -1
+# A cell of these roles is a cell of the ARM its individual is in its round; any other is a pass.
+ARM_ROLES = frozenset({MeasurementRole.ORIGIN, MeasurementRole.PANEL, MeasurementRole.PARENT})
+# The passes whose cells reach the ledger one by one, so a live surface draws and ticks them.
+RECORDED_ROLES = ARM_ROLES | {MeasurementRole.BENCH}
 
 
 @dataclass(frozen=True)
-class MeasuredCandidate:
+class MeasuredPass:
     """Bound at the INGRESS, or a re-entering asker inherits it stale."""
 
-    idx: int
-    candidate_id: str
-    label: str
+    individual_id: str
     role: MeasurementRole = MeasurementRole.PANEL
 
 
-_MEASURED: contextvars.ContextVar[MeasuredCandidate | None] = contextvars.ContextVar(
-    "measured_candidate", default=None
+_MEASURED: contextvars.ContextVar[MeasuredPass | None] = contextvars.ContextVar(
+    "measured_pass", default=None
 )
 
 
-def measured_candidate_context(candidate: MeasuredCandidate | None) -> contextvars.Context:
+def measured_pass_context(measured: MeasuredPass | None) -> contextvars.Context:
     """``None`` is an origin pass. A context, not a set: one loop launches every walk's cells."""
     context = contextvars.copy_context()
-    context.run(_MEASURED.set, candidate)
+    context.run(_MEASURED.set, measured)
     return context
 
 
-def measured_candidate() -> MeasuredCandidate | None:
+def measured_pass() -> MeasuredPass | None:
     return _MEASURED.get()

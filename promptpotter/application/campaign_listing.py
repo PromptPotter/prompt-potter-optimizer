@@ -60,8 +60,8 @@ class CampaignSummary(StrictModel):
     line: LineStanding | None = Field(
         description=(
             "The campaign's line: the cycle answering for it now and how that cycle stands — its "
-            "run state, its standing, its rounds and the cap binding them. Null while the root "
-            "cycle is not on disk yet. Its `max_rounds` is null where the root config did not "
+            "run state, its standing, its rounds and the budget binding them. Null while the root "
+            "cycle is not on disk yet. Its `budget_rounds` is null where the root config did not "
             "resolve."
         )
     )
@@ -74,10 +74,11 @@ class CampaignSummary(StrictModel):
     )
     root_cycle_id: str = Field(
         description=(
-            "The campaign's root cycle id — `cycle_<root_content_hash>`, so it IS the "
-            "campaign's ORIGIN identity. Campaigns on one declaration share it and differ "
-            "only in the random `campaign_id` suffix, which is what makes them separate RUNS "
-            "of that origin; the sidebar groups the forest by this key."
+            "The campaign's root cycle id — the content address of its origin and its run "
+            "declaration together. Campaigns on one origin under one declaration share it and "
+            "differ only in the random `campaign_id` suffix, which is what makes them separate "
+            "RUNS of it; two arms of a head-to-head never share one. The sidebar groups the "
+            "forest by this key."
         )
     )
     backend_id: str = Field(default="", description="Backend this campaign optimizes against")
@@ -85,7 +86,7 @@ class CampaignSummary(StrictModel):
         default="",
         description=(
             "Connector KIND this campaign runs against ('termnorm' / 'promptpotter' / …), FROZEN "
-            "on the manifest at mint. Re-pointing or deleting the dataset dir never changes it: a "
+            "in its declaration's environment at mint. Re-pointing or deleting the dataset dir never changes it: a "
             "campaign outlives its dataset dir, and what it RAN is a fact about the campaign."
         ),
     )
@@ -112,10 +113,20 @@ class CampaignSummary(StrictModel):
     )
     spend_metered: MeteredSpend = Field(
         description=(
-            "What the campaign's spend cap counts along its LINE — the root and every cycle a "
-            "rebase handed it to — by bucket: the bill, or the search's incurred USD for a "
-            "controlled arm. The number a surface sets beside a cap, live."
+            "The campaign's LINE — the root and every cycle a rebase handed it to — in the "
+            "ceiling's meter, by bucket: the bill, or the search's incurred USD for a controlled "
+            "arm. Part of `campaign_metered_usd`, which also counts every other cycle."
         )
+    )
+    campaign_metered_usd: float = Field(
+        description=(
+            "What the campaign's money ceiling counts, in its meter: every cycle's own spend "
+            "once, siblings and deleted cycles included. The number a surface sets beside the "
+            "campaign's cap."
+        )
+    )
+    campaign_metered_tokens: int = Field(
+        description="`campaign_metered_usd` in billed tokens, the figure the token ceiling binds."
     )
     bench: BenchScore | None = Field(
         description=(
@@ -123,22 +134,21 @@ class CampaignSummary(StrictModel):
             "read off the campaign's result (`result.json`) under the formula its line runs — "
             "whichever cycle rebases handed the line to. `status` says where it stands and "
             "whether its pass may be asked for; `selected` is null until the line grades its pick. "
-            "Null where the root config did not resolve — a check-in whose dataset is gone, a "
-            "manifest this build cannot read."
+            "Null where the root config did not resolve — a manifest this build cannot read."
         )
     )
     runs_with: CampaignRunsWith | None = Field(
         description=(
             "What the ROOT course runs with — a second transport of the answer "
             "`GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when "
-            "the root pipeline did not resolve. `max_rounds` is the DECLARED rounds cap; 0 means "
-            "origin only."
+            "the root pipeline did not resolve. `budget_rounds` is the DECLARED `budget.rounds`; "
+            "0 means origin only."
         )
     )
     comparison: str = Field(
         description=(
-            "Whether the campaign is a CONTROLLED arm of a head-to-head (`campaign.json::arm`, "
-            "frozen at mint), as one sentence (`domain/campaign.py::comparison_line`): an arm "
+            "Whether the campaign is a CONTROLLED arm of a head-to-head (its declaration's "
+            "`compare` purpose, frozen at mint), as one sentence (`domain/campaign.py::comparison_line`): an arm "
             "reads no other campaign's measurements, refuses a steer and spends its declared "
             "budget; an ordinary campaign optimizes with everything that helps."
         )
@@ -151,15 +161,9 @@ class CampaignListResponse(StrictModel):
 
 
 class CampaignDetailResponse(CampaignSummary):
-    root_content_hash: str | None = Field(
-        description="Content hash of the origin search point — the campaign identity; null on "
-        "an unstarted check-in"
-    )
+    root_content_hash: str = Field(description="Content hash of the origin search point")
     config: CampaignConfig = Field(
-        description=(
-            "The config the campaign's root runs under — its draft's while it is still authoring, "
-            "and for an arm the manifest with its head-to-head record's split and budget laid on."
-        )
+        description="The config the campaign's root runs under: its declaration, made effective."
     )
 
 
@@ -175,10 +179,10 @@ def _line(
         return None
     run = derive_run_state(stores.campaigns.cycle_dir(holder))
     limits = None if config is None else binding_run_limits(stores, holder, config, run)
-    max_rounds = (
-        (None if runs_with is None else runs_with.max_rounds)
+    budget_rounds = (
+        (None if runs_with is None else runs_with.budget_rounds)
         if limits is None
-        else limits.max_rounds
+        else limits.budget.rounds
     )
     return LineStanding(
         holder=holder,
@@ -188,9 +192,9 @@ def _line(
         stop_reason=index.stop_reason,
         standing=index.standing,
         rounds_closed=index.rounds_closed,
-        max_rounds=max_rounds,
-        rounds_line=rounds_line(index.rounds_closed, max_rounds),
-        rounds_cap_note=rounds_cap_note(max_rounds),
+        budget_rounds=budget_rounds,
+        rounds_line=rounds_line(index.rounds_closed, budget_rounds),
+        rounds_cap_note=rounds_cap_note(budget_rounds),
         human_intervened=index.human_intervened,
     )
 
@@ -209,6 +213,8 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
     holder = stores.campaigns.line_holder(campaign.root_hop)
     config = line_config(stores, campaign, holder)
     tail = campaign.campaign_id.rpartition("__")[2] if "__" in campaign.campaign_id else ""
+    meter = ceiling_meter(campaign.declaration.purpose)
+    counted = stores.campaigns.metered_spend(campaign.campaign_id, meter)
     return CampaignSummary(
         campaign_id=campaign.campaign_id,
         dataset_name=campaign.dataset_name,
@@ -220,17 +226,17 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         updated_at=_updated_at(stores, campaign),
         root_cycle_id=campaign.root_cycle_id,
         backend_id=campaign.backend_id,
-        backend_type=campaign.backend_type,
-        self_optimization=is_self_optimization(campaign.backend_type),
+        backend_type=campaign.connector,
+        self_optimization=is_self_optimization(campaign.connector),
         owner_user_id=campaign.owner_user_id,
         lifecycle_status=campaign.lifecycle_status,
         spend_lifetime=LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id)),
-        spend_metered=MeteredSpend.of(
-            read_line_spend(stores, campaign), ceiling_meter(campaign.arm)
-        ),
+        spend_metered=MeteredSpend.of(read_line_spend(stores, campaign).spend, meter),
+        campaign_metered_usd=counted.usd_amount,
+        campaign_metered_tokens=counted.token_amount,
         bench=None if config is None else cycle_bench(stores, campaign, holder, config),
         runs_with=runs_with,
-        comparison=comparison_line(campaign.arm),
+        comparison=comparison_line(campaign.declaration.purpose),
     )
 
 

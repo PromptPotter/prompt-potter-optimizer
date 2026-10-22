@@ -1,19 +1,20 @@
 // Seeds from the RESOLVED config: fork init layers it onto the dataset overlay (`entry.py`), so a sparse seed resets untouched params.
 
+import type { NodePrompt } from "@/lib/api/types";
 import { liveCandidate, type DashboardSnapshot } from "@/lib/poll";
 import type { RoundResult } from "@/lib/types";
 
 export interface CandidateSearchPoint {
-  origin_prompt_fields: Record<string, unknown>;
+  origin_prompts: Record<string, NodePrompt>;
   pipeline_overlay: Record<string, unknown>;
 }
 
 export function searchPoint(
-  promptFields: Record<string, unknown> | null | undefined,
+  prompts: Record<string, NodePrompt> | null | undefined,
   overlay: Record<string, unknown> | null | undefined,
 ): CandidateSearchPoint {
   return {
-    origin_prompt_fields: promptFields ?? {},
+    origin_prompts: prompts ?? {},
     pipeline_overlay: overlay ?? {},
   };
 }
@@ -29,21 +30,36 @@ function nodeConfigs(
   return out;
 }
 
+export interface ArmSearchpoint {
+  prompts: Record<string, NodePrompt> | null;
+  resolved_params: Record<string, unknown> | null;
+}
+
+// A proposal has resolved no config yet; every later state carries it.
+export function armSearchpoint(doc: RoundResult, key: string): ArmSearchpoint | null {
+  const arm = doc.arms[key];
+  if (!arm) return null;
+  return {
+    prompts: arm.individual.prompts,
+    resolved_params: arm.state === "proposed" ? null : arm.resolved_params,
+  };
+}
+
 export function candidateSearchPoint(
   doc: RoundResult | null,
-  candidateId: string,
+  key: string,
 ): CandidateSearchPoint | null {
-  if (!doc || !candidateId) return null;
-  const entry = doc.candidate_scores.find((c) => c.candidate_id === candidateId);
+  if (!doc || !key) return null;
+  const entry = armSearchpoint(doc, key);
   if (!entry) return null;
-  return searchPoint(entry.prompt_fields, nodeConfigs(entry.resolved_pipeline_params));
+  return searchPoint(entry.prompts, nodeConfigs(entry.resolved_params));
 }
 
 export function liveCandidateSearchPoint(
   dash: DashboardSnapshot | null,
-  label: string,
+  key: string | null,
 ): CandidateSearchPoint | null {
-  const entry = liveCandidate(dash, label);
+  const entry = liveCandidate(dash, key);
   if (!entry) return null;
-  return searchPoint(entry.prompt_fields, nodeConfigs(entry.resolved_pipeline_params));
+  return searchPoint(entry.prompts, nodeConfigs(entry.resolved_params));
 }

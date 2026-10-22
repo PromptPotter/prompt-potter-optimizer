@@ -41,11 +41,11 @@ you edited. Each file's docstring lists its packages; its `# N.` headers are the
 
 | You touched | Run | Sections |
 |-------------|-----|----------|
-| `application/scoring/`, `shared/statistics.py`, potter's `pobb/` and `escalation/`, the runner's election, `diagnostics/verify.py`, `evidence/` | `test_scoring.py` | scorer formulas · composite fitness and coverage · electing a round winner · elimination · escalation and stop, live and folded back on resume · paired readings over shared cells |
+| `application/scoring/`, `shared/statistics.py`, potter's `pobb/` and `escalation/`, the runner's election, `diagnostics/verify.py`, `evidence/` | `test_scoring.py` | scorer formulas · composite fitness and coverage · electing a round winner · an authored round · elimination · escalation and stop, live and folded back on resume · paired readings over shared cells |
 | `intelligence/rasch.py` and `adaptive_queue_mechanism.py`, `bench/difficulty.py`, `domain/ruler.py`, `domain/l4/proxies.py` | `test_ruler.py` | the estimator · the δ ruler and the cells a round reads it on · the L4 outer proxy |
 | The hashes a measurement is filed under, `application/pipeline_resolve.py`, `domain/pipeline_overlay.py`, the held-out partition, anything a scored prompt is composed from | `test_identity.py` | what a measurement is filed under · the config a campaign runs · contamination of a scored prompt |
 | `infrastructure/store/measurement_archive.py` and `archive_queries.py`, `application/maintenance/`, `bench/resume_and_fork/`, `application/origin.py` | `test_archive.py` | replay eligibility · the archive on disk · replayed decisions and forks |
-| `infrastructure/llm/` (pricing, the spend book, wire cost), `application/jobs/quota.py`, `account_spend.py`, the runner's budget gate, judge billing | `test_spend.py` | what a call costs · what a run is billed · ceilings · spend outlives what spent it |
+| `infrastructure/llm/` (pricing, the spend book, wire cost), `application/jobs/quota.py`, `account_spend.py`, the runner's budget gate, judge billing | `test_spend.py` | what a call costs · what a run is billed · a campaign's ceiling · what a send is held at · an account's ceiling · spend outlives what spent it |
 | `infrastructure/store/layout.py` path builders, `config/log_redaction.py`, the dispatch fence, `infrastructure/identity/grants.py`, `application/jobs/reaper.py` | `test_security.py` | leaks · delegation · unattended deletes |
 
 The table is for a reader. The command is `python scripts/tests_owning.py --run`: the tests that
@@ -77,8 +77,11 @@ function named for the fork; nothing else is.
 - The first failing assert names its invariant; the rest of the journey is re-read, not re-split.
 
 **The ledger ratchet** — owned by root [`CLAUDE.md`](../CLAUDE.md) `<surface-ledger>`; here it is
-a gate check and never a test: a section added or removed re-stamps `test_functions`, and a
-production module a journey newly imports, or stops importing, re-stamps `test_reach`.
+a gate check and never a test: a section added or removed re-stamps `test_functions`, a
+production module a journey newly imports, or stops importing, re-stamps `test_reach`. The
+widest journey's RAN modules are held where the suite runs whole, beside its memory ceiling
+(`scripts/tests_owning.py::WIDEST_JOURNEY_MODULES`) — a section that sprawls is split along a
+production seam, its function paid by a fork folded back into its journey.
 
 ## Structural invariants live in production, not tests
 
@@ -108,6 +111,15 @@ No pytest-mock plugin. `monkeypatch` for async, stdlib `unittest.mock` when need
 2–3 monkeypatches in one step of a journey means that step is testing wiring that should be an
 import-time assert; a journey of many steps carries each step's patches.
 
+**One fake world.** A network edge — an LLM provider, a backend — is answered by the offline
+run's world (`scripts/offline_world.py`), installed by the `offline` fixture; a journey sets what
+it answers (`offline.llm.says`, `offline.backend.faults`) and reads what was sent
+(`offline.llm.sent`, `offline.backend.asked`). Never a stub client, a raw-response double or a
+patched `get_llm_client`: the journey drives the real client over the wire it would send. Two
+seams sit above any wire of ours and are no edge: a journey whose input is each cell's verdict or
+finishing order replaces `query_loop.measure_sample`, and a DSPy cell's LM is handed an `engine`,
+DSPy's own transport seam — what the connector reads is the reply that seam returns.
+
 **Never fake a strict model.** A `SimpleNamespace` stand-in for a Pydantic model is the one
 construct that can carry a wrong number past every gate: rename a field and ruff, mypy and pytest
 all stay green while the real read path breaks. It can also assert a shape the model cannot
@@ -115,7 +127,7 @@ produce. Build the real model via `factories.py`. A namespace is fine only for a
 is not a validated document — a `Stores`-shaped stub, a session object.
 
 **No test waits on the wall clock.** A test that orders work by `asyncio.sleep` or a timeout runs
-on `test_spend.py::on_jumping_clock`, whose clock jumps to the next timer: the order is the
+on `factories.on_jumping_clock` (`jumping_clock` for one coroutine), whose clock jumps to the next timer: the order is the
 schedule the test wrote, not the box's load. A thread race is bounded by an event the writer sets,
 never by a fixed count of reads.
 
@@ -124,9 +136,10 @@ never by a fixed count of reads.
 | Fixture | Purpose |
 |---------|---------|
 | `built_stores` | A real `Stores` rooted in `tmp_path` (default identity) — `factories.workspace`, the one place a test tree is built. |
+| `offline` | The offline run's world over every network edge (`offline_world.Router`), sentinel provider keys, no rate cap, the default account's rate share bound. |
 
 `factories.py` is not a test file (no `test_` prefix, collects nothing). It holds builders that
-return REAL models — `round_result`, `cycle_result`, `scored_candidate`, plus `measurement` /
+return REAL models — `round_result`, `cycle_result`, `arm_state`, plus `measurement` /
 `measurements`, the one
 graded cell (`GradedCell`; `.facts` is the `MeasuredCell` a scorer takes, and `sheet()` holds them as given). Domain models
 and the few application models the dispatch seam needs, plus the real objects more than one

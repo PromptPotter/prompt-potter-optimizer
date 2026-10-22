@@ -15,7 +15,7 @@ export interface RoundState {
   loading: boolean;
   failure: ReadFailure | null;
   rows: ArmRow[];
-  row: (label: string) => ArmRow | null;
+  row: (key: string | null) => ArmRow | null;
   samples: (row: ArmRow | null) => SampleRow[];
 }
 
@@ -48,7 +48,7 @@ export function useRound(path: CyclePath | null, round: number | null): RoundSta
       loading,
       failure,
       rows,
-      row: (label) => rows.find((r) => r.reading.arm.label === label) ?? null,
+      row: (key) => rows.find((r) => r.reading.arm.key === key) ?? null,
       samples: (row) => (row ? samplesForRow(row, dash, doc) : []),
     }),
     [unfiled, doc, loading, failure, rows, dash],

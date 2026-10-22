@@ -9,7 +9,8 @@ from typing import Any, Literal, NamedTuple
 from pydantic import Field, ValidationError
 
 from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.jobs.quota import next_launch_ceiling
+from promptpotter.application.jobs.quota import next_launch_budget
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.domain.backend import ServedBackpressure
@@ -18,7 +19,7 @@ from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_listing import RunStatus
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits, ServedRound, served_rounds
-from promptpotter.domain.paired_reading import ArmPointer
+from promptpotter.domain.paired_reading import ArmName
 from promptpotter.domain.phases import (
     PauseReading,
     ProducerReading,
@@ -30,7 +31,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.results import VerifyStrategy, closed_after_origin
 from promptpotter.domain.run_records import ForkRemainder
 from promptpotter.domain.scoring import anchored_criterion_dials
-from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendCeilings
+from promptpotter.domain.spend import Budget, CeilingMeter, MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
@@ -49,7 +50,6 @@ from promptpotter.infrastructure.runtime_flags import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,
     scan_ledger_run_wiring,
-    scan_ledger_spend,
     scan_ledger_verify,
 )
 from promptpotter.infrastructure.store.io import read_json_optional
@@ -72,17 +72,16 @@ __all__ = [
 class VerifyPassProgress(StrictModel):
     """``verify_pass`` on a served dashboard — one candidate being re-scored on unseen cells."""
 
-    label: str = Field(description="The candidate the pass re-scores, as its row is labelled.")
-    round: int = Field(description="That candidate's own round; 0 is the origin.")
+    arm: ArmName = Field(description="The candidate the pass re-scores, as its row names it.")
     rows: int = Field(description="Unseen search cells the pass sends.")
     strategy: VerifyStrategy
 
 
 class WarmingDashboard(StrictModel):
     """What a cycle with no dashboard state serves, at 200 rather than 404 so a surface renders
-    "initialising" instead of appearing offline: a cycle in check-in — now, or at the moment a
-    replay folds to — has declared nothing to stand a state on (``RunWiringRecord``), and no
-    other cycle is without one. The run phase is served here as everywhere — a body with none is
+    "initialising" instead of appearing offline: a cycle replayed to a moment inside the check-in
+    its draft's ledger brought in has declared nothing to stand a state on (``RunWiringRecord``),
+    and no other cycle is without one. The run phase is served here as everywhere — a body with none is
     what lets a browser invent one."""
 
     warming_up: Literal[True] = True
@@ -137,17 +136,16 @@ def _round_axis(state: LiveDashboardState, *, live: bool) -> RoundAxis:
     )
 
 
-def _observed(state: LiveDashboardState, *, live: bool) -> ArmPointer | None:
+def _observed(state: LiveDashboardState, *, live: bool) -> ArmName | None:
     current = state.current_round
     if live and (rows := current.candidates):
         measuring = current.measurement_node is not None and (
             current.active_node == current.measurement_node
         )
-        named = [c for c in rows if measuring and c.reading.arm.label == state.candidate]
+        named = [c for c in rows if measuring and c.reading.arm == state.measuring_arm]
         return (named or rows)[-1].reading.arm
     closed = [r for r in state.rounds if r.candidates]
-    arm = closed[-1].candidates[-1].reading.arm if closed else None
-    return arm if arm is not None and arm.candidate_id else None
+    return closed[-1].candidates[-1].reading.arm if closed else None
 
 
 def _walk(state: LiveDashboardState, *, live: bool) -> SampleWalk | None:
@@ -160,8 +158,8 @@ def _walk(state: LiveDashboardState, *, live: bool) -> SampleWalk | None:
         if any(r.round == current.round and r.candidates for r in state.rounds)
         else (current.candidates)
     )
-    measured = [s.sample_id for s in rows[-1].samples if s.sample_id is not None] if rows else []
-    in_flight = state.current_sample_id
+    measured = [s.position for s in rows[-1].samples if s.position is not None] if rows else []
+    in_flight = state.current_position
     key = f"{state.cycle_id}:{current.round}:{len(rows) - 1 if rows else '-'}"
     if axis := state.declared_sample_order:
         # Anchored on a cell's own position, so a walk off the declared order cannot slide the cursor.
@@ -255,10 +253,23 @@ class ServedDashboard(DashboardFacts):
     spend_metered_by_round: dict[str, MeteredSpend] | None = Field(
         description="`spend_metered` per round, in round order."
     )
+    campaign_metered_usd: float | None = Field(
+        description="What the campaign's ceiling has counted in its meter, every cycle of it "
+        "once, deleted ones included — the figure `run_limits.budget.usd` binds, of which "
+        "`spend_metered` is this cycle's own. Null on a replay and where the manifest is gone."
+    )
+    campaign_metered_tokens: int | None = Field(
+        description="The same count in billed tokens, the figure `run_limits.budget.tokens` "
+        "binds; null with `campaign_metered_usd`."
+    )
+    allotment: Budget | None = Field(
+        description="This cycle's share of the campaign's ceiling — the most it may have metered "
+        "in all, and what its run's book binds; null where no run holds a share, and on a replay."
+    )
     fork_remainder: ForkRemainder | None = Field(
         description="What an offshoot of this cycle starts under; null on a replay."
     )
-    observed: ArmPointer | None = Field(
+    observed: ArmName | None = Field(
         description="The arm a surface following the run shows (`_observed`); null before any "
         "arm exists."
     )
@@ -273,19 +284,22 @@ class _Standing(NamedTuple):
     """Only the PRESENT holds these; a replay takes none — a past moment never had them."""
 
     run_limits: RunLimits
+    allotment: Budget | None
     lookahead: int
     lookahead_auto: bool
     verify: VerifyLedger
     verify_stale_after: float | None
     fork_remainder: ForkRemainder
     bench_score: BenchScore | None
+    # ``None`` where the manifest, and so the meter, is gone.
+    campaign_metered: Budget | None
     at: float
 
 
 def binding_run_limits(
     stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
-    """``None`` on a cycle that has declared no wiring — one still in check-in."""
+    """``None`` on a cycle that has declared no wiring yet."""
     wiring = scan_ledger_run_wiring(
         ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None)
     )
@@ -295,30 +309,27 @@ def binding_run_limits(
 def _binding(
     stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState, declared: RunLimits
 ) -> RunLimits:
-    limits = declared
     if config is not None and not run.producer.appending:
-        limits = limits.model_copy(
-            update={
-                "ceiling": next_launch_ceiling(config, stores=stores, hop=hop),
-                "max_rounds": config.optimization.max_rounds or None,
-            }
+        declared = declared.model_copy(
+            update={"budget": next_launch_budget(config, stores=stores, hop=hop)}
         )
-    return armed_run_limits(cycle_dir_for(stores.base_dir, hop), limits)
+    return armed_run_limits(cycle_dir_for(stores.base_dir, hop), declared)
 
 
-def _remainder(
-    stores: Stores, hop: CycleHop, limits: RunLimits | None, meter: CeilingMeter | None
-) -> ForkRemainder:
-    chain = ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None)
+def _allotment(stores: Stores, hop: CycleHop, run: RunState) -> Budget | None:
+    # The share lives on the run's job, which a reshare moves mid-run; no run, no share.
+    if not run.producer.appending:
+        return None
+    job = JobRegistry.attach().running_job_for(stores.campaigns.workspace, hop)
+    return None if job is None else job.allotment
+
+
+def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkRemainder:
     return ForkRemainder.of(
         rounds_closed=closed_after_origin(
             list(stores.campaigns.standing_rounds(hop, moment=None).rounds)
         ),
-        max_rounds=None if limits is None else limits.max_rounds,
-        metered_usd=None
-        if meter is None
-        else MeteredSpend.of(scan_ledger_spend(chain).spend, meter).metered_usd,
-        ceiling=SpendCeilings() if limits is None else limits.ceiling,
+        rounds=None if limits is None else limits.budget.rounds,
     )
 
 
@@ -326,12 +337,7 @@ def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     run = derive_run_state(cycle_dir_for(stores.base_dir, hop))
     config = None if campaign is None else resolve_campaign_config(stores, campaign, hop)
-    return _remainder(
-        stores,
-        hop,
-        binding_run_limits(stores, hop, config, run),
-        None if campaign is None else ceiling_meter(campaign.arm),
-    )
+    return _remainder(stores, hop, binding_run_limits(stores, hop, config, run))
 
 
 _ONE_AT_A_TIME = "This backend runs one sample at a time — a single call has no latency to overlap."
@@ -381,7 +387,8 @@ def _serve(
     verify = None if standing is None else standing.verify
     rounds = served_rounds(
         state.rounds,
-        {} if verify is None else {label: read for label, (_, read) in verify.graded.items()},
+        {} if verify is None else {key: read for key, (_, read) in verify.graded.items()},
+        state.level_series,
     )
     opened = None if verify is None else verify.open
     stale_after = None if standing is None else standing.verify_stale_after
@@ -401,6 +408,7 @@ def _serve(
     unavailable = _ONE_AT_A_TIME if ceiling <= 1 else ""
     live = standing is not None and run.producer.appending
     line_round = next((r for r in reversed(rounds) if r.overlap_line), None)
+    campaign_metered = None if standing is None else standing.campaign_metered
     return ServedDashboard(
         **banked | {"rounds": rounds},
         run_phase=run.run_phase,
@@ -410,10 +418,8 @@ def _serve(
         run_admission=run.admission,
         pause=run.pause,
         overlap_line_round=None if line_round is None else line_round.round,
-        overlap_line_n=None if line_round is None else len(line_round.overlap.sample_ids),
-        verify_pass=VerifyPassProgress(
-            label=opened.label, round=opened.round, rows=opened.rows, strategy=opened.strategy
-        )
+        overlap_line_n=None if line_round is None else len(line_round.overlap.positions),
+        verify_pass=VerifyPassProgress(arm=opened.arm, rows=opened.rows, strategy=opened.strategy)
         if opened is not None
         and standing is not None
         and stale_after is not None
@@ -444,6 +450,9 @@ def _serve(
             key: MeteredSpend.of(spent, meter)
             for key, spent in sorted(state.spend_by_round.items(), key=lambda kv: int(kv[0]))
         },
+        campaign_metered_usd=None if campaign_metered is None else campaign_metered.usd_amount,
+        campaign_metered_tokens=None if campaign_metered is None else campaign_metered.token_amount,
+        allotment=None if standing is None else standing.allotment,
         fork_remainder=None if standing is None else standing.fork_remainder,
         observed=_observed(state, live=live),
         walk=_walk(state, live=live),
@@ -481,7 +490,7 @@ def served_dashboard(
     cycle_path = cycle_dir_for(stores.base_dir, hop)
     run = derive_run_state(cycle_path)
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    meter = None if campaign is None else ceiling_meter(campaign.arm)
+    meter = None if campaign is None else ceiling_meter(campaign.declaration.purpose)
 
     state = (
         _head_state(cycle_path, hop)
@@ -508,14 +517,18 @@ def served_dashboard(
         meter=meter,
         standing=_Standing(
             run_limits=limits,
+            allotment=_allotment(stores, hop, run),
             lookahead=requested_lookahead(armed),
             lookahead_auto=armed.lookahead is not None and armed.lookahead.auto,
             verify=scan_ledger_verify(CycleLayout(cycle_path).ledger),
             verify_stale_after=verify_stale_after(cycle_path),
-            fork_remainder=_remainder(stores, hop, limits, meter),
+            fork_remainder=_remainder(stores, hop, limits),
             bench_score=None
             if campaign is None or config is None
             else cycle_bench(stores, campaign, hop, config),
+            campaign_metered=None
+            if meter is None
+            else stores.campaigns.metered_spend(hop.campaign_id, meter),
             at=time.time(),
         ),
     )

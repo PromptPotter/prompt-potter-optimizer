@@ -147,7 +147,7 @@ export function useChannelModel(
   const docId = selected?.id ?? null;
   const pickedReading = docId ? scoreboardReading(doc, docId) : null;
   const cfg = selected
-    ? candidateObserveConfig(doc, selected.reading.arm.label, selected.label)
+    ? candidateObserveConfig(doc, selected.reading.arm.key, selected.label)
     : null;
   const samples = useMemo(
     () => (docId && round != null ? historicalSamplesFor(doc, round, docId) : []),

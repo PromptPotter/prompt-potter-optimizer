@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimizers.nodes import EliminationReading
 from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationContext,
     EliminationGate,
@@ -13,6 +12,8 @@ from promptpotter.application.optimizers.potter.pobb.checks import (
     PoBBStop,
 )
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.results import Elimination
 from promptpotter.domain.validators import CaughtUp
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 __all__ = ["CatchUpPool", "PoBBRace"]
 
 
-def _reason(ctx: EliminationContext, unit: MeasuredUnit) -> str:
+def _reason(ctx: EliminationContext, unit: MeasuredUnit, labels: Mapping[ArmKey, str]) -> str:
     q = f"q{ctx['queries_scored']}/{ctx['total_queries']}"
     if ctx["gate"] is EliminationGate.COLLAPSED:
         return (
@@ -43,7 +44,7 @@ def _reason(ctx: EliminationContext, unit: MeasuredUnit) -> str:
         return f"leader locked {q}  p_best={ctx['p_best']:.1%} {priors}"
     return (
         f"eliminated {q}  p_best={ctx['p_best']:.1%} < eps={ctx['epsilon']:.0%}  "
-        f"vs {ctx['leader_label']} {priors}"
+        f"vs {labels[ctx['leader']]} {priors}"
     )
 
 
@@ -52,7 +53,7 @@ class _PriorsAhead:
     """Candidates ahead that are still being walked may yet become priors, so the horizon allows for them."""
 
     pobb: PoBBCheck
-    ahead: Sequence[tuple[str, Walk | None]]
+    ahead: Sequence[tuple[ArmKey, Walk | None]]
     name: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -66,7 +67,7 @@ class _PriorsAhead:
         results: Sequence[GradedCell],
         upcoming: Sequence[tuple[Sample, GradedCell | None]],
     ) -> int | None:
-        unresolved = {
+        unresolved: dict[ArmKey, list[GradedCell]] = {
             pid: walk.rows()
             for pid, walk in self.ahead
             if walk is not None and walk.outcome is None
@@ -81,18 +82,18 @@ class CatchUpPool:
         self._check = check
         self._measure = measure
         self._member = member
-        self._sps: dict[str, JobSearchPoint] = {}
-        self._pending: dict[tuple[str, int], CatchUp] = {}
+        self._sps: dict[ArmKey, JobSearchPoint] = {}
+        self._pending: dict[tuple[ArmKey, int], CatchUp] = {}
 
-    def admit(self, candidate_id: str, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
-        self._check.register_completed(results, candidate_id=candidate_id)
-        self._sps[candidate_id] = sp
+    def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
+        self._check.register_completed(results, key=key)
+        self._sps[key] = sp
 
-    def _unstarted(self, sample: Sample) -> list[str]:
+    def _unstarted(self, sample: Sample) -> list[ArmKey]:
         return [
-            cid
-            for cid, held in self._check.priors_by_sample.items()
-            if sample.key not in held and (cid, sample.id) not in self._pending
+            key
+            for key, held in self._check.priors_by_sample.items()
+            if sample.key not in held and (key, sample.id) not in self._pending
         ]
 
     def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
@@ -115,7 +116,7 @@ class CatchUpPool:
 
     def commit_backfills(self, sample: Sample) -> CaughtUp | None:
         """In prior order, when a serial round would have measured them, so what reaches disk is the serial round's."""
-        taken: dict[str, Sequence[GradedCell]] = {}
+        taken: dict[ArmKey, Sequence[GradedCell]] = {}
         for cid in self._check.priors_by_sample:
             backfill = self._pending.pop((cid, sample.id), None)
             if backfill is not None:
@@ -126,7 +127,7 @@ class CatchUpPool:
     def bank_backfills(self, samples: Sequence[Sample]) -> CaughtUp | None:
         """Written UNGRADED: cells a stopped round's walks were sure to take, so the resume replays them unpaid."""
         wanted = {s.id for s in samples}
-        taken: dict[str, list[GradedCell]] = {}
+        taken: dict[ArmKey, list[GradedCell]] = {}
         for key, (call, commit, _) in list(self._pending.items()):
             landed = call.done() and not call.cancelled() and call.exception() is None
             if key[1] in wanted and landed:
@@ -155,7 +156,7 @@ class PoBBRace(CatchUpPool):
         super().__init__(
             PoBBCheck(
                 ctx.knobs,
-                n_min=ctx.config.optimization.elimination_n_min,
+                n_min=ctx.elimination_n_min,
                 n_samples=len(panel.cells),
                 ruler=ctx.difficulty.ruler,
             ),
@@ -164,17 +165,13 @@ class PoBBRace(CatchUpPool):
         )
         self._ctx = ctx
         self._measured_unit = measured_unit
-        # The one prior no arm of this round labels.
-        self._parent_label: dict[str, str] = {}
-        parent_results = ctx.parent_rows
+        # The one prior no arm of this round labels; a cell it never answered is caught up, never borrowed.
+        self._parent = ArmKey(ctx.parent.id)
+        parent_results = ctx.parent_own_rows
         parent_sp = ctx.parent_point
         if parent_results and parent_sp is not None:
-            # Named for the round that ELECTED it: a held round keeps the parent it had.
-            elected_in = next((rr.round for rr in reversed(ctx.rounds) if rr.improved), 0)
-            parent = f"R{elected_in}_winner"
-            self._parent_label[parent] = parent
-            self._check.register_completed(parent_results, candidate_id=parent)
-            self._sps[parent] = parent_sp
+            self._check.register_completed(parent_results, key=self._parent)
+            self._sps[self._parent] = parent_sp
 
     @property
     def n_priors(self) -> int:
@@ -184,24 +181,23 @@ class PoBBRace(CatchUpPool):
     def blocks(self) -> None:
         return None
 
-    def rule(self, ahead: Sequence[tuple[str, Walk | None]]) -> _PriorsAhead:
+    def rule(self, ahead: Sequence[tuple[ArmKey, Walk | None]]) -> _PriorsAhead:
         return _PriorsAhead(self._check, ahead)
 
-    def open_turn(self, candidate_id: str, idx: int, n: int) -> None:
+    def open_turn(self, key: ArmKey) -> None:
         callbacks, node, round_num = self._ctx.callbacks, self._ctx.node, self._ctx.round_num
         self._check.set_current(
-            candidate_id,
-            on_snapshot=partial(callbacks.on_race_standing, node, round_num, idx, n),
+            key, on_snapshot=partial(callbacks.on_race_standing, node, round_num)
         )
 
     def judge(
         self,
         signal: StopSignal | None,
         *,
-        candidate_id: str,
+        key: ArmKey,
         results: Sequence[GradedCell],
-        labels: dict[str, str],
-    ) -> EliminationReading | None:
+        labels: Mapping[ArmKey, str],
+    ) -> Elimination | None:
         """Read off the priors BEFORE the arm joins them: the pool the stop rule tested against."""
         if not isinstance(signal, PoBBStop):
             return None
@@ -209,23 +205,19 @@ class PoBBRace(CatchUpPool):
         gate = context["gate"]
         round_num = self._ctx.round_num
         inputs: dict[str, Any] = {
-            "candidate_id": candidate_id,
-            "prior_candidate_ids": self._check.prior_ids,
+            "arm": key,
+            "prior_arms": self._check.prior_keys,
             "queries_scored": context["queries_scored"],
             "round_num": round_num,
         }
         data: dict[str, Any] = {}
         if fit is not None:
-            context = {
-                **context,
-                "leader_label": {**self._parent_label, **labels}[context["leader_id"]],
-            }
             inputs["recorded_p_best"] = context["p_best"]
             # Each cell by its `Sample.key`: a replay re-fits from this JSON record.
             cells = fit.cells
             data = {
                 "p_best": context["p_best"],
-                "leader_id": context["leader_id"],
+                "leader": context["leader"],
                 "paired_breakdown": signal.paired_breakdown,
                 "candidate_cells": cells,
                 "prior_histories": {
@@ -243,4 +235,7 @@ class PoBBRace(CatchUpPool):
             if gate is EliminationGate.EPSILON:
                 inputs["epsilon"] = context["epsilon"]
         self._ctx.decide(kind, inputs, True, data=data)
-        return EliminationReading(reason=_reason(context, self._measured_unit), context=context)
+        named = {**labels, self._parent: "parent"}
+        return Elimination(
+            reason=_reason(context, self._measured_unit, named), context=dict(context)
+        )

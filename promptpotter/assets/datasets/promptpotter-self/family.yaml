@@ -38,8 +38,9 @@ campaign:
   # The four-factor composite this replaces is described in `domain/l4/proxies.py`; measured over a
   # 39-cell panel, only a lift term discriminated between optimizer prompts, and the quality
   # factors carried more seed variance than arm variance while holding authority over the
-  # ordering. The search pool's θ lift (`mean_round_delta`) is served beside it and scores
-  # nothing: read on the rows the search selected on, it is in-sample.
+  # ordering. The search split's θ lift (`mean_round_delta`) is served beside it wherever the
+  # inner series differences, and scores nothing: read on the rows the search selected on, it
+  # is in-sample.
   # The re-anchor is LINEAR and only exists because `compile_scorer` refuses an empty formula and
   # `clamp_unit_score` clamps [0,1]. Being linear, the paired estimator's reported effect IS the
   # mean held-out lift in accuracy points — a number you can read, not merely order by. The window
@@ -50,14 +51,14 @@ campaign:
     per_sample: max(0.0, min(1.0, mean_bench_lift + 0.5))
   display_metric: ability
   optimization:
-    # Priced against `ceiling.usd`, not intuition: C0 costs ~$0.47 for the 6-cell calibration panel
+    # Priced against `budget.usd`, not intuition: C0 costs ~$0.47 for the 6-cell calibration panel
     # and a 3-variant round runs ~2.3 arms to completion (PoBB refunds the rest), so an optimizing
     # round is ~$1.08. 4 lands at ~$3.7 of the $5.00 ceiling; 5 would halt mid-round on budget
     # rather than on the cap.
     #
     # It must also be falsifiable: ONE optimizing round is a coin toss rather than a test of a
     # challenger, whatever the outer SE reads under the held-out measurand.
-    max_rounds: 4
+    budget: {usd: 5.0, rounds: 4}
     # `degradation_threshold` stays at the default, and that is calibrated, not inherited: it is
     # on the fitness scale, so it moves with the re-anchor above. What it must NOT reject, from
     # the inner cycles: a WINNING inner round buys 1-4 rows in 28 (+0.036 / +0.071 / +0.107 /
@@ -65,13 +66,12 @@ campaign:
     # Improvement here is granular and infrequent by nature; a bar that rejects a 1-row win
     # rejects most real wins.
     elimination_n_min: 4
-    ceiling: {usd: 5.0, tokens: null}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       l1_generate:
         config:
           prompt_family: l1_generate_self_optimizing
-          prompt_block_catalogue: 'off'
+          block_access: 'off'
           # Affordable rather than merely tolerable, and the inner cycles are why: PoBB cut an arm in
           # 14 of 17 inner rounds, so a 3-variant round runs ~2 arms to completion and the third is
           # mostly refunded. That is `elimination_n_min` earning its keep.
@@ -85,12 +85,12 @@ campaign:
       escalation:
         config:
           # No `optimization.lives`, and its absence is deliberate rather than an omission. It read
-          # `start: 2` against `max_rounds: 2`, so the bank could not reach zero before the
+          # `start: 2` against `budget.rounds: 2`, so the bank could not reach zero before the
           # calendar did: hearts NEVER bound, they only relabelled the stop. `af6252` stopped
-          # `lives_exhausted` on round 2, which is also exactly where `max_rounds` would have
+          # `lives_exhausted` on round 2, which is also exactly where `budget.rounds` would have
           # ended it, and nothing in the record says which fact stopped the run. Deleting the
           # inert knob changes no round, only the reason it reports. Re-add it with real
-          # headroom (`start` well under `max_rounds`) when the outer loop runs long enough for
+          # headroom (`start` well under `budget.rounds`) when the outer loop runs long enough for
           # a measurement-driven brake to mean something — the `lives_no_headroom` coupling
           # warns if it goes back in without it.
           l1_patience: 2

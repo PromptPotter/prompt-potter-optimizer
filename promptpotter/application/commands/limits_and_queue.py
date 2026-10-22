@@ -7,9 +7,9 @@ from promptpotter.application.account import account_of
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import withdraw_queued
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import MONEY_AXES, Budget
 from promptpotter.shared.errors import NotFoundError
-from promptpotter.shared.identity import acting_principal_id
+from promptpotter.shared.identity import acting_principal
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.launch_limits import RoundsCap
 
 __all__ = ["cancel_queued_run", "change_run_limits", "set_concurrent_cycles"]
 
@@ -31,14 +30,13 @@ def change_run_limits(
     campaign: Campaign,
     hop: CycleHop,
 ) -> Applier[object]:
-    change, rounds = payload.ceiling, payload.rounds_cap
-    return Applier.silent(lambda: _apply_change_run_limits(dispatcher, hop, change, rounds))
+    change = payload.budget
+    return Applier.silent(lambda: _apply_change_run_limits(dispatcher, hop, change))
 
 
 def _clamp_to_account_ceilings(
-    dispatcher: CommandDispatcher, hop: CycleHop, change: SpendCeilings
-) -> tuple[SpendCeilings, SpendCeilings]:
-    """Only a SUPPLIED arm is clamped: composing an absent one writes a ceiling nobody moved."""
+    dispatcher: CommandDispatcher, hop: CycleHop, change: Budget
+) -> tuple[Budget, Budget]:
     stores = dispatcher.stores
     return quota.clamp_budget_change(
         requested=change,
@@ -50,22 +48,22 @@ def _clamp_to_account_ceilings(
 
 
 async def _apply_change_run_limits(
-    dispatcher: CommandDispatcher, hop: CycleHop, change: SpendCeilings, rounds: RoundsCap | None
+    dispatcher: CommandDispatcher, hop: CycleHop, change: Budget
 ) -> None:
     """Clamped to the account FIRST: unclamped, a raise here is the way around the host-wallet gate."""
-    reserve = SpendCeilings()
-    # A round cap is no money: a rounds-only change skips the wallet read, whose contention refuses.
-    if change != SpendCeilings():
+    reserve = Budget()
+    # Rounds and a clock are no money: a change naming neither money axis skips the wallet read.
+    if change.named & MONEY_AXES:
         change, reserve = await asyncio.to_thread(
             _clamp_to_account_ceilings, dispatcher, hop, change
         )
-    quota.hold_run_limits(
+    await asyncio.to_thread(
+        quota.hold_budget_change,
         job_registry=dispatcher.job_registry,
         stores=dispatcher.stores,
         hop=hop,
         change=change,
         reserve=reserve,
-        rounds=rounds,
     )
 
 
@@ -85,7 +83,7 @@ def cancel_queued_run(
 
     def _apply() -> None:
         stores = dispatcher.stores
-        principal = acting_principal_id(stores.identity)
+        principal = acting_principal(stores.identity).id
         if not withdraw_queued(
             stores, dispatcher.job_registry, payload.job_id, principal_id=principal
         ):

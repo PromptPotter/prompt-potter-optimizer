@@ -25,13 +25,14 @@ export class ApiError extends Error {
     readonly code: string | null = null,
     readonly errorId: string | null = null,
     readonly details: Record<string, unknown> | null = null,
+    readonly serverMessage: string | null = null,
   ) {
-    super(`${status} ${url}`);
+    super(serverMessage ?? `${status} ${url}`);
     this.name = "ApiError";
   }
 }
 
-export type FailureKind = "transient" | "auth" | "gone" | "denied" | "invalid";
+export type FailureKind = "transient" | "auth" | "gone" | "denied" | "invalid" | "refused";
 
 export function failureKind(e: unknown): FailureKind {
   if (!(e instanceof ApiError)) return "transient";
@@ -39,6 +40,8 @@ export function failureKind(e: unknown): FailureKind {
   if (e.status === 403) return "denied";
   if (e.status === 404) return "gone";
   if (e.status === 400 || e.status === 422) return "invalid";
+  // The server answered and said no (a conflict, a spend cap): its sentence is the remedy.
+  if (e.status >= 400 && e.status < 500) return "refused";
   return "transient";
 }
 
@@ -47,6 +50,7 @@ async function toApiError(r: Response, url: string): Promise<ApiError> {
   try {
     const body = (await r.json()) as {
       error?: unknown;
+      message?: unknown;
       error_id?: unknown;
       details?: unknown;
     };
@@ -58,6 +62,7 @@ async function toApiError(r: Response, url: string): Promise<ApiError> {
       body.details && typeof body.details === "object"
         ? (body.details as Record<string, unknown>)
         : null,
+      typeof body.message === "string" && body.message ? body.message : null,
     );
   } catch {
     return new ApiError(r.status, url);

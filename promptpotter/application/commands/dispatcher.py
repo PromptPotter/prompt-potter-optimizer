@@ -5,23 +5,22 @@ import inspect
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, assert_never, cast
 
 from pydantic import ConfigDict
 
 from promptpotter.application.commands.payloads import (
     KIND_OF_PAYLOAD,
-    CheckinPayload,
     CommandAcceptedBody,
     CompactArchivePayload,
-    DatasetReplaced,
     DeleteCyclePayload,
+    DraftPayload,
     LifecyclePayload,
-    ReplaceDatasetPayload,
     SetCampaignLabelPayload,
     WorkspacePayload,
 )
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.domain.campaign import Compare, Optimize
 from promptpotter.domain.command_kinds import (
     CommandKind,
     CommandPayload,
@@ -39,14 +38,20 @@ from promptpotter.infrastructure.llm.telemetry import (
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.stores import Stores, owned_campaign, resolve_cycle_path
+from promptpotter.infrastructure.store.draft_store import DraftClaim
+from promptpotter.infrastructure.store.stores import (
+    Stores,
+    owned_campaign,
+    owned_draft_data,
+    resolve_cycle_path,
+)
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
     NotFoundError,
     PayloadInvalidError,
 )
-from promptpotter.shared.identity import acting_principal_id, require_capability
+from promptpotter.shared.identity import acting_principal, require_capability
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import Inline
@@ -118,6 +123,8 @@ class Applier[R]:
     replay: Callable[[], R] | None
     effect_fn: Callable[[], dict[str, Any]] | None = None
     ack: CommandAckStatus = "applied"
+    # The draft claim this command holds through its ack; a Start hands its claim to the launch.
+    claim: DraftClaim | None = None
 
     @staticmethod
     def silent(
@@ -142,12 +149,16 @@ class Applier[R]:
 
 
 def refused_on_an_arm(campaign: Campaign) -> Applier[object] | None:
-    if campaign.arm is None:
-        return None
-    return Applier.refusing(
-        f"{campaign.campaign_id} is arm {campaign.arm.arm_key} of head-to-head "
-        f"{campaign.arm.head_to_head_id}: its search and steer are the declaration's"
-    )
+    match purpose := campaign.declaration.purpose:
+        case Optimize():
+            return None
+        case Compare(arm=arm):
+            return Applier.refusing(
+                f"{campaign.campaign_id} is arm {arm.arm_key} of head-to-head "
+                f"{arm.head_to_head_id}: its search and steer are the declaration's"
+            )
+        case _:
+            assert_never(purpose)
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,7 +189,9 @@ class CommandDispatcher:
         return derive_run_state(self.stores.campaigns.cycle_dir(hop))
 
     def _applier(self, call: CommandCall[Any], *target: object) -> Applier[Any]:
-        module, _, name = call.kind.handler.partition(":")
+        kind = call.kind
+        require_capability(self.stores.identity, kind.capability, subject=f"command {kind.value!r}")
+        module, _, name = kind.handler.partition(":")
         handler: Callable[..., Applier[Any]] = getattr(
             importlib.import_module(f"{_HANDLER_PACKAGE}.{module}"), name
         )
@@ -243,11 +256,6 @@ class CommandDispatcher:
             )
         return await self._record_and_apply(ledger, call, self._applier(call, campaign, hop))
 
-    async def dispatch_replace_dataset(
-        self, call: CommandCall[ReplaceDatasetPayload]
-    ) -> CommandOutcome[DatasetReplaced]:
-        return cast(CommandOutcome[DatasetReplaced], await self._dispatch_on_workspace(call))
-
     async def dispatch_compact_archive(
         self, call: CommandCall[CompactArchivePayload]
     ) -> CommandOutcome[ArchiveReport]:
@@ -262,26 +270,31 @@ class CommandDispatcher:
         ledger = CycleEventLog.open_workspace(self.stores.base_dir)
         return await self._record_and_apply(ledger, call, self._applier(call))
 
-    async def dispatch_checkin_command[P: CheckinPayload](
+    async def dispatch_draft_command[P: DraftPayload](
         self, call: CommandCall[P]
     ) -> CommandOutcome[Any]:
-        # Asked FIRST: a draft that is gone or a patch it refuses is answered before the campaign is.
-        applier = self._applier(call)
-        campaign_id = call.payload.checkin_campaign_id
-        campaign = owned_campaign(self.stores, campaign_id)
-        cycle_dir = self.stores.campaigns.cycle_dir(campaign.root_hop)
-        if self.stores.campaigns.load(campaign.root_hop, moment=None) is None:
-            raise NotFoundError(
-                f"check-in cycle not found: {campaign_id}/{campaign.root_cycle_id}",
-                code="command_target_not_found",
+        # Under the draft's claim, which a Start holds until its mint closed: no command lands inside
+        # a mint or writes a minted draft back. Owned first, so another user's held claim says nothing.
+        owned_draft_data(self.stores, call.payload.draft_id)
+        claim = self.stores.drafts.claim(call.payload.draft_id)
+        try:
+            applier = self._applier(call, claim)
+        except BaseException:
+            claim.release()
+            raise
+        draft_dir = self.stores.drafts.draft_dir(call.payload.draft_id)
+        try:
+            return await self._record_and_apply(
+                CycleEventLog.open(CycleDir(draft_dir)), call, applier
             )
-        return await self._record_and_apply(CycleEventLog.open(CycleDir(cycle_dir)), call, applier)
+        finally:
+            if applier.claim is not None:
+                applier.claim.release()
 
     async def _record_and_apply[P: CommandPayload, R](
         self, ledger: CycleEventLog, call: CommandCall[P], applier: Applier[R]
     ) -> CommandOutcome[R]:
         kind, idempotency_key = call.kind, call.idempotency_key
-        self._require_capability_for(kind)
         if applier.replay is not None:
             existing = _find_idempotent_command(ledger, idempotency_key)
             if existing is not None:
@@ -299,7 +312,7 @@ class CommandDispatcher:
                 kind=kind,
                 payload=call.payload.model_dump(mode="json"),
                 idempotency_key=idempotency_key,
-                issued_by_user_id=acting_principal_id(self.stores.identity),
+                issued_by=acting_principal(self.stores.identity),
             )
             ack_status: CommandAckStatus = applier.ack
             ack_detail = ""
@@ -347,9 +360,6 @@ class CommandDispatcher:
             kind=CommandKind.PAUSE_CYCLE,
             payload=payload.model_dump(mode="json"),
             idempotency_key=command_id,
-            issued_by_user_id=acting_principal_id(self.stores.identity),
+            issued_by=acting_principal(self.stores.identity),
         )
         emit_command_ack(command_id=command_id, status="accepted")
-
-    def _require_capability_for(self, kind: CommandKind) -> None:
-        require_capability(self.stores.identity, kind.capability, subject=f"command {kind.value!r}")

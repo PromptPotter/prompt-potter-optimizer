@@ -124,7 +124,7 @@ The dataset's own rows where a connector reads them (`Connector.owns_panel`).
 
 Each resolves nearest-ancestor-or-self.
 
-- **`origin.yaml`** — 8-field `PromptTemplate` per node, keyed by node and merged root-first. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `promptpotter/application/datasets/prompts.py::load_node_prompt`.
+- **`origin.yaml`** — a starting prompt per node, `{field: text}` under its node name, each field one the node declares (`NodePromptInfo.fields`). Loaded by `promptpotter/application/datasets/prompts.py::declared_origin_prompts`, which refuses an undeclared field.
 - **`task.md`** — the body is free-form markdown, decomposed into the campaign's `task_context` framing (`Cycle.framing`) by the first mint that finds none committed, or by a check-in (`new <name> --task-file`, the web check-in). Its optional YAML front matter is the committed framing — written once by the `checkin` decomposition (`application/bench/task_context.py::commit_task_framing`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::readable_task_context` on the tenant-first ladder.
 - **`README.md`** — operator guide; free-form, not parsed.
 
@@ -172,7 +172,7 @@ nothing resolves to `site-packages/`: `pip` deletes there on upgrade.
 Two behaviours a fork may rely on, neither of them readable off `--help`:
 
 - Every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/campaign_ids.py::mint_campaign_id`). The prior campaign is preserved.
-- A launch flag SETS the cycle's budget, raise or lower, over what the dataset declares, and stays as the cycle's standing ceiling for later resumes; the account admits the result whole or refuses the launch. `set-limits` moves it mid-flight.
+- A launch flag SETS an axis of the cycle's budget, raise or lower, over what the dataset declares, and stays on the cycle's standing budget for later resumes; the account admits the result whole or refuses the launch. `set-limits` moves it mid-flight.
 
 The maintenance and diagnostic verbs are not part of v1.
 
@@ -183,16 +183,22 @@ one campaign inside its own event loop:
 
 ```python
 session = await open_session(dataset_name, *, stores=None,
-                             program=None)
-result = await run_campaign(session, train_data, campaign_config, *, readout_sink=None,
-                            langfuse_session_id=None, limits, mode)
+                             program=None, rows=None)
+result = await run_campaign(session, campaign_config=None, *, readout_sink=None,
+                            langfuse_session_id=None, budget, step_rounds, mode, arm=None)
 ```
 
-`limits` is a `promptpotter.domain.launch_limits.LaunchLimits(halt_at_accuracy=…,
-ceiling=SpendCeilings(usd=…, tokens=…))`, the model the CLI flags and the `start-run` payload build; a
-ceiling it declares sets the run's over the campaign's own (no admission — the host program holds no
-slot), and `LaunchLimits()` declares none. `mode`
-is `domain/launch_limits.py::RunMode`, the shape the `start-run` payload carries, and `RunMode()` is a plain run.
+A run measures the session's bank, and nothing else: `rows` hands the host's own samples in as
+that bank, which the mint labels `dataset_name` exactly as it labels every other.
+
+`campaign_config` is what a MINT declares, so it is required on a fresh session and refused on one
+bound to a cycle: a resume runs its campaign's declaration, resolved as every other door resolves it.
+
+`budget` is a `promptpotter.domain.spend.Budget(usd=…, tokens=…, rounds=…, wall_clock_s=…)`, the
+model the CLI flags and the `start-run` payload build; an axis it names is laid over the campaign's
+own and holds a share of the campaign's ceiling through the one admission every launch takes, and
+`Budget()` names none. `step_rounds` pauses the run once it has closed that many rounds. `mode` is
+`domain/run_mode.py::RunMode`, the shape the `start-run` payload carries, and `RunMode()` is a plain run.
 
 Two steps rather than one because every caller does its own work between them. It mints through
 the same `mint_framed_cycle` prologue `new` and the web mint run, and scores the origin inside
@@ -227,8 +233,8 @@ from the same call that stamps `index.json::final`, so both are projections of o
 ```python
 from promptpotter.domain.export import parse_prompt_export
 export = parse_prompt_export(Path("…/export.json").read_text())
-template = export.template()          # PromptTemplate — fields by name
-prompt = export.render()              # the prompt as scored: those fields, then its shots
+fields = export.prompts["solve"]      # per prompt node, its fields by name, as scored
+prompt = export.render("solve")       # that node's prompt as scored: those fields, then its shots
 export.measurement.own.composite      # under export.measurement.formula, never a bare number
 ```
 
@@ -261,7 +267,7 @@ counts optimization cost plus serving cost over 100k requests, and a reader of t
 Typed records on the per-cycle ledger (`.runtime/ledger.jsonl` — the
 workspace-scoped sibling at `.workspace/events.jsonl` carries workspace
 lifecycle, not cycle records). The record family — `PhaseRecord`,
-the arm-walk records (`SampleScoredRecord`, `CandidateScoredRecord`, …), `ResumeCheckpointRecord`, `TokenUsageRecord`,
+the arm-walk records (`SampleScoredRecord`, `ArmRecord`, …), `ResumeCheckpointRecord`, `TokenUsageRecord`,
 `LLMCallStartRecord`/`LLMCallRecord` — is the discriminated union in
 `domain/run_records.py`; each record's fields are its dataclass, read
 them there.

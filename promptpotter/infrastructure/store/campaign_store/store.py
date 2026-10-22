@@ -3,9 +3,12 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-from collections.abc import Mapping, Sequence
+import shutil
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Unpack
+from typing import Any, Unpack, get_args
+
+from pydantic import ValidationError
 
 from promptpotter.domain.bench import BenchScore, PartitionRecord
 from promptpotter.domain.campaign import (
@@ -15,16 +18,15 @@ from promptpotter.domain.campaign import (
     HeadToHeadRecord,
     LifecycleFilter,
     LifecycleStatus,
+    ceiling_meter,
 )
 from promptpotter.domain.cycle_listing import CycleIndex, CycleListEntry, RunStatus
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
-from promptpotter.domain.launch_limits import RoundsCap
 from promptpotter.domain.phases import ErrorRecord, LaunchStage, ProducerState, StopReason
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.ruler import DeltaRuler, RulerScope
 from promptpotter.domain.run_records import (
-    CheckinClosedRecord,
+    BankedSubject,
     CycleFinal,
     CycleFinalRecord,
     CycleMintedRecord,
@@ -41,37 +43,35 @@ from promptpotter.domain.run_records import (
     OptimizerStateRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
-    RulerRecord,
-    RunLimitsRecord,
     RunPhaseRecord,
     SpawnedBy,
     SpawnedRecord,
+    StandingBudgetRecord,
     parent_address,
 )
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter
 from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.ledger import CycleEventLog, continued_chain, ledger_chain
+from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import (
     read_cycle_index,
     write_cycle_index,
 )
 from promptpotter.infrastructure.projections.live_dashboard.projection import materializing_over
 from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
-from promptpotter.infrastructure.store.account_trail import bank_trail
+from promptpotter.infrastructure.store.account_spend import banked_metered, sandbox_cycle_dirs
+from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     StandingRounds,
     scan_cycle_facts,
     scan_launch_claim,
     scan_ledger_cycle_seed,
-    scan_ledger_ruler,
-    scan_ledger_run_limits,
+    scan_ledger_metered,
+    scan_ledger_standing_budget,
     scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.io import (
     iter_files,
-    read_json,
     read_json_optional,
     read_text_optional,
     read_yaml_optional,
@@ -99,7 +99,13 @@ from promptpotter.infrastructure.store.session_pointer import (
     clear_active_pointer,
     read_active_pointer,
 )
-from promptpotter.shared.errors import BadRequestError, ConflictError, NotFoundError, graceful
+from promptpotter.shared.errors import (
+    BadRequestError,
+    ConflictError,
+    ManifestUnreadableError,
+    NotFoundError,
+    graceful,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +131,15 @@ def _strip_to_keepsake(campaign_dir: Path) -> None:
             ]:
                 unlink_robust(p)
             _prune_empty_dirs(cdir)
+
+
+def _ledger_meters(ledgers: Iterable[Path]) -> dict[CeilingMeter, Budget]:
+    total = dict.fromkeys(get_args(CeilingMeter), NOTHING_METERED)
+    for ledger in ledgers:
+        if ledger.is_file():
+            for meter, counted in scan_ledger_metered(ledger).items():
+                total[meter] = total[meter].plus(counted)
+    return total
 
 
 class CampaignStore:
@@ -155,11 +170,22 @@ class CampaignStore:
         CycleEventLog.open(CycleDir(cycle_dir)).append(record)
         write_cycle_index(cycle_dir)
 
-    def load_campaign(self, campaign_id: str) -> Campaign | None:
-        data = read_json_optional(self._manifest_path(campaign_id))
+    def _read_declared[M: (Campaign, HeadToHeadRecord)](
+        self, path: Path, model: type[M]
+    ) -> M | None:
+        data = read_json_optional(path)
         if data is None:
             return None
-        return Campaign.model_validate(data)
+        try:
+            return model.model_validate(data)
+        except ValidationError as exc:
+            raise ManifestUnreadableError(
+                path=str(path.relative_to(self._base_dir)),
+                reason=f"{exc.error_count()} field(s) — {exc.errors()[0]['msg']}",
+            ) from exc
+
+    def load_campaign(self, campaign_id: str) -> Campaign | None:
+        return self._read_declared(self._manifest_path(campaign_id), Campaign)
 
     def _campaigns_root(self) -> Path:
         return campaigns_root_dir_for(self._base_dir)
@@ -186,6 +212,20 @@ class CampaignStore:
             if (ledger := CycleLayout(cycle_dir).ledger).is_file()
         ]
 
+    def metered_spend(self, campaign_id: str, meter: CeilingMeter) -> Budget:
+        """Each cycle's OWN appends once (a fork's prefix is its parent's), and what a deleted cycle metered."""
+        own = _ledger_meters(self.campaign_cycle_ledgers(campaign_id))[meter]
+        return own.plus(banked_metered(self._base_dir, campaign_id, meter))
+
+    def cycle_metered(self, hop: CycleHop, meter: CeilingMeter) -> Budget:
+        return _ledger_meters([self._layout(hop).ledger])[meter]
+
+    def ceiling_meter_of(self, campaign_id: str) -> CeilingMeter:
+        campaign = self.load_campaign(campaign_id)
+        if campaign is None:
+            raise NotFoundError(f"campaign not found: {campaign_id}")
+        return ceiling_meter(campaign.declaration.purpose)
+
     def campaign_walk_spans(self, campaign_id: str) -> list[LedgerSpan]:
         """Each cycle's whole chain, so a cycle lifted from another tree remembers its prefix."""
         widest: dict[Path, int | None] = {}
@@ -205,7 +245,13 @@ class CampaignStore:
         ]
 
     def create_campaign(self, campaign: Campaign) -> Path:
+        """Never over one it holds: a second root would orphan every line banked under the first."""
         path = self._manifest_path(campaign.campaign_id)
+        if path.exists():
+            raise ConflictError(
+                f"campaign {campaign.campaign_id} exists; a mint never re-roots it",
+                code="campaign_exists",
+            )
         write_json(path, campaign.model_dump(mode="json"))
         return path
 
@@ -217,8 +263,9 @@ class CampaignStore:
         write_json(self._campaign_layout(campaign_id).result, result.model_dump(mode="json"))
 
     def load_head_to_head(self, head_to_head_id: str) -> HeadToHeadRecord | None:
-        data = read_json_optional(head_to_head_path(self._base_dir, head_to_head_id))
-        return None if data is None else HeadToHeadRecord.model_validate(data)
+        return self._read_declared(
+            head_to_head_path(self._base_dir, head_to_head_id), HeadToHeadRecord
+        )
 
     def declare_head_to_head(self, record: HeadToHeadRecord) -> None:
         write_json(
@@ -227,18 +274,12 @@ class CampaignStore:
         )
 
     def update_campaign(self, campaign_id: str, **changes: Unpack[CampaignEdit]) -> None:
-        manifest = Campaign.model_validate(read_json(self._manifest_path(campaign_id)))
-        self.create_campaign(manifest.edited(**changes))
-
-    def repoint_dataset(self, old_name: str, new_name: str) -> int:
-        count = 0
-        for cid in self.list_campaign_ids():
-            campaign = self.load_campaign(cid)
-            if campaign is None or campaign.dataset_name != old_name:
-                continue
-            self.update_campaign(cid, dataset_name=new_name)
-            count += 1
-        return count
+        manifest = self.load_campaign(campaign_id)
+        if manifest is None:
+            raise NotFoundError(f"campaign not found: {campaign_id}")
+        write_json(
+            self._manifest_path(campaign_id), manifest.edited(**changes).model_dump(mode="json")
+        )
 
     def list_campaign_ids(self) -> list[str]:
         return sorted(p.name for p in self.iter_campaign_dirs())
@@ -274,10 +315,7 @@ class CampaignStore:
                 continue
             if dataset_name and campaign.dataset_name != dataset_name:
                 continue
-            if lifecycle == "checkin":
-                if not self.in_checkin(campaign.root_hop):
-                    continue
-            elif lifecycle != "all" and campaign.lifecycle_status != lifecycle:
+            if lifecycle != "all" and campaign.lifecycle_status != lifecycle:
                 continue
             if owner_user_id is not None and campaign.owner_user_id != owner_user_id:
                 continue
@@ -329,20 +367,33 @@ class CampaignStore:
         self._set_lifecycle(campaign_id, "active", changed_at, reason)
         return True
 
-    def _bank(self, cycle_dirs: list[Path], *, campaign_id: str, cycle_id: str = "") -> None:
-        """Destroyers only: what a subject cost and what was commanded on it outlive its rows."""
-        for bank in (bank_spend, bank_trail):
-            bank(
-                workspace=self._base_dir,
-                cycle_dirs=cycle_dirs,
-                campaign_id=campaign_id,
-                cycle_id=cycle_id,
-            )
+    def _bank(
+        self,
+        cycle_dirs: list[Path],
+        *,
+        campaign_id: str,
+        cycle_id: str = "",
+        metered: dict[CeilingMeter, Budget],
+    ) -> None:
+        bank_before_removal(
+            workspace=self._base_dir,
+            cycle_dirs=cycle_dirs,
+            subject=BankedSubject(campaign_id=campaign_id, cycle_id=cycle_id),
+            metered=metered,
+        )
+
+    def _campaign_metered_bank(self, campaign_id: str) -> None:
+        # What its rows metered, never the banked part: that is a tombstone already.
+        self._bank(
+            self.campaign_cycle_dirs(campaign_id),
+            campaign_id=campaign_id,
+            metered=_ledger_meters(self.campaign_cycle_ledgers(campaign_id)),
+        )
 
     def bank_all_before_removal(self) -> None:
         """Removal only: banking a subject that keeps its rows counts the money twice."""
         for campaign_dir in self.iter_campaign_dirs():
-            self._bank(self.campaign_cycle_dirs(campaign_dir.name), campaign_id=campaign_dir.name)
+            self._campaign_metered_bank(campaign_dir.name)
 
     def delete_campaign(
         self,
@@ -354,18 +405,19 @@ class CampaignStore:
         inner_sandbox_root: Path | None = None,
     ) -> bool:
         campaign_dir = self.campaign_root_dir(campaign_id)
-        if not CampaignLayout(campaign_dir).manifest.is_file():
+        if not campaign_dir.is_dir():
             return False
         self._guard_and_release(campaign_id, "delete")
         # After the guard: a tombstone beside a refused delete's rows counts the money twice.
-        self._bank(self.campaign_cycle_dirs(campaign_id), campaign_id=campaign_id)
+        self._campaign_metered_bank(campaign_id)
         # Before the tree goes: the off-tree inner sandboxes are keyed by these ids.
         inner_cycle_ids: list[str] = []
         if inner_sandbox_root is not None:
             cycles_dir = campaign_cycles_dir(campaign_dir)
             if cycles_dir.is_dir():
                 inner_cycle_ids = [p.name for p in cycles_dir.iterdir() if p.is_dir()]
-        if keep_results:
+        # With no manifest nothing marks a keepsake deleted, so its rows would count beside the bank.
+        if keep_results and CampaignLayout(campaign_dir).manifest.is_file():
             self._set_lifecycle(campaign_id, "deleted", changed_at, reason)
             _strip_to_keepsake(campaign_dir)
         else:
@@ -383,22 +435,29 @@ class CampaignStore:
         if not sandbox.exists():
             return
         # Keyed on the sandbox directory: inner cycle ids are content-addressed and repeat across them.
-        self._bank(sandbox_cycle_dirs(sandbox), campaign_id=campaign_id, cycle_id=sandbox.name)
+        # Metered nothing of the outer ceiling: the outer ledger carries every inner call.
+        self._bank(
+            sandbox_cycle_dirs(sandbox),
+            campaign_id=campaign_id,
+            cycle_id=sandbox.name,
+            metered=_ledger_meters([]),
+        )
         rmtree_robust(sandbox)
 
     def load(self, hop: CycleHop, *, moment: Moment | None) -> CycleIndex | None:
         return read_cycle_index(self.cycle_dir(hop), moment=moment)
 
-    def mint_cycle(self, hop: CycleHop, *, checkin: bool = False) -> None:
+    def adopt_ledger(self, hop: CycleHop, ledger: Path) -> None:
+        """A MOVE, never a copy: what a draft billed is the cycle's first lines."""
+        target = self._layout(hop).ledger
+        if target.exists():
+            raise ConflictError(f"cycle {hop.cycle_id} already holds a ledger")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(ledger, target)
+
+    def mint_cycle(self, hop: CycleHop) -> None:
         if scan_cycle_facts(self._layout(hop).ledger).minted is None:
-            self._append(hop, CycleMintedRecord(checkin=checkin))
-
-    def in_checkin(self, hop: CycleHop) -> bool:
-        return scan_cycle_facts(self._layout(hop).ledger).checkin
-
-    def close_checkin(self, hop: CycleHop) -> None:
-        if self.in_checkin(hop):
-            self._append(hop, CheckinClosedRecord())
+            self._append(hop, CycleMintedRecord())
 
     def mint_fork_cycle(
         self, child: CycleHop, parent_dir: Path, spec: ForkSpec, *, cut: int, from_round: int
@@ -435,7 +494,7 @@ class CampaignStore:
 
     def restate_optimizer_state(self, hop: CycleHop, rr: RoundResult) -> None:
         CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
-            OptimizerStateRecord(round=rr.round, optimizer_state=rr.optimizer_state)
+            OptimizerStateRecord(round=rr.round, optimizer_state=rr.closed_state)
         )
 
     def rewind_to_round(
@@ -628,7 +687,12 @@ class CampaignStore:
             return False, blocked
         cycle_dir = self.cycle_dir(hop)
         # After the refusal, before the rmtree: an origin-scored stub already paid for round 0.
-        self._bank([cycle_dir], campaign_id=hop.campaign_id, cycle_id=hop.cycle_id)
+        self._bank(
+            [cycle_dir],
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
+            metered=_ledger_meters([CycleLayout(cycle_dir).ledger]),
+        )
         rmtree_robust(cycle_dir)
         return True, ""
 
@@ -639,24 +703,16 @@ class CampaignStore:
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
         return scan_ledger_cycle_seed(self._layout(hop).ledger)
 
-    def write_run_limits(
-        self,
-        hop: CycleHop,
-        ceiling: SpendCeilings,
-        *,
-        rounds: RoundsCap | None,
-        pause_at_round: int | None,
-        reserve: SpendCeilings,
+    def write_standing_budget(
+        self, hop: CycleHop, budget: Budget, *, pause_at_round: int | None
     ) -> None:
-        """Whole, last wins: a ``None`` rounds cap or ``pause_at_round`` DROPS the standing one."""
+        """Whole, last wins: an axis it leaves unnamed, or a ``None`` ``pause_at_round``, stands no more."""
         CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
-            RunLimitsRecord(
-                ceiling=ceiling, rounds=rounds, pause_at_round=pause_at_round, reserve=reserve
-            )
+            StandingBudgetRecord(budget=budget, pause_at_round=pause_at_round)
         )
 
-    def read_run_limits(self, hop: CycleHop) -> RunLimitsRecord:
-        return scan_ledger_run_limits(self._layout(hop).ledger)
+    def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
+        return scan_ledger_standing_budget(self._layout(hop).ledger)
 
     def write_resolved_pipeline(self, hop: CycleHop, declaration: dict[str, Any]) -> None:
         write_yaml(self._layout(hop).resolved_pipeline, declaration)
@@ -723,21 +779,6 @@ class CampaignStore:
     def read_resolved_pipeline(self, hop: CycleHop) -> dict[str, Any] | None:
         raw = read_yaml_optional(self._layout(hop).resolved_pipeline)
         return raw if isinstance(raw, dict) else None
-
-    def write_ruler(
-        self, hop: CycleHop, ruler: DeltaRuler, *, scope: RulerScope, round_num: int
-    ) -> None:
-        cycle_dir = self.cycle_dir(hop)
-        CycleEventLog.open(CycleDir(cycle_dir)).append(
-            RulerRecord(ruler=ruler, scope=scope, round=round_num)
-        )
-
-    def read_ruler(
-        self, hop: CycleHop, *, scope: RulerScope, moment: Moment | None
-    ) -> DeltaRuler | None:
-        return scan_ledger_ruler(
-            continued_chain(CycleDir(self.cycle_dir(hop)), moment=moment), scope
-        )
 
 
 __all__ = ["CampaignStore"]

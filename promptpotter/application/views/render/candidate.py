@@ -9,13 +9,19 @@ from promptpotter.application.views.render.primitives import (
     GREEN,
     RESET,
     YELLOW,
-    _fmt_delta,
     fmt_ci,
     fmt_pct,
 )
 from promptpotter.domain.candidate_diff import flatten_sp_summary
 from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.results import ArmOutcome, ScoredCandidate
+from promptpotter.domain.results import (
+    Broken,
+    Concluded,
+    Cut,
+    ScoreSummary,
+    arm_elimination,
+    arm_end,
+)
 from promptpotter.shared.answer_text import truncate
 from promptpotter.shared.composite import render_composite_fitness_oneliner
 
@@ -46,59 +52,54 @@ class IndividualSummary:
     tag: str
     body_line: str
     detail_lines: tuple[str, ...]
-    lift: float | None
 
 
-def individual_summary(report: ScoredCandidate, *, unit: MeasuredUnit) -> IndividualSummary:
-    """Takes no parent: the comparison against it is SERVED (``vs_reference``), never differenced here."""
-    mutations = fmt_pipeline_overlay(report.pipeline_overlay)
+def individual_summary(
+    report: Concluded, fold: ScoreSummary | None, *, unit: MeasuredUnit
+) -> IndividualSummary:
+    """Takes no parent: an arm concludes before the election pairs it against one."""
+    mutations = fmt_pipeline_overlay(report.overlay)
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
 
-    outcome = report.outcome
-    if outcome == ArmOutcome.INVALID:
+    if arm_end(report) == "invalid":
         out: list[str] = []
         for vf in report.validation_failures:
             allowed_str = ", ".join(vf.allowed[:3]) + (
                 f" (+{len(vf.allowed) - 3})" if len(vf.allowed) > 3 else ""
             )
             out.append(f"{YELLOW}⚠{RESET} {vf.axis} = {vf.value!r}  ∉ [{allowed_str}]")
-            out.append("  ↳ scored 0 (no backend call); the next l1_generate reads it in l1_wounds")
+            out.append("  ↳ never measured; the next l1_generate reads it in l1_wounds")
         return IndividualSummary(
             tag=f"{YELLOW}INVALID{RESET}",
             body_line="",
             detail_lines=tuple(out),
-            lift=None,
+        )
+    if fold is None:
+        return IndividualSummary(
+            tag=f"{YELLOW}{arm_end(report)}{RESET}",
+            body_line=f"{mutations_chunk}{unit_count(0, unit)}",
+            detail_lines=(),
         )
 
-    n = report.total
-    ci = fmt_ci(report.mean_fitness_ci_lo, report.mean_fitness_ci_hi, spec="{:.1%}")
-    tag = f"{fmt_pct(report.accuracy)} {ci}"
+    ci = fmt_ci(fold.mean_fitness_ci_lo, fold.mean_fitness_ci_hi, spec="{:.1%}")
+    tag = f"{fmt_pct(fold.accuracy)} {ci}"
 
-    if outcome.cut_short:
-        scored_q, expected_q = report.scored_samples, report.expected_samples
-        n_str = (
-            f"{unit_count(scored_q, unit)} {YELLOW}⚠ {outcome.value} {scored_q}/{expected_q}{RESET}"
-        )
+    cut = report.reason if isinstance(report, Cut) else None
+    if cut is not None:
+        walked, expected_q = fold.walked, report.expected_samples
+        n_str = f"{unit_count(walked, unit)} {YELLOW}⚠ {cut.kind} {walked}/{expected_q}{RESET}"
     else:
-        n_str = unit_count(n, unit)
-    if report.cached_samples:
-        n_str += f" ({report.cached_samples}📖)"
-    # No differenced fallback: a cut arm's rate on its own prefix outruns the reference's on a fuller panel.
-    reading = report.vs_reference
-    lift = reading.headline.estimate if reading and reading.headline else None
-    vs_reference = ""
-    if lift is not None:
-        band = fmt_ci(lift.ci_lo, lift.ci_hi, spec="{:+.1%}")
-        vs_reference = f"  vs reference: {_fmt_delta(lift.value)} {band}"
-    body_line = f"{mutations_chunk}{n_str}{vs_reference}"
+        n_str = unit_count(fold.total, unit)
+    if fold.cached:
+        n_str += f" ({fold.cached}📖)"
+    body_line = f"{mutations_chunk}{n_str}"
 
     detail_lines: list[str] = []
-    degrad = report.degradation_context
-
-    if reason := report.elimination_reason:
-        mark = f"{GREEN}✓" if outcome == ArmOutcome.LOCKED_IN else f"{YELLOW}✂"
-        detail_lines.append(f"{mark} {reason}{RESET}")
-    elif outcome == ArmOutcome.BROKEN and degrad:
+    if (elimination := arm_elimination(report)) is not None:
+        mark = f"{YELLOW}✂" if cut is not None else f"{GREEN}✓"
+        detail_lines.append(f"{mark} {elimination.reason}{RESET}")
+    elif isinstance(cut, Broken):
+        degrad = cut.degradation
         tag = "fatal" if degrad["fatal"] else f"{degrad['degraded_rate']:.0%} degraded"
         detail_lines.append(
             f"{YELLOW}✂ broken ({degrad['source']}) "
@@ -106,19 +107,13 @@ def individual_summary(report: ScoredCandidate, *, unit: MeasuredUnit) -> Indivi
             f"{tag}  ({degrad['dominant_warning']})"
         )
 
-    if (comp := report.composite_fitness) is not None:
-        # The reference's composite ON THIS ARM'S CELLS; the cycle-wide one was read over the parent's own panel.
-        detail_lines.append(
-            render_composite_fitness_oneliner(
-                comp, reference=reading.reference_level("objective") if reading else None
-            )
-        )
+    if (comp := fold.composite_fitness) is not None:
+        detail_lines.append(render_composite_fitness_oneliner(comp, reference=None))
 
     return IndividualSummary(
         tag=tag,
         body_line=body_line,
         detail_lines=tuple(detail_lines),
-        lift=None if lift is None else lift.value,
     )
 
 

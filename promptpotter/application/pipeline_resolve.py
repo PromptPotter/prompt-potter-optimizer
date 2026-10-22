@@ -13,7 +13,7 @@ from promptpotter.application.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
     apply_cycle_seed,
-    under_record,
+    effective_config,
 )
 from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
@@ -25,19 +25,19 @@ from promptpotter.application.datasets.draft_campaign import (
     declared_pipeline_json,
     default_campaign_config,
     draft_scoring_block,
-    load_checkin_draft,
     rendered_pipeline_json,
     scoring_choice,
     split_overlay,
 )
 from promptpotter.application.datasets.prompts import (
     dataset_declared_nodes,
+    declared_origin_prompts,
     has_dataset_prompts,
     load_dataset_node_overlay,
-    load_node_prompt,
 )
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     prompt_body,
@@ -46,10 +46,13 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.opt_search_point import render_prompt
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
     apply_node_overlay,
     fold_output_contract,
     node_config_items,
+    normalize_model_id,
 )
 from promptpotter.domain.pipeline_parsing import (
     merge_node_blocks,
@@ -70,18 +73,19 @@ from promptpotter.domain.pipeline_schema import (
     PipelineView,
     reach_map,
 )
+from promptpotter.domain.pool import Access, PoolSource
+from promptpotter.domain.results import Concluded
+from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin
 from promptpotter.domain.search_point import (
-    PROMPT_STRING_FIELDS,
+    DEFAULT_PROMPT_FIELDS,
     missing_template_vars,
     strip_rendered_prompt,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
-from promptpotter.infrastructure.llm.registry import normalize_model_id
+from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_scoring_lock
-from promptpotter.infrastructure.store.checkin_draft_store import dataset_source_of
 from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
     ResolvedDataset,
     dataset_connector,
     dataset_experiment,
@@ -97,6 +101,8 @@ from promptpotter.infrastructure.store.stores import descend_store, owned_campai
 from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import (
     BadRequestError,
+    DatasetAccessError,
+    ManifestUnreadableError,
     NotFoundError,
     PayloadInvalidError,
     StoredConfigInvalidError,
@@ -127,25 +133,31 @@ __all__ = [
     "CampaignRunsWith",
     "DatasetPipelineResponse",
     "KnobRow",
+    "KnobSwitch",
     "NodeKnobs",
     "OptimizerEntry",
     "OptimizerKnobsResponse",
     "OptimizerPipelineResponse",
     "OptimizerRoster",
+    "OptimizerSetup",
+    "PoolDraw",
+    "PoolRow",
     "RunsWithParam",
     "VendorModels",
     "apply_identity_layer",
     "campaign_runs_with",
-    "checkin_campaign_config",
     "configure_and_apply_pipeline",
     "dataset_pipeline_declaration",
+    "defaults_drift",
+    "draft_config",
     "draft_config_rows",
-    "frozen_config",
+    "draft_pipeline",
     "line_config",
     "measurement_node",
     "merge_declared_layers",
     "optimizer_knobs",
     "optimizer_roster",
+    "optimizer_setup",
     "overlay_dataset_pipeline",
     "resolve_campaign_config",
     "resolve_pipeline_at",
@@ -420,6 +432,8 @@ def _resolve_active_schema(
         filtered = filtered.filter_to_steps(sorted(keep))
     if narrowing:
         filtered = filtered.narrow(narrowing)
+    # Every run keys its cells with the pins, workspace or not.
+    filtered = filtered.model_copy(update={"default_routes": default_routes()})
     # LAST, over the narrowed schema, so `selectable_routes` reads the nodes as the run holds them.
     if workspace is not None:
         filtered = filtered.model_copy(
@@ -437,26 +451,27 @@ def _apply_starting_prompts(
     dataset_name: str,
 ) -> None:
     """Assumes the caller checked ``has_dataset_prompts``."""
-    prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
-    prompt_info_by_node = {n.name: n.prompt_info for n in filtered.nodes}
+    prompt_nodes = [n for n in filtered.prompt_nodes() if n.name in active]
+    authored = declared_origin_prompts(dataset_dir, prompt_nodes)
     for pnode in prompt_nodes:
-        template = load_node_prompt(dataset_dir, pnode)
-        rendered = template.render()
-        pinfo = prompt_info_by_node.get(pnode)
-        declared = pinfo.template_variables if pinfo else []
-        missing = missing_template_vars(rendered, declared)
+        if pnode.name not in authored:
+            continue
+        assert pnode.prompt_info is not None
+        rendered = render_prompt(authored[pnode.name].fields, pnode.prompt_fields)
+        declared = pnode.prompt_info.template_variables
+        missing = missing_template_vars(rendered, declared, fields=pnode.prompt_fields)
         if missing:
             raise PayloadInvalidError(
-                f"Dataset {dataset_name!r} prompt for node {pnode!r} is missing required "
+                f"Dataset {dataset_name!r} prompt for node {pnode.name!r} is missing required "
                 f"template variables {missing} — the backend injects these by literal "
                 f"{{{{name}}}} substitution, so without them the query / research / output "
                 f"schema never reach the model. Add the placeholders to "
-                f"{dataset_name}'s origin.yaml under `{pnode}` "
+                f"{dataset_name}'s origin.yaml under `{pnode.name}` "
                 f"(node declares: {declared}).",
                 code="pipeline_config_invalid",
             )
-        pipeline_params.setdefault(pnode, {})["prompt"] = rendered
-        logger.info("Starting prompt: %s origin.yaml[%s]", dataset_name, pnode)
+        pipeline_params.setdefault(pnode.name, {})["prompt"] = rendered
+        logger.info("Starting prompt: %s origin.yaml[%s]", dataset_name, pnode.name)
 
 
 def _validate_prompt_reach(
@@ -467,13 +482,14 @@ def _validate_prompt_reach(
     prompt_fields_as_node_params: bool,
     dataset_name: str,
 ) -> None:
-    if any(n in active for n in filtered.prompt_node_names()):
+    if any(n.name in active for n in filtered.prompt_nodes()):
         return
+    # A node with no `prompt_info` declares no fields of its own, so the default set is the tell.
     names_prompt_fields = [
         name
         for name in active
         if (node := filtered.get_node(name)) is not None
-        and node.param_keys & set(PROMPT_STRING_FIELDS)
+        and node.param_keys & set(DEFAULT_PROMPT_FIELDS)
     ]
     if names_prompt_fields and not prompt_fields_as_node_params:
         raise PayloadInvalidError(
@@ -522,6 +538,39 @@ def _validate_model_ownership(
             )
 
 
+class KnobSwitch(StrictModel):
+    node: str = Field(description="The node whose knob sets a reader's access")
+    knob: str = Field(description="That knob, under `nodes.{node}.config`")
+
+
+class PoolDraw(StrictModel):
+    node: str = Field(description="A node drawing from the pool, in walk order")
+    access: Access = Field(
+        description="How it draws under this config: `off` not at all, `open` a window to "
+        "suggest from, `closed` an entry's id only"
+    )
+    switch: KnobSwitch = Field(description="The knob that sets `access`")
+
+
+class PoolRow(StrictModel):
+    pool: str = Field(description="The pool's state kind, e.g. `block_pool`")
+    source: PoolSource = Field(description="Where its entries come from")
+    initializer: str = Field(description="The run-init node writing it once, before round 0")
+    active: list[str] = Field(description="The initializer's `active` paths: the entries in play")
+    drawn_by: list[PoolDraw]
+
+
+class OptimizerSetup(StrictModel):
+    """What the selected optimizer runs under a config, derived once for check-in and campaign."""
+
+    knobs: dict[str, dict[str, Any]] = Field(
+        description="Every member's knob values, the manifest's under the config's overlays"
+    )
+    arms_per_round: int = Field(description="Arms each round tests")
+    proposers: list[str] = Field(description="The nodes making each round's arms, in walk order")
+    pools: list[PoolRow] = Field(description="What the members draw from")
+
+
 class CampaignPipelineResponse(StrictModel):
     """One campaign's pipeline at one searchpoint — the body of ``GET /campaigns/{id}/pipeline``.
     The peer of ``resolve_dataset`` one question up: that seam answers which bytes are on disk,
@@ -540,13 +589,13 @@ class CampaignPipelineResponse(StrictModel):
         description="The optimizer manifest the addressed course runs — the one answer a surface "
         "reads which optimizer's graph, knobs and analytics apply by, a check-in's draft included"
     )
-    optimizer_knobs: dict[str, dict[str, Any]] = Field(
-        description="That optimizer's knob values per node as the addressed course runs them — "
-        "the manifest's under the campaign's and the cycle seed's overlays"
+    optimizer_setup: OptimizerSetup = Field(
+        description="That optimizer as the addressed course runs it — the manifest's knobs under "
+        "the campaign's and the cycle seed's overlays, its arms and its pools"
     )
     params: dict[str, Any] = Field(
-        description="Resolved config as the engine holds it — the bytes a round file carries "
-        "as `resolved_pipeline_params`, which makes that field this endpoint's check"
+        description="Resolved config as the engine holds it — the bytes each arm of a round file "
+        "carries as `resolved_params`, which makes that field this endpoint's check"
     )
     node_config_schema: dict[str, list[NodeConfigParam]]
     view: PipelineView | None
@@ -596,9 +645,9 @@ def _evolved_overlay(stores: Stores, at: SubjectSpec) -> tuple[dict[str, Any], d
     hop = CycleHop(campaign_id=at.campaign_id, cycle_id=at.cycle_id)
     # Newest round first: a re-measured point answers from the round that measured it last.
     for held in reversed(stores.campaigns.standing_rounds(hop, moment=None).rounds.values()):
-        for cand in held.close.candidate_scores:
-            if cand.candidate_id == at.candidate_id:
-                return dict(cand.pipeline_overlay or {}), dict(cand.resolved_pipeline_params or {})
+        arm = held.close.arms.get(ArmKey(at.candidate_id))
+        if isinstance(arm, Concluded):
+            return dict(arm.overlay), dict(arm.resolved_params)
     return {}, {}
 
 
@@ -656,17 +705,11 @@ def _criterion_locked[S](stores: Stores, hop: CycleHop, scoring: S) -> S | dict[
     return lock.locked if lock is not None and lock.declared == scoring else scoring
 
 
-def frozen_config(stores: Stores, campaign: Campaign) -> dict[str, Any]:
-    declared = campaign.config.get("scoring")
-    locked = _criterion_locked(stores, campaign.root_hop, declared)
-    return campaign.config if locked == declared else {**campaign.config, "scoring": locked}
-
-
-def checkin_campaign_config(
+def draft_config(
     stores: Stores, draft: DraftCampaign, *, session_chain: Sequence[str] | None = None
 ) -> CampaignConfig:
-    """What Start freezes. ``session_chain`` is the live backend's, which only Start holds."""
-    canonical = dataset_source_of(draft.source_file)
+    """What Start declares and every read before it shows; only Start holds a ``session_chain``."""
+    canonical = draft.source_dataset
     if canonical is None:
         # A fresh upload commits its overlay and chain into its own `dataset.yaml::pipeline`.
         return with_optimization(default_campaign_config(draft), draft.optimization_overrides)
@@ -691,39 +734,38 @@ def _declared_chain(dataset_dir: Path) -> list[str]:
     return declared_pipelines(read_dataset_pipeline(dataset_dir) or {}).get("default", [])
 
 
+def _locked(stores: Stores, hop: CycleHop, config: CampaignConfig) -> CampaignConfig:
+    locked = _criterion_locked(stores, hop, config.scoring)
+    return config if locked == config.scoring else config.model_copy(update={"scoring": locked})
+
+
+def defaults_drift(campaign: Campaign) -> DefaultsDrift | None:
+    """The one answer to whether what the declaration is a delta over moved since its mint."""
+    declared = DefaultsPin(
+        bench=campaign.declaration.bench_defaults_pin, treatment=campaign.treatment
+    )
+    optimization = effective_config(campaign.declaration).optimization
+    running = DefaultsPin(
+        bench=bench_defaults_pin(), treatment=select_optimizer(optimization).treatment()
+    )
+    return None if running == declared else DefaultsDrift(declared=declared, running=running)
+
+
 def resolve_campaign_config(
     stores: Stores, campaign: Campaign, hop: CycleHop | None
 ) -> CampaignConfig:
-    draft = _authoring_draft(stores, campaign)
-    if draft is not None:
-        return checkin_campaign_config(stores, draft)
+    """The declaration's effective config, the criterion its dials lock on the origin laid on."""
     try:
-        frozen = CampaignConfig.model_validate(frozen_config(stores, campaign))
+        declared = effective_config(campaign.declaration)
     except ValidationError as exc:
-        raise StoredConfigInvalidError(
-            path=f"campaigns/{campaign.campaign_id}/campaign.json::config",
+        raise ManifestUnreadableError(
+            path=f"campaigns/{campaign.campaign_id}/campaign.json::declaration",
             reason=f"{exc.error_count()} field(s) invalid — {exc.errors()[0]['msg']}",
         ) from exc
-    if campaign.arm is not None:
-        record = stores.campaigns.load_head_to_head(campaign.arm.head_to_head_id)
-        if record is None:
-            raise StoredConfigInvalidError(
-                path=f"campaigns/{campaign.campaign_id}/campaign.json::arm",
-                reason=f"head-to-head {campaign.arm.head_to_head_id} has no record to run under",
-            )
-        frozen = under_record(frozen, record)
+    root = _locked(stores, campaign.root_hop, declared)
     if hop is None:
-        return frozen
-    seeded = apply_cycle_seed(frozen, stores.campaigns.read_cycle_seed(hop))
-    locked = _criterion_locked(stores, hop, seeded.scoring)
-    return seeded if locked == seeded.scoring else seeded.model_copy(update={"scoring": locked})
-
-
-def _authoring_draft(stores: Stores, campaign: Campaign) -> DraftCampaign | None:
-    """The FLAG decides, never a draft's presence: ``draft.json`` stays in place after Start."""
-    if not stores.campaigns.in_checkin(campaign.root_hop):
-        return None
-    return load_checkin_draft(stores, campaign.campaign_id)
+        return root
+    return _locked(stores, hop, apply_cycle_seed(root, stores.campaigns.read_cycle_seed(hop)))
 
 
 @dataclass(frozen=True)
@@ -757,7 +799,7 @@ class _CampaignMerge(_Merge):
 
 def _draft_merge(stores: Stores, draft: DraftCampaign) -> _Merge:
     schema = parse_pipeline_response(rendered_pipeline_json(draft))
-    cfg = checkin_campaign_config(stores, draft)
+    cfg = draft_config(stores, draft)
     # Still the operator's own layer here, where a fresh upload's Start files it in `dataset.yaml::pipeline`.
     overrides, narrowing = split_overlay(draft.pipeline_overlay)
     active, filtered = _resolve_active_schema(
@@ -832,25 +874,47 @@ def _served_menu(m: _Merge, params: dict[str, Any], workspace: Path | None) -> C
     return resolve_schema_menu(_routed_as_run(m.filtered, params, m.active), workspace=workspace)
 
 
-def _optimizer_knobs(cfg: CampaignConfig) -> dict[str, dict[str, Any]]:
+def optimizer_setup(cfg: CampaignConfig) -> OptimizerSetup:
     selected = select_optimizer(cfg.optimization)
-    return {n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes}
+    members = [optimizers.member(n) for n in selected.member_nodes]
+    return OptimizerSetup(
+        knobs={n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes},
+        arms_per_round=selected.arms_per_round,
+        proposers=[p.name for p in selected.plan.proposers],
+        pools=[
+            PoolRow(
+                pool=initializer.pool.kind,
+                source=initializer.pool.source,
+                initializer=initializer.name,
+                active=initializer.active(selected),
+                drawn_by=[
+                    PoolDraw(
+                        node=m.name,
+                        access=selected.access(m, initializer.pool),
+                        switch=KnobSwitch(node=selected.knob_owner(m, draw.knobs), knob=draw.knob),
+                    )
+                    for m in members
+                    if (draw := m.draws.get(initializer.pool)) is not None
+                ],
+            )
+            for initializer in selected.plan.initializers
+        ],
+    )
 
 
-def resolve_pipeline_for_draft(
-    stores: Stores, draft: DraftCampaign, *, campaign_id: str, cycle_id: str
-) -> CampaignPipelineResponse:
+def resolve_pipeline_for_draft(stores: Stores, draft: DraftCampaign) -> CampaignPipelineResponse:
     m = _draft_merge(stores, draft)
     params, rows = _draft_rows(m)
     return CampaignPipelineResponse(
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
+        # A draft is no campaign and runs no cycle until its Start mints both.
+        campaign_id=draft.draft_id,
+        cycle_id="",
         dataset_name=draft.slug,
         connector=draft.connector,
         backend_type=draft.connector,
         self_optimization=is_self_optimization(draft.connector),
         optimizer=m.cfg.optimization.optimizer,
-        optimizer_knobs=_optimizer_knobs(m.cfg),
+        optimizer_setup=optimizer_setup(m.cfg),
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,
@@ -865,6 +929,12 @@ def resolve_pipeline_for_draft(
 
 def draft_config_rows(stores: Stores, draft: DraftCampaign) -> dict[str, list[NodeConfigParam]]:
     return _draft_rows(_draft_merge(stores, draft))[1]
+
+
+def draft_pipeline(stores: Stores, draft: DraftCampaign) -> tuple[dict[str, Any], PipelineSchema]:
+    """What the draft's nodes run with, and the chain they run in, before Start commits any of it."""
+    m = _draft_merge(stores, draft)
+    return _draft_rows(m)[0], m.filtered
 
 
 def _draft_rows(m: _Merge) -> tuple[dict[str, Any], dict[str, list[NodeConfigParam]]]:
@@ -894,12 +964,6 @@ def resolve_pipeline_for_campaign(
     at: SubjectSpec,
 ) -> CampaignPipelineResponse:
     """``stores`` is already the store *campaign* lives in: the caller descends ``at.inside`` first."""
-    draft = _authoring_draft(stores, campaign)
-    if draft is not None:
-        return resolve_pipeline_for_draft(
-            stores, draft, campaign_id=campaign.campaign_id, cycle_id=campaign.root_cycle_id
-        )
-
     m = _campaign_merge(stores, campaign, at)
     # Recorded first: a live resolve recomputes a banked identity off a roster it never ran.
     experiment = stores.campaigns.read_resolved_experiment(m.hop) or experiment_outside_run(
@@ -936,11 +1000,11 @@ def resolve_pipeline_for_campaign(
         cycle_id=m.hop.cycle_id,
         dataset_name=campaign.dataset_name,
         connector=str((m.raw or {}).get("backend_name", "")),
-        # The campaign's FROZEN kind — one definition serves every campaign on the slug.
-        backend_type=campaign.backend_type,
-        self_optimization=is_self_optimization(campaign.backend_type),
+        # The campaign's DECLARED kind — one definition serves every campaign on the slug.
+        backend_type=campaign.connector,
+        self_optimization=is_self_optimization(campaign.connector),
         optimizer=m.cfg.optimization.optimizer,
-        optimizer_knobs=_optimizer_knobs(m.cfg),
+        optimizer_setup=optimizer_setup(m.cfg),
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,
@@ -1031,10 +1095,10 @@ class StartPrompt(StrictModel):
 
 def _start_prompts(selected: SelectedOptimizer) -> dict[str, StartPrompt]:
     out: dict[str, StartPrompt] = {}
-    declared = [str(key) for key in selected.document.get("resolved_prompts") or {}]
+    declared = list(selected.manifest.resolved_prompts)
     for node in selected.schema.declared_nodes:
         config = node.current_config
-        body = prompt_body(selected.document, config)
+        body = prompt_body(selected.manifest, config)
         if body is not None:
             family = str(config.get("prompt_family"))
             out[node.name] = StartPrompt(
@@ -1078,7 +1142,7 @@ class OptimizerPipelineResponse(StrictModel):
 
 
 def resolve_pipeline_for_optimizer(stores: Stores, optimizer: str) -> OptimizerPipelineResponse:
-    selected = resolve_optimizer(optimizer, {})
+    selected = resolve_optimizer(optimizer, {}, gate="off")
     schema = selected.schema
     # The reach must sum the SAME rows it serves, or the glyph and the padlock disagree.
     rows = schema.node_config_schema(selected.steered_axes)
@@ -1167,7 +1231,7 @@ def _knob_row(key: str, prop: Mapping[str, Any], defs: Mapping[str, Any], value:
 
 
 def optimizer_knobs(name: str) -> OptimizerKnobsResponse:
-    selected = resolve_optimizer(name, {})
+    selected = resolve_optimizer(name, {}, gate="off")
     nodes: list[NodeKnobs] = []
     for node in selected.member_nodes:
         schema = optimizers.member(node).knobs.model_json_schema()
@@ -1209,7 +1273,7 @@ def optimizer_roster() -> OptimizerRoster:
     origins = optimizers.runtime_origins()
     entries = []
     for name in names:
-        selected = resolve_optimizer(name, {})
+        selected = resolve_optimizer(name, {}, gate="off")
         origin = None if origins[name] == BUILT_IN else origins[name]
         entries.append(
             OptimizerEntry(name=name, version=selected.version, paper=selected.paper, origin=origin)
@@ -1249,8 +1313,9 @@ class CampaignRunsWith(StrictModel):
         description="Every model in `params`, grouped under its vendor in first-seen order"
     )
     optimizer: str = Field(description="The optimizer manifest the root course runs")
-    max_rounds: int | None = Field(
-        description="The DECLARED rounds cap, not the armed one: 0 = origin only, null = unlimited"
+    budget_rounds: int | None = Field(
+        description="The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = "
+        "no rounds axis"
     )
 
 
@@ -1263,15 +1328,14 @@ _ROOT_UNRESOLVED = (
     TypeError,
     NotFoundError,
     StoredConfigInvalidError,
+    ManifestUnreadableError,
     PayloadInvalidError,
 )
 
 
 def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith | None:
     """``None`` is a root whose pipeline did not resolve: a broken dataset drops its own row only."""
-    return _root_read(
-        stores, campaign, "runs_with", lambda draft: _runs_with(stores, campaign, draft)
-    )
+    return _root_read(stores, campaign, "runs_with", lambda: _runs_with(stores, campaign))
 
 
 def line_config(stores: Stores, campaign: Campaign, holder: CycleHop) -> CampaignConfig | None:
@@ -1286,56 +1350,45 @@ def line_config(stores: Stores, campaign: Campaign, holder: CycleHop) -> Campaig
     return config
 
 
-def _root_read[T](
-    stores: Stores, campaign: Campaign, what: str, read: Callable[[DraftCampaign | None], T]
-) -> T | None:
+def _root_read[T](stores: Stores, campaign: Campaign, what: str, read: Callable[[], T]) -> T | None:
     root = stores.campaigns.cycle_dir(campaign.root_hop)
 
     def resolve() -> T | None:
         try:
-            return read(draft)
+            return read()
         except _ROOT_UNRESOLVED:
             logger.exception("%s: root of %s did not resolve", what, campaign.campaign_id)
             return None
 
     try:
-        draft = _authoring_draft(stores, campaign)
-        key = _root_key(stores, campaign, root, draft)
+        key = _root_key(stores, campaign, root)
     except _ROOT_UNRESOLVED:
         logger.exception("%s: root of %s did not resolve", what, campaign.campaign_id)
         return None
     return derived((what, root), sig=key, compute=resolve)
 
 
-def _root_key(
-    stores: Stores, campaign: Campaign, root: Path, draft: DraftCampaign | None
-) -> tuple[Any, ...]:
+def _root_key(stores: Stores, campaign: Campaign, root: Path) -> tuple[Any, ...]:
     dataset = _dataset_of(stores, campaign)
     dataset_dir = None if dataset is None else dataset.directory
     # The seed's VALUE, never its ledger's stat: a running root appends there on every sample.
     seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
+    lock = scan_ledger_scoring_lock(CycleLayout(root).ledger)
     return (
-        stable_hash(frozen_config(stores, campaign)),
-        campaign.backend_type,
+        campaign.declaration.digest,
+        None if lock is None else stable_hash(lock.locked),
         campaign.dataset_name,
         campaign.root_cycle_id,
         dataset_dir,
-        # A check-in on a reused dataset reads that dataset's declaration live, defaults included.
         *(() if dataset_dir is None else (file_sig(p) for p in definition_files(dataset_dir))),
         file_sig(CycleLayout(root).resolved_pipeline),
         None if seed is None else stable_hash(seed.model_dump(mode="json")),
-        None if draft is None else stable_hash(draft.to_disk()),
     )
 
 
-def _runs_with(stores: Stores, campaign: Campaign, draft: DraftCampaign | None) -> CampaignRunsWith:
-    m: _Merge
-    if draft is not None:
-        m = _draft_merge(stores, draft)
-        params = m.params
-    else:
-        read = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))
-        m, params = read, read.with_seed(read.params)
+def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
+    read = _campaign_merge(stores, campaign, SubjectSpec("campaign", campaign.campaign_id))
+    m, params = read, read.with_seed(read.params)
     stripped = strip_rendered_prompt(params)
     nodes = {n.name: n for n in m.filtered.declared_nodes}
     out: list[RunsWithParam] = []
@@ -1359,7 +1412,7 @@ def _runs_with(stores: Stores, campaign: Campaign, draft: DraftCampaign | None) 
         params=out,
         vendors=[VendorModels(vendor=v, models=ms) for v, ms in by_vendor.items()],
         optimizer=m.cfg.optimization.optimizer,
-        max_rounds=m.cfg.optimization.max_rounds,
+        budget_rounds=m.cfg.optimization.budget.rounds,
     )
 
 

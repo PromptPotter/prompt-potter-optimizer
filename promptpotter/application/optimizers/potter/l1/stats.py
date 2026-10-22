@@ -7,11 +7,10 @@ from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading
 from promptpotter.application.optimizers.potter.dispatch.injections.layer_state import (
     format_l1_critique_for_prompt,
 )
-from promptpotter.application.optimizers.potter.records import PotterRoundState
+from promptpotter.application.optimizers.potter.records import L1Readout
 from promptpotter.application.optimizers.potter.validators.behavior_base import ValidatorContext
 from promptpotter.application.optimizers.potter.validators.l1_behavior import (
     CHECK_REGISTRY,
-    extract_l1_variants,
     run_all_checks,
 )
 from promptpotter.application.optimizers.potter.validators.l2_behavior import run_all_l2_checks
@@ -87,18 +86,12 @@ def review_reading(
             ReviewStat("stagnation_max", stats.stagnation_max),
             ReviewStat("l2_fires", stats.l2_fires),
         ),
-        variants=[extract_l1_variants(audit) for audit in audits],
-        feedback=[
-            format_l1_critique_for_prompt(
-                r.optimizer_state.payload_as(PotterRoundState).critique
-            ).strip()
-            for r in rounds
-        ],
+        feedback=[format_l1_critique_for_prompt(r.closed_state.feedback()).strip() for r in rounds],
     )
 
 
 def round_facts(round_result: RoundResult) -> list[OptimizerFact]:
-    state = round_result.optimizer_state.payload_as(PotterRoundState)
+    state = round_result.closed_state.output(L1Readout)
     facts: list[OptimizerFact] = []
     if state.l1_rejected:
         live = state.l1_proposed - sum(state.l1_rejected.values())
@@ -112,7 +105,7 @@ def round_facts(round_result: RoundResult) -> list[OptimizerFact]:
                 key="l1_yield", label="L1 yield", text=text, value=state.l1_yield, kind="stat"
             )
         )
-    if critique := format_l1_critique_for_prompt(state.critique):
+    if critique := format_l1_critique_for_prompt(round_result.closed_state.feedback()):
         facts.append(
             OptimizerFact(key="critique", label="Critique", text=critique, value=None, kind="note")
         )
@@ -130,11 +123,11 @@ def _behavior_per_round(
     # A round's generator reads the critique of the round BEFORE it.
     read_critique: CritiqueReadout | None = None
     for round_data, audit in zip(rounds, audits, strict=True):
-        payload = round_data.optimizer_state.payload_as(PotterRoundState)
+        payload = round_data.closed_state.output(L1Readout)
         clusters = tuple(
             frozenset(c["sample_ids"]) for c in (read_critique or {}).get("failure_highlights", [])
         )
-        read_critique = payload.critique
+        read_critique = round_data.closed_state.feedback()
         if audit is None:
             l1_out.append([])
             l2_out.append([])
@@ -162,7 +155,7 @@ def _compute_round_1_verdict(
     if not rounds:
         return "unknown"
 
-    parse_failure = rounds[0].optimizer_state.payload_as(PotterRoundState).l1_parse_failure
+    parse_failure = rounds[0].closed_state.output(L1Readout).l1_parse_failure
     if parse_failure in PARSE_FAILURE_CHARGED:
         return "broken"
     # What remains is TOOLING: the verdict is a CHARGE against the prompt, and this round earns none.
@@ -181,19 +174,19 @@ def _compute_round_1_verdict(
 
 
 def _mean_yield_rate(rounds: list[RoundResult]) -> float | None:
-    if not rounds:
-        return None
-    yields = [r.optimizer_state.payload_as(PotterRoundState).l1_yield for r in rounds]
-    return sum(yields) / len(yields)
+    yields = [y for r in rounds if (y := r.closed_state.output(L1Readout).l1_yield) is not None]
+    return sum(yields) / len(yields) if yields else None
 
 
 def _top_lifts(rounds: list[RoundResult]) -> list[float]:
     tops: list[float] = []
     for r in rounds:
         lifts = [
-            cs.vs_reference.headline.estimate.value
-            for cs in r.candidate_scores
-            if cs.vs_reference is not None and cs.vs_reference.headline is not None
+            fit.vs_reference.headline.estimate.value
+            for key in r.panel
+            if (fit := r.fit(key)) is not None
+            and fit.vs_reference is not None
+            and fit.vs_reference.headline is not None
         ]
         if lifts:
             tops.append(max(lifts))

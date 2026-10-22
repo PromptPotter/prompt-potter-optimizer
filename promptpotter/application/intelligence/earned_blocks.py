@@ -2,31 +2,35 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
+from promptpotter.domain.search_point import DEFAULT_PROMPT_FIELDS
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.store.archive_queries import (
-    as_of_moment,
-    campaign_fenced,
+    ArmOf,
+    CellOf,
+    OpenAt,
+    memory_scope,
     walked_answers,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
 
 if TYPE_CHECKING:
-    from promptpotter.domain.paired_reading import MemberAddress
-    from promptpotter.domain.results import ScoredCandidate
+    from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
+    from promptpotter.domain.paired_reading import MemberAddress, PairedReading
     from promptpotter.domain.run_records import RoundClosedRecord
     from promptpotter.infrastructure.store.stores import Stores
 
-__all__ = ["answer_space_signature", "earned_library_for", "mine_earned_blocks"]
+__all__ = ["answer_space_signature", "earned_blocks_for", "mine_earned_blocks"]
 
 # The long fields (instruction, problem_description) are task-specific, not transferable.
 _REUSABLE_FIELDS: frozenset[str] = frozenset(
     {"persona", "task_intent", "thinking_style", "answer_format"}
 )
+assert set(DEFAULT_PROMPT_FIELDS) >= _REUSABLE_FIELDS
 
 # An open answer space is the ABSENCE of a shape: keyed by its dataset, it transfers nowhere else.
 OPEN_ANSWER_SPACE = "OPEN"
@@ -57,9 +61,9 @@ def _answer_space_signature(stores: Stores, closed: RoundClosedRecord, dataset: 
     )
 
 
-def _credible_lift(cand: ScoredCandidate) -> float | None:
+def _credible_lift(reading: PairedReading | None) -> float | None:
     """Accuracy, never the composite: blocks pool across campaigns, each pricing cells its own way."""
-    lift = cand.vs_reference.on_whole_set if cand.vs_reference else None
+    lift = reading.on_whole_set if reading else None
     if lift is None or lift.estimate.ci_lo <= 0:
         return None
     return lift.estimate.value
@@ -70,49 +74,53 @@ def _accumulate(
     closed: RoundClosedRecord,
     dataset: str,
     acc: dict[tuple[str, str, str], list[float]],
-    fields_of: Mapping[str, dict[str, Any]],
+    fields_of: Mapping[str, Mapping[str, NodePrompt]],
     counted: set[MemberAddress],
 ) -> None:
-    earned: list[tuple[ScoredCandidate, str, float]] = []
-    for cand in closed.candidate_scores:
-        if (lift := _credible_lift(cand)) is None:
+    earned: list[tuple[OptSearchPoint, str, float]] = []
+    for key, arm in closed.panel.items():
+        reading = None if (fit := closed.fit(key)) is None else fit.vs_reference
+        if (lift := _credible_lift(reading)) is None:
             continue
-        reading = cand.vs_reference
         assert reading is not None and reading.a is not None and reading.b is not None
         # A reading is its address: a fork's chain and a repair's re-close each carry it again.
         if reading.b.address not in counted:
             counted.add(reading.b.address)
-            earned.append((cand, reading.a.address.individual_id, lift))
+            earned.append((arm.individual, reading.a.address.individual_id, lift))
     if not earned:
         return
-    fit = _answer_space_signature(stores, closed, dataset)
+    answer_space = _answer_space_signature(stores, closed, dataset)
     # Diffed against the individual the lift was READ against: a round's arms may have several parents.
-    for cand, reference_id, lift in earned:
+    for individual, reference_id, lift in earned:
         reference = fields_of.get(reference_id)
         if reference is None:
             continue
-        delta = candidate_delta(cand.prompt_fields, reference, None, None)
-        for field, text in delta.prompt.items():
-            if field in _REUSABLE_FIELDS and (block := text.strip()):
-                acc[(fit, field, block)].append(lift)
+        delta = candidate_delta(individual.prompts, reference, None, None)
+        # By field name, across nodes: a block earned on one node's `persona` is a `persona`.
+        for locus, text in delta.prompt.items():
+            if locus.key in _REUSABLE_FIELDS and (block := text.strip()):
+                acc[(answer_space, locus.key, block)].append(lift)
 
 
 def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
-    """The campaign TREE, so empty for an arm or an instrument's cell; a task re-read at a moment
-    mines the tree as it stood then."""
-    if campaign_fenced():
-        return {}
-    moment = as_of_moment()
+    """Optimize mines the campaign TREE as it stands; an arm and an L4 cell mine none."""
+    match scope := memory_scope():
+        case OpenAt():
+            pass
+        case ArmOf() | CellOf():
+            return {}
+        case _:
+            assert_never(scope)
 
     acc: dict[tuple[str, str, str], list[float]] = defaultdict(list)
     counted: set[MemberAddress] = set()
     for campaign in stores.campaigns.list_campaigns(lifecycle="all"):
         for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign.campaign_id):
-            standing = scan_standing_rounds(ledger_chain(CycleDir(cycle_dir), moment=moment))
+            standing = scan_standing_rounds(ledger_chain(CycleDir(cycle_dir), moment=None))
             fields_of = {
-                cand.candidate_id: cand.prompt_fields
+                arm.individual.id: arm.individual.prompts
                 for held in standing.rounds.values()
-                for cand in held.close.candidate_scores
+                for arm in held.close.arms.values()
             }
             for held in standing.rounds.values():
                 _accumulate(stores, held.close, campaign.dataset_name, acc, fields_of, counted)
@@ -125,7 +133,7 @@ def mine_earned_blocks(stores: Stores) -> dict[str, list[EarnedBlock]]:
     return dict(by_fit)
 
 
-def earned_library_for(
+def earned_blocks_for(
     stores: Stores, fit_signature: str, *, per_field_cap: int = 3
 ) -> dict[str, tuple[str, ...]]:
     earned = mine_earned_blocks(stores).get(fit_signature, [])

@@ -7,7 +7,8 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.l4.proxies import PanelPrecision
-from promptpotter.domain.paired_reading import ArmPointer
+from promptpotter.domain.opt_search_point import NodePrompt
+from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.results import (
     ArmReading,
     DegradationHealth,
@@ -15,15 +16,17 @@ from promptpotter.domain.results import (
     OptimizerFact,
     OverlapReading,
     VerifyReading,
+    arm_name,
     line_by_individual,
     overlap_line,
 )
 from promptpotter.domain.results_health import critical_health_title
-from promptpotter.domain.ruler import AbilityReading, series_levels
+from promptpotter.domain.ruler import AbilityReading, LevelSeries, SeriesReading
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.wounds import ValidationFailure
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import RoundClosedRecord
@@ -78,11 +81,11 @@ def sample_status(facts: MeasuredCell, grade: Grade) -> SampleStatus:
 class DashboardSample(StrictModel):
     """One scored sample as `dashboard.json` serves it, display-trimmed and one shape in any state."""
 
-    sample_id: int | None = Field(
-        default=None,
-        description="Dataset sample id, which diverges from the row's position in the walk once "
-        "the hard-sample sorter drives the order. Null where the row carries none.",
+    position: int = Field(
+        description="The sample's slot in the bank the cycle drew, which diverges from the row's "
+        "position in the walk once the hard-sample sorter drives the order.",
     )
+    sample_key: str = Field(description="What the sample IS (`Sample.key`).")
     status: SampleStatus = Field(description="The grading verdict.")
     fitness: float | None = Field(
         default=None,
@@ -144,12 +147,12 @@ class DashboardCandidate(StrictModel):
 class LiveCandidate(DashboardCandidate):
     """A candidate of the round in flight, with its searchpoint, sample tape and rejection reason."""
 
-    # `OptSearchPoint.prompt_field_dict()` shape; with the resolved params, what a steered fork seeds from.
-    prompt_fields: dict[str, Any] | None = None
-    node_prompt_fields: dict[str, dict[str, Any]] = Field(
-        default_factory=dict, description="`ScoredCandidate.node_prompt_fields`, from its seeding."
+    prompts: dict[str, NodePrompt] | None = Field(
+        default=None,
+        description="`OptSearchPoint.prompts`; with the resolved params, what a steered fork "
+        "seeds from. Null until the candidate is announced.",
     )
-    resolved_pipeline_params: dict[str, Any] | None = None
+    resolved_params: dict[str, Any] | None = None
     pipeline_overlay: dict[str, Any] | None = None
     samples: list[DashboardSample] = Field(default_factory=list)
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
@@ -171,26 +174,27 @@ class OptimizerLimit(StrictModel):
 
 
 class RunLimits(StrictModel):
-    """The ceilings a launch declared; a served dashboard lays the standing operator ceiling over them."""
+    """The budget a launch declared, beside its optimizer's own bounds; a served dashboard lays
+    the standing budget over it."""
 
-    max_rounds: int | None = None
-    ceiling: SpendCeilings = SpendCeilings()
+    # Its money axes are the CAMPAIGN's ceiling, which every live cycle shares.
+    budget: Budget = Budget()
     optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
 
 class RoundSummary(StrictModel):
-    """Top-level `accuracy` is what the round MEASURED; `ability` is the invariant series."""
+    """Top-level `accuracy` is what the round MEASURED; its θ is `ServedRound.level`."""
 
     model_config = ConfigDict(frozen=True)
 
     round: int
-    leading: ArmPointer | None = Field(
+    leading: ArmName | None = Field(
         description="The ONE arm this round is read off, as its selector named it and never "
         "re-ranked: the selection where the round selected, on a held round the challenger "
         "`verdict_reason` names as its best, at round 0 the origin. `panel_precision` is "
         "measured on it. Null where the selector could read no arm."
     )
-    selected: list[ArmPointer] = Field(
+    selected: list[ArmName] = Field(
         description="The arms the election crowned; empty on a round that held."
     )
     # ``None`` where the round measured nothing readable: the chart draws a GAP, never a point at zero.
@@ -199,12 +203,12 @@ class RoundSummary(StrictModel):
     # Rows of the individual the round ENDED on: on a held round the retained parent, never the leading arm.
     total: int
     # Never add a `cumulative_accuracy`: a mean over DIFFERENT configurations is a score nobody scored.
-    ability: AbilityReading | None = None
     # ``None`` where no bench pass graded this round's selection.
     bench: BenchReading | None = None
     # Moves the stall counter and the life bank. Unset at round 0, which holds no election.
     improved: bool | None = None
     verdict_reason: str | None = None
+    # The round's own arms: a reference it re-read is no row of it.
     candidates: list[DashboardCandidate] = Field(default_factory=list)
     # Measurement order, off the longest candidate sequence: PoBB truncates losers.
     selection: list[int] = Field(default_factory=list)
@@ -222,21 +226,39 @@ class RoundSummary(StrictModel):
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
 
     @classmethod
-    def of(cls, closed: RoundClosedRecord, panel_precision: PanelPrecision | None) -> RoundSummary:
+    def of(
+        cls,
+        closed: RoundClosedRecord,
+        panel_precision: PanelPrecision | None,
+    ) -> RoundSummary:
         arms = closed.cells.arms
         longest = arms[max(arms, key=lambda k: (len(arms[k]), k))] if arms else []
+        election, fold = closed.election, closed.fold
+
+        def name(key: ArmKey) -> ArmName:
+            return arm_name(key, closed.arms[key], closed.round)
+
         return cls(
             round=closed.round,
-            leading=closed.leading_arm,
-            selected=closed.selected_arms,
-            accuracy=closed.accuracy,
-            composite_fitness=None if closed.accuracy is None else closed.composite_fitness,
-            total=closed.total,
-            ability=closed.ability,
+            leading=None
+            if election is None or election.leading is None
+            else name(election.leading),
+            selected=[] if election is None else [name(key) for key in election.selected],
+            accuracy=None if fold is None else fold.accuracy,
+            composite_fitness=None
+            if fold is None or fold.accuracy is None
+            else fold.composite_fitness,
+            total=0 if fold is None else fold.total,
             improved=None if closed.round == 0 else closed.improved,
-            verdict_reason=None if closed.round == 0 else closed.verdict_reason,
-            candidates=[DashboardCandidate(reading=reading) for reading in closed.arm_readings()],
-            selection=list(dict.fromkeys(sample_id for _, sample_id, _, _ in longest)),
+            verdict_reason=None
+            if closed.round == 0 or election is None
+            else election.verdict_reason,
+            candidates=[
+                DashboardCandidate(reading=reading)
+                for reading in closed.arm_readings()
+                if reading.role != MeasurementRole.PARENT
+            ],
+            selection=list(dict.fromkeys(closed.positions[key] for key, _, _ in longest)),
             health=closed.health,
             health_alert=critical_health_title(closed.round, closed.health),
             overlap=closed.overlap,
@@ -248,10 +270,6 @@ class RoundSummary(StrictModel):
 class ServedRound(RoundSummary):
     """A closed round as a dashboard serves it: the banked summary plus every reading derived from it."""
 
-    ability_on_series_ruler: bool = Field(
-        description="Whether `ability` is on the scale the cycle's θ series is drawn on, the "
-        "first ruler a round stamped (`AbilityReading.comparable_to`)."
-    )
     overlap_line: list[LineRate] = Field(
         description="`overlap` as its members and rates, C0 first; empty where the lead was not "
         "read."
@@ -263,6 +281,14 @@ class ServedRound(RoundSummary):
     selection_movement: list[SampleMovement] = Field(
         description="How each sample of `selection` moved against the round before it that "
         "measured any, position for position with `selection` (`sample_movements`)."
+    )
+    level: AbilityReading | None = Field(
+        description="This round's level on the cycle's `LevelSeries`, the one two rounds may "
+        "difference: null where `series_reading` carries a caveat."
+    )
+    series_reading: SeriesReading | None = Field(
+        description="That level as read, under the caveat that withholds it, for a surface that "
+        "shows θ under its caveat; null where no scored cell sits on the scale."
     )
 
 
@@ -284,10 +310,11 @@ def sample_movements(
 
 
 def served_rounds(
-    rounds: Sequence[RoundSummary], verify: Mapping[str, VerifyReading]
+    rounds: Sequence[RoundSummary],
+    verify: Mapping[ArmKey, VerifyReading],
+    series: LevelSeries | None,
 ) -> list[ServedRound]:
     ordered = sorted(rounds, key=lambda r: r.round)
-    levels = series_levels([r.ability for r in ordered])
     line = line_by_individual(
         next((r.overlap for r in reversed(ordered) if overlap_line(r.overlap)), None)
     )
@@ -307,19 +334,20 @@ def served_rounds(
                     row.model_copy(
                         update={
                             "reading": row.reading.on_line(line).model_copy(
-                                update={"verify": verify.get(row.reading.arm.label)}
+                                update={"verify": verify.get(row.reading.arm.key)}
                             )
                         }
                     )
                     for row in closed.candidates
                 ]
             },
-            ability_on_series_ruler=level is not None,
             overlap_line=overlap_line(closed.overlap),
             panel_precision_verdict=None
             if closed.panel_precision is None
             else precision_verdict(closed.panel_precision),
             selection_movement=movement,
+            level=None if series is None else series.level(closed.round),
+            series_reading=None if series is None else series.reading(closed.round),
         )
-        for closed, level, movement in zip(ordered, levels, movements, strict=True)
+        for closed, movement in zip(ordered, movements, strict=True)
     ]

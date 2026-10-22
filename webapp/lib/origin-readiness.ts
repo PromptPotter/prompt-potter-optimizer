@@ -9,7 +9,6 @@ export const ORIGIN_KEY = {
   taskDescription: "task_description",
   connector: "connector",
   scoringMatcher: "scoring_matcher",
-  maxRounds: "max_rounds",
   backendNodeConfig: "backend.node_config",
 } as const;
 
@@ -27,11 +26,6 @@ export function questionPatch(field: string, answer: string): DraftPatch | null 
       return { connector: value };
     case ORIGIN_KEY.scoringMatcher:
       return { scoring_matcher: value };
-    case ORIGIN_KEY.maxRounds: {
-      // The range is the server's (`OptimizationOverrides.max_rounds`); only a non-integer has no patch.
-      const n = Number(value);
-      return Number.isInteger(n) ? { optimization_overrides: { max_rounds: n } } : null;
-    }
     default:
       return null;
   }

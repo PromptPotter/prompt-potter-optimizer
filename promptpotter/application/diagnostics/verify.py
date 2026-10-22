@@ -6,7 +6,11 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.difficulty import session_ruler_scope
+from promptpotter.application.bench.difficulty import (
+    judging_ruler,
+    ruler_clock,
+    session_ruler_scope,
+)
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
@@ -26,7 +30,8 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
-    ArmPointer,
+    ArmKey,
+    ArmName,
     CellSetName,
     MemberAddress,
 )
@@ -34,11 +39,12 @@ from promptpotter.domain.phase_views import VerifyEnterView, VerifyGradedView
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.results import (
     BankedSearchPointError,
-    ScoredCandidate,
+    Concluded,
     VerifyHeldAbsent,
     VerifyPass,
     VerifyReading,
     VerifyStrategy,
+    arm_name,
     individual_cells,
 )
 from promptpotter.infrastructure.ledger import ledger_chain
@@ -123,7 +129,7 @@ def _held(
 
 def verify_member(
     hop: CycleHop,
-    arm: ArmPointer,
+    arm: ArmName,
     sheet: CellSheet,
     *,
     bought: int,
@@ -132,7 +138,7 @@ def verify_member(
     return MemberRows(
         address=MemberAddress(
             path=(hop,),
-            individual_id=arm.candidate_id,
+            individual_id=arm.key,
             arm=arm,
             # A fold over every pass report scope may see, so no one pass names it.
             pass_role=None,
@@ -166,7 +172,7 @@ def verify_reading(
         banked.strategy, fresh_level.n, fresh_level.accuracy, recorded_level.accuracy
     )
     return VerifyReading(
-        label=banked.label,
+        label=banked.arm.label,
         scorer_id=scorer_id,
         strategy=banked.strategy,
         fresh=fresh_level,
@@ -203,51 +209,49 @@ def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Score
 
     fresh = rows(list(banked.walk().cells))
     if not fresh:
-        raise DiagnosticError(f"the verify pass of {banked.label} holds no answer in the archive.")
+        raise DiagnosticError(
+            f"the verify pass of {banked.arm.label} holds no answer in the archive."
+        )
     standing = stores.campaigns.standing_rounds(hop, moment=None).rounds
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
     if 0 not in standing:
         raise DiagnosticError(
-            f"{hop.campaign_id}/{hop.cycle_id} holds no closed round 0, so {banked.label} has no "
-            "origin to be read over."
+            f"{hop.campaign_id}/{hop.cycle_id} holds no closed round 0, so {banked.arm.label} has "
+            "no origin to be read over."
         )
-    instrument_id = cycle_instrument(campaign.dataset_name, standing)
-    candidate = ArmPointer(round=banked.round, label=banked.label, candidate_id=banked.candidate_id)
+    instrument_id = cycle_instrument(stores.campaigns.read_bank_partition(hop), standing)
+    assert instrument_id is not None, "a cycle that closed round 0 drew its bank"
     c0 = standing[0].close.origin
-    origin = ArmPointer(round=0, label=c0.label, candidate_id=c0.candidate_id)
+    origin = ArmName(key=ArmKey(c0.individual.id), round=0, label=c0.label)
+    measured = banked.arm.key
     return verify_reading(
         banked,
         fresh=fresh,
-        recorded=folded(banked.candidate_id, RoleScope.DECISION),
+        recorded=folded(measured, RoleScope.DECISION),
         measured=verify_member(
             hop,
-            candidate if c0.candidate_id != banked.candidate_id else origin,
-            folded(banked.candidate_id, RoleScope.REPORT),
+            banked.arm if origin.key != measured else origin,
+            folded(measured, RoleScope.REPORT),
             bought=sum(1 for *_, replayed in banked.cells if not replayed),
             instrument_id=instrument_id,
         ),
         origin=verify_member(
             hop,
             origin,
-            folded(c0.candidate_id, RoleScope.REPORT),
+            folded(origin.key, RoleScope.REPORT),
             bought=0,
             instrument_id=instrument_id,
         ),
     )
 
 
-def _scored_candidate(
-    stores: Stores, hop: CycleHop, candidate_id: str
-) -> tuple[int, ScoredCandidate]:
-    # Newest first: a repair re-measures a candidate in place without re-minting it.
+def _scored_candidate(stores: Stores, hop: CycleHop, candidate_id: str) -> tuple[int, Concluded]:
+    # Newest first: a repair re-measures an arm in place without re-proposing it.
     for round_num, held in reversed(
         stores.campaigns.standing_rounds(hop, moment=None).rounds.items()
     ):
-        for entry in held.close.candidate_scores:
-            if entry.candidate_id == candidate_id:
-                return round_num, entry
+        arm = held.close.arms.get(ArmKey(candidate_id))
+        if isinstance(arm, Concluded) and arm.role != MeasurementRole.PARENT:
+            return round_num, arm
     raise DiagnosticError(
         f"no round of {hop.campaign_id}/{hop.cycle_id} scored candidate {candidate_id!r}."
     )
@@ -266,7 +270,8 @@ async def verify_candidate(
     if campaign is None:
         raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
     round_num, entry = _scored_candidate(stores, hop, candidate_id)
-    label = entry.label
+    arm = arm_name(ArmKey(candidate_id), entry, round_num)
+    label = arm.label
 
     session, campaign_config = await bind_cycle_session(stores, campaign, hop)
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.VERIFY)
@@ -282,20 +287,23 @@ async def verify_candidate(
     # Carries the prompt: keyed on config alone, candidates sharing a model read as one.
     predicate: dict[str, dict[str, Any]] = dict(schema.node_configs(jsp.pipeline_params))
 
-    prior = stores.archive.measurements_for_config(predicate, dataset_name=campaign.dataset_name)
-    measured_ids = {m.cell.sample_id for m in prior}
-    # Search pool only: `verify_on_saturation` runs inside the loop, which must decide on no bench row.
+    # By sample key under every bank: a re-cut bank re-measures none of the rows it kept.
+    prior = stores.archive.measurements_for_config(predicate)
+    measured_keys = {m.cell.sample_key for m in prior} & session.bank.slot_of.keys()
+    # Search split only: `verify_on_saturation` runs inside the loop, which must decide on no bench row.
     search = session.scoring.require_partition().search
-    unmeasured = [s for s in search if s.id not in measured_ids]
+    unmeasured = [s for s in search if s.key not in measured_keys]
     round_cells = select_optimizer(campaign_config.optimization).round_cells(len(search))
     if not unmeasured:
-        return VerifyOutcome(dataset_name=campaign.dataset_name, already_measured=len(measured_ids))
+        return VerifyOutcome(
+            dataset_name=campaign.dataset_name, already_measured=len(measured_keys)
+        )
 
     ledger_path = CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
     budget = derive_verify_samples(
         round_cell_budget=round_cells,
         rounds_unverified=rounds_since_verified(
-            (banked.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()),
+            (banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()),
             round_num=round_num,
         ),
         unmeasured=len(unmeasured),
@@ -307,7 +315,16 @@ async def verify_candidate(
             f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured). "
             f"Pass {budget} or fewer, or verify again after more rounds."
         )
-    ruler = stores.campaigns.read_ruler(hop, scope=session_ruler_scope(session), moment=None)
+    # The ruler the campaign's elections read now, less the candidate under verification.
+    ruler = judging_ruler(
+        stores.ruler,
+        session_ruler_scope(session),
+        ruler_clock(session),
+        {jsp.sp_hash(schema)},
+        objective_id=session.scoring.require_scorer().id,
+        n_min=campaign_config.optimization.elimination_n_min,
+        enable_2pl=campaign_config.optimization.enable_2pl_graduation,
+    ).ruler
     picked = pick_fresh(
         unmeasured,
         budget if samples is None else samples,
@@ -322,7 +339,7 @@ async def verify_candidate(
         hop.campaign_id,
         hop.cycle_id,
         len(picked),
-        len(measured_ids),
+        len(measured_keys),
     )
     with diagnostic_trace(stores, hop):
         ledger = active_cycle_ledger()
@@ -331,7 +348,7 @@ async def verify_candidate(
         on_phase(
             CampaignPhase.VERIFY,
             "enter",
-            view=VerifyEnterView(label=label, round=round_num, rows=len(picked), strategy=strategy),
+            view=VerifyEnterView(arm=arm, rows=len(picked), strategy=strategy),
         )
         try:
             scored = await diagnostic_pass(
@@ -344,12 +361,10 @@ async def verify_candidate(
                 ),
             )
             banked = VerifyPass(
-                label=label,
-                candidate_id=candidate_id,
-                round=round_num,
+                arm=arm,
                 sp_hash=sp_hash,
                 cells=scored.cells,
-                sample_ids=[s.id for s in picked],
+                positions=[s.id for s in picked],
                 strategy=strategy,
                 seed=seed,
                 scorer_id=session.scoring.require_scorer().id,
@@ -370,7 +385,7 @@ async def verify_candidate(
 
     return VerifyOutcome(
         dataset_name=campaign.dataset_name,
-        already_measured=len(measured_ids),
+        already_measured=len(measured_keys),
         verify_pass=banked,
         reading=reading,
     )
@@ -391,7 +406,7 @@ async def verify_on_saturation(
     if control.budget_tripped() is not None:
         return None
     ledger_path = CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
-    mine = [banked.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()]
+    mine = [banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()]
     if mine and rounds_since_verified(mine, round_num=round_num) < _VERIFY_LIFT_CAP:
         return None
     try:

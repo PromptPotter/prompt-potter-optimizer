@@ -267,23 +267,14 @@ assert stable_hash(CANONICAL_PIN, length=ADDRESS_HEX) == "bff2239dc003d203bdf115
 )
 
 
-def _sorted_pairs(dataset: list[Any]) -> list[tuple[str, str]]:
-    return sorted((d.query, d.ground_truth or "") for d in dataset)
+def dataset_hash(dataset: Iterable[Any]) -> str:
+    """Over each row as its bank file stores it, IN ORDER: one hash is one bank, every slot included."""
+    return stable_hash({"rows": [row.banked() for row in dataset]}, length=ADDRESS_HEX)
 
 
-def dataset_hash(dataset: list[Any]) -> str:
-    return stable_hash({"pairs": _sorted_pairs(dataset)}, length=ADDRESS_HEX)
-
-
-def content_hash(
-    rendered_prompt: str,
-    dataset: list[Any],
-    pipeline_params: dict[str, Any] | None = None,
-) -> str:
-    blob_dict: dict[str, Any] = {
-        "prompt": rendered_prompt,
-        "pairs": _sorted_pairs(dataset),
-    }
+def content_hash(dataset: Iterable[Any], pipeline_params: dict[str, Any] | None = None) -> str:
+    """Each node's rendered ``prompt`` rides its config, so *pipeline_params* covers every prompt."""
+    blob_dict: dict[str, Any] = {"dataset": dataset_hash(dataset)}
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params
     return stable_hash(blob_dict, length=ADDRESS_HEX)

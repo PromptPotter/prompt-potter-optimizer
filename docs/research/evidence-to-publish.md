@@ -29,7 +29,7 @@ Commit one folder per run under `paper/evidence/<date>-<dataset>/`, so the site 
 - `index.json` (`final.rounds_to_separable`, `final.rounds_to_improved`)
 - `dashboard.json` (`spend.total_used_usd`, `spend.total_tokens_used`, `spend_by_round`, `rounds[]`)
 - `rounds/round_000N.json` and `hard_samples.json` (intervals per candidate, ability, per-sample rows)
-- `result.json` (calls and wall clock), the `dataset.yaml` used, the exact
+- `result.json` (wall clock per launch), the `dataset.yaml` used, the exact
   commands, and the `noise-floor` output.
 
 The site then adds one entry to `src/data/results.ts` with `status: 'measured'` and the link to that

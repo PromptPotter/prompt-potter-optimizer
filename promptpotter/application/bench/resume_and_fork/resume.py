@@ -1,4 +1,4 @@
-"""``repair.py`` runs regardless of config scope; only the divergence check short-circuits on it."""
+"""``repair.py`` runs regardless of the defaults pin; only the divergence check short-circuits on it."""
 
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_decisions,
 )
-from promptpotter.application.knobs import DiffScope, classify_config_diff
-from promptpotter.application.pipeline_resolve import frozen_config
+from promptpotter.application.pipeline_resolve import defaults_drift
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_records import ForkSpec, ForkTrigger
 from promptpotter.shared.errors import ResumeDivergenceError
+from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
@@ -74,7 +74,7 @@ def _optimizer_mismatches(
     current = selected.prompt_hashes()
     out: dict[int, ReplayMismatch] = {}
     for t in prior:
-        recorded = t.optimizer_state.prompt_hashes
+        recorded = t.closed_state.prompt_hashes
         moved = sorted(n for n, h in recorded.items() if current.get(n) != h)
         if not moved:
             continue
@@ -117,6 +117,8 @@ async def resume_with_divergence_check(
     # Fingerprinted BEFORE the repair, so the corrected set differs by exactly what it changed.
     packages_before = cycle.optimizer.runtime.round_packages(cycle, prior)
     cycle.replay_priors(prior)
+    # Over the cycle's whole history: a fork's lifted rounds made theirs on its parent's ledger.
+    standing = campaign_store.standing_rounds(hop, moment=None)
 
     correction = await apply_correction(
         campaign_store, hop, prior, packages_before, session, cycle, dataset
@@ -124,34 +126,16 @@ async def resume_with_divergence_check(
     if correction is not None:
         return correction
 
-    # Over the cycle's whole history: a fork's lifted rounds made theirs on its parent's ledger.
-    ledger_decisions = campaign_store.standing_rounds(hop, moment=None).decisions
+    ledger_decisions = standing.decisions
 
     if not skip_divergence_check:
-        # Both ABOVE the config short-circuit: neither is a knob, so a clean diff misses them.
         optimizer_mismatches = _optimizer_mismatches(prior, cycle.optimizer)
         stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
         campaign = campaign_store.load_campaign(hop.campaign_id)
-        frozen = frozen_config(session.store, campaign) if campaign is not None else {}
-        scope, diffed = classify_config_diff(
-            cycle.config, frozen, arm=campaign is not None and campaign.arm is not None
-        )
-        if (
-            not optimizer_mismatches
-            and stale is None
-            and scope in (DiffScope.NONE, DiffScope.POLICY_ONLY)
-        ):
-            if scope is DiffScope.POLICY_ONLY:
-                logger.info(
-                    "Resume: policy-only config diff (%s); continuing on cycle %s in-place",
-                    ", ".join(diffed),
-                    hop.cycle_id,
-                )
+        # The declaration never moves; the defaults it is a delta over can, under the same name.
+        drifted = campaign is not None and defaults_drift(campaign) is not None
+        if not optimizer_mismatches and stale is None and not drifted:
             return None
-        if scope in (DiffScope.DATA_AFFECTING, DiffScope.TREATMENT) and diffed:
-            logger.info(
-                "Resume: %s config diff (%s); running divergence check", scope, ", ".join(diffed)
-            )
 
         def _branch_or_halt(
             div: ReplayMismatch, survivors: list[RoundResult], *, self_inflicted: bool
@@ -178,7 +162,7 @@ async def resume_with_divergence_check(
                 ForkSpec(
                     trigger=ForkTrigger.SCORING_DIVERGENCE,
                     reason=f"resume_divergence:{div.kind}",
-                    issued_by="system",
+                    issued_by=SYSTEM_PRINCIPAL,
                 ),
             )
             cycle.replay_priors(survivors)
@@ -195,7 +179,7 @@ async def resume_with_divergence_check(
             div = optimizer_mismatches.get(t.round) or replay_decisions(
                 t,
                 ledger_decisions.get(t.round, []),
-                ruler=cycle.difficulty.ruler,
+                ruler=cycle.difficulty.ruler_of(t.ruler),
             )
             if div is not None:
                 return _branch_or_halt(div, list(prior[:i]), self_inflicted=False)

@@ -125,7 +125,8 @@ def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
     """The declared pick's own reading, never a high-water across rounds: those sat different rows."""
     if target is None:
         return None
-    accuracy = cycle.selection.accuracy
+    fold = cycle.selection.fold
+    accuracy = None if fold is None else fold.accuracy
     return StopReason.TARGET_HIT if accuracy is not None and accuracy >= target else None
 
 

@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+import contextlib
+from pathlib import Path
+from typing import Any, get_args
+
+from filelock import BaseFileLock, FileLock, Timeout
+
+from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.run_records import BankedSubject
+from promptpotter.domain.spend import NOTHING_METERED, CeilingMeter
+from promptpotter.infrastructure.store.account_trail import bank_before_removal
+from promptpotter.infrastructure.store.io import (
+    read_json_optional,
+    rmtree_robust,
+    write_json,
+)
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    draft_claim_path,
+    draft_dir_for,
+    draft_dirs,
+)
+from promptpotter.shared.errors import ConflictError, NotFoundError
+
+
+class DraftClaim:
+    """An OS lock, so a dead process holds none; ``release`` is idempotent for a refusal before the hold."""
+
+    def __init__(self, draft_id: str, lock: BaseFileLock, draft_dir: Path) -> None:
+        self.draft_id = draft_id
+        self._lock = lock
+        self._draft_dir = draft_dir
+
+    def release(self) -> None:
+        if not self._lock.is_locked:
+            return
+        self._lock.release()
+        # Only once the draft is gone: before that, a second taker may already hold this file.
+        if not self._draft_dir.exists():
+            with contextlib.suppress(OSError):
+                Path(self._lock.lock_file).unlink(missing_ok=True)
+
+
+class DraftStore:
+    """A draft's one owner is its CLAIM: a write, a discard and a second Start refuse while it is held."""
+
+    def __init__(self, base_dir: WorkspaceDir):
+        self._base_dir = base_dir
+
+    def draft_dir(self, draft_id: str) -> Path:
+        return draft_dir_for(self._base_dir, draft_id)
+
+    def ledger(self, draft_id: str) -> Path:
+        return CycleLayout(self.draft_dir(draft_id)).ledger
+
+    def draft_ids(self) -> list[str]:
+        return [p.name for p in draft_dirs(self._base_dir) if (p / "draft.json").is_file()]
+
+    def _take(self, draft_id: str) -> DraftClaim:
+        path = draft_claim_path(self._base_dir, draft_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # A fresh instance, never reentrant: a second take in this process must refuse too.
+        lock = FileLock(str(path), timeout=0, thread_local=False)
+        try:
+            lock.acquire()
+        except Timeout:
+            raise ConflictError(
+                f"draft {draft_id!r} is held by a Start or a command on it; retry once that ends.",
+                code="draft_held",
+            ) from None
+        return DraftClaim(draft_id, lock, self.draft_dir(draft_id))
+
+    def claim(self, draft_id: str) -> DraftClaim:
+        """Taken first, then the draft asked for: a discard that won the race leaves nothing to mint."""
+        claim = self._take(draft_id)
+        if self.read_draft(draft_id) is None:
+            claim.release()
+            raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
+        return claim
+
+    def write_draft(self, draft_id: str, draft: dict[str, Any]) -> Path:
+        path = self.draft_dir(draft_id) / "draft.json"
+        write_json(path, draft)
+        return path
+
+    def read_draft(self, draft_id: str) -> dict[str, Any] | None:
+        return read_json_optional(self.draft_dir(draft_id) / "draft.json")
+
+    def _patch_checkin(self, draft_id: str, **fields: Any) -> None:
+        path = self.draft_dir(draft_id) / "checkin.json"
+        write_json(path, {**(read_json_optional(path) or {}), **fields})
+
+    def _checkin_field(self, draft_id: str, key: str) -> Any:
+        return (read_json_optional(self.draft_dir(draft_id) / "checkin.json") or {}).get(key)
+
+    def write_upload(self, draft_id: str, upload: str) -> None:
+        """The kept file's name under ``TenantDatasetStore.upload_path``."""
+        self._patch_checkin(draft_id, upload=upload)
+
+    def upload_of(self, draft_id: str) -> str | None:
+        upload = self._checkin_field(draft_id, "upload")
+        return upload if isinstance(upload, str) and upload else None
+
+    def write_resolution(self, draft_id: str, resolution: dict[str, Any]) -> None:
+        self._patch_checkin(draft_id, resolution=resolution)
+
+    def load_resolution(self, draft_id: str) -> dict[str, Any] | None:
+        resolution = self._checkin_field(draft_id, "resolution")
+        return resolution if isinstance(resolution, dict) else None
+
+    def close(self, draft_id: str) -> None:
+        """After a mint moved its ledger out, by whoever holds the draft: a working copy nothing reads."""
+        rmtree_robust(self.draft_dir(draft_id))
+
+    def discard(self, draft_id: str) -> None:
+        """A destroyer: what its check-in cost and what was commanded on it outlive it, under its id."""
+        claim = self._take(draft_id)
+        try:
+            draft_dir = self.draft_dir(draft_id)
+            bank_before_removal(
+                workspace=self._base_dir,
+                cycle_dirs=[draft_dir],
+                subject=BankedSubject(draft_id=draft_id),
+                metered=dict.fromkeys(get_args(CeilingMeter), NOTHING_METERED),
+            )
+            rmtree_robust(draft_dir)
+        finally:
+            claim.release()
+
+
+__all__ = ["DraftClaim", "DraftStore"]

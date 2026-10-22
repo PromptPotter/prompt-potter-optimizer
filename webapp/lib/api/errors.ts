@@ -13,7 +13,6 @@ export type IngestErrorDetail = {
   gaps?: FieldGap[];
 };
 export class IngestApiError extends ApiError {
-  readonly serverMessage: string | null;
   readonly reason?: string;
   readonly existingSlug?: string;
   readonly suggestedSlug?: string;
@@ -27,10 +26,8 @@ export class IngestApiError extends ApiError {
     errorId?: string,
     detail?: IngestErrorDetail,
   ) {
-    super(status, url, code ?? null, errorId ?? null, detail ?? null);
+    super(status, url, code ?? null, errorId ?? null, detail ?? null, serverMessage);
     this.name = "IngestApiError";
-    this.serverMessage = serverMessage;
-    if (serverMessage !== null) this.message = serverMessage;
     this.reason = detail?.reason;
     this.existingSlug = detail?.slug;
     this.suggestedSlug = detail?.suggested_slug;
@@ -41,17 +38,20 @@ export class IngestApiError extends ApiError {
 
 // A transient write may have landed before the connection dropped: never claim nothing changed.
 const KIND_SENTENCE: Record<FailureKind, string> = {
-  transient: "Could not reach the server — the change may not have been applied.",
+  transient: "Could not reach the server — anything you sent may not have been applied.",
   auth: "Your session has ended — sign in again.",
   denied: "This account is not allowed to do that.",
   gone: "What this acts on no longer exists.",
   invalid: "The server refused the request as malformed.",
+  refused: "The server declined the request.",
 };
 
 // Never rebuild a sentence from the envelope's details: only the server knows a refusal's remedy.
 export function operatorMessage(e: unknown, kind: FailureKind): string {
-  if (!(e instanceof IngestApiError) || e.serverMessage === null) return KIND_SENTENCE[kind];
-  if (e.suggestedSlug) return `${e.serverMessage} Suggested slug: ${e.suggestedSlug}.`;
+  if (!(e instanceof ApiError) || e.serverMessage === null) return KIND_SENTENCE[kind];
+  if (e instanceof IngestApiError && e.suggestedSlug) {
+    return `${e.serverMessage} Suggested slug: ${e.suggestedSlug}.`;
+  }
   return e.serverMessage;
 }
 

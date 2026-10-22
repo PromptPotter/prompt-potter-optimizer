@@ -9,7 +9,7 @@ import {
 } from "@/lib/api";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useCommand } from "@/lib/hooks/useCommand";
-import type { ParamIntent } from "@/lib/api/types";
+import type { NodePrompt, ParamIntent } from "@/lib/api/types";
 import { useRound } from "@/lib/hooks/useRound";
 import { useAuth } from "@/lib/auth-context";
 import { pathRoot, type CyclePath } from "@/lib/ids";
@@ -45,9 +45,9 @@ export function SteerForkPanel({
   const { unfiled, doc } = useRound(path, candidate.round);
   const { me } = useAuth();
   const seed = unfiled
-    ? liveCandidateSearchPoint(dash, candidate.label)
-    : candidateSearchPoint(doc, candidate.candidate_id);
-  const seedPrompt = seed?.origin_prompt_fields ?? {};
+    ? liveCandidateSearchPoint(dash, candidate.arm)
+    : candidateSearchPoint(doc, candidate.arm);
+  const seedPrompts = seed?.origin_prompts ?? {};
   const overlay = seed?.pipeline_overlay ?? {};
   // For the EDITOR only: the verdict reads the campaign's frozen narrowing, not these rows.
   const permittedModels = permittedModelsOf(schema.config);
@@ -65,7 +65,7 @@ export function SteerForkPanel({
   ];
 
   // Refs, not state: a blur firing just before the Confirm click is already reflected.
-  const editedPrompt = useRef<Record<string, unknown> | null>(null);
+  const editedPrompts = useRef<Record<string, NodePrompt> | null>(null);
   const editedOverlay = useRef<Record<string, Record<string, unknown>> | null>(null);
   const editedNarrowing = useRef<Record<string, ParamIntent[]>>({});
   const limits = useRef<RunLimitOverrides>({});
@@ -75,7 +75,7 @@ export function SteerForkPanel({
 
   const confirm = () => {
     const forkSeed: ForkSeed = {
-      origin_prompt_fields: editedPrompt.current ?? seedPrompt,
+      origin_prompts: editedPrompts.current ?? seedPrompts,
       pipeline_overlay: editedOverlay.current ?? overlay,
       config_overrides: limits.current,
       ...(Object.keys(editedNarrowing.current).length > 0
@@ -85,7 +85,7 @@ export function SteerForkPanel({
     void cmd.run(
       "steer-fork",
       () =>
-        postSteerFork(path, candidate.round, candidate.candidate_id, { seed: forkSeed }),
+        postSteerFork(path, candidate.round, candidate.arm, { seed: forkSeed }),
       onDone,
     );
   };
@@ -99,8 +99,8 @@ export function SteerForkPanel({
 
       {!seed && (
         <p className="steer-fork-note" role="note">
-          This searchpoint isn&apos;t loaded yet — start from the fields below
-          (they seed the fork&apos;s origin prompt).
+          This searchpoint isn&apos;t loaded yet — its prompt appears here once it is, and
+          seeds the fork&apos;s origin.
         </p>
       )}
 
@@ -132,14 +132,21 @@ export function SteerForkPanel({
 
       <NodeSurface
         node={null}
-        point={searchPoint(seedPrompt, overlay)}
+        point={searchPoint(seedPrompts, overlay)}
         overlay={overlay}
         schema={schema}
         mode="values"
         babysitEditable={canBabysit}
         permittedModels={permittedModels}
         onApply={(p) => {
-          editedPrompt.current = p.origin_prompt_fields ?? {};
+          // The editor writes fields; each node's shots ride the seed unchanged.
+          const fields = p.origin_prompts ?? {};
+          editedPrompts.current = Object.fromEntries(
+            Object.entries(fields).flatMap(([node, f]) => {
+              const seeded = seedPrompts[node];
+              return seeded ? [[node, { fields: f, shots: seeded.shots }]] : [];
+            }),
+          );
         }}
         onConfigChange={(o) => {
           editedOverlay.current = o;

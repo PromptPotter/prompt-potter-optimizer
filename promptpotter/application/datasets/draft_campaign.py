@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from promptpotter import connectors
 from promptpotter.application.campaign_config import (
@@ -20,15 +20,16 @@ from promptpotter.application.scoring.formula import (
 )
 from promptpotter.connectors import DEFAULT_CONNECTOR
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.pipeline_parsing import merge_node_blocks
+from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
     NodeSearchNarrowing,
     ParamIntent,
 )
 from promptpotter.domain.scoring import anchored_criterion_dials
+from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, owned_draft_data
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import TenantId, safe_name
 
@@ -38,22 +39,28 @@ if TYPE_CHECKING:
 DEFAULT_SCORING_MATCHER = "label_match"
 """Only universally-applicable matcher for ``(query, ground_truth)`` shape."""
 
-DEFAULT_MAX_ROUNDS = 5
+DEFAULT_BUDGET_ROUNDS = 5
 """Matches the M10 prompt-iteration framework default."""
+
+MAX_EDITED_ROUNDS = 100
 
 PREVIEW_ROWS = 10
 """Sample-preview head size returned alongside every mutation response."""
 
 
 class OptimizationOverrides(StrictModel):
-    """The ``max_rounds`` bound gates the operator EDIT path only; the trusted internal
+    """The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal
     ``draft_from_dataset`` builds the dict directly, so a reused dataset may exceed it."""
 
-    max_rounds: int = Field(
-        DEFAULT_MAX_ROUNDS,
-        ge=0,
-        le=100,
-        description="Round ceiling for the campaign. 0 = measure the origin and stop.",
+    budget: Budget = Field(
+        Budget(rounds=DEFAULT_BUDGET_ROUNDS),
+        description=OptimizationConfig.model_fields["budget"].description,
+    )
+    halt_at_accuracy: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=OptimizationConfig.model_fields["halt_at_accuracy"].description,
     )
     optimizer: str = Field(
         OptimizationConfig.model_fields["optimizer"].default,
@@ -68,6 +75,13 @@ class OptimizationOverrides(StrictModel):
         OptimizationConfig.model_fields["arm_gate"].default,
         description=OptimizationConfig.model_fields["arm_gate"].description,
     )
+
+    @field_validator("budget")
+    @classmethod
+    def _rounds_on_the_edit_path(cls, budget: Budget) -> Budget:
+        if budget.rounds is not None and budget.rounds > MAX_EDITED_ROUNDS:
+            raise ValueError(f"budget.rounds is at most {MAX_EDITED_ROUNDS} on a check-in")
+        return budget
 
 
 def _default_optimization_overrides() -> dict[str, Any]:
@@ -102,7 +116,8 @@ class EditDraftPatch(StrictModel):
     pipeline_steps: list[str] | None = None
     column_query: str | None = Field(default=None, max_length=256)
     column_ground_truth: str | None = Field(default=None, max_length=256)
-    origin_prompt_fields: dict[str, Any] | None = None
+    # Per step, its fields by name; replaces the draft's whole map.
+    origin_prompts: dict[str, dict[str, str]] | None = None
     # Merged onto the draft's current overrides, `nodes` key by key.
     optimization_overrides: dict[str, Any] | None = None
     candidate_library: list[str] | None = Field(default=None, min_length=1)
@@ -121,6 +136,8 @@ def closed_answer_format(labels: tuple[str, ...]) -> str:
 class DraftCampaign:
     draft_id: str
     tenant_id: TenantId
+    # Another user's draft is not found, as their campaign is.
+    owner_user_id: str
     slug: str
     n_samples: int
     sample_preview: tuple[dict[str, str], ...]
@@ -136,7 +153,9 @@ class DraftCampaign:
     column_label_sets: dict[str, tuple[str, ...]] = field(default_factory=dict)
     field_provenance: dict[str, Provenance] = field(default_factory=dict)
     source_file: str = ""
-    origin_prompt_fields: dict[str, Any] = field(default_factory=dict)
+    # The committed dataset it was cut from; ``None`` for an upload.
+    source_dataset: str | None = None
+    origin_prompts: dict[str, dict[str, str]] = field(default_factory=dict)
     decomposed_task_context: dict[str, Any] = field(default_factory=dict)
     pipeline_steps: list[str] = field(default_factory=list)
     optimization_overrides: dict[str, Any] = field(default_factory=_default_optimization_overrides)
@@ -149,6 +168,7 @@ class DraftCampaign:
 
     def to_disk(self) -> dict[str, Any]:
         return {
+            "owner_user_id": self.owner_user_id,
             "slug": self.slug,
             "n_samples": self.n_samples,
             "sample_preview": [dict(row) for row in self.sample_preview],
@@ -165,7 +185,8 @@ class DraftCampaign:
             "column_label_sets": {k: list(v) for k, v in self.column_label_sets.items()},
             "field_provenance": {k: v.value for k, v in self.field_provenance.items()},
             "source_file": self.source_file,
-            "origin_prompt_fields": dict(self.origin_prompt_fields),
+            "source_dataset": self.source_dataset,
+            "origin_prompts": {node: dict(f) for node, f in self.origin_prompts.items()},
             "decomposed_task_context": dict(self.decomposed_task_context),
             "pipeline_steps": list(self.pipeline_steps),
             "optimization_overrides": dict(self.optimization_overrides),
@@ -181,6 +202,7 @@ class DraftCampaign:
         return cls(
             draft_id=draft_id,
             tenant_id=tenant_id,
+            owner_user_id=data["owner_user_id"],
             slug=data["slug"],
             n_samples=data["n_samples"],
             sample_preview=tuple(dict(row) for row in data.get("sample_preview", [])),
@@ -199,7 +221,8 @@ class DraftCampaign:
                 k: Provenance(v) for k, v in data.get("field_provenance", {}).items()
             },
             source_file=data.get("source_file", ""),
-            origin_prompt_fields=dict(data.get("origin_prompt_fields", {})),
+            source_dataset=data.get("source_dataset"),
+            origin_prompts={node: dict(f) for node, f in data.get("origin_prompts", {}).items()},
             decomposed_task_context=dict(data.get("decomposed_task_context", {})),
             pipeline_steps=list(data.get("pipeline_steps", [])),
             optimization_overrides={
@@ -216,19 +239,34 @@ class DraftCampaign:
             return None
         return self.column_label_sets.get(self.column_ground_truth)
 
-    def committed_prompt_fields(self) -> dict[str, Any]:
-        # Wiped strings count as blank, so the fallback is not keyed on the dict being empty.
-        authored = any(str(value).strip() for value in self.origin_prompt_fields.values())
-        fields = (
-            dict(self.origin_prompt_fields)
-            if authored
-            else {"instruction": self.raw_task_description}
+    def active_steps(self) -> list[str]:
+        return self.pipeline_steps or list(connectors.get(self.connector).default_pipeline)
+
+    def authored_prompts(self) -> bool:
+        # Wiped strings count as blank, so the fallback is not keyed on the map being empty.
+        return any(
+            text.strip() for fields in self.origin_prompts.values() for text in fields.values()
         )
+
+    def committed_prompts(self) -> dict[str, dict[str, str]]:
+        """The raw task and the label enumeration seed a field only on a chain of ONE prompt node."""
+        prompt_nodes = parse_pipeline_response(rendered_pipeline_json(self)).prompt_nodes()
+        alone = len(prompt_nodes) == 1
+        return {
+            node.name: self._committed_fields(node.name, node.prompt_fields if alone else ())
+            for node in prompt_nodes
+        }
+
+    def _committed_fields(self, step: str, seeded: tuple[str, ...]) -> dict[str, str]:
+        authored = self.origin_prompts.get(step, {})
+        fields = dict(authored)
+        if "instruction" in seeded and not any(text.strip() for text in authored.values()):
+            fields = {"instruction": self.raw_task_description}
         # Appended even when answer_format is blank: the optimizer prompts promise the labels.
         labels = self.answer_space()
-        if labels:
+        if labels and "answer_format" in seeded:
             enumeration = closed_answer_format(labels)
-            fmt = str(fields.get("answer_format", "")).strip()
+            fmt = fields.get("answer_format", "").strip()
             if enumeration not in fmt:
                 fields["answer_format"] = f"{fmt}\n{enumeration}" if fmt else enumeration
         return fields
@@ -262,19 +300,32 @@ class DraftCampaign:
 
 
 def merge_pipeline_overlay(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
-    """What is WRITTEN: without ``backend_nodes``, whose ``param_keys`` would pin the search space."""
-    return merge_node_blocks(dict(connector.default_node_config), draft.pipeline_overlay or {})
+    """No ``backend_nodes`` (they would pin the search space) and no narrowing: ``optimizer_narrowing`` holds it."""
+    declared = {
+        node: {k: v for k, v in block.items() if k != "optimizer"}
+        for node, block in (draft.pipeline_overlay or {}).items()
+        if isinstance(block, dict)
+    }
+    return merge_node_blocks(dict(connector.default_node_config), declared)
 
 
 def resolved_node_schema(draft: DraftCampaign, connector: Connector) -> dict[str, Any]:
     return merge_node_blocks(dict(draft.backend_nodes), merge_pipeline_overlay(draft, connector))
 
 
-def load_checkin_draft(stores: Stores, campaign_id: str) -> DraftCampaign | None:
-    data = stores.checkin.read_draft(campaign_id)
-    if data is None:
-        return None
-    return DraftCampaign.from_disk(data, draft_id=campaign_id, tenant_id=stores.identity.tenant_id)
+def owned_draft(stores: Stores, draft_id: str) -> DraftCampaign:
+    data = owned_draft_data(stores, draft_id)
+    return DraftCampaign.from_disk(data, draft_id=draft_id, tenant_id=stores.identity.tenant_id)
+
+
+def owned_drafts(stores: Stores) -> list[DraftCampaign]:
+    user = str(stores.identity.user_id)
+    return [
+        DraftCampaign.from_disk(data, draft_id=draft_id, tenant_id=stores.identity.tenant_id)
+        for draft_id in stores.drafts.draft_ids()
+        if (data := stores.drafts.read_draft(draft_id)) is not None
+        and data["owner_user_id"] == user
+    ]
 
 
 def draft_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str, Any]:
@@ -330,14 +381,19 @@ def scoring_choice(scoring: str | dict[str, str] | None) -> tuple[str, str]:
 def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
     connector = connectors.get(draft.connector)
     overrides = draft.optimization_overrides
-    optimization: dict[str, Any] = {"max_rounds": overrides["max_rounds"]}
+    optimization: dict[str, Any] = {
+        "budget": overrides["budget"],
+        "halt_at_accuracy": overrides["halt_at_accuracy"],
+    }
     optimization.update(dict(connector.default_optimization))
     optimization["optimizer"] = overrides["optimizer"]
     optimization["nodes"] = dict(overrides["nodes"])
+    _, narrowing = split_overlay(draft.pipeline_overlay)
     return CampaignConfig.model_validate(
         {
             "scoring": draft_scoring_block(draft),
             "optimization": optimization,
+            "optimizer_narrowing": {n: v.model_dump() for n, v in narrowing.items()},
         }
     )
 
@@ -365,18 +421,21 @@ def split_overlay(
 def new_draft(
     *,
     tenant_id: TenantId,
+    owner_user_id: str,
     slug: str,
     n_samples: int,
     sample_preview: list[dict[str, str]],
     headers: list[str],
     source_file: str = "",
+    source_dataset: str | None = None,
     column_label_sets: dict[str, tuple[str, ...]] | None = None,
 ) -> DraftCampaign:
     now = utcnow_iso()
     column_query, column_ground_truth, provenance = _seed_provenance(headers)
     return DraftCampaign(
-        draft_id=_mint_draft_id(),
+        draft_id=mint_draft_id(),
         tenant_id=tenant_id,
+        owner_user_id=owner_user_id,
         slug=slug,
         n_samples=n_samples,
         sample_preview=tuple(dict(row) for row in sample_preview[:PREVIEW_ROWS]),
@@ -392,6 +451,7 @@ def new_draft(
         created_at=now,
         updated_at=now,
         source_file=source_file,
+        source_dataset=source_dataset,
     )
 
 
@@ -416,7 +476,7 @@ def _auto_detect_columns(
     return query_col, ground_truth_col, provenance
 
 
-def _mint_draft_id() -> str:
+def mint_draft_id() -> str:
     return f"d_{uuid.uuid4().hex[:16]}"
 
 
@@ -432,7 +492,7 @@ def default_slug_from_filename(filename: str) -> str:
 
 
 __all__ = [
-    "DEFAULT_MAX_ROUNDS",
+    "DEFAULT_BUDGET_ROUNDS",
     "DEFAULT_SCORING_MATCHER",
     "PREVIEW_ROWS",
     "SETTABLE_SCALARS",
@@ -442,5 +502,8 @@ __all__ = [
     "OptimizationOverrides",
     "default_slug_from_filename",
     "merge_pipeline_overlay",
+    "mint_draft_id",
     "new_draft",
+    "owned_draft",
+    "owned_drafts",
 ]

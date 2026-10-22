@@ -5,11 +5,8 @@ from typing import Any, ClassVar, get_args
 
 from promptpotter.domain.run_records import (
     AccountEventRecord,
+    ArmRecord,
     BackendWarningRecord,
-    CandidateMintedRecord,
-    CandidateScoredRecord,
-    CandidateStartedRecord,
-    CheckinClosedRecord,
     CommandAckRecord,
     CommandRecord,
     CycleFinalRecord,
@@ -40,17 +37,15 @@ from promptpotter.domain.run_records import (
     RoundProposedRecord,
     RoundStandingRecord,
     RoundWarningRecord,
-    RulerRecord,
-    RunLimitsRecord,
     RunPhaseRecord,
     RunWiringRecord,
-    SampleOrderRecord,
     SampleScoredRecord,
     SampleStartedRecord,
     ScoringLockedRecord,
     SpawnedRecord,
     SpendHoldRecord,
     SpendTombstoneRecord,
+    StandingBudgetRecord,
     TokenUsageRecord,
     TrailTombstoneRecord,
 )
@@ -91,11 +86,9 @@ class Projection:
             RoundEnteredRecord: cls._handle_round_entered,
             RoundClosedRecord: cls._handle_round_closed,
             RoundStandingRecord: cls._handle_round_standing,
-            CandidateStartedRecord: cls._handle_candidate_started,
-            SampleOrderRecord: cls._handle_sample_order,
+            ArmRecord: cls._handle_arm,
             SampleStartedRecord: cls._handle_sample_started,
             SampleScoredRecord: cls._handle_sample_scored,
-            CandidateScoredRecord: cls._handle_candidate_scored,
             FlightRecord: cls._handle_flight,
             RaceStandingRecord: cls._handle_race_standing,
             RaceCatchUpRecord: cls._handle_race_catch_up,
@@ -106,7 +99,6 @@ class Projection:
             LLMCallRecord: cls._handle_llm_call,
             ErrorRecord: cls._handle_error,
             RoundWarningRecord: cls._handle_round_warning,
-            CandidateMintedRecord: cls._handle_candidate_minted,
             ElectionRecord: cls._handle_election,
             RoundProposedRecord: cls._handle_round_proposed,
             OptimizerStateRecord: cls._handle_optimizer_state,
@@ -114,11 +106,9 @@ class Projection:
             CommandRecord: None,
             CommandAckRecord: None,
             CycleSeedRecord: None,
-            RulerRecord: None,
-            RunLimitsRecord: None,
+            StandingBudgetRecord: None,
             ScoringLockedRecord: None,
             CycleMintedRecord: None,
-            CheckinClosedRecord: None,
             CycleFinalRecord: None,
             CycleSupersededRecord: None,
             ForkGradedRecord: None,
@@ -153,11 +143,9 @@ class Projection:
     def _handle_round_closed(self, record: RoundClosedRecord) -> None: ...
     def _handle_round_standing(self, record: RoundStandingRecord) -> None: ...
     def _handle_election(self, record: ElectionRecord) -> None: ...
-    def _handle_candidate_started(self, record: CandidateStartedRecord) -> None: ...
-    def _handle_sample_order(self, record: SampleOrderRecord) -> None: ...
+    def _handle_arm(self, record: ArmRecord) -> None: ...
     def _handle_sample_started(self, record: SampleStartedRecord) -> None: ...
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None: ...
-    def _handle_candidate_scored(self, record: CandidateScoredRecord) -> None: ...
     def _handle_flight(self, record: FlightRecord) -> None: ...
     def _handle_race_standing(self, record: RaceStandingRecord) -> None: ...
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None: ...
@@ -168,7 +156,6 @@ class Projection:
     def _handle_llm_call(self, record: LLMCallRecord) -> None: ...
     def _handle_error(self, record: ErrorRecord) -> None: ...
     def _handle_round_warning(self, record: RoundWarningRecord) -> None: ...
-    def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None: ...
     def _handle_optimizer_state(self, record: OptimizerStateRecord) -> None: ...
 
     def drain(self) -> None:

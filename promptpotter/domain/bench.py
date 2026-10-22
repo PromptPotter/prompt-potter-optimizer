@@ -8,7 +8,7 @@ from typing import Literal, NamedTuple, Self, get_args
 from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.paired_reading import (
-    ArmPointer,
+    ArmName,
     CellSet,
     CellSetBasis,
     CellSetName,
@@ -64,12 +64,8 @@ class DatasetSplit(StrictModel):
         0,
         ge=0,
         description="Distinct samples reserved as the demo pool — the rows an individual's "
-        "`shot_ids` name, rendered into its prompt as query and ground truth, never scored.",
-    )
-    seed: int = Field(
-        0,
-        description="Seeds which rows fall where. Membership ranks each row by its content "
-        "(`Sample.key`), never its slot, so a reordered bank holds out the same rows.",
+        "`shots` name by `Sample.key`, rendered into its prompt as query and ground truth, never "
+        "scored.",
     )
     tolerance: int = Field(
         0,
@@ -111,10 +107,6 @@ class BankPartition:
     def bench_rows(self) -> CellSet:
         return bench_split(s.key for s in self.bench)
 
-    @property
-    def search_demo_id(self) -> str:
-        return stable_hash([[s.key for s in self.search], [s.key for s in self.demo]])
-
     def record(self, *, dataset_hash: str) -> PartitionRecord:
         return PartitionRecord(
             dataset_hash=dataset_hash,
@@ -123,12 +115,11 @@ class BankPartition:
             bench_ids=[s.id for s in self.bench],
             bench_rows=self.bench_rows,
             demo_ids=[s.id for s in self.demo],
-            search_demo_id=self.search_demo_id,
         )
 
 
 class PartitionRecord(StrictModel):
-    """``cycles/{id}/bank_partition.json``: the partition a run init drew, as row ids."""
+    """``cycles/{id}/bank_partition.json``: the partition a run init drew, as slots in its bank."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -136,36 +127,38 @@ class PartitionRecord(StrictModel):
     split: DatasetSplit | None
     search_ids: list[int]
     bench_ids: list[int]
-    # Row ids are slots; this is the held-out content two campaigns are compared on.
+    # The held-out content two campaigns are compared on.
     bench_rows: CellSet
     demo_ids: list[int]
-    # The other two pools' content. `None` only on a record drawn before 2026-10-16.
-    search_demo_id: str | None = None
 
     @property
     def bank_ids(self) -> frozenset[int]:
         return frozenset([*self.search_ids, *self.bench_ids, *self.demo_ids])
 
 
-def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPartition:
-    """Ranks DISTINCT samples, so every copy lands on its sample's side; a ``bench_only`` row is never ranked."""
+def partition_bank(
+    bank: Sequence[Sample], split: DatasetSplit | None, *, seed: int
+) -> BankPartition:
+    """Ranks DISTINCT samples by *seed* and content, so every copy lands on its sample's side."""
     declared = {s.key for s in bank if s.bench_only}
+    rank = {k: stable_hash([seed, k]) for k in {s.key for s in bank}}
+
+    def ordered(rows: Iterable[Sample]) -> tuple[Sample, ...]:
+        return tuple(sorted(rows, key=lambda s: rank[s.key]))
+
     if split is None:
         if declared:
             raise ValueError(
                 f"{len(declared)} samples of this bank are bench-only and no dataset_split is "
                 "declared, so the search would draw rows the dataset holds out."
             )
-        return BankPartition(split=None, search=tuple(bank), bench=(), demo=())
+        return BankPartition(split=None, search=ordered(bank), bench=(), demo=())
     if repeats := sorted(s.id for s in bank if not s.bench_only and s.key in declared):
         raise ValueError(
             f"rows {repeats} repeat the content of a bench-only row, so one sample would sit on "
             "both sides of the split."
         )
-    keys = sorted(
-        {s.key for s in bank} - declared,
-        key=lambda k: stable_hash([split.seed, k]),
-    )
+    keys = sorted({s.key for s in bank} - declared, key=rank.__getitem__)
     held = split.bench + split.demo
     if held >= len(keys):
         raise ValueError(
@@ -182,29 +175,20 @@ def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPa
         )
     return BankPartition(
         split=split,
-        search=tuple(s for s in bank if s.key not in bench_keys and s.key not in demo_keys),
+        search=ordered(s for s in bank if s.key not in bench_keys and s.key not in demo_keys),
         bench=tuple(s for s in bank if s.key in bench_keys),
         demo=tuple(s for s in bank if s.key in demo_keys),
     )
 
 
 def restored_partition(bank: Sequence[Sample], drawn: PartitionRecord) -> BankPartition:
-    """The partition a run init drew, back on *bank* by row id — refused where a row's content
-    moved, since an L4 cell's rows ride its bank and never its config."""
-    by_id = {s.id: s for s in bank}
-    if missing := sorted(drawn.bank_ids - by_id.keys()):
-        raise ValueError(f"rows {missing[:5]} the cycle drew are not in this bank")
-    partition = BankPartition(
+    """*bank* is the one ``drawn.dataset_hash`` names, so a slot is its position."""
+    return BankPartition(
         split=drawn.split,
-        search=tuple(by_id[i] for i in drawn.search_ids),
-        bench=tuple(by_id[i] for i in drawn.bench_ids),
-        demo=tuple(by_id[i] for i in drawn.demo_ids),
+        search=tuple(bank[i] for i in drawn.search_ids),
+        bench=tuple(bank[i] for i in drawn.bench_ids),
+        demo=tuple(bank[i] for i in drawn.demo_ids),
     )
-    if partition.bench_rows.id != drawn.bench_rows.id:
-        raise ValueError("its held-out rows hold other content than the cycle drew")
-    if drawn.search_demo_id not in (None, partition.search_demo_id):
-        raise ValueError("its search or demo rows hold other content than the cycle drew")
-    return partition
 
 
 BenchSubject = Literal["origin", "selected"]
@@ -414,7 +398,7 @@ class LineRun(NamedTuple):
     selecting: bool
     ending: StopReason | None
     # ``RunStanding.selection``: the origin until a round selects, ``None`` until round 0 closes.
-    selection: ArmPointer | None
+    selection: ArmName | None
     rounds_closed: int
 
 

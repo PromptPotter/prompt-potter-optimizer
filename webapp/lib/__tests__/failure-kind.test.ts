@@ -11,10 +11,20 @@ describe("failureKind", () => {
     expect(failureKind(new ApiError(422, "/api/v1/x"))).toBe("invalid");
   });
 
-  it("treats every server-side and unmapped failure as transient", () => {
-    for (const status of [500, 502, 503, 504, 429, 418]) {
+  it("treats every server-side failure as transient", () => {
+    for (const status of [500, 502, 503, 504]) {
       expect(failureKind(new ApiError(status, "/api/v1/x"))).toBe("transient");
     }
+  });
+
+  it("reads any other answered 4xx as a refusal, worded by the server, read or write", () => {
+    for (const status of [409, 429, 418]) {
+      expect(failureKind(new ApiError(status, "/api/v1/x"))).toBe("refused");
+    }
+    const capped = new ApiError(429, "/api/v1/x", "spend_cap", null, null, "Raise the cap to go on.");
+    expect(operatorMessage(capped, failureKind(capped))).toBe("Raise the cap to go on.");
+    const bare = new ApiError(429, "/api/v1/x");
+    expect(operatorMessage(bare, failureKind(bare))).not.toMatch(/reach/i);
   });
 
   it("treats a non-ApiError (network, parse, abort) as transient", () => {

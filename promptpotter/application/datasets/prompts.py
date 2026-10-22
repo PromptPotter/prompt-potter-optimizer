@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.opt_search_point import NodePrompt
+from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_origin,
     read_dataset_pipeline,
 )
+from promptpotter.shared.errors import PayloadInvalidError
 
 
 def load_dataset_node_overlay(dataset_dir: Path) -> dict[str, dict[str, Any]]:
@@ -35,18 +37,39 @@ def has_dataset_prompts(dataset_dir: Path) -> bool:
     return bool(read_dataset_origin(dataset_dir))
 
 
-def load_node_prompt(dataset_dir: Path, node_name: str) -> PromptTemplate:
-    origin = read_dataset_origin(dataset_dir)
-    if node_name not in origin:
-        raise FileNotFoundError(
-            f"The definition at {dataset_dir} names no starting prompt for node {node_name!r}: "
-            f"`origin.yaml` keys {sorted(origin)}. Author one as a PromptTemplate under its node."
+def _authored_fields(dataset_dir: Path, node: str, authored: object) -> dict[str, str]:
+    if not isinstance(authored, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in authored.items()
+    ):
+        raise PayloadInvalidError(
+            f"{dataset_dir}/origin.yaml: node {node!r} holds {authored!r}; a starting prompt is "
+            "`{field: text}` under its node.",
+            code="pipeline_config_invalid",
         )
-    return PromptTemplate(**origin[node_name])
+    return dict(authored)
 
 
-def first_origin_prompt(dataset_dir: Path, steps: Sequence[str]) -> PromptTemplate | None:
-    """The one prompt a check-in edits: the first step's that holds one."""
+def origin_prompts(dataset_dir: Path, steps: Collection[str]) -> dict[str, NodePrompt]:
+    """Every starting prompt ``origin.yaml`` authors on a node of *steps*, as authored."""
     origin = read_dataset_origin(dataset_dir)
-    node = next((n for n in steps if n in origin), next(iter(origin), None))
-    return None if node is None else PromptTemplate(**origin[node])
+    return {
+        node: NodePrompt(fields=_authored_fields(dataset_dir, node, origin[node]))
+        for node in steps
+        if node in origin
+    }
+
+
+def declared_origin_prompts(
+    dataset_dir: Path, nodes: Sequence[PipelineNode]
+) -> dict[str, NodePrompt]:
+    """Refuses a field its node does not declare: it would render nowhere."""
+    authored = origin_prompts(dataset_dir, [node.name for node in nodes])
+    for node in nodes:
+        fields = authored.get(node.name, NodePrompt()).fields
+        if undeclared := sorted(set(fields) - set(node.prompt_fields)):
+            raise PayloadInvalidError(
+                f"{dataset_dir}/origin.yaml: node {node.name!r} declares the prompt fields "
+                f"{list(node.prompt_fields)}, and its starting prompt sets {undeclared}.",
+                code="pipeline_config_invalid",
+            )
+    return authored

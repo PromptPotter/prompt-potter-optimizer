@@ -15,7 +15,6 @@ import {
 } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import type { CourseNode } from "@/lib/api";
-import { ARM_OUTCOMES_ENDED_EARLY } from "@/lib/api/types.generated";
 import { useCycleStream } from "@/lib/poll";
 import {
   isSelectedCandidate,
@@ -56,7 +55,7 @@ export function MeasurementRun({
     const arm = c?.reading.arm;
     setSelectionForCandidate(
       arm && leafCycleId
-        ? selectedCandidateOf(leafCycleId, arm.round, arm.candidate_id, arm.label)
+        ? selectedCandidateOf(leafCycleId, arm.round, arm.key, arm.label)
         : null,
     );
   };
@@ -73,7 +72,7 @@ export function MeasurementRun({
 
   const verdicts = useMemo(
     () =>
-      isLiveView ? liveCandidateVerdicts(dash) : candidateVerdicts(roundDoc?.candidate_scores ?? []),
+      isLiveView ? liveCandidateVerdicts(dash) : candidateVerdicts(roundDoc),
     [isLiveView, dash, roundDoc],
   );
 
@@ -88,12 +87,12 @@ export function MeasurementRun({
       const { arm } = c.reading;
       const spec =
         c.source === "inflight"
-          ? liveCandidateSearchPoint(dash, arm.label)
-          : candidateSearchPoint(roundDoc, arm.candidate_id);
+          ? liveCandidateSearchPoint(dash, arm.key)
+          : candidateSearchPoint(roundDoc, arm.key);
       out.push({ candidate: c, samples: filtered, spec });
     }
     if (candFilter !== "all") {
-      return out.filter((g) => g.candidate.reading.arm.candidate_id === candFilter);
+      return out.filter((g) => g.candidate.reading.arm.key === candFilter);
     }
     return out;
   }, [candidates, candFilter, dash, roundDoc, samplesFor]);
@@ -104,9 +103,8 @@ export function MeasurementRun({
   );
 
   const oneCandidate = candFilter !== "all";
-  const picked = candidates.find((c) => c.reading.arm.candidate_id === candFilter);
-  const narrowTo =
-    picked && picked.source !== "inflight" ? picked.reading.arm.candidate_id : undefined;
+  const picked = candidates.find((c) => c.reading.arm.key === candFilter);
+  const narrowTo = picked && picked.source !== "inflight" ? picked.reading.arm.key : undefined;
 
   if (!dash || (!isLiveView && roundLoading)) {
     return <Region>Loading round {round}…</Region>;
@@ -132,7 +130,7 @@ export function MeasurementRun({
           <SegmentedControl<string>
             options={[
               { value: "all", label: `ALL (${candidates.length})` },
-              ...candidates.map((c) => segmentFor(c, verdicts.get(c.reading.arm.label))),
+              ...candidates.map((c) => segmentFor(c, verdicts.get(c.reading.arm.key))),
             ]}
             value={candFilter}
             onChange={setCandFilter}
@@ -144,18 +142,17 @@ export function MeasurementRun({
       <div className="rsv-groups">
         {groups.map((g) => {
           const { reading } = g.candidate;
-          const { arm, outcome } = reading;
+          const { arm } = reading;
+          const { end } = reading;
+          const invalid = end === "invalid";
+          // An invalid arm never started a walk: it renders as rejected below, never as a stop.
+          const early = reading.walked_short ? end : null;
           const accuracy = reading.own?.accuracy?.value ?? null;
-          const isCandSelected = isSelectedCandidate(
-            selected,
-            leafCycleId,
-            arm.round,
-            arm.candidate_id,
-          );
+          const isCandSelected = isSelectedCandidate(selected, leafCycleId, arm.round, arm.key);
           const { cached, cached_share: cachedShare } = reading.panel;
           const display = g.samples.slice(0, PANEL_RENDER_CAP);
           const truncated = g.samples.length - display.length;
-          const verdict = verdicts.get(arm.label);
+          const verdict = verdicts.get(arm.key);
           return (
             <section
               key={g.candidate.key}
@@ -173,7 +170,7 @@ export function MeasurementRun({
                     <span className="tag-cached" title="Each cell is an inner campaign">
                       {unitCount(g.samples.length, unit)}
                     </span>
-                  ) : outcome === "invalid" ? (
+                  ) : invalid ? (
                     <Badge
                       tone="danger"
                       title="Rejected by validation — it never ran, so the scores served beside it are synthetic."
@@ -190,11 +187,9 @@ export function MeasurementRun({
                         .join(" · ")}
                     </span>
                   )}
-                  {outcome && ARM_OUTCOMES_ENDED_EARLY.includes(outcome) && (
-                    <Badge tone={outcome === "broken" ? "danger" : "default"}>
-                      <Term content={TERMS[`arm_${outcome}`]}>
-                        {outcome.replace("_", " ")}
-                      </Term>
+                  {early && (
+                    <Badge tone={early === "broken" ? "danger" : "default"}>
+                      <Term content={TERMS[`arm_${early}`]}>{early.replace("_", " ")}</Term>
                     </Badge>
                   )}
                   {cached != null && cached > 0 && (
@@ -245,8 +240,8 @@ export function MeasurementRun({
                   <CopyButton
                     data={{
                       label: arm.label,
-                      resolved_pipeline_params: g.spec.pipeline_overlay,
-                      prompt_fields: g.spec.origin_prompt_fields,
+                      resolved_params: g.spec.pipeline_overlay,
+                      prompts: g.spec.origin_prompts,
                     }}
                     title={`Copy what ${arm.label} ran`}
                   />
@@ -254,7 +249,7 @@ export function MeasurementRun({
               )}
               {!cells ? null : g.samples.length === 0 ? (
                 <div className="rsv-empty-row">
-                  {outcome === "invalid"
+                  {invalid
                     ? `No ${unitPlural(unit)} — it was rejected before it ran.`
                     : `No matching ${unitPlural(unit)}.`}
                 </div>
@@ -304,13 +299,13 @@ function Region({ children }: { children: ReactNode }) {
   );
 }
 
-// `rejected`, never `0%`: an invalid arm's served accuracy is `INVALID_SCORES`' synthetic 0.0.
+// `rejected`, never `0%`: an invalid arm holds no level.
 function segmentFor(c: ArmRow, verdict: CandidateVerdict | undefined): Segment<string> {
-  const { arm, outcome, own } = c.reading;
-  if (outcome === "invalid") {
+  const { arm, own } = c.reading;
+  if (c.reading.end === "invalid") {
     const reason = verdict?.failures[0]?.value;
     return {
-      value: arm.candidate_id,
+      value: arm.key,
       label: (
         <>
           {arm.label} · <span className="rsv-rejected">rejected</span>
@@ -322,7 +317,7 @@ function segmentFor(c: ArmRow, verdict: CandidateVerdict | undefined): Segment<s
   }
   const accuracy = own?.accuracy?.value;
   return {
-    value: arm.candidate_id,
+    value: arm.key,
     label: accuracy != null ? `${arm.label} · ${fmtPct0(accuracy)}` : arm.label,
   };
 }

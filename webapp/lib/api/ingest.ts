@@ -2,14 +2,13 @@ import { API, send } from "./client";
 import { mintIdempotencyKey, throwApiError } from "./errors";
 import { postCommand } from "./commands";
 import type {
-  CheckinReopenResponse,
-  DatasetReplaced,
   DraftCampaignWire,
+  DraftReopenResponse,
   DraftPatch,
   ResolveOriginResponse,
   StartCheckinResponse,
 } from "./types";
-import type { LaunchLimits, StartCheckinPayload } from "./types.generated";
+import type { StartCheckinPayload } from "./types.generated";
 
 export async function postIngestDataset(
   file: File,
@@ -55,7 +54,7 @@ export async function postBuildCandidateLibraryFromColumn(
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
 }
-// Mints a durable `checkin` campaign from the dataset's CURRENT config; nothing runs until `postStartCheckin`.
+// Opens a draft from the dataset's CURRENT config; no campaign exists until `postStartCheckin`.
 export async function postDraftFromDataset(name: string): Promise<DraftCampaignWire> {
   const r = await send(`${API}/datasets/${encodeURIComponent(name)}/draft`, {
     method: "POST",
@@ -71,9 +70,6 @@ export async function postDraftFromOrigin(originId: string): Promise<DraftCampai
   if (!r.ok) await throwApiError(r);
   return (await r.json()) as DraftCampaignWire;
 }
-export async function postReplaceDataset(slug: string): Promise<DatasetReplaced> {
-  return postCommand<DatasetReplaced>("replace-dataset", { slug });
-}
 export async function postEditDraftCampaign(
   draftId: string,
   patch: DraftPatch,
@@ -84,33 +80,32 @@ export async function postEditDraftCampaign(
   });
 }
 // Per press, never draft state: a reopened check-in must not show a budget nobody re-entered.
-export type StartCheckinOptions = Partial<
-  Omit<StartCheckinPayload, "campaign_id" | "limits">
-> & { limits?: Partial<LaunchLimits> };
+export type StartCheckinOptions = Partial<Omit<StartCheckinPayload, "draft_id">>;
 
 const START_KEYS: { [K in keyof Required<StartCheckinOptions>]: true } = {
-  limits: true,
+  budget: true,
   diag: true,
 };
 
-// `campaignId` is the draft's `draft_id`; sparse, so the `CommandRecord` shows what the operator declared.
+// Sparse, so the `CommandRecord` shows what the operator declared.
 export async function postStartCheckin(
-  campaignId: string,
+  draftId: string,
   options: StartCheckinOptions = {},
 ): Promise<StartCheckinResponse> {
-  const payload: Record<string, unknown> = { campaign_id: campaignId };
+  const payload: Record<string, unknown> = { draft_id: draftId };
   for (const key of Object.keys(START_KEYS) as (keyof StartCheckinOptions)[]) {
     const value = options[key];
     if (value !== undefined && value !== null) payload[key] = value;
   }
   return postCommand<StartCheckinResponse>("start-checkin", payload);
 }
-export async function getCampaignCheckin(
-  campaignId: string,
-): Promise<CheckinReopenResponse> {
-  const r = await send(`${API}/campaigns/${encodeURIComponent(campaignId)}/checkin`);
+export async function postDiscardDraft(draftId: string): Promise<void> {
+  await postCommand<unknown>("discard-draft", { draft_id: draftId });
+}
+export async function getDraft(draftId: string): Promise<DraftReopenResponse> {
+  const r = await send(`${API}/drafts/${encodeURIComponent(draftId)}`);
   if (!r.ok) await throwApiError(r);
-  return (await r.json()) as CheckinReopenResponse;
+  return (await r.json()) as DraftReopenResponse;
 }
 export async function postResolveOrigin(draftId: string): Promise<ResolveOriginResponse> {
   return postCommand<ResolveOriginResponse>("resolve-origin", { draft_id: draftId });

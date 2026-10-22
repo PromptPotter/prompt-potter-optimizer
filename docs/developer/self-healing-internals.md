@@ -9,7 +9,7 @@ Every wound is two axes, not a four-item taxonomy:
 
 The **nurse is not the producer**: L1 tends its own malformed proposal because it owns `pipeline_params`, and a break whose only fix is a locked surface escalates to the operator rather than churning at a layer that cannot reach the lever. L2 produces wounds and heals none. No field keys a nurse by producer, and none may be added.
 
-Three detection points but **four** typed `WoundChannels` lists: post-parse splits `l2_guard_breaches` from `l3_guard_breaches` because each is read by the OTHER layer on its next fire — distinct consumers, so merging them would need a discriminator. A fifth channel, `l3_note`, is a sticky free-text L3→L2 steer, not a failure record.
+Three detection points, and post-parse lands on each layer's OWN memory: `L2Memory.guard_breaches` and `L3Memory.guard_breaches`, each written by the layer whose output it judged, so neither layer writes the other's state. `L3Memory.note` beside them is a sticky free-text L3→L2 steer, not a failure record.
 
 **Healing is gradual.** One nurse firing is one nudge, not a guaranteed fix. Soft pointers toward the right region beat hard one-shot briefs ("do NOT propose X"), because the nurse is built to retry — wounds 1 and 4 retrigger on the new evidence, wound 2's trail accumulates so L2 must change angle if ACCUMULATED survives, and wound 3 fires only on stall but reshapes both L1 and L2.
 
@@ -17,7 +17,7 @@ Three detection points but **four** typed `WoundChannels` lists: post-parse spli
 
 ## The wounds, mapped to the two axes
 
-Storage is the arm's own rejects plus three typed lists on potter's memory (+ `l3_note`); **rendering collapses to two owner-grouped signals** — `l1_wounds` = validation + runtime, `guard_breaches` = L2 + L3 post-parse. This table is the roster; each § below adds only what it cannot hold.
+Storage is the arm's own rejects, the runtime stream the cycle derives, and the two layers' guard breaches (+ `L3Memory.note`); **rendering collapses to two owner-grouped signals** — `l1_wounds` = validation + runtime, `guard_breaches` = L2 + L3 post-parse. This table is the roster; each § below adds only what it cannot hold.
 
 |  | Wound 1 | Wound 2 | Wound 3 | Wound 4 |
 |---|---|---|---|---|
@@ -25,12 +25,12 @@ Storage is the arm's own rejects plus three typed lists on potter's memory (+ `l
 | **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (layout refusal → L3) |
 | **Detector** | the bench's `overlay_failures` (`bench/children.py`) and L1's own registry (`validators/l1_strict.py`), at `parse_population()` | `DegradationCheck` (`scoring/classification.py`), mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
-| **Storage** | the arm's `ScoredCandidate.validation_failures` on its round; a round with no arm, `PotterRoundState.l1_parse_failure` | `runtime_failures` | `state.escalation.l2_stall_count` (on the cycle, not the OSP) | `l2_guard_breaches` |
-| **Outer-memory mirror** | none — `_r_l1_wounds` reads the last measured round's arms | cumulative on `state.memory.wounds.runtime_failures` | none | per-round on the `CandidateProposal` |
+| **Storage** | the arm's `ArmState.validation_failures` on its round; a round with no arm, `L1Readout.l1_parse_failure` | `runtime_failures` | `Ladder.l2.stall_count` (a banked slice, not the OSP) | `L2Memory.guard_breaches` |
+| **Outer-memory mirror** | none — `_r_l1_wounds` reads the last measured round's arms | none — `Cycle.runtime_failures` derives it off the banked rounds at each read | none | none — a banked `L2Memory` slice |
 | **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
 | **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
 | **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
-| **Score effect** | synthetic 0 (`runner/measurement.py::_conclude_candidate`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
+| **Score effect** | synthetic 0 (`runner/measurement.py::_conclude_arm`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
 ## Wound 1 — what trips the validator
 
@@ -45,13 +45,13 @@ The bench's `overlay_failures()` (`application/bench/children.py`) runs on every
 1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape. One sighting ends the candidate; bypasses `min_samples`/`threshold`.
 2. **Rate-based.** After `min_samples=3`, if `degraded_rate >= 0.4`, eliminate.
 
-The measurement (`scoring/candidate_report.py::read_breakage`) synthesises `RuntimeFailure(source, dominant_warning, degraded_rate, …)` from the check plus the observed pipeline_params, then continues with the next candidate. End-of-round, `PotterState.absorb` returns potter's memory with the new records added, deduplicated by `(source, dominant_warning, observed_config)`, and never clears them — they represent discovered runtime constraints.
+The measurement (`application/scoring/arm_states.py::read_breakage`) synthesises `RuntimeFailure(source, dominant_warning, degraded_rate, …)` from the check plus the observed pipeline_params, then continues with the next candidate. Each record rides its `Cut` arm's `Broken` reason as `failure`, and `Cycle.runtime_failures` derives the stream from the banked rounds — concluded siblings' first, then this cycle's — deduplicated by `(source, dominant_warning, observed_config)`; nothing clears them, since they represent discovered runtime constraints.
 
 `_r_l1_wounds()` partitions the runtime block into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`) and tags each entry `[owner=l1|operator]`. **ACCUMULATED is the real signal** — a surviving item means L2's prior angle didn't take. If it keeps growing, Wound 3 takes over.
 
 ## Wound 3 — what L3 reads and writes
 
-L3 fires when `state.escalation.l2_stall_count >= opt.l2_patience`, subject to its own `l3_patience`. What its prompt reads is its layout, `dispatch/layout.py::NODE_LAYOUTS["l3_plan"]` — read the membership there; what it writes is `dispatch/schemas.py::L3PlanOutput` (`plan`, `note` → `wounds.l3_note`, `rationale`, `fork_proposal`, `terminate_proposal`). The new `plan` feeds every node whose layout places it, L1 and the next L2 fire included. The only wound with cross-layer authority — L3 changes the strategy L2 and L1 work within.
+L3 fires when `Ladder.l2.stall_count >= opt.l2_patience`, subject to its own `l3_patience`. What its prompt reads is its layout, `dispatch/layout.py::NODE_LAYOUTS["l3_plan"]` — read the membership there; what it writes is `dispatch/schemas.py::L3PlanOutput` (`plan`, `note` → `L3Memory.note`, `rationale`, `fork_proposal`, `terminate_proposal`). The new `plan` feeds every node whose layout places it, L1 and the next L2 fire included. The only wound with cross-layer authority — L3 changes the strategy L2 and L1 work within.
 
 ## Wound 4 — immediate, never patient
 
@@ -65,9 +65,9 @@ A REFUSED L2 layout edit makes `escalate_l2` run `_run_transition(L3, …)` *imm
 
 ## Optimizer-memory state
 
-The fields that travel cross-round are the cycle's `optimizers/potter/records.py::L2L3Memory`, banked on every round's close as its `optimizer_state` — read the roster and each field's lifecycle off the model, which cannot drift from itself.
+The fields that travel cross-round are the cycle's `optimizers/potter/records.py::L2Memory` and `L3Memory`, each written by its own layer alone and banked on every round's close as its `optimizer_state` — read the roster and each field's lifecycle off the models, which cannot drift from themselves.
 
-Two that the model cannot tell you. **`wounds.l3_note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) and is cleared only when L3 fires again, the only field there with that lifetime. And **the L1 critique is not on `L2L3Memory` at all**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads through `bundle.digest.critique` (`build_bundle`, off the latest round), the same way per-round trajectory lives on `Cycle.rounds` rather than the memory.
+Two that the models cannot tell you. **`L3Memory.note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) and is cleared only when L3 fires again. And **the L1 critique is on neither memory**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads through `bundle.digest.critique` (`build_bundle`, off the latest round), the same way per-round trajectory lives on `Cycle.rounds` rather than the memory.
 
 ## The prompt-budget unit (a separate mechanism)
 
@@ -95,7 +95,7 @@ This is a load-boundary filter, not a score-time fallback: trace records are sti
 Pick the storage stream by detector + score-effect; the owner falls out of the record type, so you never wire a nurse by hand.
 
 - New gen-time check on L1's output → **Wound 1**. Add a validator to `validators/l1_strict.py` — or to `bench/children.py` when every optimizer's child owes it.
-- New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `scoring/candidate_report.py::read_breakage`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can.
+- New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `application/scoring/arm_states.py::read_breakage`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can.
 - New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
 - New post-parse check on L2/L3's output → **Wound 4**. L3's side has a registry (`L3_OUTPUT_VALIDATORS`, `validators/l3_output.py`); L2's is the layout check itself (`dispatch/layout.py::validate_l1_layout`) — there is no `L2_OUTPUT_VALIDATORS` to append to, so a new L2 check means extending that validator or standing a registry up.
 

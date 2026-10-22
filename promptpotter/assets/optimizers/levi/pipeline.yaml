@@ -39,6 +39,7 @@ nodes:
       model: qwen/qwen3-8b
       # The paper's prompt is one text: the reply replaces the whole prompt.
       rewrites: prompt
+      field: instruction
       # The parent's softmax temperatures, one drawn per call (App. A, App. B).
       sampler_temperatures: [0.3, 0.7, 1.0, 1.2]
       # One inspiration, dropped 20% of the time (App. B, Table 5).
@@ -59,6 +60,7 @@ nodes:
       provider: openrouter
       model: google/gemini-3-flash-preview
       rewrites: prompt
+      field: instruction
       # Every 10 evaluations, over k = 3 clusters of the occupied cells (App. B, App. F).
       interval: 10
       n_clusters: 3
@@ -74,6 +76,7 @@ nodes:
       provider: openrouter
       model: google/gemini-3-flash-preview
       rewrites: prompt
+      field: instruction
       # n_diverse_seeds = 4 (App. B, Table 5): with the origin, the 5 calibration prompts (App. A).
       n_diverse_seeds: 4
   # A 150-problem discovery set (App. I); K_proxy = 30 of {30, 40}, weights (r, s, c) =

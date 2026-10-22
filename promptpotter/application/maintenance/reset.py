@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
+from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import rmtree_robust, unlink_robust
+from promptpotter.infrastructure.store.io import iter_files, rmtree_robust, unlink_robust
 from promptpotter.infrastructure.store.layout import (
-    SHARED_CACHE_DIRS,
     SandboxOwner,
     inner_sandboxes_dir,
     read_sandbox_owner,
@@ -19,11 +19,15 @@ from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     clear_active_pointer,
 )
-from promptpotter.infrastructure.store.tenant_dataset_store import MATERIALIZED_DIR
+from promptpotter.infrastructure.store.tenant_dataset_store import (
+    BANKS_DIR,
+    MATERIALIZED_DIR,
+    UPLOADS_DIR,
+)
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ResetPlan", "SandboxDrop", "TenantReset", "apply_reset", "plan_reset"]
+__all__ = ["ResetPlan", "SandboxDrop", "TenantReset", "apply_reset", "plan_reset", "size_tag"]
 
 
 # A head-to-head manifest names campaigns, so it goes with them.
@@ -37,6 +41,8 @@ _PRESERVE_NAMES = (
     "backends",
     "datasets",
     MATERIALIZED_DIR,
+    BANKS_DIR,
+    UPLOADS_DIR,
     "task-context",
     ".workspace",
     ".cache",
@@ -127,6 +133,18 @@ def plan_reset(projects_root: Path, *, tenant_id: str | None) -> ResetPlan:
         sandboxes=tuple(sandboxes),
         unattributable_sandboxes=tuple(unattributable),
     )
+
+
+def size_tag(path: Path) -> str:
+    try:
+        if path.is_file():
+            return f"  ({path.stat().st_size:,} B)"
+        if path.is_dir():
+            sizes = [st.st_size for _p, st in iter_files(path)]
+            return f"  ({len(sizes):,} files / {sum(sizes) / 1_048_576:.1f} MiB)"
+    except OSError:
+        pass
+    return ""
 
 
 def _remove(path: Path) -> None:

@@ -8,7 +8,7 @@
 #
 # One round is one iteration of Alg. 1: the parent Alg. 2 drew runs on a minibatch of the feedback
 # set, the reflection writes its child a new instruction, the child walks the same minibatch and,
-# only where it beats its parent there, the whole Pareto set, which admits it to the pool.
+# only where it beats its parent there, the whole Pareto set, and joins the candidate pool.
 #
 # Editing a `resolved_prompts` field below changes what every GEPA call reads; the text is the
 # paper's own (App. C), with its `<placeholder>`s spelled as `{{placeholder}}`.
@@ -26,7 +26,7 @@ available_models:
 nodes:
   # b = 3 (App. E.4). The paper's D_train splits into D_feedback and D_pareto (Alg. 1 line 1) and
   # states each as a row count per benchmark (App. E.1). NOT the paper's: 50, the count itself —
-  # every accepted child walks the whole set, so it is sized to the search pools the bench runs.
+  # every accepted child walks the whole set, so it is sized to the search splits the bench runs.
   minibatch:
     type: sampler
     config:
@@ -47,15 +47,16 @@ nodes:
       model: qwen/qwen3-8b
       # The paper's prompt is one text: the reply replaces the whole prompt.
       rewrites: prompt
-  # A child joins the pool only if it improves on its parent on the minibatch (Alg. 1 line 14).
+      field: instruction
+  # A child joins the candidate pool only if it beats its parent on the minibatch (Alg. 1 line 14).
   minibatch_gate:
     type: eliminator
     config: {}
   score:
     type: measurement
     config: {}
-  # Pareto-based candidate selection (Alg. 2) over the pool; the best aggregate on the Pareto set
-  # is what GEPA returns (Alg. 1 line 21).
+  # Pareto-based candidate selection (Alg. 2) off the pool's Pareto front; the best aggregate on
+  # the Pareto set is what GEPA returns (Alg. 1 line 21).
   pareto:
     type: selector
     config: {}

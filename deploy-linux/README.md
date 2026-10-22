@@ -75,8 +75,7 @@ expensive to *live with*. **Move the tree; never teach the resolver to read both
 would move first: `ls .promptpotter/projects/*/campaigns`.
 
 **Never rename**, at any tier: the **provider** (provenance, not a label) · `prompt_variants.json`'s
-**`"source"`** (a citation) · **dataset names and `campaign_id`**, since `sample_id` is part of the
-measurement cache key and renaming voids the archive without saying so · **`name:` in
+**`"source"`** (a citation) · **`name:` in
 `assets/optimizers/potter/pipeline.yaml`**, which identifies the optimizer pipeline rather than the seller.
 
 *(Written against the live single-tenant install; no second unit has been built from it, so tier 3

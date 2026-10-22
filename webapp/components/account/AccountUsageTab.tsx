@@ -31,7 +31,7 @@ export function AccountUsageTab() {
   const quota = shownData(read);
 
   if (read.status === "failed" && quota === null) {
-    return <AccountFailure kind={read.failure.kind} subject="your usage" />;
+    return <AccountFailure message={read.failure.message} subject="your usage" />;
   }
   if (quota === null) return <AccountLoading subject="your usage" />;
   return (

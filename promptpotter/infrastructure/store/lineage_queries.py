@@ -12,28 +12,28 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_listing import CycleIndex, CycleListEntry, RunStatus
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.opt_search_point import Variation
-from promptpotter.domain.paired_reading import ArmPointer, PairedReading
+from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import (
-    ArmAbility,
     ArmElection,
+    ArmFit,
+    ArmPanel,
     ArmReading,
+    ArmState,
     ArmVerdict,
     DisplayMetric,
+    Election,
     LineRate,
     RunStanding,
+    ScoreSummary,
     VerifyReading,
+    arm_name,
     arm_verdict,
     line_by_individual,
     overlap_line,
     panel_cuts,
 )
-from promptpotter.domain.run_records import (
-    ElectionRecord,
-    ForkDirection,
-    LedgerCandidate,
-    LedgerFit,
-)
+from promptpotter.domain.run_records import ElectionRecord, ForkDirection
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
@@ -52,6 +52,7 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
+from promptpotter.shared.measurement_context import MeasurementRole
 
 __all__ = [
     "ArmNode",
@@ -179,7 +180,7 @@ class _Node(StrictModel):
     elects_on: DisplayMetric | None = Field(
         default=None,
         description="The column the selector elects on. Candidate: the declaration its round's "
-        "election carried (`RoundResult.elects_on`), null on a round that never elected. Course: "
+        "election carried (`Election.elects_on`), null on a round that never elected. Course: "
         "the declaration its own elections carried. `ability`: the rounds are won on theta, not "
         "on accuracy.",
     )
@@ -357,9 +358,6 @@ class CourseNode(_Node):
 
 LineageNode = Annotated[CourseNode | ArmNode, Field(discriminator="kind")]
 
-ArmNode.model_rebuild()
-CourseNode.model_rebuild()
-
 
 class FamilyCourse(NamedTuple):
     store: Stores
@@ -407,15 +405,37 @@ def _read_index(stores: Stores, hop: CycleHop, *, moment: Moment | None) -> Cycl
     return read_cycle_index(_layout(stores, hop).cycle_dir, moment=moment)
 
 
-def _course_edge(index: CycleIndex | None) -> tuple[str | None, str | None]:
-    """Both null = a campaign root or a rebase fork, attached to the origin."""
+def _course_edge(index: CycleIndex | None) -> str | None:
+    """Null = a campaign root or a rebase fork, attached to the origin."""
     if index is None:
-        return None, None
+        return None
     if index.fork is not None and index.fork.from_candidate_id:
-        return index.fork.from_candidate_id, None
+        return index.fork.from_candidate_id
     if (spawned := index.spawned_by) is not None:
-        return spawned.candidate_id or None, spawned.candidate_label or None
-    return None, None
+        return spawned.individual_id or None
+    return None
+
+
+class _TreeArm(NamedTuple):
+    """An arm its round PROPOSED: a reference a round re-read is a node of the round that walked it."""
+
+    round: int
+    key: ArmKey
+    state: ArmState
+    fold: ScoreSummary | None
+
+    @property
+    def id(self) -> str:
+        return self.key
+
+
+def _tree_arms(standing: StandingRounds) -> list[_TreeArm]:
+    arms = [
+        _TreeArm(rnd, key, held.state, held.fold)
+        for (rnd, key), held in standing.arms.items()
+        if held.state.role != MeasurementRole.PARENT
+    ]
+    return sorted(arms, key=lambda a: (a.round, 0 if a.state.slot is None else a.state.slot.idx))
 
 
 _NO_ELECTION = ArmElection(held=False, selected=False, leading=False, crown=None)
@@ -424,43 +444,29 @@ _NO_ELECTION = ArmElection(held=False, selected=False, leading=False, crown=None
 class _RoundFacts(NamedTuple):
     election: ArmElection = _NO_ELECTION
     elects_on: DisplayMetric | None = None
-    ability: ArmAbility | None = None
-    vs_reference: PairedReading | None = None
+    fit: ArmFit | None = None
 
 
 def _round_facts(
-    standing: StandingRounds, candidates: list[LedgerCandidate]
-) -> dict[str, _RoundFacts]:
-    """The join stays on `label`: `candidate_id` names an individual a later round can read again."""
-    out: dict[str, _RoundFacts] = {}
-    for cand in candidates:
-        election = standing.elections.get(cand.round)
-        held = standing.rounds.get(cand.round)
-        close = None if held is None else held.close
-        if election is None and close is None:
+    standing: StandingRounds, arms: list[_TreeArm]
+) -> dict[tuple[int, ArmKey], _RoundFacts]:
+    out: dict[tuple[int, ArmKey], _RoundFacts] = {}
+    for arm in arms:
+        election: Election | None = standing.elections.get(arm.round)
+        if election is None and (held := standing.rounds.get(arm.round)) is not None:
+            election = held.close.election
+        if election is None:
             continue
-        fit = (election.fit.get(cand.label) if election is not None else None) or LedgerFit()
-        row = (
-            None
-            if close is None
-            else next((cs for cs in close.candidate_scores if cs.label == cand.label), None)
-        )
-        ability = (
-            fit
-            if row is None or (row.theta, row.theta_se, row.theta_caveat) == (None, None, None)
-            else row
-        )
-        out[cand.candidate_id] = _RoundFacts(
+        out[arm.round, arm.key] = _RoundFacts(
             election=ArmElection.of(
-                cand.label,
-                held=election is not None,
-                selected=() if election is None else election.selected_labels,
-                leading=None if close is None else close.leading_label,
-                electable=None if close is None else close.electable_count,
+                arm.key,
+                held=True,
+                selected=election.selected,
+                leading=election.leading,
+                electable=election.electable,
             ),
-            elects_on=None if election is None else election.elects_on,
-            ability=ArmAbility.of(ability.theta, ability.theta_se, ability.theta_caveat),
-            vs_reference=fit.vs_reference,
+            elects_on=election.elects_on,
+            fit=election.fit.get(arm.key),
         )
     return out
 
@@ -506,7 +512,7 @@ def _course_scalars(
         "status": RunStatus.of(run.run_phase, None if index is None else index.stop_reason),
         "trigger": "" if fork is None else fork.trigger.value,
         "fork_direction": None if fork is None else fork.resolved_direction,
-        "steered_by": None if fork is None else fork.issued_by or None,
+        "steered_by": None if fork is None else fork.issued_by.display,
         "task": None if spawned is None else spawned.task or None,
         "dataset_name": campaign.dataset_name if campaign else "",
         "run_standing": None if index is None else index.standing,
@@ -583,16 +589,15 @@ def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
     return out
 
 
-def _parent_candidate_of(course: FamilyCourse, candidates: list[LedgerCandidate]) -> str:
-    by_label = {c.label: c.candidate_id for c in candidates}
-    known = {c.candidate_id for c in candidates}
-    origin = candidates[0].candidate_id if candidates else ""
-    cid, label = _course_edge(course.manifest)
-    return cid if cid in known else by_label.get(label or "", origin)
+def _parent_candidate_of(course: FamilyCourse, candidates: list[_TreeArm]) -> str:
+    known = {c.id for c in candidates}
+    origin = candidates[0].id if candidates else ""
+    cid = _course_edge(course.manifest)
+    return cid if cid is not None and cid in known else origin
 
 
 def _bucket_by_parent(
-    courses: list[FamilyCourse], candidates: list[LedgerCandidate]
+    courses: list[FamilyCourse], candidates: list[_TreeArm]
 ) -> dict[str, list[FamilyCourse]]:
     out: dict[str, list[FamilyCourse]] = {}
     for course in courses:
@@ -602,24 +607,24 @@ def _bucket_by_parent(
 
 
 def _retired_by(
-    fork: FamilyCourse, candidates: list[LedgerCandidate], reach: int | None
+    fork: FamilyCourse, candidates: list[_TreeArm], reach: int | None
 ) -> dict[str, str]:
     spec = None if fork.manifest is None else fork.manifest.fork
     if spec is None or spec.resolved_direction is not ForkDirection.SUPERSEDE or reach is None:
         return {}
     edge = spec.from_candidate_id
-    cut = next((i + 1 for i, c in enumerate(candidates) if c.candidate_id == edge), None)
+    cut = next((i + 1 for i, c in enumerate(candidates) if c.id == edge), None)
     if cut is None:
         cut_round = spec.from_round
         if cut_round is None:
             return {}
         cut = next((i for i, c in enumerate(candidates) if c.round >= cut_round), len(candidates))
     branch = fork.path[-1].cycle_id
-    return {c.candidate_id: branch for c in candidates[cut:] if c.round <= reach}
+    return {c.id: branch for c in candidates[cut:] if c.round <= reach}
 
 
 def _is_replay(node: ArmNode) -> bool:
-    return node.label == "C0" and bool(node.parent_ids)
+    return node.reading.role == MeasurementRole.ORIGIN and bool(node.parent_ids)
 
 
 def _stamp(course: CourseNode) -> ForkStamp:
@@ -640,14 +645,24 @@ def _empty_attempt(course: CourseNode, *, cut_from: str, round_: int, row: int) 
         parent_ids=[cut_from],
         label=course.label,
         path=course.path,
-        reading=ArmReading.walking(
-            ArmPointer(round=round_, label=course.label, candidate_id=""),
-            fold=None,
-            scored=None,
-            expected=None,
-            cached=None,
-            cut=False,
+        reading=ArmReading(
+            arm=ArmName(key=ArmKey(course.id), round=round_, label=course.label),
+            role=MeasurementRole.PANEL,
+            sp_hash="",
+            changes_description="",
+            state="proposed",
+            end=None,
+            walked_short=False,
+            own=None,
+            panel=ArmPanel.of(None, None, None, cut=False),
+            tokens=None,
+            prefix=None,
+            ability=None,
+            vs_reference=None,
             election=_NO_ELECTION,
+            bench=None,
+            verify=None,
+            on_origin_panel=None,
         ),
         fork=_stamp(course),
     )
@@ -742,13 +757,13 @@ _NO_ROUND_FACTS = _RoundFacts()
 
 
 class _Readings(NamedTuple):
-    verify: Mapping[str, VerifyReading]
-    bench: Mapping[tuple[int, str], BenchReading]
+    verify: Mapping[ArmKey, VerifyReading]
+    bench: Mapping[tuple[int, ArmKey], BenchReading]
     line: Mapping[str, LineRate]
 
 
 def _arm_node(
-    cand: LedgerCandidate,
+    cand: _TreeArm,
     *,
     row: int,
     facts: _RoundFacts,
@@ -762,39 +777,27 @@ def _arm_node(
         if retired_by is None
         else facts.election.model_copy(update={"selected": False, "crown": None})
     )
-    arm = ArmPointer(round=cand.round, label=cand.label, candidate_id=cand.candidate_id)
-    if cand.report is None:
-        reading = ArmReading.walking(
-            arm,
-            fold=None,
-            scored=None,
-            expected=cand.walk_length,
-            cached=None,
-            cut=False,
-            election=election,
-            changes_description=cand.lineage.changes_description,
-        )
-    else:
-        reading = ArmReading.of(
-            arm,
-            cand.report,
-            cut=False,
-            election=election,
-            changes_description=cand.lineage.changes_description,
-            ability=facts.ability,
-            vs_reference=facts.vs_reference,
-        )
+    state = cand.state
+    reading = ArmReading.of(
+        arm_name(cand.key, state, cand.round),
+        state,
+        fold=cand.fold,
+        cut=False,
+        election=election,
+        fit=facts.fit,
+    )
+    lineage = state.individual.lineage
     return ArmNode(
-        id=cand.candidate_id,
+        id=cand.id,
         row=row,
-        parent_ids=list(cand.lineage.parent_ids),
-        variations=list(cand.lineage.variations),
-        label=cand.label,
+        parent_ids=list(lineage.parent_ids),
+        variations=list(lineage.variations),
+        label=state.label,
         path=hops,
         reading=reading.on_line(readings.line).model_copy(
             update={
-                "verify": readings.verify.get(cand.label),
-                "bench": readings.bench.get((cand.round, cand.label)),
+                "verify": readings.verify.get(cand.key),
+                "bench": readings.bench.get((cand.round, cand.key)),
             }
         ),
         elects_on=facts.elects_on,
@@ -968,7 +971,7 @@ def _readings(
     return _Readings(
         verify={}
         if replay
-        else {label: read for label, (_, read) in scan_ledger_verify(layout.ledger).graded.items()},
+        else {key: read for key, (_, read) in scan_ledger_verify(layout.ledger).graded.items()},
         bench=scan_bench_readings(spans),
         line=line_by_individual(
             next(
@@ -994,7 +997,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
         ]
     )
     standing = scan_standing_rounds(spans)
-    candidates = standing.candidates()
+    candidates = _tree_arms(standing)
     elections = standing.elections
     children = _child_courses(stores, path, reads)
     inner = [c for c in children if c.inner]
@@ -1008,7 +1011,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
     readings = _readings(layout, spans, standing, replay=reads.moment is not None)
 
     # Forks resolve first: a replayed origin grafts its runs onto the candidate it replays.
-    by_id = {c.candidate_id: c for c in candidates}
+    by_id = {c.id: c for c in candidates}
     contributions: list[_Contribution] = []
     grafts: dict[str, list[CourseNode]] = {}
     retired: dict[str, str] = {}
@@ -1027,15 +1030,15 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
             _arm_node(
                 cand,
                 row=reads.row(),
-                facts=decided.get(cand.candidate_id, _NO_ROUND_FACTS),
+                facts=decided.get((cand.round, cand.key), _NO_ROUND_FACTS),
                 readings=readings,
                 children=[
                     _build(c.store, c.path, depth=depth - 1, reads=reads)
-                    for c in buckets.get(cand.candidate_id, [])
+                    for c in buckets.get(cand.id, [])
                     if depth > 0
                 ]
-                + grafts.get(cand.candidate_id, []),
-                retired_by=retired.get(cand.candidate_id),
+                + grafts.get(cand.id, []),
+                retired_by=retired.get(cand.id),
                 hops=hops,
             )
             for cand in candidates
@@ -1053,7 +1056,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
         }
 
     # After the fold: a fork's attempts arrive naming its replayed C0 and judged short against its own rounds.
-    origin_row = _origin_row(kids, candidates[0].candidate_id) if candidates else None
+    origin_row = _origin_row(kids, candidates[0].id) if candidates else None
     kids = [
         k.model_copy(
             update={
@@ -1066,13 +1069,13 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
         for k, cut in zip(kids, _panel_cuts(kids), strict=True)
     ]
 
-    edge_id, _ = _course_edge(index)
+    edge_id = _course_edge(index)
     return CourseNode(
         id=leaf.cycle_id,
         origin_row=origin_row,
         parent_ids=[edge_id]
         if edge_id
-        else (list(candidates[0].lineage.parent_ids) if candidates else []),
+        else (list(candidates[0].state.individual.lineage.parent_ids) if candidates else []),
         label=leaf.cycle_id,
         path=hops,
         children=kids,

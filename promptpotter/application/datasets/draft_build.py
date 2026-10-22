@@ -3,24 +3,26 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import (
+    MAX_EDITED_ROUNDS,
     DraftCampaign,
     EditDraftPatch,
     OptimizationOverrides,
     default_campaign_config,
+    owned_drafts,
 )
 from promptpotter.application.datasets.origin_readiness import OriginReadiness, origin_readiness
 from promptpotter.application.jobs.quota import launch_usd_bound
 from promptpotter.application.pipeline_resolve import (
-    checkin_campaign_config,
+    OptimizerSetup,
+    draft_config,
     resolve_pipeline_for_draft,
 )
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
-from promptpotter.domain.launch_limits import LaunchLimits
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
@@ -34,7 +36,7 @@ from promptpotter.domain.pipeline_schema import (
     dependencies_from_node_roles,
 )
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -48,8 +50,8 @@ class DraftDependency(PipelineDependency):
 
 
 class DraftCampaignWire(StrictModel):
-    """A check-in campaign's draft as every check-in route answers it. ``draft_id`` IS the owning
-    ``campaign_id``; no ``tenant_id`` rides it (ADR-0002 no-drift gate #3)."""
+    """A check-in's draft as every check-in route answers it; Start mints its campaign. No
+    ``tenant_id`` rides it (ADR-0002 no-drift gate #3)."""
 
     draft_id: str
     slug: str
@@ -67,6 +69,9 @@ class DraftCampaignWire(StrictModel):
         description="`term=weight` dials joined by commas; empty scores correctness alone."
     )
     optimization_overrides: OptimizationOverrides
+    optimizer_setup: OptimizerSetup = Field(
+        description="The optimizer as this draft's config runs it, as a campaign serves it."
+    )
     raw_task_description: str
     pipeline_overlay: dict[str, Any]
     headers: list[str]
@@ -75,8 +80,9 @@ class DraftCampaignWire(StrictModel):
     field_provenance: dict[str, Provenance] = Field(
         description="By checklist field id. Nothing reaches mint until `confirmed`."
     )
-    origin_prompt_fields: dict[str, Any] = Field(
-        description="`OptSearchPoint.prompt_field_dict()` shape; empty until the check-in fills it."
+    origin_prompts: dict[str, dict[str, str]] = Field(
+        description="Per active step, its starting prompt's fields by name; empty until the "
+        "check-in fills it. A step bearing no prompt reads none."
     )
     candidate_library_size: int = Field(
         description="A count, not the list: a library runs to tens of thousands of entries."
@@ -117,6 +123,31 @@ class DraftCampaignWire(StrictModel):
     )
 
 
+class DraftSummary(StrictModel):
+    draft_id: str
+    slug: str
+    n_samples: int
+    updated_at: str
+
+
+class DraftListResponse(StrictModel):
+    """The caller's open check-ins, most recently edited first."""
+
+    drafts: list[DraftSummary]
+
+
+def draft_list(stores: Stores) -> DraftListResponse:
+    drafts = sorted(owned_drafts(stores), key=lambda d: d.updated_at, reverse=True)
+    return DraftListResponse(
+        drafts=[
+            DraftSummary(
+                draft_id=d.draft_id, slug=d.slug, n_samples=d.n_samples, updated_at=d.updated_at
+            )
+            for d in drafts
+        ]
+    )
+
+
 def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
     """The INVERSE of ``draft_campaign.split_overlay``: the pair must lose nothing."""
     overlay: dict[str, Any] = {}
@@ -137,13 +168,8 @@ def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
     return overlay
 
 
-def draft_active_steps(draft: DraftCampaign) -> list[str]:
-    connector = connectors.get(draft.connector)
-    return draft.pipeline_steps or list(connector.default_pipeline)
-
-
 def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependency, ...]:
-    active = set(draft_active_steps(draft))
+    active = set(draft.active_steps())
     return dependencies_from_node_roles(
         {n: r for n, r in connectors.get(draft.connector).node_roles.items() if n in active}
     )
@@ -162,10 +188,11 @@ def _draft_schema_source(draft: DraftCampaign) -> SchemaSource:
 
 
 def _wire_overrides(draft: DraftCampaign) -> OptimizationOverrides:
-    """Constructed, not validated: a reused dataset's ``max_rounds`` may exceed the edit bound."""
+    """Constructed, not validated: a reused dataset's ``budget.rounds`` may exceed the edit bound."""
     held = draft.optimization_overrides
     return OptimizationOverrides.model_construct(
-        max_rounds=held["max_rounds"],
+        budget=Budget.model_validate(held["budget"]),
+        halt_at_accuracy=held["halt_at_accuracy"],
         optimizer=held["optimizer"],
         nodes={
             node: ManifestNodeOverlay.model_validate(overlay)
@@ -193,17 +220,22 @@ def _recap(draft: DraftCampaign) -> str:
         else f"evolve a prompt that turns each “{draft.column_query or 'your input'}” into "
         f"the right “{draft.column_ground_truth or 'the target'}”"
     )
-    rounds = draft.optimization_overrides["max_rounds"]
+    rounds = default_campaign_config(draft).optimization.budget.rounds
+    over = (
+        "with no rounds cap"
+        if rounds is None
+        else f"over {'1 round' if rounds == 1 else f'up to {rounds} rounds'}"
+    )
     return (
         f"PromptPotter will {lead} — "
         f"running {_SPOKEN_CONNECTOR.get(draft.connector, draft.connector)}, "
         f"scoring by {_SPOKEN_MATCHER.get(draft.scoring_matcher, draft.scoring_matcher)}, "
-        f"over {'1 round' if rounds == 1 else f'up to {rounds} rounds'}."
+        f"{over}."
     )
 
 
 def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
-    resolution = resolve_pipeline_for_draft(stores, draft, campaign_id=draft.draft_id, cycle_id="")
+    resolution = resolve_pipeline_for_draft(stores, draft)
     return DraftCampaignWire(
         draft_id=draft.draft_id,
         slug=draft.slug,
@@ -214,17 +246,18 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         scoring_matchers=sorted(SCORING_FUNCTIONS),
         scoring_dials=draft.scoring_dials,
         optimization_overrides=_wire_overrides(draft),
+        optimizer_setup=resolution.optimizer_setup,
         raw_task_description=draft.raw_task_description,
         pipeline_overlay=dict(draft.pipeline_overlay),
         headers=list(draft.headers),
         column_query=draft.column_query,
         column_ground_truth=draft.column_ground_truth,
         field_provenance=dict(draft.field_provenance),
-        origin_prompt_fields=dict(draft.origin_prompt_fields),
+        origin_prompts={node: dict(fields) for node, fields in draft.origin_prompts.items()},
         candidate_library_size=len(draft.candidate_library),
         created_at=draft.created_at,
         updated_at=draft.updated_at,
-        active_steps=draft_active_steps(draft),
+        active_steps=draft.active_steps(),
         pipeline_view=resolution.view,
         node_config_schema=resolution.node_config_schema,
         node_output_schema=resolution.node_output_schema,
@@ -240,7 +273,7 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         recap=_recap(draft),
         setup_schema=setup_schema(
             draft,
-            inherited_usd=checkin_campaign_config(stores, draft).optimization.ceiling.usd,
+            inherited_usd=draft_config(stores, draft).optimization.budget.usd,
             launch_usd=launch_usd_bound(stores),
         ),
     )
@@ -252,7 +285,7 @@ def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:
     prop = dict(schema["properties"][name])
     arms = [arm for arm in prop.pop("anyOf", ()) if arm.get("type") != "null"]
     prop = {**(arms[0] if arms else {}), **prop}
-    for loose, standard in (("ge", "minimum"), ("le", "maximum")):
+    for loose, standard in (("ge", "minimum"), ("le", "maximum"), ("gt", "exclusiveMinimum")):
         if loose in prop:
             prop[standard] = prop.pop(loose)
     if prop.get("default") is None:
@@ -271,11 +304,11 @@ def _column(draft: DraftCampaign, field_key: str, title: str) -> dict[str, Any]:
 
 
 def _usd_cap(
-    ceiling: dict[str, Any], inherited: float | None, launch: float | None
+    budget: dict[str, Any], inherited: float | None, launch: float | None
 ) -> dict[str, Any]:
     """Bounded at what admission takes; a dataset cap above it would be refused whole, so the
     account's bound is offered in its place."""
-    field = _field(ceiling, "usd", "Spend cap in USD")
+    field = _field(budget, "usd", "Spend cap in USD")
     if launch is None:
         return field
     offered = {"default": launch} if inherited is None or inherited > launch else {}
@@ -291,9 +324,8 @@ def setup_schema(
     draft: DraftCampaign, *, inherited_usd: float | None, launch_usd: float | None
 ) -> dict[str, Any]:
     patch = EditDraftPatch.model_json_schema()
-    rounds = OptimizationOverrides.model_json_schema()
-    limits = LaunchLimits.model_json_schema()
-    ceiling = TypeAdapter(SpendCeilings).json_schema()
+    overrides = OptimizationOverrides.model_json_schema()
+    budget = Budget.model_json_schema()
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -315,25 +347,32 @@ def setup_schema(
                     "optimization_overrides": {
                         "type": "object",
                         "title": "This campaign",
-                        "required": ["max_rounds"],
-                        "properties": {"max_rounds": _field(rounds, "max_rounds", "Max rounds")},
+                        "properties": {
+                            "budget": {
+                                "type": "object",
+                                "properties": {
+                                    "rounds": {
+                                        **_field(budget, "rounds", "Rounds cap"),
+                                        "maximum": MAX_EDITED_ROUNDS,
+                                    },
+                                },
+                            },
+                            "halt_at_accuracy": _field(
+                                overrides, "halt_at_accuracy", "Halt at accuracy"
+                            ),
+                        },
                     },
-                    "limits": {
+                    "budget": {
                         "type": "object",
                         "title": "This launch only",
                         "description": "Blank inherits your account's allowance, which still "
                         "binds underneath; whichever cap trips first stops the run.",
                         "writeOnly": True,
                         "properties": {
-                            "ceiling": {
-                                "type": "object",
-                                "properties": {
-                                    "usd": _usd_cap(ceiling, inherited_usd, launch_usd),
-                                    "tokens": _field(ceiling, "tokens", "Token cap"),
-                                },
-                            },
-                            "halt_at_accuracy": _field(
-                                limits, "halt_at_accuracy", "Halt at accuracy"
+                            "usd": _usd_cap(budget, inherited_usd, launch_usd),
+                            "tokens": _field(budget, "tokens", "Token cap"),
+                            "wall_clock_s": _field(
+                                budget, "wall_clock_s", "Wall-clock cap in seconds"
                             ),
                         },
                     },

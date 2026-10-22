@@ -1,9 +1,9 @@
 export interface SelectedCandidate {
-  // The LEAF hop it was picked on: a `candidate_id` is unique only within its cycle.
+  // The LEAF hop it was picked on: an arm key is unique only within its cycle.
   cycle_id: string;
   round: number;
-  candidate_id: string;
-  // A join key: the MINTING course's label, not a fork-contributed attempt's renumbered one.
+  // The served `reading.arm.key`: every join's, and the individual a command addresses.
+  arm: string;
   label: string;
 }
 
@@ -11,10 +11,10 @@ export interface SelectedCandidate {
 export function selectedCandidateOf(
   cycleId: string,
   round: number,
-  candidateId: string,
+  arm: string,
   label: string,
 ): SelectedCandidate {
-  return { cycle_id: cycleId, round, candidate_id: candidateId, label };
+  return { cycle_id: cycleId, round, arm, label };
 }
 
 // `cycleId` is the leaf hop the caller READ its rows from; they carry no cycle of their own.
@@ -22,13 +22,13 @@ export function isSelectedCandidate(
   sel: SelectedCandidate | null,
   cycleId: string | null,
   round: number,
-  candidateId: string,
+  arm: string,
 ): boolean {
   return (
     sel != null &&
     cycleId != null &&
     sel.cycle_id === cycleId &&
     sel.round === round &&
-    sel.candidate_id === candidateId
+    sel.arm === arm
   );
 }

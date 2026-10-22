@@ -89,6 +89,7 @@ def extract_display_answer(predicted: str, formula: str | None) -> str:
 
 
 def fmt_query_result(
+    position: int,
     facts: MeasuredCell,
     grade: Grade,
     *,
@@ -151,19 +152,24 @@ def fmt_query_result(
         indent = f"{indent}\U0001f504 "
 
     time_col = f"{tt:5.1f}s" if tt is not None else "     "
-    sid_col = f"#{facts.sample_id:03d}"
+    sid_col = f"#{position:03d}"
     step_block = f" {step}" if step else ""
     if err:
         return f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} {str(err)[:40]!r} gt:{gt!r} q:{q!r}"
 
     # An L4 outer sample never reaches the HIT threshold and its ground truth is a placeholder.
-    proxy_delta = pd.mean_round_delta
-    if proxy_delta is not None:
+    if (inner := pd.inner) is not None:
         fit_col = f" fit {grade.fitness:.2f}" if grade.fitness is not None else ""
-        bench_col = f" B{pd.mean_bench_lift:+.3f}" if pd.mean_bench_lift is not None else ""
-        return (
-            f"{indent}{time_col} {sid_col}{bench_col} Δ{proxy_delta:+.3f}{fit_col}"
+        bench_col = "B—" if pd.mean_bench_lift is None else f"B{pd.mean_bench_lift:+.3f}"
+        delta_col = " Δ—" if inner.mean_round_delta is None else f" Δ{inner.mean_round_delta:+.3f}"
+        line = (
+            f"{indent}{time_col} {sid_col} {bench_col}{delta_col}{fit_col}"
             f"{step_block}{tok_col} q:{q!r}"
+        )
+        if inner.series_reason is None:
+            return line
+        return _append_annotation(
+            line, " " * len(indent) or "      ", DIM, "Δ", f"withheld: {inner.series_reason}"
         )
 
     # A verifier-graded cell has no label: `predicted` is the `NO_RESULT` sentinel.

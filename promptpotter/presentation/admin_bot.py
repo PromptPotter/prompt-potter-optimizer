@@ -7,7 +7,17 @@ from typing import Any
 
 import httpx
 
-from promptpotter.application.account import trail_by_email, trails_since
+from promptpotter.application.account import (
+    block_email,
+    blocked_emails,
+    grant,
+    grants,
+    registered_user_id,
+    revoke_grant,
+    trail_by_email,
+    trails_since,
+    unblock_email,
+)
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
@@ -16,21 +26,9 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.domain.spend import RATE_PRICED_LABEL
-from promptpotter.infrastructure.identity.blocklist import (
-    block_email,
-    list_blocked,
-    unblock_email,
-)
-from promptpotter.infrastructure.identity.grants import (
-    grant_principal,
-    list_grants,
-    revoke_principal,
-)
-from promptpotter.infrastructure.identity.migration import registered_user_id
-from promptpotter.infrastructure.identity.paths import IdentityPaths, default_identity_paths
-from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
+from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
 
@@ -61,29 +59,24 @@ def parse_command(text: str, passphrase: str | None) -> tuple[str, str] | None:
 
 
 def handle_command(command: str, argument: str, actor: str) -> str:
-    paths = default_identity_paths()
     if command == "blocked":
-        emails = list_blocked(paths.blocklist)
+        emails = blocked_emails()
         return "Blocked:\n" + ("\n".join(emails) if emails else "(nobody)")
     if command in ("block", "unblock"):
         if not argument:
             return f"Usage: /{command} <email>"
         try:
             if command == "block":
-                emails = block_email(
-                    paths.blocklist, argument, actor=actor, audit_path=paths.blocklist_audit
-                )
+                emails = block_email(argument, actor=actor)
                 verb = "Blocked"
             else:
-                emails = unblock_email(
-                    paths.blocklist, argument, actor=actor, audit_path=paths.blocklist_audit
-                )
+                emails = unblock_email(argument, actor=actor)
                 verb = "Unblocked"
         except ValueError as exc:
             return f"Error: {exc}"
         return f"{verb} {argument.strip().lower()}. {len(emails)} email{'' if len(emails) == 1 else 's'} blocked."
     if command in ("grant", "revoke", "grants"):
-        return _handle_grant_command(command, argument, actor, paths)
+        return _handle_grant_command(command, argument, actor)
     if command == "spend":
         return _render_install_spend()
     if command == "trail":
@@ -151,13 +144,13 @@ def _render_install_spend() -> str:
     return "\n".join(lines)
 
 
-def _handle_grant_command(command: str, argument: str, actor: str, paths: IdentityPaths) -> str:
+def _handle_grant_command(command: str, argument: str, actor: str) -> str:
     if command == "grants":
-        grants = list_grants(paths.grants)
-        if not grants:
+        held = grants()
+        if not held:
             return "Delegations: (none)"
         lines: list[str] = []
-        for sub, g in sorted(grants.items()):
+        for sub, g in sorted(held.items()):
             caps_val = g.get("capabilities")
             caps_str = ", ".join(str(c) for c in caps_val) if isinstance(caps_val, list) else ""
             lines.append(f"{sub} → by {g.get('delegated_by', '?')}: {caps_str or '(none)'}")
@@ -165,12 +158,7 @@ def _handle_grant_command(command: str, argument: str, actor: str, paths: Identi
     if command == "revoke":
         if not argument:
             return "Usage: /revoke <sub_user_id>"
-        removed = revoke_principal(
-            paths.grants,
-            sub_principal_user_id=argument.strip(),
-            actor=actor,
-            audit_path=paths.grants_audit,
-        )
+        removed = revoke_grant(argument.strip(), actor=actor)
         return (
             f"Revoked {argument.strip()}." if removed else f"No delegation for {argument.strip()}."
         )
@@ -178,7 +166,7 @@ def _handle_grant_command(command: str, argument: str, actor: str, paths: Identi
     if len(parts) < 2:
         return "Usage: /grant <sub_user_id> <capabilities>  (e.g. step,create)"
     sub_user_id, caps_csv = parts[0].strip(), parts[1]
-    delegator = registered_user_id(paths.default_claim_marker)
+    delegator = registered_user_id()
     if delegator is None:
         return "Cannot grant: no registered operator to delegate from (sign in once first)."
     try:
@@ -188,16 +176,7 @@ def _handle_grant_command(command: str, argument: str, actor: str, paths: Identi
     if not caps:
         return f"Error: name at least one capability ({', '.join(sorted(CAMPAIGN_CAP_BY_NAME))})."
     try:
-        grant_principal(
-            paths.grants,
-            sub_principal_user_id=sub_user_id,
-            delegated_by_user_id=delegator,
-            capabilities=caps,
-            spend_ceiling_usd=None,
-            note=f"via {actor}",
-            actor=actor,
-            audit_path=paths.grants_audit,
-        )
+        grant(sub_user_id, delegator=delegator, capabilities=caps, actor=actor)
     except ValueError as exc:
         return f"Error: {exc}"
     return f"Granted {sub_user_id} [{', '.join(sorted(caps))}] as delegate of {delegator}."

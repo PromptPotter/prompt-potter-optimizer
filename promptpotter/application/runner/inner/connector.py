@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.bench import difficulty
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.intelligence import rasch
-from promptpotter.application.runner.inner import ruler
 from promptpotter.application.runner.inner.spawn import (
     inner_cell_envelope_s,
     inner_cell_hop,
@@ -48,8 +47,8 @@ MAX_CELLS_IN_FLIGHT = 4
 
 def measurement_modules() -> tuple[ModuleType, ...]:
     """Never ``APP_VERSION``: it voids every banked cell on each release, measurement changed or not."""
-    # The δ scale's two halves: fit at the outer boundary, and what each cell reads it on.
-    return (rasch, metrics, selection, proxies, ruler, difficulty)
+    # The δ scale: how it is fit, and what each cell reads it on.
+    return (rasch, metrics, selection, proxies, difficulty)
 
 
 def _inner_cells(stores: Stores, experiment: Mapping[str, Any] | None) -> InnerCells:

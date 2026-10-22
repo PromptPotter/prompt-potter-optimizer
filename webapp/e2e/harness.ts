@@ -2,7 +2,12 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test as base, expect, type Page, type APIRequestContext } from "@playwright/test";
-import { STOP_REASON_OUTCOMES, type ServedRound } from "@/lib/api/types.generated";
+import {
+  STOP_REASON_OUTCOMES,
+  type CampaignListResponse,
+  type DraftListResponse,
+  type ServedRound,
+} from "@/lib/api/types.generated";
 import { isStopReason } from "@/lib/run-phase";
 
 const API = "/api/v1";
@@ -128,17 +133,25 @@ export type Campaign = {
 export async function campaigns(request: APIRequestContext): Promise<Campaign[]> {
   const res = await request.get(`${API}/campaigns`);
   expect(res.ok(), `GET ${API}/campaigns → ${res.status()}`).toBeTruthy();
-  const rows: Record<string, string>[] = (await res.json()).campaigns ?? [];
-  return rows.flatMap((c) => {
-    const id = c.campaign_id;
-    const cycleId = c.root_cycle_id;
-    if (!id || !cycleId) return [];
-    // The `cycle_` prefix is stripped in the address and nowhere else (`lib/address.ts`).
-    return [{ id, cycleId, addr: `#/c/${id}/${cycleId.replace(/^cycle_/, "")}` }];
-  });
+  const { campaigns: rows } = (await res.json()) as CampaignListResponse;
+  // The `cycle_` prefix is stripped in the address and nowhere else (`lib/address.ts`).
+  return rows.map(({ campaign_id: id, root_cycle_id: cycleId }) => ({
+    id,
+    cycleId,
+    addr: `#/c/${id}/${cycleId.replace(/^cycle_/, "")}`,
+  }));
 }
 
-/** Never the newest campaign: it is often an empty check-in cycle, whose empty panes pass whatever the chart code does. */
+export type Draft = { draftId: string; slug: string };
+
+export async function drafts(request: APIRequestContext): Promise<Draft[]> {
+  const res = await request.get(`${API}/drafts`);
+  expect(res.ok(), `GET ${API}/drafts → ${res.status()}`).toBeTruthy();
+  const { drafts: rows } = (await res.json()) as DraftListResponse;
+  return rows.map((d) => ({ draftId: d.draft_id, slug: d.slug }));
+}
+
+/** Never the newest campaign: it is often a cycle with no round yet, whose empty panes pass whatever the chart code does. */
 export async function richestCampaign(request: APIRequestContext): Promise<Campaign | null> {
   const all = await campaigns(request);
   let best: Campaign | null = null;
@@ -228,7 +241,7 @@ export function roundsOf(dash: Record<string, unknown> | null): ServedRound[] {
 export function assertRoundMeasured(label: string, round: ServedRound | undefined) {
   expect(round, `${label}: no round to read`).toBeDefined();
   const graded = (round?.candidates ?? []).filter(
-    (c) => c.reading.own?.accuracy != null && c.reading.outcome !== "invalid",
+    (c) => c.reading.own?.accuracy != null && c.reading.end !== "invalid",
   );
   expect(
     graded.length,

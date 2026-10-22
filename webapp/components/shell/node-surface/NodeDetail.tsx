@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import type { DraftPatch, StartPrompt } from "@/lib/api";
+import type { DraftPatch, NodePrompt, StartPrompt } from "@/lib/api";
 import { useSelection, type SelectedNode } from "@/lib/SelectionContext";
 import { cx } from "@/lib/cx";
 import type { NodeBlock } from "@/lib/api/types";
@@ -26,7 +26,15 @@ import { L1Variants, variantsOf } from "./L1Variants";
 
 export interface NodeAuthoring {
   overlay: Record<string, unknown>;
-  promptFields: Record<string, unknown>;
+  prompts: Record<string, NodePrompt>;
+}
+
+// The optimizer's own prompt, as the one prompt node it is.
+function startPrompts(id: string, origin: StartPrompt | null): Record<string, NodePrompt> {
+  if (!origin) return {};
+  const fields: Record<string, string> = {};
+  for (const [k, v] of Object.entries(origin.fields)) if (typeof v === "string") fields[k] = v;
+  return { [id]: { fields, shots: [] } };
 }
 
 interface Props {
@@ -86,19 +94,19 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
 
   const identity = { id, scope, label: node?.label ?? id, kind: servedKind };
   const program = isOptimizer
-    ? { ...identity, prompt_fields: origin?.fields ?? {} }
+    ? { ...identity, prompts: startPrompts(id, origin) }
     : authoring
       ? {
           ...identity,
-          resolved_pipeline_params: authoring.overlay,
-          prompt_fields: authoring.promptFields,
+          resolved_params: authoring.overlay,
+          prompts: authoring.prompts,
         }
       : observed.cfg
         ? {
             ...identity,
             searchpoint: observed.cfg.label,
-            resolved_pipeline_params: observed.cfg.config,
-            prompt_fields: observed.cfg.promptFields,
+            resolved_params: observed.cfg.config,
+            prompts: observed.cfg.prompts,
           }
         : identity;
   const copyChoices = [
@@ -149,6 +157,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
 
         {isOptimizer ? (
           <OptimizerProgram
+            id={id}
             node={node}
             origin={origin}
             schema={schema}
@@ -188,11 +197,13 @@ function scopeLabel(isOptimizer: boolean): string {
 }
 
 function OptimizerProgram({
+  id,
   node,
   origin,
   schema,
   modelCapabilities,
 }: {
+  id: string;
   node: Parameters<typeof NodeSurface>[0]["node"];
   origin: StartPrompt | null;
   schema: NodeSchemaReading;
@@ -202,7 +213,7 @@ function OptimizerProgram({
     <>
       <NodeSurface
         node={node}
-        point={{ origin_prompt_fields: origin?.fields ?? {}, pipeline_overlay: {} }}
+        point={{ origin_prompts: startPrompts(id, origin), pipeline_overlay: {} }}
         overlay={{}}
         schema={schema}
         modelCapabilities={modelCapabilities}
@@ -242,7 +253,7 @@ function TargetProgram({
     return (
       <NodeSurface
         node={scoped ? node : null}
-        point={{ origin_prompt_fields: authoring.promptFields, pipeline_overlay: {} }}
+        point={{ origin_prompts: authoring.prompts, pipeline_overlay: {} }}
         overlay={scoped ? authoring.overlay : {}}
         schema={schema}
         modelCapabilities={modelCapabilities}
@@ -271,14 +282,14 @@ function TargetProgram({
         <>
           <NodeSurface
             node={node}
-            point={{ origin_prompt_fields: cfg.promptFields, pipeline_overlay: {} }}
+            point={{ origin_prompts: cfg.prompts, pipeline_overlay: {} }}
             overlay={cfg.config}
             schema={schema}
             modelCapabilities={modelCapabilities}
             label={cfg.label}
             mode="values"
           />
-          {Object.keys(cfg.promptFields).length === 0 && (
+          {Object.keys(cfg.prompts).length === 0 && (
             <p className="inspector-note">
               The optimizer has not changed this node&apos;s prompt — it still runs the
               one its dataset shipped.

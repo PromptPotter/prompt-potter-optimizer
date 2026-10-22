@@ -1,18 +1,19 @@
 import { liveCandidate, liveCandidates, type DashboardSnapshot } from "@/lib/poll";
-import type { ArmPointer, ScoredCandidate, ValidationFailure } from "@/lib/api/types";
+import type { ArmName, ValidationFailure } from "@/lib/api/types";
 import type { ArmRow, RoundResult, SampleRow } from "@/lib/types";
 
-function liveSamplesFor(dash: DashboardSnapshot | null, arm: ArmPointer): SampleRow[] {
+function liveSamplesFor(dash: DashboardSnapshot | null, arm: ArmName): SampleRow[] {
   const out: SampleRow[] = [];
-  const c = liveCandidate(dash, arm.label);
+  const c = liveCandidate(dash, arm.key);
   if (!c) return out;
-  const { round, candidate_id } = arm;
-  c.samples.forEach((s, ord) => {
+  const { round, key: candidate_id } = arm;
+  c.samples.forEach((s) => {
     out.push({
-      key: `${round}|${arm.label}|${s.sample_id ?? `o${ord}`}`,
+      key: `${round}|${candidate_id}|${s.position}`,
       round,
       candidate_id,
-      sample_id: s.sample_id,
+      position: s.position,
+      sample_key: s.sample_key,
       status: s.status,
       cached: s.cached,
       query: s.query,
@@ -29,13 +30,14 @@ export function historicalSamplesFor(
   round: number,
   candidate_id: string,
 ): SampleRow[] {
-  const rows = roundDoc?.all_candidate_results[candidate_id];
+  const rows = roundDoc?.cells[candidate_id];
   if (!rows) return [];
   return rows.map((s) => ({
-    key: `${round}|${candidate_id}|${s.sample_id}`,
+    key: `${round}|${candidate_id}|${s.position}`,
     round,
     candidate_id,
-    sample_id: s.sample_id,
+    position: s.position,
+    sample_key: s.sample_key,
     status: s.status,
     cached: s.cached,
     query: s.query,
@@ -52,7 +54,7 @@ export function samplesForRow(
   const arm = row.reading.arm;
   return row.source === "inflight"
     ? liveSamplesFor(dash, arm)
-    : historicalSamplesFor(doc, arm.round, arm.candidate_id);
+    : historicalSamplesFor(doc, arm.round, arm.key);
 }
 
 export interface CandidateVerdict {
@@ -61,18 +63,24 @@ export interface CandidateVerdict {
   failures: ValidationFailure[];
 }
 
-export function candidateVerdicts(
-  rows: readonly Pick<ScoredCandidate, "label" | "changes_description" | "validation_failures">[],
-): Map<string, CandidateVerdict> {
-  return new Map(
-    rows.map((c) => [c.label, { changes: c.changes_description, failures: c.validation_failures }]),
-  );
+export function candidateVerdicts(doc: RoundResult | null): Map<string, CandidateVerdict> {
+  const out = new Map<string, CandidateVerdict>();
+  if (!doc) return out;
+  for (const { reading } of doc.scoreboard) {
+    const arm = doc.arms[reading.arm.key];
+    if (!arm) continue;
+    out.set(reading.arm.key, {
+      changes: reading.changes_description,
+      failures: arm.validation_failures,
+    });
+  }
+  return out;
 }
 
 export function liveCandidateVerdicts(dash: DashboardSnapshot | null): Map<string, CandidateVerdict> {
   return new Map(
     liveCandidates(dash).map((c) => [
-      c.reading.arm.label,
+      c.reading.arm.key,
       { changes: c.reading.changes_description, failures: c.validation_failures },
     ]),
   );

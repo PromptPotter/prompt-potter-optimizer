@@ -20,6 +20,7 @@ from promptpotter.shared.statistics import (
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.rasch import RoundAbilities
+    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import GradeColumn
@@ -69,106 +70,103 @@ assert _EXPECTED_MAX_Z[:2] == (0.0, 0.0) and list(_EXPECTED_MAX_Z) == sorted(_EX
 def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
     """A winner is the MAX over its round's arms, so its θ carries the largest noise draw; corrects the BAR only."""
     for rr in reversed(rounds):
-        if not rr.selected_labels:
+        election = rr.election
+        if election is None or not election.selected:
             continue
-        winner = next(iter(rr.selected_scores), None)
+        winner = rr.fit(election.selected[0])
         se = winner.theta_se if winner else None
         if not se:
             return 0.0
-        k = min(max(rr.electable_count, 1), len(_EXPECTED_MAX_Z) - 1)
+        k = min(max(election.electable, 1), len(_EXPECTED_MAX_Z) - 1)
         # ONE arm's SE, not the paired √2 one: θ̂_parent is common to all k comparisons.
         return _EXPECTED_MAX_Z[k] * se
     return 0.0
 
 
 def lift_over_bar(
-    abilities: RoundAbilities, candidate_id: str, parent_bias: float
+    abilities: RoundAbilities, key: ArmKey, parent_bias: float
 ) -> tuple[float, float] | None:
     """``(θ lift, bias credit)``; the credit scales by SE_parent/SE_arm, a flat one favouring the noisiest arm."""
-    lift = theta_lift_over_parent(abilities, candidate_id)
+    lift = theta_lift_over_parent(abilities, key)
     if lift is None:
         return None
-    se_parent = abilities.parent[1] if abilities.parent is not None else 0.0
-    se_cand = abilities.theta_se.get(candidate_id) or 0.0
+    se_parent = abilities.bar[key][1]
+    se_cand = abilities.theta_se.get(key) or 0.0
     return lift, parent_bias * (min(1.0, se_parent / se_cand) if se_parent and se_cand else 1.0)
 
 
 def readable_lifts(
-    candidate_ids: Sequence[str],
-    results_by_id: Mapping[str, CellSheet],
+    keys: Sequence[ArmKey],
+    rows: Mapping[ArmKey, CellSheet],
     parent_results: CellSheet,
     coverage_floor: int,
     abilities: RoundAbilities,
     parent_bias: float,
-) -> dict[str, tuple[float, float]]:
-    reads: dict[str, tuple[float, float]] = {}
-    for cid in candidate_ids:
-        cand_results = results_by_id.get(cid)
+) -> dict[ArmKey, tuple[float, float]]:
+    reads: dict[ArmKey, tuple[float, float]] = {}
+    for key in keys:
+        cand_results = rows.get(key)
         # An arm thin for a reason OTHER than elimination (an operator skip); PoBB's `n_min` IS this floor.
         if cand_results is None or distinct_valid_cells(cand_results) < coverage_floor:
             continue
         # About the WALK, not a statistic: an errored row still shares the cell, where the θ fit drops it.
         if not cand_results.by_key().keys() & parent_results.by_key().keys():
             continue
-        read = lift_over_bar(abilities, cid, parent_bias)
+        read = lift_over_bar(abilities, key, parent_bias)
         if read is not None:
-            reads[cid] = read
+            reads[key] = read
     return reads
 
 
-def closest_to_bar(reads: Mapping[str, tuple[float, float]], *, beside: str = "") -> str:
+def closest_to_bar(
+    reads: Mapping[ArmKey, tuple[float, float]], *, beside: ArmKey | None = None
+) -> ArmKey | None:
     """On the raw θ lift ADMISSION takes, never lift plus credit; the first walked holds a tie."""
-    return max((cid for cid in reads if cid != beside), key=lambda cid: reads[cid][0], default="")
+    return max((key for key in reads if key != beside), key=lambda k: reads[k][0], default=None)
 
 
 def elect_round_winner(
-    candidate_ids: list[str],
-    results_by_id: Mapping[str, CellSheet],
+    keys: Sequence[ArmKey],
+    rows: Mapping[ArmKey, CellSheet],
     parent_results: CellSheet,
     coverage_floor: int,
     ruler: DeltaRuler | None,
     *,
     parent_bias: float,
-) -> tuple[str, RoundAbilities]:
+) -> tuple[ArmKey | None, RoundAbilities]:
     """ADMISSION is raw θ strictly above the parent's; the RANK is ``P(θ_cand > θ_parent)``, which PoBB cuts on."""
 
     abilities = candidate_abilities(
-        {cid: results_by_id[cid] for cid in candidate_ids if cid in results_by_id},
+        {key: rows[key] for key in keys if key in rows},
         parent_results,
         ruler,
     )
 
-    theta_parent, se_parent = abilities.parent or (None, 0.0)
-    # The bar is what the parent can DO, not the draw that crowned it (`parent_selection_bias`).
-    if theta_parent is not None:
-        theta_parent -= parent_bias
-
     best_rank: tuple[float, int] = (0.0, 0)
-    winner_id = ""
-    reads = readable_lifts(
-        candidate_ids, results_by_id, parent_results, coverage_floor, abilities, parent_bias
-    )
-    for cid, read in reads.items():
+    winner: ArmKey | None = None
+    reads = readable_lifts(keys, rows, parent_results, coverage_floor, abilities, parent_bias)
+    for key, read in reads.items():
         # No SE margin: subtracting one turns a wide-posterior gain negative; uncertainty is the RANK's.
         if read[0] <= 0.0:
             continue
-        theta_c = abilities.theta.get(cid)
-        if theta_c is None or theta_parent is None:
-            continue
-        p_better = p_exceeds(theta_c, abilities.theta_se.get(cid) or 0.0, theta_parent, se_parent)
-        rank = (p_better, distinct_valid_cells(results_by_id[cid]))
+        theta_parent, se_parent = abilities.bar[key]
+        # The bar is what the parent can DO, not the draw that crowned it (`parent_selection_bias`).
+        p_better = p_exceeds(
+            abilities.theta[key], abilities.theta_se[key], theta_parent - parent_bias, se_parent
+        )
+        rank = (p_better, distinct_valid_cells(rows[key]))
         if rank > best_rank:
             best_rank = rank
-            winner_id = cid
-    return winner_id, abilities
+            winner = key
+    return winner, abilities
 
 
 def elimination_p_best(
     candidate_grades: Sequence[float],
-    paired_prior_grades: Mapping[str, Sequence[float]],
+    paired_prior_grades: Mapping[ArmKey, Sequence[float]],
     candidate_cells: Sequence[str],
     ruler: DeltaRuler | None,
-) -> tuple[float, dict[str, float]]:
+) -> tuple[float, dict[ArmKey, float]]:
     """A stopping rule, not a verdict: ``P(θ_cand > θ_prior)`` CAPPED by what the discordant pairs support."""
     if not paired_prior_grades:
         return 1.0, {}
@@ -185,7 +183,7 @@ def elimination_p_best(
 
     theta_c, se_c = read(candidate_grades)
 
-    per_prior: dict[str, float] = {}
+    per_prior: dict[ArmKey, float] = {}
     for pid, grades in paired_prior_grades.items():
         theta_p, se_p = read(grades)
         p = p_exceeds(theta_c, se_c, theta_p, se_p)
@@ -194,22 +192,22 @@ def elimination_p_best(
 
 
 def priors_covering[P: Mapping[str, float]](
-    priors: Mapping[str, P], cells: Collection[str]
-) -> dict[str, P]:
+    priors: Mapping[ArmKey, P], cells: Collection[str]
+) -> dict[ArmKey, P]:
     return {pid: grades for pid, grades in priors.items() if all(c in grades for c in cells)}
 
 
 class PairedPosterior(NamedTuple):
     cells: list[str]
     grades: list[float]
-    priors: dict[str, list[float]]
+    priors: dict[ArmKey, list[float]]
     p_best: float
-    p_better: dict[str, float]
+    p_better: dict[ArmKey, float]
 
 
 def paired_p_best(
     rows: Sequence[GradedCell],
-    priors: Mapping[str, Mapping[str, float]],
+    priors: Mapping[ArmKey, Mapping[str, float]],
     ruler: DeltaRuler | None,
 ) -> PairedPosterior | None:
     """Over rows carrying a verdict only: a backend error is no evidence of inability."""
@@ -235,10 +233,10 @@ def _capped(p: float, bound: float) -> float:
 def elimination_p_best_bounds(
     cells: Sequence[str],
     candidate: Mapping[str, float],
-    priors: Mapping[str, Mapping[str, float]],
+    priors: Mapping[ArmKey, Mapping[str, float]],
     ruler: DeltaRuler | None,
     *,
-    settled: Collection[str],
+    settled: Collection[ArmKey],
 ) -> tuple[float, float]:
     """``high`` is over ``settled`` priors alone: any other may drop out, which can only RAISE the minimum."""
     sids = list(cells)
@@ -247,8 +245,8 @@ def elimination_p_best_bounds(
     c_low, c_high, c_floor = theta_bounds_given_delta(
         known, [s for s in sids if s not in known], entries
     )
-    low: dict[str, float] = {}
-    high: dict[str, float] = {}
+    low: dict[ArmKey, float] = {}
+    high: dict[ArmKey, float] = {}
     for pid, grades in priors.items():
         both = {s: grades[s] for s in known if s in grades}
         rest = [s for s in sids if s not in both]

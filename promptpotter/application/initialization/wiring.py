@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -11,9 +12,8 @@ from promptpotter import connectors
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.datasets.loaders import (
-    bank_samples,
     build_panel,
-    resolve_dataset_items,
+    resolve_bank,
     samples_from_dicts,
 )
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
@@ -26,10 +26,9 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
-from promptpotter.domain.optimizer_state import round_payload_type
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.sample import Sample
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
@@ -92,7 +91,7 @@ async def _verify_connector_revision(
 
 def _warn_if_labels_have_no_ranker(
     schema: PipelineSchema,
-    samples: list[Sample],
+    samples: Sequence[Sample],
     connector: Connector | None,
 ) -> None:
     """The converse is deliberately not warned: a ranker with no labels is no fault."""
@@ -183,13 +182,13 @@ async def _resolve_pipeline_schema(
     return schema, declaration
 
 
-def _load_dataset_into_session(
+def _session_bank(
     session: Session,
     dataset_name: str,
     *,
     connector: Connector,
     experiment: dict[str, Any] | None,
-) -> None:
+) -> Bank:
     # First, never a fallback: rows cached under the same dataset name describe another instrument.
     if connector.owns_panel:
         if experiment is None:
@@ -198,31 +197,18 @@ def _load_dataset_into_session(
                 f"declares no `panel:` and no `source:` builds one.",
                 code="pipeline_config_invalid",
             )
-        queries = extract_panel_rows(connector, dataset_name, experiment)
-        session.samples = samples_from_dicts(queries)
-        logger.info("Panel: %d tasks", len(queries))
-        return
+        return Bank.of(samples_from_dicts(extract_panel_rows(connector, dataset_name, experiment)))
     assert session.dataset is not None, "a session loads rows only off the dataset it resolved"
-    items = resolve_dataset_items(session.store, session.dataset)
-    if not items:
+    bank = resolve_bank(session.store, session.dataset)
+    if not bank.samples:
         raise PayloadInvalidError(
-            f"Dataset {dataset_name!r} holds no rows: no upload, no `rows.json` and no "
-            f"`source:` in its definition to fetch them from.",
+            f"Dataset {dataset_name!r} holds no rows: no bank under its name and no "
+            f"`source:` in its definition to cut one from.",
             code="dataset_not_found",
         )
-
-    session.samples = bank_samples(items)
-    gt_terms = {r["ground_truth"] for r in items if r.get("ground_truth")}
     # Unioned with the ground-truth answers, never replacing them: every label stays rankable.
-    library = read_candidate_library_file(session.dataset.directory)
-    session.index_terms = sorted(gt_terms | set(library))
-    if library:
-        logger.info(
-            "Candidate library: +%d targets (term index now %d)",
-            len(set(library) - gt_terms),
-            len(session.index_terms),
-        )
-    logger.info("Dataset: %s (%d samples)", dataset_name, len(items))
+    session.candidate_library = read_candidate_library_file(session.dataset.directory)
+    return bank
 
 
 def complete_registries(*, every_treatment: bool = True) -> None:
@@ -231,11 +217,10 @@ def complete_registries(*, every_treatment: bool = True) -> None:
     judge_registry.registered()
     optimizers.registered()
     for runtime in optimizers.runtimes().values():
-        round_payload_type(runtime.name)
         runtime.complete()
         # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
         if every_treatment:
-            resolve_optimizer(runtime.name, {}).treatment()
+            resolve_optimizer(runtime.name, {}, gate="off").treatment()
     replayers()
     for connector in table.values():
         if connector.completion_check is not None:
@@ -297,9 +282,12 @@ async def init_services(
         langfuse=LangfuseLogger(enabled=enable_tracing),
     )
 
-    _load_dataset_into_session(session, dataset_name, connector=connector, experiment=experiment)
+    session.bank = _session_bank(session, dataset_name, connector=connector, experiment=experiment)
+    # By hash, never a label: every answer this session files names a bank the store holds.
+    stores.tenant_datasets.put_bank(session.bank)
+    logger.info("Dataset: %s (%d samples)", dataset_name, len(session.bank.samples))
     # After the samples, never before: the invariant is about the schema AND the bank together.
-    _warn_if_labels_have_no_ranker(pipeline_schema, session.samples, connector)
+    _warn_if_labels_have_no_ranker(pipeline_schema, session.bank.samples, connector)
     return session
 
 
@@ -314,7 +302,7 @@ async def bind_cycle_session(
         identity=stores.identity,
         stores=stores,
     )
-    session.bind_campaign(hop, arm=campaign.arm)
+    session.bind_campaign(hop, purpose=campaign.declaration.purpose)
     return session, resolve_campaign_config(stores, campaign, hop)
 
 

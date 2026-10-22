@@ -10,20 +10,20 @@ around. No I/O, no async, no infrastructure imports — anything needing a
 | Primitive | File | Why it's settled |
 |---|---|---|
 | `JobSearchPoint` | `search_point.py` | Frozen target spec. Its cells are filed by its node chain (`measurement_archive.py::config_key`); `content_hash(dataset)` names a campaign's root only. First positional arg to `score_search_point()` (`application/scoring/search_point_scorer.py`). |
-| `PromptTemplate` | `opt_search_point.py` | Prompt scheme — the `PROMPT_STRING_FIELDS` decomposition fields — with `render()` / `compile_prompt()`. **The constant is the field SET; the render ORDER is per class** (`RENDER_ORDER`, permutation-checked at import) — the base orders for the archive key, so any target prompt (an `OptSearchPoint`, an export's `template()`) renders as scored; `OptimizerPromptTemplate` alone orders for cache prefixes, and re-coupling them re-cuts every banked cell. Canonical prompts in the dataset's `origin.yaml`, keyed by node. |
-| `OptSearchPoint` | `opt_search_point.py` | The individual: the `PROMPT_STRING_FIELDS` decomposition fields + `shot_ids` + `pipeline_params` (its resolved node config, written by `configured` alone) + `lineage` (`parent_ids`, `variations`). **`loci()` is the one roster of its parts, and a child is made by `derive` / `edited` alone**, so each node's variation records the loci it wrote. **Its `id` is that content, never stored**, so the same configuration reached twice is one individual and a resume names the ids its ledger holds; a REJECTED proposal measured no individual and is named by its slot (`scoring/candidate_report.py::arm_id`). **No optimizer state rides it** — that is per-optimizer typed state (`optimizer_state.py`: the `{manifest, population, prompt_hashes, payload}` envelope around a registered `RoundPayload`), banked on every round's close and restored from there on resume and fork. **Neither the campaign's framing nor its shots' content is on it**: `target_fields(framing, demo=)` splices the one and resolves the other's demo-pool ids at render, so every render of a scored prompt is handed the pool. |
+| `OptimizerPromptTemplate` | `opt_search_point.py` | A prompt the optimizer RUNS ON, with `render()` / `compile_prompt()`; its `RENDER_ORDER` orders for cache prefixes. **A target prompt has no class**: each prompt node declares its fields IN RENDER ORDER (`NodePromptInfo.fields`, default `search_point.py::DEFAULT_PROMPT_FIELDS`), and `render_prompt(fields, order)` joins them — that order sits inside every cell key the node renders, so it is the node's, never a shared constant. Canonical prompts in the dataset's `origin.yaml`, keyed by node. |
+| `OptSearchPoint` | `opt_search_point.py` | The individual: `{locus: value}` over the pipeline's roster — `prompts` (per prompt node a `NodePrompt`: its fields by declared name + its `shots` as demo-pool `Sample.key`s) + `pipeline_params` (its resolved node config, written by `configured` alone) + `lineage` (`parent_ids`, `variations`). A `Locus` is `(node, key)`; `PipelineSchema.locus_kind` says whether it is a prompt field, the node's shots or a config param. **`loci()` is the one roster of its parts, and a child is made by `derive` / `edited` alone** (`changes: Mapping[Locus, Any]`), so each node's variation records the loci it wrote. No site reads "the first prompt node": a member that knows one prompt reads `NodeContext.prompt_node`, which refuses a roster of none or several. **Its `id` is that content, never stored**, so the same configuration reached twice is one individual and a resume names the ids its ledger holds; a REJECTED proposal measured no individual and is named by its slot (`results.py::arm_key`). **No optimizer state rides it** — that is per-optimizer typed state (`optimizer_state.py`: the `{manifest, population, prompt_hashes, slices, outputs}` envelope around registered `StatePart`s), banked on every round's close and restored from there on resume and fork. **Neither the campaign's framing nor its shots' content is on it**: `scored_prompts(schema, framing, demo=)` splices the one into the ONE prompt node declaring `problem_description` — refusing a framed chain with none or several — and resolves the other's sample keys at render, so every render of a scored prompt is handed the pool. |
 | `CheckpointKind` | `run_records.py` | The base every decision-kind enum subclasses — the bench's `BenchCheckpointKind` here, each optimizer's in its own package — so a decision's kind names the party that took it; a ledger record carries its value. Whether a resume re-derives a kind is whether a replayer is registered for it (`application/bench/resume_and_fork/replayers.py::replayers`, the SoT for replayed-vs-archival) — no second table. |
-| `ForkSpec` / `CycleSeed` / `ConfigOverrides` | `run_records.py` | The one typed fork record + the chosen starting point a non-root cycle begins from (`{origin_prompt_fields, pipeline_overlay, config_overrides, origin_source}`). `ConfigOverrides` is the fork's whole campaign-config delta; `scoring` sits on `CampaignConfig` itself rather than under `optimization`, so it needs its own bucket at the apply seam. Each is a `Knob` whose scope says it must FORK rather than mutate the running cycle. **An operator fork is one of two acts, and `keep_rounds` is which**: unset, `operator_steered` — a clean offshoot from the origin; set, `operator_rewind` — rounds `0..N-1` lifted, the branch continuing at N under the overrides, which is what applying a scoring mask means. Both carry a `CycleSeed` (the `fork-cycle` payload's `seed` is one on the wire, less the server-stamped `origin_source`); the rewind refuses one declaring `origin_prompt_fields`, since the lifted round 0 already is its origin; the mint seam writes one for campaign-from-origin; an L2/L3 `fork_proposal` carrying an unlock writes one too (config delta, no origin — `origin_source` empty, since a rebase replays its own C0); a diag carries no seed. `origin_source` (`fork_seed` \| `campaign_origin`) names C0's `changes_description`; its `source` stays the bench's `origin`. For forks: one writer (`mint_fork`, `application/bench/resume_and_fork/fork_siblings.py`), three records — the `FORK_CUT` decision on the parent, the fork's own `CycleMintedRecord` carrying the `ForkSpec` (which `CycleIndex.fork` is folded from), and the read-once `CycleSeedRecord` (the chosen starting point, appended by `write_cycle_seed`, `infrastructure/store/campaign_store/store.py`). |
+| `ForkSpec` / `CycleSeed` / `ConfigOverrides` | `run_records.py` | The one typed fork record + the chosen starting point a non-root cycle begins from (`{origin_prompts, pipeline_overlay, config_overrides, origin_source}`). `ConfigOverrides` is the fork's whole campaign-config delta; `scoring` sits on `CampaignConfig` itself rather than under `optimization`, so it needs its own bucket at the apply seam. Each is a `Knob` whose scope says it must FORK rather than mutate the running cycle. **An operator fork is one of two acts, and `keep_rounds` is which**: unset, `operator_steered` — a clean offshoot from the origin; set, `operator_rewind` — rounds `0..N-1` lifted, the branch continuing at N under the overrides, which is what applying a scoring mask means. Both carry a `CycleSeed` (the `fork-cycle` payload's `seed` is one on the wire, less the server-stamped `origin_source`); the rewind refuses one declaring `origin_prompts`, since the lifted round 0 already is its origin; the mint seam writes one for campaign-from-origin; an L2/L3 `fork_proposal` carrying an unlock writes one too (config delta, no origin — `origin_source` empty, since a rebase replays its own C0); a diag carries no seed. `origin_source` (`fork_seed` \| `campaign_origin`) names C0's `changes_description`; its `source` stays the bench's `origin`. For forks: one writer (`mint_fork`, `application/bench/resume_and_fork/fork_siblings.py`), three records — the `FORK_CUT` decision on the parent, the fork's own `CycleMintedRecord` carrying the `ForkSpec` (which `CycleIndex.fork` is folded from), and the read-once `CycleSeedRecord` (the chosen starting point, appended by `write_cycle_seed`, `infrastructure/store/campaign_store/store.py`). |
 | `PipelineSchema` / `PipelineNode` | `pipeline_schema.py` | Built from `GET /pipeline` (pure parser in `pipeline_parsing.py`); no BACKEND constants — the structured-output axis vocabulary (`SCHEMA_TOGGLE_PARAM`, `SCHEMA_DESCRIPTION_PREFIX`, `OUTPUT_CONTRACT_KEYS`) is ours, named once here so the parser that injects it, the fold that spends it and the served row all spell it the same. One field is not the backend's: `model_capabilities`, attached where a workspace is in hand, so `param_options` can answer a value space without this layer doing I/O. It rides the schema and never the identity — `node_configs`/`sp_hash` fold node configs, so a refreshed snapshot re-keys no banked measurement. |
-| `RoundResult` | `results.py` | Per-round outcome, including `deprecated` (sanctioned vocabulary for fatal-warning sample lifecycle) and `ability` (below). **It is `RoundOutcome` plus its rows**: `RoundOutcome` is what `RoundClosedRecord` carries onto the ledger — with each row as its archive address (`RoundCells`) — so a field declared on it is ledger shape, and a rename there erases every close that carried the old name (§ Tolerance, the Ledger case). **The envelope is optimizer-neutral**: each arm carries its reading against what it was measured against (`vs_reference`, rows in `reference_results`), the election is `selected_labels` (empty = held) plus `leading_label` (the one arm the round is read off, which the selector names and no reader re-ranks), and every optimizer-specific readout rides `optimizer_state`. Its `scoreboard` is persisted IN RANK ORDER, so `scoreboard_rank_key` — the key deciding that order — and `order_floor` under it live beside the model, never with the renderers in `application/views/`. |
-| `AbilityReading` | `ruler.py` | **A θ, the δ scale it was read on, and whether that scale makes it ability — ONE value.** **No field defaulted**, so no producer can stamp a level and leave its scale or its caveat to be inferred. `comparable_to` is the only sanctioned test for whether two θ may be differenced; `scale()` is the single rendering; `caveat` is the served `ThetaCaveat`, decided once by `ruler.py::theta_caveat` for screen and optimizer alike. Not a `@computed_field`: this model is `extra="forbid"`, so a derived key would serialize and then refuse to read back. |
-| `DeltaRuler` | `ruler.py` | **The δ scale every θ in the system is read on.** **The anchor is stamped at LOCK and never moves**: the ruler GROWS by anchored extension (`intelligence/rasch.py::extend_ruler`) while shared δ stay bit-identical, so `ruler_id` names the anchor, never the membership (`ruler.py::anchor_id_of`). `entries_covering` exists for mid-round PoBB alone; everywhere else a cell a warm ruler does not carry enters no θ and is served as `ThetaCaveat.UNMEASURED_DELTA` (`unlinked`). |
+| `RoundResult` | `results.py` | Per-round outcome, including `deprecated` (sanctioned vocabulary for fatal-warning sample lifecycle). **It is `RoundOutcome` plus its rows**: `RoundOutcome` is what `RoundClosedRecord` carries onto the ledger — with each row as its archive address (`RoundCells`) — so a field declared on it is ledger shape, and a rename there erases every close that carried the old name (§ Tolerance, the Ledger case). **The envelope is optimizer-neutral**: `arms` holds each arm's `ArmState` by `ArmKey`, and the `Election` holds the verdict — `selected` (empty = held), `leading` (the one arm the round is read off, which the selector names and no reader re-ranks) and, per arm, its `fit` (θ, and `vs_reference` — its reading against what it was measured against, whose rows are an arm of `cells`) — while every optimizer-specific readout rides `optimizer_state`. Its `scoreboard` is `ranked()`, derived at each read and never on the ledger — only the round-file checkout writes it, in that order — so `scoreboard_rank_key`, the key deciding the order, and `order_floor` under it live beside the model, never with the renderers in `application/views/`. |
+| `AbilityReading` | `ruler.py` | **A θ, the δ scale it was read on, and whether that scale makes it ability — ONE value.** **No field defaulted**, so no producer can stamp a level and leave its scale or its caveat to be inferred. Its `ruler` is a `RulerStamp` — the tenant ruler's version and the individuals that reading excluded — so any reading re-fits to the scale it was taken on. `comparable_to` is the only sanctioned test for whether two θ may be differenced; `scale()` is the single rendering; `caveat` is the served `ThetaCaveat`, decided once by `ruler.py::theta_caveat` for screen and optimizer alike. Not a `@computed_field`: this model is `extra="forbid"`, so a derived key would serialize and then refuse to read back. |
+| `DeltaRuler` | `ruler.py` | **The δ scale every θ in the system is read on: one fit of the tenant's rows at one version, less the rows of the individuals the reading judges** (`application/bench/difficulty.py::judging_ruler`, the one anchoring fit). Its id hashes the δ themselves (`ruler.py::anchor_id_of`), so two versions that fit one scale are comparable. `entries_covering` exists for mid-round PoBB alone; everywhere else a cell the scale does not carry enters no θ and is served as `ThetaCaveat.UNMEASURED_DELTA` (`unlinked`). |
 
 ## Sanctioned `deprecated` vocabulary
 
 **Write `deprecated` only as domain language for the fatal-warning sample
-lifecycle** — `Sample.is_deprecated`, `deprecated_samples` lists,
-`RoundResult.deprecated`, `retry_of_deprecated_cache`. Those four are the
+lifecycle** — `is_deprecated`, `deprecated_samples` lists, `CellFold.deprecated`,
+`retry_of_deprecated_cache`. Those four are the
 whole set: a sample's state, never a back-compat shim (root `CLAUDE.md` § STOP).
 The word `legacy` is **never** sanctioned.
 
@@ -35,7 +35,8 @@ The word `legacy` is **never** sanctioned.
   and every term the panel retired, is argued in
   [`../../docs/specs/l4-outer-loop.md`](../../docs/specs/l4-outer-loop.md) § The measurand.
   **The estimator digest hashes `proxies`, so only what decides a cell's number lives there** —
-  an identity reader (`inner_origin.py`) sits beside it. `__init__.py` re-exports nothing — import
+  an identity reader (`inner_origin.py`) and the facts a row carries beside its number
+  (`inner_facts.py`) sit beside it. `__init__.py` re-exports nothing — import
   the module, never the package.
 - `export.py` — the export artifact (`cycles/{id}/export.json`): the winning prompt by field name
   plus the provenance that makes its fitness readable — the formula the number was computed under,
@@ -43,9 +44,10 @@ The word `legacy` is **never** sanctioned.
   refuses on. Pure over ONE `RoundResult`, which is what keeps it here: the projection can grow no
   file read and no session dependency. **The round it projects is the optimizer's declared pick,
   origin round included** — a campaign that never selected past it exports its origin under round
-  0, not nothing. Read the round file's `prompt_fields`, never `CycleResult.result_prompt_fields`:
-  that one is the wire-side projection. The shots ride resolved, as `few_shot_block`, because a
-  reader outside the campaign has no demo pool to resolve an id against.
+  0, not nothing. Read the round file's `prompts`, never `CycleResult.result_prompt_fields`:
+  that one is the wire-side projection. It holds one prompt per prompt node, each in its node's
+  declared order (`render(node)`); the shots ride resolved, as that node's `few_shot_block`,
+  because a reader outside the campaign has no demo pool to resolve a key against.
 - `spend.py` — tokens and money, at both arities: `TokenAccount` is ONE call's (or one row's)
   consumption, `SpendBucket` / `SpendRollup` the same account summed over a cycle. `results.py`
   imports `SpendRollup` for `CycleResult.spend` and deliberately does not re-export it. What the
@@ -64,13 +66,25 @@ The word `legacy` is **never** sanctioned.
   line** — the SSE tail and the time-ray both serve it, so a wording, a lifetime (`LIFETIME`) or
   a new record kind changes here and nowhere else.
 - `optimizer_state.py` — an optimizer's own working state: the `OptimizerState` envelope
-  (`{manifest, population, prompt_hashes, payload}`) every round's close banks — `population` the
-  bench's, the individuals the run carries — and `RoundPayload`, the base
-  each optimizer's payload subclasses IN ITS OWN PACKAGE, registered under its manifest's name
-  as `complete_registries` loads it; an unregistered one raises past every tolerant read. The bench restores it on
-  resume and fork and reads nothing inside `payload`; a reader narrows through `payload_as`.
-- `campaign.py` — `Campaign`, the frozen manifest (`campaign.json`) and single owner of the
-  frozen `CampaignConfig` snapshot.
+  (`{manifest, population, prompt_hashes, slices, outputs}`) every round banks — `population` the
+  bench's, the individuals the run carries — and `StatePart`, the base each kind of state
+  subclasses IN THE PACKAGE THAT OWNS IT through one of two scopes, `StateSlice` (carried across
+  rounds, stamped at the close) or `RoundOutput` (one round's, stamped at the election), registered
+  under its `kind` as that package imports; an unregistered kind raises past every tolerant read,
+  restamp's pruning included. `Critique` is the one kind declared here, because the bench and L4
+  read it. The bench restores the slices on resume and fork and reads none but through `slice` /
+  `output`.
+- `pool.py` — a pool is a `StateSlice` of entries of ONE kind (`BlockPool`, `DemoPool`) from ONE
+  declared `PoolSource`, banking what a reader draws: a block pool every entry in play whole, so a
+  library edit never reaches a running campaign, a demo pool the sample keys its pinned bank
+  resolves. A member declares the pools it `draws` and reads one under an `Access` (`off` ·
+  `open` · `closed`); a pool is the one part many members may write (`StatePart.writers`).
+  Seeded by a run-init member, banked like any slice, so a resume hands back the pool its round
+  named.
+- `treatment.py` — `Treatment`, what an optimizer run IS; its own module because a campaign holds
+  it and a run record's defaults pin compares it, and `campaign.py` imports `run_records.py`.
+- `campaign.py` — `Campaign`, the frozen manifest (`campaign.json`), and the `RunDeclaration` it
+  holds: the keys a layer set, never a resolved config. A head-to-head pins its `shared_part`.
 - `cycle_paths.py` — how a cycle is ADDRESSED. `CycleHop` (the `(campaign, cycle)`
   pair) and its root→leaf chain `CyclePath` are the address type for the campaign
   store *and* the served tree: a cycle_id is content-addressed on the origin and
@@ -113,14 +127,15 @@ outcome is CORRECT depends on what the payload carries:
 
 - **Reporting** — `round_diagnostics.py`'s rows. Nothing gates, scores or escalates on them, so
   every field defaults: a lost name degrades instead of killing a paid measurement.
-- **Scoring** — `ScoredCandidate`, `StopSignal`, `OptSearchPoint` and its subtree. These
+- **Scoring** — the `ArmState` models, `StopSignal`, `OptSearchPoint` and its subtree. These
   stay required. A missing field means the record cannot be vouched for, and a tolerant read
   hands back a winner prompt with a silently defaulted field — a wrong answer beats an
   unreadable one only until someone believes it.
 - **Ledger** — the `CycleRecord` arms. Tolerant by SKIP, not by default: `ledger.py::iter` logs
   a key no arm declares and drops the WHOLE line, so a field DELETE erases every record carrying
   it and nothing raises. Here pruning IS the repair — `restamp.py::_prune_record`, derived from
-  the union, so no field delete needs a migration of its own.
+  the union and, inside `optimizer_state`, from each part's registered kind, so no field delete
+  needs a migration of its own.
 
 `application/maintenance/restamp.py::check_round_closes` reports a close that no longer loads —
 a round the scan silently stops counting; PRUNING never repairs one, because it cannot restore a

@@ -80,7 +80,7 @@ function ReadCandidatesCard({ dash }: { dash: DashboardSnapshot }) {
     >
       <div className="fitness-body">
         {!areCourses && wonOnTheta && (
-          <ThetaCaveatNotice caveat={m.ability?.caveat ?? null} ability={m.ability} />
+          <ThetaCaveatNotice caveat={m.ability?.caveat ?? null} ability={m.ability?.reading} />
         )}
         {!areCourses && wonOnTheta && m.floorPinned.length > 0 && (
           <>

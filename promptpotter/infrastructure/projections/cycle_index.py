@@ -62,7 +62,10 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
         final=None if final is None else final.final,
         superseded_by=facts.superseded_by,
         rounds=[
-            IndexRound(round=n, accuracy=held.close.accuracy) for n, held in standing.rounds.items()
+            IndexRound(
+                round=n, accuracy=None if (fold := held.close.fold) is None else fold.accuracy
+            )
+            for n, held in standing.rounds.items()
         ],
         standing=standing.standing,
     )

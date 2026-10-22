@@ -102,7 +102,7 @@ export function LiveStateCard() {
           <div className="var-label">In-flight query payload</div>
           <div className={cx("payload-block", payload === null && "empty")}>
             {payload ??
-              (dash.open_sample_ids.length > 0
+              (dash.open_positions.length > 0
                 ? "in flight, payload not exposed"
                 : "no query in flight")}
           </div>
@@ -127,11 +127,11 @@ function RaceCatchUpLog({ dash }: { dash: DashboardSnapshot | null }) {
       <div className="var-label">Race catch-up (last {log.length})</div>
       <div className="payload-block">
         {log.slice().reverse().map((e, i) => {
-          const { member, round, candidate_idx: cidx, candidate_total: ctot, sample_id: sid, prior_ids: priors } = e;
+          const { member, round, label, position: sid, prior_ids: priors } = e;
           return (
             <div key={i} className="log-row">
               <span className="log-dim">
-                R{round} C{cidx + 1}/{ctot} · {member}
+                R{round} {label} · {member}
               </span>{" "}
               <span className="log-mark">↻</span> #{sid}
               {priors.length > 0 && <span className="log-dim"> — {priors.join(", ")}</span>}

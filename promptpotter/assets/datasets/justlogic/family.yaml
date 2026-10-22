@@ -78,7 +78,7 @@ campaign:
     bench: 30
     demo: 50
   optimization:
-    max_rounds: 5
+    budget: {rounds: 5}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       adaptive_queue:

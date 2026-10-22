@@ -9,7 +9,11 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.config.settings import settings
-from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
+from promptpotter.domain.candidate_diff import (
+    build_candidate_flat,
+    flatten_prompts,
+    flatten_sp_summary,
+)
 from promptpotter.domain.phase_views import (
     CandidatesGeneratedView,
     InitEnterView,
@@ -20,8 +24,13 @@ from promptpotter.domain.phase_views import (
     SpDiffView,
     WarningEntry,
 )
-from promptpotter.domain.results import RoundResult, RunStanding
-from promptpotter.domain.spend import MeteredSpend
+from promptpotter.domain.results import (
+    Proposal,
+    RoundResult,
+    RunStanding,
+    candidate_label,
+)
+from promptpotter.domain.spend import Budget, MeteredSpend
 from promptpotter.domain.wounds import collapse_reason
 from promptpotter.shared.answer_text import truncate
 
@@ -31,6 +40,7 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizers.nodes import RoundOpening
     from promptpotter.application.preflight import PreflightWarning
+    from promptpotter.domain.opt_search_point import NodePrompt
     from promptpotter.domain.sample import Sample
 
 __all__ = [
@@ -55,7 +65,6 @@ def init_enter(
     opt = config.optimization
     selected = select_optimizer(opt)
 
-    ctx.max_rounds = opt.max_rounds or 0
     ctx.patience = opt.convergence_patience
     origin_pp = session.pipeline_params or schema.to_pipeline_params()
     ctx.original_sp_flat = flatten_sp_summary(origin_pp)
@@ -69,7 +78,6 @@ def init_enter(
 
     return InitEnterView(
         warnings=tuple(WarningEntry(title=w.title, detail=w.detail) for w in warnings),
-        max_rounds=ctx.max_rounds,
         patience=ctx.patience,
         sp_budget_round=selected.round_cells(len(dataset)),
         model=selected.model(),
@@ -86,13 +94,11 @@ def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitVi
     ctx.composite_fitness_formula_short = short
     ctx.display_metric = session.scoring.display_metric
 
-    for field_name, value in cycle.opt_sp.prompt_field_dict().items():
-        if value:
-            ctx.original_sp_flat[field_name] = str(value)
+    ctx.original_sp_flat.update(flatten_prompts(cycle.opt_sp.prompts))
 
     partition = session.scoring.require_partition()
     return InitExitView(
-        origin_acc=cycle.origin_round.accuracy,
+        origin_acc=None if (fold := cycle.origin_round.fold) is None else fold.accuracy,
         cycle_id_short=(session.state.cycle_id or "?")[:12],
         samples=len(partition.search),
         bench_samples=len(partition.bench),
@@ -113,29 +119,22 @@ def propose_enter(
     round: int,
     node: str,
     opening: RoundOpening,
-    max_rounds: int | None,
+    budget_rounds: int | None,
     parent_accuracy: float | None,
     prompt_preview: str,
     model: str | None,
     pipeline_params: dict[str, Any] | None,
-    parent_prompt_fields: Mapping[str, Any],
+    parent_prompts: Mapping[str, NodePrompt],
 ) -> RoundStartView:
     # The header renders before candidates exist: it describes the parent.
     preview = prompt_preview.replace("\n", " ").strip()
     preview = "(empty)" if not preview else truncate(preview, 50, "...")
-
-    new_flat = flatten_sp_summary(pipeline_params)
-    for field_name, value in parent_prompt_fields.items():
-        if value:
-            new_flat[field_name] = str(value)
-    ctx.current_sp_flat = new_flat
-    # Per round, not only at INIT: `change-run-limits` moves the cap between rounds.
-    ctx.max_rounds = max_rounds or 0
+    ctx.current_sp_flat = flatten_sp_summary(pipeline_params) | flatten_prompts(parent_prompts)
 
     return RoundStartView(
         node=node,
         round=round,
-        max_rounds=ctx.max_rounds,
+        budget_rounds=budget_rounds,
         standing=opening.standing,
         parent_accuracy=parent_accuracy,
         prompt_preview=preview,
@@ -151,7 +150,7 @@ def propose_exit(
     *,
     round: int,
     opening: RoundOpening,
-    candidates: Sequence[dict[str, Any]],
+    proposals: Sequence[Proposal],
     collapses: Mapping[str, int],
 ) -> CandidatesGeneratedView:
     parent = ctx.current_sp_flat
@@ -160,15 +159,19 @@ def propose_exit(
         ("Parent", dict(parent)),
     ]
     clone_labels: list[str] = []
-    for c in candidates:
-        label = c["label"]
-        flat = build_candidate_flat(parent, c)
+    for i, cp in enumerate(proposals):
+        label = candidate_label(round, i)
+        flat = build_candidate_flat(
+            parent,
+            pipeline_overlay=cp.overlay,
+            prompt_flat=flatten_prompts(cp.individual.prompts),
+        )
         if flat == parent:
             clone_labels.append(label)
         columns.append((label, flat))
 
     return CandidatesGeneratedView(
-        n_candidates=len(candidates),
+        n_candidates=len(proposals),
         source="disk" if opening.replayed else "llm",
         clone_labels=tuple(clone_labels),
         sp_diff=SpDiffView(
@@ -187,19 +190,16 @@ def select_exit(ctx: ViewContext, round_result: RoundResult) -> RoundCompleteVie
     return RoundCompleteView(
         round=round_result.round,
         arms=tuple(
-            reading
-            for sc, reading in zip(
-                round_result.candidate_scores, round_result.arm_readings(), strict=True
-            )
-            if collapse_reason(sc.validation_failures) is None
+            row.reading
+            for row in round_result.ranked()
+            if collapse_reason(round_result.arms[row.reading.arm.key].validation_failures) is None
         ),
-        ended_on=round_result.label,
-        accuracy=round_result.accuracy,
-        composite_fitness=round_result.composite_fitness,
-        evaluators=dict(round_result.evaluators),
-        total=round_result.total,
+        ended_on="" if (head := round_result.head) is None else head.label,
+        fold=round_result.fold,
         improved=round_result.improved,
-        verdict_reason=round_result.verdict_reason,
+        verdict_reason=None
+        if (election := round_result.election) is None
+        else election.verdict_reason,
         composite_fitness_formula=ctx.composite_fitness_formula,
         composite_fitness_formula_short=ctx.composite_fitness_formula_short,
         display_metric=ctx.display_metric,
@@ -207,7 +207,12 @@ def select_exit(ctx: ViewContext, round_result: RoundResult) -> RoundCompleteVie
 
 
 def run_spend_view(
-    spent: MeteredSpend, *, usd_cap: float | None, token_cap: int | None
+    spent: MeteredSpend,
+    *,
+    campaign_metered: Budget,
+    usd_cap: float | None,
+    token_cap: int | None,
+    share: Budget,
 ) -> RunSpendView:
     return RunSpendView(
         billed_usd=spent.billed_usd,
@@ -216,6 +221,10 @@ def run_spend_view(
         meter=spent.meter,
         metered_usd=spent.metered_usd,
         metered_tokens=spent.metered_tokens,
+        campaign_metered_usd=campaign_metered.usd_amount,
+        campaign_metered_tokens=campaign_metered.token_amount,
         usd_cap=usd_cap,
         token_cap=token_cap,
+        usd_share=share.usd,
+        token_share=share.tokens,
     )

@@ -4,7 +4,14 @@ export type { DashboardSample };
 
 export type SampleStatus = DashboardSample["status"];
 
-type Shown = "sample_id" | "cached" | "query" | "predicted" | "status" | "ground_truth_text";
+type Shown =
+  | "position"
+  | "sample_key"
+  | "cached"
+  | "query"
+  | "predicted"
+  | "status"
+  | "ground_truth_text";
 
 export type SampleRow = Pick<DashboardSample, Shown> & {
   key: string;

@@ -23,7 +23,7 @@ const EMPTY: ConnectorView = {
   backendType: null,
   selfOptimization: false,
   optimizer: null,
-  optimizerKnobs: null,
+  optimizerSetup: null,
   view: null,
   schema: { status: "unbound", config: null, output: null, isSingleNode: false },
   active: null,
@@ -89,7 +89,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
       backendType: resp.backend_type,
       selfOptimization: resp.self_optimization,
       optimizer: resp.optimizer,
-      optimizerKnobs: resp.optimizer_knobs,
+      optimizerSetup: resp.optimizer_setup,
       view: resp.view,
       schema: {
         status: pipelineStatus,

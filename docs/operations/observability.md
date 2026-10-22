@@ -16,7 +16,7 @@ Phase events (the bench's `domain/phases.py::CampaignPhase`, and each optimizer'
 
 ## The wall clock, and where the claim stops
 
-`index.json::final.wall_clock` is the cycle's own clock, folded from the ledger at finalize (`ledger_scan.py::scan_ledger_wall_clock`) and rendered by `review.md` § Wall clock. It is banked rather than derived on read because no round file carries a timestamp and the records it is folded from are compactable. **A resumed cycle's clock is its LAST launch's** — a round an earlier launch closed carries no seconds rather than a wrong number, so a result quoting a clock quotes an unbroken run. **A campaign's clock is its result's** (`campaigns/{id}/result.json::cost.launches`): one clock per launch, folded across every cycle that launch ran on the campaign's line, and `ArmCost.worked_s` sums them less each launch's origin gate and unworked time — the number a head-to-head prices a lift in.
+`index.json::final.wall_clock` is the cycle's own clock, folded from the ledger at finalize (`ledger_scan.py::scan_ledger_wall_clock`) and rendered by `review.md` § Wall clock. It is banked rather than derived on read because no round file carries a timestamp and the records it is folded from are compactable. **A resumed cycle's clock is its LAST launch's** — a round an earlier launch closed carries no seconds rather than a wrong number, so a result quoting a clock quotes an unbroken run. **A campaign's clock is its result's** (`campaigns/{id}/result.json::launches`): one clock per launch, folded across every cycle that launch ran on the campaign's line, and `domain/campaign.py::worked_seconds` sums them less each launch's origin gate and unworked time — the number a head-to-head prices a lift in. **A launch's clock is also a budget axis** (`Budget.wall_clock_s`): it starts afresh at every launch, and a remote cell still open at its edge is cut, the run stopping `wall_clock`.
 
 **Two denominators, and they are not interchangeable.** `phase_s` is CLOCK, keyed by phase: the brackets do not nest, so the legs sum and each is a real share of `elapsed_s`. `worked_s` is summed CALL time per spend bucket and billing node, off `TokenUsageRecord.duration_s`: concurrent cells overshoot the clock and replayed calls are excluded, so it says what the search *worked*, never what share of the run a node held. Quote `phase_s` for a share; quote `worked_s` for a cost.
 
@@ -92,7 +92,7 @@ Suppressing `↩` under a fatal warning is load-bearing: a fatal warning means t
 
 In `cycles/{cycle_id}/rounds/round_NNNN.json`:
 
-- `optimizer_state.payload.memory.steer.l1_generate.config` — everything L2 moved, as one node overlay: `layout` (the per-slot signal names, whole) and the call settings (`temperature`, `n_variants`). **The** thing to read: a fire that changed nothing here bought nothing (`review.md`'s `l2_targets_l1_surface`).
+- `optimizer_state.slices.l2_memory.steer.l1_generate.config` — everything L2 moved, as one node overlay: `layout` (the per-slot signal names, whole) and the call settings (`temperature`, `n_variants`). **The** thing to read: a fire that changed nothing here bought nothing (`review.md`'s `l2_targets_l1_surface`).
 
 In its audit twin `cycles/{cycle_id}/.runtime/cache/rounds/round_NNNN.json` — the round file carries no `nodes`:
 

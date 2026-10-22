@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.pipeline_resolve import defaults_drift
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
@@ -28,6 +29,7 @@ from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     bind_spend_book,
+    bound_spend_book,
     reset_spend_book,
 )
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
@@ -47,7 +49,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.phase_views import RunSpendView
-    from promptpotter.domain.results import CandidateProposal
+    from promptpotter.domain.results import Proposal
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +70,7 @@ def declare_running(session: Session) -> None:
         ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
 
 
-def declare_gate(
-    session: Session, gate: GateKind, *, drafts: Sequence[CandidateProposal] = ()
-) -> None:
+def declare_gate(session: Session, gate: GateKind, *, drafts: Sequence[Proposal] = ()) -> None:
     ledger = session.state.ledger
     if ledger is not None:
         ledger.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate=gate, drafts=list(drafts)))
@@ -96,11 +96,7 @@ def declare_run_stop(
 
 def run_limits_from(config: CampaignConfig) -> RunLimits:
     opt = config.optimization
-    return RunLimits(
-        max_rounds=opt.max_rounds or None,
-        ceiling=opt.ceiling,
-        optimizer=list(select_optimizer(opt).limits),
-    )
+    return RunLimits(budget=opt.budget, optimizer=list(select_optimizer(opt).limits))
 
 
 def declare_run_wiring(
@@ -112,10 +108,12 @@ def declare_run_wiring(
 ) -> None:
     """The one writer of ``RunWiringRecord``; a mint passes no *tracing* — no launch has opened one."""
     selected = select_optimizer(campaign_config.optimization)
+    campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
+    assert campaign is not None, "a run is wired on a campaign its session is bound to"
     ledger.append(
         RunWiringRecord(
             arms_per_round=selected.arms_per_round,
-            sp_budget_round=selected.round_cells(len(session.samples)),
+            sp_budget_round=selected.round_cells(len(session.bank.samples)),
             display_metric=campaign_config.display_metric,
             elects_on=selected.elects_on,
             max_cells_in_flight=session.backend_client.max_cells_in_flight,
@@ -125,6 +123,7 @@ def declare_run_wiring(
             if tracing is None
             else langfuse_trace_url(tracing.langfuse_trace_id()),
             run_limits=run_limits_from(campaign_config),
+            defaults_drift=defaults_drift(campaign),
         )
     )
 
@@ -144,12 +143,15 @@ class RunObservers:
     def arm_spend_book(self, book: SpendBook) -> None:
         ledger = self.callbacks.ledger
         ledger.bind(book)
-        # A nested run (an L4 inner cell) admits nothing here: its sends stay on the ROOT's ceiling.
-        if instrument_depth() == 0:
-            book.ledger = ledger
-            if self._book_tokens:
-                reset_spend_book(self._book_tokens.pop())
-            self._book_tokens.append(bind_spend_book(book))
+        book.ledger = ledger
+        if self._book_tokens:
+            reset_spend_book(self._book_tokens.pop())
+        # A nested run (an L4 inner cell) admits each send against its own book AND its root's.
+        if instrument_depth() > 0:
+            book.enclosing = bound_spend_book()
+            if book.enclosing is None:
+                raise RuntimeError("a nested run spends only under its enclosing run's book")
+        self._book_tokens.append(bind_spend_book(book))
         unreported = book.take_up(ledger)
         if unreported.sends:
             logger.warning(
@@ -188,7 +190,7 @@ def build_run_observers(
     if session.state.cycle_id is None:
         raise RuntimeError(
             "build_run_observers: session must already be minted via "
-            "jobs.mint.prepare_fresh_cycle — it needs a cycle_id"
+            "jobs.mint.mint — it needs a cycle_id"
         )
 
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
@@ -209,7 +211,7 @@ def build_run_observers(
     if forked_from is not None:
         # The line moved onto this cycle; the one it left is no longer this process's.
         release_cycle(forked_from.cycle_dir)
-        # A fork's config is already admitted; a first build waits for `_prepare_run` to settle it.
+        # A fork's config is already admitted; a first build waits for `prepare_run` to settle it.
         declare_run_wiring(
             session, campaign_config, observers.callbacks.ledger, tracing=observers.tracing
         )

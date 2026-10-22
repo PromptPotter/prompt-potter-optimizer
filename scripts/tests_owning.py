@@ -19,6 +19,9 @@ EVERY_TEST = f"{TESTS}/"
 RECORD = REPO / ".pytest_cache" / "tests_owning.json"
 # A fifth above the whole suite's measured peak: drift passes, a growth of one fifth does not.
 CEILING_MB = 197
+# Package modules the widest journey RAN: one that wires the whole engine to reach one decision
+# is the churn every reshape pays. Equality, like the ledger: a move is re-pinned with its reason.
+WIDEST_JOURNEY_MODULES = 136
 
 
 def _peak_mb() -> int:
@@ -313,15 +316,16 @@ def _record(pytest_args: list[str]) -> int:
         for paths in (opened, listed)
     )
     package = set(before)
+    reached = {
+        node: sorted(rel for f in files if (rel := _rel(f)) in package)
+        for node, files in sorted(ran.items())
+    }
     RECORD.parent.mkdir(exist_ok=True)
     RECORD.write_text(
         json.dumps(
             {
                 "files": before,
-                "ran": {
-                    node: sorted(rel for f in files if (rel := _rel(f)) in package)
-                    for node, files in sorted(ran.items())
-                },
+                "ran": reached,
                 "opened": sorted(inside - package),
                 "listed": sorted(scanned),
             },
@@ -329,10 +333,19 @@ def _record(pytest_args: list[str]) -> int:
         ),
         "utf-8",
     )
+    failed = []
     if (peak := _peak_mb()) > CEILING_MB:
-        print(f"tests_owning: the suite peaked at {peak} MB, over its {CEILING_MB} MB ceiling.")
-        return 1
-    return code
+        failed.append(f"the suite peaked at {peak} MB, over its {CEILING_MB} MB ceiling")
+    widest = max(sum(rel.startswith(f"{PACKAGE}/") for rel in rels) for rels in reached.values())
+    if widest != WIDEST_JOURNEY_MODULES:
+        failed.append(
+            f"the widest journey ran {widest} package modules, not WIDEST_JOURNEY_MODULES = "
+            f"{WIDEST_JOURNEY_MODULES}: split a sprawl along a production seam, or re-pin it "
+            "with its reason in the commit body"
+        )
+    for line in failed:
+        print(f"tests_owning: {line}.")
+    return int(bool(failed))
 
 
 def main(argv: list[str]) -> int:

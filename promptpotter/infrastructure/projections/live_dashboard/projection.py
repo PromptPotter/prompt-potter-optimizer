@@ -9,6 +9,7 @@ from typing import assert_never
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.dashboard_rows import RoundSummary
+from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phase_views import (
     BenchEnterView,
     BenchGradedView,
@@ -20,15 +21,12 @@ from promptpotter.domain.phase_views import (
     RoundStartView,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, DashboardState, RunPhase
-from promptpotter.domain.results import ArmAbility, candidate_label
+from promptpotter.domain.results import Concluded, Measuring
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
-from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import (
+    ArmRecord,
     BackendWarningRecord,
-    CandidateMintedRecord,
-    CandidateScoredRecord,
-    CandidateStartedRecord,
     CycleRecord,
     ElectionRecord,
     ErrorRecord,
@@ -47,7 +45,6 @@ from promptpotter.domain.run_records import (
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
-    SampleOrderRecord,
     SampleScoredRecord,
     SampleStartedRecord,
     TokenUsageRecord,
@@ -74,7 +71,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_st
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.measurement_context import NO_ROUND_SLOT
 
 logger = logging.getLogger(__name__)
 
@@ -112,10 +108,9 @@ class LiveDashboardProjection(Projection):
         self.short_formula_template: str | None = None
         self._buffer = RoundBuffer()
         self._closed: dict[int, RoundClosedRecord] = {}
-        self._open_samples: dict[int, tuple[str, int, int, int]] = {}
-        self._bench_labels: dict[tuple[int, str], str] = {}
+        self._open_samples: dict[int, tuple[str, ArmKey | None, int]] = {}
         self._bench_readings: dict[int, BenchReading] = {}
-        self._around_bench: tuple[DashboardState, str | None, str] | None = None
+        self._around_bench: tuple[DashboardState, str | None, ArmName | None] | None = None
         self._flight: tuple[int, int, int] = (0, 0, 0)
         self._affordable: int | None = None
         self._cell_reserve_usd: float | None = None
@@ -217,7 +212,7 @@ class LiveDashboardProjection(Projection):
         if record.run_phase == RunPhase.TERMINAL:
             self.state.stop_reason = record.stop_reason
             self._set_state(DashboardState.STOPPED)
-            self.state.candidate = ""
+            self.state.measuring_arm = None
         self._flush_pending_persist()
 
     def _handle_backend_warning(self, record: BackendWarningRecord) -> None:
@@ -246,7 +241,8 @@ class LiveDashboardProjection(Projection):
         self._flush_pending_persist()
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
-        self._move_to_round(record.round)
+        self.state.round = record.round
+        self._buffer.enter(record)
         self._flush_pending_persist()
 
     def _move_to_round(self, round_num: int | None) -> None:
@@ -257,11 +253,7 @@ class LiveDashboardProjection(Projection):
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
         self._closed[record.round] = record
-        if (ability := record.ability) is not None:
-            self.state.rounds = [
-                self._restamp_ability(r, ability) if r.round == record.round else r
-                for r in self.state.rounds
-            ]
+        self.state.level_series = record.level_series
         self._flush_pending_persist()
 
     def _handle_round_standing(self, record: RoundStandingRecord) -> None:
@@ -279,7 +271,7 @@ class LiveDashboardProjection(Projection):
         view = record.view
         if record.phase == CampaignPhase.BENCH and record.event == "enter":
             # Stopped included: `grade-bench` opens a pass outside any run, and its exit hands the state back.
-            self._around_bench = (s.state, s.optimizer_step, s.candidate)
+            self._around_bench = (s.state, s.optimizer_step, s.measuring_arm)
             self._set_state(DashboardState.BENCH)
         elif record.event == "enter" and s.state != DashboardState.STOPPED:
             mapped = _PHASE_TO_STATE.get(record.phase)
@@ -301,9 +293,9 @@ class LiveDashboardProjection(Projection):
             case OptimizerStepEnterView():
                 self._step_node = view.node
             case BenchEnterView():
-                self._bench_labels[view.round, view.sp_hash] = view.label
                 s.bench_pass = BenchPassProgress(
                     subject=view.subject,
+                    arm=view.arm,
                     label=view.label,
                     sp_hash=view.sp_hash,
                     round=view.round,
@@ -317,33 +309,32 @@ class LiveDashboardProjection(Projection):
                         self._place_bench(reading)
             case BenchGradedView():
                 if (reading := view.reading) is not None:
-                    self._bench_labels[reading.round, reading.sp_hash] = view.label
                     self._place_bench(reading)
         if record.phase == CampaignPhase.BENCH and record.event == "exit":
             s.bench_pass = None
             if (around := self._around_bench) is not None:
                 self._around_bench = None
-                state, step, s.candidate = around
+                state, step, s.measuring_arm = around
                 self._set_state(state, step=step)
         self._flush_pending_persist()
 
     def _handle_election(self, record: ElectionRecord) -> None:
-        self._buffer.mark_selected(record.selected_labels)
-        self._buffer.stamp_fit(record.fit)
+        self._buffer.election = record
         self._flush_pending_persist()
 
-    def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None:
+    def _handle_arm(self, record: ArmRecord) -> None:
+        self._buffer.announce(record)
         if record.round != self._buffer.round_num:
-            logger.warning(
-                "candidate_minted for round %d reached a buffer holding round %d — not seeded",
-                record.round,
-                self._buffer.round_num,
-            )
             return
-        slot = self._buffer.slot(record.idx)
-        slot.changes_description = record.lineage.changes_description
-        slot.candidate_id = record.candidate_id
-        self._flush_pending_persist()
+        # A walk ending: a sample launched INTO an armed window is a discard; one left open at depth 1 failed on its own.
+        if isinstance(record.state, Concluded) and self._open_samples:
+            self.state.sample_lookahead_discards += sum(
+                1 for *_, depth in self._open_samples.values() if depth > 1
+            )
+            self._open_samples.clear()
+        if isinstance(record.state, Measuring) and record.state.sample_order:
+            self.state.declared_sample_order = record.state.sample_order
+        self._schedule_persist()
 
     def _place_bench(self, reading: BenchReading) -> None:
         # Kept, not only applied: the origin's reading lands before round 0's summary exists.
@@ -354,7 +345,6 @@ class LiveDashboardProjection(Projection):
         reading = self._bench_readings.get(r.round)
         if reading is None:
             return r
-        label = self._bench_labels.get((reading.round, reading.sp_hash))
         return r.model_copy(
             update={
                 "bench": reading,
@@ -362,43 +352,17 @@ class LiveDashboardProjection(Projection):
                     c.model_copy(
                         update={"reading": c.reading.model_copy(update={"bench": reading})}
                     )
-                    if c.reading.arm.label == label
+                    if c.reading.sp_hash == reading.sp_hash
                     else c
                     for c in r.candidates
                 ],
             }
         )
 
-    @staticmethod
-    def _restamp_ability(r: RoundSummary, ability: AbilityReading) -> RoundSummary:
-        """Round 0's θ IS its one candidate's; later rounds are stamped per candidate at the election."""
-        candidates = (
-            [
-                c.model_copy(
-                    update={
-                        "reading": c.reading.model_copy(
-                            update={
-                                "ability": ArmAbility.of(
-                                    ability.theta,
-                                    ability.se,
-                                    None if c.reading.ability is None else c.reading.ability.caveat,
-                                )
-                            }
-                        )
-                    }
-                )
-                for c in r.candidates
-            ]
-            if r.round == 0
-            else r.candidates
-        )
-        return r.model_copy(update={"ability": ability, "candidates": candidates})
-
     def _handle_sample_started(self, record: SampleStartedRecord) -> None:
-        self._open_samples[record.sample_id] = (
+        self._open_samples[record.position] = (
             record.query_preview,
-            record.candidate_idx,
-            record.candidate_total,
+            record.arm,
             record.sample_lookahead,
         )
         self._refresh_open_sample_markers()
@@ -407,14 +371,11 @@ class LiveDashboardProjection(Projection):
         self._schedule_persist()
 
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
-        facts, grade = record.result.facts, record.result.grade
-        ci, ct = record.candidate_idx, record.candidate_total
         qi, qt = record.sample_idx or 0, record.sample_total or 0
-        self._open_samples.pop(facts.sample_id, None)
-        self._absorb_sample_scored(facts, last_in_candidate=(qi + 1 >= qt))
-        if ci != NO_ROUND_SLOT:
-            self._buffer.append_sample(ci, ct, qt, facts, grade, record.running)
-        elif (bench_pass := self.state.bench_pass) is not None:
+        self._open_samples.pop(record.position, None)
+        self._absorb_sample_scored(record.result.facts, last_in_candidate=(qi + 1 >= qt))
+        # A pass no arm walks (a bench pass, a verify) moves the run's scalars, never the round's arms.
+        if self._buffer.take(record) is None and (bench_pass := self.state.bench_pass) is not None:
             self.state.bench_pass = bench_pass.model_copy(
                 update={
                     "scored": bench_pass.scored + 1,
@@ -423,29 +384,9 @@ class LiveDashboardProjection(Projection):
             )
         self._schedule_persist()
 
-    def _handle_candidate_started(self, record: CandidateStartedRecord) -> None:
-        self._buffer.seed_candidate(record)
-        self._schedule_persist()
-
-    def _handle_candidate_scored(self, record: CandidateScoredRecord) -> None:
-        # Only a sample launched INTO an armed window is a discard: one left open at depth 1 failed on its own.
-        if self._open_samples:
-            self.state.sample_lookahead_discards += sum(
-                1 for *_, depth in self._open_samples.values() if depth > 1
-            )
-            self._open_samples.clear()
-        self._buffer.set_candidate_scores(
-            record.candidate_idx, record.candidate_total, record.scores
-        )
-        self._schedule_persist()
-
-    def _handle_sample_order(self, record: SampleOrderRecord) -> None:
-        self.state.declared_sample_order = record.sample_order
-        self._schedule_persist()
-
     def _handle_race_standing(self, record: RaceStandingRecord) -> None:
         self._buffer.record_race_standing(
-            record.member, record.current_id, record.n_samples, record.p_best
+            record.member, record.current, record.n_samples, record.p_best
         )
         self._schedule_persist()
 
@@ -454,7 +395,7 @@ class LiveDashboardProjection(Projection):
         self._affordable = record.affordable
         self._cell_reserve_usd = record.cell_usd
         waiting = record.waiting
-        self._waiting = None if waiting is None else (waiting.sample_id, waiting.since)
+        self._waiting = None if waiting is None else (waiting.position, waiting.since)
         self._schedule_persist()
 
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None:
@@ -462,9 +403,9 @@ class LiveDashboardProjection(Projection):
             CatchUpLogEntry(
                 member=record.member,
                 round=record.round,
-                candidate_idx=record.candidate_idx,
-                candidate_total=record.candidate_total,
-                sample_id=record.sample_id,
+                arm=record.arm,
+                label=self._buffer.label(record.arm),
+                position=record.position,
                 prior_ids=record.prior_ids,
             )
         )
@@ -474,14 +415,14 @@ class LiveDashboardProjection(Projection):
         s = self.state
         if not self._open_samples:
             s.current_query_payload = None
-            s.current_sample_id = None
-            s.open_sample_ids = []
+            s.current_position = None
+            s.open_positions = []
             return
-        sid, (query_text, ci, _ct, _depth) = next(iter(self._open_samples.items()))
+        sid, (query_text, arm, _depth) = next(iter(self._open_samples.items()))
         s.current_query_payload = query_text
-        s.current_sample_id = sid
-        s.open_sample_ids = list(self._open_samples)
-        s.candidate = "reference" if ci == NO_ROUND_SLOT else candidate_label(s.round, ci)
+        s.current_position = sid
+        s.open_positions = list(self._open_samples)
+        s.measuring_arm = None if arm is None else self._buffer.name(arm)
 
     def _absorb_sample_scored(self, facts: MeasuredCell, *, last_in_candidate: bool) -> None:
         s = self.state
@@ -612,8 +553,8 @@ class LiveDashboardProjection(Projection):
             candidates=build_candidate_rows(self._buffer, self.short_formula_template),
             fitness_bands=fitness_bands(
                 GradedCell.of(s.facts, s.grade)
-                for slot in self._buffer.candidates.values()
-                for s in slot.samples
+                for walked in self._buffer.samples.values()
+                for s in walked
             ),
             nodes=self._current_round_nodes(),
             racing=build_racing_block(self._buffer),
@@ -631,8 +572,8 @@ class LiveDashboardProjection(Projection):
         if self._waiting is None or opened is None:
             s.waiting_on, s.waiting_since = None, None
         else:
-            ci = opened[1]
-            owner = "reference" if ci == NO_ROUND_SLOT else candidate_label(s.round, ci)
+            arm = opened[1]
+            owner = "pass" if arm is None else self._buffer.label(arm)
             s.waiting_on = f"{owner} · sample {self._waiting[0]}"
             s.waiting_since = self._waiting[1]
         # The field holds one sender: the episode that has held longest.
@@ -662,6 +603,7 @@ def resolve_resume_state(
             "rounds": surviving,
             "round": max(prior.round, max(standing.rounds, default=0)),
             "run_standing": standing.standing,
+            "level_series": standing.level_series,
         }
     )
 

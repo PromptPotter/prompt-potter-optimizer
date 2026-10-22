@@ -54,7 +54,7 @@ class RaisedCommand(StrictModel):
 
 
 class OriginResolution(StrictModel):
-    """The checklist state ``cache.json::resolution`` holds, and the last resolver turn beside it."""
+    """The checklist state ``checkin.json::resolution`` holds, and the last resolver turn beside it."""
 
     complete: bool
     provenance: dict[str, Provenance]
@@ -220,8 +220,9 @@ def origin_projection(draft: DraftCampaign) -> dict[str, Any]:
     ):
         if draft.field_provenance.get(field_key) is Provenance.CONFIRMED:
             projection[field_key] = value
-    for name, text in draft.committed_prompt_fields().items():
-        projection[f"prompt.{name}"] = text
+    for step, fields in draft.committed_prompts().items():
+        for name, text in fields.items():
+            projection[f"prompt.{step}.{name}"] = text
     return projection
 
 
@@ -246,14 +247,14 @@ def resolution_block(draft: DraftCampaign) -> OriginResolution:
 def save_checkin_draft(
     stores: Stores, draft: DraftCampaign, *, resolution: OriginResolution | None = None
 ) -> DraftCampaign:
-    stores.checkin.write_draft(draft.draft_id, draft.to_disk())
+    stores.drafts.write_draft(draft.draft_id, draft.to_disk())
     block = resolution or resolution_block(draft)
-    stores.checkin.write_resolution(draft.draft_id, block.model_dump(mode="json"))
+    stores.drafts.write_resolution(draft.draft_id, block.model_dump(mode="json"))
     return draft
 
 
 def load_resolution(stores: Stores, draft: DraftCampaign) -> OriginResolution:
-    block = (stores.checkin.load_bank(draft.draft_id) or {}).get("resolution")
+    block = stores.drafts.load_resolution(draft.draft_id)
     return OriginResolution.model_validate(block) if block else resolution_block(draft)
 
 

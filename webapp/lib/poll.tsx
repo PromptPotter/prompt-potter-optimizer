@@ -14,7 +14,7 @@ import { reportIncident } from "@/lib/diagnostics";
 import { dashboardRead, isWarming, rayRead } from "./api";
 import { encodeCyclePath, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
-import type { LiveCandidate, RayItem, ServedDashboard } from "./api/types";
+import type { ArmName, LiveCandidate, RayItem, ServedDashboard } from "./api/types";
 import { shownData, useRead } from "./hooks/useRead";
 import { invalidateReads, readThrough } from "./read-cache";
 import { useWorkspace } from "./workspace";
@@ -31,9 +31,12 @@ export function liveCandidates(dash: DashboardSnapshot | null): LiveCandidate[] 
   return dash?.current_round.candidates ?? NO_ROWS;
 }
 
-export function liveCandidate(dash: DashboardSnapshot | null, label: string): LiveCandidate | null {
-  if (!label) return null;
-  return liveCandidates(dash).find((c) => c.reading.arm.label === label) ?? null;
+export function liveCandidate(
+  dash: DashboardSnapshot | null,
+  key: string | null,
+): LiveCandidate | null {
+  if (!key) return null;
+  return liveCandidates(dash).find((c) => c.reading.arm.key === key) ?? null;
 }
 
 export function isMeasuring(dash: DashboardSnapshot | null): boolean {
@@ -41,10 +44,10 @@ export function isMeasuring(dash: DashboardSnapshot | null): boolean {
   return cr?.measurement_node != null && cr.active_node === cr.measurement_node;
 }
 
-// The served `dash.candidate` is a label, and goes stale between rounds.
-export function measuringLabel(dash: DashboardSnapshot | null): string | null {
+// The served `dash.measuring_arm` goes stale between rounds.
+export function measuringArm(dash: DashboardSnapshot | null): ArmName | null {
   if (!dash || !isMeasuring(dash)) return null;
-  return dash.candidate || null;
+  return dash.measuring_arm;
 }
 
 export interface CycleStreamState {

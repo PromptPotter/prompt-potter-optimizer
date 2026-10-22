@@ -3,27 +3,28 @@
 from __future__ import annotations
 
 import enum
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimizers.potter.records import L2L3Memory, Ladder
+from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import CritiqueReadout
-from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import ArmOutcome, RoundResult
+from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+from promptpotter.domain.pool import EARNED_SOURCE, Access, PoolEntry
+from promptpotter.domain.results import CutKind, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.value_tree import Delivery
+from promptpotter.domain.wounds import RuntimeFailure
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
-    from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
     from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
     from promptpotter.application.runner.inner.tasks import InnerCells
 
@@ -95,6 +96,12 @@ ANSWER_LABEL_STEM = 40
 ANSWER_TALLY_ROWS = 5
 DEMO_POOL_RENDER_CAP = 12
 DEMO_QUERY_STEM = 80
+# Per field under `open`, earned blocks included; the rest rotate in by round. `closed` shows its enum whole.
+BLOCK_POOL_RENDER_CAP = 8
+BLOCK_ID_INSTRUCTION = (
+    "Per prompt node, its pooled fields: {node: {field: the id of a block the PROMPT BLOCK POOL "
+    "panel lists for that field}}."
+)
 
 
 class InjectionKind(enum.StrEnum):
@@ -133,7 +140,7 @@ class CycleSlice:
     # `frozen` | `adaptive`, resolved once: a renderer deriving it disagrees with the sampler.
     subset_mode: str | None = None
     sp_budget_round: int | None = None
-    max_rounds: int | None = None
+    budget_rounds: int | None = None
     spend_budget_usd: float | None = None
     # What the cap has counted — a FLOOR while unpriced tokens are outstanding, never "spent".
     spend_used_usd: float | None = None
@@ -141,51 +148,55 @@ class CycleSlice:
 
 @dataclass(frozen=True)
 class ArmDigest:
-    """Deliberately not `ScoredCandidate`: a panel that can reach a rival's whole prompt will quote it."""
+    """Deliberately not the arm's state: a panel that can reach a rival's whole prompt will quote it."""
 
     label: str
     mean_fitness_ci_lo: float | None
     mean_fitness_ci_hi: float | None
     scored_samples: int
     expected_samples: int
-    outcome: ArmOutcome
+    # `None`: measured, the panel run out or locked in.
+    cut: CutKind | None
     gate: EliminationGate | None
 
 
 @dataclass(frozen=True)
 class RoundDigest:
-    """One round's readouts; the FAILURE renderers read ``bundle.memory``, which accumulates across rounds."""
+    """One round's readouts; the FAILURE renderers read the layers' memories and ``bundle.runtime_failures``, which accumulate across rounds."""
 
     diagnostics: RoundDiagnostics | None
     critique: CritiqueReadout | None
-    l1_yield: float = 1.0
+    # `L1Readout.l1_yield`: `None` where nothing was proposed.
+    l1_yield: float | None = None
+    # `None` where the round's generation parsed, or made no call.
+    l1_parse_failure: str | None = None
     node_failure_rates: dict[str, float] = field(default_factory=dict)
-    latest_sample_ids: frozenset[int] = field(default_factory=frozenset)
-    prev_sample_ids: frozenset[int] = field(default_factory=frozenset)
+    latest_sample_keys: frozenset[str] = field(default_factory=frozenset)
+    prev_sample_keys: frozenset[str] = field(default_factory=frozenset)
     composite_fitness: float | None = None
     evaluators: dict[str, float] = field(default_factory=dict)
     ability: AbilityReading | None = None
-    # The two counts `ability.caveat` was decided on (`bench/difficulty.py::StampedReading`).
-    unlinked: int = 0
-    pinned_share: float | None = None
     arms: tuple[ArmDigest, ...] = ()
 
 
 @dataclass(frozen=True)
 class InjectionBundle:
     opt_sp: OptSearchPoint
-    memory: L2L3Memory
+    l2: L2Memory
+    l3: L3Memory
     framing: TaskDecomposition
     pipeline_schema: PipelineSchema | None
     cycle_slice: CycleSlice
     digest: RoundDigest
     axes: AxisIndex | None
-    prompt_block_catalogue: PromptBlockCatalogue
+    block_access: Access
     rebase_capability: bool
     terminate_capability: bool
     schema_field_rename: bool
-    # 0 silences the shot menu as an empty `demo_pool` does, withdrawing the `shot_ids` slot.
+    # 0 silences the shot menu as an empty `demo_pool` does, withdrawing the `shots` slot.
     shot_k_max: int
+    # Each sample's slot in the cycle's bank: the `[#id]` a panel marks a row by.
+    slot_of: Mapping[str, int]
     origin_per_sample: CellSheet = field(default_factory=lambda: CellSheet(""))
     # Hits included: a pipeline collapsed onto one label shows only against the labels it is NOT emitting.
     trajectory_results: Sequence[GradedCell] = ()
@@ -193,19 +204,42 @@ class InjectionBundle:
     ruler: DeltaRuler | None = None
     # The round under render LAST.
     measured_rounds: list[RoundResult] = field(default_factory=list)
-    # Empty falls back to the task-agnostic block set.
-    earned_blocks: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # The block pool's entries by field, in its draw order; none under `off`.
+    blocks: Mapping[str, tuple[PoolEntry, ...]] = field(default_factory=dict)
+    # Sibling forks' and this cycle's, each distinct config once (`Cycle.runtime_failures`).
+    runtime_failures: tuple[RuntimeFailure, ...] = ()
     # L1 panels rendering nothing for this bundle: L2's layout menu and wire enum leave them out.
     silent_l1_panels: frozenset[str] = frozenset()
     measured_unit: MeasuredUnit = "sample"
     prompt_delivery: Delivery = "request"
+    # What a variant's shots may be drawn from; `demo_split` resolves the shots an individual already holds.
     demo_pool: tuple[Sample, ...] = ()
+    demo_split: tuple[Sample, ...] = ()
     # `None` off the L4 recursion; each outer node's manifest is `InnerCells.owners`'.
     inner_cells: InnerCells | None = None
 
     @property
+    def prompt_nodes(self) -> list[PipelineNode]:
+        return [] if self.pipeline_schema is None else self.pipeline_schema.prompt_nodes()
+
+    @property
     def offers_shots(self) -> bool:
-        return bool(self.demo_pool) and self.shot_k_max > 0
+        return bool(self.demo_pool and self.prompt_nodes) and self.shot_k_max > 0
+
+    def block_window(self) -> dict[str, tuple[PoolEntry, ...]]:
+        """By field a prompt node opens, what the panel shows: under ``closed`` the active subset whole, its wire's enum; under ``open`` earned blocks, then a window rotating by round."""
+        opened = {name for node in self.prompt_nodes for name in node.open_prompt_fields}
+        if self.block_access == "closed":
+            return {name: held for name, held in self.blocks.items() if name in opened}
+        out: dict[str, tuple[PoolEntry, ...]] = {}
+        for name, blocks in self.blocks.items():
+            earned = [b for b in blocks if b.group[1] == EARNED_SOURCE]
+            rest = [b for b in blocks if b.group[1] != EARNED_SOURCE]
+            k = min(max(BLOCK_POOL_RENDER_CAP - len(earned), 0), len(rest))
+            start = (self.cycle_slice.round_num - 1) * k % len(rest) if rest else 0
+            if name in opened and (window := (*earned, *(rest[start:] + rest[:start])[:k])):
+                out[name] = window
+        return out
 
 
 @dataclass(frozen=True)
@@ -246,6 +280,8 @@ __all__ = [
     "ANSWER_LABEL_STEM",
     "ANSWER_TALLY_ROWS",
     "AXES_ENUM_PREVIEW",
+    "BLOCK_ID_INSTRUCTION",
+    "BLOCK_POOL_RENDER_CAP",
     "DEMO_POOL_RENDER_CAP",
     "DEMO_QUERY_STEM",
     "INNER_NARRATIVE_CAP",

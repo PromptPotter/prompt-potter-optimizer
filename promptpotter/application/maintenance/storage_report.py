@@ -9,10 +9,11 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
+from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import iter_files, read_json_tolerant
-from promptpotter.infrastructure.store.layout import SHARED_CACHE_DIRS, FileKind, classify
+from promptpotter.infrastructure.store.layout import ArchiveHomeOwner, FileKind, classify
 from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 
 if TYPE_CHECKING:
@@ -136,7 +137,7 @@ class DatasetStorageResponse(StrictModel):
 
 
 def storage_by_dataset(stores: Stores) -> DatasetStorageResponse:
-    """The shared measurement store is excluded: it is filed by content, owned by no dataset."""
+    """The archive home is excluded: it is filed by content, owned by no dataset."""
     by_dataset: dict[str, dict[str, int]] = {}
     for campaign, split in _owned_campaign_splits(stores):
         acc = by_dataset.setdefault(campaign.dataset_name, dict.fromkeys(_LEAVES, 0))
@@ -168,12 +169,21 @@ class WorkspaceStorageEntry(StrictModel):
 
 class WorkspaceStorageResponse(StrictModel):
     total_bytes: int = Field(
-        description="The tenant's real on-disk total — campaigns + caches + other"
+        description="What this account holds on disk — campaigns + other, + the archive home "
+        "when the account owns it"
     )
-    shared_cache_bytes: int = Field(
-        description="Cross-campaign reuse caches ("
+    archive_home_id: str = Field(
+        description="The archive home this account files into and replays from: its own tenant "
+        "id, or the install's shared archive"
+    )
+    archive_home_owner: ArchiveHomeOwner = Field(
+        description="`tenant`: the account's own home, counted in `total_bytes`; `install`: one "
+        "every account on the install shares, counted in no account's total"
+    )
+    archive_home_bytes: int = Field(
+        description="The home's cross-campaign reuse caches ("
         + ", ".join(f"{d}/" for d in SHARED_CACHE_DIRS)
-        + ") — survive delete"
+        + ") — survive delete; under an install-owned home, every account's"
     )
     other_bytes: int = Field(
         description="Everything else under the tenant: sessions, workspace ledger, dataset/backend stores"
@@ -199,13 +209,17 @@ def workspace_storage(stores: Stores) -> WorkspaceStorageResponse:
             )
         )
     entries.sort(key=lambda e: e.on_disk_bytes, reverse=True)
-    base = stores.base_dir
-    shared = sum(_dir_size(base / name) for name in SHARED_CACHE_DIRS)
-    # Both halves read the ONE declaration: a cache in the sum but not the skip set counts twice.
-    other = _dir_size(base, skip=frozenset({"campaigns", *SHARED_CACHE_DIRS}))
+    home = stores.archive_home
+    home_bytes = sum(_dir_size(home.root / name) for name in SHARED_CACHE_DIRS)
+    # Both halves read the ONE declaration: a tenant's own home is its workspace, so a cache in the
+    # sum but not the skip set counts twice.
+    other = _dir_size(stores.base_dir, skip=frozenset({"campaigns", *SHARED_CACHE_DIRS}))
+    owned = home_bytes if home.owner == "tenant" else 0
     return WorkspaceStorageResponse(
-        total_bytes=campaigns_total + shared + other,
-        shared_cache_bytes=shared,
+        total_bytes=campaigns_total + owned + other,
+        archive_home_id=home.id,
+        archive_home_owner=home.owner,
+        archive_home_bytes=home_bytes,
         other_bytes=other,
         campaigns=entries,
     )

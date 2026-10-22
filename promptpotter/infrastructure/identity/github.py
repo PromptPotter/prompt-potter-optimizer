@@ -9,7 +9,7 @@ import httpx
 
 from promptpotter.infrastructure.identity.google import ProviderIdentity
 from promptpotter.infrastructure.identity.provider_config import OIDCProviderConfig
-from promptpotter.infrastructure.tls import tls_context
+from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
 

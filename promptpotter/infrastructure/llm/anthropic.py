@@ -15,8 +15,8 @@ from promptpotter.infrastructure.llm.send_pacing import (
     RateLimiter,
 )
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel
-from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.extras import Extra, require_extra
+from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic

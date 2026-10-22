@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import Field
 
+from promptpotter.application.bench.difficulty import AbilityScale, restamped
 from promptpotter.application.evidence.comparison import (
     ArmReplicate,
     Comparability,
@@ -58,36 +59,48 @@ from promptpotter.application.evidence.subjects import (
     SubjectSpec,
     WinnerChainPoint,
     authorship_of,
-    parse_subject,
     parse_tree_address,
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.scenario import scenario_spine
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.scoring.closed_rounds import (
     campaign_scorer,
+    cycle_bank,
     cycle_instrument,
     walked_rows,
 )
 from promptpotter.application.scoring.formula.compiler import ScoringFormulaError
 from promptpotter.application.scoring.paired import MemberRows, as_family
-from promptpotter.domain.candidate_diff import build_candidate_flat, flatten_sp_summary
+from promptpotter.domain.candidate_diff import (
+    build_candidate_flat,
+    flatten_prompts,
+    flatten_sp_summary,
+)
 from promptpotter.domain.cycle_listing import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.paired_reading import (
-    ArmPointer,
+    ArmKey,
+    ArmName,
     Measurand,
     MemberAddress,
     PairedReading,
 )
-from promptpotter.domain.results import IndividualWalk, individual_cells
-from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.results import (
+    Concluded,
+    IndividualWalk,
+    Proposed,
+    arm_name,
+    individual_cells,
+)
+from promptpotter.domain.ruler import CellScopes
 from promptpotter.domain.scoring import CellSheet, GradedCell, WalkedCell
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    ArmWalk,
+    StandingArm,
     StandingRounds,
     scan_ledger_spend,
     scan_ledger_spend_by_round,
@@ -228,7 +241,7 @@ class Evidence(StrictModel):
 
 
 class _Accum:
-    def __init__(self, arm: ArmPointer) -> None:
+    def __init__(self, arm: ArmName) -> None:
         self.arm = arm
         self.provenance: list[EffectProvenance] = []
         self.cells: dict[str, GradedCell] = {}
@@ -253,22 +266,10 @@ def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
     ]
 
 
-def _named(stores: Stores, spec: SubjectSpec) -> SubjectSpec:
-    if spec.inside:
-        return spec
-    matches = stores.campaigns.match_campaign_ids(spec.campaign_id)
-    if len(matches) > 1:
-        raise ValueError(
-            f"{spec.campaign_id!r} in subject {spec.key!r} matches {len(matches)} campaigns: "
-            f"{', '.join(matches[:5])}. Pass the full id."
-        )
-    return spec._replace(campaign_id=matches[0]) if matches else spec
-
-
 def select_evidence(
     stores: Stores,
     *,
-    subjects: Sequence[str],
+    subjects: Sequence[SubjectSpec],
     dataset: str = "",
     grid: str = "",
     include_ranking: bool = False,
@@ -276,7 +277,7 @@ def select_evidence(
     include_config: bool = False,
     metric: str = MEASURAND,
 ) -> Evidence:
-    specs = [_named(stores, parse_subject(raw)) for raw in subjects]
+    specs = list(subjects)
     if dataset:
         pool = parse_tree_address(dataset)
         try:
@@ -312,32 +313,40 @@ class _ChainPoint(NamedTuple):
     label: str
     sheet: CellSheet
     bench: CellSheet
-    arm: ArmWalk
+    arm: StandingArm
+
+    @property
+    def concluded(self) -> Concluded | None:
+        state = self.arm.state
+        return state if isinstance(state, Concluded) else None
 
 
 class _Cycle(NamedTuple):
     stores: Stores
+    hop: CycleHop
     walked: StandingRounds
     walks: list[IndividualWalk[WalkedCell]]
     scorer: Scorer
+
+    def mask(self, samples: frozenset[int] | None) -> frozenset[str] | None:
+        """A `;samples=` mask names slots in the bank the cycle drew; rows pair on keys."""
+        if samples is None:
+            return None
+        slot_of = cycle_bank(self.stores, self.hop).slot_of
+        return frozenset(k for k, s in slot_of.items() if s in samples)
 
     def sheet(self, individual_id: str, scope: RoleScope = RoleScope.REPORT) -> CellSheet:
         measured = individual_cells(self.walks, individual_id, scope)
         return walked_rows(self.stores, measured, self.scorer).standing()
 
-    def point(
-        self, round_num: int, *, label: str = "", candidate_id: str = ""
-    ) -> _ChainPoint | None:
-        for (rnd, _), arm in self.walked.arms.items():
-            found, named = arm.candidate_id, arm.label
-            if rnd != round_num or not found:
-                continue
-            if (label and named != label) or (candidate_id and found != candidate_id):
+    def point(self, round_num: int, *, candidate_id: str = "") -> _ChainPoint | None:
+        for (rnd, found), arm in self.walked.arms.items():
+            if rnd != round_num or (candidate_id and found != candidate_id):
                 continue
             return _ChainPoint(
                 round=round_num,
                 candidate_id=found,
-                label=named or found,
+                label=arm_name(found, arm.state, rnd).label,
                 sheet=self.sheet(found),
                 bench=self.sheet(found, RoleScope.BENCH),
                 arm=arm,
@@ -350,7 +359,8 @@ def _open_cycle(stores: Stores, campaign_id: str, cycle_dir: Path) -> _Cycle | N
     if graded_under is None:
         return None
     chain = ledger_chain(CycleDir(cycle_dir), moment=None)
-    return _Cycle(stores, scan_standing_rounds(chain), scan_ledger_walks(chain), graded_under)
+    hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name)
+    return _Cycle(stores, hop, scan_standing_rounds(chain), scan_ledger_walks(chain), graded_under)
 
 
 class _Head(NamedTuple):
@@ -368,7 +378,8 @@ class _Head(NamedTuple):
 class _CycleFacts(NamedTuple):
     arm_id: str | None
     instrument_id: str
-    ability: AbilityReading | None
+    # The fit the last close read its series on, so every subject of the cycle levels on one scale.
+    scale: AbilityScale | None
     spend_usd: float | None
     rounds_scored: int
     spend_to_round: dict[str, float]
@@ -471,7 +482,7 @@ def subject_evidence(
     if include_ranking:
         for row in (r for r in rows if r.kind == "campaign"):
             head = heads[row.key]
-            report = head.point.arm.report
+            report = head.point.concluded
             anchor = "" if report is None else report.sp_hash
             cycle = _open_cycle(leaves[row.key], row.campaign_id, head.cycle_dir)
             if cycle is not None:
@@ -576,27 +587,29 @@ def _read_subject(at: _Located, spec: SubjectSpec) -> _SubjectRead | None:
         head,
         channels,
         cell_channels(head.point.bench),
-        _cycle_facts(head.cycle_dir, head.dataset_name),
+        _cycle_facts(
+            at.stores,
+            CycleHop(campaign_id=spec.campaign_id, cycle_id=head.cycle_dir.name),
+            head.cycle_dir,
+        ),
     )
 
 
 def _member(spec: SubjectSpec, head: _Head, cycle: _CycleFacts) -> SubjectMember:
     hop = CycleHop(campaign_id=spec.campaign_id, cycle_id=head.cycle_dir.name)
     point = head.point
-    arm = ArmPointer(round=point.round, label=point.label, candidate_id=point.candidate_id)
+    arm = ArmName(key=ArmKey(point.candidate_id), round=point.round, label=point.label)
     return SubjectMember(
         _member_rows((*spec.inside, hop), arm, point.sheet, cycle.instrument_id),
         masked=spec.samples is not None,
     )
 
 
-def _member_rows(
-    path: CyclePath, arm: ArmPointer, sheet: CellSheet, instrument_id: str
-) -> MemberRows:
+def _member_rows(path: CyclePath, arm: ArmName, sheet: CellSheet, instrument_id: str) -> MemberRows:
     return MemberRows(
         address=MemberAddress(
             path=path,
-            individual_id=arm.candidate_id,
+            individual_id=arm.key,
             arm=arm,
             pass_role=None,
         ),
@@ -617,9 +630,9 @@ def _resolve_head(at: _Located, spec: SubjectSpec) -> _Head | None:
     if spec.kind == "campaign":
         cycle = _open_cycle(stores, spec.campaign_id, cycle_dir)
         origin = cycle.point(0) if cycle is not None else None
-        if origin is None:
+        if cycle is None or origin is None:
             return None
-        c0 = _masked(origin, spec.samples)
+        c0 = _masked(origin, cycle.mask(spec.samples))
         c0_index = read_cycle_index(cycle_dir, moment=None)
         return _Head(
             cycle_dir=cycle_dir,
@@ -627,7 +640,7 @@ def _resolve_head(at: _Located, spec: SubjectSpec) -> _Head | None:
             dataset_name=dataset_name,
             created_at=str(manifest.get("created_at", "")),
             point=c0,
-            authorship=_authorship(cycle_dir, c0, c0_index),
+            authorship=_authorship(c0, c0_index),
             human_intervened=c0_index is not None and c0_index.human_intervened,
         )
 
@@ -645,46 +658,40 @@ def _resolve_head(at: _Located, spec: SubjectSpec) -> _Head | None:
     elif spec.kind == "course":
         stands = cycle.walked.standing
         picked = None if stands is None else stands.selection
-        point = cycle.point(0) if picked is None else cycle.point(picked.round, label=picked.label)
+        point = (
+            cycle.point(0) if picked is None else cycle.point(picked.round, candidate_id=picked.key)
+        )
     else:
         point = _candidate_point(cycle, spec.candidate_id)
     if point is None:
         return None
-    masked = _masked(point, spec.samples)
+    masked = _masked(point, cycle.mask(spec.samples))
     return _Head(
         cycle_dir=cycle_dir,
         label=spec.cycle_id if spec.kind == "course" else point.label,
         dataset_name=dataset_name,
         created_at="" if index is None else index.created_at,
         point=masked,
-        authorship=_authorship(cycle_dir, masked, index),
+        authorship=_authorship(masked, index),
         human_intervened=index is not None and index.human_intervened,
         scenario=scenario,
         chain=chain,
     )
 
 
-def _authorship(cycle_dir: Path, point: _ChainPoint, index: CycleIndex | None) -> str:
-    source = next(
-        (
-            c.lineage.source
-            for c in scan_standing_rounds(
-                ledger_chain(CycleDir(cycle_dir), moment=None)
-            ).candidates()
-            if c.candidate_id == point.candidate_id
-        ),
-        "",
-    )
+def _authorship(point: _ChainPoint, index: CycleIndex | None) -> str:
+    state = point.arm.state
+    source = "" if state is None else state.individual.lineage.source
     fork = None if index is None else index.fork
-    return authorship_of(source, "" if fork is None else fork.issued_by)
+    return authorship_of(source, None if fork is None else fork.issued_by)
 
 
-def _masked(point: _ChainPoint, samples: frozenset[int] | None) -> _ChainPoint:
-    if samples is None:
+def _masked(point: _ChainPoint, keys: frozenset[str] | None) -> _ChainPoint:
+    if keys is None:
         return point
     return point._replace(
-        sheet=point.sheet.where(lambda cell: cell.sample_id in samples),
-        bench=point.bench.where(lambda cell: cell.sample_id in samples),
+        sheet=point.sheet.where(lambda cell: cell.key in keys),
+        bench=point.bench.where(lambda cell: cell.key in keys),
     )
 
 
@@ -704,6 +711,7 @@ def _scenario(
         return None
     last = steps[-1]
     parted = last.candidate_id != last.recorded_id
+    keys = cycle.mask(spec.samples)
     return (
         ScenarioReading(
             recorded_winner_id=last.recorded_id,
@@ -713,10 +721,10 @@ def _scenario(
             invariant_rounds=len(steps) - 1 if parted else len(steps),
             # The cycle's, not the chain's: the chain stops at the parting.
             total_rounds=len(recorded.rounds),
-            n_samples_scored=len(_masked(points[-1], spec.samples).sheet),
+            n_samples_scored=len(_masked(points[-1], keys).sheet),
             note=_SCENARIO_NOTE,
         ),
-        [_masked(p, spec.samples) for p in points],
+        [_masked(p, keys) for p in points],
     )
 
 
@@ -752,9 +760,9 @@ def _winner_chain(
     at = head.point.round
     rounds = [r for r in sorted({0, *(r for r in crowns if r < at)}) if r != at]
     points = [
-        _masked(p, spec.samples)
+        _masked(p, cycle.mask(spec.samples))
         for r in rounds
-        if cycle is not None and (p := cycle.point(r, label=crowns.get(r, ""))) is not None
+        if cycle is not None and (p := cycle.point(r, candidate_id=crowns.get(r, ""))) is not None
     ]
     return [
         *(_winner_chain_point(p, cell_channels(p.sheet), compiled) for p in points),
@@ -763,14 +771,11 @@ def _winner_chain(
 
 
 def _config_of(point: _ChainPoint) -> dict[str, str]:
-    # The report restates what the arm announced before its first cell, so either names it.
-    searchpoint = point.arm.report or point.arm.announced
-    prompt_fields = {} if searchpoint is None else searchpoint.prompt_fields
-    # `lineage` is identity, not configuration: it differs between any two candidates.
-    fields = {k: v for k, v in prompt_fields.items() if k != "lineage" and v}
+    state = point.arm.state
     return build_candidate_flat(
-        flatten_sp_summary(None if searchpoint is None else searchpoint.resolved_pipeline_params),
-        {"prompt_fields": fields},
+        flatten_sp_summary(None if state is None else state.individual.pipeline_params),
+        pipeline_overlay=None,
+        prompt_flat={} if state is None else flatten_prompts(state.individual.prompts),
     )
 
 
@@ -828,17 +833,37 @@ def _spend_to_round(by_round: Mapping[int, SpendRollup]) -> dict[str, float]:
     return out
 
 
-def _cycle_facts(cycle_dir: Path, dataset_name: str) -> _CycleFacts:
+def _cycle_facts(stores: Stores, hop: CycleHop, cycle_dir: Path) -> _CycleFacts:
     chain = ledger_chain(CycleDir(cycle_dir), moment=None)
-    standing = scan_standing_rounds(chain).rounds
+    scanned = scan_standing_rounds(chain)
+    standing, series = scanned.rounds, scanned.level_series
     origin = standing[0].close if 0 in standing else None
     spend_by_round = scan_ledger_spend_by_round(chain)
-    hashes = origin.optimizer_state.prompt_hashes if origin else None
+    hashes = origin.closed_state.prompt_hashes if origin else None
+    instrument_id = cycle_instrument(stores.campaigns.read_bank_partition(hop), standing)
+    if instrument_id is None:
+        raise NotFoundError(f"cycle {hop.cycle_id} drew no bank, so it names no instrument")
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    assert campaign is not None, "a subject resolves through its campaign's directory"
+    opt = resolve_campaign_config(stores, campaign, hop).optimization
+    scale = (
+        None
+        if series is None
+        else AbilityScale(
+            restamped(
+                stores.ruler,
+                series.stamp,
+                n_min=opt.elimination_n_min,
+                enable_2pl=opt.enable_2pl_graduation,
+            ),
+            CellScopes.of(cycle_bank(stores, hop).samples, series.stamp.scope.dataset),
+        )
+    )
     return _CycleFacts(
         # Unstamped is `None`, never a shared hash: `replicates` would pair every unstamped campaign.
         arm_id=stable_hash(dict(hashes)) if hashes else None,
-        instrument_id=cycle_instrument(dataset_name, standing),
-        ability=origin.ability if origin else None,
+        instrument_id=instrument_id,
+        scale=scale,
         # No bill at all priced nothing (`None`); bills summing to 0 measured it.
         spend_usd=scan_ledger_spend(chain).spend.total_used_usd if spend_by_round else None,
         rounds_scored=max(len(standing) - 1, 0),
@@ -860,7 +885,9 @@ def _reading_row(
 ) -> SubjectReading:
     values, unscorable = _score_cells(compiled, channels)
     bench_values, _ = _score_cells(compiled, bench_channels)
-    arm = head.point.arm
+    state = head.point.arm.state
+    assert state is not None, "a point is an arm its records named"
+    report = head.point.concluded
     value, ci_lo, ci_hi, n_cells = merge_cells(values)
     return SubjectReading(
         key=spec.key,
@@ -892,11 +919,13 @@ def _reading_row(
         arm_id=cycle.arm_id,
         authorship=head.authorship,
         human_intervened=head.human_intervened,
-        status=arm.state,
-        expected_samples=arm.walk_length if arm.report is None else arm.report.expected_samples,
-        cached_samples=None if arm.report is None else arm.report.cached_samples,
+        status=state.state,
+        expected_samples=None if isinstance(state, Proposed) else state.expected_samples,
+        cached_samples=None
+        if report is None or (fold := head.point.arm.fold) is None
+        else fold.cached,
         instrument_id=cycle.instrument_id,
-        ability=cycle.ability,
+        ability=None if cycle.scale is None else cycle.scale.frontier(head.point.sheet),
         round=head.point.round,
         cycle_spend_usd=cycle.spend_usd,
         cycle_rounds_scored=cycle.rounds_scored,
@@ -942,15 +971,12 @@ def _campaign_edits(
     hop = address.path[-1]
     accums: dict[str, _Accum] = {}
     pooled: set[str] = set()
-    for (round_num, _), arm in cycle.walked.arms.items():
-        cand_id = arm.candidate_id
-        sp_hash = "" if arm.report is None else arm.report.sp_hash
-        if not cand_id or not sp_hash or sp_hash == anchor_hash:
+    for (round_num, cand_id), arm in cycle.walked.arms.items():
+        state = arm.state
+        if not isinstance(state, Concluded) or state.sp_hash == anchor_hash:
             continue
-        acc = accums.setdefault(
-            sp_hash,
-            _Accum(ArmPointer(round=round_num, label=arm.label, candidate_id=cand_id)),
-        )
+        sp_hash = state.sp_hash
+        acc = accums.setdefault(sp_hash, _Accum(arm_name(cand_id, state, round_num)))
         acc.provenance.append(
             EffectProvenance(
                 campaign_id=hop.campaign_id,

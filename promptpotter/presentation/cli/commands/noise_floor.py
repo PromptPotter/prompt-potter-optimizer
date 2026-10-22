@@ -2,24 +2,21 @@ from __future__ import annotations
 
 import argparse
 
+from promptpotter.application.cycle_listing import resolve_campaign_id, resolve_cycle_id
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import BankedSearchPointError
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import (
-    open_stores,
-    resolve_campaign,
-    resolve_cycle,
-)
+from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import DiagnosticError
 
 
 async def cmd_noise_floor(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
-    campaign_id = resolve_campaign(stores, args.campaign)
-    cycle_id = resolve_cycle(stores, campaign_id, args.cycle)
+    campaign_id = resolve_campaign_id(stores, args.campaign)
+    cycle_id = resolve_cycle_id(stores, campaign_id, args.cycle)
 
     try:
         outcome = await measure_noise_floor(

@@ -10,9 +10,10 @@ from promptpotter.application.datasets.draft_campaign import (
     EditDraftPatch,
     NodeOutputEdit,
     OptimizationOverrides,
-    load_checkin_draft,
+    owned_draft,
     rendered_pipeline_json,
 )
+from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import draft_config_rows
@@ -26,7 +27,7 @@ from promptpotter.domain.pipeline_schema import (
     description_path,
     narrowing_of,
 )
-from promptpotter.shared.errors import ConflictError, NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.datasets.draft_campaign import DraftCampaign
@@ -80,7 +81,7 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
     for patch_val, draft_attr in (
         (patch.connector, "connector"),
         (patch.scoring_matcher, "scoring_matcher"),
-        (patch.origin_prompt_fields, "origin_prompt_fields"),
+        (patch.origin_prompts, "origin_prompts"),
         (patch.pipeline_steps, "pipeline_steps"),
         (patch.candidate_library, "candidate_library"),
     ):
@@ -121,7 +122,7 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             raise PayloadInvalidError(
                 f"patch.optimization_overrides.{where}: {first['msg']}"
             ) from exc
-        resolve_optimizer(overrides.optimizer, overrides.nodes)
+        resolve_optimizer(overrides.optimizer, overrides.nodes, gate=overrides.arm_gate)
         changes["optimization_overrides"] = overrides.model_dump(mode="json")
 
     if patch.raw_task_description is not None:
@@ -201,17 +202,12 @@ def _narrowing_follows_schema(
 
 
 def candidate_library_from_column(stores: Stores, draft_id: str, column: str) -> tuple[str, ...]:
-    draft = load_checkin_draft(stores, draft_id)
-    if draft is None:
-        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
+    draft = owned_draft(stores, draft_id)
     if column not in draft.headers:
         raise PayloadInvalidError(
             f"column {column!r} is not one of the dataset's columns {list(draft.headers)}."
         )
-    bank = stores.checkin.load_bank(draft_id)
-    if bank is None:
-        raise PayloadInvalidError("draft has no cached rows to build from.")
-    terms = candidate_library_from_rows(bank["items"], column)
+    terms = candidate_library_from_rows(checkin_rows(stores, draft), column)
     if not terms:
         raise PayloadInvalidError(
             f"column {column!r} has no usable values.",

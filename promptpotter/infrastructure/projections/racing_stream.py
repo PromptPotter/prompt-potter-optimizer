@@ -34,7 +34,7 @@ class RacingStreamProjection(Projection):
         return cls(CycleLayout(Path(cycle_dir)).streams)
 
     def _handle_race_standing(self, record: RaceStandingRecord) -> None:
-        current_id, p_best = record.current_id, record.p_best
+        current_id, p_best = record.current, record.p_best
 
         if self._last_round != record.round:
             self._last_p_best = {}

@@ -225,19 +225,21 @@ shape this field deletes.
 
 Two places keep their own word on purpose: the **evidence** surface calls every row a cell because a
 selection there spans campaigns, datasets and backends, so no single connector's noun applies; and
-`ruler_n` / `DeltaRuler` count **ruler cells**, a δ-scale membership that is the same on every
+`AbilityReading.cells` / `DeltaRuler` count **ruler cells**, a δ-scale membership that is the same on every
 backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict-resolution.md)).
 
 **And `cell` implies NOTHING about the run's CONTROL LOOP — a flag reasoning "a cell is expensive,
 therefore…" is the one to refuse.** A connector declares what a row costs (`max_cells_in_flight`,
-`cells_hold_the_machine`, `cell_envelope_s`, `cell_attempts`, `cell_wait_s` — each defined on its `Connector` field); how long an operator's look-ahead arming lasts is the round's
+`cells_hold_the_machine`, `cell_envelope_s`, `cell_attempts` — each defined on its `Connector` field); how long an operator's look-ahead arming lasts is the round's
 and the operator's to decide — no connector can see the round it is inside. Refuse a second flag
 beside `measured_unit` set by RESEMBLING the recursion rather than by any fact about the run.
 
 **`cell_envelope_s` is the test passing, and the template for anything that wants to join it:** it
 is a fact about one cell of THIS backend, resolved from the same pair the request is built from,
 and it decides nothing — the round it sits in is neither consulted nor changed.
-`application/scoring/cell_envelope.py` enforces it. **A ceiling on measured COUNTS would fail the
+`application/scoring/cell_envelope.py` enforces it. **Every connector declares one, never `None`**:
+a remote cell is bounded by the smaller of it and the launch's clock left (`SpendBook.clock_left`),
+so no cell runs unbounded. **A ceiling on measured COUNTS would fail the
 same test** — tokens and dollars jitter run to run, so the same cell would be cut on one run and not
 the next.
 
@@ -309,8 +311,9 @@ start containers is never a tenant's choice.
   `runner/inner/` reads the panel off the run's workload, never the file. Ordered before the row
   ladder, never a fallback: rows cached under the same name describe a different instrument, and
   a resolver that knows only MATERIALIZED banks answers a connector-owned one EMPTY, which is not
-  a fact about the dataset. Panel ORDER is the `sample_id` (`samples_from_dicts` numbers positionally);
-  the δ scale keys a cell by `Sample.key`, so a reorder moves no δ.
+  a fact about the dataset. Panel ORDER is the slot (`samples_from_dicts` numbers positionally),
+  never stored on a measurement; the archive and the δ scale key a cell by `Sample.key`, so a
+  reorder moves no δ and re-files no answer.
 - **`query` is whatever addresses one unit of work, and on an episodic backend that is an ID.**
   A judge falling back to it then grades against an identifier, so a task carrying a real question
   declares it and it rides `Sample.question` (`domain/sample.py`) — the only channel that reaches

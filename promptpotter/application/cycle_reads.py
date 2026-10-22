@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
+from promptpotter.application.scoring.closed_rounds import (
+    campaign_scorer,
+    closed_round,
+    cycle_bank,
+)
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
@@ -97,10 +101,13 @@ def round_audit(cycle: ViewedCycle, round_num: int) -> RoundAudit | None:
 
 @dataclass(frozen=True)
 class _MarkedSheet(CellSheet):
+    slot_of: Mapping[str, int] = field(default_factory=dict)
+
     def wire(self) -> list[dict[str, object]]:
         return [
             {
                 **cell.wire(),
+                "position": self.slot_of[cell.key],
                 "status": sample_status(cell.facts, cell.grade),
                 "ground_truth_text": ground_truth_text(cell.facts.ground_truth),
             }
@@ -120,20 +127,16 @@ def served_round(
     )
     if closed is None:
         return None
+    slot_of = cycle_bank(stores, hop).slot_of
 
     def marked(sheet: CellSheet) -> CellSheet:
-        return _MarkedSheet(sheet.scorer_id, sheet.cells)
+        return _MarkedSheet(sheet.scorer_id, sheet.cells, slot_of)
 
-    def each(arms: dict[str, CellSheet]) -> dict[str, CellSheet]:
-        return {k: marked(v) for k, v in arms.items()}
+    def each[K: str](sheets: dict[K, CellSheet]) -> dict[K, CellSheet]:
+        return {k: marked(v) for k, v in sheets.items()}
 
     return closed.model_copy(
-        update={
-            "results": marked(closed.results),
-            "all_candidate_results": each(closed.all_candidate_results),
-            "reference_results": each(closed.reference_results),
-            "overlap_results": each(closed.overlap_results),
-        }
+        update={"cells": each(closed.cells), "overlap_results": each(closed.overlap_results)}
     )
 
 

@@ -19,7 +19,6 @@ import ast
 import collections
 import json
 import sys
-import types
 import typing
 from collections.abc import Iterator
 from pathlib import Path
@@ -29,36 +28,37 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 444,
+    "modules": 449,
     # Every `__init__.py` among them.
-    "init_files": 55,
+    "init_files": 56,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 5,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
-    "config_leaf_fields": 81,
+    "config_leaf_fields": 89,
     # `Settings` fields — what the environment can set.
-    "settings_env": 42,
+    "settings_env": 43,
     # The upper-case constants `config/settings.py` exports.
     "settings_const": 3,
     # Leaves of `OptSearchPoint` — what a run is handed.
-    "opt_search_point_fields": 15,
+    "opt_search_point_fields": 10,
     # Leaves of `CycleResult` — what a run produces.
-    "cycle_result_fields": 605,
+    "cycle_result_fields": 671,
     # Parameters annotated `Any`.
-    "any_params": 47,
+    "any_params": 46,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 68,
+    "domain_any_maps": 66,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 3,
-    # The prompt decomposition fields.
-    "prompt_string_fields": 6,
+    # The fields a prompt node bears when its backend declares none (`DEFAULT_PROMPT_FIELDS`).
+    "default_prompt_fields": 6,
     # Injections the optimizers' runtimes price — each a block an optimizer prompt can carry.
     "injections": 34,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
     # transition written as a branch beside the tables was policy the count could not see.
-    "escalation_rules": 11,
-    # Function-local imports of the package's own modules.
-    "deferred_imports": 6,
+    "escalation_rules": 12,
+    # Function-local imports of the package's own modules. The bare invocation's first-run check
+    # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
+    "deferred_imports": 7,
     # `CLAUDE.md` files under the package.
     "claude_md": 21,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
@@ -69,9 +69,9 @@ BASELINE = {
     # Modules a test run imports: our own, followed through their module-level imports, plus
     # each outside distribution's top name. A test that reaches the server app or an extra
     # moves it as one function does not.
-    "test_reach": 356,
+    "test_reach": 363,
     # Every property of every schema the generated contract offers the browser.
-    "served_fields": 1667,
+    "served_fields": 1728,
 }
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -152,17 +152,18 @@ def _package_files(pattern: str) -> list[Path]:
     return [p for p in _PACKAGE_ROOT.rglob(pattern) if _ASSETS_ROOT not in p.parents]
 
 
-def _unwrap_optional(annotation: object) -> object:
-    origin = typing.get_origin(annotation)
-    if origin is typing.Union or origin is types.UnionType:
-        non_none = [a for a in typing.get_args(annotation) if a is not type(None)]
-        if len(non_none) == 1:
-            return non_none[0]
-    return annotation
+def _models_in(annotation: object) -> list[type[BaseModel]]:
+    """Every model an annotation holds, through ``Annotated``, unions and container arguments."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return [annotation]
+    if typing.get_origin(annotation) is typing.Annotated:
+        return _models_in(typing.get_args(annotation)[0])
+    return [model for arg in typing.get_args(annotation) for model in _models_in(arg)]
 
 
 def _count_leaves(model: type[BaseModel], _path: tuple[type[BaseModel], ...] = ()) -> int:
-    """A ``list[Model]`` or ``dict[str, Model]`` field is a whole nested surface, not one leaf.
+    """A field holding models — ``Model | None``, ``list[Model]``, ``dict[K, Annotated[A | B, …]]``
+    — is each model's whole nested surface, not one leaf.
     The guard is the PATH, never a seen-set: one model at two sibling fields is two surfaces.
 
     REBUILD FIRST, or the count is a reading of what happened to be imported. Pydantic resolves a
@@ -177,15 +178,7 @@ def _count_leaves(model: type[BaseModel], _path: tuple[type[BaseModel], ...] = (
     path = (*_path, model)
     total = 0
     for field in model.model_fields.values():
-        inner = _unwrap_optional(field.annotation)
-        if isinstance(inner, type) and issubclass(inner, BaseModel):
-            total += _count_leaves(inner, path)
-            continue
-        nested = [
-            arg
-            for arg in typing.get_args(inner)
-            if isinstance(arg, type) and issubclass(arg, BaseModel)
-        ]
+        nested = _models_in(field.annotation)
         total += sum(_count_leaves(n, path) for n in nested) if nested else 1
     return total
 
@@ -358,7 +351,7 @@ def compute_ledger() -> dict[str, int]:
     from promptpotter.config.settings import Settings
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.results import CycleResult
-    from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
+    from promptpotter.domain.search_point import DEFAULT_PROMPT_FIELDS
 
     py_files = _package_files("*.py")
     init_files = [p for p in py_files if p.name == "__init__.py"]
@@ -383,7 +376,7 @@ def compute_ledger() -> dict[str, int]:
         "any_params": source["any_params"],
         "domain_any_maps": source["domain_any_maps"],
         "models_lax": source["models_lax"],
-        "prompt_string_fields": len(PROMPT_STRING_FIELDS),
+        "default_prompt_fields": len(DEFAULT_PROMPT_FIELDS),
         **priced,
         "deferred_imports": source["deferred_imports"],
         "claude_md": len(_package_files("CLAUDE.md")),

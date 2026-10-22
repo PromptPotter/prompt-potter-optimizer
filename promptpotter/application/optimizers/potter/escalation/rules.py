@@ -24,13 +24,6 @@ NEXT_ACTION_STOP: dict[NextAction, StopReason] = {
     NextAction.STOP_L3_PATIENCE: StopReason.OPTIMIZER_EXHAUSTED,
 }
 
-# The manifest walk a fire takes (`pipeline.yaml::pipelines`).
-NEXT_ACTION_WALK: dict[NextAction, str] = {
-    NextAction.FIRE_L2: "l2_escalation",
-    NextAction.FIRE_L3: "l3_escalation",
-}
-assert set(NextAction) == {NextAction.CONTINUE, *NEXT_ACTION_STOP, *NEXT_ACTION_WALK}
-
 
 @dataclass(frozen=True)
 class EscalationEvent:
@@ -74,14 +67,21 @@ class EscalationRule[S]:
     priority: int = 0
 
 
-# Every rule above `l1_continue` preempts patience; `l1_only_ladder` preempts every FIRE_L2 below it.
-DEFAULT_ESCALATION_RULES: list[EscalationRule[EscalationInputs]] = [
-    EscalationRule(
-        name="l1_only_ladder",
+L1_ONLY_LADDER = "l1_only_ladder"
+
+
+def _l1_only[S: (EscalationInputs, LadderInputs)]() -> EscalationRule[S]:
+    return EscalationRule(
+        name=L1_ONLY_LADDER,
         when=lambda s: not s.escalation_ladder.fires_l2,
         fire=NextAction.CONTINUE,
         priority=90,
-    ),
+    )
+
+
+# Every rule above `l1_continue` preempts patience; `l1_only_ladder` preempts every FIRE_L2 below it.
+DEFAULT_ESCALATION_RULES: list[EscalationRule[EscalationInputs]] = [
+    _l1_only(),
     EscalationRule(
         name="l1_generate_unusable",
         when=lambda s: s.l1_mandatory_breach or s.l1_zero_candidates,
@@ -122,7 +122,9 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule[EscalationInputs]] = [
 L2_PATIENCE_SPENT = "l2_patience_spent"
 L1_LAYOUT_REFUSED = "l1_layout_refused"
 
+# Its first rule holds a climb no cause reaches past `observe` (`--diag`) to the ladder's depth.
 CLIMB_RULES: list[EscalationRule[LadderInputs]] = [
+    _l1_only(),
     EscalationRule(
         name="l2_within_patience",
         when=lambda s: not s.escalation_ladder.fires_l3 or s.l2_stall_count < s.l2_patience,
@@ -186,9 +188,9 @@ __all__ = [
     "DEFAULT_ESCALATION_RULES",
     "HEAL_RULES",
     "L1_LAYOUT_REFUSED",
+    "L1_ONLY_LADDER",
     "L2_PATIENCE_SPENT",
     "NEXT_ACTION_STOP",
-    "NEXT_ACTION_WALK",
     "EscalationEvent",
     "EscalationInputs",
     "EscalationRule",

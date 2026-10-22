@@ -6,7 +6,6 @@ from pydantic import ConfigDict, Field
 
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord
-from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.strict_model import StrictModel
 
 LensKind = Literal["score", "dials", "abort"]
@@ -81,9 +80,8 @@ class MaskRound(StrictModel):
     round: int
     candidates: list[MaskCandidate] = Field(default_factory=list)
     parent: MaskReading | None = None
-    # Carried only under ``with_replay``; the pool is as it stood BEFORE this round ran.
+    # Carried only under ``with_replay``.
     round_data: RoundResult | None = None
-    known_outcomes: list[GradedCell] = Field(default_factory=list)
     decisions: list[ResumeCheckpointRecord] = Field(default_factory=list)
 
 
@@ -115,7 +113,8 @@ class SpineCycle(StrictModel):
     parent_cycle_id: str | None = None
     fork_from_round: int | None = None
     # Subset-invariant, so it alone averages up a lineage whose rounds scored different subsets.
-    theta_by_round: dict[int, float] = Field(default_factory=dict)
+    # Every round the cycle closed is a node; ``None`` where its level does not difference.
+    theta_by_round: dict[int, float | None]
 
 
 __all__ = [

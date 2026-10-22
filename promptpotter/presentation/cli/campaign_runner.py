@@ -14,14 +14,11 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.phases import StopOutcome
-from promptpotter.infrastructure.store.layout import tenant_workspace
-from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
 from promptpotter.presentation.cli.commands.verbs import VERBS
-from promptpotter.presentation.cli.parsers import build_parser, identity_from_args
+from promptpotter.presentation.cli.parsers import build_parser
 from promptpotter.shared.errors import (
     PotterError,
     RequestTooLargeError,
@@ -66,8 +63,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command is None:
-        identity = identity_from_args(args)
-        if not active_pointer_exists(tenant_workspace(DEFAULT_PROJECTS_ROOT, identity.tenant_id)):
+        # Named as a string like the handlers: `--help` loads no use case.
+        listing = importlib.import_module("promptpotter.application.cycle_listing")
+        if not listing.holds_active_pointer(tenant=args.tenant):
             print(
                 f"Welcome to {settings.BRAND_SHORT_NAME}.\n\n"
                 "Pick a verb to get started:\n"

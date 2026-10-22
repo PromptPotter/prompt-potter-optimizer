@@ -18,10 +18,8 @@ from promptpotter.application.commands.payloads import (
     PAYLOAD_MODEL_FOR_KIND,
     CommandAcceptedBody,
     CompactArchivePayload,
-    DatasetReplaced,
     EditDraftCampaignPayload,
     LifecyclePayload,
-    ReplaceDatasetPayload,
     ResolveOriginPayload,
     SetCampaignLabelPayload,
     StartCheckinPayload,
@@ -116,22 +114,17 @@ async def start_checkin(
     envelope: CommandEnvelope,
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> StartCheckinResponse:
-    """Flip a check-in campaign to ``active``, mint its run cycle and detach the loop.
+    """Mint the draft's campaign and root cycle, close the draft and detach the loop.
 
-    An incomplete origin answers 422 and the campaign stays ``checkin``.
+    An incomplete origin answers 422 and the draft stays open.
     """
     _require_kind(envelope, CommandKind.START_CHECKIN)
     idemp = ensure_idempotency_key(idempotency_key)
     payload = cast(
         StartCheckinPayload, _validated_payload(CommandKind.START_CHECKIN, envelope.payload)
     )
-    launched = await dispatch_start_checkin(
-        stores, CommandCall(payload, idemp), job_registry=job_registry
-    )
-    job = launched.job
-    return StartCheckinResponse(
-        campaign_id=job.campaign_id, cycle_id=job.cycle_id, job_id=job.job_id
-    )
+    launched = await dispatch_start_checkin(stores, payload, idemp, job_registry=job_registry)
+    return StartCheckinResponse(job_id=launched.job.job_id, hop=launched.hop)
 
 
 @commands_router.post(f"/{CommandKind.COMPACT_ARCHIVE}")
@@ -148,27 +141,6 @@ async def compact_archive(
         CompactArchivePayload, _validated_payload(CommandKind.COMPACT_ARCHIVE, envelope.payload)
     )
     outcome = await CommandDispatcher(stores).dispatch_compact_archive(CommandCall(payload, idemp))
-    return outcome.result
-
-
-@commands_router.post(f"/{CommandKind.REPLACE_DATASET}")
-async def replace_dataset(
-    request: Request,
-    stores: StoresDep,
-    envelope: CommandEnvelope,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> DatasetReplaced:
-    """Version-and-repoint a colliding dataset so its name frees for new data.
-
-    Nothing is overwritten: the old data and every prior campaign's results stay under ``{slug}-vN``.
-    The freed name is re-ingested by a separate ``/datasets/ingest`` call.
-    """
-    _require_kind(envelope, CommandKind.REPLACE_DATASET)
-    idemp = ensure_idempotency_key(idempotency_key)
-    payload = cast(
-        ReplaceDatasetPayload, _validated_payload(CommandKind.REPLACE_DATASET, envelope.payload)
-    )
-    outcome = await CommandDispatcher(stores).dispatch_replace_dataset(CommandCall(payload, idemp))
     return outcome.result
 
 

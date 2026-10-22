@@ -22,7 +22,6 @@ from promptpotter.application.campaign_listing import CampaignListResponse, Camp
 from promptpotter.application.commands.origin_resolving import ResolveOriginResponse
 from promptpotter.application.commands.payloads import (
     CommandAcceptedBody,
-    DatasetReplaced,
     EditDraftCampaignPayload,
     StartCheckinPayload,
     StartRunPayload,
@@ -35,7 +34,12 @@ from promptpotter.application.config_map import (
 )
 from promptpotter.application.cycle_files import FileContentResponse, FileEntry, FilesResponse
 from promptpotter.application.cycle_listing import CyclesResponse
-from promptpotter.application.datasets.draft_build import DraftCampaignWire, DraftDependency
+from promptpotter.application.datasets.draft_build import (
+    DraftCampaignWire,
+    DraftDependency,
+    DraftListResponse,
+    DraftSummary,
+)
 from promptpotter.application.datasets.draft_campaign import (
     EditDraftPatch,
     NodeOutputEdit,
@@ -111,11 +115,15 @@ from promptpotter.application.pipeline_resolve import (
     CampaignRunsWith,
     DatasetPipelineResponse,
     KnobRow,
+    KnobSwitch,
     NodeKnobs,
     OptimizerEntry,
     OptimizerKnobsResponse,
     OptimizerPipelineResponse,
     OptimizerRoster,
+    OptimizerSetup,
+    PoolDraw,
+    PoolRow,
     RunsWithParam,
     StartPrompt,
     VendorModels,
@@ -146,7 +154,14 @@ from promptpotter.domain.bench import (
     OwnLevel,
     PassStop,
 )
-from promptpotter.domain.campaign import Arm, ArmBudget, BenchSet
+from promptpotter.domain.campaign import (
+    Arm,
+    BenchSet,
+    Compare,
+    DeterminismClamp,
+    Optimize,
+    StoppingRule,
+)
 from promptpotter.domain.cells import (
     Cell,
     CellCandidate,
@@ -167,17 +182,18 @@ from promptpotter.domain.dashboard_rows import (
     ServedRound,
 )
 from promptpotter.domain.dataset_start import DatasetStartBlock
+from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.l4.proxies import PanelPrecision
-from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.opt_search_point import (
     EvidenceGrounding,
     IndividualLineage,
+    NodePrompt,
     OptSearchPoint,
     Variation,
 )
 from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.paired_reading import (
-    ArmPointer,
+    ArmName,
     CellSet,
     Coverage,
     EstimatorSpec,
@@ -213,19 +229,30 @@ from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.results import (
     ArmAbility,
     ArmElection,
+    ArmFit,
     ArmPanel,
     ArmReading,
-    ArmSpend,
+    ArmSlot,
+    Broken,
+    Cut,
     DegradationContext,
     DegradationHealth,
+    Election,
+    Eliminated,
+    Elimination,
+    Invalid,
     LineRate,
     LivesReading,
+    Measured,
+    Measuring,
     OptimizerFact,
     OverlapReading,
+    Proposed,
     RoundResult,
     RunStanding,
     ScoreboardRow,
-    ScoredCandidate,
+    ScoreSummary,
+    Skipped,
     VerifyReading,
 )
 from promptpotter.domain.round_audit import (
@@ -235,8 +262,22 @@ from promptpotter.domain.round_audit import (
     NodeOutput,
     RoundAudit,
 )
-from promptpotter.domain.ruler import AbilityReading, RulerStanding
-from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkRemainder, SpawnedBy
+from promptpotter.domain.ruler import (
+    AbilityReading,
+    RulerScope,
+    RulerStamp,
+    RulerStanding,
+    SeriesReading,
+)
+from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_records import (
+    ConfigOverrides,
+    CycleSeed,
+    DefaultsDrift,
+    DefaultsPin,
+    ForkRemainder,
+    SpawnedBy,
+)
 from promptpotter.domain.scoring import (
     SHEET_ROW,
     Diagnostics,
@@ -247,16 +288,16 @@ from promptpotter.domain.scoring import (
     TurnRecord,
 )
 from promptpotter.domain.spend import (
-    CloseSpend,
+    Budget,
     KindSpend,
     MeteredSpend,
     PrefixReading,
     SpendBucket,
-    SpendCeilings,
     SpendRollup,
     StepUsage,
     TokenAccount,
 )
+from promptpotter.domain.treatment import Treatment
 from promptpotter.domain.wire_record import record_of
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.projections.live_dashboard.state import (
@@ -289,7 +330,7 @@ from promptpotter.presentation.api.routers.backends import (
     BackendResponse,
 )
 from promptpotter.presentation.api.routers.campaigns.manifests import (
-    CheckinReopenResponse,
+    DraftReopenResponse,
     ForkPreviewResponse,
 )
 from promptpotter.presentation.api.routers.datasets.index import DatasetIndexResponse
@@ -298,11 +339,14 @@ from promptpotter.presentation.api.routers.origins import OriginListResponse
 EXPORTED_MODELS: list[type] = [
     # The emitter does not recurse: register every nested type, before its container.
     ArchiveReport,
+    RulerScope,
+    RulerStamp,
     AbilityReading,
+    SeriesReading,
     VerifyReading,
+    ArmName,
     ArmPanel,
     PrefixReading,
-    ArmSpend,
     ArmAbility,
     ArmElection,
     ArmReading,
@@ -317,18 +361,32 @@ EXPORTED_MODELS: list[type] = [
     ValidationFailure,
     RuntimeFailure,
     DegradationContext,
-    ScoredCandidate,
+    ArmSlot,
+    Proposed,
+    ScoreSummary,
+    Measuring,
+    Elimination,
+    Eliminated,
+    Broken,
+    Invalid,
+    Skipped,
+    Cut,
+    Measured,
+    ArmFit,
+    Election,
     ScoreboardRow,
     EvidenceGrounding,
     Variation,
     IndividualLineage,
     OptimizerState,
+    NodePrompt,
     OptSearchPoint,
     record_of(StepUsage),
     TurnRecord,
     record_of(NodeWarning),
     record_of(Diagnostics),
     record_of(JudgeReading),
+    InnerCellFacts,
     record_of(PipelineData),
     RerunComparison,
     SHEET_ROW,
@@ -344,9 +402,11 @@ EXPORTED_MODELS: list[type] = [
     LoopWarning,
     DashboardError,
     OptimizerLimit,
-    SpendCeilings,
+    Budget,
     RunLimits,
-    CloseSpend,
+    Treatment,
+    DefaultsPin,
+    DefaultsDrift,
     LivesReading,
     RunStanding,
     CatchUpLogEntry,
@@ -360,7 +420,6 @@ EXPORTED_MODELS: list[type] = [
     CurrentRound,
     BenchPassProgress,
     VerifyPassProgress,
-    ArmPointer,
     ProducerAlert,
     ProducerReading,
     RunAdmission,
@@ -411,7 +470,6 @@ EXPORTED_MODELS: list[type] = [
     LineStanding,
     CyclesResponse,
     CommandAcceptedBody,
-    LaunchLimits,
     RunMode,
     StartCheckinPayload,
     StartRunPayload,
@@ -419,6 +477,8 @@ EXPORTED_MODELS: list[type] = [
     VendorModels,
     CampaignRunsWith,
     Arm,
+    Optimize,
+    Compare,
     CampaignSummary,
     CampaignListResponse,
     CampaignPipelineResponse,
@@ -448,7 +508,8 @@ EXPORTED_MODELS: list[type] = [
     LiftProfile,
     DatasetSplit,
     BenchSet,
-    ArmBudget,
+    StoppingRule,
+    DeterminismClamp,
     PairGuard,
     HeadToHeadRow,
     SelectionPair,
@@ -503,6 +564,10 @@ EXPORTED_MODELS: list[type] = [
     OptimizerKnobsResponse,
     NodeKnobs,
     KnobRow,
+    OptimizerSetup,
+    PoolRow,
+    PoolDraw,
+    KnobSwitch,
     OptimizerRoster,
     OptimizerEntry,
     ConfigKnob,
@@ -529,9 +594,10 @@ EXPORTED_MODELS: list[type] = [
     RaisedCommand,
     OriginResolution,
     ResolveOriginResponse,
-    CheckinReopenResponse,
+    DraftReopenResponse,
+    DraftSummary,
+    DraftListResponse,
     StartCheckinResponse,
-    DatasetReplaced,
 ]
 
 _OUT_PATH = _REPO / "webapp" / "lib" / "api" / "types.generated.ts"
@@ -559,6 +625,8 @@ def _emit_type(annotation: typing.Any) -> str:
         return "null"
     if isinstance(annotation, typing.TypeAliasType):
         return _emit_type(annotation.__value__)
+    if isinstance(annotation, typing.NewType):
+        return _emit_type(annotation.__supertype__)
 
     if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
         return " | ".join(
@@ -581,8 +649,9 @@ def _emit_type(annotation: typing.Any) -> str:
         return f"{rendered} | null" if has_none else rendered
 
     if origin is typing.Literal:
+        values = [a.value if isinstance(a, enum.Enum) else a for a in args]
         # `json.dumps` for a non-string: a Python `True` is not a TypeScript literal.
-        return " | ".join(repr(a) if isinstance(a, str) else json.dumps(a) for a in args)
+        return " | ".join(repr(v) if isinstance(v, str) else json.dumps(v) for v in values)
 
     if origin in (list, set, frozenset):
         (inner,) = args
@@ -612,15 +681,23 @@ def _emit_type(annotation: typing.Any) -> str:
     return "unknown"
 
 
-def _emit_field(name: str, info: FieldInfo, annotation: typing.Any) -> str:
-    # Pydantic serializes defaults on the wire ⇒ no `?` in TS, only `| null` for Optional.
+def _emit_field(name: str, info: FieldInfo, annotation: typing.Any, *, omittable: bool) -> str:
+    # Pydantic serializes defaults on the wire ⇒ no `?` in TS, unless a serializer drops the field.
     ts_type = _emit_type(annotation)
     description = info.description
     comment_block = ""
     if description:
         wrapped = textwrap.fill(description, width=78, subsequent_indent="   * ")
         comment_block = f"  /** {wrapped} */\n"
-    return f"{comment_block}  {info.alias or name}: {ts_type};"
+    return f"{comment_block}  {info.alias or name}{'?' if omittable else ''}: {ts_type};"
+
+
+def _omitted_unset(model: type[BaseModel]) -> frozenset[str]:
+    """The fields a model's own serializer leaves off the wire when nobody set them."""
+    if any(info.is_required() for info in model.model_fields.values()):
+        return frozenset()
+    dumped = model.model_construct().model_dump(mode="json")
+    return frozenset(name for name in model.model_fields if name not in dumped)
 
 
 def _resolved_hints(model: type[BaseModel]) -> dict[str, typing.Any]:
@@ -656,17 +733,6 @@ def _emit_lifecycle_filter() -> str:
     members = " | ".join(repr(m) for m in typing.get_args(LifecycleFilter.__value__))
     note = "`GET /campaigns?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'."
     return f"// {note}\nexport type LifecycleFilter = {members};"
-
-
-def _emit_arm_outcomes_ended_early() -> str:
-    from promptpotter.domain.results import ArmOutcome
-
-    members = ", ".join(repr(o.value) for o in ArmOutcome if o.ended_early)
-    return (
-        "// The outcomes whose walk stopped before its panel "
-        "(domain/results.py::ArmOutcome.ended_early).\n"
-        f"export const ARM_OUTCOMES_ENDED_EARLY: readonly ArmOutcome[] = [{members}];"
-    )
 
 
 def _emit_command_kinds() -> str:
@@ -711,7 +777,6 @@ def _emit_run_phase_tables() -> str:
         "label",
         "walks",
         "settled",
-        "authoring",
         "awaits_operator",
         "dock_priority",
         "parked",
@@ -734,7 +799,6 @@ def _emit_run_phase_tables() -> str:
         "  label: string;\n"
         "  walks: boolean;\n"
         "  settled: boolean;\n"
-        "  authoring: boolean;\n"
         "  awaits_operator: boolean;\n"
         "  dock_priority: number;\n"
         "  parked: string;\n"
@@ -1008,20 +1072,6 @@ def _emit_pipeline_schema_words() -> str:
     )
 
 
-def _emit_prompt_string_fields() -> str:
-    from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
-
-    rows = "\n".join(f"  {name!r}," for name in PROMPT_STRING_FIELDS).replace("'", '"')
-    return (
-        "// The PromptTemplate decomposition field SET. Mirror of\n"
-        "// domain/search_point.py::PROMPT_STRING_FIELDS — canonical MEMBERSHIP only, since each\n"
-        "// prompt kind orders its own render (PromptTemplate.RENDER_ORDER). Don't hand-list these.\n"
-        "export const PROMPT_STRING_FIELDS = [\n"
-        f"{rows}\n"
-        "] as const;"
-    )
-
-
 def _emit_recent_step() -> str:
     from promptpotter.infrastructure.runtime_flags import RECENT_STEP_S
 
@@ -1099,8 +1149,9 @@ def _emit_interface(model: type) -> str:
     if not issubclass(model, BaseModel):
         return _emit_record(model)
     hints = _resolved_hints(model)
+    omitted = _omitted_unset(model)
     body_lines = [
-        _emit_field(name, info, hints.get(name, info.annotation))
+        _emit_field(name, info, hints.get(name, info.annotation), omittable=name in omitted)
         for name, info in model.model_fields.items()
     ]
     body_lines += [
@@ -1124,15 +1175,8 @@ _HEADER = """\
 
 def main() -> int:
     from promptpotter.domain.phases import DashboardState, ProducerState, RunPhase
-    from promptpotter.domain.results import ArmOutcome
 
     blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
-    blocks.append(
-        _emit_enum_union(
-            ArmOutcome, "How an arm's measurement ended (domain/results.py::ArmOutcome)."
-        )
-    )
-    blocks.append(_emit_arm_outcomes_ended_early())
     blocks.append(
         _emit_enum_union(RunPhase, "The coarse run-state axis (domain/phases.py::RunPhase).")
     )
@@ -1165,7 +1209,6 @@ def main() -> int:
     blocks.append(_emit_cell_term_meta())
     blocks.append(_emit_recent_step())
     blocks.append(_emit_cycle_path_grammar())
-    blocks.append(_emit_prompt_string_fields())
     content = _HEADER + "\n\n".join(blocks) + "\n"
     _OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     prior = _OUT_PATH.read_text(encoding="utf-8") if _OUT_PATH.is_file() else ""

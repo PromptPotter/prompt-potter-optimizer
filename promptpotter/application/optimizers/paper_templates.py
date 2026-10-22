@@ -7,15 +7,16 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 from pydantic import Field
 
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.wounds import ValidationFailure
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.results import CandidateProposal
+    from promptpotter.domain.pipeline_schema import PipelineNode
+    from promptpotter.domain.results import Proposal
 
 __all__ = [
     "RewriteKnobs",
@@ -33,42 +34,51 @@ __all__ = [
 _PROMPT = re.compile(r"<prompt>(.*?)</prompt>", re.DOTALL)
 
 
-def task_description(ctx: NodeContext[Any]) -> str:
-    """Ends on the origin's answer format: the extraction contract a paper's task descriptions state (CAPO App. D.1)."""
-    origin = ctx.origin
+def task_description(ctx: NodeContext[Any], node: PipelineNode) -> str:
+    """Ends on *node*'s origin answer format: the extraction contract a paper's task descriptions state (CAPO App. D.1)."""
     parts = [v for v in ctx.framing.to_dict().values() if v]
-    if origin.answer_format:
-        parts.append(origin.answer_format)
+    if answer_format := ctx.origin.prompt(node.name).fields.get("answer_format"):
+        parts.append(answer_format)
     if not parts:
         raise ValueError(
-            f"{ctx.optimizer.name} fills its templates with the task description, and this "
+            f"{ctx.optimizer_name} fills its templates with the task description, and this "
             "campaign declares no framing (task_context) and its origin no answer_format"
         )
     return "\n".join(parts)
 
 
-Rewrites = Literal["prompt", "instruction"]
+Rewrites = Literal["prompt", "field"]
 
 
 class RewriteKnobs(StrictModel):
     rewrites: Annotated[Rewrites, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        description="Which loci the node's reply replaces. `prompt`: the whole prompt as one "
-        "text — the model is shown every field rendered together, its reply rides `instruction` "
-        "and the other five empty, as the papers' one-text prompts do. `instruction`: that field "
-        "alone — the model is shown it alone, and the child inherits every other locus from its "
-        "first parent."
+        description="Which loci of a prompt node the reply replaces. `prompt`: the whole prompt "
+        "as one text — the model is shown every field rendered together, its reply rides `field` "
+        "and the node's other fields empty, as the papers' one-text prompts do. `field`: that "
+        "field alone — the model is shown it alone, and the child inherits every other locus "
+        "from its first parent."
+    )
+    field: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        min_length=1,
+        description="The prompt field the reply is written into; every prompt node the member "
+        "rewrites declares it, or the campaign is refused before it mints.",
     )
 
 
-def shown(ctx: NodeContext[Any], individual: OptSearchPoint) -> str:
-    return individual.render() if ctx.knobs.rewrites == "prompt" else individual.instruction
+def shown(ctx: NodeContext[Any], individual: OptSearchPoint, node: PipelineNode) -> str:
+    knobs: RewriteKnobs = ctx.knobs
+    if knobs.rewrites == "prompt":
+        return individual.render(node)
+    return individual.prompt(node.name).fields.get(knobs.field, "")
 
 
-def rewritten(text: str, rewrites: Rewrites) -> dict[str, Any]:
+def rewritten(ctx: NodeContext[Any], node: PipelineNode, text: str) -> dict[Locus, str]:
     """Under ``prompt`` every other field is emptied: the reply replaced the whole ``render()`` shown."""
-    if rewrites == "instruction":
-        return {"instruction": text}
-    return {**dict.fromkeys(PROMPT_STRING_FIELDS, ""), "instruction": text}
+    knobs: RewriteKnobs = ctx.knobs
+    written = {Locus(node.name, knobs.field): text}
+    if knobs.rewrites == "field":
+        return written
+    return {**{Locus(node.name, f): "" for f in node.prompt_fields}, **written}
 
 
 def marked(text: str) -> str | None:
@@ -84,35 +94,38 @@ def unmarked(node: str, raw: str) -> ValidationFailure:
 
 
 def reply_fields(
-    node: str, raw: str, rewrites: Rewrites, parse: Callable[[str], str | None] = marked
-) -> tuple[dict[str, Any], list[ValidationFailure]]:
+    ctx: NodeContext[Any],
+    node: PipelineNode,
+    raw: str,
+    parse: Callable[[str], str | None] = marked,
+) -> tuple[dict[Locus, str], list[ValidationFailure]]:
     text = parse(raw)
-    return ({}, [unmarked(node, raw)]) if text is None else (rewritten(text, rewrites), [])
+    return ({}, [unmarked(ctx.node, raw)]) if text is None else (rewritten(ctx, node, text), [])
 
 
 def child(
     ctx: NodeContext[Any],
+    node: PipelineNode,
     parents: Sequence[OptSearchPoint],
     raw: str,
     changes: str,
     *,
     parse: Callable[[str], str | None] = marked,
-    **fields: Any,
-) -> CandidateProposal:
-    written, failures = reply_fields(ctx.node, raw, ctx.knobs.rewrites, parse)
-    return ctx.child(parents, failures=failures, changes_description=changes, **written, **fields)
+) -> Proposal:
+    written, failures = reply_fields(ctx, node, raw, parse)
+    return ctx.child(parents, failures=failures, prompt_loci=written, changes_description=changes)
 
 
 def rewrite(
     ctx: NodeContext[Any],
-    proposal: CandidateProposal,
+    proposal: Proposal,
     raw: str,
     changes: str | None = None,
     *,
     parse: Callable[[str], str | None] = marked,
-) -> CandidateProposal:
-    fields, failures = reply_fields(ctx.node, raw, ctx.knobs.rewrites, parse)
+) -> Proposal:
+    written, failures = reply_fields(ctx, ctx.prompt_node, raw, parse)
     if failures:
         failures = [*proposal.validation_failures, *failures]
         return proposal.model_copy(update={"validation_failures": failures})
-    return ctx.edit(proposal, changes_description=changes, **fields)
+    return ctx.edit(proposal, prompt_loci=written, changes_description=changes)

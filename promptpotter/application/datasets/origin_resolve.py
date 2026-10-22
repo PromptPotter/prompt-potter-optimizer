@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from promptpotter.application.bench.task_context import (
     CheckinOutput,
-    checkin_campaign_call_context,
+    draft_call_context,
     run_checkin,
 )
 from promptpotter.application.commands.payloads import EditDraftCampaignPayload
@@ -26,7 +26,7 @@ from promptpotter.application.datasets.origin_readiness import (
 from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
+from promptpotter.domain.search_point import DEFAULT_PROMPT_FIELDS
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -125,7 +125,7 @@ async def resolve_origin_turn(
     user_content, consultation_instruction = build_origin_consultation(draft, message)
 
     # Bound here as well as in `CommandDispatcher`: the CLI path (`new <file>`) has no dispatcher.
-    context = checkin_campaign_call_context(stores, draft.draft_id)
+    context = draft_call_context(stores, draft.draft_id)
     token = set_cycle_ledger(context.ledger)
     try:
         # No launch admitted this call and no run's book watches it; a check-in has no producer.
@@ -222,13 +222,15 @@ def _apply_findings(
             Provenance.CONFIRMED if proposal.confidence == "high" else Provenance.PROPOSED
         )
     prompt_fields = {
-        name: getattr(output, name)
-        for name in PROMPT_STRING_FIELDS
-        if str(getattr(output, name)).strip()
+        name: text for name in DEFAULT_PROMPT_FIELDS if (text := getattr(output, name)).strip()
     }
     if prompt_fields:
-        values["origin_prompt_fields"] = {**draft.origin_prompt_fields, **prompt_fields}
-        provenance["origin_prompt_fields"] = Provenance.CONFIRMED
+        # The decomposition is the default field set, so it seeds every active step alike.
+        values["origin_prompts"] = {
+            step: {**draft.origin_prompts.get(step, {}), **prompt_fields}
+            for step in draft.active_steps()
+        }
+        provenance["origin_prompts"] = Provenance.CONFIRMED
     decomposed = output.task_context.model_dump()
     if any(str(value).strip() for value in decomposed.values()):
         values["decomposed_task_context"] = decomposed

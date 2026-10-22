@@ -1,21 +1,22 @@
 "use client";
-import { ratePricedText, spendHeadline } from "@/lib/derivations";
-import type { ArmReading, MeteredSpend, PairedReading } from "@/lib/api/types";
+import { ratePricedText, spendHeadline, type SpendView } from "@/lib/derivations";
+import type { ArmReading, PairedReading } from "@/lib/api/types";
 import { fmtPct0 } from "@/lib/format";
 import { HoverCard, Term } from "@/components/ui";
 import { PairedLift } from "@/components/shell/PairedLift";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 
 export function SubjectHeadline({
-  metered,
+  spend,
   reading,
   bench,
 }: {
-  metered: MeteredSpend | null;
+  spend: SpendView;
   reading: ArmReading | null;
   // served: `bench_score.vs_origin`, set only where the shown searchpoint is the graded pick.
   bench: PairedReading | null;
 }) {
+  const { metered } = spend;
   const priced = metered
     ? ratePricedText(metered.rate_priced_usd, metered.calls_rate_priced)
     : null;
@@ -23,7 +24,7 @@ export function SubjectHeadline({
     <div className="subject-headline">
       {metered ? (
         <>
-          <Term content={<SpendBuckets metered={metered} />}>
+          <Term content={<SpendBuckets metered={metered} campaignUsd={spend.campaignUsd} />}>
             <strong>{spendHeadline(metered)}</strong>
           </Term>
           <span className="subject-headline-unit">

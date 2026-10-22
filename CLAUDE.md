@@ -8,11 +8,13 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 **Our setting is the cloud team-online deployment (tier 3), NOT the local-secure one (tier 2)** — treat cloud/team as the default operating context in everything we build ([`deploy-linux/`](deploy-linux/): Cloudflare tunnel + open OIDC signup + a per-account spend ceiling). What shipped and what is in flight: [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
+**Every run either OPTIMIZES (anything on disk that helps is admissible) or COMPARES (a controlled `--arm`: it reads only what a fresh run of itself would) — ask which before touching any mechanism that reads past the run.** Opposite rules, one predicate: [ADR-0009](docs/adr/0009-optimize-or-compare.md).
+
 **Origin = the campaign root = C0**, and for a fork the point it branches *from*. An *individual/candidate* is a configuration (both are `OptSearchPoint`). **The general relation is *parent*** — the individual a candidate was mutated from, and each arm's `reference_id`: the origin at round 0, the prior winner after it.
 
 **Fitness is never one fixed number — always ask "under which formula?"** It is formula-relative (**active** / **mask**, picked by a **lens** / **replay**) and mode-relative (`measured` subset vs `all`). Every score — the active fitness, any alternative formula or mode, the hard-sample sort — is computed and **served by the backend; the webapp never recomputes.** Depth: [`docs/architecture.md`](docs/architecture.md) §0.5 (Composite-fitness resolution chain) + [`docs/concepts/scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
 
-⚠️ **Where the selector elects on ability (`Selector.elects_on == "ability"` — potter's), a round is won on θ, not accuracy — when the operator reads the accuracy column, say so.** The bench stamps θ on every optimizer's arms, but a peer's selector elects on its own objective, so none of this paragraph applies there. Subsets move between rounds and PoBB truncates arms at different depths, so a lower-accuracy winner is normally *correct*: push back rather than accept the premise. **That pushback is wrong wherever the round or the arm carries a `ThetaCaveat`** (`domain/ruler.py` — the enum is the roster), SERVED so no surface re-decides one; several are SILENT, every number still rendering. **Read the round's `overlap` line before arguing either way** — C0 and each new best since, on one shared set of cells, needing no ruler. Each caveat's meaning, derivation and what stays readable under it: [`docs/methods/verdict-resolution.md`](docs/methods/verdict-resolution.md) § Reading a round.
+⚠️ **Where the selector elects on ability (`Selector.elects_on == "ability"` — potter's), a round is won on θ, not accuracy — when the operator reads the accuracy column, say so.** The bench stamps θ on every optimizer's arms, but a peer's selector elects on its own objective, so none of this paragraph applies there. Subsets move between rounds and PoBB truncates arms at different depths, so a lower-accuracy winner is normally *correct*: push back rather than accept the premise. **That pushback is wrong wherever the level series or the arm carries a `ThetaCaveat`** (`domain/ruler.py` — the enum is the roster), SERVED so no surface re-decides one; several are SILENT, every number still rendering. **Read the round's `overlap` line before arguing either way** — C0 and each new best since, on one shared set of cells, needing no ruler. Each caveat's meaning, derivation and what stays readable under it: [`docs/methods/verdict-resolution.md`](docs/methods/verdict-resolution.md) § Reading a round.
 
 ## First — decide what KIND of ask this is, then load for it
 
@@ -23,7 +25,7 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 | **Run / watch a campaign** — "run bbeh", "start it", "how's it going" | `/potter-run` · the cycle's `readout.log` · [`persistence-and-state.md`](docs/operations/persistence-and-state.md) (the verbs, resume/rewind/fork) · [`observability.md`](docs/operations/observability.md) (what is traced, the P(best) stream) | Fired and left; config edited mid-flight. |
 | **Diagnose a live or stuck run** — "it's hung", "why did it stop" | [`persistence-and-state.md`](docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run — the triage order, the phase vocabulary, liveness; then § Recovery for the verb | Mtimes read first, so a deliberate pause looks like a crash. |
 | **L4 / `promptpotter-self`** self-improvement, the optimizer's own business logic, prompts and configurations alike. | [`l4-outer-loop.md`](docs/specs/l4-outer-loop.md) (what is true) · `/potter-self` (what to do) · [`optimizers/potter/CLAUDE.md`](promptpotter/application/optimizers/potter/CLAUDE.md) · [`dispatch-hub.md`](docs/developer/dispatch-hub.md) | A leader believed from a panel that cannot resolve arms. |
-| **Dataset / benchmark work** | [`promptpotter/assets/datasets/CLAUDE.md`](promptpotter/assets/datasets/CLAUDE.md) | Rows re-cut under the name they already had. |
+| **Dataset / benchmark work** | [`promptpotter/assets/datasets/CLAUDE.md`](promptpotter/assets/datasets/CLAUDE.md) | A row's slot read as the sample it holds. |
 | **Engine code (Python)** | [`architecture.md`](docs/architecture.md) §0 + §0.5 · the ONE layer you touch, indexed by [`promptpotter/CLAUDE.md`](promptpotter/CLAUDE.md) · [`conventions.md`](docs/developer/conventions.md) · [`adding-a-surface.md`](docs/developer/adding-a-surface.md) § for the kind of thing you are adding · [`tests/CLAUDE.md`](tests/CLAUDE.md) BEFORE a test: three axes admit one, it rides one of six files, the ledger counts both | Green locally, red in CI — gated in the wrong env. A test file per feature. |
 | **Variation, pools, recombining optimizers** — "crossover", "genetic", "use CAPO's X in potter" | [`ADR-0007`](docs/adr/0007-one-loop-shared-members.md) · [`variation-and-pools.md`](docs/specs/variation-and-pools.md) · [`roadmap.md`](docs/specs/roadmap.md) § Variation and pools (its Decided list, then the stage in hand) | A feature built inside one optimizer's package. A decided choice re-asked. |
 | **Reading an outside source** — a paper, a peer, a benchmark, "what does X report" | [`docs/research/CLAUDE.md`](docs/research/CLAUDE.md) · [`landscape.md`](docs/research/landscape.md) (where a peer is recorded first) | A fact recalled, not read, written down as if read. |
@@ -37,6 +39,7 @@ Ask fits no row, or you need one fact rather than a task's whole surface? The qu
 
 What this file owns, and where each rule is stated. Names only — the section is the text.
 
+- Ask optimize-or-compare before touching a mechanism → § What this is
 - Classify the ask before loading → § First — decide what KIND of ask this is, then load for it
 - Delete shims, fallbacks and redundant paths → § STOP — no backward compatibility, ever
 - Never commit or push unprompted → § Conventions
@@ -90,7 +93,8 @@ Six *situational* guardrails against recurring AI blind spots. The trigger and t
 
 ```bash
 # Every `python` below is the repo venv (`.venv/Scripts/python.exe` | `.venv/bin/python`). Bare `python` refuses at
-# `import promptpotter`, naming the core dependencies it lacks; `gate.py` re-execs into its own venv instead.
+# `import promptpotter`, naming the core dependencies it lacks; `gate.py` re-execs into its own venv instead,
+# and refuses to sync a `.venv` junctioned from another tree — that venv is its owner's.
 pip install -e ".[all,dev]"                                  # `benchmarks` and `harbor` are OUT of `all` deliberately — add one only when you need it; harbor wants a container runtime
 python scripts/gate.py                                       # EVERY check CI runs, in the locked env. --py / --web to halve it, --only NAME for the one check that owns what you touched
 python scripts/gate.py --release                             # BEFORE cutting a release: the dashboard lock against npm's advisory DB + every open Dependabot alert. Network-bound, so never in the default run

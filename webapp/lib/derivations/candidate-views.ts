@@ -21,14 +21,14 @@ export function barsAreCourses(viewedNode: LineageNode | undefined): boolean {
 
 export interface CandidateBarsInput {
   viewedNode: LineageNode | undefined;
-  inflightByLabel: ReadonlyMap<string, ArmReading>;
+  inflightByKey: ReadonlyMap<string, ArmReading>;
   sampleSet: number[] | null;
   benchPass: BenchPassProgress | null;
 }
 
 export function candidateBars({
   viewedNode,
-  inflightByLabel,
+  inflightByKey,
   sampleSet,
   benchPass,
 }: CandidateBarsInput): CandidateBar[] {
@@ -51,9 +51,9 @@ export function candidateBars({
         benchPass: null,
       };
     }
-    // ONE half per bar: the tree serves `outcome: null` until the arm's walk is decided on the ledger.
-    const live =
-      node.reading.outcome === null ? inflightByLabel.get(node.reading.arm.label) : undefined;
+    // ONE half per bar: the tree serves `proposed`/`measuring` until the arm's walk is decided on the ledger.
+    const decided = node.reading.state === "cut" || node.reading.state === "measured";
+    const live = decided ? undefined : inflightByKey.get(node.reading.arm.key);
     const reading = live ?? node.reading;
     // Both are served null short of the WHOLE basis: a rate over a shorter denominator sat another exam.
     const onLine = node.reading.on_origin_panel;
@@ -73,7 +73,7 @@ export function candidateBars({
       source: live ? "inflight" : "history",
       level: reading.own?.accuracy?.value ?? null,
       overlap,
-      benchPass: benchPass?.label === node.reading.arm.label ? benchPass : null,
+      benchPass: benchPass?.arm === node.reading.arm.key ? benchPass : null,
     };
   });
 }

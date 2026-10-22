@@ -52,7 +52,7 @@ CHANNELS: tuple[str, ...] = CELL_CHANNELS
 
 
 def cell_channels(rows: Iterable[GradedCell]) -> dict[str, dict[str, float]]:
-    """Keyed by the row's `query`: a per-campaign `sample_id` names a different cell across campaigns."""
+    """Keyed by the row's `query`: a per-campaign `position` names a different cell across campaigns."""
     sums: dict[str, dict[str, list[float]]] = {}
     for row in rows:
         answered = cell_channels_of(row.facts, row.grade.fitness)

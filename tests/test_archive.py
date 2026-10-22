@@ -18,17 +18,24 @@ from unittest import mock
 
 import pytest
 from factories import (
+    arm_state,
+    election,
+    level_series,
     loop_session,
     measurement,
     measurements,
+    minted_campaign,
     optimizer_state,
     pipeline_schema,
     pobb_knobs,
-    scored_candidate,
+    prompted,
+    score_summary,
     sheet,
     workspace,
 )
 
+from promptpotter.application import optimizers
+from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     mint_operator_fork,
@@ -39,13 +46,16 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     apply_config_overrides,
 )
-from promptpotter.application.intelligence.hard_sample_archive import build_archive_observations
-from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
 )
-from promptpotter.application.optimizers.nodes import Measured, Proposals, RoundContext
+from promptpotter.application.optimizers.nodes import (
+    MeasuredRound,
+    Proposals,
+    ReadArm,
+    RoundContext,
+)
 from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.optimizers.potter.race import PoBBRace
@@ -53,56 +63,63 @@ from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
 )
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.scoring.formula import compile_scorer
-from promptpotter.application.scoring.search_point_scorer import _replayable_on
+from promptpotter.application.scoring.measurement_log import open_cell
+from promptpotter.application.scoring.search_point_scorer import replayable_on
+from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.optimizer_state import UnregisteredPayloadError
+from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.paired_reading import ReadingState
-from promptpotter.domain.phase_views import ViewAnchors
-from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
-from promptpotter.domain.results import OverlapReading, ReferenceReading, RoundResult, RunStanding
-from promptpotter.domain.ruler import DeltaRuler, RulerScope
+from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode
+from promptpotter.domain.results import (
+    ArmKey,
+    ArmSlot,
+    OverlapReading,
+    Proposed,
+    RoundResult,
+    RunStanding,
+)
 from promptpotter.domain.run_records import (
-    CandidateMintedRecord,
-    CandidateScoredRecord,
+    AnnouncedArms,
+    ArmRecord,
     ConfigOverrides,
     CycleSeed,
-    ElectionRecord,
     ForkSpec,
     ForkTrigger,
     ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
-    RoundProposedRecord,
-    RoundStandingRecord,
     SampleScoredRecord,
 )
-from promptpotter.domain.sample import ArchiveEntry, Sample, sample_key
+from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
+    at_round,
     reset_cycle_ledger,
     set_cycle_ledger,
 )
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store.archive_queries import (
+    ArmOf,
     CampaignWalks,
-    FiledBy,
     SampleFoldRow,
-    fence_memory,
+    bench_reads,
+    bind_memory_scope,
     list_populations,
     load_population,
     sample_fold_rows,
     write_sample_fold,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
+from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import rewrite_lines
+from promptpotter.infrastructure.store.layout import campaigns_root_dir_for
 from promptpotter.infrastructure.store.lineage_queries import build_lineage_tree
 from promptpotter.infrastructure.store.measurement_archive import (
     MeasurementArchive,
@@ -110,32 +127,29 @@ from promptpotter.infrastructure.store.measurement_archive import (
     config_key,
     standing,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import DatasetIdentityError
-from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.identity import SYSTEM_PRINCIPAL
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 Configs = list[tuple[str, dict[str, Any]]]
 _LLM_ONLY: Configs = [("llm_only", {"model": "X"})]
 _CAMPAIGN = "testds__20260101-000000"
 
 
-def _entry(node_configs: Configs, dataset_name: str) -> ArchiveEntry:
+def _entry(node_configs: Configs, dataset_hash: str) -> ArchiveEntry:
     return ArchiveEntry(
         config_key=config_key(node_configs),
         prompt_fields_id="pf_x",
-        rendered_prompt_hash="",
         node_configs=node_configs,
         pipeline_params={},
-        dataset_name=dataset_name,
+        dataset_hash=dataset_hash,
     )
 
 
 def _row(
-    sid: int, query: str, *, predicted: str = "p", hit: bool = True, terminal: str = "llm_only"
+    query: str, *, predicted: str = "p", hit: bool = True, terminal: str = "llm_only"
 ) -> dict[str, Any]:
     return {
-        "sample_id": sid,
         "query": query,
         "ground_truth": "g",
         "predicted": predicted,
@@ -149,7 +163,7 @@ def _file(
     archive: MeasurementArchive,
     rows: list[dict[str, Any]],
     *,
-    dataset_name: str,
+    dataset_hash: str,
     node_configs: Configs = _LLM_ONLY,
     provenance: str = "A",
     created_at: str = "2026-05-19T00:00:00Z",
@@ -163,7 +177,7 @@ def _file(
         return {"sample_key": key, **r}
 
     return archive.file_answers(
-        _entry(node_configs, dataset_name),
+        _entry(node_configs, dataset_hash),
         [(MeasuredCell.from_wire(keyed(r)), provenance) for r in rows],
         role="panel",
         source=RunSource.OPTIMIZATION_LOOP.value,
@@ -180,24 +194,25 @@ def _walk_panel(
     per_sample: str,
     per_cell: str | None,
     *,
+    bank: list[Sample] | None = None,
     ledger: Path | None = None,
 ) -> Any:
-    """*ledger* given, the walk is an arm's and records what it took there."""
+    """*ledger* given, the walk is an arm's and records what it took there; *bank* given, the
+    panel is a part of that bank."""
     schema = pipeline_schema(
         name="claims",
         nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())],
     )
-    session = loop_session(workspace(root), schema, panel, backend_id="b")
+    session = loop_session(workspace(root), schema, panel if bank is None else bank, backend_id="b")
     session.source = RunSource.OPTIMIZATION_LOOP
     session.scoring.scorer = compile_scorer(per_sample, per_cell, verifier_graded=False)
-    sp = OptSearchPoint(instruction="Answer.").to_job_search_point(
+    sp = prompted(instruction="Answer.").to_job_search_point(
         schema=schema, framing=TaskDecomposition(), demo=[]
     )
 
     async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:
         predicted = "b" if sample.id % 2 else "a"
         return MeasuredCell(
-            sample_id=sample.id,
             sample_key=sample.key,
             query=sample.query,
             ground_truth="a",
@@ -205,12 +220,12 @@ def _walk_panel(
         )
 
     bound = set_cycle_ledger(CycleEventLog(root / "walk.jsonl" if ledger is None else ledger))
-    slot = None if ledger is None else query_loop.ArmSlot(0, 1, "arm")
+    measured = None if ledger is None else MeasuredPass(individual_id="arm")
     try:
         with mock.patch.object(query_loop, "measure_sample", _measure):
             walked = asyncio.run(
                 search_point_scorer.score_search_point(
-                    sp, panel, session, label="panel", slot=slot, measured=None
+                    sp, panel, session, label="panel", measured=measured
                 )
             )
     finally:
@@ -225,8 +240,8 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     for predicted, terminal in (("short_circuit", "l1_critique"), ("full_chain", "l3_plan")):
         _file(
             archive,
-            [_row(1, "q", predicted=predicted, terminal=terminal)],
-            dataset_name="promptpotter-self",
+            [_row("q", predicted=predicted, terminal=terminal)],
+            dataset_hash="promptpotter-self",
             node_configs=chain,
         )
     later_node_changed: Configs = [
@@ -241,37 +256,30 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
         "mid-chain short-circuit inside the trusted prefix stopped reusing"
     )
 
-    for name, grade, terminal, sid, dataset_name, hit in (
-        ("clean", "A", "llm_only", 7, "aime", True),
-        ("connector", "C", "token_matching", 8, "aime", True),
-        ("aime_14", "A", "llm_only", 14, "aime", True),
-        ("justlogic_14", "A", "llm_only", 14, "justlogic", False),
+    for name, grade, terminal, dataset_hash, hit in (
+        ("clean", "A", "llm_only", "aime", True),
+        ("connector", "C", "token_matching", "aime", True),
+        ("aime_14", "A", "llm_only", "aime", True),
+        ("justlogic_14", "A", "llm_only", "justlogic", False),
     ):
-        row = _row(sid, f"q_{name}", hit=hit, terminal=terminal)
-        _file(archive, [row], dataset_name=dataset_name, provenance=grade)
+        row = _row(f"q_{name}", hit=hit, terminal=terminal)
+        _file(archive, [row], dataset_hash=dataset_hash, provenance=grade)
     reusable = ReplayFeed(archive, _LLM_ONLY).advance()
     assert {b.cell.query for b in reusable.values()} == {
         "q_clean",
         "q_aime_14",
         "q_justlogic_14",
     }, "a grade-C answer was replayed"
+    # A cell replays on its sample's content in whichever bank holds it, at that bank's slot.
     wider = [
         Sample(id=0, query="q_aime_14", ground_truth="g"),
         Sample(id=14, query="q_new", ground_truth="g"),
-        Sample(id=1, query="q_aime_14", ground_truth="g", source_pin={"git_commit_id": "moved"}),
+        Sample(id=1, query="q_aime_14", ground_truth="not_g"),
+        Sample(id=2, query="q_aime_14", ground_truth="g", source_pin={"git_commit_id": "moved"}),
     ]
-    on_wider = _replayable_on(wider, reusable, "aime-wide")
-    assert set(on_wider) == {0}, "only the sample aime measured replays, at the slot it holds HERE"
-    assert on_wider[0].query == "q_aime_14" and on_wider[0].sample_id == 0
-    # Readers keyed on `(dataset_name, sample_id)` pool a re-cut slot; a relabel alone is a re-cut.
-    same = [Sample(id=14, query="q_aime_14", ground_truth="g")]
-    assert set(_replayable_on(same, reusable, "aime")) == {14}
-    for recut in (
-        [Sample(id=14, query="an entirely different question", ground_truth="g")],
-        [Sample(id=14, query="q_aime_14", ground_truth="not_g")],
-    ):
-        with pytest.raises(DatasetIdentityError):
-            _replayable_on(recut, reusable, "aime")
+    on_wider = replayable_on(wider, reusable)
+    assert set(on_wider) == {0}, "a cell replayed onto a sample whose content it never measured"
+    assert on_wider[0].query == "q_aime_14"
 
     # Two walks never buy one cell: the waiter reads the answer its holder publishes.
     holder, waiter = (
@@ -279,7 +287,7 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     )
     held = holder.claim("k_held")
     assert held is not None and waiter.claim("k_held") is None, "two walks bought one cell"
-    held.publish(MeasuredCell(sample_id=0, sample_key="k_held", predicted="p"), grade="B")
+    held.publish(MeasuredCell(sample_key="k_held", predicted="p"), grade="B")
     beside = waiter.claim("k_beside")
     assert beside is not None, "one cell's claim held another sample of its configuration"
     assert waiter.claimed_cell("k_beside") is None
@@ -289,10 +297,11 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     beside.release()
 
     # Rows banked under one formula read under another exactly as a fresh run would.
-    panel = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(6)]
+    wider_panel = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(10)]
+    panel = wider_panel[:6]
     banked_under = ("label_match(predicted, ground_truth)", None)
     read_under = ("0.5 * label_match(predicted, ground_truth)", "0.5 * fitness + 0.25")
-    shared, banked_walk = _walk_panel(tmp_path / "shared", panel, *banked_under)
+    shared, banked_walk = _walk_panel(tmp_path / "shared", panel, *banked_under, bank=wider_panel)
     assert all(GRADE_KEYS & r.keys() for r in banked_walk.sheet.wire()), "guard: the walk graded"
     banked = archive_queries.walked_answers(shared.store, banked_walk.cells)
     assert len(banked) == len(panel), "a walked answer was not banked"
@@ -301,35 +310,14 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     worth = {c.key: c.grade.objective for c in fresh.sheet}
     assert len(set(worth.values())) == 2, "guard: hits and misses are worth different amounts"
 
-    def ruler_cells() -> dict[str, float]:
-        observed = build_archive_observations(
-            shared.store,
-            dataset_name="claims",
-            scorer=compile_scorer(*read_under, verifier_graded=False),
-            admitted=None,
-        )
-        return {o.key: o.response for o in observed}
-
-    assert ruler_cells() == pytest.approx(worth), "the ruler read the banked formula's grades"
-    _, replayed = _walk_panel(tmp_path / "shared", panel, *read_under)
+    _, replayed = _walk_panel(tmp_path / "shared", panel, *read_under, bank=wider_panel)
     assert all(c.facts.cached for c in replayed.sheet), "guard: the second read bought nothing"
-    assert [c[:3] for c in replayed.cells] == [c[:3] for c in banked_walk.cells]
+    ruler_cells = {key: y for _, key, y in ruler_rows(shared.store, [("x", replayed.sheet)], None)}
+    assert ruler_cells == pytest.approx(worth), "the ruler read the banked formula's grades"
+    assert [c[:2] for c in replayed.cells] == [c[:2] for c in banked_walk.cells]
     assert shared.store.archive.cell_signatures() == filed, "a replay filed a second answer"
     assert {c.key: c.grade.objective for c in replayed.sheet} == worth
     assert replayed.scores.composite_fitness == pytest.approx(fresh.scores.composite_fitness)
-    SampleIndex.ensure_for(
-        shared.store,
-        scorer=compile_scorer(*read_under, verifier_graded=False),
-        dataset_name="claims",
-        sample_ids=None,
-    )
-    assert ruler_cells() == pytest.approx(worth), "the fold's cells are the regraded ones"
-    wider_panel = [*panel, *(Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(6, 10))]
-    _walk_panel(tmp_path / "shared", wider_panel, *banked_under)
-    _, fresh_wider = _walk_panel(tmp_path / "fresh", wider_panel, *read_under)
-    assert ruler_cells() == pytest.approx({c.key: c.grade.objective for c in fresh_wider.sheet}), (
-        "a population that grew after it was folded read at its folded length"
-    )
 
 
 # 2. The archive on disk
@@ -348,22 +336,24 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
         (3, "ERROR", _LLM_ONLY, {"error_category": "transient"}),
         (4, "elsewhere", other, {}),
     ):
-        row = {"sample_id": 1, "predicted": said, **facts}
+        row = {"sample_key": "k1", "predicted": said, **facts}
         refs += _file(
             archive,
             [row],
-            dataset_name="kept",
+            dataset_hash="kept",
             node_configs=configs,
             created_at=f"2026-05-19T00:{at:02}",
         )
     assert len(set(refs)) == 4
     held = archive.population(entry)
     assert [a.cell.predicted for a in held] == ["first", "second", "ERROR"], "an answer was dropped"
-    assert standing(held)[1].cell.predicted == "second", "an errored answer stood over a graded one"
-    described = {e.config_key for e in archive.list_all(dataset_name="kept")}
+    assert standing(held)["k1"].cell.predicted == "second", (
+        "an errored answer stood over a graded one"
+    )
+    described = {e.config_key for e in archive.list_all(dataset_hash="kept")}
     assert described == {config_key(_LLM_ONLY), config_key(other)}
     assert archive.reindex() == {"indexed": 2, "undescribed": 0}
-    assert {e.config_key for e in archive.list_all(dataset_name="kept")} == described
+    assert {e.config_key for e in archive.list_all(dataset_hash="kept")} == described
     assert archive.population(entry) == held, "reindex destroyed an answer"
     assert all(archive.answer(ref) is not None for ref in refs), "reindex lost an address"
 
@@ -372,14 +362,13 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     reader = MeasurementArchive(archive.base_dir)
     feed = ReplayFeed(reader, tailed)
 
-    def _bank(sid: int, dataset_name: str = "reidx", via: MeasurementArchive = archive) -> None:
+    def _bank(sid: int, dataset_hash: str = "reidx", via: MeasurementArchive = archive) -> None:
         cell = {
-            "sample_id": sid,
             "sample_key": f"k{sid}",
             "predicted": "p",
             "pipeline_data": {"reasoning_trace": "T" * 400},
         }
-        _file(via, [cell], dataset_name=dataset_name, node_configs=tailed)
+        _file(via, [cell], dataset_hash=dataset_hash, node_configs=tailed)
 
     for sid in (1, 2, 3):
         _bank(sid)
@@ -394,7 +383,7 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert set(feed.advance()) == {"k4"}, "an answer filed after the rewrite was skipped"
     assert reader.entry(file_key, "reidx") is not None
     archive.reindex()
-    _bank(5, dataset_name="reidx-wide")
+    _bank(5, dataset_hash="reidx-wide")
     assert reader.entry(file_key, "reidx-wide") is not None, "an index entry was skipped"
     # The other process files between this writer's look at the file and its own append.
     own = ReplayFeed(archive, tailed)
@@ -434,9 +423,14 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
 
     # Compaction round-trips every field it moved; TWO filings, so a restore clears each stamp.
     compacted: Configs = [("llm_only", {"model": "C"})]
+    compacted_bank = Bank.of(Sample(id=0, query=f"q{sid}", ground_truth="g") for sid in (1, 2))
+    compacted_hash = compacted_bank.dataset_hash
+    built_stores.tenant_datasets.put_bank(compacted_bank)
+    built_stores.tenant_datasets.relabel("compacted", compacted_hash)
+    compacted_refs: dict[str, str] = {}
     for sid in (1, 2):
         row = {
-            **_row(sid, f"q{sid}"),
+            **_row(f"q{sid}"),
             "ground_truth_rank": 0,
             "pipeline_data": {
                 "terminal_node": "llm_only",
@@ -449,8 +443,10 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
                 "total_time": 1.25,
             },
         }
-        _file(archive, [row], dataset_name="compacted", node_configs=compacted)
-    whole = _entry(compacted, "compacted")
+        [compacted_refs[f"q{sid}"]] = _file(
+            archive, [row], dataset_hash=compacted_hash, node_configs=compacted
+        )
+    whole = _entry(compacted, compacted_hash)
     before = archive.population(whole)
     assert len(before) == 2 and not any(answer.compaction for answer in before)
     moved_out = compact_measurement_archive(built_stores, dataset="compacted", apply=True)
@@ -469,20 +465,24 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert archive.population(whole) == before, "a restore did not return every moved field"
 
     # A controlled arm remembers only the answers its campaign walked.
+    ds = Bank.of(Sample(id=0, query=f"k{i}", ground_truth="g") for i in range(2))
+
     def individual(name: str) -> ArchiveEntry:
         return ArchiveEntry(
             config_key=config_key([("", {"individual": name})]),
             prompt_fields_id=name,
-            rendered_prompt_hash="",
             node_configs=[],
             pipeline_params={},
-            dataset_name="ds",
+            dataset_hash=ds.dataset_hash,
         )
 
     def bank(name: str, said: list[str], at: int) -> list[str]:
         return archive.file_answers(
             individual(name),
-            [(MeasuredCell(sample_id=i, predicted=p), "A") for i, p in enumerate(said)],
+            [
+                (MeasuredCell(sample_key=ds.samples[i].key, predicted=p), "A")
+                for i, p in enumerate(said)
+            ],
             role="panel",
             source="optimization_loop",
             created_at=f"2026-09-28T00:00:{at:02d}Z",
@@ -498,38 +498,41 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
             ledger.append(
                 SampleScoredRecord(
                     round=0,
-                    candidate_idx=0,
-                    candidate_total=1,
                     individual_id="c0",
                     role=MeasurementRole.PANEL,
-                    result={"sample_key": f"k{i}", "sample_id": i, "answer": answer},
+                    position=i,
+                    result={"sample_key": ds.samples[i].key, "answer": answer},
                 )
             )
 
     def listed() -> set[str]:
-        return {e.prompt_fields_id for e in list_populations(built_stores, dataset_name="ds")}
+        return {e.prompt_fields_id for e in list_populations(built_stores, ds)}
 
     def remembered(name: str) -> list[str]:
-        return [a.cell.predicted for a in load_population(built_stores, individual(name))]
+        return [a.cell.predicted for a in load_population(built_stores, individual(name), ds)]
 
     def fold_row(key: str) -> SampleFoldRow:
         return SampleFoldRow(config_key=key, sp=key, fk="formula", sig=[], graded=[])
 
     bank("foreign", ["yes", "no"], 1)
     bank("shared", ["no", "no"], 2)
-    write_sample_fold(built_stores, dataset_name="ds", rows=[fold_row("x")])
+    write_sample_fold(built_stores, dataset_hash=ds.dataset_hash, rows=[fold_row("x")])
 
     def inside_arm() -> tuple[set[str], list[str], list[SampleFoldRow]]:
         walk(arm_root, bank("origin", ["yes", "no"], 3))
-        fence_memory(CampaignWalks(campaigns, "arm", None))
+        bind_memory_scope(ArmOf(CampaignWalks(campaigns, "arm"), ruler_version=0))
         assert listed() == {"origin"}, "the arm saw a population its campaign never walked"
         # A cycle the campaign mints after the fence (a rebase, a fork) is its own too, and a
         # replayed answer joins the arm's memory once its walk lands there.
         later = CycleHop(campaign_id="arm", cycle_id="cycle_rebased")
         campaigns.mint_cycle(later)
         walk(later, bank("shared", ["yes", "yes"], 0))
-        write_sample_fold(built_stores, dataset_name="ds", rows=[fold_row("y")])
-        return listed(), remembered("shared"), sample_fold_rows(built_stores, dataset_name="ds")
+        write_sample_fold(built_stores, dataset_hash=ds.dataset_hash, rows=[fold_row("y")])
+        return (
+            listed(),
+            remembered("shared"),
+            sample_fold_rows(built_stores, dataset_hash=ds.dataset_hash),
+        )
 
     arm_listed, arm_shared, arm_fold = contextvars.copy_context().run(inside_arm)
     assert arm_listed == {"origin", "shared"}
@@ -539,29 +542,67 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert arm_fold == [], "the arm read a fold its fence never admitted"
     assert listed() == {"foreign", "shared", "origin"}, "the fence leaked out of the arm"
     assert remembered("shared") == ["no", "no"]
-    assert sample_fold_rows(built_stores, dataset_name="ds") == [fold_row("x")]
+    assert sample_fold_rows(built_stores, dataset_hash=ds.dataset_hash) == [fold_row("x")]
+
+    # A relabel moves a name onto a bank: it rewrites no paid row and no campaign, and every cell
+    # filed under the bank replays on the samples the new name resolves to.
+    def tree_bytes() -> dict[Path, bytes]:
+        roots = (archive.base_dir / MEASUREMENTS_DIR, campaigns_root_dir_for(campaigns.workspace))
+        return {p: p.read_bytes() for root in roots for p in root.rglob("*") if p.is_file()}
+
+    before_relabel = tree_bytes()
+    built_stores.tenant_datasets.relabel("compacted-renamed", compacted_hash)
+    assert tree_bytes() == before_relabel, "a relabel rewrote a measurement or a campaign"
+    renamed = built_stores.tenant_datasets.labelled("compacted-renamed")
+    assert renamed == compacted_bank
+    assert set(replayable_on(list(renamed.samples), ReplayFeed(archive, compacted).advance())) == {
+        0,
+        1,
+    }, "a cell filed under the bank stopped replaying once its name moved"
+
+    # A re-cut drops q1 and moves q2: an old answer opens at its own bank's slot, and a holdout
+    # read under the old bank stays spent under the new one.
+    q1, q2 = compacted_bank.samples
+    recut = Bank.of([Sample(id=0, query="q_new", ground_truth="g"), q2])
+    built_stores.tenant_datasets.put_bank(recut)
+    built_stores.tenant_datasets.relabel("compacted-renamed", recut.dataset_hash)
+    definition = built_stores.tenant_datasets.dataset_dir("compacted-renamed")
+    definition.mkdir(parents=True)
+    (definition / DEFINITION_FILE).write_text(
+        "pipeline:\n  nodes:\n    llm_only: {type: llm}\n  pipelines:\n    default: [llm_only]\n"
+        "campaign:\n  scoring: label_match(predicted, ground_truth)\n"
+        "  optimization:\n    degradation_threshold: 0.4\n",
+        encoding="utf-8",
+    )
+    opened = open_cell(built_stores, "compacted-renamed", compacted_refs[q1.query])
+    assert opened.position == compacted_bank.slot_of[q1.key], (
+        "an old answer opened at another bank's slot"
+    )
+    assert bench_reads(built_stores, bank=recut, sample_keys=frozenset({q2.key})) == 0, "guard"
+    archive.file_answers(
+        _entry(compacted, compacted_hash),
+        [(MeasuredCell(sample_key=q2.key, predicted="g"), "A")],
+        role=MeasurementRole.BENCH.value,
+        source=RunSource.OPTIMIZATION_LOOP.value,
+        created_at="2026-05-19T00:00:00Z",
+    )
+    assert bench_reads(built_stores, bank=recut, sample_keys=frozenset({q2.key})) == 1, (
+        "a holdout read under the bank before a re-cut was not counted on the re-cut"
+    )
 
 
 # 3. Replayed decisions, and forks
 
 
 def _round(**kw: Any) -> RoundResult:
-    return RoundResult.model_validate(
-        {
-            "label": "C0",
-            "accuracy": None,
-            "composite_fitness": None,
-            "total": 0,
-            "improved": False,
-            "elects_on": "ability",
-            "prompt_fields": {},
-            "candidates_scored": 0,
-            "selected_labels": [],
-            "leading_label": None,
+    return RoundResult(
+        **{
+            "folds": {},
+            "election": None,
             "overlap": OverlapReading.unpaired(ReadingState.NOT_HELD, 0, False),
-            "optimizer_state": optimizer_state().model_dump(),
-            **kw,
+            "optimizer_state": optimizer_state(),
         }
+        | kw
     )
 
 
@@ -587,30 +628,28 @@ def _mint_sibling(
     return child
 
 
-def _stand_round(
+def _emit_round(
     ledger: CycleEventLog, closed: list[RoundResult], name: str, *, crowned: bool = True
 ) -> str:
     n = len(closed)
-    label = f"C{n}.1" if n else "C0"
-    pick = OptSearchPoint(instruction=name)
-    selected = [label] if crowned else []
-    scores = scored_candidate(pick.id, label=label)
-    closed.append(
-        _round(
-            round=n, label=label, opt_sp=pick, candidate_scores=[scores], selected_labels=selected
-        )
-    )
-    ledger.append(RoundEnteredRecord(round=n))
-    ledger.append(CandidateMintedRecord(round=n, idx=0, candidate_id=pick.id, label=label))
-    ledger.append(CandidateScoredRecord(round=n, candidate_idx=0, candidate_total=1, scores=scores))
-    ledger.append(ElectionRecord(round=n, selected_labels=selected, elects_on="accuracy"))
-    ledger.append(RoundClosedRecord.of(closed[-1]))
-    stood = RunStanding.after(closed, lives=None, spent=None)
-    ledger.append(RoundStandingRecord(round=n, run_standing=stood, anchors=ViewAnchors()))
+    pick = prompted(instruction=name)
+    key, slot = ArmKey(pick.id), ArmSlot(round=n, idx=0, total=1)
+    arm = arm_state(name, slot=slot, individual=pick)
+    vote = election([key] if crowned else [], ended_on=key)
+    rr = _round(round=n, arms={key: arm}, election=vote)
+    closed.append(rr)
+    callbacks = RunCallbacks(ledger)
+    callbacks.on_round_entered(n)
+    callbacks.on_arm(n, key, Proposed(role=arm.role, slot=slot, individual=pick))
+    with at_round(n):
+        callbacks.on_arm(n, key, arm)
+    callbacks.on_election(n, vote)
+    ledger.append(RoundClosedRecord.of(rr, {}, level_series(0.0, [])))
+    callbacks.on_round_complete(rr, RunStanding.after(closed, lives=None), None)
     return pick.id
 
 
-def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
+def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_inherits_them(
     built_stores: Stores,
 ) -> None:
     stores = built_stores
@@ -618,8 +657,8 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
     blind = replay_decisions(
         _round(
             round=0,
-            all_candidate_results={
-                "c1": sheet(
+            cells={
+                ArmKey("c1"): sheet(
                     [measurement(0, 1.0, objective=1.0, query="q", predicted="p", ground_truth="g")]
                 )
             },
@@ -628,7 +667,7 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
             ResumeCheckpointRecord.model_validate(
                 {
                     "kind": "round_winner",
-                    "inputs_ref": {"candidate_ids": ["c1"], "round_num": 0, "coverage_floor": 1},
+                    "inputs_ref": {"arms": ["c1"], "round_num": 0, "coverage_floor": 1},
                     "outcome": "c1",
                 }
             )
@@ -640,38 +679,48 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
     )
 
     # A cut the live race made past an errored cell replays on the cells it was fit on.
+    parent = prompted(instruction="parent")
+    hits = sheet(measurements([1.0] * 10))
     racing = SimpleNamespace(
         optimizer=SimpleNamespace(knobs=lambda node: pobb_knobs(epsilon=0.30)),
         config=SimpleNamespace(optimization=SimpleNamespace(elimination_n_min=4)),
         difficulty=SimpleNamespace(ruler=None),
-        tracking=SimpleNamespace(
-            current_results=list(sheet(measurements([1.0] * 10))), current_sp=JobSearchPoint()
-        ),
-        rounds=[],
+        opt_sp=parent,
+        # The frontier holds every cell, answered by an individual that is not the parent.
+        tracking=SimpleNamespace(current_results=list(hits), current_sp=JobSearchPoint()),
+        rounds=[_round(round=0, cells={ArmKey("origin"): hits})],
         pending_decisions=[],
     )
-    race = PoBBRace(
-        NodeContext(RoundContext(racing, 3, callbacks=None), "pobb"),  # type: ignore[arg-type]
-        SimpleNamespace(cells=list(range(10))),  # type: ignore[arg-type]
-        lambda sp, sample, prior_id: None,  # type: ignore[arg-type, return-value]
-        measured_unit="sample",
-    )
+
+    def race_of() -> PoBBRace:
+        return PoBBRace(
+            NodeContext(RoundContext(racing, 3, callbacks=None), optimizers.member("pobb")),  # type: ignore[arg-type]
+            SimpleNamespace(cells=list(range(10))),  # type: ignore[arg-type]
+            lambda sp, sample, prior_id: None,  # type: ignore[arg-type, return-value]
+            measured_unit="sample",
+        )
+
     walked = sheet(
         measurement(i, None, error="boom", error_category="transient")
         if i == 2
         else measurement(i, 1.0 if i == 4 else 0.0)
         for i in range(8)
     )
+    assert race_of().rule([]).check(walked.cells) is None, (
+        "the parent's prior borrowed cells another individual answered"
+    )
+    racing.rounds.append(_round(round=1, cells={ArmKey(parent.id): hits}))
+    race = race_of()
     reading = race.judge(
         race.rule([]).check(walked.cells),
-        candidate_id="c1",
+        key=ArmKey("c1"),
         results=walked.cells,
-        labels={"c1": "C3.1"},
+        labels={ArmKey("c1"): "C3.1"},
     )
     assert reading is not None and reading.context["gate"] == EliminationGate.EPSILON
     [cut] = racing.pending_decisions
     assert cut.data["candidate_cells"] == [str(i) for i in range(8) if i != 2]
-    assert replay_decisions(_round(round=3, all_candidate_results={"c1": walked}), [cut]) is None, (
+    assert replay_decisions(_round(round=3, cells={ArmKey("c1"): walked}), [cut]) is None, (
         "the cut the live rule made is not the cut its own record replays"
     )
 
@@ -680,7 +729,7 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
 
     def filed(model: str, answers: dict[int, str | None]) -> Any:
         rows = [
-            {"sample_id": sid, "query": f"q{sid}", "ground_truth": "g"}
+            {"query": f"q{sid}", "ground_truth": "g"}
             | (
                 {"predicted": said}
                 if said is not None
@@ -691,15 +740,15 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
         refs = _file(
             stores.archive,
             rows,
-            dataset_name="replayds",
+            dataset_hash="replayds",
             node_configs=[("llm_only", {"model": model})],
         )
         return scorer.sheet(a.cell for ref in refs if (a := stores.archive.answer(ref)) is not None)
 
-    # Level with the parent on the nine cells both answered: only the charged error separates them.
+    # Level with the parent on nine cells; on the tenth only the parent's charged error separates them.
     shared = {sid: "g" if sid < 5 else "x" for sid in range(9)}
-    parent, child = OptSearchPoint(instruction="parent"), OptSearchPoint(instruction="child")
-    bar, arm = filed("P", {**shared, 9: None}), filed("C", shared)
+    parent, child = prompted(instruction="parent"), prompted(instruction="child")
+    bar, arm = filed("P", {**shared, 9: None}), filed("C", {**shared, 9: "g"})
     assert bar.cells[9].scored and bar.cells[9].grade.fitness == 0.0, "guard"
     electing = SimpleNamespace(
         difficulty=SimpleNamespace(ruler=None),
@@ -708,50 +757,52 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
         opt_sp=parent,
         population=[parent],
     )
-    scores = [scored_candidate(child.id, label="C1.1")]
+    walked_child = ArmKey(child.id)
+    child_arm = arm_state("child", slot=ArmSlot(round=1, idx=0, total=1), individual=child)
+    read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)
     selection = elect_on_theta(
-        NodeContext(RoundContext(electing, 1, callbacks=None), "election"),  # type: ignore[arg-type]
-        Measured(
-            rows={child.id: arm},
-            scores=scores,
-            scored=[child],
-            parent=ReferenceReading(opt_sp=parent, report=scored_candidate(parent.id)),
-            parent_rows=bar,
-            references={parent.id: bar},
-            electable=[child],
+        NodeContext(RoundContext(electing, 1, callbacks=None), optimizers.member("theta_election")),  # type: ignore[arg-type]
+        MeasuredRound(
+            arms={walked_child: child_arm},
+            rows={walked_child: arm},
+            parent=read_parent,
+            filed={
+                walked_child: ReadArm(walked_child, child_arm, arm),
+                read_parent.key: read_parent,
+            },
+            folds={},
+            fit={},
+            electable=[walked_child],
             coverage_floor=1,
             cut=None,
         ),
         Proposals([]),
     )
-    assert selection.selected_id == child.id, "guard: the live election charges the error"
+    assert selection.selected == walked_child, "guard: the live election charges the error"
     charged, ledger = _minted(stores, "cycle_charged_parent")
     ledger.append(RoundEnteredRecord(round=1))
     ledger.append(
         RoundClosedRecord.of(
             _round(
                 round=1,
-                label="C1.1",
-                improved=True,
-                opt_sp=child,
-                candidate_scores=scores,
-                selected_labels=["C1.1"],
-                results=arm,
-                all_candidate_results={child.id: arm},
-                reference_results={parent.id: bar},
-            )
+                arms={walked_child: child_arm, read_parent.key: read_parent.state},
+                election=election([walked_child]),
+                cells={walked_child: arm, read_parent.key: bar},
+            ),
+            {cell.key: slot for slot, cell in enumerate(bar)},
+            level_series(0.0, [0.0]),
         )
     )
     [closed_on_disk] = closed_rounds(stores, charged, scorer, moment=None)
-    [election] = electing.pending_decisions
-    assert replay_decisions(closed_on_disk, [election]) is None, (
+    [decided] = electing.pending_decisions
+    assert replay_decisions(closed_on_disk, [decided]) is None, (
         "the replay read the parent's charged error as a cell nobody scored"
     )
 
     # Rounds stand; a rewind retracts every election, close and crown past it, for every reader.
     hop, ledger = _minted(stores, "cycle_rewound")
     closed: list[RoundResult] = []
-    ids = [_stand_round(ledger, closed, name) for name in ("c0", "c1", "c2")]
+    ids = [_emit_round(ledger, closed, name) for name in ("c0", "c1", "c2")]
 
     def served() -> list[tuple[str, bool, bool]]:
         tree = build_lineage_tree(stores, (hop,), moment=None)
@@ -774,103 +825,87 @@ def test_a_closed_round_replays_its_decisions_and_a_rewind_retracts_them(
     )
     stores.campaigns.rewind_to_round(hop, 0)
     stood = stores.campaigns.standing_rounds(hop, moment=None)
-    assert list(stood.rounds) == list(stood.elections) == [0] and stood.crowns == {0: "C0"}, (
+    assert list(stood.rounds) == list(stood.elections) == [0] and stood.crowns == {0: ids[0]}, (
         "an election, close or crown stood past the rewind"
     )
     assert served() == [(ids[0], True, True)]
-    again = _stand_round(ledger, closed[:1], "c1_again", crowned=False)
+    # Every live fold reads the rewind off its record: a re-entered round's arm folds its new walk.
+    folds = AnnouncedArms()
+    walk = ArmRecord(round=1, arm=ArmKey(ids[1]), state=closed[1].arms[ArmKey(ids[1])])
+    cell = SampleScoredRecord(
+        round=1,
+        individual_id=ids[1],
+        role=MeasurementRole.PANEL,
+        position=0,
+        result={"sample_key": "k0", "answer": "a"},
+        running=score_summary(),
+    )
+    folds.announce(walk)
+    folds.take(cell)
+    assert folds.fold(1, walk.arm) is not None, "guard"
+    folds.enter(RoundEnteredRecord(round=1, rewound=True))
+    with pytest.raises(LookupError):
+        folds.take(cell)
+    folds.announce(walk)
+    assert folds.fold(1, walk.arm) is None, (
+        "a re-announced arm folded the cells of the pass a rewind retracted"
+    )
+    again = _emit_round(ledger, closed[:1], "c1_again", crowned=False)
     assert served() == [(ids[0], True, True), (again, True, False)]
     origin, held = build_lineage_tree(stores, (hop,), moment=None).children
     assert (origin.stands, held.stands) == (True, False), "an uncrowned re-run took the stand"
 
-    # Re-reading round 1 from the cut before it sees the cycle as it stood when
-    # its generation landed: not the δ scale, round 0's restamp or an answer filed after it.
-    warmed, ledger = _minted(stores, "cycle_warmed")
-    _stand_round(ledger, [], "c0")
-    ledger.append(RoundEnteredRecord(round=1))
-    ledger.append(RoundProposedRecord(round=1, consumed="", proposals=[]))
-    warm = DeltaRuler(
-        delta={"0": 0.5, "1": -0.5},
-        delta_se={"0": 0.4, "1": 0.4},
-        mu_delta=0.0,
-        sigma_delta=0.5,
-        sigma_theta=1.0,
-        calibration_model="1PL",
-        anchor_id="warm",
-    )
-    # Round 1's calibrate locks the scale, and round 0 closes again on it.
-    scope = RulerScope(scorer="exact", dataset="testds")
-    stores.campaigns.write_ruler(warmed, warm, scope=scope, round_num=0)
-    ledger.append(RoundClosedRecord.of(_round(round=0, label="C0")))
-    ledger.append(RoundClosedRecord.of(_round(round=1, label="C1.1")))
-    entered_at = scan_standing_rounds([LedgerSpan(ledger.path)]).proposals[1].entered_at
-    assert entered_at is not None
-    moment = Moment(ledger.path, entered_at - 1)
-    then = stores.campaigns.standing_rounds(warmed, moment=moment).rounds[0]
-    now = stores.campaigns.standing_rounds(warmed, moment=None).rounds[0]
-    assert then.at_offset <= moment.offset < now.at_offset, "the decision read round 0's restamp"
-    assert stores.campaigns.read_ruler(warmed, scope=scope, moment=moment) is None
-    assert stores.campaigns.read_ruler(warmed, scope=scope, moment=None) == warm
-    for sid, at in ((1, "2000-01-01T00:00:00Z"), (2, "2999-01-01T00:00:00Z")):
-        _file(stores.archive, [_row(sid, f"q{sid}")], dataset_name="testds", created_at=at)
-
-    def remembered() -> list[int]:
-        fence_memory(FiledBy(moment))
-        return [
-            answer.cell.sample_id
-            for entry in list_populations(stores, dataset_name="testds")
-            for answer in load_population(stores, entry)
-        ]
-
-    assert contextvars.copy_context().run(remembered) == [1], "a later answer reached the decision"
-
-    # A ledger read SKIPS a line that fails validation; a close naming an unregistered payload
+    # A ledger read SKIPS a line that fails validation; a close holding an unregistered slice
     # stops the read instead. `rewrite_lines` writes a fresh file: a ledger index takes a
     # same-inode growth for an append, and no writer here grows a file in place.
     peer, ledger = _minted(stores, "cycle_of_a_peer")
-    _stand_round(ledger, [], "c0")
+    _emit_round(ledger, [], "c0")
 
     def _uninstall(lines: list[str]) -> tuple[list[str], None]:
         records = [json.loads(line) for line in lines]
         close = max(i for i, rec in enumerate(records) if "optimizer_state" in rec)
-        records[close]["optimizer_state"]["manifest"] = "uninstalled"
+        records[close]["optimizer_state"]["slices"]["uninstalled"] = {}
         return [json.dumps(rec) + "\n" for rec in records], None
 
     rewrite_lines(ledger.path, _uninstall)
-    with pytest.raises(UnregisteredPayloadError):
+    with pytest.raises(UnregisteredStatePartError):
         list(CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(peer))).iter())
-    with pytest.raises(UnregisteredPayloadError):
+    with pytest.raises(UnregisteredStatePartError):
         stores.campaigns.standing_rounds(peer, moment=None)
 
-
-def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
-    built_stores: Stores,
-) -> None:
-    stores, store = built_stores, built_stores.campaigns
-    # An unmodified fork origin inherits the branch-point candidate's reading; an edited one rescores.
+    # A fork: an unmodified origin inherits the branch-point candidate's reading; an edited one
+    # rescores.
+    store = stores.campaigns
     prompt = {"instruction": "do the thing", "persona": "you are precise"}
+    solving = pipeline_schema(
+        [PipelineNode(name="solve", tunes_llm=False, prompt_info=NodePromptInfo())]
+    )
     parent, ledger = _minted(stores, "cycle_inherit_parent")
     ledger.append(
         RoundClosedRecord.of(
             _round(
                 round=1,
-                label="C1.1",
-                accuracy=0.4,
-                total=10,
-                improved=True,
-                candidate_scores=[
-                    scored_candidate(
-                        "c1", label="C1.1", prompt_fields=prompt, accuracy=0.2, total=10
-                    )
-                ],
-            )
+                arms={
+                    ArmKey("c1"): arm_state(
+                        "c1",
+                        slot=ArmSlot(round=1, idx=0, total=1),
+                        individual=prompted(**prompt),
+                        total=10,
+                    ),
+                    ArmKey("parent"): arm_state("parent", total=10),
+                },
+                folds={ArmKey("c1"): score_summary(total=10)},
+                election=election([], ended_on="parent"),
+            ),
+            {},
+            level_series(0.0, [0.0]),
         )
     )
     fork = "cycle_inherit_parent_fork_abc123"
     spec = ForkSpec(
         trigger=ForkTrigger.OPERATOR_STEERED,
         reason="",
-        issued_by="",
+        issued_by=SYSTEM_PRINCIPAL,
         from_round=1,
         from_candidate_id="c1",
     )
@@ -882,7 +917,7 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
         hop=CycleHop(campaign_id=_CAMPAIGN, cycle_id=fork),
         experiment_extract={},
         dataset=None,
-        pipeline_schema=PipelineSchema(),
+        pipeline_schema=solving,
         # The branch-point round banked no row here, so no cell is ever graded.
         scoring=SimpleNamespace(
             require_scorer=lambda: compile_scorer(
@@ -893,10 +928,8 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
 
     def inherit(fields: dict[str, str]) -> Any:
         # Resolved as `establish_campaign_origin` does: the fork seed wins.
-        seed = CycleSeed(origin_prompt_fields=fields, origin_source="fork_seed")
-        resolved = resolve_origin_opt_search_point(
-            [], seed=seed, pipeline_params=None, schema=PipelineSchema()
-        )
+        seed = CycleSeed(origin_prompts=prompted(**fields).prompts, origin_source="fork_seed")
+        resolved = resolve_origin_opt_search_point(seed=seed, pipeline_params=None, schema=solving)
         return try_inherit_fork_origin(
             session,  # type: ignore[arg-type]
             seed,
@@ -907,17 +940,18 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
 
     inherited = inherit(dict(prompt))
     assert inherited is not None, "an unmodified fork origin rescored what its parent paid for"
-    assert inherited.report.accuracy == 0.2, "the fork read its round's 0.4, not its candidate's"
-    assert isinstance(inherited.resolved_origin, OptSearchPoint)
-    assert inherited.resolved_origin.lineage.source == "origin"
+    assert inherited.origin.individual.lineage.source == "origin"
     assert inherit({**prompt, "instruction": "do it differently"}) is None, (
         "an edited fork origin inherited a measurement it never earned"
     )
 
     # An applied scenario forks at its round, keeps the parent's holdout and carries its criterion.
     scenario, _ = _minted(stores, "cycle_applyscenario")
+    stores.campaigns.create_campaign(
+        minted_campaign(scenario, owner_user_id=str(stores.identity.user_id))
+    )
     bank = [Sample(id=n, query=f"q{n}", ground_truth="g") for n in range(4)]
-    drawn = partition_bank(bank, DatasetSplit(bench=0)).record(dataset_hash="bank")
+    drawn = partition_bank(bank, DatasetSplit(bench=0), seed=0).record(dataset_hash="bank")
     store.write_bank_partition(scenario, drawn)
     criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
     fork_id = mint_operator_fork(
@@ -931,7 +965,7 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
     applied = scenario.model_copy(update={"cycle_id": fork_id})
     index = store.load(applied, moment=None)
     assert index is not None and index.fork is not None
-    assert index.fork.issued_by == str(stores.identity.user_id), "the fork names no issuer"
+    assert index.fork.issued_by.id == str(stores.identity.user_id), "the fork names no issuer"
     assert store.read_bank_partition(applied) == drawn, (
         "a redrawn holdout reads the fork's bench lift on rows its parent never held out"
     )
@@ -946,27 +980,29 @@ def test_a_fork_inherits_its_parents_decisions_and_displaces_them_once(
     # A fork's own ledger displaces its parent's prefix once.
     displaced, ledger = _minted(stores, "cycle_displaced")
     closed: list[RoundResult] = []
-    prefix = [_stand_round(ledger, closed, f"p{n}") for n in range(3)]
+    prefix = [_emit_round(ledger, closed, f"p{n}") for n in range(3)]
     fork_hop = _mint_sibling(
         store,
         displaced,
         "cycle_displaced_fork_r1",
-        ForkSpec(trigger=ForkTrigger.OPERATOR_REWIND, reason="", issued_by="", from_round=3),
+        ForkSpec(
+            trigger=ForkTrigger.OPERATOR_REWIND,
+            reason="",
+            issued_by=SYSTEM_PRINCIPAL,
+            from_round=3,
+        ),
         from_round=3,
     )
 
     def candidates(hop: CycleHop) -> list[str]:
-        return [c.candidate_id for c in store.standing_rounds(hop, moment=None).candidates()]
+        return [key for _, key in store.standing_rounds(hop, moment=None).arms]
 
     assert candidates(fork_hop) == prefix, "the fork does not continue its parent's rounds"
     own = CycleEventLog.open(CycleDir(store.cycle_dir(fork_hop)))
     forked = closed[:1]
-    mine = [_stand_round(own, forked, "f1"), _stand_round(own, forked, "f2", crowned=False)]
+    mine = [_emit_round(own, forked, "f1"), _emit_round(own, forked, "f2", crowned=False)]
     stood = store.standing_rounds(fork_hop, moment=None)
     assert candidates(fork_hop) == [prefix[0], *mine], "a parent round stood beside the fork's own"
-    assert [r.close.candidate_scores[0].candidate_id for r in stood.rounds.values()] == [
-        prefix[0],
-        *mine,
-    ]
-    assert stood.crowns == {0: "C0", 1: "C1.1"}
+    assert [next(iter(r.close.arms)) for r in stood.rounds.values()] == [prefix[0], *mine]
+    assert stood.crowns == {0: prefix[0], 1: mine[0]}
     assert candidates(displaced) == prefix, "the fork's rounds displaced its parent's own"

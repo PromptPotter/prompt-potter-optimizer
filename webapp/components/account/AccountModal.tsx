@@ -85,7 +85,7 @@ export function AccountModal() {
           <div className="account-pane-body">
             {tab === "profile" ? (
               profile.status === "failed" ? (
-                <AccountFailure kind={profile.failure.kind} subject="your profile" />
+                <AccountFailure message={profile.failure.message} subject="your profile" />
               ) : me ? (
                 <AccountProfileTab me={me} />
               ) : (

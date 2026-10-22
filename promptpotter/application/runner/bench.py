@@ -14,7 +14,6 @@ from promptpotter.application.scoring.paired import (
     grade_measurands,
     read_pair,
 )
-from promptpotter.application.scoring.query_loop import ArmSlot
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     score_search_point,
@@ -43,6 +42,7 @@ from promptpotter.domain.bench import (
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
+    ArmKey,
     CellSetName,
     MemberAddress,
     PairedReading,
@@ -57,9 +57,9 @@ from promptpotter.domain.results import (
     measured_searchpoint,
 )
 from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.store.archive_queries import bench_reads
-from promptpotter.shared.measurement_context import NO_ROUND_SLOT, MeasurementRole, RoleScope
+from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -104,8 +104,8 @@ class BenchLine:
     held_by: str | None
     trigger: BenchTrigger
     held_out: int
-    # The pair refuses two passes whose instruments differ.
-    instrument_id: str
+    # The pair refuses two passes whose instruments differ; a cycle that drew no bank names none.
+    instrument_id: str | None
     run: LineRun
     spend: SpendRollup | None
 
@@ -171,9 +171,10 @@ def bench_series(
     standing = origin = headline(passes.origin)
     series: list[float | None] = []
     for outcome in rounds:
-        if outcome.selected_labels:
-            assert outcome.opt_sp is not None, "a round that selected names the individual"
-            taken = passes.pass_of(outcome.opt_sp.id)
+        if outcome.election is not None and outcome.election.selected:
+            head = outcome.head
+            assert head is not None, "a round that selected ends on the arm it selected"
+            taken = passes.pass_of(head.individual.id)
             # Ungraded (an `at_end` line's, or a pause cut its pass): never the one it displaced.
             standing = None if taken is None else headline(taken)
         series.append(standing)
@@ -272,7 +273,7 @@ def read_bench(
         selected=None if selected is None else selected.reading,
         vs_origin=vs_origin,
         cost=LiftCost.of(vs_origin, line.spend),
-        scopes=[] if graded is None else _read_scopes(graded, line.instrument_id),
+        scopes=[] if graded is None else _read_scopes(graded),
     )
 
 
@@ -281,7 +282,7 @@ def _on_rows(sheet: CellSheet, keys: Sequence[str]) -> CellSheet:
     return sheet.where(lambda cell: cell.key in held)
 
 
-def _read_scopes(graded: _Graded, instrument_id: str) -> list[BenchScope]:
+def _read_scopes(graded: _Graded) -> list[BenchScope]:
     """Each dataset's rows read and paired apart; none where the bench measures one."""
     groups = graded.origin.bench_pass.by_dataset()
     if len(groups) < 2:
@@ -308,7 +309,7 @@ def _read_scopes(graded: _Graded, instrument_id: str) -> list[BenchScope]:
                 selected=level(graded.selected, keys),
                 vs_origin=None
                 if a is None or b is None or graded.vs_origin is None
-                else pair_on_bench(a, b, sample_keys=keys, instrument_id=instrument_id),
+                else pair_on_bench(a, b, sample_keys=keys, instrument_id=a.instrument_id),
             )
         )
     return scopes
@@ -327,12 +328,14 @@ def bench_members(
 def _standing_pass(passes: BenchPasses, run: LineRun) -> BenchPass | None:
     if run.selection is None or not run.rounds_closed:
         return None
-    return passes.pass_of(run.selection.candidate_id)
+    return passes.pass_of(run.selection.key)
 
 
 def _grade_bench(stores: Stores, passes: BenchPasses, scorer: Scorer, line: BenchLine) -> _Graded:
+    instrument_id = line.instrument_id
+    assert instrument_id is not None, "a line that banked a pass drew its bank"
     read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
-    member = partial(_bench_member, (line.hop,), instrument_id=line.instrument_id)
+    member = partial(_bench_member, (line.hop,), instrument_id=instrument_id)
     origin = read(passes.origin)
     a = member(origin)
     selected_pass = _standing_pass(passes, line.run)
@@ -344,7 +347,7 @@ def _grade_bench(stores: Stores, passes: BenchPasses, scorer: Scorer, line: Benc
     if a is None or b is None:
         return _Graded(origin, selected, (a, b), None)
     vs_origin = pair_on_bench(
-        a, b, sample_keys=passes.origin.sample_keys, instrument_id=line.instrument_id
+        a, b, sample_keys=passes.origin.sample_keys, instrument_id=instrument_id
     )
     return _Graded(origin, selected, (a, b), vs_origin)
 
@@ -352,8 +355,8 @@ def _grade_bench(stores: Stores, passes: BenchPasses, scorer: Scorer, line: Benc
 def _reads_before(session: Session) -> int:
     return bench_reads(
         session.store,
-        dataset_name=session.measured_dataset,
-        sample_ids=frozenset(s.id for s in session.scoring.require_partition().bench),
+        bank=session.bank,
+        sample_keys=frozenset(s.key for s in session.scoring.require_partition().bench),
     )
 
 
@@ -373,6 +376,7 @@ async def score_on_bench(
         "enter",
         view=BenchEnterView(
             subject=subject,
+            arm=ArmKey(individual_id),
             label=label,
             sp_hash=search_point.sp_hash(session.pipeline_schema),
             round=round_num,
@@ -416,7 +420,6 @@ async def _pass_on_bench(
         session,
         label=MeasurementRole.BENCH,
         measured=None,
-        slot=ArmSlot(NO_ROUND_SLOT, 0, individual_id),
     )
     stop: PassStop | None = None
     if scored.stopped is not None:
@@ -457,7 +460,7 @@ def graded(
     *,
     subject: BenchSubject,
     label: str,
-    reserve: tuple[float, int] | None = None,
+    reserve: Budget | None = None,
 ) -> None:
     """The one write a line's passes are folded from: a pass no call here follows is lost with the process."""
     tolerance = _tolerance(session)
@@ -471,8 +474,8 @@ def graded(
             subject=subject,
             bench_pass=bench_pass,
             tolerance=tolerance,
-            reserve_usd=None if reserve is None else reserve[0],
-            reserve_tokens=None if reserve is None else reserve[1],
+            reserve_usd=None if reserve is None else reserve.usd_amount,
+            reserve_tokens=None if reserve is None else reserve.token_amount,
             reading=read.reading,
             state=read.outcome.state,
             label=label,
@@ -483,19 +486,20 @@ def graded(
 async def grade_round_selection(
     cycle: Cycle, session: Session, round_result: RoundResult, *, cb: RunCallbacks
 ) -> None:
-    passes = cycle.bench_passes
+    passes, election, head = cycle.bench_passes, round_result.election, round_result.head
     if not (
         cycle.config.bench_trigger == "each_round"
-        and round_result.selected_labels
+        and election is not None
+        and election.selected
         and passes is not None
     ):
         return
-    label = round_result.selected_labels[0]
-    assert round_result.opt_sp is not None, "a round that selected names the individual"
+    assert head is not None, "a round that selected ends on the arm it selected"
+    label = head.label
     taken = await score_on_bench(
         session,
         cycle.selected_sp,
-        individual_id=round_result.opt_sp.id,
+        individual_id=head.individual.id,
         subject="selected",
         label=label,
         round_num=round_result.round,
@@ -540,18 +544,19 @@ async def bench_selection(
     """Only a pause escapes the pass: any other stop ends it short, banked as a stopped pass."""
     origin = banked.origin
     picked = declared_selection(rounds)
-    assert picked.opt_sp is not None, "a closed round names the individual it ended on"
-    if picked.opt_sp.id == origin.candidate_id:
+    head = picked.head
+    assert head is not None, "a closed round names the individual it ended on"
+    if head.individual.id == origin.candidate_id:
         return banked
     selected_sp = measured_searchpoint(
         rounds,
-        picked.opt_sp.id,
+        head.individual.id,
         schema=session.pipeline_schema,
         framing=framing,
         demo=session.scoring.require_partition().demo,
     )
     selected_hash = selected_sp.sp_hash(session.pipeline_schema)
-    held = banked.pass_of(picked.opt_sp.id)
+    held = banked.pass_of(head.individual.id)
     if (
         held is not None
         and held.stop is None
@@ -563,9 +568,9 @@ async def bench_selection(
         selected = await score_on_bench(
             session,
             selected_sp,
-            individual_id=picked.opt_sp.id,
+            individual_id=head.individual.id,
             subject="selected",
-            label=picked.selected_labels[0],
+            label=head.label,
             round_num=picked.round,
             cb=cb,
         )
@@ -575,7 +580,7 @@ async def bench_selection(
             raise
         selected = BenchPass(
             round=picked.round,
-            candidate_id=picked.opt_sp.id,
+            candidate_id=head.individual.id,
             sp_hash=selected_hash,
             cells=[],
             sample_keys=origin.sample_keys,
@@ -584,5 +589,5 @@ async def bench_selection(
             reads_before=_reads_before(session),
             measured_datasets=origin.measured_datasets,
         )
-    graded(cb, session, selected, subject="selected", label=picked.selected_labels[0])
+    graded(cb, session, selected, subject="selected", label=head.label)
     return _with_selection(banked, selected)
