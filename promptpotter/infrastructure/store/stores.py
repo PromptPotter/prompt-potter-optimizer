@@ -16,6 +16,7 @@ from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.layout import (
     ArchiveHome,
     archive_home,
+    in_inner_sandbox,
     inner_sandbox_dir,
     tenant_workspace,
 )
@@ -51,6 +52,11 @@ class Stores:
     @property
     def tenant_id(self) -> TenantId:
         return self.identity.tenant_id
+
+    @property
+    def inner(self) -> bool:
+        """An L4 inner run's sandbox: every cycle under it answers every run verb for itself."""
+        return in_inner_sandbox(self.projects_root)
 
 
 def owned_campaign(stores: Stores, campaign_id: str) -> Campaign:

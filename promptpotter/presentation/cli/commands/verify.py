@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import argparse
 
-from pydantic import ValidationError
-
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_listing import resolve_campaign_id_hint
 from promptpotter.application.diagnostics.verify import VerifyOutcome
@@ -45,10 +43,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         "strategy": args.strategy,
         "seed": args.seed,
     }
-    try:
-        payload = VerifyCandidatePayload.model_validate(fields)
-    except ValidationError as exc:
-        raise PayloadInvalidError.refusing(exc.errors()) from exc
+    payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
     dispatched = await CommandDispatcher(stores).dispatch(CommandCall(payload))
 
     outcome = dispatched.result

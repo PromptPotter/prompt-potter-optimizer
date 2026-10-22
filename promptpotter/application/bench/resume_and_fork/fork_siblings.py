@@ -211,11 +211,6 @@ def mint_operator_fork(
 ) -> str:
     campaign = owned_campaign(stores, hop.campaign_id)
     seed = declare_steered_values(seed, effective_config(campaign.declaration).optimizer_narrowing)
-    if keep_rounds and seed.origin_prompts:
-        raise PayloadInvalidError(
-            "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
-            "declare origin_prompts; fork without keep_rounds to start from an edited origin"
-        )
     if not keep_rounds:
         # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
         caps = fork_remainder(stores, hop).under(seed.config_overrides)

@@ -36,10 +36,13 @@ from promptpotter.presentation.cli.commands.launch import (
 )
 from promptpotter.presentation.cli.commands.new import mint_and_run
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_target
+from promptpotter.presentation.cli.commands.workspace import (
+    open_stores,
+    resolve_target,
+)
 from promptpotter.presentation.cli.parsers import budget_from_args
 from promptpotter.presentation.cli.session import load_session
-from promptpotter.shared.errors import ResumeDivergenceError
+from promptpotter.shared.errors import PayloadInvalidError, ResumeDivergenceError
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -100,25 +103,23 @@ async def _dispatch_fork(
     return await _dispatch_held(
         args,
         ctx,
-        ForkCyclePayload(
-            campaign_id=ctx.campaign_id,
-            cycle_id=ctx.cycle_id,
-            round=from_round,
-            seed=seed,
-            keep_rounds=keep_rounds,
-            reason=reason,
-            mode=_run_mode(args, fork_on_divergence=args.fork_on_divergence),
+        PayloadInvalidError.validating(
+            ForkCyclePayload,
+            {
+                "campaign_id": ctx.campaign_id,
+                "cycle_id": ctx.cycle_id,
+                "round": from_round,
+                "seed": seed,
+                "keep_rounds": keep_rounds,
+                "reason": reason,
+                "mode": _run_mode(args, fork_on_divergence=args.fork_on_divergence),
+            },
         ),
     )
 
 
 async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
     rewind_to: int = args.rewind_to_round
-    if rewind_to < 0:
-        raise SystemExit(f"ERROR: --rewind must be >= 0, got {rewind_to}")
-    if rewind_to == 0:
-        raise SystemExit("ERROR: --rewind 0 mints a fork at the cycle root. Use `--diag` instead.")
-
     reason = args.rewind_reason.strip() or f"operator rewind to round {rewind_to}"
     parent_cycle_id = ctx.cycle_id
     held = await _dispatch_fork(

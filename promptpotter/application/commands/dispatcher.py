@@ -197,7 +197,7 @@ class CommandDispatcher:
 
     async def _on_campaign(self, call: CommandCall[CampaignPayload]) -> CommandOutcome[object]:
         owned_campaign(self.stores, call.payload.campaign_id)
-        # The WORKSPACE ledger: `archive` MOVES the campaign tree and `delete` REMOVES it.
+        # The WORKSPACE ledger: `delete` REMOVES the campaign tree, and its own ledger with it.
         ledger = CycleEventLog.open_workspace(self.stores.base_dir)
         return await self._record_and_apply(ledger, call, self._applier(call))
 

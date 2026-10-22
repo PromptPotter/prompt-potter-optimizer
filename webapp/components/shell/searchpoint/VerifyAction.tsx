@@ -13,10 +13,10 @@ import { VerifyReading } from "./VerifyReading";
 
 const PASS_POLL_MS = 5000;
 
-const STRATEGIES: readonly { value: VerifyStrategy; label: string }[] = [
-  { value: "random", label: "at random — reads the level" },
-  { value: "hard", label: "hardest first — a stress read" },
-];
+const STRATEGIES = (Object.keys(VERIFY_STRATEGY_LABELS) as VerifyStrategy[]).map((value) => ({
+  value,
+  label: VERIFY_STRATEGY_LABELS[value],
+}));
 
 export function VerifyAction({
   candidate,
@@ -93,7 +93,7 @@ export function VerifyAction({
                   value={samples}
                   placeholder="derived"
                   aria-label="Fresh cells to measure; blank lets the round budget decide"
-                  validate={(d) => d === "" || /^[1-9]\d{0,3}$/.test(d)}
+                  validate={(d) => d === "" || /^[1-9]\d*$/.test(d)}
                   onCommit={setSamples}
                 />
               </label>

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import TYPE_CHECKING, assert_never
 
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.domain.command_kinds import (
@@ -47,8 +47,7 @@ def set_campaign_label(
     """Identity-neutral: ``label`` is not in ``root_content_hash``, so a rename voids no banked origin."""
     campaign_id, label = payload.campaign_id, payload.label
 
-    def _apply() -> dict[str, Any]:
+    def _apply() -> None:
         dispatcher.stores.campaigns.update_campaign(campaign_id, label=label)
-        return {"campaign_id": campaign_id, "label": label}
 
     return Applier.silent(_apply)

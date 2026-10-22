@@ -440,7 +440,7 @@ Open: the **cross-round headline surfaces** + the lineage `/N` badge, and **feed
 ### Host coupon + BYO per-user API keys
 **The whole mechanism is owned by [`ADR-0003`](../adr/0003-spend-and-tenancy.md) § Host coupon + BYO keys** — `grant.json`, `key_source`, the three-step resolution order and its two 422s, `TenantApiKeyStore`, and the auth-router verbs. In one line: the host runs users on its own keys up to a per-user coupon; past it a user uploads their own key and continues on their own money. The coupon protects the host wallet, `jobs/quota.py` protects the machine, and the two stay separate.
 
-**Status: none of the coupon exists in code today** — no `HOST_ALLOWANCE` member on `StopReason`, no `grant.json`, no `TenantApiKeyStore`; `key_source` is declared in the asyncapi only.
+**Status: none of the coupon exists in code today** — no `HOST_ALLOWANCE` member on `StopReason`, no `grant.json`, no `TenantApiKeyStore`; no model declares `key_source`, so no spec carries it.
 
 ### Anonymous preview tier
 Spec only — **do not build it before the chat backend exists** (`presentation/api/routers/chat.py` is absent), because an anonymous meter with no conversation to meter is a writer with no reader.

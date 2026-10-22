@@ -4,8 +4,6 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
-
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.loop_commands import read_payload_file
 from promptpotter.application.cycle_listing import resolve_campaign_id_hint
@@ -16,7 +14,11 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
 )
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import cycle_target, open_stores, refused_by
+from promptpotter.presentation.cli.commands.workspace import (
+    cycle_target,
+    open_stores,
+    refused_by,
+)
 from promptpotter.presentation.cli.parsers import budget_from_args
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -42,10 +44,7 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
         fields["campaign_id"], fields["cycle_id"] = target
     elif issubclass(model, CampaignPayload):
         fields["campaign_id"] = resolve_campaign_id_hint(stores, args.campaign_id)
-    try:
-        payload = model.model_validate(fields)
-    except ValidationError as exc:
-        raise PayloadInvalidError.refusing(exc.errors()) from exc
+    payload = PayloadInvalidError.validating(model, fields)
     # The address, else the one field a workspace command names its subject by.
     named = [name for name in _ADDRESS if name in model.model_fields] or [next(iter(fields))]
     ids = {name: str(fields[name]) for name in named}

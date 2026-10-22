@@ -1485,6 +1485,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             line=BenchLine(
                 hop=session.hop,
                 on_line=True,
+                inner=False,
                 held_by=None,
                 trigger="at_end",
                 held_out=4,
@@ -1611,6 +1612,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         line = BenchLine(
             hop=CycleHop(campaign_id="camp", cycle_id="cyc"),
             on_line="held_by" not in run,
+            inner=False,
             held_by=run.get("held_by"),
             trigger=run.get("trigger", "at_end"),
             held_out=4,

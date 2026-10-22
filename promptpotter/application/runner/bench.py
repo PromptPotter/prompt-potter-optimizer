@@ -84,6 +84,7 @@ class _PassReading(NamedTuple):
 class BenchLine:
     hop: CycleHop
     on_line: bool
+    inner: bool
     held_by: str | None
     trigger: BenchTrigger
     held_out: int
@@ -231,6 +232,7 @@ def read_bench(
         bench_size=line.held_out if passes is None else len(passes.origin.sample_keys),
         tolerance=0 if passes is None else passes.tolerance,
         on_line=line.on_line,
+        inner=line.inner,
         held_by=line.held_by,
         origin=None if graded is None else graded.origin.outcome,
         selected=None if selected is None else selected.outcome,

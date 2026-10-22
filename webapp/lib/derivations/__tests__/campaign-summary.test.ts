@@ -107,6 +107,7 @@ describe("benchReading", () => {
     sentence,
     can_grade: false,
     refusal: sentence,
+    offered: false,
     subject: null,
     held_by: null,
     stop: null,

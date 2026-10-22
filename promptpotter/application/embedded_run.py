@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from promptpotter.application.account import local_stores
 from promptpotter.application.campaign_config import effective_config
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.payloads import CompactArchivePayload
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
 from promptpotter.application.jobs.launcher.admission import embedded_share, probe_backend
@@ -19,12 +20,7 @@ from promptpotter.application.jobs.mint import (
     refuse_drifted_resume,
 )
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.maintenance.archive_maintenance import (
-    compact_measurement_archive,
-    purge_cold_store,
-    reindex_measurement_archive,
-    restore_measurement_archive,
-)
+from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
     resolve_campaign_config,
@@ -49,6 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
     from promptpotter.domain.bench import BenchScore
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.phases import GateDecision
@@ -59,12 +56,10 @@ if TYPE_CHECKING:
 
 # This module IS the embedded surface: a capability it does not name is one a host cannot find.
 __all__ = [
-    "compact_measurement_archive",
+    "compact_archive",
     "grade_bench",
     "open_session",
-    "purge_cold_store",
     "reindex_measurement_archive",
-    "restore_measurement_archive",
     "run_campaign",
     "submit_arms",
     "submit_gate_decision",
@@ -136,6 +131,18 @@ async def grade_bench(stores: Stores, campaign_id: str) -> BenchScore:
     )
     score: BenchScore = sent.result
     return score
+
+
+async def compact_archive(
+    stores: Stores, *, mode: str, dataset: str | None = None, apply: bool = False
+) -> ArchiveReport:
+    """Raises what the dispatcher refuses the browser's and the terminal's compaction on."""
+    payload = PayloadInvalidError.validating(
+        CompactArchivePayload, {"mode": mode, "dataset": dataset, "apply": apply}
+    )
+    sent = await CommandDispatcher(stores).dispatch(CommandCall(payload))
+    report: ArchiveReport = sent.result
+    return report
 
 
 async def run_campaign(

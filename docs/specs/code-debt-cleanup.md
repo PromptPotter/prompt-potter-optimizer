@@ -353,8 +353,8 @@ runs on its own budget and reports its attempts as a count.
   launches are each admitted against the same remainder and the pair spends ~2× the ceiling.
 - **`domain/run_records.py::TokenUsageRecord` lacks `key_source`** → `/auth/activity`
   `group_by=api_key` (`application/jobs/account_activity.py`) groups by the recorded `provider` —
-  who billed, not whose key. Once real `key_source: host|user` lands (declared on
-  `TokenUsagePayload` in the asyncapi), the axis gains that dimension. Blocker: the coupon build
+  who billed, not whose key. Once `key_source: host|user` lands (undeclared on
+  every model today), the axis gains that dimension. Blocker: the coupon build
   adds the field.
 
 **Needs a capability neither the bench nor the preprint opens** — the bar is "does M13 or M14 need

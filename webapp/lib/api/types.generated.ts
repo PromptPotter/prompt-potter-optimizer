@@ -718,6 +718,9 @@ export interface BenchStatus {
   can_grade: boolean;
   /** Why not, exactly where `can_grade` is false. */
   refusal: string | null;
+  /** Whether the grade control shows: admitted, or a pass still waited on. Never on
+   * an inner run, whose line no command grades. */
+  offered: boolean;
   /** Whose pass `state` names, where one pass decides it. */
   subject: 'origin' | 'selected' | null;
   /** The cycle holding the campaign's line, where that is another one. */

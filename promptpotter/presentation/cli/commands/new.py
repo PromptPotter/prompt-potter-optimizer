@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import yaml
-from pydantic import ValidationError
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
@@ -50,7 +49,7 @@ from promptpotter.presentation.cli.commands.launch import (
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args
-from promptpotter.shared.errors import DatasetAccessError, PotterError
+from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError, PotterError
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Sequence
@@ -114,14 +113,7 @@ def _sets_to_patch(sets: list[str]) -> EditDraftPatch:
             )
     if knobs:
         patch_raw["optimization_overrides"] = knobs
-    try:
-        return EditDraftPatch.model_validate(patch_raw)
-    except ValidationError as exc:
-        first = exc.errors()[0]
-        name = str(first.get("loc", ("?",))[0])
-        raise SystemExit(
-            f"ERROR: --set {name} rejected: {first.get('msg', 'invalid value')}"
-        ) from None
+    return PayloadInvalidError.validating(EditDraftPatch, patch_raw)
 
 
 def _set_knobs(sets: list[str]) -> dict[str, Any]:
@@ -232,10 +224,11 @@ def _purpose_request(raw: str | None) -> Purpose:
     head_to_head_id, sep, arm_key = raw.partition(":")
     if not sep:
         raise SystemExit(f"ERROR: --arm takes HEAD_TO_HEAD:KEY, got {raw!r}")
-    try:
-        return Compare(arm=Arm(head_to_head_id=head_to_head_id, arm_key=arm_key))
-    except ValidationError as exc:
-        raise SystemExit(f"ERROR: --arm {raw!r}: {exc}") from exc
+    return Compare(
+        arm=PayloadInvalidError.validating(
+            Arm, {"head_to_head_id": head_to_head_id, "arm_key": arm_key}
+        )
+    )
 
 
 def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload:
@@ -255,18 +248,18 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
         Path(args.task_file).read_text(encoding="utf-8") if args.task_file else args.task_text
     )
 
-    try:
-        return MintCampaignPayload(
-            dataset_name=dataset_name,
-            optimization=OptimizationOverrides.model_validate(knobs) if knobs else None,
-            purpose=purpose,
-            diag=args.diag,
-            campaign_config=declared,
-            task_text=task_text,
-            budget=budget_from_args(args),
-        )
-    except ValidationError as exc:
-        raise SystemExit(f"ERROR: {exc.errors()[0].get('msg', exc)}") from None
+    return PayloadInvalidError.validating(
+        MintCampaignPayload,
+        {
+            "dataset_name": dataset_name,
+            "optimization": knobs or None,
+            "purpose": purpose,
+            "diag": args.diag,
+            "campaign_config": declared,
+            "task_text": task_text,
+            "budget": budget_from_args(args),
+        },
+    )
 
 
 def cmd_new(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:

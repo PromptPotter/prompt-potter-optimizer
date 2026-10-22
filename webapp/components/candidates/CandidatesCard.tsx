@@ -135,8 +135,7 @@ function ReadCandidatesCard({ dash }: { dash: DashboardSnapshot }) {
         )}
         {maskOpen && !viewedCandidateId && (
           <ApplyScenarioPanel
-            campaignId={m.campaignId}
-            cycleId={m.cycleId}
+            path={m.viewedPath}
             isLive={m.isLive}
             criterion={m.lensCriterion}
             divergentRound={m.divergentRound}

@@ -23,7 +23,7 @@ def open_stores(args: argparse.Namespace) -> Stores:
 
 
 def resolve_target(args: argparse.Namespace, store: Stores) -> tuple[str, str]:
-    """The named pair, else the active pointer's — never half of each."""
+    """A named campaign never takes the pointer's cycle; a cycle named alone is the active campaign's."""
     campaign_id: str = args.campaign
     cycle_id: str = args.cycle
     if not campaign_id:

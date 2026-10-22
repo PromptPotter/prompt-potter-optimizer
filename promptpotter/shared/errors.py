@@ -8,6 +8,8 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Annotated, Any
 
+from pydantic import BaseModel, ValidationError
+
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 logger = logging.getLogger(__name__)
@@ -219,6 +221,14 @@ class PayloadInvalidError(PotterError):
             f"{'.'.join(e['loc'])}: {e['msg']}" if e["loc"] else e["msg"] for e in found
         )
         return cls(reason, details={"errors": found})
+
+    @classmethod
+    def validating[M: BaseModel](cls, model: type[M], fields: Mapping[str, Any]) -> M:
+        """A payload a terminal or a host built, refused in the words the REST body's 422 carries."""
+        try:
+            return model.model_validate(fields)
+        except ValidationError as exc:
+            raise cls.refusing(exc.errors()) from exc
 
 
 class ServiceUnavailableError(PotterError):

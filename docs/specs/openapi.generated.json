@@ -1956,6 +1956,11 @@
             "description": "The cycle holding the campaign's line, where that is another one.",
             "title": "Held By"
           },
+          "offered": {
+            "description": "Whether the grade control shows: admitted, or a pass still waited on. Never on an inner run, whose line no command grades.",
+            "title": "Offered",
+            "type": "boolean"
+          },
           "reads_before": {
             "anyOf": [
               {
@@ -2041,6 +2046,7 @@
           "sentence",
           "can_grade",
           "refusal",
+          "offered",
           "subject",
           "held_by",
           "stop",

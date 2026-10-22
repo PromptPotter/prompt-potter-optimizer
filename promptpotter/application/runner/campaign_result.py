@@ -197,6 +197,7 @@ def bench_line(
     return BenchLine(
         hop=hop,
         on_line=holder == hop,
+        inner=stores.inner,
         held_by=None if holder == hop else holder.cycle_id,
         trigger=config.bench_trigger,
         held_out=len(drawn.bench_ids) if drawn is not None else 0 if split is None else split.bench,
@@ -241,6 +242,7 @@ def declare_line_bench(
         line = BenchLine(
             hop=hop,
             on_line=False,
+            inner=stores.inner,
             held_by=None,
             trigger=config.bench_trigger,
             held_out=0 if split is None else split.bench,

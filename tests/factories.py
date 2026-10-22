@@ -779,6 +779,7 @@ def cycle_result(
             bench_size=0,
             tolerance=0,
             on_line=True,
+            inner=False,
             held_by=None,
             origin=None,
             selected=None,

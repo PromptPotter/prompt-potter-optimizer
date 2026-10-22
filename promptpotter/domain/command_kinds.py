@@ -414,6 +414,20 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
         ),
     )
 
+    @model_validator(mode="after")
+    def _rewinds_past_its_origin(self) -> ForkCyclePayload:
+        if self.keep_rounds and self.round == 0:
+            raise ValueError(
+                "keep_rounds at round 0 lifts no round to continue from; a run that starts over "
+                "at the origin is a diag run"
+            )
+        if self.keep_rounds and self.seed.origin_prompts:
+            raise ValueError(
+                "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
+                "declare origin_prompts; fork without keep_rounds to start from an edited origin"
+            )
+        return self
+
 
 class VerifyCandidatePayload(CyclePayload, kind=CommandKind.VERIFY_CANDIDATE):
     """``samples`` omitted is the ANSWER, not an absence: the count is derived from the

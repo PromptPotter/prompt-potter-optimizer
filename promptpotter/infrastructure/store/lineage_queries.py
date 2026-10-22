@@ -51,7 +51,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     cycle_dir_for,
-    in_inner_sandbox,
     sibling_kind,
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
@@ -205,7 +204,7 @@ def _course_scalars(
     kind: CourseKind = sibling_kind(hop.cycle_id)
     # A fork's course is folded into its parent's and never served: only a family root is asked.
     stubs = len(stores.campaigns.deletable_stubs(hop)) if kind == "root" else 0
-    if kind == "root" and (spawned or in_inner_sandbox(stores.projects_root)):
+    if kind == "root" and (spawned or stores.inner):
         kind = "inner"
 
     run = derive_run_state(layout.cycle_dir)

@@ -1,6 +1,5 @@
 "use client";
 
-import { READING_STATE_KINDS } from "@/lib/api/types.generated";
 import { useDashboardAt } from "@/lib/poll";
 import { postCommand } from "@/lib/api/commands";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -10,12 +9,7 @@ export function BenchAction({ path }: { path: CyclePath }) {
   const dash = useDashboardAt(path);
   const cmd = useCommand<"grade-bench">("grade-bench", { scope: encodeCyclePath(path) });
   const status = dash?.bench_score?.status;
-  // An inner run is a cell of its outer campaign: no command addresses its line.
-  if (
-    path.length > 1 ||
-    !status ||
-    !(status.can_grade || READING_STATE_KINDS[status.state] === "waiting")
-  ) {
+  if (!status?.offered) {
     return null;
   }
   const campaignId = pathRoot(path).campaignId;

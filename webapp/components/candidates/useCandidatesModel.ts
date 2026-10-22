@@ -211,8 +211,6 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
   };
 
   return {
-    campaignId,
-    cycleId,
     isLive,
     unit,
     viewedPath,

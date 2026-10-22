@@ -187,7 +187,13 @@ session = await open_session(dataset_name, *, stores=None,
 session, result = await run_campaign(session, campaign_config=None, *, readout_sink=None,
                                      langfuse_session_id=None, budget, step_rounds, mode,
                                      purpose=Optimize())
+report = await compact_archive(stores, *, mode, dataset=None, apply=False)
+counts = reindex_measurement_archive(stores)
 ```
+
+`compact_archive` is §5's `compact-archive` verb as the host's call — dispatched, so it lands on
+the ledger and is refused in the words the REST body's 422 carries; `reindex_measurement_archive`
+is `reindex`'s.
 
 The session `run_campaign` answers is bound to the cycle the run ended on, a fork it took
 included; the one handed in stays bound to its own.

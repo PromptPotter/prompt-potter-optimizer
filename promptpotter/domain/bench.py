@@ -8,6 +8,7 @@ from typing import Literal, NamedTuple, Self, get_args
 from pydantic import Field, model_validator
 
 from promptpotter.domain.paired_reading import (
+    READING_STATE_INFO,
     ArmName,
     CellSet,
     CellSetBasis,
@@ -15,6 +16,7 @@ from promptpotter.domain.paired_reading import (
     MeasuredLift,
     PairedReading,
     ReadingState,
+    ReadingStateKind,
 )
 from promptpotter.domain.phases import StopOutcome, StopReason, WalkEnd, stop_reason_outcome
 from promptpotter.domain.sample import Sample
@@ -382,6 +384,10 @@ class BenchStatus(FrozenModel):
         "this one answer."
     )
     refusal: str | None = Field(description="Why not, exactly where `can_grade` is false.")
+    offered: bool = Field(
+        description="Whether the grade control shows: admitted, or a pass still waited on. "
+        "Never on an inner run, whose line no command grades."
+    )
     subject: BenchSubject | None = Field(
         description="Whose pass `state` names, where one pass decides it."
     )
@@ -410,6 +416,7 @@ def bench_status(
     bench_size: int,
     tolerance: int,
     on_line: bool,
+    inner: bool,
     held_by: str | None,
     origin: PassOutcome | None,
     selected: PassOutcome | None,
@@ -457,7 +464,9 @@ def bench_status(
         )
 
     refusal: str | None = None
-    if not on_line:
+    if inner:
+        refusal = "An inner run is one cell of its outer campaign; no command grades its line."
+    elif not on_line:
         refusal = (
             "This campaign has no manifest on disk."
             if held_by is None
@@ -480,6 +489,8 @@ def bench_status(
         sentence=sentence,
         can_grade=refusal is None,
         refusal=refusal,
+        offered=refusal is None
+        or (not inner and READING_STATE_INFO[state].kind is ReadingStateKind.WAITING),
         subject=subject,
         held_by=held_by,
         stop=None if decided is None else decided.stop,

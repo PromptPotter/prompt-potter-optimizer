@@ -52,7 +52,7 @@ BASELINE = {
     # Leaves of `OptSearchPoint` — what a run is handed.
     "opt_search_point_fields": 10,
     # Leaves of `CycleResult` — what a run produces.
-    "cycle_result_fields": 671,
+    "cycle_result_fields": 672,
     # Parameters annotated `Any`.
     "any_params": 46,
     # `dict[str, Any]` maps declared in `domain/`.
@@ -80,7 +80,7 @@ BASELINE = {
     "test_reach": 357,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
-    "served_fields": 1639,
+    "served_fields": 1640,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 19,
@@ -91,7 +91,7 @@ BASELINE = {
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 11,
     # The rows each of those files leaves out.
-    "p_command_drift": 209,
+    "p_command_drift": 208,
     # What an optimizer member is handed: `NodeContext`'s public members, inherited ones included,
     # and the public members of each object one of its properties exposes; each `CycleRead` alike.
     "p_member": 309,

@@ -76,7 +76,7 @@ The shipped spend feature *measures* cost; it does not *bound a user against the
 
 Three decisions outlive the build; the shapes and status are [`../specs/roadmap.md`](../specs/roadmap.md) § Host coupon + BYO per-user API keys.
 
-- **`TokenUsageRecord` gains `key_source: "host" | "user"`** — the *one* allowed exception to identity-from-path (option E), because `key_source` is not identity but which wallet paid, and the coupon math needs it on the record. Declared on `TokenUsageRecord`, which the generated [`../specs/events-asyncapi.generated.json`](../specs/events-asyncapi.generated.json) carries.
+- **`TokenUsageRecord` gains `key_source: "host" | "user"`** — the *one* allowed exception to identity-from-path (option E), because `key_source` is not identity but which wallet paid, and the coupon math needs it on the record. It lands on `TokenUsageRecord` with the coupon build; no model declares it before then.
 - **Coupon remaining is derived from the ledger**, never a decrementing counter — one source of truth, consistent with option A.
 - **`resolve_api_key(identity, provider, stores)` is the one choke point**, wrapping the identity-free `get_llm_client`. A user's own key for this provider wins with no coupon check (their money); else a live coupon uses the host key; else `HostAllowanceExhaustedError` → 422 `host_allowance_exhausted`, distinct from 422 `no_api_key` (no user key *and* no host key at all). The short-circuit is **per provider**, so a user with a key for X still burns the coupon on Y unless `settings.coupon_void_on_byo` retires it.
 
