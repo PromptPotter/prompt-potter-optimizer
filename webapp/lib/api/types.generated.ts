@@ -3169,8 +3169,6 @@ export interface ScoreboardRow {
 
 /** A cycle's dashboard as it is SERVED: the fold's facts, and beside them what only the */
 export interface ServedDashboard {
-  campaign_id: string;
-  cycle_id: string;
   at_offset: number;
   langfuse_trace_url: string | null;
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
@@ -3216,6 +3214,8 @@ export interface ServedDashboard {
   catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
   error: DashboardError | null;
+  campaign_id: string;
+  cycle_id: string;
   /** The cycle's phase, derived at the read (`derive_run_state`) — never the
    * runner's own `declared_phase`, which says `running` forever after a kill. */
   run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';

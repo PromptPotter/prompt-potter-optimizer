@@ -58,7 +58,7 @@ from promptpotter.infrastructure.projections.cycle_index import (
     read_cycle_index,
     write_cycle_index,
 )
-from promptpotter.infrastructure.projections.live_dashboard.projection import materializing_over
+from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import banked_metered, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
@@ -558,7 +558,7 @@ class CampaignStore:
         self, hop: CycleHop, stop: RunPhaseRecord, *, error: ErrorRecord | None = None
     ) -> None:
         cycle_dir = CycleDir(self.cycle_dir(hop))
-        dashboard = materializing_over(cycle_dir, hop)
+        dashboard = DashboardCheckout.over(cycle_dir)
         ledger = CycleEventLog.open(cycle_dir)
         if dashboard is not None:
             ledger.bind(dashboard)
@@ -733,7 +733,9 @@ class CampaignStore:
                 hop.campaign_id,
                 held.experiment_cycle_id,
             )
-        self._append(hop, ResolvedRunRecord(declaration=declaration, experiment=doc))
+        landed = held.then(ResolvedRun(declaration, doc))
+        if (landed.declaration, landed.experiment) != (held.declaration, held.experiment):
+            self._append(hop, ResolvedRunRecord(declaration=declaration, experiment=doc))
 
     def read_resolved_run(self, hop: CycleHop) -> ResolvedRun:
         return scan_resolved_run(self._chain(hop))

@@ -52,7 +52,7 @@ from promptpotter.domain.run_records import (
     TrailTombstoneRecord,
 )
 
-type _Handler = Callable[[Projection, Any], None]
+type RouteHandler = Callable[[Projection, Any], None]
 
 _ARMS = frozenset(get_args(get_args(CycleRecord)[0]))
 
@@ -60,7 +60,7 @@ _ARMS = frozenset(get_args(get_args(CycleRecord)[0]))
 class Projection:
     #: The ``Cut`` folded to, stamped by a fold that materializes itself. ``-1`` = nothing folded yet.
     at_offset: int = -1
-    _routes: ClassVar[dict[type[CycleRecord], _Handler | None]]
+    _routes: ClassVar[dict[type[CycleRecord], RouteHandler | None]]
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -75,7 +75,7 @@ class Projection:
         cls._routes = routes
 
     @classmethod
-    def _route_table(cls) -> dict[type[CycleRecord], _Handler | None]:
+    def _route_table(cls) -> dict[type[CycleRecord], RouteHandler | None]:
         return {
             PhaseRecord: cls._handle_phase,
             RunPhaseRecord: cls._handle_run_phase,

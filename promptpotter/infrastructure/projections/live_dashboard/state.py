@@ -7,7 +7,6 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchScore, BenchSubject
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import LiveCandidate, RoundSummary, RunLimits
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
@@ -103,9 +102,6 @@ class CurrentRound(StrictModel):
 
 class DashboardFacts(StrictModel):
     model_config = ConfigDict(validate_assignment=False)
-
-    campaign_id: str
-    cycle_id: str
 
     # ``-1`` until the first record lands; the SSE snapshot parks its tail one past it.
     at_offset: int = -1
@@ -203,13 +199,8 @@ class LiveDashboardState(DashboardFacts):
     spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
 
     @classmethod
-    def declared(cls, hop: CycleHop, wiring: RunWiringRecord) -> LiveDashboardState:
-        return cls(
-            campaign_id=hop.campaign_id,
-            cycle_id=hop.cycle_id,
-            at_time=wiring.timestamp,
-            **cls.launched(wiring),
-        )
+    def declared(cls, wiring: RunWiringRecord) -> LiveDashboardState:
+        return cls(at_time=wiring.timestamp, **cls.launched(wiring))
 
     @staticmethod
     def launched(wiring: RunWiringRecord) -> dict[str, Any]:

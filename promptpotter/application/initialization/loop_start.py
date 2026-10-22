@@ -35,6 +35,7 @@ from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.results import PointContext
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
@@ -65,9 +66,8 @@ if TYPE_CHECKING:
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
     from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.results import Concluded
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+    from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -169,8 +169,9 @@ class OpenedDiagnostic:
     config: CampaignConfig
     framing: TaskDecomposition
 
-    def point(self, concluded: Concluded) -> JobSearchPoint:
-        return concluded.searchpoint(
+    @property
+    def points(self) -> PointContext:
+        return PointContext(
             schema=self.session.pipeline_schema,
             framing=self.framing,
             demo=self.session.state.scoring.require_partition().demo,
@@ -367,7 +368,6 @@ async def _apply_resume_fork(
     resolved_cycle_id: str | None,
     resumed_from_round: int,
     dataset: list[Sample],
-    cb: RunCallbacks,
     *,
     no_divergence_check: bool,
     fork_on_divergence: bool,
@@ -382,7 +382,6 @@ async def _apply_resume_fork(
             session,
             cycle,
             dataset,
-            cb.view_context,
             skip_divergence_check=no_divergence_check,
             fork_on_divergence=fork_on_divergence,
         )
@@ -453,7 +452,6 @@ async def init_optimization_loop(
         resolved_cycle_id,
         resumed_from_round,
         dataset,
-        cb,
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
     )

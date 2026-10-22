@@ -72,7 +72,6 @@ class RunCallbacks:
         line = [*(rr for rr in prior if rr.round < closing.round), closing]
         standing = RunStanding.after(line, lives=None if lives is None else lives.bank)
         [series] = difficulty.level_series([line])
-        self.view_context.run_standing = standing
         anchors = self.view_context.anchors()
         return self._emit(RoundClosedRecord.of(line, slot_of, series, standing, anchors)), standing
 

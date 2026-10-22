@@ -11,7 +11,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **BREAKING — start clean. One `Budget` bounds a run** (`domain/spend.py`: `usd`, `tokens`, `rounds`, `wall_clock_s`) as it is asked, admitted and standing. It replaces `LaunchLimits`, `HeldLimits`, `RoundsCap`, `SpendCeilings`, `ArmBudget` and the `optimization.ceiling` / `max_rounds` knobs, now `optimization.budget`; `halt_at_accuracy` is a stopping knob, refused on an arm (`arm_halt_refused`). The ledger's `run_limits` record is `standing_budget`; `mint-campaign`, `start-run`, `start-checkin` and `change-run-limits` carry `budget`, `start-run` also `step_rounds`.
 - **The ceiling is the campaign's**: one book its live cycles share, seeded off every cycle's ledger; admission refuses `campaign_ceiling_held` / `campaign_ceiling_unshared`.
 - **Wall clock is a budget axis** (`--max-wall-clock`): a remote cell is bounded by its connector's `cell_envelope_s` and the launch's clock left, cut `HALTED`, the run stopping `wall_clock`. `Connector.cell_wait_s` is gone.
-- `ArmSpend`, `ArmCost`, `CloseSpend` and `RunStanding.spent` are gone, each a fold of the spend facts read at its scope; `result.json` keeps `cycle_id` and `launches`.
+- `ArmSpend`, `ArmCost`, `CloseSpend` and `RunStanding.spent` are gone, each a fold of the spend facts read at its scope.
+- **BREAKING — removed on-disk shapes**, each now a ledger record or a fold of one: `campaigns/{id}/result.json` (the line's `launch_clock` records, bench passes and spend), `pipeline.resolved.yaml` and `experiment.resolved.yaml` (`resolved_run`), `bank_partition.json` (`bank_partition`), and the `round_standing` record (carried by `round_closed`).
 
 ## [0.8.17] — 2026-10-15
 

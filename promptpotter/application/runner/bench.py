@@ -54,7 +54,6 @@ from promptpotter.domain.results import (
     IndividualWalk,
     declared_selection,
     individual_cells,
-    measured_searchpoint,
 )
 from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
 from promptpotter.domain.spend import Budget, SpendRollup
@@ -67,9 +66,9 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_callbacks import RunCallbacks
-    from promptpotter.domain.results import RoundOutcome, RoundResult
+    from promptpotter.domain.results import PointContext, RoundOutcome, RoundResult
     from promptpotter.domain.scoring import CellSheet, Scorer
-    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -521,7 +520,7 @@ async def bench_selection(
     session: Session,
     rounds: Sequence[RoundOutcome],
     *,
-    framing: TaskDecomposition,
+    points: PointContext,
     banked: BenchPasses,
     cb: RunCallbacks,
 ) -> BenchPasses:
@@ -532,13 +531,7 @@ async def bench_selection(
     assert head is not None, "a closed round names the individual it ended on"
     if head.individual.id == origin.candidate_id:
         return banked
-    selected_sp = measured_searchpoint(
-        rounds,
-        head.individual.id,
-        schema=session.pipeline_schema,
-        framing=framing,
-        demo=session.state.scoring.require_partition().demo,
-    )
+    selected_sp = points.measured(head)
     selected_hash = selected_sp.sp_hash(session.pipeline_schema)
     held = banked.pass_of(head.individual.id)
     if held is not None and held.answers(

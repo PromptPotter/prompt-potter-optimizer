@@ -95,7 +95,7 @@ async def rescore_parent(
     cycle = round_.cycle
     return await measure_as_parent(
         round_,
-        cycle.opt_sp,
+        cycle.parent,
         cycle.parent_point,
         scoring_set,
         role=role,
@@ -200,7 +200,7 @@ def _judged(cycle: Cycle, population: Proposals) -> set[str]:
         for arm in rr.arms.values()
         if isinstance(arm, Concluded)
     }
-    held = {ind.id: cycle.job_point(ind).sp_hash(schema) for ind in population.individuals}
+    held = {ind.id: cycle.points.job(ind).sp_hash(schema) for ind in population.individuals}
     parents = {
         known.get(pid) or held.get(pid)
         for ind in population.individuals
@@ -238,7 +238,7 @@ async def _reference_readings(
         await measure_as_parent(
             ctx,
             individual,
-            cycle.job_point(individual),
+            cycle.points.job(individual),
             [s for s in panel.cells if s.key in keys],
             role=MeasurementRole.PARENT,
         )
@@ -372,7 +372,7 @@ async def _walk_population(
     )
     labels = {key: arm.label for key, arm in proposed.items()}
     order = [int(s.id) for s in panel.order]
-    sps = {key: cycle.job_point(arm.individual) for key, arm in proposed.items()}
+    sps = {key: cycle.points.job(arm.individual) for key, arm in proposed.items()}
     asked = {key: ctx.asked(key, panel.order) for key in proposed}
     states = {
         key: measuring(arm, sps[key], schema, expected=len(asked[key]), sample_order=order)

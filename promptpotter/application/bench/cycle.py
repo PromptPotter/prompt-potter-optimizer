@@ -27,13 +27,13 @@ from promptpotter.domain.results import (
     DisplayMetric,
     Election,
     OverlapReading,
+    PointContext,
     Proposal,
     RoundOutcome,
     RoundResult,
     ScoreSummary,
     declared_selection,
     measured_arm,
-    measured_searchpoint,
     merge_known_outcomes,
 )
 from promptpotter.domain.results_health import compute_round_health
@@ -156,7 +156,6 @@ class Cycle:
 
     # ``rounds[0]`` IS the origin's measurement, built by ``start``, so it is never absent.
     rounds: list[RoundResult] = field(default_factory=list)
-    opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
     population: list[OptSearchPoint] = field(default_factory=list)
     framing: TaskDecomposition = field(default_factory=TaskDecomposition)
     sample_index: SampleIndex | None = None
@@ -173,16 +172,15 @@ class Cycle:
         session: Session,
         config: CampaignConfig,
     ) -> Cycle:
-        opt_sp = origin.individual
         origin_sheet = origin.rows
         selected = select_optimizer(config.optimization)
         selected.runtime.refuse_origin(origin_sheet)
         slices = SliceMap(selected.slices)
-        sp = opt_sp.to_job_search_point(
+        sp = PointContext(
             schema=schema, framing=framing, demo=session.state.scoring.require_partition().demo
-        )
+        ).job(origin.individual)
         _assert_overlay_preserved(sp, session.pipeline_params)
-        # Hashed here because ``opt_sp`` advances on ``adopt``.
+        # Hashed here because the parent advances with every round's head.
         difficulty = DifficultyView.open(session, config, origin=sp.sp_hash(schema))
         reading = difficulty.scale.frontier(origin_sheet)
         origin_round = _origin_round(
@@ -206,7 +204,6 @@ class Cycle:
             slices=slices,
             difficulty=difficulty,
             rounds=[origin_round],
-            opt_sp=opt_sp,
             framing=framing,
         )
 
@@ -226,14 +223,11 @@ class Cycle:
     def selected_sp(self) -> JobSearchPoint:
         picked = self.selection.head
         assert picked is not None, "a closed round names the individual it ended on"
-        return self.searchpoint(picked.individual.id)
+        return self.points.measured(picked)
 
-    def searchpoint(
-        self, individual_id: str, *, rounds: Sequence[RoundResult] | None = None
-    ) -> JobSearchPoint:
-        return measured_searchpoint(
-            self.rounds if rounds is None else rounds,
-            individual_id,
+    @property
+    def points(self) -> PointContext:
+        return PointContext(
             schema=self.session.pipeline_schema,
             framing=self.framing,
             demo=self.session.state.scoring.require_partition().demo,
@@ -265,12 +259,11 @@ class Cycle:
             priors, key=lambda rr: rr.round
         )
         last_rr = self.rounds[-1]
-        if last_rr.election is None or (head := last_rr.head) is None:
+        if last_rr.election is None:
             raise ValueError(
                 f"round {last_rr.round} closed without an election — the round file cannot seed "
                 "a resume."
             )
-        self.opt_sp = head.individual
         self.difficulty.seat(last_rr.election.ruler)
         self.population = list(last_rr.closed_state.population)
         self.slices.seat(last_rr.closed_state)
@@ -290,20 +283,17 @@ class Cycle:
 
     def absorb_round(self, rr: RoundResult) -> None:
         self.rounds.append(rr)
-        # A HELD round ends on the parent itself, so nothing is adopted.
-        if (head := rr.head) is not None and head.individual.id != self.opt_sp.id:
-            self.opt_sp = head.individual
 
-    def job_point(self, individual: OptSearchPoint) -> JobSearchPoint:
-        return individual.to_job_search_point(
-            schema=self.session.pipeline_schema,
-            framing=self.framing,
-            demo=self.session.state.scoring.require_partition().demo,
-        )
+    @property
+    def parent(self) -> OptSearchPoint:
+        """The individual the last round ended on: a HELD round ends on the parent itself."""
+        head = self.rounds[-1].head
+        assert head is not None, "a round on the cycle's line names the individual it ended on"
+        return head.individual
 
     @property
     def parent_point(self) -> JobSearchPoint:
-        return self.job_point(self.opt_sp)
+        return self.points.job(self.parent)
 
     @property
     def parent_fold(self) -> ScoreSummary | None:

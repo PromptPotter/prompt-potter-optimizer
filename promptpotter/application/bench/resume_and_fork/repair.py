@@ -11,6 +11,7 @@ from promptpotter.application.bench.resume_and_fork.replayers import ReplayMisma
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.results import ArmState, Concluded, Proposed, is_leader_eligible
@@ -32,7 +33,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.difficulty import DifficultyView
     from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.views.view_models import ViewContext
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -94,11 +94,10 @@ def _rebank_on_branch(
     slot_of: Mapping[str, int],
     difficulty: DifficultyView,
     lives: LivesConfig | None,
-    view_context: ViewContext,
 ) -> list[RoundResult]:
     branch = CycleHop(campaign_id=parent.campaign_id, cycle_id=branch_cycle_id)
     ledger = CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch)))
-    cb = RunCallbacks(ledger=ledger, view_context=view_context)
+    closes = campaign_store.standing_rounds(parent, moment=None).rounds
     keys: dict[int, list[ArmKey]] = {}
     for round_num, key in retirements:
         keys.setdefault(round_num, []).append(key)
@@ -106,6 +105,9 @@ def _rebank_on_branch(
     for t in rounds:
         if t.round not in keys or t.election is None:
             continue
+        # A restatement renders under its round's own anchors, never the resuming launch's.
+        anchors = dict(closes[t.round].close.anchors)
+        cb = RunCallbacks(ledger=ledger, view_context=ViewContext(**anchors))
         for key in keys[t.round]:
             arm = t.arms[key]
             cb.on_arm(t.round, key, arm)
@@ -153,7 +155,7 @@ async def repair_incomplete_rounds(
                     arm.label,
                 )
                 continue
-            sp = cycle.searchpoint(arm.individual.id, rounds=prior)
+            sp = cycle.points.measured(arm)
             stamp = MeasuredPass(individual_id=arm.individual.id, role=MeasurementRole.REPAIR)
             missing = [by_key[r.key] for r in rows if _repairable_hole(r) and r.key in by_key]
             for hole in missing:
@@ -252,7 +254,6 @@ async def apply_correction(
     session: Session,
     cycle: Cycle,
     dataset: list[Any],
-    view_context: ViewContext,
 ) -> ForkResult | None:
     cut = repair_cut(prior)
     # Only what the branch carries: it REGENERATES a round above the cut rather than correct it.
@@ -308,7 +309,6 @@ async def apply_correction(
         slot_of=session.bank.slot_of,
         difficulty=cycle.difficulty,
         lives=cycle.config.optimization.lives,
-        view_context=view_context,
     )
     logger.warning(
         "Re-banked %d retired candidate(s) onto %s — the branch now names them itself, so "

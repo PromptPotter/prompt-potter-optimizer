@@ -29,7 +29,7 @@ Storage is the arm's own rejects, the runtime stream the cycle derives, and the 
 | **Outer-memory mirror** | none — `_r_l1_wounds` reads the last measured round's arms | none — `Cycle.runtime_failures` derives it off the banked rounds at each read | none | none — a banked `L2Memory` slice |
 | **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
 | **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
-| **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
+| **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `L3Memory.plan` | `L3Memory.plan` |
 | **Score effect** | synthetic 0 (`runner/measurement.py::_conclude_arm`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
 ## Wound 1 — what trips the validator

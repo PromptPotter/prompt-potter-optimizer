@@ -98,8 +98,7 @@ raise. Use **tolerant** for a cross-cycle SURVEY — walking siblings, building 
 lineage tree, sizing a storage report — where one unreadable neighbour must not
 fail the whole read. Use **optional** wherever the caller acts differently on the
 two, and say which in a comment: `try_delete_stub_cycle` (absent = a stub to
-delete, corrupt = a cycle we cannot vouch for), the served dashboard (absent folds the
-ledger in silence, corrupt folds it with a warning), and the three identity readers, where absent
+delete, corrupt = a cycle we cannot vouch for) and the three identity readers, where absent
 and malformed are opposite security answers (`check_blocklist` admits on absent
 and blocks everyone on malformed — collapsing them would fail OPEN). Hand-rolling
 `json.loads(path.read_text())` in a `try` is the bug.

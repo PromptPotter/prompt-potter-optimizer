@@ -36,9 +36,7 @@ from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cy
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
-from promptpotter.infrastructure.projections.live_dashboard.projection import (
-    LiveDashboardProjection,
-)
+from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.projections.racing_stream import RacingStreamProjection
 from promptpotter.infrastructure.tracing.bridge import TracingProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
@@ -123,7 +121,7 @@ class RunObservers:
     cycle_dir: CycleDir
     callbacks: RunCallbacks
     audit: AuditTrailProjection
-    dashboard: LiveDashboardProjection
+    dashboard: DashboardCheckout
     racing: RacingStreamProjection
     readout: ReadoutProjection
     tracing: TracingProjection
@@ -224,13 +222,10 @@ def _bind_observers(
         if forked_from is None
         else forked_from.readout
     )
-    dashboard = LiveDashboardProjection.for_session(session.hop, tenant_root=session.tenant_root)
-
+    dashboard = DashboardCheckout.over(cycle_dir)
     if dashboard is None:
         raise RuntimeError(
-            "build_run_observers: LiveDashboardProjection.for_session returned None — the session "
-            f"address is incomplete (tenant_root={session.tenant_root!r}, hop={session.hop}) or "
-            "its ledger holds no RunWiringRecord"
+            f"build_run_observers: the ledger of {session.hop} holds no RunWiringRecord"
         )
 
     ledger.bind(dashboard)

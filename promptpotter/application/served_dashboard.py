@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import json
-import logging
 import time
-from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
-from pydantic import Field, ValidationError
+from pydantic import Field
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.jobs.quota import next_launch_budget
@@ -52,11 +49,8 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_run_wiring,
     scan_ledger_verify,
 )
-from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
-
-logger = logging.getLogger(__name__)
 
 
 class VerifyPassProgress(StrictModel):
@@ -138,7 +132,7 @@ def _observed(state: LiveDashboardState, *, live: bool) -> ArmName | None:
     return closed[-1].candidates[-1].reading.arm if closed else None
 
 
-def _walk(state: LiveDashboardState, *, live: bool) -> SampleWalk | None:
+def _walk(state: LiveDashboardState, hop: CycleHop, *, live: bool) -> SampleWalk | None:
     """``None`` where nothing is walking: `current_round` rows linger after a stop."""
     current = state.current_round
     if not live:
@@ -150,7 +144,7 @@ def _walk(state: LiveDashboardState, *, live: bool) -> SampleWalk | None:
     )
     measured = [s.position for s in rows[-1].samples if s.position is not None] if rows else []
     in_flight = state.current_position
-    key = f"{state.cycle_id}:{current.round}:{len(rows) - 1 if rows else '-'}"
+    key = f"{hop.cycle_id}:{current.round}:{len(rows) - 1 if rows else '-'}"
     if axis := state.declared_sample_order:
         # Anchored on a cell's own position, so a walk off the declared order cannot slide the cursor.
         if in_flight in axis:
@@ -173,6 +167,8 @@ class ServedDashboard(DashboardFacts):
 
     # The served rounds narrow the banked ones; nothing assigns through this list.
     rounds: list[ServedRound]  # type: ignore[assignment]
+    campaign_id: str
+    cycle_id: str
     backpressure: ServedBackpressure | None
 
     run_phase: RunPhase = Field(
@@ -354,6 +350,7 @@ def _lookahead_explained(*, auto: bool, ceiling: int, pick_max: int, discards: i
 def _serve(
     state: LiveDashboardState,
     *,
+    hop: CycleHop,
     run: RunState,
     meter: CeilingMeter | None,
     standing: _Standing | None,
@@ -401,6 +398,8 @@ def _serve(
     campaign_metered = None if standing is None else standing.campaign_metered
     return ServedDashboard(
         **banked | {"rounds": rounds},
+        campaign_id=hop.campaign_id,
+        cycle_id=hop.cycle_id,
         run_phase=run.run_phase,
         status=RunStatus.of(run.run_phase, state.stop_reason),
         next_step=stop_next_step(state.stop_reason),
@@ -445,32 +444,9 @@ def _serve(
         allotment=None if standing is None else standing.allotment,
         fork_remainder=None if standing is None else standing.fork_remainder,
         observed=_observed(state, live=live),
-        walk=_walk(state, live=live),
+        walk=_walk(state, hop, live=live),
         round_axis=_round_axis(state, live=live),
     )
-
-
-def _head_state(cycle_path: Path, hop: CycleHop) -> LiveDashboardState | None:
-    """``None`` where the cycle's ledger has declared no wiring."""
-    cut = Cut(cycle=CycleDir(cycle_path), hop=hop)
-    try:
-        stored = read_json_optional(CycleLayout(cycle_path).dashboard)
-        if stored is None:
-            return fold_at(cut)
-        state = LiveDashboardState.model_validate(stored)
-        if (state.campaign_id, state.cycle_id) == (hop.campaign_id, hop.cycle_id):
-            return state
-        why = "names another cycle"
-    except (json.JSONDecodeError, ValidationError) as exc:
-        why = type(exc).__name__
-    logger.warning(
-        "dashboard.json of %s/%s does not read as this cycle's under this build — served off a "
-        "refold of its ledger (%s)",
-        hop.campaign_id,
-        hop.cycle_id,
-        why,
-    )
-    return fold_at(cut)
 
 
 def served_dashboard(
@@ -482,11 +458,7 @@ def served_dashboard(
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     meter = None if campaign is None else ceiling_meter(campaign.declaration.purpose)
 
-    state = (
-        _head_state(cycle_path, hop)
-        if at is None
-        else fold_at(Cut(cycle=CycleDir(cycle_path), hop=hop, offset=at))
-    )
+    state = fold_at(Cut(cycle=CycleDir(cycle_path), hop=hop, offset=at))
     if state is None:
         return WarmingDashboard(
             campaign_id=hop.campaign_id,
@@ -497,12 +469,13 @@ def served_dashboard(
             pause=run.pause,
         )
     if at is not None:
-        return _serve(state, run=run, meter=meter, standing=None)
+        return _serve(state, hop=hop, run=run, meter=meter, standing=None)
     config = None if campaign is None else resolve_campaign_config(stores, campaign, hop)
     limits = _binding(stores, hop, config, run, state.run_limits)
     armed = standing_controls(cycle_path)
     return _serve(
         state,
+        hop=hop,
         run=run,
         meter=meter,
         standing=_Standing(

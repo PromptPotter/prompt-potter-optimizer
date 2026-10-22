@@ -674,12 +674,13 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         stores,
         round_num=3,
         optimization={"elimination_n_min": 4, "nodes": {"pobb": {"config": {"epsilon": 0.30}}}},
-        opt_sp=parent,
     )
+    on_parent = {
+        "arms": {ArmKey(parent.id): arm_state("parent", individual=parent)},
+        "election": election([], ended_on=parent.id),
+    }
     # The frontier holds every cell, answered by an individual that is not the parent.
-    line = [
-        _round(round=0, cells={ArmKey("origin"): hits}, election=election([], ended_on="origin"))
-    ]
+    line = [_round(round=0, cells={ArmKey("origin"): hits}, **on_parent)]
     set_line(racing.cycle, line)
     ten = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(10)]
 
@@ -700,7 +701,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert race_of().rule([]).check(walked.cells) is None, (
         "the parent's prior borrowed cells another individual answered"
     )
-    set_line(racing.cycle, [*line, _round(round=1, cells={ArmKey(parent.id): hits})])
+    set_line(racing.cycle, [*line, _round(round=1, cells={ArmKey(parent.id): hits}, **on_parent)])
     race = race_of()
     reading = race.judge(
         race.rule([]).check(walked.cells),
@@ -741,7 +742,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     parent, child = prompted(instruction="parent"), prompted(instruction="child")
     bar, arm = filed("P", {**shared, 9: None}), filed("C", {**shared, 9: "g"})
     assert bar.cells[9].scored and bar.cells[9].grade.fitness == 0.0, "guard"
-    electing = seat(stores, opt_sp=parent, population=[parent])
+    electing = seat(stores, population=[parent])
+    set_line(electing.cycle, [_round(round=0, **on_parent)])
     walked_child = ArmKey(child.id)
     child_arm = arm_state("child", slot=ArmSlot(round=1, idx=0, total=1), individual=child)
     read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)

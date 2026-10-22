@@ -231,7 +231,7 @@ async def _measure_gaps(
         len(samples),
     )
     scored = await score_search_point(
-        cycle.job_point(step.opt_sp),
+        cycle.points.job(step.opt_sp),
         samples,
         cycle.session,
         # One run per (member, gap set), so a re-run of the same round replays it free.

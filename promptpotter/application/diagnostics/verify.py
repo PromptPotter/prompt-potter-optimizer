@@ -260,7 +260,7 @@ async def verify_candidate(
     session, campaign_config, campaign = opened.session, opened.config, opened.campaign
     schema = session.pipeline_schema
     # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
-    jsp = opened.point(entry)
+    jsp = opened.points.measured(entry)
     sp_hash = jsp.sp_hash(schema)
     # Carries the prompt: keyed on config alone, candidates sharing a model read as one.
     predicate: dict[str, dict[str, Any]] = dict(schema.node_configs(jsp.pipeline_params))

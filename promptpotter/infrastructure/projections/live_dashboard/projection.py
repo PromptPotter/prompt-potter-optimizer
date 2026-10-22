@@ -4,10 +4,10 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import assert_never
+from typing import ClassVar, assert_never
 
 from promptpotter.domain.bench import BenchReading
-from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import Cut, CycleDir
 from promptpotter.domain.dashboard_rows import RoundSummary
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phase_views import (
@@ -37,16 +37,18 @@ from promptpotter.domain.run_records import (
     CycleRecord,
     ElectionRecord,
     FlightRecord,
-    LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
+    OptimizerStateRecord,
     PhaseRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
+    ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
+    RoundProposedRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
@@ -56,9 +58,9 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, fitness_bands
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
-from promptpotter.infrastructure.ledger import open_with_history
+from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
-from promptpotter.infrastructure.projections.base import Projection
+from promptpotter.infrastructure.projections.base import Projection, RouteHandler
 from promptpotter.infrastructure.projections.live_dashboard.blocks import (
     build_candidate_rows,
     build_racing_block,
@@ -73,7 +75,8 @@ from promptpotter.infrastructure.projections.live_dashboard.state import (
     LiveDashboardState,
 )
 from promptpotter.infrastructure.store.io import write_json
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, RecordClasses
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,22 @@ logger = logging.getLogger(__name__)
 _DASHBOARD_DEBOUNCE_S = 0.25
 # The write holds the lock every ledger append takes, so the next one rests this many times its cost.
 _PERSIST_REST_FACTOR = 9.0
+
+# Every other record the fold routes settles within the debounce.
+_AT_ONCE: frozenset[type[CycleRecord]] = frozenset(
+    {
+        RunWiringRecord,
+        RunPhaseRecord,
+        BackendWarningRecord,
+        ProviderHoldRecord,
+        ProviderEasedRecord,
+        RoundEnteredRecord,
+        RoundClosedRecord,
+        PhaseRecord,
+        ElectionRecord,
+        RoundWarningRecord,
+    }
+)
 
 
 # MEASURE, BENCH and optimizer steps are absent on purpose: sample records, a bracket and the enter view drive them.
@@ -95,28 +114,25 @@ _CHECKIN_NODE = "checkin"
 
 
 class LiveDashboardProjection(Projection):
-    def __init__(
-        self,
-        cycle_dir: CycleDir,
-        *,
-        state_path: Path | None,
-        hop: CycleHop,
-        seed: LiveDashboardState,
-    ) -> None:
-        cycle_path = Path(cycle_dir)
-        self.cycle_dir = cycle_path
-        # None: a replay answering for a past moment, which must not overwrite the head's file.
-        self.state_path = state_path
-        self.state = seed
-        self._at = seed.at_time
+    records: ClassVar[RecordClasses]
+
+    @classmethod
+    def _route_table(cls) -> dict[type[CycleRecord], RouteHandler | None]:
+        # Unread here, so never validated for it: an optimizer's state needs its package to read.
+        return super()._route_table() | {
+            ResumeCheckpointRecord: None,
+            RoundProposedRecord: None,
+            OptimizerStateRecord: None,
+        }
+
+    def __init__(self) -> None:
+        # No state stands before the first `RunWiringRecord`: what lands earlier waits here.
+        self._unwired: list[tuple[CycleRecord, int]] | None = []
+        self.state: LiveDashboardState
+        self._at = ""
         self._closes: dict[int, tuple[LevelSeries | None, RunStanding | None]] = {}
         self._sticky_llm_calls: dict[str, tuple[int, NodeBlock]] = {}
         self._launch()
-        # RLock: a boundary flush runs inside a handler that already holds it via `on_record`.
-        self._persist_lock: threading.RLock = threading.RLock()
-        self._persist_timer: threading.Timer | None = None
-        self._persist_dirty: bool = False
-        self._persist_cost_s: float = 0.0
 
     def _launch(self) -> None:
         self.short_formula_template: str | None = None
@@ -135,69 +151,40 @@ class LiveDashboardProjection(Projection):
         self._measurement_node: str | None = None
         self._step_node: str | None = None
 
-    @classmethod
-    def for_session(cls, hop: CycleHop, *, tenant_root: str) -> LiveDashboardProjection | None:
-        """``None`` where the address is incomplete or the cycle has declared no wiring."""
-        if not (tenant_root and hop.campaign_id and hop.cycle_id):
-            return None
-        view = materializing_over(
-            CycleDir(cycle_dir_for(WorkspaceDir(Path(tenant_root)), hop)), hop
-        )
-        if view is not None:
-            view._flush_pending_persist()
-        return view
+    def feed(self, offset: int, record: CycleRecord) -> None:
+        self.on_record(record, offset)
+
+    def value(self) -> LiveDashboardState | None:
+        """`None`: no `RunWiringRecord` yet (a check-in still authoring its origin)."""
+        return None if self._unwired is not None else self.composed().model_copy(deep=True)
+
+    def on_record(self, record: CycleRecord, offset: int) -> None:
+        if self._routes[type(record)] is None:
+            return
+        if self._unwired is not None:
+            if not isinstance(record, RunWiringRecord):
+                self._unwired.append((record, offset))
+                return
+            self.state = LiveDashboardState.declared(record)
+            # Folded under the state it opens: a check-in bills its cycle before Start.
+            unwired, self._unwired = self._unwired, None
+            for held, at in unwired:
+                self._fold(held, at)
+        self._fold(record, offset)
+
+    def _fold(self, record: CycleRecord, offset: int) -> None:
+        self._at = record.timestamp
+        super().on_record(record, offset)
 
     def _set_state(self, name: DashboardState, *, step: str | None = None) -> None:
         self.state.state = name
         self.state.optimizer_step = step
         self.state.state_since = self._at
 
-    def on_record(self, record: CycleRecord, offset: int) -> None:
-        with self._persist_lock:
-            self._at = record.timestamp
-            super().on_record(record, offset)
-
-    def _schedule_persist(self) -> None:
-        if self.state_path is None:
-            return
-        self._persist_dirty = True
-        # An armed timer is never replaced: staleness is bounded from the FIRST mutation.
-        if self._persist_timer is not None:
-            return
-        rest = max(_DASHBOARD_DEBOUNCE_S, self._persist_cost_s * _PERSIST_REST_FACTOR)
-        timer = threading.Timer(rest, self._fire_debounced_persist)
-        timer.daemon = True
-        self._persist_timer = timer
-        timer.start()
-
-    def _fire_debounced_persist(self) -> None:
-        try:
-            with self._persist_lock:
-                # Before the dirty test: left set on the not-dirty path, it disarms the debounce.
-                self._persist_timer = None
-                if not self._persist_dirty:
-                    return
-                self._persist_dirty = False
-                self._persist()
-        except Exception:
-            logger.exception("debounced dashboard persist failed")
-
-    def _flush_pending_persist(self) -> None:
-        with self._persist_lock:
-            if self._persist_timer is not None:
-                self._persist_timer.cancel()
-                self._persist_timer = None
-            self._persist_dirty = False
-            self._persist()
-
-    def drain(self) -> None:
-        self._flush_pending_persist()
-
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
         for name, value in LiveDashboardState.launched(record).items():
             setattr(self.state, name, value)
         self._launch()
-        self._flush_pending_persist()
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if self.state.declared_phase == record.run_phase:
@@ -207,7 +194,6 @@ class LiveDashboardProjection(Projection):
             self.state.stop_reason = record.stop_reason
             self._set_state(DashboardState.STOPPED)
             self.state.measuring_arm = None
-        self._flush_pending_persist()
 
     def _handle_backend_warning(self, record: BackendWarningRecord) -> None:
         self.state.backend_retry_count += 1
@@ -224,15 +210,12 @@ class LiveDashboardProjection(Projection):
             detail=record.detail,
         )
         self.state.recent_backend_warnings = [*self.state.recent_backend_warnings, warning][-10:]
-        self._flush_pending_persist()
 
     def _handle_provider_hold(self, record: ProviderHoldRecord) -> None:
         self._holds[record.sender] = record
-        self._flush_pending_persist()
 
     def _handle_provider_eased(self, record: ProviderEasedRecord) -> None:
         self._holds.pop(record.sender, None)
-        self._flush_pending_persist()
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
         s = self.state
@@ -243,7 +226,6 @@ class LiveDashboardProjection(Projection):
             self._closes[max(self._closes)] if self._closes else (None, None)
         )
         self._buffer.enter(record)
-        self._flush_pending_persist()
 
     def _move_to_round(self, round_num: int | None) -> None:
         if round_num is not None:
@@ -258,7 +240,6 @@ class LiveDashboardProjection(Projection):
         prior = [r for r in self.state.rounds if r.round != record.round]
         summary = self._with_bench(RoundSummary.of(record))
         self.state.rounds = sorted([*prior, summary], key=lambda r: r.round)
-        self._flush_pending_persist()
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         s = self.state
@@ -310,11 +291,9 @@ class LiveDashboardProjection(Projection):
                 self._around_bench = None
                 state, step, s.measuring_arm = around
                 self._set_state(state, step=step)
-        self._flush_pending_persist()
 
     def _handle_election(self, record: ElectionRecord) -> None:
         self._buffer.election = record
-        self._flush_pending_persist()
 
     def _handle_arm(self, record: ArmRecord) -> None:
         self._buffer.announce(record)
@@ -328,7 +307,6 @@ class LiveDashboardProjection(Projection):
             self._open_samples.clear()
         if isinstance(record.state, Measuring) and record.state.sample_order:
             self.state.declared_sample_order = record.state.sample_order
-        self._schedule_persist()
 
     def _place_bench(self, reading: BenchReading) -> None:
         # Kept, not only applied: the origin's reading lands before round 0's summary exists.
@@ -362,7 +340,6 @@ class LiveDashboardProjection(Projection):
         self._refresh_open_sample_markers()
         if self.state.state is not DashboardState.BENCH:
             self._set_state(DashboardState.SCORING)
-        self._schedule_persist()
 
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
         qi, qt = record.sample_idx or 0, record.sample_total or 0
@@ -376,13 +353,11 @@ class LiveDashboardProjection(Projection):
                     "accuracy": None if record.running is None else record.running.accuracy,
                 }
             )
-        self._schedule_persist()
 
     def _handle_race_standing(self, record: RaceStandingRecord) -> None:
         self._buffer.record_race_standing(
             record.member, record.current, record.n_samples, record.p_best
         )
-        self._schedule_persist()
 
     def _handle_flight(self, record: FlightRecord) -> None:
         self._flight = (record.out, record.allowed, record.most)
@@ -390,7 +365,6 @@ class LiveDashboardProjection(Projection):
         self._cell_reserve_usd = record.cell_usd
         waiting = record.waiting
         self._waiting = None if waiting is None else (waiting.position, waiting.since)
-        self._schedule_persist()
 
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None:
         self._append_catch_up(
@@ -403,7 +377,6 @@ class LiveDashboardProjection(Projection):
                 prior_ids=record.prior_ids,
             )
         )
-        self._schedule_persist()
 
     def _refresh_open_sample_markers(self) -> None:
         s = self.state
@@ -444,25 +417,17 @@ class LiveDashboardProjection(Projection):
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
         self.state.spend.bank(record)
         self.state.spend_by_round.setdefault(str(record.spend_round), SpendRollup()).bank(record)
-        self._schedule_persist()
 
     def spend_metered(self, meters: CeilingMeter) -> MeteredSpend:
         return MeteredSpend.of(self.state.spend, meters)
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         self._in_flight = (record.call_id, record.node)
-        self._schedule_persist()
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
         self._sticky_llm_calls[record.node] = (self.state.round, build_node_block(record))
         if self._in_flight is not None and record.call_id and self._in_flight[0] == record.call_id:
             self._in_flight = None
-        self._schedule_persist()
-
-    def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
-        """A heartbeat: re-persists so `at_time` moves while no other record fires."""
-        del record
-        self._schedule_persist()
 
     def _handle_error(self, record: ErrorRecord) -> None:
         info = STOP_REASON_INFO[record.stop_reason]
@@ -473,7 +438,6 @@ class LiveDashboardProjection(Projection):
             label=info.label,
             next_step=info.next_step,
         )
-        self._schedule_persist()
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:
         warning = LoopWarning(
@@ -485,7 +449,6 @@ class LiveDashboardProjection(Projection):
             detail=dict(record.detail),
         )
         self.state.recent_loop_warnings = [*self.state.recent_loop_warnings, warning][-10:]
-        self._flush_pending_persist()
 
     def _append_catch_up(self, entry: CatchUpLogEntry) -> None:
         self.state.catch_up_log = [*self.state.catch_up_log, entry][-256:]
@@ -519,14 +482,125 @@ class LiveDashboardProjection(Projection):
             if fired_in == self.state.round
         }
 
-    def _persist(self) -> None:
-        if self.state_path is None:
+    def composed(self) -> LiveDashboardState:
+        """Shares the fold's own fields, so it is read before the next record lands."""
+        s = self.state
+        most: int | None
+        if any(self._flight):
+            in_flight, allowed, most = self._flight
+        else:
+            in_flight = allowed = 0
+            most = None if s.arms_per_round is None else (s.arms_per_round + 1) * s.sp_budget_round
+        opened = self._open_samples.get(self._waiting[0]) if self._waiting else None
+        waiting_on: str | None = None
+        waiting_since: float | None = None
+        if self._waiting is not None and opened is not None:
+            arm = opened[1]
+            owner = "pass" if arm is None else self._buffer.label(arm)
+            waiting_on = f"{owner} · sample {self._waiting[0]}"
+            waiting_since = self._waiting[1]
+        # The field holds one sender: the episode that has held longest.
+        held = min(self._holds.values(), key=lambda r: r.gives_up_at, default=None)
+        current = CurrentRound(
+            round=s.round,
+            active_node=self._active_node(),
+            measurement_node=self._measurement_node,
+            candidates=build_candidate_rows(self._buffer, self.short_formula_template),
+            fitness_bands=fitness_bands(
+                GradedCell.of(w.facts, w.grade)
+                for walked in self._buffer.samples.values()
+                for w in walked
+            ),
+            nodes=self._current_round_nodes(),
+            racing=build_racing_block(self._buffer),
+        )
+        return s.model_copy(
+            update={
+                "at_offset": self.at_offset,
+                "current_round": current,
+                "in_flight": in_flight,
+                "lookahead_allowed": allowed,
+                "lookahead_most": most,
+                "lookahead_affordable": self._affordable,
+                "cell_reserve_usd": self._cell_reserve_usd,
+                "waiting_on": waiting_on,
+                "waiting_since": waiting_since,
+                "backpressure": None if held is None else held.reading,
+                "at_time": self._at,
+            }
+        )
+
+
+LiveDashboardProjection.records = tuple(
+    arm for arm, handler in LiveDashboardProjection._routes.items() if handler is not None
+)
+
+
+class DashboardCheckout(LiveDashboardProjection):
+    """`dashboard.json`: the fold its run goes on folding, written out at a boundary or settled."""
+
+    def __init__(self, folded: LiveDashboardProjection, path: Path) -> None:
+        # Adopts the private copy `LedgerIndex.head` hands out; the lock and the timer are its own.
+        vars(self).update(vars(folded))
+        self._path = path
+        self._lock = threading.Lock()
+        self._timer: threading.Timer | None = None
+        self._dirty = False
+        self._cost_s = 0.0
+
+    @classmethod
+    def over(cls, cycle_dir: CycleDir) -> DashboardCheckout | None:
+        """``None`` where the cycle has declared no wiring."""
+        *prefix, own = ledger_chain(cycle_dir, moment=None)
+        folded = LedgerIndex.of(own.path, ()).head(LiveDashboardProjection, seed=_seed(prefix))
+        if folded._unwired is not None:
+            return None
+        checkout = cls(folded, CycleLayout(Path(cycle_dir)).dashboard)
+        checkout.drain()
+        return checkout
+
+    def on_record(self, record: CycleRecord, offset: int) -> None:
+        with self._lock:
+            super().on_record(record, offset)
+            if type(record) in _AT_ONCE:
+                self._write()
+            elif self._routes[type(record)] is not None:
+                self._settle()
+
+    def _settle(self) -> None:
+        self._dirty = True
+        # An armed timer is never replaced: staleness is bounded from the FIRST mutation.
+        if self._timer is not None:
             return
-        started = time.perf_counter()
-        self.compose()
+        rest = max(_DASHBOARD_DEBOUNCE_S, self._cost_s * _PERSIST_REST_FACTOR)
+        timer = threading.Timer(rest, self._settled)
+        timer.daemon = True
+        self._timer = timer
+        timer.start()
+
+    def _settled(self) -> None:
         try:
-            write_json(self.state_path, self.state.model_dump(), default=str)
-            self._persist_cost_s = time.perf_counter() - started
+            with self._lock:
+                # Before the dirty test: left set on the not-dirty path, it disarms the debounce.
+                self._timer = None
+                if self._dirty:
+                    self._write()
+        except Exception:
+            logger.exception("debounced dashboard persist failed")
+
+    def drain(self) -> None:
+        with self._lock:
+            self._write()
+
+    def _write(self) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+        self._dirty = False
+        started = time.perf_counter()
+        try:
+            write_json(self._path, self.composed().model_dump(), default=str)
+            self._cost_s = time.perf_counter() - started
         except OSError as exc:
             # Logged, never raised or emitted: a round warning appends to the ledger this view subscribes to.
             logger.warning(
@@ -534,75 +608,20 @@ class LiveDashboardProjection(Projection):
                 "(the run is unaffected; the ledger holds every fact this file shows)",
                 exc.__class__.__name__,
                 exc,
-                self.state_path,
+                self._path,
             )
-
-    def compose(self) -> LiveDashboardState:
-        s = self.state
-        s.at_offset = self.at_offset
-        s.current_round = CurrentRound(
-            round=s.round,
-            active_node=self._active_node(),
-            measurement_node=self._measurement_node,
-            candidates=build_candidate_rows(self._buffer, self.short_formula_template),
-            fitness_bands=fitness_bands(
-                GradedCell.of(s.facts, s.grade)
-                for walked in self._buffer.samples.values()
-                for s in walked
-            ),
-            nodes=self._current_round_nodes(),
-            racing=build_racing_block(self._buffer),
-        )
-        if any(self._flight):
-            s.in_flight, s.lookahead_allowed, s.lookahead_most = self._flight
-        else:
-            s.in_flight = s.lookahead_allowed = 0
-            s.lookahead_most = (
-                None if s.arms_per_round is None else (s.arms_per_round + 1) * s.sp_budget_round
-            )
-        s.lookahead_affordable = self._affordable
-        s.cell_reserve_usd = self._cell_reserve_usd
-        opened = self._open_samples.get(self._waiting[0]) if self._waiting else None
-        if self._waiting is None or opened is None:
-            s.waiting_on, s.waiting_since = None, None
-        else:
-            arm = opened[1]
-            owner = "pass" if arm is None else self._buffer.label(arm)
-            s.waiting_on = f"{owner} · sample {self._waiting[0]}"
-            s.waiting_since = self._waiting[1]
-        # The field holds one sender: the episode that has held longest.
-        held = min(self._holds.values(), key=lambda r: r.gives_up_at, default=None)
-        s.backpressure = None if held is None else held.reading
-        s.at_time = self._at
-        return s
 
 
 def fold_at(cut: Cut) -> LiveDashboardState | None:
     """`None`: the cut holds no `RunWiringRecord` yet (a check-in still authoring its origin)."""
-    view = _folded(cut)
-    return None if view is None else view.compose()
+    *prefix, own = ledger_chain(cut.cycle, moment=None)
+    until = None if cut.offset is None else cut.offset + 1
+    return LedgerIndex.of(own.path, ()).view(LiveDashboardProjection, until, seed=_seed(prefix))
 
 
-def materializing_over(cycle_dir: CycleDir, hop: CycleHop) -> LiveDashboardProjection | None:
-    view = _folded(Cut(cycle=cycle_dir, hop=hop))
-    if view is not None:
-        view.state_path = CycleLayout(Path(cycle_dir)).dashboard
-    return view
-
-
-def _folded(cut: Cut) -> LiveDashboardProjection | None:
-    history = open_with_history(cut.cycle)
-    limit = None if cut.offset is None else cut.offset + 1
-    wiring = next((r for _, r in history.iter(limit) if isinstance(r, RunWiringRecord)), None)
-    if wiring is None:
-        return None
-    view = LiveDashboardProjection(
-        cut.cycle,
-        state_path=None,
-        hop=cut.hop,
-        seed=LiveDashboardState.declared(cut.hop, wiring),
-    )
-    # Every record of the cut, those before the wiring included: a check-in bills its cycle before Start.
-    for offset, record in history.iter(limit):
-        view.on_record(record, offset)
-    return view
+def _seed(prefix: list[LedgerSpan]) -> LiveDashboardProjection | None:
+    seed: LiveDashboardProjection | None = None
+    for span in prefix:
+        assert span.until is not None, "a fork's parent is read to its cut"
+        seed = LedgerIndex.of(span.path, ()).prefix(LiveDashboardProjection, span.until, seed=seed)
+    return seed

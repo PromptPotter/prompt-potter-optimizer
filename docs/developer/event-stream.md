@@ -33,7 +33,7 @@ data: {"kind": "phase", "cycle_id": "cycle_abc123",
 | `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, the cycle's served dashboard. |
 | `activity` | object | The run's current state as of this frame: `status`, the one line saying what it is doing, `notices`, what was said that still holds, and `decision`, the choice it is held on — worded, with each answer as the command to send. Whole on every frame — see § Current state. |
 
-Adding a new kind starts at `ProjectionKind` (closed-set policy — security box 1) in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or `_PROJECTION_ONLY`, for a kind the tail synthesizes rather than reads), then its answer in `domain/activity.py` — a case in `ActivityFeed._item` for the line it reads as, or a place in `SILENT_RECORDS` if no line is ever made of it, which is what `/ray` drops on. The record class raises at import if skipped, the answer fails the type check, and `gate.py --only specs` refuses the spec until it is regenerated.
+Adding a new kind starts at `ProjectionKind` (closed-set policy — security box 1) in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or `_PROJECTION_ONLY`, for a kind the tail synthesizes rather than reads), then its answer in `domain/activity.py` — a case in `ActivityFeed._item` for the line it reads as, or a place in `SilentRecord` if no line is ever made of it, which is what `/ray` drops on. The record class raises at import if skipped or placed twice, the answer fails the type check, and `gate.py --only specs` refuses the spec until it is regenerated.
 
 ## Subscription contract — snapshot-then-tail
 
@@ -73,11 +73,11 @@ That is correct, and it is correct because history has its own home — `GET /ca
 
 ## Writer / reader split
 
-The **ledger is the writer**: `CycleEventLog.append` serializes every `CycleRecord` to `.runtime/ledger.jsonl` (one JSON object per line; line index = offset). The **SSE stream is a reader**: `CycleLedgerTail` tails that file, mapping each line to a `ProjectionEnvelope` (`kind` = the record's `record_type`, `sequence` = line index) and reading `dashboard.json` for the leading snapshot. No projection synthesizes frames; the on-disk ledger is the single medium.
+The **ledger is the writer**: `CycleEventLog.append` serializes every `CycleRecord` to `.runtime/ledger.jsonl` (one JSON object per line; line index = offset). The **SSE stream is a reader**: `CycleLedgerTail` tails that file, mapping each line to a `ProjectionEnvelope` (`kind` = the record's `record_type`, `sequence` = line index) and serving the fold of that same file for the leading snapshot. No projection synthesizes frames; the on-disk ledger is the single medium.
 
 ## Cross-process by construction
 
-Because the stream reads a file, it works from any process that shares the filesystem — the API server, the CLI runner, a spawned subprocess, a future MCP "watch this run" client. There is no in-memory registry and no requirement that the run live in the reader's process. The same medium the `dashboard.json` poll already crosses processes on.
+Because the stream reads a file, it works from any process that shares the filesystem — the API server, the CLI runner, a spawned subprocess, a future MCP "watch this run" client. There is no in-memory registry and no requirement that the run live in the reader's process. The same medium the dashboard poll already crosses processes on.
 
 ## Efficiency
 

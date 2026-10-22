@@ -8,7 +8,7 @@ from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.scoring import ROW_GRADES, is_hit
-from promptpotter.shared.statistics import sigmoid
+from promptpotter.shared.statistics import logistic
 
 if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler
@@ -37,7 +37,7 @@ def marginal_hit_probability(
     se_delta_s: float,
 ) -> float:
     v = var_c + se_delta_s * se_delta_s
-    return sigmoid((mu_c - delta_s) / math.sqrt(1.0 + _PROBIT_SCALE * v))
+    return logistic((mu_c - delta_s) / math.sqrt(1.0 + _PROBIT_SCALE * v))
 
 
 def update_theta_posterior(
@@ -45,7 +45,7 @@ def update_theta_posterior(
 ) -> tuple[float, float]:
     """One Newton step on a 1PL likelihood marginalized over δ_s via probit, not a full fit."""
     scale = math.sqrt(1.0 + _PROBIT_SCALE * se_delta_s * se_delta_s)
-    p = sigmoid((mu - delta_s) / scale)
+    p = logistic((mu - delta_s) / scale)
     score = ((1.0 if hit else 0.0) - p) / scale
     info = 1.0 / var + p * (1.0 - p) / (scale * scale)
     new_var = max(1.0 / info, 1e-6)
@@ -68,7 +68,7 @@ def decision_information_gain(
     p_miss = _normal_cdf((mu_miss - mu_s) / math.sqrt(var_miss + var_s))
     m = mu_c - delta_s
     v = var_c + se_delta_s * se_delta_s
-    p_bar = sigmoid(m / math.sqrt(1.0 + _PROBIT_SCALE * v))
+    p_bar = logistic(m / math.sqrt(1.0 + _PROBIT_SCALE * v))
     return _binary_entropy(p0) - (
         p_bar * _binary_entropy(p_hit) + (1.0 - p_bar) * _binary_entropy(p_miss)
     )

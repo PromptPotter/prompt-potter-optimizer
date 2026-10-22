@@ -14,6 +14,7 @@ from promptpotter.domain.projection_envelope import (
     bearing_record,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 
 logger = logging.getLogger(__name__)
 
@@ -68,19 +69,17 @@ class CycleLedgerTail:
 
     def _park(self, line: int | None) -> int:
         """Walks the bytes, not the number: a rewind or a fork leaves a ledger shorter than ``line``."""
-        self._feed = ActivityFeed()
         self._byte_pos = 0
         self._line_index = 0
-        if not self._ledger_path.exists():
-            return 0
-        data = self._ledger_path.read_bytes()
-        while line is None or self._line_index < line:
-            nl = data.find(b"\n", self._byte_pos)
-            if nl == -1:
-                break
-            self._read(data[self._byte_pos : nl])
-            self._byte_pos = nl + 1
-            self._line_index += 1
+        if self._ledger_path.exists():
+            data = self._ledger_path.read_bytes()
+            while line is None or self._line_index < line:
+                nl = data.find(b"\n", self._byte_pos)
+                if nl == -1:
+                    break
+                self._byte_pos = nl + 1
+                self._line_index += 1
+        self._feed = LedgerIndex.of(self._ledger_path, ()).view(ActivityFeed, self._line_index)
         return self._line_index
 
     def _read(self, raw: bytes) -> tuple[ProjectionKind, dict[str, Any]] | None:

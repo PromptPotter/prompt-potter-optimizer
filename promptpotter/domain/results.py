@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import (
     TYPE_CHECKING,
@@ -263,21 +264,7 @@ class Skipped(FrozenModel):
 CutReason = Annotated[Eliminated | Broken | Invalid | Skipped, Field(discriminator="kind")]
 
 
-class _Concluded(_Walked):
-    def searchpoint(
-        self, *, schema: PipelineSchema, framing: TaskDecomposition, demo: Sequence[Sample]
-    ) -> JobSearchPoint:
-        sp = self.individual.to_job_search_point(schema=schema, framing=framing, demo=demo)
-        if sp.sp_hash(schema) != self.sp_hash:
-            raise BankedSearchPointError(
-                f"{self.label} rebuilds as searchpoint {sp.sp_hash(schema)[:12]}, not the "
-                f"{self.sp_hash[:12]} its rows were measured under: the pipeline schema, framing "
-                "or demo pool has moved under it."
-            )
-        return sp
-
-
-class Cut(_Concluded):
+class Cut(_Walked):
     """Stopped short of its panel against it."""
 
     state: Literal["cut"] = "cut"
@@ -288,7 +275,7 @@ class Cut(_Concluded):
         return self.reason.kind
 
 
-class Measured(_Concluded):
+class Measured(_Walked):
     state: Literal["measured"] = "measured"
     # Stopped FOR it: the eliminator settled it before its panel ran out.
     locked_in: Elimination | None
@@ -1244,17 +1231,26 @@ class RunStanding(FrozenModel):
         )
 
 
-def measured_searchpoint(
-    rounds: Sequence[RoundOutcome],
-    individual_id: str,
-    *,
-    schema: PipelineSchema,
-    framing: TaskDecomposition,
-    demo: Sequence[Sample],
-) -> JobSearchPoint:
-    return measured_arm(rounds, individual_id).searchpoint(
-        schema=schema, framing=framing, demo=demo
-    )
+@dataclass(frozen=True)
+class PointContext:
+    schema: PipelineSchema
+    framing: TaskDecomposition
+    demo: Sequence[Sample]
+
+    def job(self, individual: OptSearchPoint) -> JobSearchPoint:
+        return individual.to_job_search_point(
+            schema=self.schema, framing=self.framing, demo=self.demo
+        )
+
+    def measured(self, arm: Concluded) -> JobSearchPoint:
+        sp = self.job(arm.individual)
+        if sp.sp_hash(self.schema) != arm.sp_hash:
+            raise BankedSearchPointError(
+                f"{arm.label} rebuilds as searchpoint {sp.sp_hash(self.schema)[:12]}, not the "
+                f"{arm.sp_hash[:12]} its rows were measured under: the pipeline schema, framing "
+                "or demo pool has moved under it."
+            )
+        return sp
 
 
 def measured_arm(rounds: Sequence[RoundOutcome], individual_id: str) -> Concluded:

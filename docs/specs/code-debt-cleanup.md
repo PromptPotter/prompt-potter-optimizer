@@ -35,11 +35,9 @@ Filed at the operator's ask, ahead of everything below: each entry is a shape th
 from being SEEN, so leaving it blinds the next plan the same way (`<next-change>`). Solve as soon
 as possible. **Rides with:** the shrink arc's stage named in each entry, or any pass in that file.
 
-- **Most doc invariants are still prose no gate checks, and one that carries a probe is false.**
-  `gate.py --only doc-claims` resolves every cited `file::symbol` and runs every probe; each false
-  one is filed in `scripts/gate.py::_KNOWN_FALSE` under its phrase here:
-  *dashboard.json served as the head state*. Action: each goes true and its sentence states the
-  invariant again; every other one-X / no-second-Y / nothing-reads-Z claim gains a probe or is
+- **Most doc invariants are still prose no gate checks.** `gate.py --only doc-claims` resolves every
+  cited `file::symbol` and runs every probe, and `scripts/gate.py::_KNOWN_FALSE` is empty. Action: every
+  other one-X / no-second-Y / nothing-reads-Z claim gains a probe or is
   deleted. **Re-test:** `gate.py --only doc-claims`.
 - **Three "the one reader" mechanisms, each owned by a different layer file** —
   `infrastructure/projections/base.py::Projection`, `infrastructure/store/read_model.py::LedgerFold` + `infrastructure/store/campaign_store/ledger_scan.py::scan_*`,
@@ -57,6 +55,21 @@ as possible. **Rides with:** the shrink arc's stage named in each entry, or any 
 - **Run state mirrored by test namespaces**, so a reshape looks costly and stays off the brief.
   Action: a `seat` in `tests/factories.py` the one seat. **Re-test:** renaming a `Cycle` attribute
   changes one file under `tests/`.
+
+## NEXT ARC — seeded by the shrink arc
+
+Closed by the operator after its review-repair wave; what it could not reach starts the next one.
+The arc's method is the session protocol in memory (`feedback_arc_of_arcs_loop`), not this file.
+**Rides with:** the next arc's first builder wave, after its cold recon and premise hunt.
+
+- **The dev loop serializes where it need not.** Sibling gates queue whole runs (a `gate --py` waited
+  9 min behind two others before its own 5); `next-build` peaks near 4 GB; a builder spends ~100k
+  tokens of tool output, most of it whole-file reads and whole-tree content greps; Turbopack
+  refuses a junctioned `webapp/node_modules`, so web checks run only in the integration tree; at
+  five builders plus a full gate the host reaped the gate's shell. Action: attribute each (scout
+  first, read-only), then cut what OUR code wastes — gate lanes that overlap, a lighter build
+  check, briefs that read by section. **Re-test:** five builders and one full gate run with no
+  reap and no gate waiting longer than its own run.
 
 ## Open — multi-arc, no blocker
 
@@ -174,7 +187,7 @@ and delete the entry if the answer is no.
   resumes with every decision equal. The re-close itself is declared (`application/runner/loop.py::run_round_loop`:
   until an L1 round closes, every launch re-closes round 0, since a stopped run's file passed no
   gate); open is whether the critique re-send should read the banked `optimizer_state` instead. **Rides with:** any change to
-  `infrastructure/projections/live_dashboard/projection.py::materializing_over` or the origin round in `runner/run_prep.py`. **Re-test:**
+  `infrastructure/projections/live_dashboard/projection.py::DashboardCheckout.over` or the origin round in `runner/run_prep.py`. **Re-test:**
   `scripts/offline_run.py --rounds 1 --rows 60` — `decisions MOVED` on the resume line means it
   still does.
 - **INVESTIGATE — two items filed with their re-tests in `.scratch/debug-arc-seed.md`**: errored
@@ -256,6 +269,19 @@ runs on its own budget and reports its attempts as a count.
   — a literal means that budget is still its own.
 
 ## Blocked — named blocker
+
+- **TermNorm's live datasets (`llm_only`, `entity_profiling`, `llm_ranking`) are refused at parse:
+  a prompt node now declares its own fields and TermNorm's side does not.** Owed there:
+  TermNorm's `_enrich_with_registries` (its `backend-api/api/pipeline.py`) carries `meta["fields"]`, both
+  `logs/prompts/*/1/metadata.json` declare `fields`, `config/pipeline.json` gives `llm_only` its
+  fields, and `direct_prompt` gains a `prompt_info`. **Blocker:** the operator's go to edit the
+  TermNorm checkout, whose tree holds uncommitted work; it also blocks landing the shrink arc on
+  main. **Re-test:** `python -m promptpotter new llm_only` parses its pipeline.
+- **Three readings wait on the operator.** (1) A one-text prompt mode needs a declared slot before
+  `rewrites` + `field` fold into one knob — today the slot moves the scored prompt. (2) `ab_replay`
+  re-fits the ruler under the replaying scorer, `restamped` under the stamp's scope: which ruler
+  a replay reads. (3) `SearchpointDrillIn.tsx` prints rates at 1dp beside `webapp/lib/format.ts::fmtLevel`
+  at 0dp: one precision. **Blocker:** the operator's answer to each. **Re-test:** ask the operator.
 
 - **`infrastructure/llm/anthropic.py::AnthropicClient` cannot run an optimizer node on a current
   Claude model.** It refuses a set `reasoning_effort` (no mapping onto `output_config.effort`),

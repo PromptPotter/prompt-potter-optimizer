@@ -8,10 +8,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.run_observers import RunObservers, declare_run_stop
 from promptpotter.application.runner.bench import bench_series, own_level
-from promptpotter.application.runner.campaign_result import (
-    bank_campaign_result,
-    declare_line_bench,
-)
+from promptpotter.application.runner.campaign_result import declare_line_bench
 from promptpotter.application.runner.output import (
     publish_export,
     write_log_md,
@@ -146,15 +143,6 @@ def close_cycle(
     bench = declare_line_bench(
         session, config, observers.callbacks, passes=banked, selecting=False, ending=stop_reason
     )
-    if session.state.cycle_id:
-        # A pause included: the next launch's clock is summed beside this one's.
-        bank_campaign_result(
-            session.store,
-            session.hop,
-            started_at=started_at,
-            finished_at=finished_at,
-            optimizer_phases=selected.phases,
-        )
     cycle_result = build_cycle_result(
         cycle,
         session,

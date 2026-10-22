@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 import threading
@@ -141,6 +142,7 @@ class LedgerSpan(NamedTuple):
 
 
 LEDGER_INDEX_MAX = 256
+PREFIXES_MAX = 16
 DERIVED_MAX = 4096
 
 
@@ -220,50 +222,96 @@ def appended_here(path: Path, raw: bytes, at: range) -> None:
         index._take(raw, at)
 
 
+type _Make = Callable[[], LedgerFold[Any, Any]]
+
+
 class LedgerIndex(_LedgerTail):
-    """ONE per ledger, holding every typed fold any roster named: a line is screened and validated once."""
+    """ONE per ledger, holding every typed fold any roster named: a line is screened and validated once.
+    A fold no roster names holds a slot in its own ledger's index alone, seeded with a fork's parent at its cut."""
 
     _registry: ClassVar[OrderedDict[Path, LedgerIndex]] = OrderedDict()
-    _screened: ClassVar[list[Callable[[], LedgerFold[Any, Any]]]] = []
+    _screened: ClassVar[list[_Make]] = []
     _registry_lock: ClassVar[threading.Lock] = threading.Lock()
 
+    def __init__(self, path: Path) -> None:
+        self._seeds: dict[_Make, LedgerFold[Any, Any] | None] = {}
+        super().__init__(path)
+
     @classmethod
-    def of(cls, path: Path, roster: Sequence[Callable[[], LedgerFold[Any, Any]]]) -> LedgerIndex:
+    def of(cls, path: Path, roster: Sequence[_Make]) -> LedgerIndex:
         with cls._registry_lock:
             cls._screened.extend(fold for fold in roster if fold not in cls._screened)
             return _registered(cls._registry, path, lambda: cls(path))
 
     def _reset(self) -> None:
         super()._reset()
-        self._folds = [make() for make in self._screened]
+        self._folds = [self._fresh(make) for make in (*self._screened, *self._seeds)]
         self._by_type: dict[type[Any], LedgerFold[Any, Any]] = {
             type(fold): fold for fold in self._folds
         }
         self._models = _by_record_type(self._folds)
         probes = sorted(p.encode() for p in self._models)
         self._screen = re.compile(b'"(' + b"|".join(re.escape(p) for p in probes) + b')"')
-        self._prefixes: dict[
-            tuple[Callable[[], LedgerFold[Any, Any]], int], LedgerFold[Any, Any]
-        ] = {}
+        self._prefixes: OrderedDict[tuple[_Make, int], LedgerFold[Any, Any]] = OrderedDict()
 
-    def view[V](self, fold: Callable[[], LedgerFold[Any, V]], until: int | None = None) -> V:
+    def _fresh(self, make: _Make) -> LedgerFold[Any, Any]:
+        seed = self._seeds.get(make)
+        return make() if seed is None else copy.deepcopy(seed)
+
+    def view[V](
+        self,
+        fold: Callable[[], LedgerFold[Any, V]],
+        until: int | None = None,
+        *,
+        seed: LedgerFold[Any, V] | None = None,
+    ) -> V:
         with self._lock:
-            if fold not in self._by_type:
-                self._reset()
-            self._refresh()
-            if (stopped := self._stopped.get(cast("type[Any]", fold))) is not None:
-                raise stopped
+            self._open(fold, seed)
             if until is None or until >= self._lines:
                 return cast("LedgerFold[Any, V]", self._by_type[cast("type[Any]", fold)]).value()
-            prefix = self._prefixes.get((fold, until))
-            if prefix is None:
-                prefix = self._prefixes[(fold, until)] = self._fold_prefix(fold, until)
-            return cast("LedgerFold[Any, V]", prefix).value()
+            return cast("LedgerFold[Any, V]", self._prefix(fold, until)).value()
 
-    def _fold_prefix(
-        self, fold: Callable[[], LedgerFold[Any, Any]], until: int
-    ) -> LedgerFold[Any, Any]:
-        made = fold()
+    def prefix[F: LedgerFold[Any, Any]](
+        self, fold: Callable[[], F], until: int, *, seed: F | None = None
+    ) -> F:
+        """Built once and never fed again, so it may seed another ledger's slot outside this lock."""
+        with self._lock:
+            self._open(fold, seed)
+            return cast("F", self._prefix(fold, until))
+
+    def head[F: LedgerFold[Any, Any]](self, fold: Callable[[], F], *, seed: F | None = None) -> F:
+        """A private copy as the file stands, for a writer that folds on from there."""
+        with self._lock:
+            self._open(fold, seed)
+            return cast("F", copy.deepcopy(self._by_type[cast("type[Any]", fold)]))
+
+    def _open(self, fold: _Make, seed: LedgerFold[Any, Any] | None) -> None:
+        if fold in self._screened:
+            if fold not in self._by_type:
+                self._reset()
+        # By identity: a parent's prefix is a new object exactly when its ledger was rewritten.
+        elif fold not in self._seeds or self._seeds[fold] is not seed:
+            self._seeds[fold] = seed
+            self._reset()
+        self._refresh()
+        if (stopped := self._stopped.get(cast("type[Any]", fold))) is not None:
+            raise stopped
+
+    def _prefix(self, fold: _Make, until: int) -> LedgerFold[Any, Any]:
+        held = self._prefixes.pop((fold, until), None)
+        if held is None:
+            held = (
+                copy.deepcopy(self._by_type[cast("type[Any]", fold)])
+                if until >= self._lines
+                else self._fold_prefix(fold, until)
+            )
+        self._prefixes[(fold, until)] = held
+        while len(self._prefixes) > PREFIXES_MAX:
+            self._prefixes.popitem(last=False)
+        return held
+
+    def _fold_prefix(self, fold: _Make, until: int) -> LedgerFold[Any, Any]:
+        made = self._fresh(fold)
         models = _by_record_type([made])
         probes = tuple(f'"{p}"'.encode() for p in models)
         for line, raw in enumerate(islice(_complete_lines(self._path, 0), until)):

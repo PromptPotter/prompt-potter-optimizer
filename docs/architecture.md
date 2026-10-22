@@ -736,12 +736,11 @@ derived on read for campaign surfaces.
 
 `dashboard.json` is **per-cycle**: every cycle (root,
 fork, diag) owns its live file in its own dir
-(`cycles/{cycle_id}/dashboard.json`), stamped with its own `cycle_id`. A
+(`cycles/{cycle_id}/dashboard.json`), a checkout of its ledger's fold. A
 fork's view never surfaces the parent's id; a fork folds its prior
-trajectory off the parent's ledger prefix, never off the parent's file ([`specs/roadmap.md`](specs/roadmap.md) § State-sync). Each
-`dashboard.json` self-stamps its own `(campaign_id, cycle_id)`; the read
-(`application/served_dashboard.py`) refolds the ledger where the stamp is not the
-cycle it was asked for, so a freshly minted cycle never renders another's data.
+trajectory off the parent's ledger prefix, never off the parent's file ([`specs/roadmap.md`](specs/roadmap.md) § State-sync). The fold
+carries no address: the read (`application/served_dashboard.py`) serves the fold of the
+cycle it was asked for, named by that request, so a freshly minted cycle never renders another's data.
 
 Each campaign is a
 standalone dashboard: the operator understands a campaign from

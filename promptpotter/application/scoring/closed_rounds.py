@@ -153,6 +153,7 @@ class RoundFileProjection(Projection):
     def __init__(self, stores: Stores, hop: CycleHop, state: LaunchState) -> None:
         self._stores, self._hop, self._state = stores, hop, state
         self._layout = CycleLayout(stores.campaigns.cycle_dir(hop))
+        self._ledger = stores.campaigns.ledger(hop)
         self._synced = False
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
@@ -172,7 +173,7 @@ class RoundFileProjection(Projection):
         with graceful(f"Round {round_num} checkout failed"):
             wanted = {round_num}
             if not self._synced:
-                own = scan_standing_rounds([LedgerSpan(self._layout.ledger)]).rounds
+                own = scan_standing_rounds([LedgerSpan(self._ledger)]).rounds
                 wanted |= {n for n in own if not self._layout.round_file(n).exists()}
                 self._synced = True
             scorer = self._state.scoring.require_scorer()

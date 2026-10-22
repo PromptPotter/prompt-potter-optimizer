@@ -13937,8 +13937,6 @@
           }
         },
         "required": [
-          "campaign_id",
-          "cycle_id",
           "state_since",
           "rounds",
           "display_metric",
@@ -13950,6 +13948,8 @@
           "arms_per_round",
           "sp_budget_round",
           "run_limits",
+          "campaign_id",
+          "cycle_id",
           "run_phase",
           "status",
           "next_step",
@@ -16661,7 +16661,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
       "get": {
-        "description": "Live telemetry for the viewed cycle: its own ``dashboard.json``.\n\nThe path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.\nHonors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.\n``at`` is an offset in the LEAF cycle's own ledger, the address a ray item carries: the state as of that line.",
+        "description": "Live telemetry for the viewed cycle: the fold of its own ledger chain.\n\nThe path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.\nHonors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.\n``at`` is an offset in the LEAF cycle's own ledger, the address a ray item carries: the state as of that line.",
         "operationId": "get_cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
         "parameters": [
           {

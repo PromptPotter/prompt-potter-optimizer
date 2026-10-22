@@ -21,7 +21,11 @@ from promptpotter.application.run_observers import (
 )
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import bench_selection
-from promptpotter.application.runner.campaign_result import bench_origin, declare_line_bench
+from promptpotter.application.runner.campaign_result import (
+    bank_campaign_result,
+    bench_origin,
+    declare_line_bench,
+)
 from promptpotter.application.runner.cycle_close import close_cycle
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.loop import run_round_loop
@@ -69,6 +73,8 @@ class _CycleOutcome:
     cycle_result: CycleResult
     fork: RebaseRequest | None
     observers: RunObservers
+    # Re-raised at the launch's exit, past its clock: it must reach the canceller.
+    cancelled: asyncio.CancelledError | None
 
 
 async def _run_single_cycle(
@@ -125,7 +131,7 @@ async def _run_single_cycle(
             # Its price is set aside so the selection's pass still fits under the search's ceiling.
             cycle.bench_passes = await bench_origin(
                 session,
-                cycle.job_point(origin.origin.individual),
+                cycle.points.job(origin.origin.individual),
                 origin_id=origin.origin.individual.id,
                 spend=observers.dashboard.state.spend,
                 cb=cb,
@@ -143,7 +149,7 @@ async def _run_single_cycle(
                     cycle.bench_passes = await bench_selection(
                         session,
                         cycle.rounds,
-                        framing=cycle.framing,
+                        points=cycle.points,
                         banked=cycle.bench_passes,
                         cb=cb,
                     )
@@ -163,7 +169,6 @@ async def _run_single_cycle(
             pause_cause = PauseCause.STEP
     except RUN_ENDS as exc:
         stop_reason, cycle_error = end_run_on(exc, session, where="before the round loop")
-        # A cancellation still finalizes, then is re-raised past the finalize: it must reach the canceller.
         if isinstance(exc, asyncio.CancelledError):
             cancel_exc = exc
 
@@ -178,7 +183,7 @@ async def _run_single_cycle(
             # Under the last round, as the `bench` verb grades it (`grade_bench.py`).
             with at_round(cycle.rounds[-1].round):
                 cycle.bench_passes = await bench_selection(
-                    session, cycle.rounds, framing=cycle.framing, banked=cycle.bench_passes, cb=cb
+                    session, cycle.rounds, points=cycle.points, banked=cycle.bench_passes, cb=cb
                 )
         except (*RUN_STOPS, KeyboardInterrupt, asyncio.CancelledError) as exc:
             # Only a pause escapes the pass; the resume takes the pass again.
@@ -198,15 +203,9 @@ async def _run_single_cycle(
         diag=mode.diag,
         pause_cause=PauseCause.CANCELLED if cancel_exc is not None else pause_cause,
     )
-    # Ahead of the re-raise below: a cancellation is one of the interrupts that leaves an empty fork dir.
-    if forked_from() and cycle_result.n_rounds_after_origin == 0:
-        cleanup_stub_fork_if_empty(campaign_store=session.store.campaigns, hop=session.hop)
-
-    if cancel_exc is not None:
-        # The caught instance, not a fresh class — it carries the reason its raise site named.
-        raise cancel_exc
-
-    return _CycleOutcome(cycle_result=cycle_result, fork=fork, observers=observers)
+    return _CycleOutcome(
+        cycle_result=cycle_result, fork=fork, observers=observers, cancelled=cancel_exc
+    )
 
 
 def _onto_fork(
@@ -274,6 +273,53 @@ def _mint_and_rebase_fork(
     return prep, observers
 
 
+async def _run_line(
+    prep: PreparedRun,
+    *,
+    dataset: list[Sample],
+    session: Session,
+    observers: RunObservers,
+    mode: RunMode,
+    started_at: str,
+    step_rounds: int | None,
+) -> tuple[_CycleOutcome, str]:
+    """The last cycle's outcome, and the cycle that cycle's run opened on before run init forked it."""
+    rebase_count = 0
+    while True:
+        launched_on = session.state.cycle_id
+        outcome = await _run_single_cycle(
+            prep,
+            dataset=dataset,
+            session=session,
+            observers=observers,
+            mode=mode,
+            started_at=started_at,
+            step_rounds=step_rounds,
+        )
+        rebase_req = outcome.fork
+        if (
+            outcome.cancelled is not None
+            or outcome.cycle_result.stop_reason != StopReason.REBASED
+            or rebase_req is None
+            or rebase_count >= MAX_AUTO_REBASES
+            or session.state.cycle_id is None
+        ):
+            if rebase_req is not None and rebase_count >= MAX_AUTO_REBASES:
+                logger.warning(
+                    "Auto-rebase cap %d reached; ignoring further fork_proposals.",
+                    MAX_AUTO_REBASES,
+                )
+            return outcome, launched_on
+        rebase_count += 1
+        prep, observers = _mint_and_rebase_fork(
+            prep,
+            session=session,
+            observers=outcome.observers,
+            rebase_req=rebase_req,
+            rebase_count=rebase_count,
+        )
+
+
 async def run_optimization(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
@@ -320,17 +366,23 @@ async def run_optimization(
                 )
             except RUN_STOPS as stop:
                 stop_reason, cycle_error = end_run_on(stop, session, where="in run prep")
-                return close_cycle(
-                    None,
-                    session,
-                    observers,
-                    stop_reason=stop_reason,
-                    cycle_error=cycle_error,
-                    open_round=None,
-                    started_at=started_at,
-                    config=campaign_config,
-                    diag=mode.diag,
-                    pause_cause=PauseCause.INTERRUPT,
+                launched_on = session.state.cycle_id
+                outcome = _CycleOutcome(
+                    cycle_result=close_cycle(
+                        None,
+                        session,
+                        observers,
+                        stop_reason=stop_reason,
+                        cycle_error=cycle_error,
+                        open_round=None,
+                        started_at=started_at,
+                        config=campaign_config,
+                        diag=mode.diag,
+                        pause_cause=PauseCause.INTERRUPT,
+                    ),
+                    fork=None,
+                    observers=observers,
+                    cancelled=None,
                 )
             except (KeyboardInterrupt, asyncio.CancelledError) as exc:
                 # Prep sits outside `_run_single_cycle`'s try: undeclared, it leaves a dead run `running`.
@@ -345,10 +397,9 @@ async def run_optimization(
                 )
                 observers.drain_all()
                 raise
-            session = prep.session
-            rebase_count = 0
-            while True:
-                outcome = await _run_single_cycle(
+            else:
+                session = prep.session
+                outcome, launched_on = await _run_line(
                     prep,
                     dataset=dataset,
                     session=session,
@@ -357,29 +408,26 @@ async def run_optimization(
                     started_at=started_at,
                     step_rounds=budget.step_rounds,
                 )
-                observers = outcome.observers
-                cycle_result = outcome.cycle_result
-                rebase_req = outcome.fork
-                if (
-                    cycle_result.stop_reason != StopReason.REBASED
-                    or rebase_req is None
-                    or rebase_count >= MAX_AUTO_REBASES
-                    or session.state.cycle_id is None
-                ):
-                    if rebase_req is not None and rebase_count >= MAX_AUTO_REBASES:
-                        logger.warning(
-                            "Auto-rebase cap %d reached; ignoring further fork_proposals.",
-                            MAX_AUTO_REBASES,
-                        )
-                    return cycle_result
-                rebase_count += 1
-                prep, observers = _mint_and_rebase_fork(
-                    prep,
-                    session=session,
-                    observers=observers,
-                    rebase_req=rebase_req,
-                    rebase_count=rebase_count,
+            if session.state.cycle_id:
+                # Once per launch, on the cycle holding the line as it ends: a rebased parent banks none.
+                bank_campaign_result(
+                    session.store,
+                    session.hop,
+                    started_at=started_at,
+                    finished_at=outcome.cycle_result.finished_at,
+                    optimizer_phases=selected.phases,
                 )
+            # A cancellation is one of the interrupts that leaves an empty fork dir.
+            if (
+                launched_on
+                and launched_on != session.state.cycle_id
+                and outcome.cycle_result.n_rounds_after_origin == 0
+            ):
+                cleanup_stub_fork_if_empty(campaign_store=session.store.campaigns, hop=session.hop)
+            if outcome.cancelled is not None:
+                # The caught instance, not a fresh class — it carries the reason its raise site named.
+                raise outcome.cancelled
+            return outcome.cycle_result
     finally:
         release_cycle(opened_dir)
         if session.state.cycle_id:

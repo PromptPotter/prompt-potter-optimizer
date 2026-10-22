@@ -35,7 +35,7 @@ from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.statistics import greedy_column_subset
+from promptpotter.shared.statistics import greedy_column_subset, logistic
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -187,7 +187,7 @@ def _normalized(stats: DescriptorStats, x: Sequence[float]) -> list[float]:
     for d, value in enumerate(x):
         sd = math.sqrt(stats.m2[d] / stats.count)
         z = (value - stats.mean[d]) / sd if sd > 0.0 else 0.0
-        out.append(1.0 / (1.0 + math.exp(-z)))
+        out.append(logistic(z))
     return out
 
 

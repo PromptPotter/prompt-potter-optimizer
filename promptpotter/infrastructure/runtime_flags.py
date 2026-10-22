@@ -213,7 +213,6 @@ def run_phase_validator_epoch(cycle_dir: Path) -> float | None:
     stamps: list[float] = []
     for path in (
         layout.cycle_dir,
-        layout.dashboard,
         layout.runtime,  # the producer lock: a directory's mtime sees a child's create AND unlink
         layout.ledger,
         campaign.manifest,

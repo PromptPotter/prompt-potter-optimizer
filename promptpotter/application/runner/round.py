@@ -189,7 +189,7 @@ def _round_result(
     cycle = ctx.cycle
     arms: dict[ArmKey, ArmState] = {key: read.state for key, read in measured.filed.items()}
     cells = {key: read.rows for key, read in measured.filed.items()}
-    # A held round headlines the parent RE-SCORED on this panel.
+    # A held round headlines the parent RE-SCORED on this panel, never a union of its cells.
     ended_on = winner or measured.parent.key
     head, head_rows = arms[ended_on], cells[ended_on]
     assert isinstance(head, Concluded)
@@ -315,12 +315,16 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
             budget_rounds=cycle.config.optimization.budget.rounds,
             parent_accuracy=None if fold is None else fold.accuracy,
             prompt_preview="\n\n".join(
-                cycle.opt_sp.render(prompt_node)
+                cycle.parent.render(prompt_node)
                 for prompt_node in cycle.session.pipeline_schema.prompt_nodes()
             )[:120],
             model=cycle.optimizer.model(node),
             pipeline_params=cycle.parent_point.pipeline_params,
-            parent_prompts=cycle.opt_sp.prompts,
+            parent_prompts=cycle.parent.prompts,
+            run_standing=RunStanding.after(
+                cycle.rounds,
+                lives=None if (lives := cycle.config.optimization.lives) is None else lives.bank,
+            ),
         ),
     )
     return opening

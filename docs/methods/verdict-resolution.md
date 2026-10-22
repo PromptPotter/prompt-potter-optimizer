@@ -215,7 +215,7 @@ under every optimizer so a comparison of the two readings is one knob apart:
   one, since the better parent is picked on the same cells the lift is read on. An arm with no
   parent has no reference. A parent is any individual a round measured — an archive elite no
   round selected included — re-measured under the configuration its round banked
-  (`Cycle.searchpoint`).
+  (`PointContext.measured`).
 
 Neither value moves what an optimizer's selector reads: potter elects on θ against the round's
 best-so-far and CAPO keeps its population on its own length-penalised objective, whichever lift is

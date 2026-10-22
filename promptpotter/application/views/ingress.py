@@ -60,7 +60,6 @@ def init_enter(
     origin_pp = session.pipeline_params or schema.to_pipeline_params()
     ctx.original_sp_flat = flatten_sp_summary(origin_pp)
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}
-    ctx.run_standing = RunStanding.opening(None if opt.lives is None else opt.lives.bank)
 
     # Resolved at INIT.enter so the live dashboard stamps the formula before origin scoring fires.
     full, short = resolve_cell_formula(session.state.scoring.require_scorer().per_cell, schema)
@@ -85,7 +84,7 @@ def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitVi
     ctx.composite_fitness_formula_short = short
     ctx.display_metric = session.state.scoring.display_metric
 
-    ctx.original_sp_flat.update(flatten_prompts(cycle.opt_sp.prompts))
+    ctx.original_sp_flat.update(flatten_prompts(cycle.parent.prompts))
 
     partition = session.state.scoring.require_partition()
     return InitExitView(
@@ -116,6 +115,7 @@ def propose_enter(
     model: str | None,
     pipeline_params: dict[str, Any] | None,
     parent_prompts: Mapping[str, NodePrompt],
+    run_standing: RunStanding,
 ) -> RoundStartView:
     # The header renders before candidates exist: it describes the parent.
     preview = prompt_preview.replace("\n", " ").strip()
@@ -132,7 +132,7 @@ def propose_enter(
         arms=opening.arms,
         note=opening.note,
         model=model or "(default)",
-        run_standing=ctx.run_standing,
+        run_standing=run_standing,
     )
 
 

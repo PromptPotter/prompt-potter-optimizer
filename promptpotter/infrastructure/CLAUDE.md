@@ -31,19 +31,18 @@ the union of what its subscribers RENDER.
 
 | Projection | Scope | Writes | Role |
 |---|---|---|---|
-| `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage` → `SpendRollup.bank`, which keys one by the record's kind and folds the totals over `SpendRollup.by_kind` — never a hand-named pair, or a new spend kind is money the cap cannot see; a run's spend book is seeded off its own cycle's `CampaignStore.cycle_metered`, in the units its campaign's ceiling meters, when it is armed). Sole webapp source for the chart and trend sparkline; the lineage tree reads the ledger instead. |
+| `LiveDashboardProjection` (`projections/live_dashboard/projection.py`) | per cycle | `dashboard.json`, through `DashboardCheckout` | **Display surface** — completed-round summaries (`dash.rounds[]`; **round 0 = the origin's round-0 score**, a one-candidate round emitted via the standard `close_round` path, no separate origin block) + in-flight `current_round` block + `spend` rollup (sole writer for every bucket via `_handle_token_usage` → `SpendRollup.bank`, which keys one by the record's kind and folds the totals over `SpendRollup.by_kind` — never a hand-named pair, or a new spend kind is money the cap cannot see; a run's spend book is seeded off its own cycle's `CampaignStore.cycle_metered`, in the units its campaign's ceiling meters, when it is armed). Sole webapp source for the chart and trend sparkline; the lineage tree reads the ledger instead. |
 | `AuditTrailProjection` (`projections/audit_trail.py`) | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` | **Deep audit** — each optimizer node's full LLM I/O and the round's warnings; the file IS `domain/round_audit.py::RoundAudit` dumped, and every reader loads it through that model. Fetched lazily by the webapp (`useRoundNodes`) only when an operator drills into a specific round; `useRound` is the peer hook for the round itself, served typed off the ledger (`GET …/cycles/{cycle_id}/rounds/{round_num}`) — never the round-file checkout. |
 | `RacingStreamProjection` (`projections/racing_stream.py`) | per cycle | `.runtime/streams/round_NNNN_{member}.jsonl` | Per-sample race standing under the eliminator `member` names, for post-hoc posterior analysis. Operator-tailable; webapp does not consume it. |
 | `ReadoutProjection` (`application/views/readout.py` — it renders through `views/render/`, so it sits a layer up) | per cycle / fork | `readout.log` | **The run readout** — the ledger stream as lines, ANSI-stripped, appended per launch. Bound at every entry point; one with a terminal hands in a line sink and sees the styled line too. |
 
-**`dashboard.json` is an operator surface, and three guarantees hold at the writer.** The served read also takes it as the head state (`application/served_dashboard.py::_head_state`), so today it is a cache of the ledger fold too. <!-- probe: git grep -cE "def _head_state" -- promptpotter/application/served_dashboard.py == 0 -->
+**`dashboard.json` is an operator surface and a checkout of the fold, and three guarantees hold at its writer.** No served read parses it: the served state is the fold itself, out of the ledger's index. <!-- probe: git grep -cE "\.dashboard\b" -- promptpotter/application/served_dashboard.py == 0 -->
 An operator opening the file tree mid-run must see the truth: before deferring or skipping
-a write, answer whether they still can — and a SERVED read rests on the same guarantees
-(a served dashboard is this file, validated; a cell never is). It is **always on disk and always swapped atomically**
+a write, answer whether they still can. It is **always on disk and always swapped atomically**
 (tmp + rename — never a partial write or a torn read), present after any ledger event in the cycle.
-It **settles within `_DASHBOARD_DEBOUNCE_S` of the last event** (`infrastructure/projections/live_dashboard/projection.py::_schedule_persist`
-coalesces bursts). And it flushes **immediately, with no debounce, at round boundaries**
-(`infrastructure/projections/live_dashboard/projection.py::_flush_pending_persist`), so a round's file is current before the next begins.
+It **settles within `_DASHBOARD_DEBOUNCE_S` of the last event** (`infrastructure/projections/live_dashboard/projection.py::DashboardCheckout._settle`
+coalesces bursts). And it is written **immediately, with no debounce, at round boundaries**
+(`infrastructure/projections/live_dashboard/projection.py::_AT_ONCE`), so a round's file is current before the next begins.
 Do not relax the swap, remove those flushes, or add a path that lets the file lag past a completed
 round. The public round file carries the same atomicity, with
 `application/scoring/closed_rounds.py::RoundFileProjection` the tree's sole writer — a ledger subscriber,
@@ -70,8 +69,8 @@ does not depend on the run living in the reader's own process. Contract:
 [`docs/developer/event-stream.md`](../../docs/developer/event-stream.md).
 
 **Every cycle — root, fork, diag — owns its live stream** at
-`cycles/{cycle_id}/dashboard.json`, stamped with its own id; a fork's view can never
-surface the parent's; read sites serve the viewed cycle's own file — no `root_cycle_id` collapse. **`dashboard.json::declared_phase` is a MIRROR of the runner's
+`cycles/{cycle_id}/dashboard.json`; the fold carries no address, so a fork's view can never
+surface the parent's, and a served read names the viewed cycle — no `root_cycle_id` collapse. **`dashboard.json::declared_phase` is a MIRROR of the runner's
 declaration and no served read parses it.** The declaration is a ledger record (`RunPhaseRecord`),
 and `runtime_flags.py::derive_run_state` — the ONE function every surface and every guard is
 answered from, phase and producer (`ProducerReading`) together — reads
@@ -85,15 +84,12 @@ nothing else**; file time only grades an attached one. That grade's edge moves w
 with a write, so it is expressed once (`_beat_stale_after`) and the conditional-GET validator
 reads it from there — a 304 computed off a second copy outlives the answer it stands for.
 
-**Seeding from that file may not be able to fail the run, so nothing seeds from it.**
-A launch's projection IS the fold of the cycle's LEDGER chain (`materializing_over`), each
-`RunWiringRecord` clearing what the launch before it left and every stamp a record's own
-timestamp, so a refold reproduces the file at every offset — a projection is never an input to itself,
-and no field on this model is on-disk shape anyone must migrate. The one reader that DOES parse the
-file (`application/served_dashboard.py::_head_state`; the model is `extra="forbid"`) drops a state that does
-not read as this build's WHOLE and loudly and refolds the ledger (`infrastructure/projections/live_dashboard/projection.py::fold_at`) —
-never salvaged field by field: a partial read is a compatibility shim, and the ledger is the
-truth. **What a cycle runs under is a ledger record too** (`RunWiringRecord`, declared at the
+**Nothing reads that file back.** The fold is ONE `LedgerFold` in the ledger's index, a fork's
+slot seeded with its parent's fold at the cut (`store/read_model.py::LedgerIndex`); the served read
+(`infrastructure/projections/live_dashboard/projection.py::fold_at`) and a launch's checkout
+(`DashboardCheckout.over`) both start from it. Each `RunWiringRecord` clears what the launch before
+it left and every stamp is a record's own timestamp, so a refold reproduces the file at every
+offset, and no field on this model is on-disk shape anyone must migrate. **What a cycle runs under is a ledger record too** (`RunWiringRecord`, declared at the
 mint and again by each launch — `application/run_observers.py::declare_run_wiring`), so the
 fold needs nothing a prior file carried, and **a state exists only from that record on**: a
 replay to a moment before it (inside the check-in a root's moved-in draft ledger opens with)

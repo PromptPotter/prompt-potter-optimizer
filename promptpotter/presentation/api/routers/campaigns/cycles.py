@@ -37,7 +37,7 @@ def get_cycle_dashboard(
     descend: str | None = Query(None),
     at: int | None = Query(None, ge=0),
 ) -> Response:
-    """Live telemetry for the viewed cycle: its own ``dashboard.json``.
+    """Live telemetry for the viewed cycle: the fold of its own ledger chain.
 
     The path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.
     Honors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.

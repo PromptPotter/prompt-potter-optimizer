@@ -5,17 +5,21 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from functools import cache
 from statistics import NormalDist
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, overload
+
+import numpy as np
+from numpy.typing import NDArray
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
-def sigmoid(x: float) -> float:
-    x = float(x)
-    if x >= 0:
-        return 1.0 / (1.0 + math.exp(-x))
-    ex = math.exp(x)
-    return ex / (1.0 + ex)
+@overload
+def logistic(x: float) -> float: ...
+@overload
+def logistic(x: NDArray[np.float64]) -> NDArray[np.float64]: ...
+def logistic(x: float | NDArray[np.float64]) -> float | NDArray[np.float64]:
+    p: float | NDArray[np.float64] = 1.0 / (1.0 + np.exp(-np.clip(x, -50, 50)))
+    return p
 
 
 @shapes_optimizer_prompt

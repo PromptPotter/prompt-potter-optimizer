@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Literal, NamedTuple, assert_never, get_args
+import copy
+from typing import Any, ClassVar, Literal, NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
@@ -72,41 +73,65 @@ from promptpotter.domain.run_records import (
     TrailTombstoneRecord,
 )
 from promptpotter.domain.spend import TokenAccount, prefix_reading
-from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import duration_words
 
-# A tail never validates these (`projection_envelope.py::NON_ACTIVITY_KINDS`); `_item` is total over the rest.
-SILENT_RECORDS = (
-    AccountEventRecord,
-    BackendWarningRecord,
-    CycleFinalRecord,
-    CycleMintedRecord,
-    CycleSupersededRecord,
-    ElectionRecord,
-    FlightRecord,
-    ForkGradedRecord,
-    InterventionRecord,
-    LaunchClaimRecord,
-    LaunchClockRecord,
-    LaunchReleasedRecord,
-    OptimizerStateRecord,
-    PartitionRecord,
-    PricedKeyRecord,
-    RaceCatchUpRecord,
-    RaceStandingRecord,
-    ResolvedRunRecord,
-    ResumeCheckpointRecord,
-    RoundProposedRecord,
-    RunWiringRecord,
-    SampleStartedRecord,
-    ScoringLockedRecord,
-    SpawnedRecord,
-    SpendHoldRecord,
-    SpendTombstoneRecord,
-    StandingBudgetRecord,
-    TokenUsageRecord,
-    TrailTombstoneRecord,
+# A tail never validates one (`projection_envelope.py::NON_ACTIVITY_KINDS`).
+SilentRecord = (
+    AccountEventRecord
+    | BackendWarningRecord
+    | CycleFinalRecord
+    | CycleMintedRecord
+    | CycleSupersededRecord
+    | ElectionRecord
+    | FlightRecord
+    | ForkGradedRecord
+    | InterventionRecord
+    | LaunchClaimRecord
+    | LaunchClockRecord
+    | LaunchReleasedRecord
+    | OptimizerStateRecord
+    | PartitionRecord
+    | PricedKeyRecord
+    | RaceCatchUpRecord
+    | RaceStandingRecord
+    | ResolvedRunRecord
+    | ResumeCheckpointRecord
+    | RoundProposedRecord
+    | RunWiringRecord
+    | SampleStartedRecord
+    | ScoringLockedRecord
+    | SpawnedRecord
+    | SpendHoldRecord
+    | SpendTombstoneRecord
+    | StandingBudgetRecord
+    | TokenUsageRecord
+    | TrailTombstoneRecord
 )
+# What a feed reads, `_item` total over it: with `SilentRecord`, every arm placed exactly once.
+ActivityRecord = (
+    LLMCallStartRecord
+    | LLMCallRecord
+    | LLMCallProgressRecord
+    | ArmRecord
+    | SampleScoredRecord
+    | PhaseRecord
+    | RunPhaseRecord
+    | RoundEnteredRecord
+    | RoundClosedRecord
+    | RoundWarningRecord
+    | ErrorRecord
+    | ProviderHoldRecord
+    | ProviderEasedRecord
+    | CommandRecord
+    | CommandAckRecord
+    | CycleSeedRecord
+)
+_arms = get_args(get_args(CycleRecord)[0])
+_placed = [*get_args(SilentRecord), *get_args(ActivityRecord)]
+if sorted(map(str, _placed)) != sorted(map(str, _arms)):
+    raise RuntimeError("SilentRecord and ActivityRecord must place every CycleRecord arm once")
+del _arms, _placed
 
 ActivityKind = Literal[
     "running",
@@ -357,6 +382,8 @@ def _node_label(node: str, at: int | None) -> str:
 
 
 class ActivityFeed:
+    records: ClassVar[tuple[type[StrictModel], ...]] = get_args(ActivityRecord)
+
     def __init__(self) -> None:
         self._status: ActivityItem | None = None
         self._notices: list[ActivityItem] = []
@@ -380,7 +407,14 @@ class ActivityFeed:
             decision = _arms_gate(self._round, self._offered)
         return ActivityState(status=self._status, notices=list(self._notices), decision=decision)
 
-    def read(self, sequence: int, record: CycleRecord) -> ActivityItem | None:
+    def feed(self, offset: int, record: ActivityRecord) -> None:
+        self.read(offset, record)
+
+    def value(self) -> ActivityFeed:
+        """A private copy, which a tail reads on from."""
+        return copy.deepcopy(self)
+
+    def read(self, sequence: int, record: ActivityRecord) -> ActivityItem | None:
         self._declared(record)
         item = self._item(f"{record.record_type}-{sequence}", record)
         if item is None:
@@ -391,7 +425,7 @@ class ActivityFeed:
             self._notices.append(item)
         return item
 
-    def _declared(self, record: CycleRecord) -> None:
+    def _declared(self, record: ActivityRecord) -> None:
         """``RoundEnteredRecord`` alone MOVES the run: every launch re-enters ``origin`` at round 0 to replay it."""
         match record:
             case RunPhaseRecord():
@@ -421,9 +455,7 @@ class ActivityFeed:
             case PhaseRecord(event="enter", round=int() as opened) if self._round is None:
                 self._round = opened
 
-    def _item(self, item_id: str, record: CycleRecord) -> ActivityItem | None:
-        if isinstance(record, SILENT_RECORDS):
-            return None
+    def _item(self, item_id: str, record: ActivityRecord) -> ActivityItem | None:
         match record:
             case LLMCallStartRecord():
                 return ActivityItem(
@@ -443,7 +475,10 @@ class ActivityFeed:
             case PhaseRecord():
                 return self._phase(item_id, record)
             case RunPhaseRecord() | RoundEnteredRecord():
-                # Read by `_declared`; not SILENT, since a silent record is never handed to this feed.
+                # Read by `_declared` alone, so a feed still takes them.
+                return None
+            case RoundClosedRecord() if self._round is not None and record.round < self._round:
+                # A close below the round entered restates it (a repair's re-bank): no news.
                 return None
             case RoundClosedRecord():
                 return ActivityItem(

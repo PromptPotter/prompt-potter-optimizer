@@ -60,7 +60,7 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Noi
     opened = await open_diagnostic(stores, hop, source=RunSource.NOISE_FLOOR)
     session = opened.session
     schema = session.pipeline_schema
-    jsp = opened.point(origin)
+    jsp = opened.points.measured(origin)
     scoring_set = [s for s in session.bank.samples if s.key in sample_keys]
     if not scoring_set:
         raise DiagnosticError(

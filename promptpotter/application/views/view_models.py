@@ -22,8 +22,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import LedgerS
 @dataclass
 class ViewContext:
     patience: int | None = None
-    # Its cap is every ♥ readout's denominator: a run banking stalls may have no rounds axis.
-    run_standing: RunStanding | None = None
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
     display_metric: DisplayMetric = "accuracy"

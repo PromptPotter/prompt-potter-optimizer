@@ -71,7 +71,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         command_id, asked = standing
         arms = [
             *(drafts[idx] for idx in asked.keep),
-            *(authored_arm(seat, ctx.cycle.opt_sp, arm) for arm in asked.arms),
+            *(authored_arm(seat, ctx.cycle.parent, arm) for arm in asked.arms),
         ]
         # Recorded and banked BEFORE the ack: a producer lost between them re-reads the answer.
         session.record_intervention("submit-arms")

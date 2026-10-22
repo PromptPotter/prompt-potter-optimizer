@@ -519,11 +519,7 @@ _BACKREFERENCE = re.compile(r"\\[1-9]")
 _TRACKER = "docs/specs/code-debt-cleanup.md"
 # An invariant a doc states as the target while its sentence says what holds today, keyed to the
 # phrase the tracker's URGENT section files it under; once true, the sentence is the invariant.
-_KNOWN_FALSE = {
-    'git grep -cE "def _head_state" -- promptpotter/application/served_dashboard.py == 0': (
-        "dashboard.json served as the head state"
-    ),
-}
+_KNOWN_FALSE: dict[str, str] = {}
 
 
 @cache

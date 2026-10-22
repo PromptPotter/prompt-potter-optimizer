@@ -156,7 +156,7 @@ async def measure_as_parent(
 class Lineage(CycleRead):
     @property
     def parent(self) -> OptSearchPoint:
-        return self._cycle.opt_sp
+        return self._cycle.parent
 
     @property
     def origin(self) -> OptSearchPoint:
@@ -192,7 +192,7 @@ class Frontier(CycleRead):
     @property
     def parent_own_rows(self) -> list[GradedCell]:
         """Each sample's latest cell of the parent ITSELF, never one another individual answered."""
-        key = ArmKey(self._cycle.opt_sp.id)
+        key = ArmKey(self._cycle.parent.id)
         rows: list[GradedCell] = []
         for rr in self._cycle.rounds:
             rows = merge_known_outcomes(rows, rr.rows(key))
@@ -570,10 +570,13 @@ class NodeContext[K: StrictModel]:
 
     async def measure_parent(self, individual_id: str, cells: list[Sample]) -> CellSheet:
         cycle = self._round.cycle
-        individual = cycle.measured(individual_id).individual
-        sp = cycle.searchpoint(individual_id)
+        arm = cycle.measured(individual_id)
         read = await measure_as_parent(
-            self._round, individual, sp, cells, role=MeasurementRole.PARENT
+            self._round,
+            arm.individual,
+            cycle.points.measured(arm),
+            cells,
+            role=MeasurementRole.PARENT,
         )
         return read.rows
 

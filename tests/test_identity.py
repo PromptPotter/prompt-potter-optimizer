@@ -22,13 +22,17 @@ from typing import Any, cast
 import openpyxl
 import pytest
 from factories import (
+    PARENT,
     PROMPT_INFO,
+    arm_state,
     inner_cells,
     loop_session,
     minted_campaign,
     pipeline_schema,
     prompted,
+    round_result,
     seat,
+    set_line,
 )
 from offline_world import Router
 from pydantic import ValidationError
@@ -1243,8 +1247,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         bank=[Sample(id=7, query="q", ground_truth="a"), Sample(id=8, query="r", ground_truth="b")],
         demo=1,
         optimization={"optimizer": "gepa"},
-        opt_sp=origin,
         population=[origin],
+    )
+    set_line(
+        reflected_on.cycle,
+        [round_result(0, arms={PARENT: arm_state("parent", individual=origin)}, improved=False)],
     )
     arm = SubmittedArm(
         prompt_fields={"review": {"rubric": "Cite the clause."}},

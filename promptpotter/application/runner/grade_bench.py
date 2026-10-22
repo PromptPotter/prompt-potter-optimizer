@@ -24,7 +24,7 @@ from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.phases import STOP_REASON_INFO
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.telemetry import at_round
-from promptpotter.infrastructure.projections.live_dashboard.projection import materializing_over
+from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError
 
@@ -55,11 +55,11 @@ async def _grade(stores: Stores, hop: CycleHop) -> BenchScore:
     rounds = [standing[n].close for n in sorted(standing)]
     opened = await open_diagnostic(stores, hop, source=RunSource.OPTIMIZATION_LOOP)
     session, config, framing = opened.session, opened.config, opened.framing
-    origin_sp = opened.point(rounds[0].origin)
+    origin_sp = opened.points.measured(rounds[0].origin)
     started_at = utcnow_iso()
     optimizer = select_optimizer(config.optimization)
     cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
-    dashboard = materializing_over(cycle_dir, hop)
+    dashboard = DashboardCheckout.over(cycle_dir)
     assert dashboard is not None, "a cycle with standing rounds was launched, so it is declared"
     readout = ReadoutProjection.for_campaign(session, config, sink=None)
     banked: BenchPasses | None = None
@@ -78,7 +78,9 @@ async def _grade(stores: Stores, hop: CycleHop) -> BenchScore:
                 cb=cb,
             )
             assert banked is not None, "the line holder holds its origin's pass"
-            banked = await bench_selection(session, rounds, framing=framing, banked=banked, cb=cb)
+            banked = await bench_selection(
+                session, rounds, points=opened.points, banked=banked, cb=cb
+            )
             score = declare_line_bench(
                 session,
                 config,
