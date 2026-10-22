@@ -73,7 +73,6 @@ _DATA_ROOT = "/opt/db-llm-bench/data"
 _WORK = "/work"
 _KEY_ENV = "DBLLMBENCH_API_KEY"
 _ANTHROPIC = "anthropic"
-_OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 # Upstream's own compose stack, reached from inside the runner's container.
 _DB_DEFAULT_URLS = {
@@ -181,7 +180,7 @@ def _model_entry(cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]
         extra["reasoning_effort"] = effort
     entry: dict[str, Any] = {
         "model": model,
-        "base_url": spec.base_url or _OPENAI_BASE_URL,
+        "base_url": spec.base_url,
         "api_key_env": _KEY_ENV,
         "max_tokens": reply,
     }

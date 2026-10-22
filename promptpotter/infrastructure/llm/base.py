@@ -4,7 +4,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 from promptpotter.domain.pipeline_schema import token_bound_of_bytes
 from promptpotter.infrastructure.llm.pricing import (
@@ -33,13 +33,46 @@ from promptpotter.infrastructure.llm.spend_book import (
     bound_spend_book,
 )
 from promptpotter.shared.errors import ErrorCategory, SendRefusedError
+from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
+    import httpx
+
     from promptpotter.domain.backend import BackpressureReading
 
 logger = logging.getLogger(__name__)
 
 _R = TypeVar("_R")
+
+# Per read gap: a reasoning model may think for minutes before its first byte.
+WIRE_TIMEOUT_S = 600.0
+
+
+def wire_client(base_url: str, headers: dict[str, str], *, timeout_s: float) -> httpx.AsyncClient:
+    """Resends nothing: `LLMClientBase._admitted_send` is the one loop, and each resend a bill."""
+    import httpx
+
+    return httpx.AsyncClient(
+        base_url=base_url,
+        headers=headers,
+        timeout=httpx.Timeout(timeout_s, connect=5.0),
+        limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100),
+        verify=tls_context(),
+    )
+
+
+async def post_json(http: httpx.AsyncClient, path: str, body: dict[str, Any]) -> httpx.Response:
+    import httpx
+
+    reply = await http.post(path, json=body)
+    if not reply.is_success:
+        # httpx's own message names the status alone; the provider's words are the diagnosis.
+        raise httpx.HTTPStatusError(
+            f"HTTP {reply.status_code} from {reply.url}: {reply.text[:500]}",
+            request=reply.request,
+            response=reply,
+        )
+    return reply
 
 
 def send_bound(ceiling: RateCeiling | None, *, sent: object, max_tokens: int | None) -> SendBound:

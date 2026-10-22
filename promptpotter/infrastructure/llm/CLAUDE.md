@@ -12,8 +12,8 @@ and no surface calls spent; the hold / bill / unreported rules are [ADR-0003](..
 `LLMClientBase._admitted_send`, Harbor's in-process agent send by send (`llm/litellm_sends.py`, so
 its cell only RESERVES the run it DECLARES), and `BackendClient.run_query` for a remote cell. **Every
 attempt, ours or one a backend or library made for us, ends as ONE `SendOutcome` settled by
-`Admission.close`** — a path reading a status or an exception itself is a second classifier. SDK
-retries are off — each resend is admitted anew, and drawn from the ONE `llm/send_pacing.py::SendBudget`
+`Admission.close`** — a path reading a status or an exception itself is a second classifier. No
+client resends below it — each resend is admitted anew, and drawn from the ONE `llm/send_pacing.py::SendBudget`
 its unit of work's OWNER sized and opened (a cell, an optimizer call, a grading, a probe): a loop
 counting its own attempts multiplies under every loop around it, so a send under no budget raises
 (`drawn_budget`). A caller meters

@@ -24,6 +24,8 @@ from promptpotter.infrastructure.llm.telemetry import (
 from promptpotter.shared.errors import ErrorCategory, RequestTooLargeError, SendRefusedError
 
 if TYPE_CHECKING:
+    import httpx
+
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
@@ -449,11 +451,10 @@ def _parse_int_header(headers: Mapping[str, Any] | Any, key: str) -> int | None:
         return None
 
 
-def raise_if_request_too_large(exc: Exception, provider_name: str) -> None:
-    status = getattr(exc, "status_code", None)
-    if status not in (413, 429):
+def raise_if_request_too_large(exc: httpx.HTTPStatusError, provider_name: str) -> None:
+    if exc.response.status_code not in (413, 429):
         return
-    parsed = _parse_tpm_overflow(str(exc))
+    parsed = _parse_tpm_overflow(exc.response.text)
     if parsed is None:
         return
     limit, requested = parsed

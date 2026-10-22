@@ -26,8 +26,10 @@ jobs:
 
       # The extras are `scripts/gate.py::_PINNED_EXTRAS`, the env the verdict is taken in; one
       # missing here reads green at the desk and red on CI (litellm, reached through `harbor`).
+      # Bytecode is compiled here because the suite's peak ceiling (`scripts/tests_owning.py::CEILING_MB`)
+      # is measured warm, and a first run that compiles it as it imports peaks higher.
       - name: Install dependencies
-        run: uv sync --extra dev --extra api --extra harbor --extra dspy --extra excel --frozen
+        run: uv sync --extra dev --extra api --extra harbor --extra dspy --extra excel --frozen --compile-bytecode
 
       # One step, and deliberately: `scripts/gate.py` is the single declaration of
       # what this repo checks, so the desk and CI cannot drift apart. It also runs

@@ -582,7 +582,7 @@ class LLMCallStartRecord(FrozenModel):
 
 
 class LLMCallProgressRecord(FrozenModel):
-    """Heartbeat while the SDK call is blocked; cache replays skip it."""
+    """Heartbeat while the provider call is blocked; cache replays skip it."""
 
     record_type: Literal["llm_call_progress"] = "llm_call_progress"
     call_id: str

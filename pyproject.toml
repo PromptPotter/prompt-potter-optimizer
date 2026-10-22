@@ -41,11 +41,10 @@ requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
     "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM
-    "openai>=1.10.0,<3",       # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
     "python-dotenv>=1.2.2",    # why kept: nothing imports it — pydantic-settings does, to read
                                # `env_file`, and asks only for >=0.21.0. The direct pin is the
                                # floor past CVE-2026-28684 that the transitive one would not give.
-    "httpx>=0.26.0",           # why kept: BackendClient (TermNorm) wire transport
+    "httpx>=0.26.0",           # why kept: every LLM provider's wire (`infrastructure/llm/base.py::post_json`) + BackendClient's
     "filelock>=3.29.4",        # why kept: every JSONL append and rewrite (store/io.py) + run admission
                                # across processes. The floor: acquiring makes the lock's directory.
     "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
@@ -145,9 +144,6 @@ observability = [
                         # in `server/gateway_api.py::raw_proxy`) — unreachable for us either way,
                         # because that is a bug in `mlflow server`, which we never run.
 ]
-anthropic = [
-    "anthropic>=0.18.0",  # why kept: Anthropic SDK as a peer of the OpenAI-compatible client
-]
 all = [
     # `benchmarks` is NOT folded in here, and that is the point of it being separate: `all` is
     # what a developer installs by default, so anything listed becomes attack surface nobody
@@ -166,7 +162,6 @@ all = [
     "xlrd>=2.0.1",
     "langfuse>=2.0.0",
     "mlflow-skinny>=3.15.0",
-    "anthropic>=0.18.0",
 ]
 dev = [
     "pytest>=8.0.0",          # why kept: test runner
@@ -265,8 +260,6 @@ init_typed = true
 # modules), and `mlflow-skinny` ships neither, so their two entries went with it.
 [[tool.mypy.overrides]]
 module = [
-    "anthropic.*",
-    "openai.*",
     "langfuse.*",
     "mlflow.*",
     "scalar_fastapi.*",

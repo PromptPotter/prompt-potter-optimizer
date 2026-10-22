@@ -13,7 +13,6 @@ from promptpotter.shared.errors import PotterError
 
 
 class Extra(StrEnum):
-    ANTHROPIC = "anthropic"
     BENCHMARKS = "benchmarks"
     DSPY = "dspy"
     EXCEL = "excel"

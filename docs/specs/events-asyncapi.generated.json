@@ -3838,7 +3838,7 @@
       },
       "LLMCallProgressRecord": {
         "additionalProperties": false,
-        "description": "Heartbeat while the SDK call is blocked; cache replays skip it.",
+        "description": "Heartbeat while the provider call is blocked; cache replays skip it.",
         "properties": {
           "call_id": {
             "title": "Call Id",

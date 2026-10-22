@@ -79,7 +79,7 @@ class LLMCallContext:
 
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
 
-# Per round trip: the provider SDK's own timeout is per-read-gap, so a slow stream never trips it.
+# Per round trip: the client's own httpx timeout is per-read-gap, so a slow stream never trips it.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
 # The parse ladder inside `chat()` is a repair then a clean re-ask, each a whole round trip.

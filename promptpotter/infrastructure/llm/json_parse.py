@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from json_repair import repair_json
 from pydantic import BaseModel, ValidationError
 
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.response import LLMResponse
+
+if TYPE_CHECKING:
+    import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -166,34 +169,21 @@ def parse_response_content(
     return response_model.model_validate(parsed)
 
 
-def _repair_json_validate_failure(err_str: str) -> tuple[str, Any] | None:
-    fg_key = "'failed_generation': '"
-    fg_start = err_str.find(fg_key)
-    if fg_start < 0:
-        return None
-    fg_text = err_str[fg_start + len(fg_key) :]
-    fg_end = fg_text.rfind("'}")
-    if fg_end <= 0:
-        return None
-    fg_text = fg_text[:fg_end].replace("\\n", "\n").replace("\\'", "'")
-    parsed = try_parse_json(fg_text, "json_repair")
-    if parsed is None:
-        return None
-    return fg_text, parsed
-
-
 def try_groq_json_validate_repair(
-    exc: Exception,
+    exc: httpx.HTTPStatusError,
     request_params: dict[str, Any],
     provider_name: str,
     response_model: type[BaseModel] | None,
 ) -> LLMResponse | None:
-    if getattr(exc, "status_code", None) != 400 or "json_validate_failed" not in str(exc):
+    if exc.response.status_code != 400 or "json_validate_failed" not in exc.response.text:
         return None
-    repaired = _repair_json_validate_failure(str(exc))
-    if repaired is None:
+    error = exc.response.json().get("error")
+    fg_text = error.get("failed_generation") if isinstance(error, dict) else None
+    if not isinstance(fg_text, str):
         return None
-    fg_text, parsed = repaired
+    parsed = try_parse_json(fg_text, "json_repair")
+    if parsed is None:
+        return None
     if response_model is not None:
         parsed = _unwrap_single_element_list(parsed)
         parsed = response_model.model_validate(parsed)

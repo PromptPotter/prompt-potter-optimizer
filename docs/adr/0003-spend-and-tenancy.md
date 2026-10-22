@@ -68,7 +68,7 @@ The ceiling is the run's spend book (`infrastructure/llm/spend_book.py`), armed 
 
 ### The lesson this ADR bought
 
-Wire cost is extracted where the provider is spoken to — `infrastructure/llm/openai_compat.py::reply_cost` onto `LLMResponse.cost_usd` — and `call.py` passes it as the `cost_usd=` kwarg. **`cost_usd` holds a provider-REPORTED figure or nothing**: a call whose provider reports none is priced at our rate table in its own field (`TokenUsageRecord.rate_priced_usd`), which every ceiling counts and no surface calls spent. An ADR states the decision; whether the code matches it is checked in the code.
+Wire cost is extracted where the provider is spoken to — `infrastructure/llm/openai_compat.py::ReplyBilling` onto `LLMResponse.cost_usd` — and `call.py` passes it as the `cost_usd=` kwarg. **`cost_usd` holds a provider-REPORTED figure or nothing**: a call whose provider reports none is priced at our rate table in its own field (`TokenUsageRecord.rate_priced_usd`), which every ceiling counts and no surface calls spent. An ADR states the decision; whether the code matches it is checked in the code.
 
 ### Host coupon + BYO keys — the per-user wallet gate (Lane A2)
 

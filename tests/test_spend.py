@@ -27,7 +27,6 @@ from typing import Any, cast, get_args
 from unittest import mock
 
 import httpx
-import openai
 import pytest
 from factories import (
     PROMPT_INFO,
@@ -48,7 +47,6 @@ from factories import (
     workspace,
 )
 from offline_world import Hang, Router, Said, completion
-from openai.types.chat import ChatCompletion
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 
 from promptpotter.application.account import account_of
@@ -166,10 +164,7 @@ from promptpotter.infrastructure.backend import CELL, BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, heartbeat, pricing, telemetry
 from promptpotter.infrastructure.llm.litellm_sends import ReportedCost
-from promptpotter.infrastructure.llm.openai_compat import (
-    billed_cost,
-    reply_cost,
-)
+from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
 from promptpotter.infrastructure.llm.pricing import PriceTier, Rate, RateCeiling, RateTable
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
@@ -450,14 +445,14 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         "is_byok": False,
     }
 
-    def wired(usage: dict[str, Any] | None) -> ChatCompletion:
-        return ChatCompletion.model_validate(completion("{}", model="m", usage=usage))
+    def wired(usage: dict[str, Any] | None) -> ChatReply:
+        return ChatReply.model_validate(completion("{}", model="m", usage=usage))
 
-    assert reply_cost(wired(priced)) == 7.938e-05, (
+    assert wired(priced).cost == 7.938e-05, (
         "wire cost never reached the response, so nothing prices the optimizer"
     )
     for usage in ({"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}, None):
-        assert reply_cost(wired(usage)) is None, (
+        assert wired(usage).cost is None, (
             f"{usage}: None, not 0.0 — 0.0 is a measurement, and satisfies the cap that should "
             "escalate to the table"
         )
@@ -531,8 +526,7 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             else:
                 with pytest.raises(ValueError):
                     await sending
-            sent = offline.llm.sent
-            assert [json.dumps(body) for body in sent] == ([json.dumps(wire)] if wire else []), (
+            assert offline.llm.sent == ([wire] if wire else []), (
                 f"{host} {sorted(asked)}: a field its client cannot send reached the provider, "
                 "or the gateway body a banked reply stands for moved"
             )
@@ -1978,9 +1972,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         "no reply reported a cost: each record is priced at our rate, and the ceiling binds on that"
     )
     assert any(isinstance(o, SendRefusedError) for o in outcomes), "the ceiling never bound"
-    unreported = sum(
-        isinstance(o, asyncio.CancelledError | openai.APITimeoutError) for o in outcomes
-    )
+    unreported = sum(isinstance(o, asyncio.CancelledError | httpx.ReadTimeout) for o in outcomes)
     left_out = unreported_on(burst_ledger)
     assert unreported and left_out.sends == unreported, "a send that left unbilled lost its hold"
     assert len(records) == sum(not isinstance(o, BaseException) for o in outcomes), (
@@ -2120,7 +2112,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     async def two_rungs() -> None:
         with under_budget(SendBudget(None, attempts=SEND_ATTEMPTS)):
             for _rung in range(2):
-                with pytest.raises(openai.InternalServerError):
+                with pytest.raises(httpx.HTTPStatusError):
                     await get_llm_client("openai").chat(
                         ChatRequest([{"role": "user", "content": "x"}], "gpt-x", max_tokens=10),
                         label=CallLabel("down", "optimizer"),

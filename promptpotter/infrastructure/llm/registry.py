@@ -64,6 +64,7 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
     "openai": ProviderSpec(
         "OpenAI",
         "OPENAI_API_KEY",
+        base_url="https://api.openai.com/v1",
     ),
     # A `:nitro` host may silently drop `response_format`: re-run the schema probe on a new route.
     "openrouter": ProviderSpec(

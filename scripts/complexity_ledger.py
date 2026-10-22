@@ -58,7 +58,7 @@ BASELINE = {
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 65,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
-    "models_lax": 3,
+    "models_lax": 8,
     # Injections the optimizers' runtimes price — each a block an optimizer prompt can carry.
     "injections": 34,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
@@ -77,7 +77,7 @@ BASELINE = {
     # Modules a test run imports: our own, followed through their module-level imports, plus
     # each outside distribution's top name. A test that reaches the server app or an extra
     # moves it as one function does not.
-    "test_reach": 357,
+    "test_reach": 356,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
     "served_fields": 1640,
