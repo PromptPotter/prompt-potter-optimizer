@@ -25,7 +25,7 @@ async def hold_for_operator[T](
     beat = asyncio.create_task(
         heartbeat(
             session.state.ledger,
-            call_id=f"{node}:{session.state.cycle_id}",
+            call_id=f"{node}:{session.cycle_id}",
             node=node,
             round_num=round_num,
             start_monotonic=time.monotonic(),

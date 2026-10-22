@@ -49,7 +49,7 @@ from promptpotter.application.campaign_config import (
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.loaders import definition_source
-from promptpotter.application.embedded_run import grade_line_bench, open_session, run_campaign
+from promptpotter.application.embedded_run import grade_bench, open_session, run_campaign
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
@@ -57,10 +57,6 @@ from promptpotter.application.optimizer_manifest import (
     resolve_optimizer,
     running_prompt,
     select_optimizer,
-)
-from promptpotter.application.pipeline_resolve import (
-    configure_and_apply_pipeline,
-    resolve_campaign_config,
 )
 from promptpotter.application.runner.inner.connector import measurement_modules
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, install_datasets_root
@@ -410,7 +406,6 @@ async def rebound_session(stores: Stores, hop: CycleHop) -> Session:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     assert campaign is not None
     session = await open_session(DATASET, stores=stores)
-    session = configure_and_apply_pipeline(session, resolve_campaign_config(stores, campaign, hop))
     return session.bound(hop, purpose=campaign.declaration.purpose)
 
 
@@ -442,7 +437,6 @@ async def run_one(
     stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
     stand_in_fetch(stores, samples)
     session = await open_session(DATASET, stores=stores)
-    session = configure_and_apply_pipeline(session, config)
     session, result = await run_campaign(
         session,
         config,
@@ -490,7 +484,7 @@ async def run_one(
             raise SystemExit(f"offline run: a manual launch of {optimizer} sent bench cells")
         if bench is None or bench.status.state != "not_asked" or not bench.status.can_grade:
             raise SystemExit(f"offline run: a manual launch of {optimizer} serves {bench}")
-        bench = await grade_line_bench(stores=stores, hop=session.hop)
+        bench = await grade_bench(stores, session.hop.campaign_id)
     decisions = extract(cycle, bench)
     decisions["harness"] = {
         "stop_reason": str(result.stop_reason),

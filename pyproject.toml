@@ -291,9 +291,11 @@ implicit_reexport = true
 [tool.ruff]
 target-version = "py313"
 line-length = 100
-# Colab research notebooks — external-comparison artifacts, not project code.
-# Mirrors the deptry extend_exclude below.
-extend-exclude = ["docs/research/bbeh-comparison"]
+# The peers' Colab notebooks run promptolution and DSPy on Colab, never this repo.
+extend-exclude = [
+    "docs/research/bbeh-comparison/bbeh_capo.ipynb",
+    "docs/research/bbeh-comparison/bbeh_dspy.ipynb",
+]
 
 [tool.ruff.lint]
 select = [

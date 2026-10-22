@@ -7,22 +7,24 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.domain.bench import BankPartition, restored_partition
 from promptpotter.domain.campaign import Optimize, Purpose
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
-from promptpotter.domain.results import DisplayMetric
+from promptpotter.domain.results import DisplayMetric, PointContext
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import HeldBudget
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.scoring.evaluators import Evaluator
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
@@ -51,11 +53,24 @@ class ScorerSetup:
         return self.partition
 
 
+@dataclass(frozen=True)
+class LaunchClock:
+    """One instant: ISO for the launch's record, monotonic for the wall-clock axis its book meters."""
+
+    started_at: str
+    monotonic: float
+
+    @classmethod
+    def now(cls) -> LaunchClock:
+        return cls(started_at=utcnow_iso(), monotonic=time.monotonic())
+
+
 @dataclass
 class LaunchState:
     """Every field a launch moves after its ``Session`` is built; observers read it, never a copy."""
 
-    cycle_id: str = ""
+    # Read once at `run_optimization`'s start; every cycle its line closes reads this one.
+    clock: LaunchClock | None = None
     resumed_from_round: int = 1
     audit_projection: AuditTrailProjection | None = None
     ledger: CycleEventLog | None = None
@@ -67,6 +82,13 @@ class LaunchState:
     flight: FlightGauge | None = None
     # What admission held for this launch, set at the runner seam BEFORE the book is armed.
     held: HeldBudget | None = None
+    # The cycle whose producer lock the launch holds: `build_run_observers` moves it onto a fork.
+    locked_cycle: CycleDir | None = None
+
+    def launch_clock(self) -> LaunchClock:
+        if self.clock is None:
+            raise RuntimeError("a launch's clock is read only inside the `run_optimization` it set")
+        return self.clock
 
 
 @dataclass(frozen=True)
@@ -90,13 +112,13 @@ class Session:
     identity_keys: dict[str, frozenset[str]] = field(default_factory=dict)
     langfuse: LangfuseLogger | None = None
     campaign_id: str = ""
+    # Written by `bound` alone: a fork is a new session, never a moved field.
+    cycle_id: str = ""
     # The bound campaign's declared purpose; a session binding none optimizes.
     purpose: Purpose = field(default_factory=Optimize)
     # What the bound cycle's chain drew; `None` exactly where no cycle is bound.
     drawn: BankPartition | None = None
     state: LaunchState = field(default_factory=LaunchState)
-    # The launch's start on ``time.monotonic()``: the wall-clock axis runs from here.
-    launched: float = field(default_factory=time.monotonic)
 
     @property
     def tenant_root(self) -> str:
@@ -128,10 +150,10 @@ class Session:
         return replace(
             self,
             campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
             purpose=purpose,
             bank=bank,
             drawn=restored_partition(bank.samples, drawn),
-            state=replace(self.state, cycle_id=hop.cycle_id),
         )
 
     @property
@@ -141,8 +163,8 @@ class Session:
 
     @property
     def hop(self) -> CycleHop:
-        """Derived, never stored: ``cycle_id`` flips on a fork and repeats across sandboxes."""
-        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.state.cycle_id)
+        """Derived, never stored: a ``cycle_id`` repeats across sandboxes."""
+        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
 
     @property
     def measured_dataset(self) -> str:
@@ -153,3 +175,10 @@ class Session:
     @property
     def instrument_id(self) -> str:
         return instrument_of(self.bank.dataset_hash, self.pipeline_params)
+
+    def points(self, framing: TaskDecomposition) -> PointContext:
+        return PointContext(
+            schema=self.pipeline_schema,
+            framing=framing,
+            demo=self.state.scoring.require_partition().demo,
+        )

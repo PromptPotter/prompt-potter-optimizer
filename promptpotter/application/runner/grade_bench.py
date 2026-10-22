@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.loop_start import open_diagnostic, verb_ledger
+from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_callbacks import RunCallbacks
@@ -56,7 +57,7 @@ async def _grade(stores: Stores, hop: CycleHop) -> BenchScore:
     opened = await open_diagnostic(stores, hop, source=RunSource.OPTIMIZATION_LOOP)
     session, config, framing = opened.session, opened.config, opened.framing
     origin_sp = opened.points.measured(rounds[0].origin)
-    started_at = utcnow_iso()
+    clock = LaunchClock.now()
     optimizer = select_optimizer(config.optimization)
     cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
     dashboard = DashboardCheckout.over(cycle_dir)
@@ -99,7 +100,7 @@ async def _grade(stores: Stores, hop: CycleHop) -> BenchScore:
                 bank_campaign_result(
                     stores,
                     hop,
-                    started_at=started_at,
+                    clock=clock,
                     finished_at=utcnow_iso(),
                     optimizer_phases=optimizer.phases,
                 )

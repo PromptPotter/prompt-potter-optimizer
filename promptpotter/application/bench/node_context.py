@@ -175,7 +175,7 @@ class Lineage(CycleRead):
         """Where a rewind of this cycle lands (UCB over the campaign's lineage); ``None`` where no ancestor stands."""
         return select_rewind_round(
             load_lineage_spine(self._cycle.difficulty),
-            cycle_id=self._cycle.session.state.cycle_id or "",
+            cycle_id=self._cycle.session.cycle_id or "",
             current_round=self._round.round_num,
         )
 
@@ -384,7 +384,7 @@ class NodeContext[K: StrictModel]:
 
     def _bank(self, restated: RoundResult) -> None:
         session = self._round.cycle.session
-        if restated.at_offset is None or not session.state.cycle_id:
+        if restated.at_offset is None or not session.cycle_id:
             return
         with graceful(f"round {restated.round} optimizer state not restated"):
             session.store.campaigns.restate_optimizer_state(session.hop, restated)

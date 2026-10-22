@@ -277,7 +277,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         reason="not_in_available_models",
     )
     bundle = InjectionBundle(
-        opt_sp=OptSearchPoint(),
+        parent=OptSearchPoint(),
         l2=l2,
         l3=l3,
         framing=TaskDecomposition(),

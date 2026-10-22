@@ -621,7 +621,6 @@ class CampaignStore:
             cycle_id=cycle_id,
             parent_cycle_id=index.parent_cycle_id,
             dataset_name="" if campaign is None else campaign.dataset_name,
-            backend_id="" if campaign is None else campaign.backend_id,
             mint_kind=index.mint_kind,
             is_root=kind == "root",
             stop_reason=index.stop_reason,
@@ -630,12 +629,9 @@ class CampaignStore:
             producer_attached=run.producer.attached,
             run_admission=run.admission,
             pause=run.pause,
-            standing=index.standing,
             rounds_closed=index.rounds_closed,
-            created_at=index.created_at,
             updated_at=index.updated_at,
             human_intervened=index.human_intervened,
-            spawned_by=index.spawned_by,
         )
 
     def enumerate_cycles(self) -> list[CycleListEntry]:

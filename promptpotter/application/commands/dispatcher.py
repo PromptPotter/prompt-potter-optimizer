@@ -17,6 +17,7 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
     DeleteCyclePayload,
     DraftPayload,
+    LinePayload,
     PauseCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
@@ -184,6 +185,8 @@ class CommandDispatcher:
         match call.payload:
             case CyclePayload():
                 return await self._on_cycle(call)
+            case LinePayload():
+                return await self._on_line(call)
             case CampaignPayload():
                 return await self._on_campaign(call)
             case DraftPayload():
@@ -197,6 +200,12 @@ class CommandDispatcher:
         # The WORKSPACE ledger: `archive` MOVES the campaign tree and `delete` REMOVES it.
         ledger = CycleEventLog.open_workspace(self.stores.base_dir)
         return await self._record_and_apply(ledger, call, self._applier(call))
+
+    async def _on_line(self, call: CommandCall[LinePayload]) -> CommandOutcome[object]:
+        campaign = owned_campaign(self.stores, call.payload.campaign_id)
+        hop = self.stores.campaigns.line_holder(campaign.root_hop)
+        ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(hop)))
+        return await self._record_and_apply(ledger, call, self._applier(call, campaign, hop))
 
     async def _on_cycle(self, call: CommandCall[CyclePayload]) -> CommandOutcome[object]:
         payload = call.payload

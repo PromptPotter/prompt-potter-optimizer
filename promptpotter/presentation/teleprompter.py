@@ -29,7 +29,6 @@ from promptpotter.application.datasets.authored import load_dataset_campaign_con
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.connectors.dspy_module import (
     PROGRAM_NODE,
     SCORE_KEY,
@@ -134,7 +133,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             # No overrides: the file this compile just wrote IS the projection of `loop` and `node`.
             config = load_dataset_campaign_config(dataset_dir)
             session, result = await run_campaign(
-                configure_and_apply_pipeline(session, config),
+                session,
                 config,
                 budget=Budget(),
                 mode=RunMode(),

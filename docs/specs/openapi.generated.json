@@ -198,6 +198,53 @@
         "title": "ActivityBucket",
         "type": "object"
       },
+      "ActivityDecision": {
+        "additionalProperties": false,
+        "description": "A choice the run is holding for: what to say about it, and the commands that answer it.",
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "facts": {
+            "description": "The evidence, in reading order.",
+            "items": {
+              "$ref": "#/components/schemas/DecisionFact"
+            },
+            "title": "Facts",
+            "type": "array"
+          },
+          "lead": {
+            "description": "The paragraph under the title.",
+            "title": "Lead",
+            "type": "string"
+          },
+          "reasons": {
+            "description": "Why the run is holding, one fragment each.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "lead",
+          "facts",
+          "reasons",
+          "actions"
+        ],
+        "title": "ActivityDecision",
+        "type": "object"
+      },
       "ActivityItem": {
         "additionalProperties": false,
         "description": "One record's reading: a line to show, and the round and candidate it is about.",
@@ -412,11 +459,55 @@
         "title": "ActivityResponse",
         "type": "object"
       },
+      "ActivityState": {
+        "additionalProperties": false,
+        "description": "A run's current state: what it is doing, and what was said that still holds.",
+        "properties": {
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityDecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the run is holding for the operator to decide; null while it holds for nothing."
+          },
+          "notices": {
+            "description": "Warnings and controls of the round the run is in, and any error of this launch.",
+            "items": {
+              "$ref": "#/components/schemas/ActivityItem"
+            },
+            "title": "Notices",
+            "type": "array"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityItem"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one line saying what the run is doing; each new one replaces it."
+          }
+        },
+        "required": [
+          "status",
+          "notices",
+          "decision"
+        ],
+        "title": "ActivityState",
+        "type": "object"
+      },
       "ArchiveCampaignPayload": {
         "additionalProperties": false,
         "description": "Flag a campaign archived: hidden from the default listing, restorable by unarchive; the tree\ndoes not move.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -3359,6 +3450,7 @@
             "$ref": "#/components/schemas/Budget"
           },
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -3396,6 +3488,7 @@
         "description": "Remove the stub cycles a mint left behind when it never reached round 0.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -3743,6 +3836,42 @@
           "couplings"
         ],
         "title": "ConfigMapResponse",
+        "type": "object"
+      },
+      "ConfigOverrides": {
+        "additionalProperties": false,
+        "description": "A fork's campaign-config delta, in which an absent field inherits the parent's value.",
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
+            "default": {}
+          },
+          "nodes": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ManifestNodeOverlay"
+            },
+            "title": "Nodes",
+            "type": "object"
+          },
+          "scoring": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scoring"
+          }
+        },
+        "title": "ConfigOverrides",
         "type": "object"
       },
       "ConnectedAccount": {
@@ -4213,19 +4342,9 @@
       "CycleListEntry": {
         "additionalProperties": false,
         "properties": {
-          "backend_id": {
-            "default": "",
-            "title": "Backend Id",
-            "type": "string"
-          },
           "campaign_id": {
             "description": "Campaign the cycle belongs to",
             "title": "Campaign Id",
-            "type": "string"
-          },
-          "created_at": {
-            "default": "",
-            "title": "Created At",
             "type": "string"
           },
           "cycle_id": {
@@ -4299,28 +4418,6 @@
             "$ref": "#/components/schemas/RunPhase",
             "default": "detached",
             "description": "The single run-state value (RunPhase). Computed once by derive_run_state from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'terminal' pairs with `stop_reason` for the reason label."
-          },
-          "spawned_by": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SpawnedBy"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which outer work-item asked for this cycle, when it is an L4 inner measurement; null for an ordinary campaign, which is the only reason it is null. Lets the sidebar name an inner run by the candidate that produced it instead of by launch order."
-          },
-          "standing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunStanding"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Where the run stands as its newest standing round left it: its selection, that selection against the origin on the origin panel, and what the cycle has cost. Null until round 0 closes. Never the headline; `CampaignSummary.bench` is."
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus",
@@ -4783,10 +4880,16 @@
           "query": {
             "title": "Query",
             "type": "string"
+          },
+          "sample_key": {
+            "description": "What the sample IS (`Sample.key`) — what an evidence comparison's `gained` / `lost` name.",
+            "title": "Sample Key",
+            "type": "string"
           }
         },
         "required": [
           "position",
+          "sample_key",
           "query",
           "hard_sample_rank",
           "delta_label",
@@ -5008,6 +5111,78 @@
         "title": "DatasetStorageResponse",
         "type": "object"
       },
+      "DecisionAction": {
+        "additionalProperties": false,
+        "description": "One button: a press sends `decision` as `kind` to the cycle whose activity carries it.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "rescore",
+              "proceed",
+              "abort"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "kind": {
+            "const": "origin-gate-decision",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "variant": {
+            "enum": [
+              "primary",
+              "ghost",
+              "danger"
+            ],
+            "title": "Variant",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "variant",
+          "kind",
+          "decision"
+        ],
+        "title": "DecisionAction",
+        "type": "object"
+      },
+      "DecisionFact": {
+        "additionalProperties": false,
+        "description": "One labelled line of the evidence behind a hold.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "tone": {
+            "default": "muted",
+            "enum": [
+              "good",
+              "warn",
+              "bad",
+              "muted"
+            ],
+            "title": "Tone",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "title": "DecisionFact",
+        "type": "object"
+      },
       "DefaultsDrift": {
         "additionalProperties": false,
         "description": "Something the run's declaration is a delta over moved since it was declared, so the launch\nruns today's value under the same declaration.",
@@ -5085,159 +5260,12 @@
         "title": "DegradationContext",
         "type": "object"
       },
-      "DegradationHealth": {
-        "additionalProperties": false,
-        "description": "A round's degradation verdict from the backend's warning stamps; it never stops the run.",
-        "properties": {
-          "answer_modal_share": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Answer Modal Share"
-          },
-          "cause": {
-            "anyOf": [
-              {
-                "enum": [
-                  "origin_unmeasured",
-                  "origin_incomplete",
-                  "structural",
-                  "unscoreable",
-                  "holed",
-                  "evidence_starved",
-                  "structural_untested",
-                  "persistent",
-                  "degraded"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cause"
-          },
-          "consecutive_degraded_rounds": {
-            "title": "Consecutive Degraded Rounds",
-            "type": "integer"
-          },
-          "degraded_rate": {
-            "title": "Degraded Rate",
-            "type": "number"
-          },
-          "dominant_node": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dominant Node"
-          },
-          "grade": {
-            "enum": [
-              "healthy",
-              "degraded",
-              "critical"
-            ],
-            "title": "Grade",
-            "type": "string"
-          },
-          "hole_count": {
-            "default": 0,
-            "title": "Hole Count",
-            "type": "integer"
-          },
-          "last_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Error"
-          },
-          "node_failure_rates": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "title": "Node Failure Rates",
-            "type": "object"
-          },
-          "node_warnings": {
-            "additionalProperties": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "title": "Node Warnings",
-            "type": "object"
-          },
-          "not_attempted": {
-            "default": 0,
-            "title": "Not Attempted",
-            "type": "integer"
-          },
-          "prior_clean_rounds": {
-            "title": "Prior Clean Rounds",
-            "type": "integer"
-          },
-          "samples": {
-            "title": "Samples",
-            "type": "integer"
-          },
-          "structural_count": {
-            "title": "Structural Count",
-            "type": "integer"
-          },
-          "suggested_action": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Suggested Action"
-          },
-          "transient_count": {
-            "title": "Transient Count",
-            "type": "integer"
-          },
-          "unscored": {
-            "default": 0,
-            "title": "Unscored",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "grade",
-          "samples",
-          "structural_count",
-          "transient_count",
-          "degraded_rate",
-          "consecutive_degraded_rounds",
-          "prior_clean_rounds"
-        ],
-        "title": "DegradationHealth",
-        "type": "object"
-      },
       "DeleteCampaignPayload": {
         "additionalProperties": false,
         "description": "Remove a campaign for good; its measurements still cache-hit for siblings.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -5268,6 +5296,7 @@
         "description": "Remove ONE stub cycle, the singular of `cleanup-empty-cycles`; refused for a cycle holding\nrounds or a live producer (pause it first).",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -6956,6 +6985,7 @@
         "description": "The cut, and the shape of the fork's first run (``mode``) — one act, so one command.\nA parent a producer still holds is paused by the applier once the fork's run is admitted.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -7013,15 +7043,21 @@
             "type": "integer"
           },
           "seed": {
-            "additionalProperties": true,
-            "title": "Seed",
-            "type": "object"
+            "$ref": "#/components/schemas/ForkSeed",
+            "default": {
+              "config_overrides": {
+                "budget": {},
+                "nodes": {}
+              },
+              "node_narrowing": {},
+              "origin_prompts": {},
+              "pipeline_overlay": {}
+            }
           }
         },
         "required": [
           "campaign_id",
-          "cycle_id",
-          "seed"
+          "cycle_id"
         ],
         "title": "ForkCyclePayload",
         "type": "object"
@@ -7122,6 +7158,40 @@
         "title": "ForkRemainder",
         "type": "object"
       },
+      "ForkSeed": {
+        "additionalProperties": false,
+        "description": "A fork's `CycleSeed` as sent: the applier freezes `node_narrowing` on the forked cycle's\nown rows and stamps the `origin_source` the wire omits.",
+        "properties": {
+          "config_overrides": {
+            "$ref": "#/components/schemas/ConfigOverrides"
+          },
+          "node_narrowing": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/ParamIntent"
+              },
+              "type": "array"
+            },
+            "description": "Per node, the rows as drawn; overrides the campaign's narrowing for this cycle only, and a node it does not name inherits.",
+            "title": "Node Narrowing",
+            "type": "object"
+          },
+          "origin_prompts": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/NodePrompt"
+            },
+            "title": "Origin Prompts",
+            "type": "object"
+          },
+          "pipeline_overlay": {
+            "additionalProperties": true,
+            "title": "Pipeline Overlay",
+            "type": "object"
+          }
+        },
+        "title": "ForkSeed",
+        "type": "object"
+      },
       "ForkStamp": {
         "additionalProperties": false,
         "description": "What marks an attempt the operator cut: a fork is NOT a node, so its identity rides them.",
@@ -7193,36 +7263,18 @@
       },
       "GradeBenchPayload": {
         "additionalProperties": false,
-        "description": "The cycle holding its campaign's line: the pass grades the campaign's result, so any other\ncycle is refused.",
+        "description": "Grade the campaign's origin and its selection on the held-out bench rows.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
             "type": "string"
-          },
-          "cycle_id": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Cycle Id",
-            "type": "string"
-          },
-          "descend": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Descend"
           }
         },
         "required": [
-          "campaign_id",
-          "cycle_id"
+          "campaign_id"
         ],
         "title": "GradeBenchPayload",
         "type": "object"
@@ -8881,8 +8933,7 @@
       "MeasurandUnit": {
         "enum": [
           "rate",
-          "score",
-          "theta"
+          "score"
         ],
         "title": "MeasurandUnit",
         "type": "string"
@@ -10802,6 +10853,7 @@
         "description": "Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -11437,6 +11489,7 @@
         "description": "Ask a running cycle to stop at its next checkpoint; it resumes from there.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -11865,6 +11918,94 @@
         ],
         "title": "ProducerState",
         "type": "string"
+      },
+      "ProjectionEnvelope": {
+        "additionalProperties": false,
+        "description": "One outbound SSE frame, whose receiver treats an unknown field as a drift signal.",
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/ActivityState",
+            "description": "The run's current state as of this frame — what it is doing and what still holds. Whole on every frame, so a client renders the newest one and folds nothing."
+          },
+          "cycle_id": {
+            "description": "Target cycle the frame describes; redundant with the channel address but stamped per-frame for fan-in demux.",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot.",
+            "enum": [
+              "account_event",
+              "arm",
+              "backend_warning",
+              "bank_partition",
+              "decision",
+              "command",
+              "command_ack",
+              "cycle_final",
+              "cycle_minted",
+              "cycle_seed",
+              "cycle_superseded",
+              "election",
+              "error",
+              "flight",
+              "fork_graded",
+              "intervention",
+              "launch_claim",
+              "launch_clock",
+              "launch_released",
+              "llm_call_progress",
+              "llm_call",
+              "llm_call_start",
+              "optimizer_state",
+              "phase",
+              "priced_key",
+              "provider_eased",
+              "provider_hold",
+              "race_catch_up",
+              "race_standing",
+              "resolved_run",
+              "round_closed",
+              "round_entered",
+              "round_proposed",
+              "round_warning",
+              "run_phase",
+              "run_wiring",
+              "sample_scored",
+              "sample_started",
+              "scoring_locked",
+              "spawned",
+              "spend_hold",
+              "spend_tombstone",
+              "standing_budget",
+              "token_usage",
+              "trail_tombstone",
+              "stream_snapshot"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "Per-kind body. For record-derived kinds, the record's model_dump; for stream_snapshot, the cycle's served dashboard.",
+            "title": "Payload",
+            "type": "object"
+          },
+          "sequence": {
+            "description": "Ledger offset at append. Live-tail frames carry the record's offset; the leading stream_snapshot frame carries the offset captured at subscribe time.",
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "cycle_id",
+          "sequence",
+          "activity"
+        ],
+        "title": "ProjectionEnvelope",
+        "type": "object"
       },
       "Proposed": {
         "additionalProperties": false,
@@ -12472,74 +12613,41 @@
         "title": "RoundAxis",
         "type": "object"
       },
-      "RoundCell": {
+      "RoundHealth": {
         "additionalProperties": false,
-        "description": "One measured row of a served round, with the mark it reads as.",
+        "description": "A round's degradation grade as a surface reads it; the whole verdict stays on its close.",
         "properties": {
-          "cached": {
-            "title": "Cached",
-            "type": "boolean"
+          "grade": {
+            "enum": [
+              "healthy",
+              "degraded",
+              "critical"
+            ],
+            "title": "Grade",
+            "type": "string"
           },
-          "fitness": {
+          "suggested_action": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Fitness"
-          },
-          "ground_truth_text": {
-            "description": "The sample's label as shown.",
-            "title": "Ground Truth Text",
-            "type": "string"
-          },
-          "position": {
-            "description": "The sample's slot in the bank the cycle drew.",
-            "title": "Position",
-            "type": "integer"
-          },
-          "predicted": {
-            "title": "Predicted",
-            "type": "string"
-          },
-          "query": {
-            "title": "Query",
-            "type": "string"
-          },
-          "sample_key": {
-            "title": "Sample Key",
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "HIT",
-              "MISS",
-              "ERR",
-              "UNSC"
-            ],
-            "title": "Status",
-            "type": "string"
+            "title": "Suggested Action"
           }
         },
         "required": [
-          "position",
-          "sample_key",
-          "status",
-          "cached",
-          "query",
-          "predicted",
-          "ground_truth_text",
-          "fitness"
+          "grade",
+          "suggested_action"
         ],
-        "title": "RoundCell",
+        "title": "RoundHealth",
         "type": "object"
       },
       "RoundView": {
         "additionalProperties": false,
-        "description": "One closed round as a surface reads it: its arms, their rows and its verdict. What the\nengine banks beside them — folds, diagnostics, optimizer state — stays on the ledger.",
+        "description": "One closed round as a surface reads it: its arms and its verdict. Its rows are the\nmeasurement log's (`GET /datasets/{name}/cells`); what the engine banks beside them — folds,\ndiagnostics, optimizer state — stays on the ledger.",
         "properties": {
           "arms": {
             "additionalProperties": {
@@ -12568,17 +12676,6 @@
               ]
             },
             "title": "Arms",
-            "type": "object"
-          },
-          "cells": {
-            "additionalProperties": {
-              "items": {
-                "$ref": "#/components/schemas/RoundCell"
-              },
-              "type": "array"
-            },
-            "description": "Each arm's rows, a reference re-read on the round's cells included.",
-            "title": "Cells",
             "type": "object"
           },
           "election": {
@@ -12625,7 +12722,6 @@
         "required": [
           "round",
           "arms",
-          "cells",
           "election",
           "scoreboard",
           "headline",
@@ -14026,7 +14122,7 @@
           "health": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/DegradationHealth"
+                "$ref": "#/components/schemas/RoundHealth"
               },
               {
                 "type": "null"
@@ -14205,6 +14301,7 @@
         "description": "Name a campaign wherever it is named to a human; its id still addresses it.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -14251,6 +14348,7 @@
             "type": "boolean"
           },
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -14381,6 +14479,7 @@
         "description": "Cut the candidate being scored at its next sample boundary; the round carries on with the rest.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -14424,58 +14523,6 @@
           }
         },
         "title": "Skipped",
-        "type": "object"
-      },
-      "SpawnedBy": {
-        "additionalProperties": false,
-        "description": "The outer work-item an L4 inner cycle was spawned to measure.",
-        "properties": {
-          "individual_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The outer individual's `OptSearchPoint.id` — stable across rounds, and the outer ARM's key where `role` is an arm's. Null outside a measured pass.",
-            "title": "Individual Id"
-          },
-          "role": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "WHY this cell ran (`MeasurementRole`). A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass.",
-            "title": "Role"
-          },
-          "round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Outer round; 0 is the origin (C0). Null when the spawn came from outside any round (the noise-floor diagnostic).",
-            "title": "Round"
-          },
-          "task": {
-            "description": "The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The individual does NOT identify a run: every task runs for every individual, so one individual's spawns are as many as the panel has cells and are told apart only by this.",
-            "title": "Task",
-            "type": "string"
-          }
-        },
-        "required": [
-          "task"
-        ],
-        "title": "SpawnedBy",
         "type": "object"
       },
       "SpendBucket": {
@@ -14692,6 +14739,7 @@
             "default": {}
           },
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -14765,6 +14813,7 @@
         "description": "Let a paused cycle run a bounded number of rounds, then stop again.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -15244,6 +15293,7 @@
             "type": "array"
           },
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -15487,6 +15537,7 @@
         "description": "Restore an archived campaign to active.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",
@@ -15623,6 +15674,7 @@
         "description": "``samples`` omitted is the ANSWER, not an absence: the count is derived from the\nper-candidate round budget and the rounds run since this cycle's last verification\n(``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is\nrefused, naming the budget — which is what keeps one click on a million-row dataset from being\na million-cell bill.\n\nAddressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``\n— so an L4 inner candidate is as reachable as a top-level one.",
         "properties": {
           "campaign_id": {
+            "description": "The full id: a prefix is the terminal's to resolve, before it builds a payload.",
             "maxLength": 128,
             "minLength": 1,
             "title": "Campaign Id",

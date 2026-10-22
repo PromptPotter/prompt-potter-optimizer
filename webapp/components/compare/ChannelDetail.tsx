@@ -157,17 +157,8 @@ export function ChannelDetail({
             cfg={picked.cfg}
             stats={picked.isOwn && <CellMeans means={reading.cell_means} />}
             measurements={
-              picked.path &&
-              picked.id && (
-                <MeasurementsPane
-                  preset={{
-                    path: picked.path,
-                    datasetName: reading.dataset_name,
-                    candidateId: picked.id,
-                    scope: "cycle",
-                    groupBy: "none",
-                  }}
-                />
+              picked.cellsPreset && (
+                <MeasurementsPane preset={{ ...picked.cellsPreset, groupBy: "none" }} />
               )
             }
             schema={picked.schema}
@@ -203,7 +194,7 @@ export function ChannelDetail({
           choices={searchpointCopyChoices({
             cfg: picked.cfg,
             reading: picked.reading,
-            samples: picked.samples,
+            cells: picked.cells,
           })}
           title="Copy this searchpoint"
         />

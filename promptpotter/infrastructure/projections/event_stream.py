@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from promptpotter.domain.activity import ActivityFeed
-from promptpotter.domain.cycle_paths import CyclePath
 from promptpotter.domain.projection_envelope import (
     RECORD_KINDS,
     ProjectionEnvelope,
@@ -22,9 +21,8 @@ logger = logging.getLogger(__name__)
 class CycleLedgerTail:
     """Synchronous file I/O: a caller on an event loop uses ``asyncio.to_thread``."""
 
-    def __init__(self, cycle_dir: Path, path: CyclePath) -> None:
-        self._path = path
-        self._cycle_id = path[-1].cycle_id
+    def __init__(self, cycle_dir: Path, cycle_id: str) -> None:
+        self._cycle_id = cycle_id
         self._ledger_path = CycleLayout(cycle_dir).ledger
         self._byte_pos = 0
         self._line_index = 0
@@ -43,7 +41,7 @@ class CycleLedgerTail:
             cycle_id=self._cycle_id,
             sequence=offset,
             payload=body,
-            activity=self._feed.state(self._path),
+            activity=self._feed.state(),
         )
 
     def read_new(self) -> list[ProjectionEnvelope]:
@@ -106,5 +104,5 @@ class CycleLedgerTail:
             cycle_id=self._cycle_id,
             sequence=self._line_index,
             payload=rec,
-            activity=self._feed.state(self._path),
+            activity=self._feed.state(),
         )

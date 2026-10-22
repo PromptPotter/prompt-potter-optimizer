@@ -7,14 +7,13 @@ import type {
   CourseNode,
   CurrentRound,
   DashboardCandidate,
-  DashboardSample,
-  DegradationHealth,
   LiveCandidate,
   Measured,
   NodePrompt,
   OverlapReading,
   PairedReading,
   ProducerReading,
+  RoundHealth,
   RoundView,
   RunStanding,
   ServedDashboard,
@@ -143,29 +142,10 @@ export function producerReading(
 }
 
 export function health(
-  grade: DegradationHealth["grade"],
-  over: Partial<DegradationHealth> = {},
-): DegradationHealth {
-  return {
-    grade,
-    cause: grade === "healthy" ? null : "degraded",
-    samples: 20,
-    structural_count: 0,
-    transient_count: 5,
-    hole_count: 0,
-    not_attempted: 0,
-    unscored: 0,
-    last_error: null,
-    answer_modal_share: null,
-    degraded_rate: 0.25,
-    consecutive_degraded_rounds: 1,
-    prior_clean_rounds: 5,
-    dominant_node: "web_search",
-    node_failure_rates: {},
-    node_warnings: {},
-    suggested_action: null,
-    ...over,
-  };
+  grade: RoundHealth["grade"],
+  over: Partial<RoundHealth> = {},
+): RoundHealth {
+  return { grade, suggested_action: null, ...over };
 }
 
 export function armReading(
@@ -264,26 +244,6 @@ export function courseNode(over: Partial<CourseNode> & Pick<CourseNode, "id">): 
   };
 }
 
-export function sampleRow(over: Partial<DashboardSample> = {}): DashboardSample {
-  return {
-    position: 0,
-    sample_key: "k0",
-    status: "HIT",
-    fitness: null,
-    terminal_node: null,
-    cached: false,
-    cost_s: null,
-    predicted: "",
-    ground_truth: "",
-    ground_truth_text: "verifier-graded — no label",
-    query: "",
-    input_tokens: null,
-    output_tokens: null,
-    cache_read_tokens: null,
-    ...over,
-  };
-}
-
 const NO_FITNESS_BANDS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 export function currentRound(over: Partial<CurrentRound> = {}): CurrentRound {
@@ -340,7 +300,6 @@ export function roundDoc(over: Partial<RoundView> = {}): RoundView {
     round: 0,
     arms: {},
     election: null,
-    cells: {},
     fitness_bands: NO_FITNESS_BANDS,
     scoreboard: [],
     headline: null,

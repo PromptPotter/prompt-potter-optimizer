@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.spend import StepUsage, TokenAccount
@@ -397,14 +398,7 @@ def dataset_pipeline(
         "description": "The caller's dspy.Module, scored by the caller's metric.",
         "prompt_info": {
             "template_variables": [],
-            "fields": [
-                "persona",
-                "task_intent",
-                "problem_description",
-                "instruction",
-                "thinking_style",
-                "answer_format",
-            ],
+            "fields": list(PROMPT_FIELDS),
         },
         "config": {"model": model, "temperature": temperature, **extra},
         "optimizer": {

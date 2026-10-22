@@ -381,7 +381,7 @@ def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
     """Once per round: a resume re-walking a banked round reads its record and writes no second."""
     session = ctx.cycle.session
     # An EMPTY bank replays as zero arms on every resume: a permanent failure to propose.
-    if not session.state.cycle_id or not proposals:
+    if not session.cycle_id or not proposals:
         return
     if session.store.campaigns.round_proposals(session.hop, ctx.round_num) is None:
         bank_proposals(ctx, proposals, submitted=False)
@@ -540,7 +540,7 @@ async def close_round(
         lives=cycle.config.optimization.lives,
     )
     round_result = cycle.seat(closing.model_copy(update={"at_offset": offset}))
-    if session.state.cycle_id:
+    if session.cycle_id:
         write_hard_samples_artifacts(session, cycle)
         write_log_md(session, cycle.config)
         write_review_md(
@@ -585,7 +585,7 @@ async def post_round(
     fold, election = round_result.fold, round_result.election
     await verify_on_saturation(
         stores=session.store,
-        hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.state.cycle_id),
+        hop=CycleHop(campaign_id=session.campaign_id, cycle_id=session.cycle_id),
         round_num=round_num,
         accuracy=None if fold is None else fold.accuracy,
         winner_id=None if election is None else next(iter(election.selected), None),

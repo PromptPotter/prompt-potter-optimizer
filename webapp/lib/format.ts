@@ -1,5 +1,5 @@
-import type { Measurand, MeasuredUnit, MetricSpec } from "@/lib/api/types";
-import { RECENT_STEP_S } from "@/lib/api/types.generated";
+import type { MeasuredUnit, MetricSpec } from "@/lib/api/types";
+import { RECENT_STEP_S, type LevelUnit } from "@/lib/api/types.generated";
 import type { LiftSide } from "@/lib/fitness";
 
 export function unitPlural(unit: MeasuredUnit): string {
@@ -153,7 +153,7 @@ export function fmtFitness(v: number | null): string {
 }
 
 // A score printed as a percent reads as a rate.
-export function fmtLevel(unit: Measurand["unit"], v: number | null | undefined): string {
+export function fmtLevel(unit: LevelUnit, v: number | null | undefined): string {
   switch (unit) {
     case "rate":
       return fmtPct0(v);

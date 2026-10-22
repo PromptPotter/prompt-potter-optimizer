@@ -189,7 +189,8 @@ session, result = await run_campaign(session, campaign_config=None, *, readout_s
                                      purpose=Optimize())
 ```
 
-The session `run_campaign` answers is bound to the cycle it ran; the one handed in never changes.
+The session `run_campaign` answers is bound to the cycle the run ended on, a fork it took
+included; the one handed in stays bound to its own.
 
 A run measures the session's bank, and nothing else: `rows` hands the host's own samples in as
 that bank, which the mint labels `dataset_name` exactly as it labels every other.

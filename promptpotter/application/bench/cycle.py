@@ -57,12 +57,12 @@ def _sibling_runtime_failures(session: Session) -> list[RuntimeFailure]:
     """Only a sibling that reached a natural conclusion carries trustworthy failures — as of this cycle's mint, so a resume reads what its first process read."""
     # This campaign's own forks under either purpose, so an arm reads only its own line.
     campaigns = session.store.campaigns
-    root = root_cycle_id(session.state.cycle_id)
+    root = root_cycle_id(session.cycle_id)
     moment = Moment(campaigns.ledger(session.hop), 0)
     out: list[RuntimeFailure] = []
     cycles_dir = campaign_cycles_dir(campaigns.campaign_root_dir(session.campaign_id))
     for sibling in sorted(d.name for d in cycles_dir.iterdir() if d.is_dir()):
-        if sibling == session.state.cycle_id or root_cycle_id(sibling) != root:
+        if sibling == session.cycle_id or root_cycle_id(sibling) != root:
             continue
         hop = CycleHop(campaign_id=session.campaign_id, cycle_id=sibling)
         index = campaigns.load(hop, moment=moment)
@@ -167,18 +167,16 @@ class Cycle:
         cls,
         origin: ReadArm,
         *,
-        schema: PipelineSchema,
         framing: TaskDecomposition,
         session: Session,
         config: CampaignConfig,
     ) -> Cycle:
+        schema = session.pipeline_schema
         origin_sheet = origin.rows
         selected = select_optimizer(config.optimization)
         selected.runtime.refuse_origin(origin_sheet)
         slices = SliceMap(selected.slices)
-        sp = PointContext(
-            schema=schema, framing=framing, demo=session.state.scoring.require_partition().demo
-        ).job(origin.individual)
+        sp = session.points(framing).job(origin.individual)
         _assert_overlay_preserved(sp, session.pipeline_params)
         # Hashed here because the parent advances with every round's head.
         difficulty = DifficultyView.open(session, config, origin=sp.sp_hash(schema))
@@ -227,11 +225,7 @@ class Cycle:
 
     @property
     def points(self) -> PointContext:
-        return PointContext(
-            schema=self.session.pipeline_schema,
-            framing=self.framing,
-            demo=self.session.state.scoring.require_partition().demo,
-        )
+        return self.session.points(self.framing)
 
     def measured(self, individual_id: str) -> Concluded:
         """The individual's latest arm a round of this cycle concluded."""
@@ -258,15 +252,10 @@ class Cycle:
         self.rounds = [rr for rr in self.rounds if rr.round < from_round] + sorted(
             priors, key=lambda rr: rr.round
         )
-        last_rr = self.rounds[-1]
-        if last_rr.election is None:
-            raise ValueError(
-                f"round {last_rr.round} closed without an election — the round file cannot seed "
-                "a resume."
-            )
-        self.difficulty.seat(last_rr.election.ruler)
-        self.population = list(last_rr.closed_state.population)
-        self.slices.seat(last_rr.closed_state)
+        self.difficulty.seat(self.elected[1].ruler)
+        closed = self.rounds[-1].closed_state
+        self.population = list(closed.population)
+        self.slices.seat(closed)
 
     def seat(self, rr: RoundResult) -> RoundResult:
         slot = next(i for i, held in enumerate(self.rounds) if held.round == rr.round)
@@ -285,10 +274,15 @@ class Cycle:
         self.rounds.append(rr)
 
     @property
+    def elected(self) -> tuple[RoundResult, Election]:
+        """The last round that elected: a generation-only round ends on no arm."""
+        return next((rr, rr.election) for rr in reversed(self.rounds) if rr.election is not None)
+
+    @property
     def parent(self) -> OptSearchPoint:
-        """The individual the last round ended on: a HELD round ends on the parent itself."""
-        head = self.rounds[-1].head
-        assert head is not None, "a round on the cycle's line names the individual it ended on"
+        """The individual the last election ended on: a HELD round ends on the parent itself."""
+        head = self.elected[0].head
+        assert head is not None, "an election ends on an arm it concluded"
         return head.individual
 
     @property
@@ -298,7 +292,7 @@ class Cycle:
     @property
     def parent_fold(self) -> ScoreSummary | None:
         """What the parent SCORED the round it last ended on, never a reading of the frontier."""
-        return self.rounds[-1].fold
+        return self.elected[0].fold
 
     @property
     def frontier(self) -> list[GradedCell]:
@@ -310,7 +304,7 @@ class Cycle:
 
     def banked_proposals(self, round_num: int) -> list[Proposal] | None:
         session = self.session
-        if not session.state.cycle_id:
+        if not session.cycle_id:
             return None
         proposed = session.store.campaigns.round_proposals(session.hop, round_num)
         return None if proposed is None else list(proposed.proposals)
@@ -374,7 +368,7 @@ class Cycle:
         """Concluded sibling forks' first, then this cycle's own rounds, each distinct config once."""
         if self._sibling_failures is None:
             self._sibling_failures = (
-                _sibling_runtime_failures(self.session) if self.session.state.cycle_id else []
+                _sibling_runtime_failures(self.session) if self.session.cycle_id else []
             )
         own = (rf for rr in self.rounds[1:] for rf in _cut_failures(rr))
         return _distinct([*self._sibling_failures, *own])

@@ -14,14 +14,10 @@ import {
   pathOf,
 } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
-import type { CourseNode } from "@/lib/api";
+import type { CellRow, CourseNode } from "@/lib/api";
+import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
-import {
-  isSelectedCandidate,
-  selectedCandidateOf,
-  type ArmRow,
-  type SampleRow,
-} from "@/lib/types";
+import { isSelectedCandidate, selectedCandidateOf, type ArmRow } from "@/lib/types";
 import type { CandidateSearchPoint, CandidateVerdict } from "@/lib/derivations";
 import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
 import { fmtPct0, unitCount, unitPlural } from "@/lib/format";
@@ -65,10 +61,30 @@ export function MeasurementRun({
     loading: roundLoading,
     failure: roundFailure,
     rows: candidates,
-    samples: samplesFor,
   } = useRound(viewedPath, round);
 
   const [candFilter, setCandFilter] = useState<string>("all");
+  const picked = candidates.find((c) => c.reading.arm.key === candFilter);
+  const narrowTo = picked && picked.source !== "inflight" ? picked.reading.arm.key : undefined;
+  const preset: CellsPreset = { round, scope: "cycle", candidateId: narrowTo };
+  const measured = usePresetCells(preset);
+  // Keyed on the arm the cell's candidate IS, and each cell names its query through its slot.
+  const cellsOf = useMemo(() => {
+    const armOf = new Map(measured.candidates.map((c) => [c.key, c.candidate_id]));
+    const out = new Map<string, CellRow[]>();
+    for (const cell of measured.cells) {
+      const arm = armOf.get(cell.candidate);
+      if (arm == null) continue;
+      const list = out.get(arm);
+      if (list) list.push(cell);
+      else out.set(arm, [cell]);
+    }
+    return out;
+  }, [measured.candidates, measured.cells]);
+  const queryAt = useMemo(
+    () => new Map(measured.items.map((it) => [it.position, it.query])),
+    [measured.items],
+  );
 
   const verdicts = useMemo(
     () =>
@@ -79,12 +95,12 @@ export function MeasurementRun({
   const groups = useMemo(() => {
     const out: {
       candidate: ArmRow;
-      samples: SampleRow[];
+      samples: CellRow[];
       spec: CandidateSearchPoint | null;
     }[] = [];
     for (const c of candidates) {
-      const filtered = samplesFor(c);
       const { arm } = c.reading;
+      const filtered = cellsOf.get(arm.key) ?? [];
       const spec =
         c.source === "inflight"
           ? liveCandidateSearchPoint(dash, arm.key)
@@ -95,7 +111,7 @@ export function MeasurementRun({
       return out.filter((g) => g.candidate.reading.arm.key === candFilter);
     }
     return out;
-  }, [candidates, candFilter, dash, roundDoc, samplesFor]);
+  }, [candidates, candFilter, dash, roundDoc, cellsOf]);
 
   const totalRows = useMemo(
     () => groups.reduce((n, g) => n + g.samples.length, 0),
@@ -103,8 +119,6 @@ export function MeasurementRun({
   );
 
   const oneCandidate = candFilter !== "all";
-  const picked = candidates.find((c) => c.reading.arm.key === candFilter);
-  const narrowTo = picked && picked.source !== "inflight" ? picked.reading.arm.key : undefined;
 
   if (!dash || (!isLiveView && roundLoading)) {
     return <Region>Loading round {round}…</Region>;
@@ -255,15 +269,18 @@ export function MeasurementRun({
                 </div>
               ) : (
                 <div className="rsv-rows">
-                  {display.map((s) => (
-                    <PanelCellRow
-                      key={s.key}
-                      cell={s.query}
-                      run={cells.get(panelCellKey(arm.label, s.query)) ?? null}
-                      cached={s.cached}
-                      onOpen={openRun}
-                    />
-                  ))}
+                  {display.map((s) => {
+                    const query = queryAt.get(s.position) ?? "";
+                    return (
+                      <PanelCellRow
+                        key={s.answer}
+                        cell={query}
+                        run={cells.get(panelCellKey(arm.label, query)) ?? null}
+                        cached={s.cached}
+                        onOpen={openRun}
+                      />
+                    );
+                  })}
                   {truncated > 0 && (
                     <div className="rsv-empty-row">
                       +{truncated} more (rendering capped at {PANEL_RENDER_CAP}).
@@ -276,14 +293,7 @@ export function MeasurementRun({
         })}
       </div>
       {!cells && (
-        <MeasurementsPane
-          preset={{
-            round,
-            scope: "cycle",
-            candidateId: narrowTo,
-            groupBy: "candidate",
-          }}
-        />
+        <MeasurementsPane preset={{ ...preset, groupBy: "candidate" }} />
       )}
     </section>
   );

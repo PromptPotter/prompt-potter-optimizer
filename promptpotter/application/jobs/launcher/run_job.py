@@ -125,7 +125,7 @@ async def run_held_job(
         release_slot(job_registry, job_id, exc, stores=session.store, hop=None)
         raise
     try:
-        result = await run_optimization(
+        _, result = await run_optimization(
             list(session.bank.samples),
             campaign_config,
             session=session,

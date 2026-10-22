@@ -35,6 +35,7 @@ from promptpotter.shared.identity import TenantId, safe_name
 
 if TYPE_CHECKING:
     from promptpotter.connectors.protocol import Connector
+    from promptpotter.domain.pipeline_schema import PipelineNode
 
 DEFAULT_SCORING_MATCHER = "label_match"
 """Only universally-applicable matcher for ``(query, ground_truth)`` shape."""
@@ -248,9 +249,12 @@ class DraftCampaign:
             text.strip() for fields in self.origin_prompts.values() for text in fields.values()
         )
 
+    def prompt_nodes(self) -> list[PipelineNode]:
+        return parse_pipeline_response(rendered_pipeline_json(self)).prompt_nodes()
+
     def committed_prompts(self) -> dict[str, dict[str, str]]:
         """The raw task and the label enumeration seed a field only on a chain of ONE prompt node."""
-        prompt_nodes = parse_pipeline_response(rendered_pipeline_json(self)).prompt_nodes()
+        prompt_nodes = self.prompt_nodes()
         alone = len(prompt_nodes) == 1
         return {
             node.name: self._committed_fields(node.name, node.prompt_fields if alone else ())

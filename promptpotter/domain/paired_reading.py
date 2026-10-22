@@ -266,7 +266,6 @@ class MeasurandKind(StrEnum):
 class MeasurandUnit(StrEnum):
     RATE = "rate"
     SCORE = "score"
-    THETA = "theta"
 
 
 class Measurand(FrozenModel):

@@ -2,43 +2,40 @@ from __future__ import annotations
 
 import argparse
 import logging
+from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.runner.campaign_result import read_cycle_bench
+from promptpotter.application.cycle_listing import active_pointer, resolve_campaign_id_hint
 from promptpotter.domain.command_kinds import GradeBenchPayload
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import (
-    cycle_target,
-    open_stores,
-    refused_by,
-)
+from promptpotter.presentation.cli.commands.workspace import open_stores, refused_by
+
+if TYPE_CHECKING:
+    from promptpotter.domain.bench import BenchScore
 
 logger = logging.getLogger("promptpotter.presentation.cli.bench")
 
 
 async def cmd_bench(args: argparse.Namespace) -> CommandResult:
     store = open_stores(args)
-    target = cycle_target(store, args, "bench")
-    if isinstance(target, CommandResult):
-        return target
-    campaign_id, cycle_id = target
-    campaign = store.campaigns.load_campaign(campaign_id)
-    if campaign is not None and not args.cycle:
-        # The bench grades the campaign's result, which the cycle holding its line answers for.
-        cycle_id = store.campaigns.line_holder(campaign.root_hop).cycle_id
+    campaign_id = (
+        resolve_campaign_id_hint(store, args.campaign)
+        if args.campaign
+        else active_pointer(store).campaign_id
+    )
+    if not campaign_id:
+        return CommandResult(
+            data={"status": "no_target"},
+            human="No active campaign to bench — name one with --campaign.",
+        )
     sent = await refused_by(
-        CommandDispatcher(store).dispatch(
-            CommandCall(GradeBenchPayload(campaign_id=campaign_id, cycle_id=cycle_id))
-        ),
-        {"campaign_id": campaign_id, "cycle_id": cycle_id},
+        CommandDispatcher(store).dispatch(CommandCall(GradeBenchPayload(campaign_id=campaign_id))),
+        {"campaign_id": campaign_id},
     )
     if isinstance(sent, CommandResult):
         return sent
-    assert campaign is not None, "the dispatcher answers an absent campaign not_found"
-    score = read_cycle_bench(store, campaign, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
-    logger.info("bench: %s/%s -> graded", campaign_id, cycle_id)
+    score: BenchScore = sent.result
+    logger.info("bench: %s -> graded", campaign_id)
     return CommandResult(
-        data=score.model_dump(mode="json"),
-        human=f"{campaign_id}/{cycle_id} -> bench: {score.line}",
+        data=score.model_dump(mode="json"), human=f"{campaign_id} -> bench: {score.line}"
     )

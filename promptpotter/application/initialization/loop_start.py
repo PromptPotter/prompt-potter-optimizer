@@ -171,11 +171,7 @@ class OpenedDiagnostic:
 
     @property
     def points(self) -> PointContext:
-        return PointContext(
-            schema=self.session.pipeline_schema,
-            framing=self.framing,
-            demo=self.session.state.scoring.require_partition().demo,
-        )
+        return self.session.points(self.framing)
 
 
 async def open_diagnostic(stores: Stores, hop: CycleHop, *, source: RunSource) -> OpenedDiagnostic:
@@ -351,7 +347,6 @@ def _build_and_start_cycle(
 
     cycle = Cycle.start(
         origin.origin,
-        schema=session.pipeline_schema,
         framing=origin.framing,
         session=session,
         config=config,
@@ -396,7 +391,6 @@ def _finalize_loop_state(
     session: Session,
     cb: RunCallbacks,
     *,
-    resolved_cycle_id: str | None,
     resumed_from_round: int,
 ) -> None:
 
@@ -407,13 +401,11 @@ def _finalize_loop_state(
         sample_ids=session.state.scoring.require_partition().admitted_ids,
     )
 
-    if resolved_cycle_id:
-        session.state.cycle_id = resolved_cycle_id
-        # Idempotent — runner/entry.py may have pre-opened the ledger.
-        if session.state.ledger is None:
-            session.state.ledger = CycleEventLog.open(
-                CycleDir(session.store.campaigns.cycle_dir(session.hop))
-            )
+    # Idempotent — runner/entry.py may have pre-opened the ledger.
+    if session.cycle_id and session.state.ledger is None:
+        session.state.ledger = CycleEventLog.open(
+            CycleDir(session.store.campaigns.cycle_dir(session.hop))
+        )
     session.state.resumed_from_round = resumed_from_round
 
     # A RUNNING cycle's `log.md` reads its formula off this bracket (`scorer_cell_formula`).
@@ -435,7 +427,8 @@ async def init_optimization_loop(
     cycle_id: str | None,
     resume_from_round_override: int | None,
     session: Session,
-) -> Cycle:
+) -> tuple[Cycle, CycleHop | None]:
+    """The cycle holds the session it runs on, and beside it the cycle a divergence forked it from."""
     await _emit_preflight_and_init_session(config, dataset, cb, session, origin)
 
     cycle, resolved_cycle_id, resumed_from_round = _build_and_start_cycle(
@@ -455,13 +448,15 @@ async def init_optimization_loop(
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
     )
-    _finalize_loop_state(
-        cycle,
-        session,
-        cb,
-        resolved_cycle_id=resolved_cycle_id,
-        resumed_from_round=resumed_from_round,
-    )
+    forked_from: CycleHop | None = None
+    if resolved_cycle_id and resolved_cycle_id != session.cycle_id:
+        forked_from = session.hop
+        session = session.bound(
+            CycleHop(campaign_id=session.campaign_id, cycle_id=resolved_cycle_id),
+            purpose=session.purpose,
+        )
+        cycle.session = session
+    _finalize_loop_state(cycle, session, cb, resumed_from_round=resumed_from_round)
     # The cycle id is FINAL only here; the spawn context was published before a fork could move it.
     retarget_inner_spawn(session)
-    return cycle
+    return cycle, forked_from

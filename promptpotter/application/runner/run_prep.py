@@ -21,7 +21,6 @@ from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.pipeline_overlay import (
-    apply_node_overlay,
     overlay_sets_model_outside_allowed,
     permitted_models_from_narrowing,
 )
@@ -36,8 +35,6 @@ from promptpotter.infrastructure.store.stores import Stores
 class PreparedRun:
     """No ceiling of its own: the held one is SET INTO ``campaign_config``, so the value that halts is served."""
 
-    # The session every later step holds: the cycle seed's overlay laid on what the caller bound.
-    session: Session
     origin: CampaignOrigin
     campaign_config: CampaignConfig
 
@@ -54,15 +51,8 @@ async def prepare_run(
 ) -> PreparedRun:
     cb = observers.callbacks
 
-    seed = session.store.campaigns.read_cycle_seed(session.hop) if session.state.cycle_id else None
+    seed = session.store.campaigns.read_cycle_seed(session.hop) if session.cycle_id else None
     if seed is not None:
-        if seed.pipeline_overlay:
-            session = replace(
-                session,
-                pipeline_params=apply_node_overlay(
-                    session.pipeline_params, seed.pipeline_overlay, session.pipeline_schema
-                ),
-            )
         campaign_config = apply_cycle_seed(campaign_config, seed)
         if overlay_sets_model_outside_allowed(
             seed.pipeline_overlay,
@@ -87,7 +77,7 @@ async def prepare_run(
         langfuse_session_id=langfuse_session_id,
     )
     declare_run_wiring(session, campaign_config, cb.ledger, tracing=observers.tracing)
-    if session.state.cycle_id:
+    if session.cycle_id:
         # A fresh mint was admitted before its campaign existed: its ceiling is stored here.
         move_campaign_money(
             budget.standing,
@@ -116,7 +106,7 @@ async def prepare_run(
     if origin.locked_scoring is not None:
         campaign_config = campaign_config.model_copy(update={"scoring": origin.locked_scoring})
 
-    return PreparedRun(session=session, origin=origin, campaign_config=campaign_config)
+    return PreparedRun(origin=origin, campaign_config=campaign_config)
 
 
 def arm_run_controls(session: Session, observers: RunObservers) -> None:
@@ -128,9 +118,9 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
         session.state.held,
         stores=session.store,
         job_registry=JobRegistry.attach(),
-        hop=session.hop if session.state.cycle_id else None,
+        hop=session.hop if session.cycle_id else None,
         meters=ceiling_meter(session.purpose),
-        opened=session.launched,
+        opened=session.state.launch_clock().monotonic,
         live=True,
     )
     observers.arm_spend_book(book)
@@ -169,7 +159,7 @@ def rebase_held(session: Session, parent: CycleHop) -> None:
 
 def declare_round_allowance(session: Session, step_rounds: int | None) -> None:
     """A launch with no allowance clears the last launch's."""
-    if not session.state.cycle_id:
+    if not session.cycle_id:
         return
     campaigns = session.store.campaigns
     standing = campaigns.read_standing_budget(session.hop)

@@ -286,10 +286,8 @@ async def _screen(
             f"dataset {dataset_name!r} authors no starting prompt for {unprompted} in its "
             "origin.yaml, so its origin is the bare question. Write one before screening."
         )
-    origin_sp = origin.to_job_search_point(
-        schema=session.pipeline_schema,
-        framing=campaign_framing(stores, campaign_config, session.dataset),
-        demo=session.state.scoring.require_partition().demo,
+    origin_sp = session.points(campaign_framing(stores, campaign_config, session.dataset)).job(
+        origin
     )
 
     readings: list[SeedReading] = []

@@ -368,12 +368,11 @@ machine-checked at all; skip them and every gate stays green over a surface nobo
 | Step | Do | Why it is not optional |
 |---|---|---|
 | 1 | **Name the scope the read is a fact ABOUT**, and address it by that entity's id | A read keyed on the wrong entity is not a bug you find later — it answers *plausibly and wrongly* |
-| 2 | **Declare the response model before the handler** | Root `CLAUDE.md` § Pre-flight gate. The generated spec is built from it, and a route without one is undeclared with every gate green — the only step on the page nothing can catch |
+| 2 | **Declare the response model before the handler** | Root `CLAUDE.md` § Pre-flight gate. The generated spec and TS types are built from it (`--only specs`, `--only ts-types`), and a route without one is undeclared with every gate green — the only step on the page nothing can catch |
 | 3 | **Resolve in `application/`, never in the router** | ADR-0006 (`cli/` + `embedded_run.py` must reach it) and `presentation/CLAUDE.md` § Out-of-bounds |
-| 4 | **Give the route a `response_model` and add it to `scripts/build_ts_types.py::SERVED_ROOTS`** | Now `--only specs` and `--only ts-types` cover it, and `webapp/lib/CLAUDE.md` § A wire shape is GENERATED keeps its hand-write escape closed |
-| 5 | **Serve provenance for anything the client could otherwise infer** | A closed set belongs on the server (`webapp/lib/CLAUDE.md`). Every value the browser has to *diff* to explain becomes a client twin that drifts |
-| 6 | **Add the row to `webapp/lib/CLAUDE.md` § Display-data sources** | A data class with no row is a data class with no owner, and the gap fills itself with stores |
-| 7 | **Run it and look at the panel** | §3's rule, and it binds hardest here: a served field that is declared, typed and never *written* renders as nothing, and no check that could exist would see it |
+| 4 | **Serve provenance for anything the client could otherwise infer** | A closed set belongs on the server (`webapp/lib/CLAUDE.md`). Every value the browser has to *diff* to explain becomes a client twin that drifts |
+| 5 | **Add the row to `webapp/lib/CLAUDE.md` § Display-data sources** | A data class with no row is a data class with no owner, and the gap fills itself with stores |
+| 6 | **Run it and look at the panel** | §3's rule, and it binds hardest here: a served field that is declared, typed and never *written* renders as nothing, and no check that could exist would see it |
 
 **Reads and the polling rule.** `roadmap.md` § Hard ordering requires new webapp data panels to
 ride `dashboard.json` + the SSE tail. A GET is allowed beside that pair only when it is

@@ -7,7 +7,6 @@ from pydantic import Field
 
 from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.command_kinds import CommandKind
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, command_address
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import BenchEnterView
 from promptpotter.domain.phases import (
@@ -145,10 +144,6 @@ ActivityKind = Literal[
 ]
 ActivityTone = Literal["good", "warn", "bad", "muted"]
 
-# A time-ray window's items: what one request is served, and the most a store's ray fold keeps.
-DEFAULT_RAY_LIMIT = 200
-MAX_RAY_LIMIT = 1000
-
 # `status` lasts to the next status or run-phase declaration, `round` to the next round, `run` to the next launch.
 Lifetime = Literal["status", "round", "run"]
 LIFETIME: dict[ActivityKind, Lifetime] = {
@@ -178,50 +173,6 @@ class ActivityItem(FrozenModel):
     )
 
 
-class RayItem(FrozenModel):
-    """One ray event, addressed by ``path``: a bare ``cycle_id`` is ambiguous in an L4 family."""
-
-    path: list[CycleHop] = Field(
-        description="The cycle this record belongs to, root → leaf — THE address.",
-    )
-    offset: int = Field(
-        ge=0,
-        description="Physical 0-based line index in this cycle's own ledger — the same space "
-        "as ProjectionEnvelope.sequence, so a live SSE frame de-duplicates against a ray "
-        "item on (path, offset). SPARSE: a record no line is made of rides nowhere, so "
-        "consecutive items skip offsets; a gap between ray offsets is not a missing record.",
-    )
-    ts: str = Field(
-        description="Effective timestamp: the record's own, raised to its file predecessor's "
-        "when the two invert (records are stamped at construction but appended later).",
-    )
-    gap_before_s: float = Field(
-        ge=0,
-        description="Seconds since the item before it in this window; 0 on the window's first.",
-    )
-    activity: ActivityItem | None = Field(
-        description="The record's reading — its line, and the round and candidate it is about. "
-        "Null on a bare heartbeat alone: the process proved alive and there is nothing to read, "
-        "so it ends a silence without becoming a step. A `running` item with no later reading "
-        "on its path is a call still open.",
-    )
-
-
-class RayResponse(FrozenModel):
-    """One ordered window of a family's chronology, oldest-first."""
-
-    items: list[RayItem] = Field(
-        default_factory=list,
-        description="The window, oldest-first: every record a line was read off, and each bare "
-        "heartbeat between them.",
-    )
-    cursor_prev: str | None = Field(
-        default=None,
-        description="Opaque cursor for the window immediately older than this one; null when "
-        "this window already reaches the family's beginning.",
-    )
-
-
 class ActivityState(FrozenModel):
     """A run's current state: what it is doing, and what was said that still holds."""
 
@@ -247,14 +198,12 @@ class DecisionFact(FrozenModel):
 
 
 class DecisionAction(FrozenModel):
-    """One button: a press POSTs ``payload`` to ``/commands/{kind}`` unchanged."""
+    """One button: a press sends `decision` as `kind` to the cycle whose activity carries it."""
 
     label: str
     variant: Literal["primary", "ghost", "danger"]
-    kind: CommandKind
-    payload: dict[str, Any] = Field(
-        description="The whole command payload, the cycle's address and `descend` tail included."
-    )
+    kind: Literal[CommandKind.ORIGIN_GATE_DECISION]
+    decision: GateDecision
 
 
 class ActivityDecision(FrozenModel):
@@ -316,7 +265,7 @@ def _gate_facts(health: DegradationHealth) -> list[DecisionFact]:
     return facts
 
 
-def _origin_gate(address: CyclePath, health: DegradationHealth | None) -> ActivityDecision:
+def _origin_gate(health: DegradationHealth | None) -> ActivityDecision:
     grade = "unknown" if health is None else health.grade
     return ActivityDecision(
         title=f"Origin gate — verdict: {grade}",
@@ -330,7 +279,7 @@ def _origin_gate(address: CyclePath, health: DegradationHealth | None) -> Activi
                 label=label,
                 variant=variant,
                 kind=CommandKind.ORIGIN_GATE_DECISION,
-                payload={**command_address(address), "decision": decision},
+                decision=decision,
             )
             for decision, (label, variant) in _GATE_ACTIONS.items()
         ],
@@ -398,11 +347,10 @@ class ActivityFeed:
         self._labels: dict[ArmKey, str] = {}
         self._arms = AnnouncedArms()
 
-    def state(self, address: CyclePath) -> ActivityState:
-        """*address* is passed in: a decision's commands need it, and a ledger does not name its own path."""
+    def state(self) -> ActivityState:
         decision: ActivityDecision | None = None
         if self._gate == "origin":
-            decision = _origin_gate(address, self._origin_health)
+            decision = _origin_gate(self._origin_health)
         elif self._gate == "arms":
             decision = _arms_gate(self._round, self._offered)
         return ActivityState(status=self._status, notices=list(self._notices), decision=decision)

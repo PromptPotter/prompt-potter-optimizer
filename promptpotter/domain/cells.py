@@ -262,6 +262,10 @@ class Cell(StrictModel):
 
 class DatasetItem(StrictModel):
     position: int
+    sample_key: str = Field(
+        description="What the sample IS (`Sample.key`) — what an evidence comparison's "
+        "`gained` / `lost` name."
+    )
     query: str
     ground_truth: str | None = Field(
         default=None,

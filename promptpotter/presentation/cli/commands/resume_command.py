@@ -14,7 +14,7 @@ from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.command_kinds import ForkCyclePayload, StartRunPayload
+from promptpotter.domain.command_kinds import ForkCyclePayload, ForkSeed, StartRunPayload
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import (
@@ -22,6 +22,7 @@ from promptpotter.domain.pipeline_overlay import (
     steers_disallowed_model,
 )
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.presentation.cli.commands.launch import (
     backend_unreachable_result,
     confirm_tty,
@@ -88,14 +89,14 @@ async def _dispatch_fork(
     ctx: SessionCtx,
     *,
     from_round: int,
-    seed: dict[str, Any],
+    seed: ForkSeed,
     keep_rounds: bool = False,
     reason: str = "",
 ) -> HeldRun:
     """A refused hold leaves no fork: the applier removes the stub it minted."""
     budget = budget_from_args(args)
     if budget.named:
-        seed = {**seed, "config_overrides": {"budget": budget.model_dump(exclude_unset=True)}}
+        seed = seed.model_copy(update={"config_overrides": ConfigOverrides(budget=budget)})
     try:
         return await _dispatch_held(
             args,
@@ -126,7 +127,7 @@ async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> He
     reason = args.rewind_reason.strip() or f"operator rewind to round {rewind_to}"
     parent_cycle_id = ctx.cycle_id
     held = await _dispatch_fork(
-        args, ctx, from_round=rewind_to, seed={}, keep_rounds=True, reason=reason
+        args, ctx, from_round=rewind_to, seed=ForkSeed(), keep_rounds=True, reason=reason
     )
     logger.info(
         "Operator rewind: %s → %s at round %d [reason=%s]",
@@ -196,7 +197,7 @@ async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> Hel
             raise SystemExit("Cancelled. The active campaign is unchanged.")
 
     parent_cycle_id = ctx.cycle_id
-    held = await _dispatch_fork(args, ctx, from_round=0, seed={"pipeline_overlay": overlay})
+    held = await _dispatch_fork(args, ctx, from_round=0, seed=ForkSeed(pipeline_overlay=overlay))
     logger.info(
         "Operator steer-fork (%s): %s → %s [overlay=%s]",
         "babysit, grade C" if disallowed else "clean, sanctioned values",

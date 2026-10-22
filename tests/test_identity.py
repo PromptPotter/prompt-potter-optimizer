@@ -126,7 +126,7 @@ from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
 from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, RunDeclaration
 from promptpotter.domain.cells import Seat
-from promptpotter.domain.command_kinds import SubmittedArm
+from promptpotter.domain.command_kinds import ForkSeed, SubmittedArm
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import (
     TEMPLATE_TOKEN_RE,
@@ -153,6 +153,7 @@ from promptpotter.domain.pipeline_schema import (
     narrowing_of,
 )
 from promptpotter.domain.pool import EARNED_SOURCE
+from promptpotter.domain.results import PointContext
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
 from promptpotter.domain.sample import Bank, Sample
@@ -435,7 +436,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
             }
         ).model_copy(update={"default_routes": routes})
         point = prompted("llm_only", instruction="x").configured({"llm_only": cfg}, routed)
-        job = point.to_job_search_point(schema=routed, framing=TaskDecomposition(), demo=[])
+        job = PointContext(schema=routed, framing=TaskDecomposition(), demo=[]).job(point)
         return archive_entry(job, dataset_hash="d", pipeline_schema=routed).config_key
 
     # The individual is {locus: value} over the roster: a child written on the SECOND prompt
@@ -475,7 +476,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert second.prompt("extract") == two.prompt("extract"), "an edit on one node moved another"
 
     def scored(point: OptSearchPoint) -> tuple[dict[str, Any], str]:
-        job = point.to_job_search_point(schema=chain, framing=TaskDecomposition(), demo=[])
+        job = PointContext(schema=chain, framing=TaskDecomposition(), demo=[]).job(point)
         key = archive_entry(job, dataset_hash="d", pipeline_schema=chain).config_key
         return job.pipeline_params, key
 
@@ -885,7 +886,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         stores.campaigns.mint_cycle(hop)
         stores.campaigns.write_resolved_run(hop, declaration=declaring(rungs), experiment=None)
     fork_seed = parse_cycle_seed(
-        {"node_narrowing": {"a": rows}},
+        ForkSeed.model_validate({"node_narrowing": {"a": rows}}),
         resolve_campaign_config(stores, steered, None),
         stores,
         steered,
@@ -1660,7 +1661,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     classify = booking.prompt_nodes()[0]
     bundle = InjectionBundle(
-        opt_sp=opt_sp,
+        parent=opt_sp,
         l2=L2Memory(),
         l3=L3Memory(),
         framing=framing,
@@ -1724,7 +1725,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
 
     inner = replace(
         bundle,
-        opt_sp=OptSearchPoint(),
+        parent=OptSearchPoint(),
         framing=TaskDecomposition(),
         pipeline_schema=outer_schema(tuple(NODE_LAYOUTS)),
         inner_cells=inner_cells("potter"),

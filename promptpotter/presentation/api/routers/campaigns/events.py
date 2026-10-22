@@ -5,6 +5,7 @@ from sse_starlette import EventSourceResponse
 
 from promptpotter.application.cycle_reads import cycle_event_frames, view_cycle
 from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
+from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
@@ -12,6 +13,7 @@ from promptpotter.presentation.api.routers.campaigns._router import campaigns_ro
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe",
     response_class=EventSourceResponse,
+    response_model=ProjectionEnvelope,
     tags=["Stream"],
 )
 async def stream_cycle_events(

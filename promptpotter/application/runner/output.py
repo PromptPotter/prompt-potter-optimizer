@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
 def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
     """The ONE ``hard_samples.json``: campaign scope reads one cycle's, dataset scope folds per request."""
-    if not session.state.cycle_id:
+    if not session.cycle_id:
         return
 
     ruler = cycle.difficulty.ruler
@@ -73,7 +73,7 @@ def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
         arm_theta=arm_thetas(cycle.rounds),
         parent_grades=parent_grades(cells),
         slots=session.bank.slot_of,
-        cycle_id=session.state.cycle_id,
+        cycle_id=session.cycle_id,
     )
     with graceful("hard_samples.json write failed"):
         write_json(
@@ -209,7 +209,7 @@ def _fork_summary_from_index(fork_index: CycleIndex) -> ForkSummaryView:
 
 def write_log_md(session: Session, config: CampaignConfig) -> None:
     """Called once more AFTER the run ends: the stop and the winner reach the ledger after the last round rendered."""
-    if not session.state.cycle_id:
+    if not session.cycle_id:
         return
     with graceful("log.md render failed"):
         _render_cycle_log_md(session, config)
@@ -308,7 +308,7 @@ def write_review_md(
     optimizer: SelectedOptimizer,
     framing: TaskDecomposition,
 ) -> None:
-    if not session.state.cycle_id:
+    if not session.cycle_id:
         return
     with graceful("review.md render failed"):
         store = session.store.campaigns

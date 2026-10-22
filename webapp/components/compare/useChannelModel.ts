@@ -10,7 +10,6 @@ import {
   candidateObserveConfig,
   candidatesAtPath,
   descendantsOf,
-  historicalSamplesFor,
   indexLineage,
   mainLineOf,
   pathOf,
@@ -20,6 +19,7 @@ import {
   type LineageIndex,
   type RunGroup,
 } from "@/lib/derivations";
+import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { useLineageTree } from "@/lib/lineage";
@@ -149,10 +149,15 @@ export function useChannelModel(
   const cfg = selected
     ? candidateObserveConfig(doc, selected.reading.arm.key, selected.label)
     : null;
-  const samples = useMemo(
-    () => (docId && round != null ? historicalSamplesFor(doc, round, docId) : []),
-    [doc, docId, round],
+  const datasetName = reading?.dataset_name ?? null;
+  const cellsPreset = useMemo<CellsPreset | null>(
+    () =>
+      pickedPath && docId && datasetName
+        ? { path: pickedPath, datasetName, candidateId: docId, scope: "cycle" }
+        : null,
+    [pickedPath, docId, datasetName],
   );
+  const { cells } = usePresetCells(folds.detail ? cellsPreset : null);
   const key = useMemo(
     () => (selected ? candidateSubject(pathOf(selected), selected.id) || subject : subject),
     [selected, subject],
@@ -206,7 +211,8 @@ export function useChannelModel(
       isOwn: !!reading && key === pointKeyOf(reading),
       reading: pickedReading,
       cfg,
-      samples,
+      cellsPreset,
+      cells,
       overlay,
       docLoading,
       schema,

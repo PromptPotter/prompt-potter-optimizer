@@ -1897,38 +1897,6 @@
         "title": "CommandAckRecord",
         "type": "object"
       },
-      "CommandKind": {
-        "description": "A row is `kind, handler, capability, cli_verb`: the handler is `application/commands/{module}:{attr}`, imported on dispatch; a `None` verb DECLARES the kind browser-only.",
-        "enum": [
-          "pause-cycle",
-          "origin-gate-decision",
-          "submit-arms",
-          "skip-searchpoint",
-          "set-sample-lookahead",
-          "start-run",
-          "step-cycle",
-          "fork-cycle",
-          "mint-campaign",
-          "start-checkin",
-          "verify-candidate",
-          "grade-bench",
-          "change-run-limits",
-          "set-concurrent-cycles",
-          "cancel-queued-run",
-          "delete-cycle",
-          "cleanup-empty-cycles",
-          "archive-campaign",
-          "unarchive-campaign",
-          "delete-campaign",
-          "set-campaign-label",
-          "compact-archive",
-          "edit-draft-campaign",
-          "resolve-origin",
-          "discard-draft"
-        ],
-        "title": "CommandKind",
-        "type": "string"
-      },
       "CommandRecord": {
         "additionalProperties": false,
         "description": "``CommandDispatcher`` alone writes it, to the cycle's, its root's or the workspace ledger.",
@@ -2712,20 +2680,25 @@
       },
       "DecisionAction": {
         "additionalProperties": false,
-        "description": "One button: a press POSTs ``payload`` to ``/commands/{kind}`` unchanged.",
+        "description": "One button: a press sends `decision` as `kind` to the cycle whose activity carries it.",
         "properties": {
+          "decision": {
+            "enum": [
+              "rescore",
+              "proceed",
+              "abort"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
           "kind": {
-            "$ref": "#/components/schemas/CommandKind"
+            "const": "origin-gate-decision",
+            "title": "Kind",
+            "type": "string"
           },
           "label": {
             "title": "Label",
             "type": "string"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "description": "The whole command payload, the cycle's address and `descend` tail included.",
-            "title": "Payload",
-            "type": "object"
           },
           "variant": {
             "enum": [
@@ -2741,7 +2714,7 @@
           "label",
           "variant",
           "kind",
-          "payload"
+          "decision"
         ],
         "title": "DecisionAction",
         "type": "object"
@@ -4424,8 +4397,7 @@
       "MeasurandUnit": {
         "enum": [
           "rate",
-          "score",
-          "theta"
+          "score"
         ],
         "title": "MeasurandUnit",
         "type": "string"

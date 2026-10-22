@@ -31,7 +31,7 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
+    from promptpotter.application.initialization.session import LaunchClock, Session
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.scoring import Scorer
@@ -51,21 +51,23 @@ def bank_campaign_result(
     stores: Stores,
     hop: CycleHop,
     *,
-    started_at: str,
+    clock: LaunchClock,
     finished_at: str,
     optimizer_phases: frozenset[str],
 ) -> None:
+    """Once per launch, on the cycle holding the line as it ends: a rebased parent banks none."""
     line = _line(stores, hop)
     if line is None:
         return
-    clock = scan_ledger_wall_clock(
+    wall_clock = scan_ledger_wall_clock(
         [stores.campaigns.ledger(h) for h in line],
-        started_at=started_at,
+        started_at=clock.started_at,
         finished_at=finished_at,
         optimizer_phases=optimizer_phases,
     )
     stores.campaigns.bank_launch_clock(
-        hop, LaunchClockRecord(started_at=started_at, finished_at=finished_at, clock=clock)
+        hop,
+        LaunchClockRecord(started_at=clock.started_at, finished_at=finished_at, clock=wall_clock),
     )
 
 

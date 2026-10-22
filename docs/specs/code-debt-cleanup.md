@@ -46,9 +46,6 @@ as possible. **Rides with:** the shrink arc's stage named in each entry, or any 
   `promptpotter/CLAUDE.md`; every reader a `LedgerFold`, projections checkouts of folds;
   `CampaignStore.ledger(hop)` the one ledger-path derivation. **Re-test:** `rg -c
   "CycleLayout\(stores.campaigns.cycle_dir" promptpotter` → 0; computed `p_record` ≤ 4.
-- **`scripts/build_ts_types.py::SERVED_ROOTS` is a hand roster of the read routes' response
-  models.** Action: derived from the routes, as `CommandResponses` already is. **Re-test:** a new
-  served read touches no script.
 - **`application/bench/node_context.py::NodeContext` grows a method per member need** (52 → 88
   public in one arc). Action: declared typed reads refused at load, ~11 methods left, a member base
   in `optimizers/nodes.py`. **Re-test:** `p_member` ≤ 12.

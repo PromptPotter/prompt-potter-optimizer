@@ -56,7 +56,7 @@ from promptpotter.domain.campaign import Campaign, Optimize, Purpose
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState
 from promptpotter.domain.paired_reading import ArmKey, PairedReading, ReadingState
 from promptpotter.domain.phases import RunPhase, StopReason
@@ -336,9 +336,9 @@ def loop_session(
         dataset_name=schema.name if dataset_name is None else dataset_name,
         dataset=dataset,
         campaign_id="" if hop is None else hop.campaign_id,
+        cycle_id="" if hop is None else hop.cycle_id,
         drawn=None if hop is None else partition,
         state=LaunchState(
-            cycle_id="" if hop is None else hop.cycle_id,
             ledger=ledger,
             scoring=ScorerSetup(scorer=scorer, partition=partition),
             source=RunSource.OPTIMIZATION_LOOP,
@@ -347,16 +347,7 @@ def loop_session(
     )
 
 
-PROMPT_INFO = NodePromptInfo(
-    fields=(
-        "persona",
-        "task_intent",
-        "problem_description",
-        "instruction",
-        "thinking_style",
-        "answer_format",
-    )
-)
+PROMPT_INFO = NodePromptInfo(fields=PROMPT_FIELDS)
 
 _SEAT_BANK = (Sample(id=0, query="q0", ground_truth="a"),)
 _SEATS = count()
@@ -420,9 +411,7 @@ def seat(
             **cycle,
         )
     else:
-        seated = Cycle.start(
-            origin(session), schema=schema, session=session, config=config, **cycle
-        )
+        seated = Cycle.start(origin(session), session=session, config=config, **cycle)
     return RoundContext(seated, round_num, callbacks=RunCallbacks(ledger))
 
 

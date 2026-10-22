@@ -447,7 +447,7 @@ async def _run_inner_campaign(
     with binding_prompt_overrides(cell.overrides):
         opened = await _open_seat(cell, store)
         session, config = opened.session, opened.config
-        if session.campaign_id and session.state.cycle_id:
+        if session.campaign_id and session.cycle_id:
             spawned = SpawnedBy.model_validate(spawned_by)
             session.store.campaigns.record_spawned(session.hop, spawned)
             minted.append(session.hop)
@@ -458,9 +458,9 @@ async def _run_inner_campaign(
                 config,
                 stores=session.store,
                 dataset_name=cell.spec.inner_dataset,
-                hop=session.hop if session.state.cycle_id else None,
+                hop=session.hop if session.cycle_id else None,
             ) as held:
-                result = await run_optimization(
+                _, result = await run_optimization(
                     opened.train_data,
                     config,
                     session=session,

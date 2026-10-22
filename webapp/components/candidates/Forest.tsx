@@ -1,6 +1,6 @@
 "use client";
 import { memo, useCallback, useMemo } from "react";
-import { fmtLevel, fmtTheta } from "@/lib/format";
+import { fmtLevel } from "@/lib/format";
 import { nodeKeyOf, type DisplayMetric } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
@@ -97,7 +97,7 @@ const CandidateNode = memo(function CandidateNode({
           ? "unknown"
           : fmtLevel(DISPLAY_METRIC_UNITS[metric],level)}
         {!invalidated && metric !== "ability" && typeof theta === "number"
-          ? ` · ability θ ${fmtTheta(theta)}`
+          ? ` · ${fmtLevel(DISPLAY_METRIC_UNITS.ability, theta)}`
           : ""}
         {n.node.variations
           .map((v) => `\n${v.node} (${v.mode}): ${v.loci.join(", ") || "nothing"}`)
@@ -396,7 +396,7 @@ export function Forest({
                   <title>
                     {nodeCycleId} · R{n.round} · {fmtLevel(DISPLAY_METRIC_UNITS[metric],valOf(n))}
                     {metric !== "ability" && typeof thetaOf(n) === "number"
-                      ? ` · ability θ ${fmtTheta(thetaOf(n))}`
+                      ? ` · ${fmtLevel(DISPLAY_METRIC_UNITS.ability, thetaOf(n))}`
                       : ""}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
                     {isDivergence ? "\ndivergence under the scoring lens" : ""}

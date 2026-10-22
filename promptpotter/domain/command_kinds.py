@@ -7,6 +7,7 @@ from typing import Annotated, Any, ClassVar, Self
 
 from pydantic import Field, model_validator
 
+from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.phases import (
     INNER_ARMS_REFUSAL,
     INNER_GATE_REFUSAL,
@@ -15,8 +16,10 @@ from promptpotter.domain.phases import (
     INNER_SKIP_REFUSAL,
     GateDecision,
 )
+from promptpotter.domain.pipeline_schema import ParamIntent
 from promptpotter.domain.results import VerifyStrategy
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel, WireInt
 from promptpotter.shared.identity import (
@@ -166,8 +169,8 @@ PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {}
 class CommandPayload(StrictModel):
     """Base of every payload on the generic ``POST /commands/{kind}`` route. ``StrictModel`` forbids
     extras, so THE MODEL IS the accepted-key set — there is no list to fall out of step with it.
-    A payload's address base is its target ledger: ``CyclePayload`` the cycle's, ``CampaignPayload``
-    and a bare one the workspace's, a ``DraftPayload`` its draft's."""
+    A payload's address base is its target ledger: ``CyclePayload`` the cycle's, ``LinePayload`` its
+    line holder's, ``CampaignPayload`` and a bare one the workspace's, a ``DraftPayload`` its draft's."""
 
     kind: ClassVar[CommandKind]
     # What the terminal prints after the ack, where the ack alone leaves the next step unsaid.
@@ -190,7 +193,11 @@ class ReasonedPayload(CommandPayload):
 
 
 class CampaignPayload(CommandPayload):
-    campaign_id: str = Field(min_length=1, max_length=128)
+    campaign_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="The full id: a prefix is the terminal's to resolve, before it builds a payload.",
+    )
 
 
 class CyclePayload(CampaignPayload):
@@ -366,6 +373,20 @@ class StartRunPayload(CyclePayload, kind=CommandKind.START_RUN):
     mode: RunMode = RunMode()
 
 
+class ForkSeed(StrictModel):
+    """A fork's `CycleSeed` as sent: the applier freezes `node_narrowing` on the forked cycle's
+    own rows and stamps the `origin_source` the wire omits."""
+
+    origin_prompts: dict[str, NodePrompt] = Field(default_factory=dict)
+    pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
+    config_overrides: ConfigOverrides = Field(default_factory=ConfigOverrides)
+    node_narrowing: dict[str, list[ParamIntent]] = Field(
+        default_factory=dict,
+        description="Per node, the rows as drawn; overrides the campaign's narrowing for this "
+        "cycle only, and a node it does not name inherits.",
+    )
+
+
 class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCLE):
     """The cut, and the shape of the fork's first run (``mode``) — one act, so one command.
     A parent a producer still holds is paused by the applier once the fork's run is admitted."""
@@ -375,8 +396,7 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
     mode: RunMode = RunMode()
     round: int = Field(default=0, ge=0)
     candidate_id: str = Field(default="", max_length=128)
-    # Validated into a typed `CycleSeed` at the applier, which stamps the provenance the wire omits.
-    seed: dict[str, Any]
+    seed: ForkSeed = ForkSeed()
     keep_rounds: bool = Field(
         default=False,
         description=(
@@ -407,13 +427,12 @@ class VerifyCandidatePayload(CyclePayload, kind=CommandKind.VERIFY_CANDIDATE):
     seed: WireInt | None = None
 
 
-class GradeBenchPayload(CyclePayload, kind=CommandKind.GRADE_BENCH):
-    """The cycle holding its campaign's line: the pass grades the campaign's result, so any other
-    cycle is refused."""
+class LinePayload(CampaignPayload):
+    """Addressed to a campaign, applied to and recorded on the cycle holding its line."""
 
-    inner_refusal: ClassVar[str | None] = (
-        "The bench grades a campaign's line, and an inner run is a cell of its outer campaign's."
-    )
+
+class GradeBenchPayload(LinePayload, kind=CommandKind.GRADE_BENCH):
+    """Grade the campaign's origin and its selection on the held-out bench rows."""
 
 
 class ArchiveCampaignPayload(ReasonedPayload, CampaignPayload, kind=CommandKind.ARCHIVE_CAMPAIGN):

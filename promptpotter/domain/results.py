@@ -806,13 +806,17 @@ def individual_cells[C: tuple[Any, ...]](
 
 
 DisplayMetric = Literal["accuracy", "composite", "ability"]
+# A displayed level's unit: a measurand's, or θ — a fit over cells, never read off one.
+LevelUnit = Literal["rate", "score", "theta"]
+if not set(MeasurandUnit) < set(get_args(LevelUnit)):
+    raise RuntimeError("LevelUnit must hold every MeasurandUnit (domain/results.py)")
 
 
 class DisplayMetricInfo(NamedTuple):
     label: str
     glyph: str
     title: str
-    unit: MeasurandUnit
+    unit: LevelUnit
 
 
 #: IN PICK ORDER — the tiebreak where the elected column is not among those shown.
@@ -821,7 +825,7 @@ DISPLAY_METRIC_INFO: dict[DisplayMetric, DisplayMetricInfo] = {
         "accuracy",
         "%",
         "Raw accuracy — correctness rate over the candidate's measured subset (subset-relative).",
-        MeasurandUnit.RATE,
+        "rate",
     ),
     "ability": DisplayMetricInfo(
         "ability θ",
@@ -829,14 +833,14 @@ DISPLAY_METRIC_INFO: dict[DisplayMetric, DisplayMetricInfo] = {
         "Difficulty-adjusted ability θ — what a selector declaring ability (potter's) elects on. "
         "A logit (not a %): comparable within a round; cross-round comparison waits on the stable "
         "δ bank.",
-        MeasurandUnit.THETA,
+        "theta",
     ),
     "composite": DisplayMetricInfo(
         "composite",
         "∑",
         "Composite fitness under the active scoring formula (equals accuracy when no formula is "
         "set).",
-        MeasurandUnit.SCORE,
+        "score",
     ),
 }
 if set(DISPLAY_METRIC_INFO) != set(get_args(DisplayMetric)):

@@ -145,7 +145,7 @@ class Selection:
         names = [n for n in out.splitlines() if n]
         return cls(
             True,
-            tuple(n for n in names if n.endswith(".py")),
+            tuple(n for n in names if n.endswith((".py", ".ipynb"))),
             # eslint and tsc both want to run from webapp/, so the prefix goes.
             tuple(
                 n[len("webapp/") :]
@@ -670,13 +670,14 @@ def _doc_claims(_: Selection) -> Outcome:
 
 
 # `--staged` lints staged paths verbatim, so a directory missing here is linted by the hook only.
-_RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/")
+_BBEH_DIR = "docs/research/bbeh-comparison"
+_RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/", "notebooks/", _BBEH_DIR)
 
 
 def _ruff(*argv: str) -> Callable[[Selection], Outcome]:
     def check(sel: Selection) -> Outcome:
         paths = sel.py_files if sel.staged else _RUFF_TARGETS
-        return run(_py("ruff", *argv, *paths), REPO)
+        return run(_py("ruff", *argv, "--force-exclude", *paths), REPO)
 
     return check
 
@@ -923,7 +924,6 @@ def _owning_tests(changed: Sequence[str]) -> tuple[str, ...] | None:
     return None if nodes is None else tuple(nodes)
 
 
-_BBEH_DIR = "docs/research/bbeh-comparison"
 # The plug point's one out-of-package optimizer, typechecked so a contract change breaks it here.
 _EXAMPLE_PLUGIN_DIR = "examples/optimizer-plugin"
 _PLATFORMS = ("linux", "win32")

@@ -90,6 +90,7 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
    - **One half-landed edit breaks the import for every other pass.** Land a shared type whole before stopping; name a sibling's red and leave it; a blocked check means wait for the central run, never retry in a loop.
    - **Start a read-only overseer with every working pass.** Independent passes converge inside their seam and diverge where seams join, and only a reader of all of them sees it.
    - **Memory pressure is a defect in the repo's own processes** — measure what they commit and fix that. It is never a fact about the machine to route around.
+   - **A refactor arc runs autonomously on a few settings.** It opens with a cold read of the tip and a hunt for rules whose premise is gone; each writer takes one item group in its own worktree, since a second group outruns its context; each stage is reviewed read-only before it merges; web checks run once, in the integration tree; the dev loop's own speed comes first whenever it is what binds. The operator closes an arc, and what it did not reach seeds the next in [`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) § NEXT ARC.
 
 **And be honest about the context effect rather than reaching for it.** Turn latency does rise with the window — a median 1.4s at 50k against 4.4s at 700k — but that is seconds, and it is the whole of it: shell latency measured flat across a session, so nothing is degrading. It does not justify a five-minute delegation to save twenty thousand tokens.
 </wall-clock>

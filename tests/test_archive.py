@@ -81,6 +81,7 @@ from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import (
     ArmSlot,
     OverlapReading,
+    PointContext,
     RoundResult,
 )
 from promptpotter.domain.run_records import (
@@ -205,8 +206,8 @@ def _walk_panel(
         backend_id="b",
         scorer=compile_scorer(per_sample, per_cell, verifier_graded=False),
     )
-    sp = prompted(instruction="Answer.").to_job_search_point(
-        schema=schema, framing=TaskDecomposition(), demo=[]
+    sp = PointContext(schema=schema, framing=TaskDecomposition(), demo=[]).job(
+        prompted(instruction="Answer.")
     )
 
     async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:

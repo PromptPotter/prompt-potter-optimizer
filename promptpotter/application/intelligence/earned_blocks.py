@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.store.archive_queries import (
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 _REUSABLE_FIELDS: frozenset[str] = frozenset(
     {"persona", "task_intent", "thinking_style", "answer_format"}
 )
+assert set(PROMPT_FIELDS) >= _REUSABLE_FIELDS
 
 # An open answer space is the ABSENCE of a shape: keyed by its dataset, it transfers nowhere else.
 OPEN_ANSWER_SPACE = "OPEN"

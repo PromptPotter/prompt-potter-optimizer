@@ -279,15 +279,19 @@ async def health_check() -> HealthResponse:
     )
 
 
-app.include_router(_health, prefix="/api/v1")
-app.include_router(backends_router, prefix="/api/v1")
-app.include_router(campaigns_router, prefix="/api/v1")
-app.include_router(active_router, prefix="/api/v1")
-app.include_router(datasets_router, prefix="/api/v1")
-app.include_router(origins_router, prefix="/api/v1")
-app.include_router(commands_router, prefix="/api/v1")
-app.include_router(auth_router, prefix="/api/v1")
-app.include_router(site_records_router, prefix="/api/v1")
+API_ROUTERS: tuple[APIRouter, ...] = (
+    _health,
+    backends_router,
+    campaigns_router,
+    active_router,
+    datasets_router,
+    origins_router,
+    commands_router,
+    auth_router,
+    site_records_router,
+)
+for _router in API_ROUTERS:
+    app.include_router(_router, prefix="/api/v1")
 
 # A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
 if WEBAPP_DIR.exists():

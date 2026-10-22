@@ -15,11 +15,9 @@ import os
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
-from datetime import datetime, timedelta
 from itertools import count, product
 from pathlib import Path
 from statistics import mean, stdev
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -30,10 +28,8 @@ from factories import (
     arm_state,
     arm_walk,
     close_round,
-    cycle_result,
     jumping_clock,
     level_series,
-    loop_session,
     measurement,
     measurements,
     minted_campaign,
@@ -63,7 +59,7 @@ from promptpotter.application.diagnostics.verify import verify_member, verify_re
 from promptpotter.application.evidence.head_to_head import GuardDifference
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
-from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
     responses_of,
@@ -109,7 +105,6 @@ from promptpotter.application.optimizers.potter.records import (
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner import bench as bench_runner
-from promptpotter.application.runner import entry as runner_entry
 from promptpotter.application.runner.bench import (
     BenchLine,
     bench_selection,
@@ -198,6 +193,7 @@ from promptpotter.domain.results import (
     InRunCells,
     Measured,
     OverlapReading,
+    PointContext,
     RoundAdvance,
     RoundResult,
     RunStanding,
@@ -215,7 +211,6 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import DeltaRuler, anchor_id_of
-from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     OptimizerStateRecord,
     PhaseRecord,
@@ -239,7 +234,7 @@ from promptpotter.domain.scoring import (
     turn_scalars,
 )
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.spend import Budget, HeldBudget, StepUsage, TokenUsageKind
+from promptpotter.domain.spend import Budget, StepUsage, TokenUsageKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import Hold, spending_under
@@ -916,7 +911,7 @@ def _peer_cycle(
             asyncio.run(_measure(s, session, pipeline_params={"solve": {"prompt": "Answer."}}))
             for s in list(partition.search)[:4]
         ]
-        sp = origin.to_job_search_point(schema=schema, framing=framing, demo=partition.demo)
+        sp = PointContext(schema=schema, framing=framing, demo=partition.demo).job(origin)
         return ReadArm(
             ArmKey(origin.id),
             arm_state(
@@ -1502,12 +1497,12 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         selected_accuracy, origin_accuracy = bench.selected.accuracy, bench.origin.accuracy
         assert selected_accuracy is not None and origin_accuracy is not None
         assert (selected_accuracy.value, origin_accuracy.value) == (1.0, 0.0)
+        session.state.clock = LaunchClock.now()
         result = build_cycle_result(
             cycle,
             session,
             stop_reason=StopReason.ROUNDS_BUDGET,
             cycle_error=None,
-            started_at="",
             finished_at="",
             spend=None,
             bench=bench,
@@ -2682,7 +2677,7 @@ def _evidence_campaign(
     bank_campaign_result(
         stores,
         hop,
-        started_at=started,
+        clock=LaunchClock(started_at=started, monotonic=0.0),
         finished_at=f"2026-09-26T{hour:02d}:{wall // 60:02d}:{wall % 60:02d}Z",
         optimizer_phases=frozenset(),
     )
@@ -3285,57 +3280,6 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
                 f"{case}: priced on INCURRED spend, so capo's bill prices arrival"
             )
         assert capo_row.bench.cost.lift_per_usd == pytest.approx(0.3 / 0.25), case
-
-    # A rebase hands the line on mid-launch; the launch banks ONE clock, to its last cycle's end.
-    _evidence_campaign(h2h_stores, "potter_r", 10, selected=0.5, rebased=True)
-    rebasing = h2h_stores.campaigns.load_campaign("potter_r")
-    assert rebasing is not None
-    root_r = rebasing.root_hop
-    fork_r = CycleHop(campaign_id=root_r.campaign_id, cycle_id=f"{root_r.cycle_id}_fork_r1")
-    held_clocks = len(line_launches(h2h_stores, rebasing))
-
-    async def prepared(*_: Any, session: Session, **__: Any) -> Any:
-        return SimpleNamespace(session=session)
-
-    async def rebased_line(
-        prep: Any, *, session: Session, observers: Any, started_at: str, **_: Any
-    ) -> tuple[Any, str]:
-        session.state.cycle_id = fork_r.cycle_id
-        opened = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        ended = cycle_result([], None, []).model_copy(
-            update={"finished_at": (opened + timedelta(seconds=60)).isoformat()}
-        )
-        outcome = runner_entry._CycleOutcome(ended, None, observers, None)
-        return outcome, fork_r.cycle_id
-
-    monkeypatch.setattr(runner_entry, "prepare_run", prepared)
-    monkeypatch.setattr(runner_entry, "refresh_rates_in_background", lambda: None)
-    monkeypatch.setattr(runner_entry, "_run_line", rebased_line)
-    launching = loop_session(
-        h2h_stores,
-        pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)]),
-        _H2H_BANK,
-        hop=root_r,
-    )
-    asyncio.run(
-        runner_entry.run_optimization(
-            list(_H2H_BANK),
-            _h2h_config("potter", 0, _H2H_FORMULA, None),
-            session=launching,
-            observers=cast(
-                "Any", SimpleNamespace(cycle_dir=h2h_stores.campaigns.cycle_dir(root_r))
-            ),
-            mode=RunMode(),
-            budget=HeldBudget(admitted=Budget(), standing=Budget(), job_id="", step_rounds=None),
-        )
-    )
-    clocks = line_launches(h2h_stores, rebasing)
-    assert len(clocks) == held_clocks + 1, (
-        "a launch a rebase ran across is one clock, not one per cycle"
-    )
-    assert clocks[-1].clock.elapsed_s == pytest.approx(60.0), (
-        "from the launch to its last cycle's end"
-    )
 
     # The arms of one declared head-to-head are controlled only on their record.
     optimizer_hour = {

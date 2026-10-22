@@ -1457,9 +1457,14 @@ def configure_and_apply_pipeline(session: Session, campaign_config: CampaignConf
     excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
     logger.info("Active nodes: %s%s", ", ".join(active), excl_str)
 
+    as_run = schema_as_run(filtered, pipeline_params, active, session.store.base_dir)
+    # A bound cycle's seed is laid LAST, over the campaign's overrides, for that cycle alone.
+    seed = session.store.campaigns.read_cycle_seed(session.hop) if session.cycle_id else None
+    if seed is not None and seed.pipeline_overlay:
+        pipeline_params = apply_node_overlay(pipeline_params, seed.pipeline_overlay, as_run)
     return replace(
         session,
-        pipeline_schema=schema_as_run(filtered, pipeline_params, active, session.store.base_dir),
+        pipeline_schema=as_run,
         pipeline_params=pipeline_params,
         identity_keys=_identity_keys(provenance),
     )

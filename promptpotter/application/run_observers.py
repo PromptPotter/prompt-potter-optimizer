@@ -174,7 +174,7 @@ def build_run_observers(
     readout_sink: StatusFn | None = None,
     forked_from: RunObservers | None = None,
 ) -> RunObservers:
-    if session.state.cycle_id is None:
+    if session.cycle_id is None:
         raise RuntimeError(
             "build_run_observers: session must already be minted via "
             "jobs.mint.mint — it needs a cycle_id"
@@ -194,6 +194,7 @@ def build_run_observers(
     except BaseException:
         release_cycle(cycle_dir)
         raise
+    session.state.locked_cycle = cycle_dir
     if forked_from is not None:
         # The line moved onto this cycle; the one it left is no longer this process's.
         release_cycle(forked_from.cycle_dir)

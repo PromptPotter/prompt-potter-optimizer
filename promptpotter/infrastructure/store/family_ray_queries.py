@@ -12,15 +12,10 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from promptpotter.domain import activity
-from promptpotter.domain.activity import (
-    MAX_RAY_LIMIT,
-    ActivityFeed,
-    ActivityItem,
-    RayItem,
-    RayResponse,
-)
+from promptpotter.domain.activity import ActivityFeed, ActivityItem
 from promptpotter.domain.cycle_paths import CyclePath, encode_cycle_path
 from promptpotter.domain.projection_envelope import RECORD_KINDS, bearing_record
+from promptpotter.domain.ray import MAX_RAY_LIMIT, RayItem, RayResponse
 from promptpotter.domain.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,

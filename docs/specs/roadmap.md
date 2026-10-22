@@ -154,7 +154,7 @@ What collapses: greedy promotion becomes the acquisition at `c = 0`, and the rew
 
 #### Target wire shapes
 
-**Declared model-first**: each new field lands on its model before a writer sets it, and the field it replaces leaves in the same change, so the regenerated specs (`scripts/build_specs.py`) carry the migration as a visible diff. `dashboard.json`'s `current_round.candidates` and `racing` are generated types (`scripts/build_ts_types.py::SERVED_ROOTS` reaches both), not a hand-declared contract, so they land with the code that serves them.
+**Declared model-first**: each new field lands on its model before a writer sets it, and the field it replaces leaves in the same change, so the regenerated specs (`scripts/build_specs.py`) carry the migration as a visible diff. `dashboard.json`'s `current_round.candidates` and `racing` are generated types (the dashboard route's `response_model` reaches both), not a hand-declared contract, so they land with the code that serves them.
 
 #### Surface parity — what a peer's campaign still reads wrong
 

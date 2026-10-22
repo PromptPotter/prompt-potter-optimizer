@@ -8,7 +8,6 @@ from typing import Any
 from pydantic import ValidationError
 
 from promptpotter.application.bench.task_context import (
-    DECOMPOSED_PROMPT_FIELDS,
     CheckinOutput,
     draft_call_context,
     run_checkin,
@@ -26,6 +25,7 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
@@ -221,13 +221,21 @@ def _apply_findings(
         provenance[proposal.field] = (
             Provenance.CONFIRMED if proposal.confidence == "high" else Provenance.PROPOSED
         )
-    prompt_fields = {
-        name: text for name in DECOMPOSED_PROMPT_FIELDS if (text := getattr(output, name)).strip()
+    written = {
+        node.name: fields
+        for node in draft.prompt_nodes()
+        if (
+            fields := {
+                name: text
+                for name in node.prompt_fields
+                if name in PROMPT_FIELDS and (text := getattr(output, name)).strip()
+            }
+        )
     }
-    if prompt_fields:
+    if written:
         values["origin_prompts"] = {
-            step: {**draft.origin_prompts.get(step, {}), **prompt_fields}
-            for step in draft.active_steps()
+            **draft.origin_prompts,
+            **{step: {**draft.origin_prompts.get(step, {}), **f} for step, f in written.items()},
         }
         provenance["origin_prompts"] = Provenance.CONFIRMED
     decomposed = output.task_context.model_dump()

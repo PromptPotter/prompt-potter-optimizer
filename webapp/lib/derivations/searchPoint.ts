@@ -1,6 +1,6 @@
 import { liveCandidate, liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
-import type { ArmName, ArmNode, ArmReading, NodePrompt } from "@/lib/api/types";
-import type { ArmRow, RoundView, SampleRow, SelectedCandidate } from "@/lib/types";
+import type { ArmName, ArmNode, ArmReading, CellRow, NodePrompt } from "@/lib/api/types";
+import type { ArmRow, RoundView, SelectedCandidate } from "@/lib/types";
 import { armSearchpoint, type ArmSearchpoint } from "./candidateSearchPoint";
 import { rowAt } from "./round-candidates";
 import { roundReading, type RoundReading } from "./round-reading";
@@ -35,15 +35,15 @@ export interface ObserveConfig {
   label: string;
 }
 
-// Keys are the served names, so a paste greps against `round_NNNN.json`; samples are ALL of them, never the render cap.
+// Keys are the served names, so a paste greps against `round_NNNN.json`; cells are ALL of them, never the render cap.
 export function searchpointCopyChoices({
   cfg,
   reading,
-  samples = [],
+  cells = [],
 }: {
   cfg: ObserveConfig | null;
   reading?: ArmReading | null;
-  samples?: readonly SampleRow[];
+  cells?: readonly CellRow[];
 }): { key: string; label: string; data: unknown }[] {
   const label = reading?.arm.label;
   const spec = cfg
@@ -59,11 +59,11 @@ export function searchpointCopyChoices({
   const choices: { key: string; label: string; data: unknown }[] = [];
   if (spec) choices.push({ key: "spec", label: "Searchpoint spec", data: spec });
   if (scored) choices.push({ key: "scored", label: "Spec + scores", data: scored });
-  if (scored && samples.length > 0) {
+  if (scored && cells.length > 0) {
     choices.push({
       key: "full",
-      label: `Spec + scores + ${samples.length} samples`,
-      data: { ...scored, samples },
+      label: `Spec + scores + ${cells.length} cells`,
+      data: { ...scored, cells },
     });
   }
   return choices;

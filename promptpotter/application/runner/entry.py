@@ -12,7 +12,7 @@ from promptpotter.application.initialization.loop_start import (
     init_optimization_loop,
     scope_memory,
 )
-from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.optimizer_manifest import binding_optimizer, select_optimizer
 from promptpotter.application.run_observers import (
     RunObservers,
@@ -22,7 +22,6 @@ from promptpotter.application.run_observers import (
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import bench_selection
 from promptpotter.application.runner.campaign_result import (
-    bank_campaign_result,
     bench_origin,
     declare_line_bench,
 )
@@ -60,7 +59,6 @@ from promptpotter.infrastructure.llm.telemetry import at_round, bind_priced
 from promptpotter.infrastructure.producer_lock import release_cycle
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PayloadInvalidError
 
 logger = logging.getLogger(__name__)
@@ -68,10 +66,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _CycleOutcome:
-    """``observers`` may have been REBUILT mid-run by fork-on-divergence; the driver keeps this one."""
+    """``session`` and ``observers`` are the ones the cycle ENDED on: run init may have forked it."""
 
+    session: Session
     cycle_result: CycleResult
+    # The rebase the line continues onto; ``None`` where the line ends on this cycle.
     fork: RebaseRequest | None
+    forked_from: CycleHop | None
     observers: RunObservers
     # Re-raised at the launch's exit, past its clock: it must reach the canceller.
     cancelled: asyncio.CancelledError | None
@@ -84,43 +85,35 @@ async def _run_single_cycle(
     session: Session,
     observers: RunObservers,
     mode: RunMode,
-    started_at: str,
     step_rounds: int | None,
+    rebases: int,
 ) -> _CycleOutcome:
     origin = prep.origin
     campaign_config = prep.campaign_config
     cb = observers.callbacks
-    pre_loop_cycle_id = session.state.cycle_id
-
-    def forked_from() -> str | None:
-        return pre_loop_cycle_id if pre_loop_cycle_id != session.state.cycle_id else None
 
     cycle: Cycle | None = None
+    forked_from: CycleHop | None = None
     cancel_exc: asyncio.CancelledError | None = None
     book: SpendBook | None = None
     fork: RebaseRequest | None = None
     open_round: int | None = None
     pause_cause = PauseCause.INTERRUPT
     try:
-        cycle = await init_optimization_loop(
+        cycle, forked_from = await init_optimization_loop(
             origin,
             dataset,
             campaign_config,
             cb=cb,
             no_divergence_check=mode.no_divergence_check,
             fork_on_divergence=mode.fork_on_divergence,
-            cycle_id=session.state.cycle_id or None,
+            cycle_id=session.cycle_id or None,
             resume_from_round_override=mode.from_round,
             session=session,
         )
-
-        if (parent_cycle_id := forked_from()) is not None:
-            observers = _onto_fork(
-                session,
-                CycleHop(campaign_id=session.campaign_id, cycle_id=parent_cycle_id),
-                observers,
-                campaign_config=campaign_config,
-            )
+        session = cycle.session
+        if forked_from is not None:
+            observers = _onto_fork(session, forked_from, observers, campaign_config=campaign_config)
             cb = observers.callbacks
 
         book = session.state.control.book
@@ -191,6 +184,15 @@ async def _run_single_cycle(
             if isinstance(exc, asyncio.CancelledError):
                 cancel_exc = exc
 
+    if fork is not None and rebases >= MAX_AUTO_REBASES:
+        logger.warning("Auto-rebase cap %d reached; ignoring further fork_proposals.", rebases)
+    rebasing = (
+        fork is not None
+        and cancel_exc is None
+        and stop_reason == StopReason.REBASED
+        and bool(session.cycle_id)
+        and rebases < MAX_AUTO_REBASES
+    )
     cycle_result = close_cycle(
         cycle,
         session,
@@ -198,13 +200,18 @@ async def _run_single_cycle(
         stop_reason=stop_reason,
         cycle_error=cycle_error,
         open_round=open_round,
-        started_at=started_at,
         config=campaign_config,
         diag=mode.diag,
         pause_cause=PauseCause.CANCELLED if cancel_exc is not None else pause_cause,
+        rebasing=rebasing,
     )
     return _CycleOutcome(
-        cycle_result=cycle_result, fork=fork, observers=observers, cancelled=cancel_exc
+        session=session,
+        cycle_result=cycle_result,
+        fork=fork if rebasing else None,
+        forked_from=forked_from,
+        observers=observers,
+        cancelled=cancel_exc,
     )
 
 
@@ -232,7 +239,7 @@ def _mint_and_rebase_fork(
     observers: RunObservers,
     rebase_req: RebaseRequest,
     rebase_count: int,
-) -> tuple[PreparedRun, RunObservers]:
+) -> tuple[PreparedRun, Session, RunObservers]:
     """``config_overrides`` re-snapshot BEFORE the mint, so seed and in-process config agree."""
     parent = session.hop
     seed: CycleSeed | None = None
@@ -252,7 +259,9 @@ def _mint_and_rebase_fork(
             seed=seed,
         ),
     )
-    session.state.cycle_id = new_cycle_id
+    session = session.bound(
+        CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), purpose=session.purpose
+    )
     session.state.resumed_from_round = rebase_req.fork_from_round
     observers = _onto_fork(
         session,
@@ -270,7 +279,7 @@ def _mint_and_rebase_fork(
         rebase_req.trigger.value,
         rebase_req.reason,
     )
-    return prep, observers
+    return prep, session, observers
 
 
 async def _run_line(
@@ -280,42 +289,27 @@ async def _run_line(
     session: Session,
     observers: RunObservers,
     mode: RunMode,
-    started_at: str,
     step_rounds: int | None,
-) -> tuple[_CycleOutcome, str]:
-    """The last cycle's outcome, and the cycle that cycle's run opened on before run init forked it."""
+) -> _CycleOutcome:
     rebase_count = 0
     while True:
-        launched_on = session.state.cycle_id
         outcome = await _run_single_cycle(
             prep,
             dataset=dataset,
             session=session,
             observers=observers,
             mode=mode,
-            started_at=started_at,
             step_rounds=step_rounds,
+            rebases=rebase_count,
         )
-        rebase_req = outcome.fork
-        if (
-            outcome.cancelled is not None
-            or outcome.cycle_result.stop_reason != StopReason.REBASED
-            or rebase_req is None
-            or rebase_count >= MAX_AUTO_REBASES
-            or session.state.cycle_id is None
-        ):
-            if rebase_req is not None and rebase_count >= MAX_AUTO_REBASES:
-                logger.warning(
-                    "Auto-rebase cap %d reached; ignoring further fork_proposals.",
-                    MAX_AUTO_REBASES,
-                )
-            return outcome, launched_on
+        if outcome.fork is None:
+            return outcome
         rebase_count += 1
-        prep, observers = _mint_and_rebase_fork(
+        prep, session, observers = _mint_and_rebase_fork(
             prep,
-            session=session,
+            session=outcome.session,
             observers=outcome.observers,
-            rebase_req=rebase_req,
+            rebase_req=outcome.fork,
             rebase_count=rebase_count,
         )
 
@@ -329,9 +323,12 @@ async def run_optimization(
     langfuse_session_id: str | None = None,
     mode: RunMode,
     budget: HeldBudget,
-) -> CycleResult:
-    """*observers* MUST be pre-built (ledger bound before origin); *dataset* is the whole bank."""
-    started_at, opened_dir = utcnow_iso(), observers.cycle_dir
+) -> tuple[Session, CycleResult]:
+    """*observers* MUST be pre-built (ledger bound before origin); *dataset* is the whole bank.
+
+    Answers the session the run ENDED on: a fork run init or a rebase took is a cycle of its own.
+    """
+    session.state.clock = LaunchClock.now()
     try:
         selected = select_optimizer(campaign_config.optimization)
         if mode.diag and selected.plan.controller is None:
@@ -366,8 +363,8 @@ async def run_optimization(
                 )
             except RUN_STOPS as stop:
                 stop_reason, cycle_error = end_run_on(stop, session, where="in run prep")
-                launched_on = session.state.cycle_id
                 outcome = _CycleOutcome(
+                    session=session,
                     cycle_result=close_cycle(
                         None,
                         session,
@@ -375,12 +372,13 @@ async def run_optimization(
                         stop_reason=stop_reason,
                         cycle_error=cycle_error,
                         open_round=None,
-                        started_at=started_at,
                         config=campaign_config,
                         diag=mode.diag,
                         pause_cause=PauseCause.INTERRUPT,
+                        rebasing=False,
                     ),
                     fork=None,
+                    forked_from=None,
                     observers=observers,
                     cancelled=None,
                 )
@@ -398,37 +396,24 @@ async def run_optimization(
                 observers.drain_all()
                 raise
             else:
-                session = prep.session
-                outcome, launched_on = await _run_line(
+                outcome = await _run_line(
                     prep,
                     dataset=dataset,
                     session=session,
                     observers=observers,
                     mode=mode,
-                    started_at=started_at,
                     step_rounds=budget.step_rounds,
                 )
-            if session.state.cycle_id:
-                # Once per launch, on the cycle holding the line as it ends: a rebased parent banks none.
-                bank_campaign_result(
-                    session.store,
-                    session.hop,
-                    started_at=started_at,
-                    finished_at=outcome.cycle_result.finished_at,
-                    optimizer_phases=selected.phases,
-                )
+            ended = outcome.session
             # A cancellation is one of the interrupts that leaves an empty fork dir.
-            if (
-                launched_on
-                and launched_on != session.state.cycle_id
-                and outcome.cycle_result.n_rounds_after_origin == 0
-            ):
-                cleanup_stub_fork_if_empty(campaign_store=session.store.campaigns, hop=session.hop)
+            if outcome.forked_from is not None and outcome.cycle_result.n_rounds_after_origin == 0:
+                cleanup_stub_fork_if_empty(campaign_store=ended.store.campaigns, hop=ended.hop)
             if outcome.cancelled is not None:
                 # The caught instance, not a fresh class — it carries the reason its raise site named.
                 raise outcome.cancelled
-            return outcome.cycle_result
+            return ended, outcome.cycle_result
     finally:
-        release_cycle(opened_dir)
-        if session.state.cycle_id:
-            release_cycle(session.store.campaigns.cycle_dir(session.hop))
+        # Whatever path exits, a fork included: the lock left the opened cycle when the line moved.
+        locked = session.state.locked_cycle
+        assert locked is not None, "a run opens on observers that hold its cycle"
+        release_cycle(locked)

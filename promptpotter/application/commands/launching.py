@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from pydantic import TypeAdapter, ValidationError
-
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     mint_diag_sibling,
     mint_operator_fork,
@@ -40,7 +38,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
-from promptpotter.domain.pipeline_schema import ParamIntent, narrowing_of
+from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import CycleSeed, OriginSource
 from promptpotter.domain.spend import Budget
@@ -61,6 +59,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.command_kinds import (
         ForkCyclePayload,
+        ForkSeed,
         StartRunPayload,
         StepCyclePayload,
     )
@@ -70,36 +69,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_NODE_INTENTS: TypeAdapter[dict[str, list[ParamIntent]]] = TypeAdapter(dict[str, list[ParamIntent]])
-
-
 def parse_cycle_seed(
-    raw: object, campaign: CampaignConfig, stores: Stores, of: Campaign, hop: CycleHop
+    sent: ForkSeed, campaign: CampaignConfig, stores: Stores, of: Campaign, hop: CycleHop
 ) -> CycleSeed:
-    if not isinstance(raw, dict):
-        raise PayloadInvalidError("payload.seed (object) is required.")
-    if "node_narrowing" in raw:
-        if "optimizer_narrowing" in raw:
-            raise PayloadInvalidError(
-                "payload.seed carries both node_narrowing and optimizer_narrowing; send one."
-            )
+    narrowing: dict[str, NodeSearchNarrowing] = {}
+    if sent.node_narrowing:
         # The rows served at *hop*, not the root's: a row's menu is its cycle's own declaration.
         rows = resolve_pipeline_for_campaign(
             stores, of, at=SubjectSpec("course", hop.campaign_id, hop.cycle_id)
         ).node_config_schema
         try:
-            intents = _NODE_INTENTS.validate_python(raw["node_narrowing"])
-            declared = {
-                node: narrowing_of(rows.get(node, []), asked) for node, asked in intents.items()
+            narrowing = {
+                node: narrowing_of(rows.get(node, []), asked)
+                for node, asked in sent.node_narrowing.items()
             }
         except ValueError as exc:
             raise PayloadInvalidError(f"payload.seed.node_narrowing invalid: {exc}") from exc
-        raw = {k: v for k, v in raw.items() if k != "node_narrowing"}
-        raw["optimizer_narrowing"] = declared
-    try:
-        seed = CycleSeed.model_validate({**raw, "origin_source": OriginSource.FORK_SEED})
-    except ValidationError as exc:
-        raise PayloadInvalidError(f"payload.seed invalid: {exc}") from exc
+    seed = CycleSeed(
+        origin_prompts=sent.origin_prompts,
+        pipeline_overlay=sent.pipeline_overlay,
+        optimizer_narrowing=narrowing,
+        config_overrides=sent.config_overrides,
+        origin_source=OriginSource.FORK_SEED,
+    )
     # Refuses a node knob the manifest rejects before a fork is minted.
     select_optimizer(apply_cycle_seed(campaign, seed).optimization)
     return seed

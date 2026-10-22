@@ -48,6 +48,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_overlay import apply_node_overlay
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.results import PointContext
 from promptpotter.domain.run_records import CycleSeed, DefaultsDrift, OriginSource
 from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -118,13 +119,8 @@ class CyclePlan:
     @functools.cached_property
     def origin_hash(self) -> str:
         """The origin's content — merged params, framing, the search rows: what two declarations on one origin share."""
-        return origin_content_hash(
-            self.origin,
-            self.schema,
-            list(self.partition.search),
-            framing=self.framing,
-            demo=self.partition.demo,
-        )
+        points = PointContext(schema=self.schema, framing=self.framing, demo=self.partition.demo)
+        return origin_content_hash(self.origin, points, list(self.partition.search))
 
     @property
     def cycle_id(self) -> str:

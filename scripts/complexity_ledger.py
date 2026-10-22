@@ -38,7 +38,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 446,
+    "modules": 447,
     # Every `__init__.py` among them.
     "init_files": 56,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -80,23 +80,23 @@ BASELINE = {
     "test_reach": 357,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
-    "served_fields": 1645,
+    "served_fields": 1639,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 19,
     # The arms each of those files leaves out: a mirror rotting raises it.
     "p_record_drift": 560,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 193,
+    "p_served": 182,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
-    "p_command": 10,
+    "p_command": 11,
     # The rows each of those files leaves out.
-    "p_command_drift": 187,
+    "p_command_drift": 209,
     # What an optimizer member is handed: `NodeContext`'s public members, inherited ones included,
     # and the public members of each object one of its properties exposes; each `CycleRead` alike.
     "p_member": 309,
     # Places a test reaches a private name of the package: an import, an attribute, a patch target.
-    "test_private_reach": 8,
+    "test_private_reach": 6,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"

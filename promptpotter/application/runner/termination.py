@@ -76,7 +76,7 @@ def end_run_on(
         logger.warning(
             "Optimization cancelled %s (%s); finalizing as paused (resumable).",
             where,
-            session.state.cycle_id or "no cycle",
+            session.cycle_id or "no cycle",
         )
     elif isinstance(exc, KeyboardInterrupt):
         logger.warning("Optimization paused %s (%s).", where, str(exc) or "user-initiated")

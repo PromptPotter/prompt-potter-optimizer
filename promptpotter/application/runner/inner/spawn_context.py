@@ -67,7 +67,7 @@ def _outer_cells(session: Session) -> InnerCells | None:
 
 
 def publish_inner_spawn_context(session: Session) -> None:
-    cycle_id = session.state.cycle_id
+    cycle_id = session.cycle_id
     if not cycle_id or session.dataset is None or not session.campaign_id:
         _INNER_SPAWN.set(None)
         return
@@ -133,7 +133,7 @@ def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_
 def retarget_inner_spawn(session: Session) -> None:
     """Moves only the asker; the sandbox owner never follows a fork."""
     ctx = inner_spawn_context()
-    cycle_id = session.state.cycle_id
+    cycle_id = session.cycle_id
     if ctx is None or not cycle_id:
         return
     asking_dir = session.store.campaigns.cycle_dir(session.hop)

@@ -128,7 +128,6 @@ class CycleListEntry(StrictModel):
         description="Immediate parent for siblings (forks/diag); null for roots. Sidebar uses this to nest siblings.",
     )
     dataset_name: str = ""
-    backend_id: str = ""
     # The raw separator is NOT served beside it: the browser parses the id itself (`lib/ids.ts`).
     mint_kind: MintKind
     is_root: bool
@@ -157,30 +156,14 @@ class CycleListEntry(StrictModel):
         description="Why the cycle reads `paused` — what caused it, who asked and what the "
         "operator does next (`RunState.pause`); null in every other phase.",
     )
-    standing: RunStanding | None = Field(
-        default=None,
-        description="Where the run stands as its newest standing round left it: its selection, "
-        "that selection against the origin on the origin panel, and what the cycle has cost. "
-        "Null until round 0 closes. Never the headline; `CampaignSummary.bench` is.",
-    )
     rounds_closed: int = Field(
         default=0,
         description="Rounds this cycle has closed AFTER the origin — the unit a rounds cap counts.",
     )
-    created_at: str = ""
     updated_at: str = ""
     human_intervened: bool = Field(
         default=False,
         description="True once an operator manually intervened (e.g. skip-searchpoint); the cycle is babysat and no longer purely reproducible. Drives the 'babysat' badge; orthogonal to run_phase.",
-    )
-    spawned_by: SpawnedBy | None = Field(
-        default=None,
-        description=(
-            "Which outer work-item asked for this cycle, when it is an L4 inner "
-            "measurement; null for an ordinary campaign, which is the only reason it is "
-            "null. Lets the sidebar name an inner run by the candidate that produced it "
-            "instead of by launch order."
-        ),
     )
 
 

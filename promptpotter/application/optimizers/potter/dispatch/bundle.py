@@ -129,7 +129,7 @@ class _Injection:
 
 @dataclass(frozen=True)
 class CycleSlice:
-    # No accuracy here: cycle tracking's `current`/`best` are subset-relative and lag the round rendered.
+    # No accuracy: the EVOLUTION column (`RoundDiagnostics.evolution_rows`) is a prompt's one series.
     round_num: int
     # Closed rounds since the last advance, which no fire resets — never the ladder's pacing count.
     l1_stall_depth: int
@@ -181,7 +181,7 @@ class RoundDigest:
 
 @dataclass(frozen=True)
 class InjectionBundle:
-    opt_sp: OptSearchPoint
+    parent: OptSearchPoint
     l2: L2Memory
     l3: L3Memory
     framing: TaskDecomposition

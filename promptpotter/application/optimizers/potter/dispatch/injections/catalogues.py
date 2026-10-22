@@ -146,7 +146,7 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
         return []
     by_key = {s.key: s for s in b.demo_split}
     held = {
-        node.name: [by_key[k] for k in b.opt_sp.prompt(node.name).shots] for node in b.prompt_nodes
+        node.name: [by_key[k] for k in b.parent.prompt(node.name).shots] for node in b.prompt_nodes
     }
     current = list({s.id: s for rows in held.values() for s in rows}.values())
     others = [s for s in b.demo_pool if s not in current]

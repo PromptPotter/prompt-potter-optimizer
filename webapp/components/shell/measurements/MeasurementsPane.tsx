@@ -1,21 +1,11 @@
 "use client";
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import type {
-  CellCandidate,
-  CellRow,
-  CellStatus,
-  DatasetItem,
-  HardSampleOrder,
-  HardSamplesScope,
-} from "@/lib/api";
+import type { CellCandidate, CellRow, CellStatus, DatasetItem } from "@/lib/api";
 import type { CellAddress } from "@/lib/address";
-import type { CyclePath } from "@/lib/ids";
 import { fmtPct0 } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { fitnessStyle } from "@/lib/derivations";
-import { useHardSamples } from "@/lib/hard-samples";
-import { useCells } from "@/lib/hooks/useCells";
-import { useCycleStream } from "@/lib/poll";
+import { useHardSamples, usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useWorkspace } from "@/lib/workspace";
 import {
   DataTable,
@@ -30,12 +20,7 @@ import { CellPanel } from "@/components/shell/cell/CellPanel";
 
 type GroupBy = "sample" | "candidate" | "none";
 
-interface MeasurementsPreset {
-  path?: CyclePath;
-  datasetName?: string;
-  candidateId?: string;
-  round?: number;
-  scope?: HardSamplesScope;
+interface MeasurementsPreset extends CellsPreset {
   groupBy?: GroupBy;
 }
 
@@ -104,8 +89,7 @@ export function MeasurementsPane({
   heading?: ReactNode;
 }) {
   const shared = useHardSamples();
-  const { viewedPath, openCell, openCellOwner, setOpenCell, releaseCell } = useWorkspace();
-  const { isLive } = useCycleStream();
+  const { openCell, openCellOwner, setOpenCell, releaseCell } = useWorkspace();
   const paneId = useId();
   const [groupBy, setGroupBy] = useState<GroupBy>(preset.groupBy ?? "none");
   const [status, setStatus] = useState<StatusPick>("all");
@@ -113,32 +97,8 @@ export function MeasurementsPane({
   const owns = openCellOwner === paneId || (openCellOwner === null && claimsAddress);
   useEffect(() => () => releaseCell(paneId), [releaseCell, paneId]);
 
-  const scope = preset.scope ?? shared.scope;
-  const datasetName = preset.datasetName ?? shared.datasetName;
-  // Unfiltered on the viewed unit IS the shared roster — never a second fetch of it.
-  const ownRead =
-    preset.path !== undefined ||
-    preset.datasetName !== undefined ||
-    preset.candidateId !== undefined ||
-    preset.round !== undefined ||
-    status !== "all" ||
-    scope !== shared.scope;
-  const own = useCells(
-    ownRead ? (preset.path ?? viewedPath) : null,
-    datasetName,
-    scope,
-    shared.rankedByPick,
-    // The dashboard's liveness is the VIEWED unit's; a preset on another one does not poll.
-    preset.path === undefined && isLive,
-    {
-      candidateId: preset.candidateId,
-      round: preset.round,
-      status: status === "all" ? undefined : status,
-    },
-  );
-  const data = ownRead ? own : shared;
-  const error = data.error;
-  const stale = "stale" in data ? data.stale : data.isStale;
+  const data = usePresetCells(preset, status === "all" ? undefined : status);
+  const { datasetName, error, stale } = data;
 
   const candidateOf = useMemo(() => {
     const m = new Map<string, CellCandidate>();
@@ -247,7 +207,7 @@ export function MeasurementsPane({
     .join(" · ");
 
   // The key the rows were ranked by, off the server's echo — never the pick, which moves first.
-  const rankedBy: HardSampleOrder | null = ownRead ? own.order : shared.rankedBy;
+  const { rankedBy } = data;
 
   return (
     <section className={cx("ms-pane", stale && "is-stale")} aria-label="Measurements">

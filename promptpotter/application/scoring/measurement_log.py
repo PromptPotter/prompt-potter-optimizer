@@ -574,6 +574,7 @@ def measurement_log(
         on_ruler = page.view.difficulty(sample.key)
         return DatasetItem(
             position=sid,
+            sample_key=sample.key,
             query=sample.query,
             ground_truth=sample.ground_truth,
             # The position in the UNFILTERED ranking.

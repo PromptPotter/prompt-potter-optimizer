@@ -8,7 +8,10 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.run_observers import RunObservers, declare_run_stop
 from promptpotter.application.runner.bench import bench_series, own_level
-from promptpotter.application.runner.campaign_result import declare_line_bench
+from promptpotter.application.runner.campaign_result import (
+    bank_campaign_result,
+    declare_line_bench,
+)
 from promptpotter.application.runner.output import (
     publish_export,
     write_log_md,
@@ -42,7 +45,6 @@ def build_cycle_result(
     *,
     stop_reason: StopReason,
     cycle_error: ErrorRecord | None,
-    started_at: str,
     finished_at: str,
     spend: SpendRollup | None,
     bench: BenchScore,
@@ -78,9 +80,9 @@ def build_cycle_result(
         result_prompt_fields=picked_sp.prompt_fields if picked_sp else {},
         result_pipeline_params=picked_sp.pipeline_params if picked_sp else None,
         stop_reason=stop_reason,
-        started_at=started_at,
+        started_at=session.state.launch_clock().started_at,
         finished_at=finished_at,
-        cycle_id=session.state.cycle_id,
+        cycle_id=session.cycle_id,
         resumed_from_round=session.state.resumed_from_round,
         spend=spend,
         error=cycle_error,
@@ -105,7 +107,7 @@ def _export_artifact(
         winner,
         tool_version=APP_VERSION,
         campaign_id=session.campaign_id,
-        cycle_id=session.state.cycle_id,
+        cycle_id=session.cycle_id,
         dataset_name=session.measured_dataset,
         dataset_hash=session.bank.dataset_hash,
         treatment=campaign.treatment if campaign else None,
@@ -129,11 +131,12 @@ def close_cycle(
     stop_reason: StopReason,
     cycle_error: ErrorRecord | None,
     open_round: int | None,
-    started_at: str,
     config: CampaignConfig,
     diag: bool,
     pause_cause: PauseCause,
+    rebasing: bool,
 ) -> CycleResult:
+    """*rebasing*: the line continues onto a fork, whose close banks the launch's clock."""
     finished_at = utcnow_iso()
     selected = bound_optimizer()
     # Before the result is built: a decision made after the last round has no next `close_round`.
@@ -148,7 +151,6 @@ def close_cycle(
         session,
         stop_reason=stop_reason,
         cycle_error=cycle_error,
-        started_at=started_at,
         finished_at=finished_at,
         # In-memory, never the debounced ``dashboard.json``.
         spend=observers.dashboard.state.spend,
@@ -165,6 +167,7 @@ def close_cycle(
         diag=diag,
         open_round=open_round,
         pause_cause=pause_cause,
+        rebasing=rebasing,
     )
     return cycle_result
 
@@ -180,6 +183,7 @@ def _finalize_run(
     diag: bool,
     open_round: int | None,
     pause_cause: PauseCause,
+    rebasing: bool,
 ) -> None:
     stop_reason = cycle_result.stop_reason
     info = STOP_REASON_INFO[stop_reason]
@@ -195,13 +199,22 @@ def _finalize_run(
         # No cycle, no campaign: nothing it could have metered.
         campaign_metered=(
             session.store.campaigns.metered_spend(session.campaign_id, meter)
-            if session.state.cycle_id
+            if session.cycle_id
             else NOTHING_METERED
         ),
         usd_cap=budget.usd,
         token_cap=budget.tokens,
         share=session.state.control.book.allotment,
     )
+    if session.cycle_id and not rebasing:
+        # Before either declaration: a reader seeing the run stopped finds its clock banked.
+        bank_campaign_result(
+            session.store,
+            session.hop,
+            clock=session.state.launch_clock(),
+            finished_at=cycle_result.finished_at,
+            optimizer_phases=selected.phases,
+        )
     if is_paused:
         # Declared where every paused exit converges, rather than trusting each raise site.
         declare_run_stop(
@@ -213,7 +226,7 @@ def _finalize_run(
             spend=spend,
         )
     # A pause leaves the cycle ACTIVE: the PAUSED just declared must stay the last declaration read.
-    if session.state.cycle_id and not is_paused:
+    if session.cycle_id and not is_paused:
         session.store.campaigns.bank_final(
             session.hop,
             interrupted_round=interrupted_round,
@@ -252,7 +265,7 @@ def _finalize_run(
     # After what it banked, before the digests that name the stop, and before the drain.
     if not is_paused:
         declare_run_stop(session, stop_reason, interrupted_by=pause_cause, spend=spend)
-    if session.state.cycle_id and not is_paused:
+    if session.cycle_id and not is_paused:
         # A diagnostic cycle answers a question about the optimizer; it has no winner to hand on.
         if not diag:
             publish_export(session)

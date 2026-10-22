@@ -21,6 +21,7 @@ from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.dataset_start import DatasetStartBlock
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.results import PointContext
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetTier,
@@ -71,13 +72,10 @@ def prospective_origin_id(stores: Stores, dataset: ResolvedDataset) -> str | Non
         if not bank.samples:
             return None
         partition = partition_bank(bank.samples, cfg.dataset_split, seed=cfg.run_seed)
-        return origin_content_hash(
-            opt_sp,
-            schema,
-            list(partition.search),
-            framing=campaign_framing(stores, cfg, dataset),
-            demo=partition.demo,
+        points = PointContext(
+            schema=schema, framing=campaign_framing(stores, cfg, dataset), demo=partition.demo
         )
+        return origin_content_hash(opt_sp, points, list(partition.search))
     except (
         OSError,
         ValueError,

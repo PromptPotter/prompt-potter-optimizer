@@ -68,7 +68,7 @@ collects everything else.
   does a reader now get wrong?* "Nothing, the type stops them" is rung 1, and
   rung 1 means delete.
 - **Three carve-outs are product surfaces**, not documentation, because a
-  generator reads them: the docstring of every type `SERVED_ROOTS` reaches
+  generator reads them: the docstring of every type a route's `response_model` reaches
   (→ generated TS JSDoc — regenerate via `scripts/build_ts_types.py`; only a
   CLASS docstring's line 1 ships, so it must be a complete sentence, while a
   `@computed_field` property ships WHOLE), FastAPI route docstrings, and the

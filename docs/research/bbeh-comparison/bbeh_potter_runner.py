@@ -103,14 +103,15 @@ async def run_bbeh_campaign(
             n_variants=n_variants,
             sp_budget_round=sp_budget_round,
         )
-        session = configure_and_apply_pipeline(session, campaign_config)
-        pipeline_params = session.pipeline_params
+        # Read only: the mint configures the session it is handed, as every launch does.
+        configured = configure_and_apply_pipeline(session, campaign_config)
+        pipeline_params = configured.pipeline_params
         # The model this run actually reaches, resolved from `bbeh/dataset.yaml::pipeline` — never
         # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
         # than default: a results file naming the wrong model is worse than no results file.
         models = {
             (pipeline_params.get(node.name) or {}).get("model")
-            for node in session.pipeline_schema.prompt_nodes()
+            for node in configured.pipeline_schema.prompt_nodes()
         }
         if len(models) != 1 or None in models:
             raise RuntimeError(

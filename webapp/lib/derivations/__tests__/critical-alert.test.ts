@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { criticalAlert } from "../critical-alert";
-import type { DegradationHealth, ProducerReading } from "@/lib/api/types";
+import type { ProducerReading, RoundHealth } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { dash as dashboard, health, producerReading, summaryRound } from "@/lib/test-fixtures";
 
@@ -166,7 +166,7 @@ describe("criticalAlert", () => {
 
   const roundWithGrade = (
     round: number,
-    grade: DegradationHealth["grade"],
+    grade: RoundHealth["grade"],
     suggested: string | null,
     alert: string | null = null,
   ) =>

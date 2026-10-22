@@ -148,7 +148,7 @@ and paired lift, and names which one is the headline** (`domain/bench.py::BENCH_
 accuracy): a surface selects the named column and never picks one of its own. An optimizer's own
 selection decides what it KEEPS; it never grades what it kept. **What
 the bench grades is the pick the optimizer DECLARED** — its selector's last selection, which the
-envelope carries as `Election.selected` and the `opt_sp` the round ended on — never one the bench
+envelope carries as `Election.selected` and `RoundResult.head`, the arm the round ended on — never one the bench
 makes by comparing rounds read on different rows. A line that closed no round declared none, so
 its headline carries no selection rather than the origin at a lift of 0.0; which stops end a line
 holding one is `domain/phases.py::STOP_REASON_INFO`'s `grades_selection`.

@@ -330,7 +330,7 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
     trajectory_results = tuple(frontier.frontier_rows)
 
     bundle = InjectionBundle(
-        opt_sp=lineage.parent,
+        parent=lineage.parent,
         l2=ctx.slice(L2Memory),
         l3=ctx.slice(L3Memory),
         framing=target.framing,

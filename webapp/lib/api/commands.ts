@@ -6,8 +6,7 @@ import type {
   CommandPayloads,
   CommandResponses,
   ConfigOverrides as WireConfigOverrides,
-  CycleSeed,
-  ParamIntent,
+  ForkSeed as WireForkSeed,
 } from "./types.generated";
 import type { VerifyReading } from "./types";
 
@@ -47,9 +46,8 @@ export function cycleAddress(path: CyclePath): {
 export type ConfigOverrides = Partial<WireConfigOverrides>;
 // The reconcile dialog's subset: the policy knobs break search comparability, so it sets none.
 export type RunLimitOverrides = Partial<Pick<WireConfigOverrides, "budget" | "nodes">>;
-// `node_narrowing` overrides the campaign's mint-time narrowing for this cycle only; absent inherits it.
-export type ForkSeed = Partial<
-  Omit<CycleSeed, "origin_source" | "config_overrides" | "optimizer_narrowing">
-> & { config_overrides?: ConfigOverrides; node_narrowing?: Record<string, ParamIntent[]> };
+export type ForkSeed = Partial<Omit<WireForkSeed, "config_overrides">> & {
+  config_overrides?: ConfigOverrides;
+};
 // Per press, never draft state: a reopened check-in must not show a budget nobody re-entered.
 export type StartCheckinOptions = Omit<CommandPayloads["start-checkin"], "draft_id">;

@@ -1,6 +1,6 @@
 "use client";
-import { useMemo } from "react";
 import { useRound } from "@/lib/hooks/useRound";
+import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import type { SelectedCandidate } from "@/lib/types";
@@ -23,20 +23,22 @@ interface Props {
 }
 
 export function ScoringInspector({ selected, onClose }: Props) {
+  if (!selected) return null;
+  return <Inspector selected={selected} onClose={onClose} />;
+}
+
+function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose: () => void }) {
   const { dash } = useCycleStream();
   const cv = useConnector();
   const { viewedPath } = useWorkspace();
-  const round = useRound(viewedPath, selected?.round ?? null);
-  const row = selected ? round.row(selected.arm) : null;
-  const samples = useMemo(() => round.samples(row), [round, row]);
+  const round = useRound(viewedPath, selected.round);
+  const row = round.row(selected.arm);
+  const preset: CellsPreset = { candidateId: selected.arm, scope: "cycle" };
+  const { cells } = usePresetCells(preset);
 
-  const cfg = !selected
-    ? null
-    : round.unfiled
-      ? liveCandidateObserveConfig(dash, selected.arm)
-      : candidateObserveConfig(round.doc, selected.arm, selected.label);
-
-  if (!selected) return null;
+  const cfg = round.unfiled
+    ? liveCandidateObserveConfig(dash, selected.arm)
+    : candidateObserveConfig(round.doc, selected.arm, selected.label);
   const pass = dash?.bench_pass ?? null;
 
   return (
@@ -45,7 +47,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
         <span className="inspector-title">Scoring · {selected.label}</span>
         <ToolbarSpacer />
         <CopyButton
-          choices={searchpointCopyChoices({ cfg, reading: row?.reading, samples })}
+          choices={searchpointCopyChoices({ cfg, reading: row?.reading, cells })}
           title={`Copy ${selected.label}`}
         />
         <button
@@ -62,11 +64,7 @@ export function ScoringInspector({ selected, onClose }: Props) {
         reading={row?.reading ?? null}
         cfg={cfg}
         benchPass={pass && pass.arm === selected.arm ? pass : null}
-        measurements={
-          <MeasurementsPane
-            preset={{ candidateId: selected.arm, scope: "cycle", groupBy: "none" }}
-          />
-        }
+        measurements={<MeasurementsPane preset={{ ...preset, groupBy: "none" }} />}
         schema={cv.schema}
         pending={
           round.unfiled

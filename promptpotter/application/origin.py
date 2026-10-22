@@ -128,7 +128,7 @@ def try_inherit_fork_origin(
     logger.info(
         "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
         "acc=%s, %d per-sample rows — skipping origin re-score, straight to L1",
-        session.state.cycle_id,
+        session.cycle_id,
         from_candidate_id,
         parent,
         from_round,
@@ -204,9 +204,7 @@ async def establish_campaign_origin(
     # The SAME read identity uses; handed in, it could be a value the cycle id never saw.
     framing = campaign_framing(session.store, campaign_config, session.dataset)
     pipeline_schema = session.pipeline_schema
-    sp = resolved_origin.to_job_search_point(
-        schema=pipeline_schema, framing=framing, demo=session.state.scoring.require_partition().demo
-    )
+    sp = session.points(framing).job(resolved_origin)
     inherited = try_inherit_fork_origin(
         session, seed, resolved_origin=resolved_origin, sp=sp, framing=framing
     )

@@ -26,7 +26,6 @@ export function SubjectBox() {
   const { point, reading } = subject;
   const shown = useSearchpointRead(point);
   const origin = useOrigin();
-  const originRead = useSearchpointRead(origin);
 
   const cfg = shown.cfg;
   const evidence = useOriginEvidence(point);
@@ -86,7 +85,9 @@ export function SubjectBox() {
             ? { scored: evidence.shown.n_cells, expected: evidence.shown.expected_samples }
             : null
         }
-        before={originRead.samples} after={shown.samples} />
+        before={origin?.key ?? null}
+        after={point?.key ?? null}
+      />
     </div>
   );
 }

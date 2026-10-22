@@ -95,7 +95,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     # Field by field: as one blob a replacement sweeps in neighbours, SPLICED it absorbs the framing.
     # A HELD field still renders: the fields replaced must fit around it.
     schema = b.pipeline_schema
-    prompts = b.opt_sp.prompts
+    prompts = b.parent.prompts
     fields = [
         (Locus(node.name, f).name, text, f not in node.open_prompt_fields)
         for node in (schema.prompt_nodes() if schema is not None else ())

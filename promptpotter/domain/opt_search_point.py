@@ -41,15 +41,22 @@ def render_prompt(fields: Mapping[str, str], order: Sequence[str]) -> str:
     return "\n\n".join(v for f in order if (v := fields.get(f, "")))
 
 
+PROMPT_FIELDS: Annotated[tuple[str, ...], shapes_optimizer_prompt] = (
+    "persona",
+    "task_intent",
+    "problem_description",
+    "instruction",
+    "thinking_style",
+    "answer_format",
+)
+"""The six fields a check-in decomposes a task into, in the order a prompt node declares them."""
+
+
 class OptimizerPromptTemplate(StrictModel):
     """A prompt the optimizer RUNS ON (`dispatch/llm_call`), never one it produces."""
 
     RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
-        "persona",
-        "task_intent",
-        "instruction",
-        "thinking_style",
-        "answer_format",
+        *(f for f in PROMPT_FIELDS if f != "problem_description"),
         "problem_description",
     )
     """Prefix-cache order: a value that CHANGES between rounds goes in ``problem_description``, last."""
@@ -82,7 +89,7 @@ class OptimizerPromptTemplate(StrictModel):
 
 
 # A field the order omits renders nowhere — silently, in a prompt.
-assert sorted(OptimizerPromptTemplate.RENDER_ORDER) == sorted(OptimizerPromptTemplate.model_fields)
+assert tuple(OptimizerPromptTemplate.model_fields) == PROMPT_FIELDS
 
 
 class EvidenceGrounding(FrozenModel):

@@ -31,11 +31,11 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
-from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Compare, Optimize, Purpose
 from promptpotter.domain.command_kinds import (
+    GradeBenchPayload,
     OriginGateDecisionPayload,
     SubmitArmsPayload,
     SubmittedArm,
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.bench import BenchScore
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.phases import GateDecision
     from promptpotter.domain.run_mode import RunMode
@@ -59,7 +60,7 @@ if TYPE_CHECKING:
 # This module IS the embedded surface: a capability it does not name is one a host cannot find.
 __all__ = [
     "compact_measurement_archive",
-    "grade_line_bench",
+    "grade_bench",
     "open_session",
     "purge_cold_store",
     "reindex_measurement_archive",
@@ -128,6 +129,15 @@ async def submit_arms(
     )
 
 
+async def grade_bench(stores: Stores, campaign_id: str) -> BenchScore:
+    """Raises ``ConflictError`` where the served ``BenchStatus.refusal`` stands."""
+    sent = await CommandDispatcher(stores).dispatch(
+        CommandCall(GradeBenchPayload(campaign_id=campaign_id))
+    )
+    score: BenchScore = sent.result
+    return score
+
+
 async def run_campaign(
     session: Session,
     campaign_config: CampaignConfig | None = None,
@@ -139,8 +149,8 @@ async def run_campaign(
     mode: RunMode,
     purpose: Purpose = Optimize(),  # noqa: B008 — frozen
 ) -> tuple[Session, CycleResult]:
-    """Answers the session bound to the cycle it ran. Blocks under ``origin_gate: strict`` until
-    ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does."""
+    """Answers the session bound to the cycle the run ended on. Blocks under ``origin_gate: strict``
+    until ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does."""
     declaration = None
     if session.campaign_id:
         if campaign_config is not None or isinstance(purpose, Compare):
@@ -167,7 +177,7 @@ async def run_campaign(
         campaign_config,
         stores=session.store,
         dataset_name=session.measured_dataset,
-        hop=session.hop if session.state.cycle_id else None,
+        hop=session.hop if session.cycle_id else None,
         requested=budget,
         step_rounds=step_rounds,
     ) as (job_id, held):
@@ -181,7 +191,7 @@ async def run_campaign(
             )
             session = minted.session
             JobRegistry.attach().update_target(job_id, hop=session.hop)
-        return session, await run_optimization(
+        return await run_optimization(
             list(session.bank.samples),
             campaign_config,
             session=session,

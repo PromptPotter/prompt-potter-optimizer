@@ -1,22 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import Field
 
-from promptpotter.application.scoring.closed_rounds import (
-    campaign_scorer,
-    closed_round,
-    cycle_bank,
-)
+from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
 from promptpotter.application.served_dashboard import served_dashboard
-from promptpotter.domain.activity import RayResponse
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
-from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.ray import RayResponse
 from promptpotter.domain.results import (
     ArmReading,
     ArmState,
@@ -24,7 +19,6 @@ from promptpotter.domain.results import (
     ScoreboardRow,
 )
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.scoring import GradedCell, SampleStatus, ground_truth_text
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
@@ -93,28 +87,13 @@ def round_audit(cycle: ViewedCycle, round_num: int) -> RoundAudit | None:
     return audit
 
 
-class RoundCell(StrictModel):
-    """One measured row of a served round, with the mark it reads as."""
-
-    position: int = Field(description="The sample's slot in the bank the cycle drew.")
-    sample_key: str
-    status: SampleStatus
-    cached: bool
-    query: str
-    predicted: str
-    ground_truth_text: str = Field(description="The sample's label as shown.")
-    fitness: float | None
-
-
 class RoundView(StrictModel):
-    """One closed round as a surface reads it: its arms, their rows and its verdict. What the
-    engine banks beside them — folds, diagnostics, optimizer state — stays on the ledger."""
+    """One closed round as a surface reads it: its arms and its verdict. Its rows are the
+    measurement log's (`GET /datasets/{name}/cells`); what the engine banks beside them — folds,
+    diagnostics, optimizer state — stays on the ledger."""
 
     round: int
     arms: dict[ArmKey, ArmState]
-    cells: dict[ArmKey, list[RoundCell]] = Field(
-        description="Each arm's rows, a reference re-read on the round's cells included."
-    )
     election: Election | None
     scoreboard: list[ScoreboardRow]
     headline: ArmReading | None = Field(
@@ -129,20 +108,6 @@ class RoundView(StrictModel):
     )
 
 
-def _round_cell(cell: GradedCell, slot_of: Mapping[str, int]) -> RoundCell:
-    facts = cell.facts
-    return RoundCell(
-        position=slot_of[cell.key],
-        sample_key=cell.key,
-        status=sample_status(facts, cell.grade),
-        cached=facts.cached,
-        query=facts.query,
-        predicted=facts.predicted,
-        ground_truth_text=ground_truth_text(facts.ground_truth),
-        fitness=cell.grade.fitness,
-    )
-
-
 def served_round(
     stores: Stores, hop: CycleHop, round_num: int, *, moment: Moment | None
 ) -> RoundView | None:
@@ -154,14 +119,9 @@ def served_round(
     )
     if closed is None:
         return None
-    slot_of = cycle_bank(stores, hop).slot_of
     return RoundView(
         round=closed.round,
         arms=closed.arms,
-        cells={
-            key: [_round_cell(cell, slot_of) for cell in sheet]
-            for key, sheet in closed.cells.items()
-        },
         election=closed.election,
         scoreboard=closed.scoreboard,
         headline=closed.headline,
@@ -170,7 +130,7 @@ def served_round(
 
 
 async def cycle_event_frames(cycle: ViewedCycle) -> AsyncIterator[str]:
-    tail = CycleLedgerTail(cycle.dir, cycle.path)
+    tail = CycleLedgerTail(cycle.dir, cycle.hop.cycle_id)
     snapshot = await asyncio.to_thread(
         lambda: tail.snapshot_frame(
             served_dashboard(cycle.stores, cycle.hop).model_dump(mode="json")

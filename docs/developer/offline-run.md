@@ -19,7 +19,7 @@ PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline
 
 `--rounds` (each campaign's `budget.rounds`; the interrupted legs run one round, their contract being
 the pause and the resume rather than the search) and `--rows` (the synthetic bank) size it.
-`--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`grade_line_bench`), so
+`--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`application/embedded_run.py::grade_bench`), so
 its `decisions.json` holds the same rounds and headline as the default `at_end` run's.
 Run it from the tree under test with that tree's own venv — a worktree probe run through another
 tree's interpreter answers for that other tree.

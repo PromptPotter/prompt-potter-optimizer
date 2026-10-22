@@ -16,92 +16,21 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 
 sys.path.insert(0, str(REPO))
 
-from promptpotter.application.campaign_listing import CampaignListResponse
-from promptpotter.application.config_map import ConfigMapResponse
-from promptpotter.application.cycle_files import FileContentResponse, FilesResponse
-from promptpotter.application.cycle_listing import CyclesResponse
-from promptpotter.application.cycle_reads import RoundView
-from promptpotter.application.datasets.draft_build import DraftListResponse
-from promptpotter.application.evidence.read import Evidence
-from promptpotter.application.jobs.account_activity import ActivityResponse
-from promptpotter.application.jobs.machine_status import MachineStatusResponse
-from promptpotter.application.jobs.quota import QuotaStatus
-from promptpotter.application.maintenance.storage_report import (
-    CampaignStorageResponse,
-    DatasetStorageResponse,
-    WorkspaceStorageResponse,
-)
-from promptpotter.application.pipeline_resolve import (
-    CampaignPipelineResponse,
-    DatasetPipelineResponse,
-    ForkPreviewResponse,
-    OptimizerKnobsResponse,
-    OptimizerPipelineResponse,
-    OptimizerRoster,
-)
-from promptpotter.application.served_dashboard import ServedDashboard, WarmingDashboard
-from promptpotter.domain.activity import RayResponse
-from promptpotter.domain.cells import Cell, CellsResponse
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
-from promptpotter.domain.lineage_tree import CourseNode
-from promptpotter.domain.projection_envelope import ProjectionEnvelope
-from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.run_records import CycleSeed
-from promptpotter.main import ErrorEnvelope, HealthResponse
-from promptpotter.presentation.api.routers.active import ActiveSessionResponse
-from promptpotter.presentation.api.routers.auth import MeResponse, UserSettings
-from promptpotter.presentation.api.routers.backends import (
-    BackendHealthResponse,
-    BackendResponse,
-)
-from promptpotter.presentation.api.routers.campaigns.manifests import DraftReopenResponse
+from promptpotter.main import API_ROUTERS, app
 from promptpotter.presentation.api.routers.commands import commands_router
-from promptpotter.presentation.api.routers.datasets.index import DatasetIndexResponse
-from promptpotter.presentation.api.routers.origins import OriginListResponse
 
-# Every model, record and dataclass these reach is exported with them; the command bodies and
-# answers ride `_emit_command_contract`.
-SERVED_ROOTS: tuple[type, ...] = (
-    ActiveSessionResponse,
-    ActivityResponse,
-    BackendHealthResponse,
-    BackendResponse,
-    CampaignListResponse,
-    CampaignPipelineResponse,
-    CampaignStorageResponse,
-    Cell,
-    CellsResponse,
-    ConfigMapResponse,
-    CourseNode,
-    CycleSeed,
-    CyclesResponse,
-    DatasetIndexResponse,
-    DatasetPipelineResponse,
-    DatasetStorageResponse,
-    DraftListResponse,
-    DraftReopenResponse,
-    ErrorEnvelope,
-    Evidence,
-    FileContentResponse,
-    FilesResponse,
-    ForkPreviewResponse,
-    HealthResponse,
-    MachineStatusResponse,
-    MeResponse,
-    OptimizerKnobsResponse,
-    OptimizerPipelineResponse,
-    OptimizerRoster,
-    OriginListResponse,
-    ProjectionEnvelope,
-    QuotaStatus,
-    RayResponse,
-    RoundAudit,
-    RoundView,
-    ServedDashboard,
-    UserSettings,
-    WarmingDashboard,
-    WorkspaceStorageResponse,
-)
+
+def _served_roots() -> list[typing.Any]:
+    roots: list[typing.Any] = [app.router.responses["default"]["model"]]
+    for router in API_ROUTERS:
+        for route in router.routes:
+            # FastAPI sets `response_model` on the instance outside `APIRoute`'s declared attributes.
+            if isinstance(route, APIRoute) and (answer := vars(route)["response_model"]):
+                roots.append(answer)
+    return roots
+
+
 _OUT_PATH = REPO / "webapp" / "lib" / "api" / "types.generated.ts"
 
 # Each named type the roots reach, in the order first reached, held as its interface.
@@ -235,7 +164,6 @@ def _emit_lifecycle_filter() -> str:
 
 def _emit_command_contract() -> str:
     """Exports what it names, so it runs before the exported blocks are collected."""
-    # FastAPI sets `response_model` on the instance outside `APIRoute`'s declared attributes.
     answers = {
         route.path.removeprefix("/commands/"): vars(route)["response_model"]
         for route in commands_router.routes
@@ -493,9 +421,10 @@ def _emit_label_tables() -> str:
 
 
 def _emit_display_metrics() -> str:
-    from promptpotter.domain.results import DISPLAY_METRIC_INFO
+    from promptpotter.domain.results import DISPLAY_METRIC_INFO, LevelUnit
 
     members = " | ".join(repr(m) for m in DISPLAY_METRIC_INFO)
+    level_units = " | ".join(repr(u) for u in typing.get_args(LevelUnit))
     rows = "\n".join(
         f"  {{ id: {metric!r}, label: {info.label!r}, glyph: {info.glyph!r},"
         f" title: {info.title!r} }},"
@@ -505,7 +434,7 @@ def _emit_display_metrics() -> str:
         f"  {metric!r}: {info.label!r}," for metric, info in DISPLAY_METRIC_INFO.items()
     )
     units = "\n".join(
-        f"  {metric!r}: {info.unit.value!r}," for metric, info in DISPLAY_METRIC_INFO.items()
+        f"  {metric!r}: {info.unit!r}," for metric, info in DISPLAY_METRIC_INFO.items()
     )
     return (
         "// A column every arm carries (domain/results.py::DisplayMetric).\n"
@@ -518,7 +447,9 @@ def _emit_display_metrics() -> str:
         "export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {\n"
         f"{labels}\n"
         "};\n\n"
-        'export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, Measurand["unit"]> = {\n'
+        "// A displayed level's unit (domain/results.py::LevelUnit).\n"
+        f"export type LevelUnit = {level_units};\n\n"
+        "export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {\n"
         f"{units}\n"
         "};"
     )
@@ -710,8 +641,8 @@ _HEADER = """\
 def main() -> int:
     from promptpotter.domain.phases import DashboardState, ProducerState, RunPhase
 
-    for root in SERVED_ROOTS:
-        _export(root)
+    for root in _served_roots():
+        _emit_type(root)
     command_contract = _emit_command_contract()
     # Two types of one name would MERGE into one TypeScript interface, silently.
     if clashes := len(_EXPORTED) - len({owner.__name__ for owner in _EXPORTED}):

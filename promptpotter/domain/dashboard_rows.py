@@ -11,7 +11,7 @@ from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.results import (
     ArmReading,
-    DegradationHealth,
+    HealthGrade,
     LineRate,
     OptimizerFact,
     OverlapReading,
@@ -162,6 +162,13 @@ class RunLimits(StrictModel):
     optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
 
+class RoundHealth(FrozenModel):
+    """A round's degradation grade as a surface reads it; the whole verdict stays on its close."""
+
+    grade: HealthGrade
+    suggested_action: str | None
+
+
 class RoundSummary(FrozenModel):
     """Top-level `accuracy` is what the round MEASURED; its θ is `ServedRound.level`."""
 
@@ -191,7 +198,7 @@ class RoundSummary(FrozenModel):
     # Measurement order, off the longest candidate sequence: PoBB truncates losers.
     selection: list[int] = Field(default_factory=list)
     # ``None`` only when the round measured zero samples. Rendered, never recomputed.
-    health: DegradationHealth | None = None
+    health: RoundHealth | None = None
     health_alert: str | None = Field(
         default=None,
         description="The alert a `critical` `health` raises, worded "
@@ -207,7 +214,7 @@ class RoundSummary(FrozenModel):
     def of(cls, closed: RoundClosedRecord) -> RoundSummary:
         arms = closed.cells.arms
         longest = arms[max(arms, key=lambda k: (len(arms[k]), k))] if arms else []
-        election, fold = closed.election, closed.fold
+        election, fold, health = closed.election, closed.fold, closed.health
 
         def name(key: ArmKey) -> ArmName:
             return arm_name(key, closed.arms[key], closed.round)
@@ -233,8 +240,10 @@ class RoundSummary(FrozenModel):
                 if reading.role != MeasurementRole.PARENT
             ],
             selection=list(dict.fromkeys(closed.positions[key] for key, _, _ in longest)),
-            health=closed.health,
-            health_alert=critical_health_title(closed.round, closed.health),
+            health=None
+            if health is None
+            else RoundHealth(grade=health.grade, suggested_action=health.suggested_action),
+            health_alert=critical_health_title(closed.round, health),
             overlap=closed.overlap,
             panel_precision=closed.panel_precision,
             optimizer_facts=closed.optimizer_facts,

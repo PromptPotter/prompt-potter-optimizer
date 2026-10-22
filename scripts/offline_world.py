@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
 
@@ -142,14 +144,7 @@ LLM_ONLY_NODE: dict[str, Any] = {
     "prompt_info": {
         "family": "llm_only",
         "template_variables": [],
-        "fields": [
-            "persona",
-            "task_intent",
-            "problem_description",
-            "instruction",
-            "thinking_style",
-            "answer_format",
-        ],
+        "fields": list(PROMPT_FIELDS),
         "description": "offline",
     },
     "config": {
@@ -169,12 +164,7 @@ LLM_ONLY_NODE: dict[str, Any] = {
             "temperature",
             "max_tokens",
             "reasoning_effort",
-            "persona",
-            "task_intent",
-            "problem_description",
-            "instruction",
-            "thinking_style",
-            "answer_format",
+            *PROMPT_FIELDS,
         ],
         "param_allowed_values": {
             "provider": ["openai", "groq", "openrouter", "anthropic"],
