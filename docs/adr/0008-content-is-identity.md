@@ -67,13 +67,13 @@ The re-shapes land as ONE breaking arc with one workspace wipe.
    headline arm, its level and `improved` are read off the election and the rows, never stored
    beside them.
 7. **Cross-tenant measurement sharing is a policy, refused by default.** The content-addressed
-   caches root at an archive home (`layout.py::archive_home`): the tenant, unless the install names
+   caches root at an archive home (`store/layout.py::archive_home`): the tenant, unless the install names
    a shared one (`settings.SHARED_ARCHIVE`). What ADR-0002 says about it is its § Contract B. A
    store keyed by what one account holds or decided — dataset labels, the δ ruler — stays the
    tenant's. Decision 1 is what makes a shared home safe: a row names a hash, never a label.
 
 A model's default host is resolved into the node config before the key is taken
-(`domain/pipeline_overlay.py::pin_default_routes`, from `registry.py::_MODEL_PROFILES`), so every
+(`domain/pipeline_overlay.py::pin_default_routes`, from `llm/registry.py::_MODEL_PROFILES`), so every
 cell names its host. It re-keys every cell, which is why it rides this wipe. The pin is a trial: it
 stays only where the realized cache share is measured cheaper than running uncached.
 

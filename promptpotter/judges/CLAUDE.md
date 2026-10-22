@@ -20,13 +20,12 @@ formula reads that banked number by name. Re-grading stays free, which is what m
 
 No new concept reaches the scoring layer. `build_evaluators(specs)` returns ordinary
 `application/scoring/evaluators.py::Evaluator`s at `per_sample` scope — one per declared TERM —
-and four of their existing fields already do the work:
+and three of their existing fields already do the work:
 
 | field | what it buys |
 |---|---|
-| `scope="per_sample"` | materialized inside `measure_sample`, once, at measure time |
+| `scope="per_sample"` | materialized inside `measure_sample`, once, at measure time; `materialize_round_values` re-derives `per_round` evaluators only — the anti-re-bill property, already encoded |
 | `needs_labels=True` | auto-skipped on a verifier-graded bank — a judge never fabricates a 0.0 where there is no gold |
-| `from_rows=False` | `materialize_row_derivable` never recomputes it — the anti-re-bill property, already encoded |
 | `direction` | polarity |
 
 `materialize_sample_values` is **async, and `per_sample` only**. `_validate_evaluator` REFUSES an

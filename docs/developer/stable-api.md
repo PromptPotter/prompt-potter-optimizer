@@ -46,7 +46,7 @@ Adding one *to this repo* is one new file under `promptpotter/connectors/` defin
 
 ## 2. Scoring formula DSL
 
-Configured per dataset via `dataset.yaml::campaign.scoring`:
+Configured per dataset via `{dataset}/dataset.yaml::campaign.scoring`:
 
 ```jsonc
 {
@@ -148,7 +148,7 @@ rules; the constants themselves are internal.
 | **Install content** | `promptpotter/assets/` inside the package | The optimizer's own `pipeline.yaml` + `resolved_schemas.json` + `sets/{name}.yaml`, and the exported dashboard. Ships in the wheel; ours, not the operator's. |
 | **User data** | `$PROMPTPOTTER_HOME` → the checkout's `.promptpotter/` when running from a source tree → the OS app-data dir | Campaigns, sessions, measurements, jobs, identity. |
 | **Configuration** | `$PROMPTPOTTER_ENV_FILE` → the checkout's `.env` when running from a source tree → the user-data root's `.env` | Keys and postures (`PROMPTPOTTER_AUTH`). A process variable outranks the file. The gate names an absent file, so no verdict reads the desk's configuration. |
-| **Templates** | `promptpotter/assets/datasets/` (`paths.py::install_datasets_root`) | Template dataset **definitions**, read-only in checkout and wheel alike. Anything DERIVED from one lands in the user-data root, never beside the definition ([`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § Dataset content has two tiers). A tenant dataset of the same name shadows an installed one. |
+| **Templates** | `promptpotter/assets/datasets/` (`config/paths.py::install_datasets_root`) | Template dataset **definitions**, read-only in checkout and wheel alike. Anything DERIVED from one lands in the user-data root, never beside the definition ([`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § Dataset content has two tiers). A tenant dataset of the same name shadows an installed one. |
 
 **`PROMPTPOTTER_HOME` and `PROMPTPOTTER_ENV_FILE` are stable.** Set the first to relocate the
 whole user-data tree and the second to read another configuration file; each is read once at
@@ -230,7 +230,7 @@ the dashboard.
 
 `with_optimization(load_dataset_campaign_config(path), {…})`
 (`application/datasets/authored.py`) is the
-supported way to shape a dataset's `dataset.yaml::campaign` for one launch without editing the shared file:
+supported way to shape a dataset's `{dataset}/dataset.yaml::campaign` for one launch without editing the shared file:
 a sparse `optimization` mapping merged depth-first **before** validation, so an unknown knob raises
 here instead of being silently dropped — the same call a web mint, a check-in and the terminal make.
 

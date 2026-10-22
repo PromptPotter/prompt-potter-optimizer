@@ -131,10 +131,11 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   two routes (the export's trailing-slash layout is what FastAPI's `StaticFiles(html=True)`
   resolves, so keep it), and the ESLint config rebuilt from `typescript-eslint` and the React,
   hooks and a11y plugins while keeping the barrel-import rule in `webapp/eslint.config.mjs`. Then
-  everything keyed to Next's commands and output: the `next-build` check and its `tsc` /
-  `playwright` ordering in `scripts/gate.py`, the `.next/types` include in `tsconfig.json`,
-  `webapp/e2e/serve.mjs`, `scripts/build_release.py::_WEBAPP_SRC`, the build step in `publish.yml`,
-  the eslint cache step in `ci.yml`, the `/serve` skill and `webapp/CLAUDE.md`. Keep the output
+  everything keyed to Next's commands and output: the `next-build` check and `playwright`'s
+  ordering after it in `scripts/gate.py`, the `next typegen` in `npm run typecheck`, the `.next`
+  includes and the `.next/dev` exclude in `tsconfig.json`, `webapp/e2e/serve.mjs`,
+  `scripts/build_release.py::_WEBAPP_SRC`, the build step in `publish.yml`, the eslint cache step
+  in `ci.yml`, the `/serve` skill and `webapp/CLAUDE.md`. Keep the output
   directory named `out` and most of that list falls away. Unverified: whether the rebuilt ESLint
   set brings `braces` back through its own `micromatch` — settle that FIRST, since it decides
   whether the migration closes the audit or only shrinks the lock. **Rides with:** the next

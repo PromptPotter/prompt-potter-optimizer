@@ -47,6 +47,7 @@ from factories import (
     workspace,
 )
 from offline_world import Router
+from pydantic import ValidationError
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench import node_context
@@ -228,6 +229,7 @@ from promptpotter.domain.scoring import (
     PipelineData,
     Scorer,
     ScoringFormulaError,
+    UngradedCellError,
     WalkedCell,
     anchored_criterion_dials,
     turn_scalars,
@@ -2858,7 +2860,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert level_band(ungraded.sheet, ROW_GRADES["fitness"])[0] == pytest.approx(2 / 3)
     short = _read_pair(once, ungraded, four).coverage
     assert short is not None and short.scored == 3, "an unscored cell left the pair"
-    with pytest.raises(ValueError, match="ungraded cell"):
+    with pytest.raises(UngradedCellError):
         ROW_GRADES["fitness"].read(ungraded.sheet.cells[-1])
 
     # A pair that cannot be read says which way instead of reading zero.
@@ -2908,7 +2910,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         )
 
     assert said(ReadingState.PASS_STOPPED).headline is None
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         said(ReadingState.READ)
 
     # An arm is read on the cells its reference was read on.

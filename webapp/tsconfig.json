@@ -34,5 +34,7 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  // `next typegen` re-adds `.next/dev/types` to `include` and keeps `exclude`, and rewrites the
+  // gitignored `next-env.d.ts`, whose import would otherwise reach a `next dev` session's types.
+  "exclude": ["node_modules", ".next/dev"]
 }

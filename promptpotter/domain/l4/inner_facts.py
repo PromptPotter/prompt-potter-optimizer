@@ -1,11 +1,37 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Annotated
 
 from pydantic import Field
 
 from promptpotter.domain.phases import StopReason
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+
+class SeriesGap(StrEnum):
+    """Why a level series differences nothing where no `ThetaCaveat` says so."""
+
+    NEVER_STARTED = "never_started"
+    UNREAD_ROUND = "unread_round"
+    NO_L1_ROUND = "no_l1_round"
+
+
+SERIES_GAP_HEAD: Annotated[dict[SeriesGap, str], shapes_optimizer_prompt] = {
+    SeriesGap.NEVER_STARTED: "it never started, so it read no level series",
+    SeriesGap.UNREAD_ROUND: "a round holds no scored cell on its series' δ scale",
+    SeriesGap.NO_L1_ROUND: "it closed no L1 round, so its series holds no level past its origin's",
+}
+assert set(SERIES_GAP_HEAD) == set(SeriesGap), "every SeriesGap renders a head"
+
+
+@shapes_optimizer_prompt
+def series_reason_head(reason: ThetaCaveat | SeriesGap) -> str:
+    if isinstance(reason, ThetaCaveat):
+        return THETA_CAVEAT_INFO[reason].head
+    return SERIES_GAP_HEAD[reason]
 
 
 class InnerCellFacts(FrozenModel):
@@ -26,7 +52,7 @@ class InnerCellFacts(FrozenModel):
         "budget; bounded for plausibility only, logit abilities differing without bound; null "
         "where `series_reason` names why"
     )
-    series_reason: str | None = Field(
+    series_reason: ThetaCaveat | SeriesGap | None = Field(
         description="Why the level series differences nothing; null where it does"
     )
     mean_parent_level_se: float | None = Field(

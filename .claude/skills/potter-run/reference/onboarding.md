@@ -49,7 +49,7 @@ Seam: `application/datasets/` (`ingest.py`, `origin_resolve.py`, `origin_readine
 When the operator says their data is ready ("just set it up", names a file) **and it loads
 cleanly**, author the origin yourself instead of spending the check-in LLM call.
 
-1. **Test the load first.** Registered name → confirm its `dataset.yaml::source` names a recipe in
+1. **Test the load first.** Registered name → confirm its `dataset.yaml` `source:` names a recipe in
    `application/datasets/loaders.py::BANK_RECIPES`. Raw file → `POST /datasets/ingest`, or open a
    registered dataset as a draft via `POST /datasets/{name}/draft`. A clean parse + sample
    preview is green. **If the load fails, do NOT simulate** — fall back to the real flow.

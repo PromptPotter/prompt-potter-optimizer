@@ -6,13 +6,14 @@ import ast
 import json
 import os
 import sys
-from collections.abc import Iterable, Iterator
+import tomllib
+from collections.abc import Iterator
 from functools import cache
 from pathlib import Path
 from typing import Any
 
 from last_green import file_digest
-from processes import REPO, peak_mb
+from processes import REPO, git, peak_mb
 
 PACKAGE = "promptpotter"
 TESTS = "tests"
@@ -35,8 +36,17 @@ def _rel(path: str | Path) -> str | None:
 
 
 def _hashed() -> dict[str, str]:
-    files = [*(REPO / PACKAGE).rglob("*.py"), *(REPO / TESTS).glob("*.py")]
-    return {p.relative_to(REPO).as_posix(): file_digest(p).hex() for p in files}
+    """Every file git does not ignore: a moved manifest, bank or bare-imported script is a move too."""
+    code, listed = git("ls-files", "-co", "--exclude-standard", "-z")
+    if code:
+        raise RuntimeError(listed)
+    return {rel: file_digest(REPO / rel).hex() for rel in filter(None, listed.split("\0"))}
+
+
+def _is_code(rel: str) -> bool:
+    return rel.endswith(".py") and (
+        rel.startswith(f"{PACKAGE}/") or Path(rel).parent.as_posix() == TESTS
+    )
 
 
 def _module_name(rel: str) -> str:
@@ -46,7 +56,29 @@ def _module_name(rel: str) -> str:
 
 @cache
 def _modules() -> dict[str, str]:
-    return {_module_name(rel): rel for rel in _hashed() if rel.startswith(f"{PACKAGE}/")}
+    rels = (p.relative_to(REPO).as_posix() for p in (REPO / PACKAGE).rglob("*.py"))
+    return {_module_name(rel): rel for rel in rels}
+
+
+@cache
+def bare_imports() -> frozenset[str]:
+    """What the suite imports bare off pytest's `pythonpath`, outside the suite itself."""
+    config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    path = config["tool"]["pytest"]["ini_options"]["pythonpath"]
+    todo = sorted((REPO / TESTS).glob("*.py"))
+    seen: set[Path] = set()
+    while todo:
+        module = todo.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        rel = module.relative_to(REPO).as_posix()
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        for name in _import_names(tree, _module_name(rel), False, deferred=True):
+            todo.extend(p for d in path if (p := REPO / d / f"{name}.py").is_file())
+    return frozenset(
+        rel for p in seen if not (rel := p.relative_to(REPO).as_posix()).startswith(EVERY_TEST)
+    )
 
 
 def _is_type_checking(test: ast.expr) -> bool:
@@ -192,8 +224,8 @@ def _suite() -> dict[str, set[str]] | None:
     return out
 
 
-def tests_owning(paths: Iterable[str | Path] = ()) -> list[str] | None:
-    """``[]`` = no test is owed; ``None`` = every test must run."""
+def tests_owning() -> list[str] | None:
+    """What moved since the recorded tree. ``[]`` = no test is owed; ``None`` = every test must run."""
     try:
         record: dict[str, Any] = json.loads(RECORD.read_text("utf-8"))
     except (OSError, ValueError):
@@ -203,21 +235,18 @@ def tests_owning(paths: Iterable[str | Path] = ()) -> list[str] | None:
         return None
     then, now = record["files"], _hashed()
     moved = {rel for rel in then.keys() | now.keys() if then.get(rel) != now.get(rel)}
-    named = {_rel(p) for p in paths}
-    if None in named:
-        return None
     ran: dict[str, set[str]] = {node: set(files) for node, files in record["ran"].items()}
     # A test the record never ran is owed whatever moved.
     picked = set(suite.keys() - ran.keys())
-    for rel in moved | {r for r in named if r is not None}:
+    for rel in moved:
         if rel.startswith(f"{TESTS}/test_") and rel in now:
             picked.update(node for node in suite if node.startswith(f"{rel}::"))
-        elif rel.startswith(f"{PACKAGE}/") and rel in now and rel in then:
+        elif _is_code(rel) and rel.startswith(f"{PACKAGE}/") and rel in now and rel in then:
             reach = {rel, *_importers().get(rel, ())}
             picked.update(
                 node for node in suite if reach & ran.get(node, set()) or rel in suite[node]
             )
-        elif rel in now or rel in then or rel.endswith(".py"):
+        elif _is_code(rel) or rel in bare_imports():
             # Code the record does not follow: an import of a cached module opens nothing.
             return None
         elif rel in record["opened"] or Path(rel).parent.as_posix() in record["listed"]:
@@ -287,7 +316,7 @@ def _record(pytest_args: list[str]) -> int:
         {rel for p in paths if (rel := _rel(p)) is not None and "__pycache__" not in rel}
         for paths in (opened, listed)
     )
-    package = set(before)
+    package = {rel for rel in before if _is_code(rel)}
     reached = {
         node: sorted(rel for f in files if (rel := _rel(f)) in package)
         for node, files in sorted(ran.items())
@@ -327,8 +356,11 @@ def main(argv: list[str]) -> int:
     own, pytest_args = argv[:split], argv[split + 1 :]
     if own[:1] == ["--record"]:
         return _record(pytest_args)
-    run = own[:1] == ["--run"]
-    nodes = tests_owning(own[run:])
+    run = own == ["--run"]
+    if own and not run:
+        print("usage: tests_owning.py [--run | --record] [-- PYTEST_ARGS]")
+        return 2
+    nodes = tests_owning()
     if not run:
         print("\n".join([EVERY_TEST] if nodes is None else nodes))
         return 0

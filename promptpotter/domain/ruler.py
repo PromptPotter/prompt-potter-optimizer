@@ -4,12 +4,12 @@ from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
 from enum import StrEnum
 from statistics import NormalDist
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
 
 from pydantic import Field
 
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
@@ -107,7 +107,7 @@ class ThetaCaveatInfo(NamedTuple):
     body: str
 
 
-THETA_CAVEAT_INFO: dict[ThetaCaveat, ThetaCaveatInfo] = {
+THETA_CAVEAT_INFO: Annotated[dict[ThetaCaveat, ThetaCaveatInfo], shapes_optimizer_prompt] = {
     ThetaCaveat.DISJOINT_SCOPES: ThetaCaveatInfo(
         "θ mixes datasets that share no scale",
         "These cells measure more than one dataset, and a difficulty is only ever fitted within "

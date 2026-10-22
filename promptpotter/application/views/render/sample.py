@@ -9,6 +9,7 @@ from promptpotter.application.views.render.primitives import (
     YELLOW,
     _step_tag,
 )
+from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.results_health import is_deprecated, terminal_node
 from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.answer_text import (
@@ -169,7 +170,11 @@ def fmt_query_result(
         if inner.series_reason is None:
             return line
         return _append_annotation(
-            line, " " * len(indent) or "      ", DIM, "Δ", f"withheld: {inner.series_reason}"
+            line,
+            " " * len(indent) or "      ",
+            DIM,
+            "Δ",
+            f"withheld: {series_reason_head(inner.series_reason)}",
         )
 
     # A verifier-graded cell has no label: `predicted` is the `NO_RESULT` sentinel.

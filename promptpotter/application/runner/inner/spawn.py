@@ -40,6 +40,7 @@ from promptpotter.application.runner.inner.tasks import (
 from promptpotter.application.views.render.primitives import fmt_pct
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.l4.inner_facts import SeriesGap, series_reason_head
 from promptpotter.domain.l4.proxies import (
     INNER_RESULT_KEY,
     bench_level_series,
@@ -50,6 +51,7 @@ from promptpotter.domain.l4.proxies import (
     parent_level_series,
     parent_levels,
     series_reason,
+    unread_rounds,
 )
 from promptpotter.domain.phases import REFUSAL_STOPS, StopReason
 from promptpotter.domain.results import ArmFit, Cut, Measured, order_floor
@@ -147,7 +149,10 @@ def _inner_narrative(result: CycleResult, head: str) -> str:
     held = parent_levels(result)
     levels = [] if held is None else held[1]
     if held is None:
-        search = f" | search-split th: withheld — {series_reason(result)}"
+        reason = series_reason(result)
+        assert reason is not None
+        holes = f", round(s) {unread_rounds(result)}" if reason is SeriesGap.UNREAD_ROUND else ""
+        search = f" | search-split th: withheld — {series_reason_head(reason)}{holes}"
     else:
         origin = held[0]
         # The budget-held series, not `levels`: the law averages over the round BUDGET.

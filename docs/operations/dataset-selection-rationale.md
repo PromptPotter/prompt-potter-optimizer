@@ -31,7 +31,7 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 
 Operator-pinned model for the self-optimizing campaign focus: leading open-source at the 20B-active scale, chosen on price and `:nitro` throughput ([`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) carries both), and conservative at `low` so the optimizer climbs from the floor — `medium` / `high` stay L1-reachable mutations when sibling-yield supports them.
 
-Pinning is via the `nodes.llm_only.config` overlay in each dataset's `dataset.yaml::pipeline`, and the pin holds because these datasets do not list `model` in `optimizer.param_keys` — the engine searches `model` wherever a dataset opens it. `provider` cannot be opened at all (`PARAM_FORBIDDEN_KEYS`).
+Pinning is via the `nodes.llm_only.config` overlay in each dataset's `{dataset}/dataset.yaml::pipeline`, and the pin holds because these datasets do not list `model` in `optimizer.param_keys` — the engine searches `model` wherever a dataset opens it. `provider` cannot be opened at all (`PARAM_FORBIDDEN_KEYS`).
 
 ## The roster
 

@@ -85,7 +85,7 @@ owned by `/potter-self`.
 |---|---|
 | `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `promptpotter/assets/datasets/<name>/`, run from round 0 on the framing committed in `task.md`'s front matter — none committed, the mint decomposes its body and commits it first (one `checkin` call on the run's spend); `task_framing: off` in the campaign config runs unframed on purpose. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
 | `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). One that stops short keeps its check-in and names it: finish it in the browser or `discard-draft <draft_id>`. |
-| `new … --set optimizer=<name>` | Pick the optimizer, either form: any `GET /optimizers` roster name (potter, capo, gepa, levi), plus `--set nodes.<node>.<knob>=V` for its knobs (`GET /optimizers/{name}/knobs`). The CLI spelling of `dataset.yaml::campaign.optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`; the web check-in's optimizer picker writes the same two. A knob the manifest does not take is refused before anything mints. |
+| `new … --set optimizer=<name>` | Pick the optimizer, either form: any `GET /optimizers` roster name (potter, capo, gepa, levi), plus `--set nodes.<node>.<knob>=V` for its knobs (`GET /optimizers/{name}/knobs`). The CLI spelling of `{dataset}/dataset.yaml::campaign.optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`; the web check-in's optimizer picker writes the same two. A knob the manifest does not take is refused before anything mints. |
 | `new … --arm <h2h>:<key>` | Mint a CONTROLLED arm of a head-to-head, for an optimizer comparison rather than a best result: the first arm declares its instrument and budget, a later one adopts its split and budget and is refused on any other instrument, and each arm reads no other campaign's measurements, refuses steer/skip, and spends its declared search budget; `set-limits` moves one arm's cap alone, and the read then serves that arm's guard as `differs` on `budget`. `evidence` then reads the arms under the declared scorer. |
 | `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. The run's shape — `--from`, `--no-check`, `--fork-on-divergence`, `--diag` — is the `start-run` command's `mode` (`from_round` / `no_divergence_check` / `fork_on_divergence` / `diag`), so REST takes it too and an embedded host passes the same `RunMode` to `run_campaign`. |
 | `set-limits` | Raise (or lower) a cap, each flag `N\|none` — the same four `new` and `resume` take for a launch. `--max-usd` / `--max-tokens` move the CAMPAIGN cap, one book every live cycle shares; `--max-rounds` / `--max-wall-clock` move this cycle's own. A `resume --steer`/`--rewind` fork takes the cycle pair only. |
@@ -104,7 +104,7 @@ CUMULATIVE across resume and across the campaign's cycles, so the new ceiling mu
 the campaign already spent, not the work remaining. Only `budget.usd` and `budget.rounds` are
 named by default — `budget.tokens` and `budget.wall_clock_s` bind nothing until set.
 
-Flags are the verbs' own (`--help`); a dataset's defaults live in its `dataset.yaml::campaign` — never
+Flags are the verbs' own (`--help`); a dataset's defaults live in its `{dataset}/dataset.yaml::campaign` — never
 guessed. `new` overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
 first pauses (resumable, exit 130), second force-quits. Every query lands in
 `measurements/cells/{config_key}.jsonl` immediately, so a hard kill loses zero work and `resume`
@@ -216,10 +216,10 @@ wrong after reading both numbers, ask what the round measured, not which estimat
 ## Configs are the source of truth
 
 The skill carries no parallel default-ladder. `README.md` (source, split, sample shape) ·
-`dataset.yaml::campaign` (budget, and the node knobs n_variants, sp_budget_round, patiences) · `dataset.yaml::pipeline` (pipeline,
+`{dataset}/dataset.yaml::campaign` (budget, and the node knobs n_variants, sp_budget_round, patiences) · `{dataset}/dataset.yaml::pipeline` (pipeline,
 model, caps). BBEH's notebook run alone passes overrides beside the file:
 `docs/research/bbeh-comparison/bbeh_potter_runner.py::build_campaign_config` merges them over
-`dataset.yaml::campaign`, and an override wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
+`{dataset}/dataset.yaml::campaign`, and an override wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md)
 — CHECK a campaign's `pipeline_overlay` against it rather than assuming.
 

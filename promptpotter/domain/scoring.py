@@ -607,12 +607,15 @@ class GradeColumn(NamedTuple):
     read: Callable[[GradedCell], float]
 
 
+class UngradedCellError(ValueError):
+    """A column read off a cell that carries no grade: a zero in its place is a miss nobody measured."""
+
+
 @shapes_optimizer_prompt
 def _stamped(cell: GradedCell, grade: CellGrade) -> float:
-    """Raises on an ungraded cell: a zero in its place is a miss nobody measured."""
     value: float | None = getattr(cell.grade, grade)
     if not cell.scored or value is None:
-        raise ValueError(
+        raise UngradedCellError(
             f"sample {cell.key} carries no {grade}: an ungraded cell answers no column, "
             "so ask `scored` before reading one"
         )

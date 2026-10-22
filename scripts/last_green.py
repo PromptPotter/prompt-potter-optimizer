@@ -9,11 +9,12 @@ import os
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from stat import S_ISDIR, S_ISREG
 
 from processes import REPO, git
 
 # No prose is among them, so a docs edit reruns nothing that only RUNS the engine.
-ENGINE_RUNTIME = ("promptpotter/", "datasets/", "examples/", "pyproject.toml", "uv.lock")
+ENGINE_RUNTIME = ("promptpotter/", "examples/", "pyproject.toml", "uv.lock")
 OFFLINE_RUN = "offline-run"
 OFFLINE_RUN_READS = (
     *ENGINE_RUNTIME,
@@ -35,6 +36,13 @@ def file_digest(path: Path) -> bytes:
         stat = path.stat()
     except OSError:  # listed and since deleted: its absence is the content
         return b""
+    if S_ISDIR(stat.st_mode) and (path / ".git").exists():  # a gitlink: its content is its commit
+        code, head = git("-C", str(path), "rev-parse", "HEAD")
+        if code:
+            raise RuntimeError(f"{path}: a gitlink whose commit git cannot read: {head}")
+        return digest(head.encode())
+    if not S_ISREG(stat.st_mode):
+        raise RuntimeError(f"{path}: git lists it, and it is neither a file nor a gitlink")
     stamp = (stat.st_size, stat.st_mtime_ns)
     held = _DIGESTS.get(path)
     if held is None or held[0] != stamp:

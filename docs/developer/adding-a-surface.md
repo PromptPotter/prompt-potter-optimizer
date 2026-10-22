@@ -27,7 +27,7 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | A CLI verb | [§7](#7-a-cli-verb) | `gate.py --only handler-tables` over `commands/verbs.py::VERBS` |
 | A control-plane command kind | [§8](#8-a-control-plane-command-kind) | None to satisfy: cap, handler **and the CLI verb** are columns of the kind's one row, its payload model the class named for it |
 | A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only specs` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both |
-| A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence. Declare it on `domain/scoring.py::QueryMeasurement` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
+| A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence. Declare it on `domain/scoring.py::MeasuredCell` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
 
 ---
 
@@ -213,11 +213,11 @@ The hard half, and the one that has no default. Five questions, each with a cons
 - **What decides whether that row was good — a label, or a number something else produced?**
   That is the ANSWER SHAPE, declared in `extract_experiment` and nowhere else; § The answer shape
   on the same page has what each choice commits you to.
-- **What is the formula?** `dataset.yaml::campaign.scoring` — `per_sample` is *was this cell RIGHT*,
+- **What is the formula?** `{dataset}/dataset.yaml::campaign.scoring` — `per_sample` is *was this cell RIGHT*,
   `per_cell` the optional composite of what it was WORTH (latency, cost, reliability), and θ is
   fit on the second. Namespace: [`stable-api.md`](stable-api.md) § 2. **Start with `per_sample`
   alone.** A cost term needs a MEASURED anchor, and the first campaign is what measures it.
-- **What may the optimizer move?** `nodes.{node}.optimizer.param_keys` in `dataset.yaml::pipeline`. The
+- **What may the optimizer move?** `nodes.{node}.optimizer.param_keys` in `{dataset}/dataset.yaml::pipeline`. The
   prompt is a lever only if the node declares `prompt_info` — a `remote_http` backend serves that
   over `GET /pipeline`, an `in_process` one must declare it, or every variant would score
   identically as no-skill: run init refuses that shape

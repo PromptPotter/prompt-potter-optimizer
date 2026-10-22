@@ -6,7 +6,7 @@ Three reasons nodes-not-monoliths, mirroring prompt decomposition: measurable ax
 
 Built-in nodes cover fixed-config deterministic steps (lookup, fuzzy matching), LLM nodes, and multi-step agent nodes. PromptPotter ships a basic database-backed candidate-assignment pipe. In practice most pipelines reduce to one or more LLM nodes.
 
-This page is both the node model and the **strict wire shape** PromptPotter parses from `GET /pipeline` (or from a local `dataset.yaml::pipeline`). Every connector publishes this shape, and the **same parser** consumes `promptpotter/assets/optimizers/potter/pipeline.yaml` unchanged. Writing a connector or extending the optimizer manifest — this is the contract you implement against.
+This page is both the node model and the **strict wire shape** PromptPotter parses from `GET /pipeline` (or from a local `{dataset}/dataset.yaml::pipeline`). Every connector publishes this shape, and the **same parser** consumes `promptpotter/assets/optimizers/potter/pipeline.yaml` unchanged. Writing a connector or extending the optimizer manifest — this is the contract you implement against.
 
 The silent-harm part is tested — content-hash sensitivity, by [`tests/test_identity.py`](../../tests/test_identity.py) § 1. Flat-format rejection is a `JobSearchPoint` model validator, so Pydantic raises on a malformed authored config; that and the rest fail loud, so no standing test — see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md). Operator walk-through for wiring a new node into self-healing: [`../operations/backend-integration.md`](../operations/backend-integration.md) § Self-healing a node.
 

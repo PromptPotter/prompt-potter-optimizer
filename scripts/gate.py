@@ -19,9 +19,10 @@ from dataclasses import dataclass
 from functools import cache
 from importlib import metadata
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import tests_owning
+import yaml
 from last_green import ENGINE_RUNTIME, OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, digest, reads
 from processes import (
     REPO,
@@ -136,13 +137,12 @@ class Selection:
     @classmethod
     def build(cls, staged: bool, changed: bool) -> Selection:
         if changed:
-            _, tracked = git("diff", "--name-only", "HEAD")
             _, untracked = git("ls-files", "-o", "--exclude-standard")
-            return cls(False, (), (), tuple(filter(None, (tracked + "\n" + untracked).split("\n"))))
+            moved = [path for row in _name_status("HEAD") for path in row[1:]]
+            return cls(False, (), (), (*moved, *filter(None, untracked.split("\n"))))
         if not staged:
             return cls(False, (), ())
-        _, out = git("diff", "--cached", "--name-status", "--diff-filter=ACMRD")
-        rows = [line.split("\t") for line in out.splitlines() if line]
+        rows = _name_status("--cached")
         # A delete or a rename's old side selects checks; only a path on disk is handed to a tool.
         names = [row[-1] for row in rows if row[0] != "D"]
         return cls(
@@ -156,6 +156,12 @@ class Selection:
             ),
             staged_paths=tuple(path for row in rows for path in row[1:]),
         )
+
+
+def _name_status(against: str) -> list[list[str]]:
+    """``[status, path]``, or ``[status, old, new]`` for a rename: both sides moved."""
+    _, out = git("diff", against, "--name-status", "--diff-filter=ACMRD")
+    return [line.split("\t") for line in out.splitlines() if line]
 
 
 def _py(*args: str) -> list[str]:
@@ -506,14 +512,15 @@ def _instruction_files(_: Selection) -> Outcome:
     return (1, "\n".join(failures)) if failures else (0, "")
 
 
-_CLAIM_DOCS = (
-    "promptpotter/*CLAUDE.md",
-    "docs/architecture.md",
-    "docs/specs/*.md",
-    "webapp/*CLAUDE.md",
+# A paper, a peer's write-up or released history cites code that is not ours to keep.
+_CLAIM_DOCS = ("*.md", ":!paper/", ":!docs/research/", ":!CHANGELOG.md")
+# A source or spec file: `index.json::rounds` names a runtime artifact no clone holds. A template
+# other than `{dataset}/dataset.yaml` (`optimizers/{name}/pipeline.yaml::nodes`) names no one file.
+_DATASET_TEMPLATE = "{dataset}/dataset.yaml"
+_SYMBOL_CLAIM = re.compile(
+    r"(?<![\w./{}-])(\{dataset\}/dataset\.yaml|[\w./-]+\.(?:py|tsx?|ya?ml|md|toml|css))"
+    r"::((?:--)?[A-Za-z_][\w.*-]*[\w*])(?![\w.*-]*\{)"
 )
-# A source or spec file: `index.json::rounds` names a runtime artifact no clone holds.
-_SYMBOL_CLAIM = re.compile(r"([\w./-]+\.(?:py|tsx?|ya?ml|md|toml|css))::([A-Za-z_][\w.*]*\w\*?)")
 _PROBE_OPENS = re.compile(r"<!--\s*probe:")
 _PROBE = re.compile(r'<!--\s*probe:\s*(git grep -cE "([^"]+)" -- (\S+) (==|<=|>=) (\d+))\s*-->')
 # Git's ERE runs in bounded time except through a back-reference.
@@ -581,15 +588,127 @@ def _defined(path: Path) -> frozenset[str]:
     return frozenset(names)
 
 
+def _key_path(node: object, keys: Sequence[str]) -> bool:
+    for key in keys:
+        if not isinstance(node, dict) or key not in node:
+            return False
+        node = node[key]
+    return True
+
+
+def _schema_admits(node: dict[str, Any], keys: Sequence[str], schemas: dict[str, Any]) -> bool:
+    """An open mapping, or a value of no declared type, admits every path below it."""
+    if "$ref" in node:
+        return _schema_admits(schemas[node["$ref"].rpartition("/")[2]], keys, schemas)
+    if "anyOf" in node:
+        return any(_schema_admits(branch, keys, schemas) for branch in node["anyOf"])
+    if not keys or not node:
+        return True
+    if keys[0] in node.get("properties", {}):
+        return _schema_admits(node["properties"][keys[0]], keys[1:], schemas)
+    extra = node.get("additionalProperties", False)
+    return extra is True or (isinstance(extra, dict) and _schema_admits(extra, keys[1:], schemas))
+
+
+@cache
+def _dataset_shape() -> tuple[Any, dict[str, Any]]:
+    defaults = yaml.safe_load(
+        (REPO / "promptpotter/assets/datasets/defaults.yaml").read_text(encoding="utf-8")
+    )
+    spec = json.loads((REPO / "docs/specs/openapi.generated.json").read_text(encoding="utf-8"))
+    return defaults, spec["components"]["schemas"]
+
+
+def _in_any_dataset(symbol: str) -> bool:
+    """A key the definition every `dataset.yaml` is laid over holds, or `campaign`'s model declares."""
+    keys = symbol.split(".")
+    defaults, schemas = _dataset_shape()
+    return _key_path(defaults, keys) or (
+        keys[0] == "campaign" and _schema_admits(schemas["CampaignConfig"], keys[1:], schemas)
+    )
+
+
+def _word(segment: str) -> str:
+    stem = re.escape(segment.rstrip("*"))
+    return rf"(?P<name>{stem}[\w-]*)" if segment.endswith("*") else rf"(?P<name>{stem})(?![\w-])"
+
+
+_TS_MODIFIERS = r"(?m)^[ \t]*(?:(?:export|default|declare|abstract|async)[ \t]+)*"
+_TS_DECLARES = _TS_MODIFIERS + r"(?:function\*?|const|let|class|interface|type|enum)[ \t]+"
+_TS_TYPES = re.compile(_TS_MODIFIERS + r"(?:class|interface)[ \t]+\w+")
+_TS_MEMBER = (
+    r"(?m)^[ \t]*(?:(?:public|private|protected|readonly|static|abstract|override|async|get|set)"
+    r"[ \t]+)*{}[ \t]*[?!]?[ \t]*(?:[:(<=,;]|$)"
+)
+
+
+def _ts_block(text: str, at: int, stops: str) -> tuple[int, int] | None:
+    """The brace block opening past *at* before any of *stops*, as the span inside its braces."""
+    opened = re.compile(rf"[^{{{stops}]*\{{").match(text, at)
+    if opened is None:
+        return None
+    depth = 1
+    for end in range(opened.end(), len(text)):
+        depth += {"{": 1, "}": -1}.get(text[end], 0)
+        if depth == 0:
+            return opened.end(), end
+    return None
+
+
+def _ts_members(text: str, block: tuple[int, int] | None, word: str) -> list[int]:
+    if block is None:
+        return []
+    start, end = block
+    inside = text[start:end]
+    return [
+        start + m.end("name")
+        for m in re.finditer(_TS_MEMBER.format(word), inside)
+        if inside.count("{", 0, m.start()) == inside.count("}", 0, m.start())
+    ]
+
+
+def _ts_holds(text: str, symbol: str) -> bool:
+    """A declaration, an `import { x as name }` alias or a class or interface member; each further
+    segment of a dotted symbol a member of the block the one before it opens."""
+    head, *rest = (_word(segment) for segment in symbol.split("."))
+    held = [m.end("name") for m in re.finditer(_TS_DECLARES + head, text)]
+    if not rest:
+        types = (_ts_block(text, m.end(), ";") for m in _TS_TYPES.finditer(text))
+        return bool(
+            held
+            or re.search(rf"\bimport[ \t]+(?:type[ \t]+)?\{{[^}}]*\bas\s+{head}", text)
+            or any(_ts_members(text, block, head) for block in types)
+        )
+    stops = ";"
+    for word in rest:
+        blocks = [_ts_block(text, opened, stops) for opened in held]
+        held = [at for block in blocks for at in _ts_members(text, block, word)]
+        stops = ";,\n"
+    return bool(held)
+
+
 def _symbol_in(path: Path, symbol: str) -> bool:
-    """A method may be cited bare (`ledger.py::iter`); outside Python, the identifier opens a word."""
-    if path.suffix != ".py":
-        head = symbol.split(".")[0]
-        word = re.escape(head.rstrip("*")) + ("" if head.endswith("*") else r"\b")
-        return bool(re.search(rf"(?<!\w){word}", path.read_text(encoding="utf-8")))
-    names = _defined(path)
-    tails = {name.rpartition(".")[2] for name in names}
-    return any(fnmatch.fnmatchcase(n, symbol) for n in names) or symbol in tails
+    """Python: a name the module binds, a method also bare (`ledger.py::iter`). YAML and TOML: a key
+    path from the document root. Markdown: a heading. CSS: a selector or a custom property.
+    """
+    if path.suffix == ".py":
+        names = _defined(path)
+        tails = {name.rpartition(".")[2] for name in names}
+        return any(fnmatch.fnmatchcase(n, symbol) for n in names) or symbol in tails
+    text = path.read_text(encoding="utf-8")
+    if path.suffix in (".yaml", ".yml"):
+        return _key_path(yaml.safe_load(text), symbol.split("."))
+    if path.suffix == ".toml":
+        return _key_path(tomllib.loads(text), symbol.split("."))
+    if path.suffix in (".ts", ".tsx"):
+        return _ts_holds(text, symbol)
+    word = _word(symbol)
+    if path.suffix == ".md":
+        return bool(re.search(rf"(?m)^#{{1,6}}[ \t].*(?<![\w-]){word}", _FENCE.sub("", text)))
+    rules = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    if symbol.startswith("--"):
+        return bool(re.search(rf"(?<![\w-]){word}[ \t]*:", rules))
+    return bool(re.search(rf"(?<![\w-])[.#]?{word}[^{{;}}]*\{{", rules))
 
 
 def _probe_count(pattern: str, where: str) -> int | str:
@@ -614,20 +733,41 @@ def _doc_claims(_: Selection) -> Outcome:
     code, every_doc = git("ls-files", "-z", "--", "*.md")
     if code:
         return code, every_doc
+    code, listed = git("ls-files", "-z")
+    if code:
+        return code, listed
+    tails: dict[str, list[Path]] = {}
+    for path in filter(None, listed.split("\0")):
+        parts = path.split("/")
+        for i in range(len(parts)):
+            tails.setdefault("/".join(parts[i:]), []).append(REPO / path)
     failures: list[str] = []
     for rel in filter(None, claim_docs.split("\0")):
-        # A cited path hangs off the doc's own directory or one above it, or off the package.
+        # A cited path is relative to the doc, or the tail of ONE tracked path: `runner/round.py`.
         here = (REPO / rel).parent
-        bases = (here, *(d for d in here.parents if REPO in (d, *d.parents)), REPO / "promptpotter")
         prose = _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8"))
         for span in _BACKTICKED.findall(prose):
             for cited, symbol in _SYMBOL_CLAIM.findall(span):
-                beside = (Path(os.path.normpath(b / cited)) for b in bases)
-                found = [p for p in beside if p.is_file()]
+                claim = f"  {rel}: `{cited}::{symbol}`"
+                if cited == _DATASET_TEMPLATE:
+                    if not _in_any_dataset(symbol):
+                        failures.append(f"{claim} names neither a defaults.yaml nor a model key")
+                    continue
+                beside = Path(os.path.normpath(here / cited))
+                found = [beside] if beside.is_file() else tails.get(cited.lstrip("/"), [])
                 if not found:
-                    failures.append(f"  {rel}: `{cited}::{symbol}` names no file")
-                elif not any(_symbol_in(p, symbol) for p in found):
-                    failures.append(f"  {rel}: `{cited}::{symbol}` names nothing defined there")
+                    failures.append(f"{claim} names no file")
+                    continue
+                if len(found) > 1:
+                    failures.append(f"{claim} names {len(found)} files; qualify the path")
+                    continue
+                try:
+                    defined = _symbol_in(found[0], symbol)
+                except (yaml.YAMLError, tomllib.TOMLDecodeError) as exc:
+                    failures.append(f"{claim}: unparsable: {' '.join(str(exc).split())}")
+                    continue
+                if not defined:
+                    failures.append(f"{claim} names nothing defined there")
     tracker = (REPO / _TRACKER).read_text(encoding="utf-8")
     urgent = " ".join(tracker.partition("\n## URGENT")[2].partition("\n## ")[0].split())
     failures += [
@@ -898,36 +1038,15 @@ def _pytest(sel: Selection) -> Outcome:
     return run(_py("pytest", *sel.narrowed), REPO)
 
 
-@cache
 def _suite_reads() -> tuple[str, ...]:
     """The suite, its runner, and every module it imports bare off pytest's `pythonpath`."""
-    config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
-    path = config["tool"]["pytest"]["ini_options"]["pythonpath"]
-    todo = sorted((REPO / "tests").glob("*.py"))
-    seen: set[Path] = set()
-    while todo:
-        module = todo.pop()
-        if module in seen:
-            continue
-        seen.add(module)
-        rel = module.relative_to(REPO).as_posix()
-        tree = ast.parse(module.read_text(encoding="utf-8"))
-        for name in tests_owning._import_names(
-            tree, tests_owning._module_name(rel), False, deferred=True
-        ):
-            todo.extend(p for d in path if (p := REPO / d / f"{name}.py").is_file())
-    imported = {p.relative_to(REPO).as_posix() for p in seen}
-    beside = sorted(rel for rel in imported if not rel.startswith("tests/"))
+    beside = sorted(tests_owning.bare_imports())
     return (*_ENGINE_RUNTIME, "tests/", "scripts/tests_owning.py", *beside)
 
 
-_HASHED_BY_THE_RECORD = re.compile(r"(promptpotter/.*|tests/[^/]*)\.py")
-
-
-def _owning_tests(changed: Sequence[str]) -> tuple[str, ...] | None:
-    # The record hashes package and suite modules itself; `_GATE` files own no test's verdict.
-    moved = [p for p in changed if p not in _GATE and not _HASHED_BY_THE_RECORD.fullmatch(p)]
-    nodes = tests_owning.tests_owning(moved)
+def _owning_tests(_changed: Sequence[str]) -> tuple[str, ...] | None:
+    # Narrowed by the tree against the last whole run's record, never by the selection's files.
+    nodes = tests_owning.tests_owning()
     return None if nodes is None else tuple(nodes)
 
 
@@ -1114,15 +1233,9 @@ CHECKS: tuple[Check, ...] = (
         ),
         builds="webapp/out/index.html",
     ),
-    # tsconfig includes `.next/types`, which `next build` rewrites.
-    Check(
-        "tsc",
-        "web",
-        _tsc,
-        staged=True,
-        after="next-build",
-        product=("webapp/.next/types",),
-    ),
+    # `npm run typecheck` runs `next typegen` first, rewriting `.next/types` and the gitignored
+    # `next-env.d.ts` that imports them; the exclude in `tsconfig.json` keeps out `.next/dev`.
+    Check("tsc", "web", _tsc, staged=True),
     Check(
         "playwright",
         "web",
@@ -1346,7 +1459,7 @@ def main() -> int:
             if not c.landing and any(reads(path, c.inputs() or ()) for path in sel.changed)
         ]
     if not args.staged:
-        # `--only tsc` brings `next-build` along, so it never reads a build older than its sources.
+        # `--only playwright` brings `next-build` along, so it never reads a build older than its sources.
         named = {c.name: c for c in CHECKS}
         for check in list(checks):
             while check.after and named[check.after] not in checks:

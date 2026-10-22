@@ -537,11 +537,8 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     assert both.plateau() is None and withheld.mean_round_delta is None, (
         "a reader asked the stamp, not the series' caveat, and differenced a cold series"
     )
-    assert "disjoint_scopes" in str(withheld.series_reason), (
-        "the withheld θ lift lost the reason the series serves"
-    )
-    assert withheld.mean_round_delta is None and "disjoint_scopes" in str(withheld.series_reason), (
-        "the L4 θ lift differenced a series whose caveat outranks cold"
+    assert withheld.series_reason is ThetaCaveat.DISJOINT_SCOPES, (
+        "the withheld θ lift lost the caveat that outranks a cold scale"
     )
 
 

@@ -5,11 +5,11 @@ from collections.abc import Callable, Iterable, Sequence
 
 from pydantic import Field
 
-from promptpotter.domain.l4.inner_facts import InnerCellFacts
+from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import Cut, CycleResult, RoundResult
-from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading
+from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import PIPELINE_KEYS, GradedCell, PipelineData
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import CellUnscoreableError
@@ -38,23 +38,26 @@ def _origin_headroom(result: CycleResult) -> float | None:
     return None if accuracy is None else 1.0 - accuracy.value
 
 
-def series_reason(result: CycleResult) -> str | None:
+def unread_rounds(result: CycleResult) -> list[int]:
+    series = result.level_series
+    return [] if series is None else [r for r in series.rounds if series.reading(r) is None]
+
+
+def series_reason(result: CycleResult) -> ThetaCaveat | SeriesGap | None:
     """Why the search split's θ trajectory differences nothing; ``None`` where it does."""
     series = result.level_series
     if series is None:
-        return "it never started, so it read no level series"
+        return SeriesGap.NEVER_STARTED
     if series.caveat is not None:
-        return (
-            f"its level series carries `{series.caveat}` "
-            f"({THETA_CAVEAT_INFO[series.caveat].head}), so no two of its levels difference"
-        )
-    if holes := [rnd for rnd in series.rounds if series.level(rnd) is None]:
-        return (
-            f"round(s) {holes} hold no scored cell on its series' δ scale, or a level carrying a "
-            "θ caveat of its own, so there is no level to difference there"
-        )
+        return series.caveat
+    if unread_rounds(result):
+        return SeriesGap.UNREAD_ROUND
+    for rnd in series.rounds:
+        read = series.reading(rnd)
+        if read is not None and read.caveat is not None:
+            return read.caveat
     if len(series.rounds) < 2:
-        return "it closed no L1 round, so its series holds no level past its origin's"
+        return SeriesGap.NO_L1_ROUND
     return None
 
 
