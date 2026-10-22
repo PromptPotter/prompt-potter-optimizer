@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Literal, get_args
 
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import Field, ValidationError
 
 from promptpotter.domain.activity import SILENT_RECORDS, ActivityState
 from promptpotter.domain.run_records import RECORD_ADAPTER, CycleRecord
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 
 __all__ = [
     "NON_ACTIVITY_KINDS",
@@ -98,10 +98,8 @@ def bearing_record(kind: str, rec: dict[str, Any]) -> CycleRecord | None:
         return None
 
 
-class ProjectionEnvelope(StrictModel):
+class ProjectionEnvelope(FrozenModel):
     """One outbound SSE frame, whose receiver treats an unknown field as a drift signal."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: ProjectionKind = Field(
         description="Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot.",

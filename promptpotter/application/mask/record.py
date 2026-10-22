@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Literal, NamedTuple, get_args
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 
 LensKind = Literal["score", "dials", "abort"]
 _LENS_KINDS: dict[str, LensKind] = {kind: kind for kind in get_args(LensKind)}
@@ -49,19 +49,15 @@ def parse_sample_ids(text: str | None) -> frozenset[int] | None:
     return ids or None
 
 
-class MaskReading(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class MaskReading(FrozenModel):
     composite_fitness: float
     accuracy: float | None
     # `accuracy` is the mean over exactly these.
     n_scored: int
 
 
-class MaskCandidate(StrictModel):
+class MaskCandidate(FrozenModel):
     """``is_eligible`` is a recorded fact, invariant under a scoring swap."""
-
-    model_config = ConfigDict(frozen=True)
 
     candidate_id: str
     reading: MaskReading | None = None
@@ -71,10 +67,8 @@ class MaskCandidate(StrictModel):
     abort: str | None = None
 
 
-class MaskRound(StrictModel):
+class MaskRound(FrozenModel):
     """``parent`` is round ``N-1``'s winner under the record's scorer; under a SAMPLE-SET mask, ``load.py::_parent``."""
-
-    model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     round: int
@@ -85,10 +79,8 @@ class MaskRound(StrictModel):
     decisions: list[ResumeCheckpointRecord] = Field(default_factory=list)
 
 
-class MaskCycle(StrictModel):
+class MaskCycle(FrozenModel):
     """``fork_from_round`` is in PARENT coordinates, even when the fork restarts its own numbering."""
-
-    model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     parent_cycle_id: str | None = None
@@ -96,18 +88,14 @@ class MaskCycle(StrictModel):
     rounds: list[MaskRound] = Field(default_factory=list)
 
 
-class MaskRecord(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class MaskRecord(FrozenModel):
     cycles: list[MaskCycle] = Field(default_factory=list)
     # The `per_cell` formula a fork applying the lens carries: a `dials:` lens realized.
     criterion: str | None = None
 
 
-class SpineCycle(StrictModel):
+class SpineCycle(FrozenModel):
     """Every term is a round-CLOSE fact on the ledger, so a rewind is decided without opening one round file."""
-
-    model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     parent_cycle_id: str | None = None

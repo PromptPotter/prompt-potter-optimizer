@@ -11,14 +11,14 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain import activity
 from promptpotter.domain.activity import ActivityFeed, ActivityItem
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
 from promptpotter.domain.projection_envelope import RECORD_KINDS, bearing_record
 from promptpotter.domain.run_records import LLMCallProgressRecord
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     course_validator_ns,
@@ -57,10 +57,8 @@ _CURATION_TAG = (
 )
 
 
-class RayItem(StrictModel):
+class RayItem(FrozenModel):
     """One ray event, addressed by ``path``: a bare ``cycle_id`` is ambiguous in an L4 family."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: list[CycleHop] = Field(
         description="The cycle this record belongs to, root → leaf — THE address.",
@@ -88,10 +86,8 @@ class RayItem(StrictModel):
     )
 
 
-class RayResponse(StrictModel):
+class RayResponse(FrozenModel):
     """One ordered window of a family's chronology, oldest-first."""
-
-    model_config = ConfigDict(frozen=True)
 
     items: list[RayItem] = Field(
         default_factory=list,

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.spend import PrefixReading, TokenAccount
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 __all__ = [
     "LoopWarning",
@@ -29,10 +29,8 @@ class LoopWarning(StrictModel):
     detail: dict[str, Any] = Field(default_factory=dict)
 
 
-class NodeInput(StrictModel):
+class NodeInput(FrozenModel):
     """What a node's call was asked: the template it rendered, or its bare messages where it rendered none."""
-
-    model_config = ConfigDict(frozen=True)
 
     template_name: str | None = None
     template_fields: dict[str, Any] = Field(default_factory=dict)
@@ -40,10 +38,8 @@ class NodeInput(StrictModel):
     messages: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class NodeOutput(StrictModel):
+class NodeOutput(FrozenModel):
     """What a node's call answered."""
-
-    model_config = ConfigDict(frozen=True)
 
     response: Any
     reasoning: str | None = Field(
@@ -52,10 +48,8 @@ class NodeOutput(StrictModel):
     )
 
 
-class NodeBlock(StrictModel):
+class NodeBlock(FrozenModel):
     """One optimizer node's call in one round: what it was asked, what it answered and what that cost."""
-
-    model_config = ConfigDict(frozen=True)
 
     input: NodeInput
     output: NodeOutput

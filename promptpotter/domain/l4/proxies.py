@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable, Sequence
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING
@@ -11,17 +11,15 @@ from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import Cut, CycleResult, RoundResult
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading
 from promptpotter.domain.scoring import PIPELINE_KEYS, GradedCell, PipelineData
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.statistics import sample_sd
 
 logger = logging.getLogger(__name__)
 
 
-class OuterSampleProxies(StrictModel):
+class OuterSampleProxies(FrozenModel):
     """Its field may not be defaulted: a cycle that cannot fill it is floored or excluded, never zeroed."""
-
-    model_config = ConfigDict(frozen=True)
 
     # The SCORED term: the standing selection's headline on the cell's held-out rows minus the
     # origin's on the same rows, in accuracy points, averaged over the round budget. A promotion
@@ -204,12 +202,10 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     return OuterSampleProxies(mean_bench_lift=sum(bench) / len(bench) - result.bench_origin_level)
 
 
-class PanelPrecision(StrictModel):
+class PanelPrecision(FrozenModel):
     """How sharply each cell was measured, against how far apart the cells landed."""
 
     # In θ logits, never fitness: a cell's precision cannot cross the user-editable scoring formula.
-    model_config = ConfigDict(frozen=True)
-
     # sqrt(mean over cells of (se_variant² + se_origin²)): the spread if every cell had ONE true value.
     estimation_sd: float
     # Sample SD (n−1) of the per-cell paired diffs. Contains `estimation_sd` plus any real spread.

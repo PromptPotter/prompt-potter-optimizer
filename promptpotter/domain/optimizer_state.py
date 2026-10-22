@@ -5,7 +5,7 @@ from typing import Annotated, ClassVar, Literal, Self, TypedDict, Unpack
 from pydantic import ConfigDict, Field, SerializeAsAny, model_validator
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 __all__ = [
@@ -47,10 +47,8 @@ class CritiqueReadout(TypedDict, total=False):
     failure_highlights: list[FailureClusterReadout]
 
 
-class StatePart(StrictModel):
+class StatePart(FrozenModel):
     """One kind of optimizer state, registered under ``kind``; ``cls()`` is its value before any member writes it, where every field defaults."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: ClassVar[str]
     # How many roster members may write it; every part but a pool is one member's.
@@ -115,10 +113,8 @@ def _by_kind(held: object) -> object:
     }
 
 
-class OptimizerState(StrictModel):
+class OptimizerState(FrozenModel):
     """The one envelope every optimizer's state rides: its parts by kind beside the bench's population."""
-
-    model_config = ConfigDict(frozen=True)
 
     manifest: str
     # Empty where the manifest keeps only the bench's one parent.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, NamedTuple, assert_never, get_args
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.cycle_paths import CyclePath, command_address
@@ -70,7 +70,7 @@ from promptpotter.domain.run_records import (
     TrailTombstoneRecord,
 )
 from promptpotter.domain.spend import TokenAccount, prefix_reading
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import duration_words
 
 __all__ = [
@@ -141,10 +141,8 @@ LIFETIME: dict[ActivityKind, Lifetime] = {
 }
 
 
-class ActivityItem(StrictModel):
+class ActivityItem(FrozenModel):
     """One record's reading: a line to show, and the round and candidate it is about."""
-
-    model_config = ConfigDict(frozen=True)
 
     id: str = Field(description="The record's kind and ledger offset; one record, one id.")
     kind: ActivityKind
@@ -158,10 +156,8 @@ class ActivityItem(StrictModel):
     )
 
 
-class ActivityState(StrictModel):
+class ActivityState(FrozenModel):
     """A run's current state: what it is doing, and what was said that still holds."""
-
-    model_config = ConfigDict(frozen=True)
 
     status: ActivityItem | None = Field(
         description="The one line saying what the run is doing; each new one replaces it."
@@ -176,20 +172,16 @@ class ActivityState(StrictModel):
     )
 
 
-class DecisionFact(StrictModel):
+class DecisionFact(FrozenModel):
     """One labelled line of the evidence behind a hold."""
-
-    model_config = ConfigDict(frozen=True)
 
     label: str
     value: str
     tone: ActivityTone = "muted"
 
 
-class DecisionAction(StrictModel):
+class DecisionAction(FrozenModel):
     """One button: a press POSTs ``payload`` to ``/commands/{kind}`` unchanged."""
-
-    model_config = ConfigDict(frozen=True)
 
     label: str
     variant: Literal["primary", "ghost", "danger"]
@@ -199,10 +191,8 @@ class DecisionAction(StrictModel):
     )
 
 
-class ActivityDecision(StrictModel):
+class ActivityDecision(FrozenModel):
     """A choice the run is holding for: what to say about it, and the commands that answer it."""
-
-    model_config = ConfigDict(frozen=True)
 
     title: str
     lead: str = Field(description="The paragraph under the title.")

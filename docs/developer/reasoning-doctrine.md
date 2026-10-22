@@ -1,6 +1,6 @@
 # Reasoning doctrine
 
-Six situational guardrails against recurring AI blind spots — unlike the
+Situational guardrails against recurring AI blind spots — unlike the
 universal gates in root [`CLAUDE.md`](../../CLAUDE.md), each fires
 only in the specific situation named before it. Root `CLAUDE.md` § Working principles
 carries each trigger and rule; this page is the evidence behind them, so load the one
@@ -34,6 +34,20 @@ When an LLM call is slow, costly, or timeout-prone because it emits a large numb
 3. **Extraction threshold.** Default: a shared helper earns its place at **≥3 call sites**, or when it removes a concept; at ≤2 callers inline is usually right. A default, not a bar — extract below it when the shared thing is an invariant callers must not diverge from, and say that's why. (The subtractive counterpart to the pre-flight "Reuse before adding" gate.)
 4. **Lock the wins** — enforced, not advised. The ratchet is the gate's `surface-ledger` check (`scripts/gate.py --only surface-ledger`) and asserts EQUALITY, so a deletion that lowers a dimension goes red until you lower the baseline in the same commit. Asserting only `<=` re-pins on raises alone: an unrecorded drop becomes silent headroom for the next raise, the baselines drift loose from the package they claim to measure, and the pass that earned the win has no number to show for it. The baseline records where the surface stands — it isn't a target to reach and halt at. When no dimension can fall further without losing a load-bearing concept, the unification *phase* is done; that says nothing about whether the next change may add.
 </surface-ledger>
+
+**When planning, scoping, reviewing or ranking any change — an arc, a stage, a fix, a recon or builder brief → `<next-change>`:**
+
+<next-change>
+**The AI blind spot this guards against:** asked to plan or simplify, an AI optimizes the change in hand — the smallest diff, the fewest lines, the task closed — and leaves a shape the NEXT change must first dismantle. Lines fall, then the next refactor spends them back; a distribute-then-compact cycle on every pass is the waste.
+
+**The target of every plan is the cost of the changes after it — the next one, and the next, and the one after those.** State that direction in the plan itself, before its findings: which future changes this shape makes cheaper, and how. Score each finding by **sites a probe change touches, before → after** — rename a served field, add a field to a prompt node, add an optimizer member, reshape a persisted record — and by **test churn** per production refactor. What lowers it: one fact in one place; lists, rosters and mirrors derived, not maintained; no forwarding layer; tests pinned to entry points and the one fake world, never to internals; one owner per on-disk and served shape.
+
+**Lines and the `<surface-ledger>` are reported, never the goal.** A finding that adds lines but removes a place a fact lives is in; a compaction the next refactor undoes (a reformat, a collapsed decorator, a helper with one caller) is out, however many lines it saves. Where the tip grows, name the capability or the cheaper future change it buys.
+
+**When a plan finds work the previous arc should already have done, that is a finding about the shape, not only about the code.** Ask what hid it from that arc — scattered ownership, a forwarding layer, a mirror, a test pinned to internals — and file the cause as urgent debt beside the work itself. Each cause left in place blinds the next plan the same way.
+
+**How an arc keeps the view.** It opens with one read-only census across seams listing every fact spelled in two of them, and each brief quotes the rows it closes — a one-seam brief cannot see cross-seam duplication. A stage closes on a sites-touched count for its probe, never on a name-grep alone. A reviewer reports, beside correctness, the probe sites before → after and any neighbour outside the diff still spelling the moved fact a second way. The offline run proves what a change DECIDES; it never proves shape, since a second mechanism left standing decides the same. The final review compares the tip with the arc's BASE row by row, and every row above base names what pays for it — reasoned per-commit raises are not that reason, and a split argued from commit churn is a raise like any other.
+</next-change>
 
 **When you changed what the engine *decides* (a gate, metric, or state), or added a capability at any entry point → `<entry-point-parity>`:**
 

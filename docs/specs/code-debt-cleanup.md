@@ -29,6 +29,50 @@ is the history layer. **Never the root of a patch just shipped** — that root s
 | **A refusal that protects code** | **Beside that code** — a docstring is re-read whenever someone touches the function; a backlog line never is. |
 | How to HUNT debt, and what to skip on sight | [`../developer/conventions.md`](../developer/conventions.md) § Auditing for debt |
 
+## URGENT — the fog that hid the backbone from the core-reshape arc
+
+Filed at the operator's ask, ahead of everything below: each entry is a shape that kept a refactor
+from being SEEN, so leaving it blinds the next plan the same way (`<next-change>`). Solve as soon
+as possible. **Rides with:** the shrink arc's stage named in each entry, or any pass in that file.
+
+- **Doc invariants are prose no gate checks, and doctrine treats the doc as contract.** "No second
+  ingress" (`docs/architecture.md` §0.5, `infrastructure/CLAUDE.md`) stands beside
+  `jobs/mint.py::_write_plan` and `initialization/loop_start.py::init_cycle` side files; the standing
+  record's "aftermath" claim beside `runner/round.py::close_round`; "never writes back" beside 19
+  `Session` writers; `webapp/lib/CLAUDE.md` display sources and `chat-foundation.md`'s
+  "schema-first gate" are false. Action: every one-X / no-second-Y / nothing-reads-Z claim names its
+  `file::symbol` and a probe a `gate.py` `doc-claims` check runs; a claim with no probe is deleted;
+  the false ones go true or go in the commit that lands R1/R3/R7/W1/W5. **Re-test:** `gate.py --only doc-claims`.
+- **Three "the one reader" mechanisms, each owned by a different layer file** —
+  `projections/base.py::Projection`, `store/read_model.py::LedgerFold` + `ledger_scan.py::scan_*`,
+  `domain/activity.py::ActivityFeed` — with no roster across layers, and `adding-a-surface.md` §1
+  writing the per-record cost as a recipe. Action: one concept → mechanism → owner table in
+  `promptpotter/CLAUDE.md`; every reader a `LedgerFold`, projections checkouts of folds;
+  `CampaignStore.ledger(hop)` the one ledger-path derivation. **Re-test:** `rg -c
+  "CycleLayout\(stores.campaigns.cycle_dir" promptpotter` → 0; computed `p_record` ≤ 4.
+- **Hand mirrors blessed as contracts** — `docs/specs/api-openapi.yaml`, `events-asyncapi.yaml`,
+  `scripts/build_ts_types.py::EXPORTED_MODELS`, `__all__`, `cli/commands/verbs.py::VERBS`,
+  `webapp/lib/api/commands.ts`. Action: generated or deleted (operator decided the yaml deletion
+  2026-10-22). **Re-test:** one new `CommandKind` row touches ≤ 3 files.
+- **`scripts/complexity_ledger.py` prices declared names, not change cost**, and the arc bar was
+  never compared against the arc's base. Action: computed rows `p_record`, `p_served` (declared −
+  read by any surface), `p_command`, `p_member`, `test_private_reach`; the surface-ledger check
+  compares the tip row by row against `ARC_BASE` when set. Lands BEFORE the shrink arc's backbone
+  stages, so they report probe rows. **Re-test:** the ledger prints the five rows.
+- **`application/bench/node_context.py::NodeContext` grows a method per member need** (52 → 88
+  public in one arc). Action: declared typed reads refused at load, ~11 methods left, a member base
+  in `optimizers/nodes.py`. **Re-test:** `p_member` ≤ 12.
+- **Derived state cached by hand on `Cycle.tracking` and a mutable `Session`, mirrored by test
+  namespaces**, so a reshape looks costly and stays off the brief. Action: `Cycle` properties,
+  frozen `Session` built once in `wiring.py::bind_cycle_session`, `tests/factories.py::seat` the
+  one seat. **Re-test:** `rg -c "tracking\." promptpotter` → 0; renaming a `Cycle` attribute
+  changes one file under `tests/`.
+- **One model is disk, ledger and wire shape at once** —
+  `presentation/api/routers/campaigns/cycles.py` serves `RoundResult` whole, so every field added to
+  a round is served unasked. Action: a route serves a view under `application/views/`; no
+  `CycleRecord` arm or `RoundResult` is a `response_model`. **Re-test:** `rg -n
+  "response_model=RoundResult" promptpotter/presentation` → 0.
+
 ## Open — multi-arc, no blocker
 
 A leading `NEXT` marks the one to take up cold when nothing else is in hand.

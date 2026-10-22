@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Self
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
 from promptpotter.domain.pipeline_overlay import (
     apply_node_overlay,
@@ -18,7 +18,7 @@ from promptpotter.domain.search_point import (
     TaskDecomposition,
     strip_rendered_prompt,
 )
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
@@ -103,10 +103,8 @@ class OptimizerPromptTemplate(StrictModel):
 assert sorted(OptimizerPromptTemplate.RENDER_ORDER) == sorted(OptimizerPromptTemplate.model_fields)
 
 
-class EvidenceGrounding(StrictModel):
+class EvidenceGrounding(FrozenModel):
     """The panel field and citation L1 declares to justify a mutation."""
-
-    model_config = ConfigDict(frozen=True)
 
     field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
     citation: str = Field(description="Short string naming the panel entry cited.")
@@ -134,10 +132,8 @@ def node_source(manifest: str, node: str) -> str:
     return f"{manifest}:{node}"
 
 
-class Variation(StrictModel):
+class Variation(FrozenModel):
     """One variation node's act: which node ran, whether it asked a model, and the loci it wrote."""
-
-    model_config = ConfigDict(frozen=True)
 
     node: str = Field(
         description="`{manifest}:{node}` of the variation node that ran; `operator` where a "
@@ -178,10 +174,8 @@ class IndividualLineage(StrictModel):
         return self.variations[0].node if self.variations else ORIGIN_SOURCE
 
 
-class NodePrompt(StrictModel):
+class NodePrompt(FrozenModel):
     """One prompt node's loci: its fields by name and its shots, both written only through ``derive`` / ``edited``."""
-
-    model_config = ConfigDict(frozen=True)
 
     fields: dict[str, str] = Field(
         default_factory=dict,

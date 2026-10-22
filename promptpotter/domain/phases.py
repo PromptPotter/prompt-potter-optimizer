@@ -3,9 +3,9 @@ from __future__ import annotations
 import enum
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import duration_words, utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
 
@@ -165,10 +165,8 @@ class PauseCause(enum.StrEnum):
     BOUND = "bound"
 
 
-class PauseReading(StrictModel):
+class PauseReading(FrozenModel):
     """Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach."""
-
-    model_config = ConfigDict(frozen=True)
 
     stop_reason: StopReason | None
     cause: PauseCause
@@ -237,19 +235,15 @@ if _missing_producer_info:
     )
 
 
-class ProducerAlert(StrictModel):
+class ProducerAlert(FrozenModel):
     """What a producer's state raises on its own, worded once for every surface."""
-
-    model_config = ConfigDict(frozen=True)
 
     title: str
     detail: str
 
 
-class ProducerReading(StrictModel):
+class ProducerReading(FrozenModel):
     """One cycle's producer as served: its state, its two server-measured clocks and its words."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: ProducerState
     label: str = Field(
@@ -495,12 +489,10 @@ def run_phase_label(run_phase: RunPhase, stop_reason: StopReason | None) -> str:
     return "—" if stop_reason is None else STOP_REASON_INFO[stop_reason].label
 
 
-class RunAdmission(StrictModel):
+class RunAdmission(FrozenModel):
     """Which run verbs a cycle admits now: the one answer the run control and the dispatcher read.
 
     Each ``*_refusal`` is the sentence that verb is refused with, empty where it is admitted."""
-
-    model_config = ConfigDict(frozen=True)
 
     offers: RunAction | None = Field(
         description="The verb the one run control offers; null where it offers none."
@@ -860,10 +852,8 @@ class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
         super().__init__(reason.value)
 
 
-class ErrorRecord(StrictModel):
+class ErrorRecord(FrozenModel):
     """An arm of ``CycleRecord`` declared here, since ``CycleResult.error`` sits below that union."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["error"] = "error"
     # Exception class name — operator-facing diagnostic, never load-bearing for routing.

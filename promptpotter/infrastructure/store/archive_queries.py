@@ -7,10 +7,10 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.results import CellFold
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
 from promptpotter.infrastructure.store.measurement_archive import standing
@@ -168,9 +168,7 @@ def _sample_fold_path(stores: Stores, dataset_hash: str) -> Path:
     return stores.archive.derived_dir() / f"sample_fold__{dataset_hash}.jsonl"
 
 
-class SampleFoldRow(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class SampleFoldRow(FrozenModel):
     config_key: str
     sp: str
     fk: str

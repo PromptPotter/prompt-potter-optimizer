@@ -4,7 +4,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.bench import BenchScore, OwnLevel
 from promptpotter.domain.paired_reading import PairedReading
@@ -15,7 +15,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import SeriesReading
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.treatment import Treatment
 
 EXPORT_ARTIFACT_VERSION = 8
@@ -35,10 +35,8 @@ class ExportVersionError(ValueError):
     """The artifact names a version this build does not read."""
 
 
-class ExportMeasurement(StrictModel):
+class ExportMeasurement(FrozenModel):
     """Every field is read off the round that crowned the winner, so all stand on one measurement."""
-
-    model_config = ConfigDict(frozen=True)
 
     round: int
     # ``None`` when the cycle resolved no round formula; never ``""``, which reads as a formula called "".
@@ -59,10 +57,8 @@ class ExportMeasurement(StrictModel):
     ability: SeriesReading | None
 
 
-class PromptExport(StrictModel):
+class PromptExport(FrozenModel):
     """One campaign's answer, self-describing. ``model_dump_json()`` IS ``export.json``."""
-
-    model_config = ConfigDict(frozen=True)
 
     artifact_version: int
     tool: str

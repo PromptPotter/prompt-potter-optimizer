@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.bench import BenchPass, BenchReading, BenchScore, BenchSubject
 from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
@@ -16,7 +16,7 @@ from promptpotter.domain.results import (
     VerifyStrategy,
 )
 from promptpotter.domain.spend import CeilingMeter
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 
 __all__ = [
     "BenchEnterView",
@@ -40,22 +40,18 @@ __all__ = [
 ]
 
 
-class _View(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
-
-class ViewAnchors(_View):
+class ViewAnchors(FrozenModel):
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
     display_metric: DisplayMetric = "accuracy"
 
 
-class WarningEntry(_View):
+class WarningEntry(FrozenModel):
     title: str
     detail: str
 
 
-class InitEnterView(_View):
+class InitEnterView(FrozenModel):
     """The formula rides here so the mask editor has one to reference DURING origin scoring."""
 
     kind: Literal["init_enter"] = "init_enter"
@@ -67,7 +63,7 @@ class InitEnterView(_View):
     composite_fitness_formula_short: str | None = None
 
 
-class InitExitView(_View):
+class InitExitView(FrozenModel):
     """``resumed_from_round`` is the NEXT L1 round; ``cached_rounds_count`` counts round artifacts."""
 
     kind: Literal["init_exit"] = "init_exit"
@@ -85,7 +81,7 @@ class InitExitView(_View):
     composite_fitness_formula_short: str | None = None
 
 
-class RoundStartView(_View):
+class RoundStartView(FrozenModel):
     """``propose:enter``; ``standing`` and ``note`` are the optimizer's own words (``RoundOpening``)."""
 
     kind: Literal["round_start"] = "round_start"
@@ -103,7 +99,7 @@ class RoundStartView(_View):
     run_standing: RunStanding | None = None
 
 
-class SpDiffView(_View):
+class SpDiffView(FrozenModel):
     columns: tuple[tuple[str, dict[str, str]], ...]
     node_param_keys: dict[str, list[str]] | None
     round_num: int | None
@@ -112,7 +108,7 @@ class SpDiffView(_View):
     proposer: str
 
 
-class CandidatesGeneratedView(_View):
+class CandidatesGeneratedView(FrozenModel):
     """``propose:exit``."""
 
     kind: Literal["candidates_generated"] = "candidates_generated"
@@ -122,14 +118,14 @@ class CandidatesGeneratedView(_View):
     sp_diff: SpDiffView
 
 
-class MeasureEnterView(_View):
+class MeasureEnterView(FrozenModel):
     kind: Literal["measure_enter"] = "measure_enter"
     node: str
     n_candidates: int
     n_samples: int
 
 
-class BenchEnterView(_View):
+class BenchEnterView(FrozenModel):
     """Every ``sample_scored`` up to the matching ``exit`` is one of its rows; round 0 is the origin."""
 
     kind: Literal["bench_enter"] = "bench_enter"
@@ -141,12 +137,12 @@ class BenchEnterView(_View):
     rows: int
 
 
-class BenchScoredView(_View):
+class BenchScoredView(FrozenModel):
     kind: Literal["bench_scored"] = "bench_scored"
     bench: BenchScore
 
 
-class BenchGradedView(_View):
+class BenchGradedView(FrozenModel):
     """``reading`` is ``None`` exactly where ``state`` is not ``read``."""
 
     kind: Literal["bench_graded"] = "bench_graded"
@@ -161,14 +157,14 @@ class BenchGradedView(_View):
     label: str
 
 
-class VerifyEnterView(_View):
+class VerifyEnterView(FrozenModel):
     kind: Literal["verify_enter"] = "verify_enter"
     arm: ArmName
     rows: int
     strategy: VerifyStrategy
 
 
-class VerifyGradedView(_View):
+class VerifyGradedView(FrozenModel):
     """The pass is the fact, the reading a cache of one grading of it."""
 
     kind: Literal["verify_graded"] = "verify_graded"
@@ -176,7 +172,7 @@ class VerifyGradedView(_View):
     reading: VerifyReading
 
 
-class RunSpendView(_View):
+class RunSpendView(FrozenModel):
     """The caps bound the CAMPAIGN, so they pair with its metered spend; this cycle's sits beside."""
 
     billed_usd: float
@@ -194,7 +190,7 @@ class RunSpendView(_View):
     token_share: int | None
 
 
-class RoundCompleteView(_View):
+class RoundCompleteView(FrozenModel):
     """``select:exit``; the readout HOLDS it until the round closes: the panel gate can unwind it."""
 
     kind: Literal["round_complete"] = "round_complete"
@@ -212,7 +208,7 @@ class RoundCompleteView(_View):
     display_metric: DisplayMetric = "accuracy"
 
 
-class OptimizerStepEnterView(_View):
+class OptimizerStepEnterView(FrozenModel):
     kind: Literal["optimizer_step_enter"] = "optimizer_step_enter"
     node: str
     activity: str
@@ -221,7 +217,7 @@ class OptimizerStepEnterView(_View):
     lines: tuple[str, ...]
 
 
-class OptimizerStepExitView(_View):
+class OptimizerStepExitView(FrozenModel):
     """``headline`` is empty where the step adopted nothing."""
 
     kind: Literal["optimizer_step_exit"] = "optimizer_step_exit"

@@ -1,12 +1,10 @@
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 
 
-class BackpressureReading(StrictModel):
+class BackpressureReading(FrozenModel):
     """Exists only while a provider holds a sender's sends, so its presence is the whole signal."""
-
-    model_config = ConfigDict(frozen=True)
 
     sender: str
     at_once: int | None = Field(description="Sends that may be out at once; None: uncapped.")

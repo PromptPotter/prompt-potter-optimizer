@@ -41,7 +41,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import PrefixReading, SpendRollup, TokenAccount
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.wounds import (
     RuntimeFailure,
     ValidationFailure,
@@ -196,9 +196,7 @@ def closed_after_origin(rounds: Sequence[int]) -> int:
     return sum(1 for number in rounds if number > 0)
 
 
-class CellFold(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class CellFold(FrozenModel):
     # The cells carrying a verdict, a deprecated one included as a miss.
     total: int
     # ``None`` where `total` is 0: no fitness is not a 0.0.
@@ -235,10 +233,8 @@ ArmStateKind = Literal["proposed", "measuring", "cut", "measured"]
 ArmRole = Literal[MeasurementRole.ORIGIN, MeasurementRole.PANEL, MeasurementRole.PARENT]
 
 
-class ArmSlot(StrictModel):
+class ArmSlot(FrozenModel):
     """Where an individual was first walked as an arm: the ``idx``-th of its round's ``total``."""
-
-    model_config = ConfigDict(frozen=True)
 
     round: int
     idx: int
@@ -258,10 +254,10 @@ def arm_key(
     return ArmKey(individual.id)
 
 
-class Proposal(StrictModel):
+class Proposal(FrozenModel):
     """What a proposer hands the round: an individual, its sparse overlay, and why it is refused."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     individual: OptSearchPoint
     # The sparse fork transport; the individual's own params are the resolved whole.
@@ -276,8 +272,8 @@ class Proposal(StrictModel):
         return arm_key(self.individual, self.validation_failures, round_num, idx)
 
 
-class _Arm(StrictModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+class _Arm(FrozenModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     role: ArmRole
     # Its FIRST walk as an arm; ``None``: a reference no round of this cycle walked as an arm.
@@ -327,45 +323,35 @@ class Measuring(_Walked):
     block: dict[str, int] | None = None
 
 
-class Elimination(StrictModel):
+class Elimination(FrozenModel):
     """The eliminator's reading of a stop it made, for the arm or against it."""
-
-    model_config = ConfigDict(frozen=True)
 
     reason: str
     # Opaque to the bench (potter's: `pobb/checks.py::EliminationContext`).
     context: dict[str, Any]
 
 
-class Eliminated(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class Eliminated(FrozenModel):
     kind: Literal["eliminated"] = "eliminated"
     elimination: Elimination
 
 
-class Broken(StrictModel):
+class Broken(FrozenModel):
     """The bench's run-health rules stopped it."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: Literal["broken"] = "broken"
     failure: RuntimeFailure
     degradation: DegradationContext
 
 
-class Invalid(StrictModel):
+class Invalid(FrozenModel):
     """Refused before a cell: the reasons are the arm's own fatal ``validation_failures``."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: Literal["invalid"] = "invalid"
 
 
-class Skipped(StrictModel):
+class Skipped(FrozenModel):
     """The operator stopped it."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: Literal["skipped"] = "skipped"
 
@@ -512,10 +498,8 @@ def scoreboard_rank_key(
     )
 
 
-class ScoreboardRow(StrictModel):
+class ScoreboardRow(FrozenModel):
     """One rank-ordered row of a round's scoreboard: an arm's reading at its rank."""
-
-    model_config = ConfigDict(frozen=True)
 
     rank: int
     reading: ArmReading
@@ -658,10 +642,8 @@ def lives_label(left: int, cap: int | None) -> str:
     return f"{left} of {cap} {noun} left"
 
 
-class LivesReading(StrictModel):
+class LivesReading(FrozenModel):
     """A run's life bank as every surface shows it. Built by :meth:`of` alone."""
-
-    model_config = ConfigDict(frozen=True)
 
     bar: str = Field(description="One ♥ per banked life, one ♡ per spent one; 💀 on an empty bank.")
     label: str
@@ -672,12 +654,10 @@ class LivesReading(StrictModel):
         return cls(bar=lives_bar(left, cap), label=lives_label(left, cap), spent=left <= 0)
 
 
-class OverlapReading(StrictModel):
+class OverlapReading(FrozenModel):
     """The best-so-far line on the ORIGIN PANEL: each pick paired with C0 on one set of cells."""
 
     # Its rows reach no election, floor, lift, ruler or acquisition: OUTSIDE them is the point.
-    model_config = ConfigDict(frozen=True)
-
     # :func:`origin_panel`, by sample slot, ascending; empty where no pass was sent.
     positions: tuple[int, ...]
     lead: PairedReading = Field(
@@ -713,10 +693,8 @@ class OverlapReading(StrictModel):
         )
 
 
-class LineRate(StrictModel):
+class LineRate(FrozenModel):
     """One member of the best-so-far line as an overlap reading holds it."""
-
-    model_config = ConfigDict(frozen=True)
 
     arm: ArmName
     rate: float = Field(description="Its rate over the panel cells it and C0 both scored.")
@@ -844,10 +822,8 @@ HealthCause = Literal[
 ]
 
 
-class DegradationHealth(StrictModel):
+class DegradationHealth(FrozenModel):
     """A round's degradation verdict from the backend's warning stamps; it never stops the run."""
-
-    model_config = ConfigDict(frozen=True)
 
     grade: HealthGrade
     # `None` is the `healthy` grade.
@@ -873,10 +849,8 @@ class DegradationHealth(StrictModel):
     last_error: str | None = None
 
 
-class OptimizerFact(StrictModel):
+class OptimizerFact(FrozenModel):
     """One labelled reading an optimizer reports about a round, worded by its own runtime."""
-
-    model_config = ConfigDict(frozen=True)
 
     key: str
     label: str
@@ -886,10 +860,8 @@ class OptimizerFact(StrictModel):
     kind: Literal["stat", "note"]
 
 
-class RoundCells(StrictModel):
+class RoundCells(FrozenModel):
     """A :class:`RoundResult`'s rows as archive addresses, in walk order."""
-
-    model_config = ConfigDict(frozen=True)
 
     arms: dict[ArmKey, list[WalkedCell]] = Field(default_factory=dict)
     overlap: dict[str, list[WalkedCell]] = Field(default_factory=dict)
@@ -976,10 +948,8 @@ if set(DISPLAY_METRIC_INFO) != set(get_args(DisplayMetric)):
     raise RuntimeError("DISPLAY_METRIC_INFO is out of step with DisplayMetric (domain/results.py)")
 
 
-class ArmFit(StrictModel):
+class ArmFit(FrozenModel):
     """What the election read of one arm: θ lives here and nowhere else."""
-
-    model_config = ConfigDict(frozen=True)
 
     # Rasch ability on the round's joint-fit scale; `None` outside the election fit.
     theta: float | None = None
@@ -990,10 +960,8 @@ class ArmFit(StrictModel):
     vs_reference: PairedReading | None = None
 
 
-class Election(StrictModel):
+class Election(FrozenModel):
     """What a round's selector decided over its arms, by key; empty ``selected`` = the round HELD."""
-
-    model_config = ConfigDict(frozen=True)
 
     # Round 0 selects the origin it adopted.
     selected: list[ArmKey]
@@ -1020,7 +988,7 @@ class Election(StrictModel):
     ruler: RulerStamp
 
 
-class RoundOutcome(StrictModel):
+class RoundOutcome(FrozenModel):
     """``RoundClosedRecord`` carries exactly this: a field declared here reaches the ledger."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -1164,7 +1132,7 @@ class RoundResult(RoundOutcome):
     """A round with its rows, which is the round file itself."""
 
     # `extra="ignore"`: the computed `round_id`/`scoreboard` are dumped and must read back.
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="ignore", frozen=True)
+    model_config = ConfigDict(extra="ignore")
 
     # Offset of its own ``RoundClosedRecord``. ``None`` where no ledger was bound: 0 is a real offset.
     at_offset: int | None = None
@@ -1265,10 +1233,8 @@ def _selection_line(selection: ArmName | None, pair: PairedReading) -> str:
     )
 
 
-class RunStanding(StrictModel):
+class RunStanding(FrozenModel):
     """Where the run stands after a round: its selection, over whom, and how it reads against C0."""
-
-    model_config = ConfigDict(frozen=True)
 
     rounds_without_advance: int
     # ``None`` where the campaign banks no lives (`optimization.lives`).
@@ -1434,10 +1400,8 @@ if set(VERIFY_STRATEGY_LABELS) != set(get_args(VerifyStrategy)):
     raise RuntimeError("VERIFY_STRATEGY_LABELS is out of step with VerifyStrategy")
 
 
-class VerifyPass(StrictModel):
+class VerifyPass(FrozenModel):
     """The facts a verify pass banked, never a grade of them."""
-
-    model_config = ConfigDict(frozen=True)
 
     arm: ArmName
     sp_hash: str
@@ -1455,10 +1419,8 @@ class VerifyPass(StrictModel):
 VerifyHeldAbsent = Literal["hard_picks", "under_two_fresh"]
 
 
-class VerifyReading(StrictModel):
+class VerifyReading(FrozenModel):
     """A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones."""
-
-    model_config = ConfigDict(frozen=True)
 
     label: str
     scorer_id: str = Field(
@@ -1512,10 +1474,8 @@ def panel_cuts(panels: Sequence[tuple[int | None, int | None]]) -> list[bool]:
 Crown = Literal["elected", "uncontested"]
 
 
-class ArmPanel(StrictModel):
+class ArmPanel(FrozenModel):
     """The cells one arm's walk holds of the panel its round asked of it."""
-
-    model_config = ConfigDict(frozen=True)
 
     scored: int | None = Field(
         description="Cells the walk holds. Null on an arm with no score report — never measured, "
@@ -1544,10 +1504,8 @@ class ArmPanel(StrictModel):
         return cls(scored=scored, expected=expected, cached=cached, cached_share=share, cut=cut)
 
 
-class ArmAbility(StrictModel):
+class ArmAbility(FrozenModel):
     """One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale."""
-
-    model_config = ConfigDict(frozen=True)
 
     theta: float | None
     se: float | None
@@ -1570,10 +1528,8 @@ class ArmAbility(StrictModel):
         return cls(theta=theta, se=se, ci_lo=lo, ci_hi=hi, caveat=caveat)
 
 
-class ArmElection(StrictModel):
+class ArmElection(FrozenModel):
     """What one arm's round decided about it. Built by :meth:`of` alone."""
-
-    model_config = ConfigDict(frozen=True)
 
     held: bool = Field(
         description="The arm's round has held its election. `selected: false` reads the same on a "
@@ -1668,13 +1624,11 @@ def _own_level(
     )
 
 
-class ArmReading(StrictModel):
+class ArmReading(FrozenModel):
     """One arm of one round, read: the one carrier every surface that lists or ranks arms embeds.
 
     Each part lands when its fact exists, so an arm in flight is this type with fewer parts set.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     arm: ArmName = Field(description="THE key, and where the arm was first walked.")
     role: ArmRole = Field(
@@ -1797,10 +1751,8 @@ def line_by_individual(overlap: OverlapReading | None) -> dict[str, LineRate]:
     return {r.arm.key: r for r in overlap_line(overlap) if r.n == whole}
 
 
-class DiagnosticRunRecord(StrictModel):
+class DiagnosticRunRecord(FrozenModel):
     """One ``noise-floor`` run's sidecar: the run-to-run spread of fresh re-scores of ONE config."""
-
-    model_config = ConfigDict(frozen=True)
 
     ts: str
     dataset: str

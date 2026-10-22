@@ -7,8 +7,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, assert_never, cast
 
-from pydantic import ConfigDict
-
 from promptpotter.application.commands.payloads import (
     KIND_OF_PAYLOAD,
     CommandAcceptedBody,
@@ -29,7 +27,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
 from promptpotter.domain.run_records import CommandAckRecord, CommandAckStatus, CommandRecord
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
     emit_command,
@@ -66,8 +64,7 @@ class RejectedError(Exception):
         self.reason = reason
 
 
-class _IdempotentMatch(StrictModel):
-    model_config = ConfigDict(frozen=True)
+class _IdempotentMatch(FrozenModel):
     command_id: str
     offset: int
 

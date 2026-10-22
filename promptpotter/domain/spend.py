@@ -7,7 +7,6 @@ from functools import reduce
 from typing import TYPE_CHECKING, Literal, get_args
 
 from pydantic import (
-    ConfigDict,
     Field,
     GetJsonSchemaHandler,
     PrivateAttr,
@@ -19,7 +18,7 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema
 
-from promptpotter.domain.strict_model import StrictModel, WireFloat, WireInt
+from promptpotter.domain.strict_model import FrozenModel, StrictModel, WireFloat, WireInt
 from promptpotter.domain.wire_record import ALWAYS, WireRecord
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -106,14 +105,12 @@ _STEP_USAGE = WireRecord.of(
 )
 
 
-class TokenAccount(StrictModel):
+class TokenAccount(FrozenModel):
     """What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.
 
     ``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further
     totals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.
     """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     input: int = 0
     output: int = 0
@@ -191,10 +188,8 @@ if set(PREFIX_STATE_TITLES) != set(get_args(PrefixState)):
     raise RuntimeError("PREFIX_STATE_TITLES is out of step with PrefixState (domain/spend.py)")
 
 
-class PrefixReading(StrictModel):
+class PrefixReading(FrozenModel):
     """A provider's prefix-cache discount as every surface reads it, served whole."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: PrefixState
     share: float | None = Field(description="Null on `unreported` and `replayed`.")
@@ -245,10 +240,8 @@ ROLE_SPEND_KIND: dict[str, TokenUsageKind] = {MeasurementRole.BENCH: "bench"}
 NESTED_NODE_PREFIX = "inner:"
 
 
-class Budget(StrictModel):
+class Budget(FrozenModel):
     """What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits."""
-
-    model_config = ConfigDict(frozen=True)
 
     usd: WireFloat | None = Field(
         default=None,
@@ -356,11 +349,9 @@ def money_axes_only(budget: Budget) -> Budget:
     return budget
 
 
-class HeldBudget(StrictModel):
+class HeldBudget(FrozenModel):
     """A launch past admission; ``standing`` is the axes an operator named, as asked: the account
     bounds a run through its job's reservation, never through a ceiling it writes."""
-
-    model_config = ConfigDict(frozen=True)
 
     admitted: Budget
     standing: Budget

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 
 __all__ = [
     "GEPA_MANIFEST",
@@ -39,9 +39,7 @@ class ReflectionModules(StateSlice, kind="reflection_modules"):
     modules: dict[str, int] = Field(default_factory=dict)
 
 
-class MinibatchBar(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class MinibatchBar(FrozenModel):
     parent_id: str
     # By sample key, the parent's objective on each minibatch cell.
     objectives: dict[str, float]

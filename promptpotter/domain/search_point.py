@@ -4,9 +4,9 @@ from collections.abc import Collection
 from dataclasses import asdict, dataclass, fields
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import content_hash, shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -62,9 +62,7 @@ def strip_rendered_prompt(pipeline_params: dict[str, Any] | None) -> dict[str, A
     }
 
 
-class JobSearchPoint(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class JobSearchPoint(FrozenModel):
     # Empty is the ONE spelling of "carries none": `content_hash` omits a falsy `pipeline_params`.
     pipeline_params: dict[str, Any] = Field(default_factory=dict)
     # Per prompt node, each field as SCORED (framing spliced, shots as `few_shot_block`), in render order.

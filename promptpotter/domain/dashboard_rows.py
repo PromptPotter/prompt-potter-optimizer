@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.l4.proxies import PanelPrecision
@@ -24,7 +24,7 @@ from promptpotter.domain.results_health import critical_health_title
 from promptpotter.domain.ruler import AbilityReading, LevelSeries, SeriesReading
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -136,10 +136,8 @@ class DashboardSample(StrictModel):
     )
 
 
-class DashboardCandidate(StrictModel):
+class DashboardCandidate(FrozenModel):
     """One candidate as `dashboard.json` serves it, the same shape live or closed."""
-
-    model_config = ConfigDict(frozen=True)
 
     reading: ArmReading
 
@@ -159,10 +157,8 @@ class LiveCandidate(DashboardCandidate):
     composite_fitness_formula_short: str | None = None
 
 
-class OptimizerLimit(StrictModel):
+class OptimizerLimit(FrozenModel):
     """One knob an optimizer declares as bounding its run, which a fork may reconcile."""
-
-    model_config = ConfigDict(frozen=True)
 
     node: str
     knob: str
@@ -182,10 +178,8 @@ class RunLimits(StrictModel):
     optimizer: list[OptimizerLimit] = Field(default_factory=list)
 
 
-class RoundSummary(StrictModel):
+class RoundSummary(FrozenModel):
     """Top-level `accuracy` is what the round MEASURED; its θ is `ServedRound.level`."""
-
-    model_config = ConfigDict(frozen=True)
 
     round: int
     leading: ArmName | None = Field(

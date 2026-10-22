@@ -4,16 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import ConfigDict
-
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 
 __all__ = ["PromptBlock"]
 
 
-class PromptBlock(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class PromptBlock(FrozenModel):
     id: str
     text: str
     source: str

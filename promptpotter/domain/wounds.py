@@ -5,9 +5,9 @@ import json
 from collections.abc import Iterable
 from typing import Annotated, Any
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
@@ -33,12 +33,10 @@ COLLAPSE_WORDS: dict[str, str] = {
 assert COLLAPSE_WORDS.keys() == INVARIANT_REASONS
 
 
-class ValidationFailure(StrictModel):
+class ValidationFailure(FrozenModel):
     """An L1 output that broke a parse-time invariant, scoring its candidate a synthetic zero."""
 
     # Rendered into L2's prompt as JSON (``model_dump``): a field renamed here rewrites that prompt.
-    model_config = ConfigDict(frozen=True)
-
     axis: str = Field(
         description=(
             "The parameter path that failed, ``{node_name}.{param}`` "
@@ -104,12 +102,10 @@ def collapse_counts(populations: Iterable[Iterable[ValidationFailure]]) -> dict[
     return counts
 
 
-class RuntimeFailure(StrictModel):
+class RuntimeFailure(FrozenModel):
     """One candidate's degradation evidence from its evaluation, beside a score that stands."""
 
     # Rendered into L2's prompt as JSON (``model_dump``): a field renamed here rewrites that prompt.
-    model_config = ConfigDict(frozen=True)
-
     source: str = Field(
         description=(
             "Failure family: ``degradation`` (mid-eval DegradationCheck "

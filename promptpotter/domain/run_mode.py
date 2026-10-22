@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
-from promptpotter.domain.strict_model import StrictModel, WireInt
+from promptpotter.domain.strict_model import FrozenModel, WireInt
 
 __all__ = ["RunMode"]
 
 
-class RunMode(StrictModel):
+class RunMode(FrozenModel):
     """The SHAPE a run takes, on the wire and in the runner alike. How far it goes is its ``Budget``."""
-
-    model_config = ConfigDict(frozen=True)
 
     from_round: WireInt | None = Field(
         default=None,

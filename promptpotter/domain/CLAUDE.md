@@ -115,8 +115,7 @@ The word `legacy` is **never** sanctioned.
 
 **Every model here inherits `StrictModel` (`strict_model.py`).** Pydantic's default is
 `extra="ignore"`, so an unknown key is dropped and a misspelled kwarg is a silent no-op.
-`model_config` merges across
-inheritance, so a subclass adds `frozen=True` without restating `extra`. A model that
+A frozen model inherits `FrozenModel`, never restates `frozen=True`. A model that
 must stay lax says so on itself and states why; the ledger's `models_lax` counts them.
 
 ## Tolerance is scoped by what a payload is FOR

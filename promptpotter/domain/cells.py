@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, JsonValue
+from pydantic import Field, JsonValue
 
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.ruler import DELTA_STATE_LABEL, DeltaState, RulerStanding
 from promptpotter.domain.scoring import SampleStatus, is_hit
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 __all__ = [
     "DEPTH_FIELDS",
@@ -37,11 +37,9 @@ DEPTH_FIELDS: frozenset[str] = frozenset(
 )
 
 
-class Seat(StrictModel):
+class Seat(FrozenModel):
     """One fresh inner campaign, declared off its panel. ``id`` is the outer query; omitted
     overrides inherit the panel's benchmark and model."""
-
-    model_config = ConfigDict(frozen=True)
 
     # In every pin, so in every banked cell's `Sample.key`: dropping it re-keys them all.
     kind: Literal["seat"]
@@ -66,11 +64,9 @@ class Seat(StrictModel):
 _INSTRUMENT = "instrument"
 
 
-class PinnedCell(StrictModel):
+class PinnedCell(FrozenModel):
     """A declared cell with what measures it, digested where its panel resolves
     (`runner/inner/connector.py`): in the pin, so its key moves with its own instrument alone."""
-
-    model_config = ConfigDict(frozen=True)
 
     cell: Seat
     instrument: str = Field(min_length=1)

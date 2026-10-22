@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.campaign import LIFECYCLE_STATUS_LABELS, LifecycleStatus
 from promptpotter.domain.cycle_paths import CycleHop
@@ -23,7 +23,7 @@ from promptpotter.domain.run_records import (
     SpawnedBy,
     sibling_cycle_id,
 )
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 __all__ = [
     "CycleIndex",
@@ -37,26 +37,20 @@ __all__ = [
 ]
 
 
-class IndexRound(StrictModel):
+class IndexRound(FrozenModel):
     """The level is ``None`` where the round's measurand is not an accuracy: an L4 outer round."""
-
-    model_config = ConfigDict(frozen=True)
 
     round: int
     accuracy: float | None
 
 
-class Intervention(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class Intervention(FrozenModel):
     kind: str
     at: str
 
 
-class CycleIndex(StrictModel):
+class CycleIndex(FrozenModel):
     """Folded off the ledger; ``index.json`` is this written out for a human, and no code reads it."""
-
-    model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     created_at: str
@@ -113,10 +107,8 @@ type StatusMark = Literal[
 ]
 
 
-class RunStatus(StrictModel):
+class RunStatus(FrozenModel):
     """How a run reads on a row: one word and the mark drawn beside it."""
-
-    model_config = ConfigDict(frozen=True)
 
     label: str
     mark: StatusMark
@@ -207,10 +199,8 @@ class CycleListEntry(StrictModel):
     )
 
 
-class LineStanding(StrictModel):
+class LineStanding(FrozenModel):
     """A campaign's line as one value: the cycle that answers for it now, and how that cycle stands."""
-
-    model_config = ConfigDict(frozen=True)
 
     holder: CycleHop = Field(description="The cycle answering for the campaign.")
     status: RunStatus = Field(

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.application import optimizers
 from promptpotter.application.campaign_config import OptimizationConfig
@@ -39,7 +39,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import Pool
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
@@ -99,9 +99,7 @@ def _stamp(path: Path) -> int:
         return -1
 
 
-class ManifestNode(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class ManifestNode(FrozenModel):
     type: NodeKind
     description: str | None = None
     # The backend-shaped menu of the node's searchable params (`pipeline_parsing.py`).
@@ -109,10 +107,8 @@ class ManifestNode(StrictModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
 
-class PipelineManifest(StrictModel):
+class PipelineManifest(FrozenModel):
     """A `pipeline.yaml` typed at load — an optimizer's, or the bench's check-in."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: str
     version: str

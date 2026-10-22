@@ -7,9 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NewType
 
-from pydantic import ConfigDict
-
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 
 __all__ = [
     "ALL_DOTS_PATTERN",
@@ -49,10 +47,8 @@ if any(ID_COMPONENT_RE.match(ch) for ch in HOP_SEP + UNIT_SEP):
     )
 
 
-class CycleHop(StrictModel):
+class CycleHop(FrozenModel):
     """One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle alone."""
-
-    model_config = ConfigDict(frozen=True)
 
     campaign_id: str
     cycle_id: str

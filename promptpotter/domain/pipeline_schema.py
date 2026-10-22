@@ -9,7 +9,7 @@ from promptpotter.domain.search_point import (
     PARAM_FORBIDDEN_KEYS,
     SHOTS_KEY,
 )
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
@@ -166,10 +166,8 @@ CANDIDATE_LIBRARY = "candidate_library"
 CANDIDATE_LIBRARY_FILE = "candidate_library.txt"
 
 
-class PipelineDependency(StrictModel):
+class PipelineDependency(FrozenModel):
     """Surfaced to the operator as a missing input, never a hidden fabricated default."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: str
     node: str
@@ -201,29 +199,25 @@ def dependencies_from_node_roles(
     return tuple(deps)
 
 
-class ObservationMapping(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class ObservationMapping(FrozenModel):
     pipeline_key: str
     output_field: str | None = None
     is_llm: bool = False
 
 
-class NodeOutputSchema(StrictModel):
+class NodeOutputSchema(FrozenModel):
     """The structured output a target pipeline node produces, parsed from ``GET /pipeline``."""
-
-    model_config = ConfigDict(frozen=True)
 
     fields: list[str] = Field(default_factory=list)
     field_descriptions: dict[str, str] = Field(default_factory=dict)
     json_schema: dict[str, Any] = Field(default_factory=dict)
 
 
-class NodePromptInfo(StrictModel):
+class NodePromptInfo(FrozenModel):
     """Its PRESENCE marks the node prompt-bearing: the injection point for the candidate prompt."""
 
     # `extra="ignore"`: the backend owns this sub-object; PP reads `template_variables` and `fields`.
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    model_config = ConfigDict(extra="ignore")
 
     template_variables: list[str] = Field(default_factory=list)
     # The node's prompt loci, IN RENDER ORDER: the order sits inside every cell key it renders.
@@ -245,13 +239,11 @@ ViewKind = Literal["io", "llm", "tool", "retriever", "cache", "measurement"]
 ParamKind = Literal["model", "enum", "number", "bool", "string", "prompt", "description", "nested"]
 
 
-class PipelineViewNode(StrictModel):
+class PipelineViewNode(FrozenModel):
     """One node's place in the flow, as a tier and a rank rather than as pixels.
 
     Tier 0 is the chain a sample runs, tier n>0 the n-th nested alternative pipeline; rank is the tier-0 position it acts on.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     label: str
@@ -261,8 +253,8 @@ class PipelineViewNode(StrictModel):
     rank: int = 0
 
 
-class PipelineViewEdge(StrictModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+class PipelineViewEdge(FrozenModel):
+    model_config = ConfigDict(populate_by_name=True)
 
     from_: str = Field(alias="from")
     to: str
@@ -270,10 +262,10 @@ class PipelineViewEdge(StrictModel):
     kind: Literal["forward", "loop", "directive", "alternative"] = "forward"
 
 
-class PipelineView(StrictModel):
+class PipelineView(FrozenModel):
     """The graph projection derived from a manifest's nodes and pipelines; no manifest declares one."""
 
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True)
 
     nodes: list[PipelineViewNode] = Field(default_factory=list)
     edges: list[PipelineViewEdge] = Field(default_factory=list)
@@ -284,10 +276,8 @@ def token_bound_of_bytes(utf8_bytes: int) -> int:
     return utf8_bytes
 
 
-class LLMSpendBound(StrictModel):
+class LLMSpendBound(FrozenModel):
     """In the counts its BACKEND enforces, never a price (``infrastructure/llm/pricing.py::rate_ceiling``)."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: Literal["llm"]
     # Every retry and repair included.
@@ -309,9 +299,7 @@ class LLMSpendBound(StrictModel):
         return held | {"input_tokens": token_bound_of_bytes(int(served["input_bytes"]))}
 
 
-class WebSpendBound(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class WebSpendBound(FrozenModel):
     kind: Literal["web"]
     queries: int = Field(ge=0)
     usd_per_query: float = Field(ge=0)
@@ -320,9 +308,7 @@ class WebSpendBound(StrictModel):
 NodeSpendBound = Annotated[LLMSpendBound | WebSpendBound, Field(discriminator="kind")]
 
 
-class PipelineNode(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class PipelineNode(FrozenModel):
     name: str
     # `None` is "the producer declared no type" — a real state, never read as a default kind.
     kind: NodeKind | None = None
@@ -415,7 +401,7 @@ ParamSource = Literal[
 ]
 
 
-class NodeConfigParam(StrictModel):
+class NodeConfigParam(FrozenModel):
     """One param a node carries, in the COMPLETE per-node list a reader sums `movable_by` over.
 
     `kind` names the surface that owns it: `model`/`enum` a select, `number`/`bool`/`string` a typed
@@ -427,8 +413,6 @@ class NodeConfigParam(StrictModel):
     structured-output contract); `held` says this campaign closed an axis the dataset offered,
     reversibly. `model` is in neither: an ordinary axis.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     key: str
     value: Any = None
@@ -445,10 +429,8 @@ class NodeConfigParam(StrictModel):
     permitted_stated: bool = False
 
 
-class NodeReach(StrictModel):
+class NodeReach(FrozenModel):
     """How far the search reaches on one node: an unmoved param is SHUT, an absent node unknown."""
-
-    model_config = ConfigDict(frozen=True)
 
     open: int
     openable: int
@@ -490,15 +472,13 @@ class NestedPipelineRef(StrictModel):
     dataset: str = Field(description="Slug of the pipeline that node runs; fetch it the same way.")
 
 
-class ModelCapability(StrictModel):
+class ModelCapability(FrozenModel):
     """What one model accepts and what it costs on one provider, resolved server-side.
 
     `reasoning_efforts` `None` is UNKNOWN, never "unsupported": keep the node's declared ladder.
     `reasoning_note` is populated in every arm. Card fields are optional and a third party's claim,
     except the two prices, which are the rate table's for `provider`.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     model: str
     provider: str
@@ -533,23 +513,19 @@ assert CAPABILITY_ANSWERED_PARAMS.issubset(_MODEL_ANSWER_FIELDS)
 _EFFORT_LADDER_ORDER: tuple[str, ...] = ("none", "minimal", "low", "medium", "high")
 
 
-class NodeSearchNarrowing(StrictModel):
+class NodeSearchNarrowing(FrozenModel):
     """A campaign's own declaration over the dataset's, whose two halves compose differently.
 
     ``param_keys`` SUBSETS the dataset's tunable surface, prompt fields included;
     ``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     param_keys: list[str] | None = None
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
 
 
-class ParamIntent(StrictModel):
+class ParamIntent(FrozenModel):
     """What an operator set on one config row: a free param's padlock, or an axis's ticks."""
-
-    model_config = ConfigDict(frozen=True)
 
     key: str
     open: bool
@@ -574,17 +550,13 @@ def narrowing_of(params: list[NodeConfigParam], intents: list[ParamIntent]) -> N
     return NodeSearchNarrowing(param_keys=keys, param_allowed_values=allowed)
 
 
-class ManifestNodeOverlay(StrictModel):
+class ManifestNodeOverlay(FrozenModel):
     """One optimizer node's delta over its manifest's ``config``."""
-
-    model_config = ConfigDict(frozen=True)
 
     config: dict[str, Any] = Field(default_factory=dict)
 
 
-class PipelineSchema(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class PipelineSchema(FrozenModel):
     name: str = ""
     version: str = ""
     description: str = ""

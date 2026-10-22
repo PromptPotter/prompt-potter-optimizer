@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ConfigDict, Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from promptpotter import connectors
 from promptpotter.application.campaign_config import (
@@ -35,7 +35,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
 )
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_pipeline,
     resolve_dataset,
@@ -48,10 +48,8 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 
-class InnerBenchmarkConfig(StrictModel):
+class InnerBenchmarkConfig(FrozenModel):
     """A SPEND bound only: a target score or default ladder rescales every fitness against an undeclared benchmark."""
-
-    model_config = ConfigDict(frozen=True)
 
     n_samples_per_inner_round: int = Field(ge=1)
     # Explicit `null` ⇒ the per-round count; the inner-origin θ is the term BOTH arms of every paired delta subtract.
@@ -83,10 +81,8 @@ def _level_slug(value: object) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", str(value)).strip("-") or "none"
 
 
-class InnerTasks(StrictModel):
+class InnerTasks(FrozenModel):
     """A panel of seats, each a fresh inner campaign run as an inner hop of the arm's cell."""
-
-    model_config = ConfigDict(frozen=True)
 
     inner_benchmark: str = Field(min_length=1)
     inner_benchmark_config: InnerBenchmarkConfig
@@ -236,11 +232,9 @@ def parse_panel(raw: object) -> InnerTasks:
     return InnerTasks.model_validate(raw)
 
 
-class ResolvedPanel(StrictModel):
+class ResolvedPanel(FrozenModel):
     """The panel with each cell's instrument (`connector.py::_resolve_panel`): the ONE document run
     init, the samples and the fingerprint read."""
-
-    model_config = ConfigDict(frozen=True)
 
     panel: InnerTasks
     # By cell id.
@@ -276,9 +270,7 @@ def parse_resolved(raw: object) -> ResolvedPanel:
     return ResolvedPanel.model_validate(raw)
 
 
-class InnerTaskSpec(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class InnerTaskSpec(FrozenModel):
     inner_dataset: str
     optimizer_treatment: str
     run_seed: int

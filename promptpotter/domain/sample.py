@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import ConfigDict, JsonValue
 
 from promptpotter.domain.scoring import MeasuredCell
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import dataset_hash, stable_hash
 
 
@@ -93,10 +93,8 @@ def sample_key(
     )
 
 
-class ArchiveEntry(StrictModel):
+class ArchiveEntry(FrozenModel):
     """A configuration under ONE dataset; ``name`` and ``created_at`` are its first answer's."""
-
-    model_config = ConfigDict(frozen=True)
 
     config_key: str
     # ``PipelineSchema.sp_hash``: empty where the searchpoint resolves no node config.

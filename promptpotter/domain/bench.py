@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, NamedTuple, Self, get_args
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from promptpotter.domain.paired_reading import (
     ArmName,
@@ -20,7 +20,7 @@ from promptpotter.domain.phases import StopOutcome, StopReason, WalkEnd, stop_re
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellGrade, WalkedCell
 from promptpotter.domain.spend import SpendRollup
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import stable_hash
 
 __all__ = [
@@ -118,10 +118,8 @@ class BankPartition:
         )
 
 
-class PartitionRecord(StrictModel):
+class PartitionRecord(FrozenModel):
     """``cycles/{id}/bank_partition.json``: the partition a run init drew, as slots in its bank."""
-
-    model_config = ConfigDict(frozen=True)
 
     dataset_hash: str
     split: DatasetSplit | None
@@ -197,10 +195,8 @@ BenchSubject = Literal["origin", "selected"]
 BenchTrigger = Literal["manual", "at_end", "each_round"]
 
 
-class PassStop(StrictModel):
+class PassStop(FrozenModel):
     """Why a bench pass holds fewer rows than it was sent on."""
-
-    model_config = ConfigDict(frozen=True)
 
     cause: StopReason | WalkEnd = Field(
         description="The walk's own end, or the run stop that cut the pass before it was sent."
@@ -210,10 +206,8 @@ class PassStop(StrictModel):
     )
 
 
-class BenchPass(StrictModel):
+class BenchPass(FrozenModel):
     """One individual's pass over the bench set, as the facts it banked — never a grade of them."""
-
-    model_config = ConfigDict(frozen=True)
 
     round: int
     candidate_id: str
@@ -239,10 +233,8 @@ class BenchPass(StrictModel):
         return out
 
 
-class BenchPasses(StrictModel):
+class BenchPasses(FrozenModel):
     """``runner/bench.py::read_bench`` is the one reading of these passes."""
-
-    model_config = ConfigDict(frozen=True)
 
     tolerance: int
     origin: BenchPass
@@ -266,9 +258,7 @@ BENCH_HEADLINE: BenchColumn = "accuracy"
 COLUMN_GRADE: dict[BenchColumn, CellGrade] = {"accuracy": "fitness", "composite": "objective"}
 
 
-class BandedValue(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class BandedValue(FrozenModel):
     value: float
     ci_lo: float | None = Field(
         description="The 95% band on `value`, drawn from the same per-row values; both bounds are "
@@ -283,10 +273,8 @@ class BandedValue(StrictModel):
         return self
 
 
-class OwnLevel(StrictModel):
+class OwnLevel(FrozenModel):
     """One individual's own level on one set of rows, in both columns; never one side of a pair."""
-
-    model_config = ConfigDict(frozen=True)
 
     accuracy: BandedValue | None = Field(
         description="Mean per-row fitness — the hit rate under a scorer that grades each row 0 "
@@ -402,10 +390,8 @@ class LineRun(NamedTuple):
     rounds_closed: int
 
 
-class BenchStatus(StrictModel):
+class BenchStatus(FrozenModel):
     """Where a campaign's bench stands, and whether asking for its pass would be admitted."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: ReadingState
     trigger: BenchTrigger
@@ -530,10 +516,8 @@ class CostAbsence(StrEnum):
     ZERO_SPEND = "zero_spend"
 
 
-class LiftCost(StrictModel):
+class LiftCost(FrozenModel):
     """The headline lift per USD its SEARCH incurred, or why there is none."""
-
-    model_config = ConfigDict(frozen=True)
 
     lift_per_usd: float | None = Field(
         description="Priced on INCURRED spend, never the bill — a replayed cell is billed "
@@ -564,11 +548,9 @@ class LiftCost(StrictModel):
         return cls(lift_per_usd=vs_origin.headline.estimate.value / usd, absent=None)
 
 
-class BenchScope(StrictModel):
+class BenchScope(FrozenModel):
     """One dataset's rows of a bench spanning several, read apart: a level is never averaged
     across datasets."""
-
-    model_config = ConfigDict(frozen=True)
 
     dataset: str | None = Field(
         description="The dataset these rows measure; `None` is the one the cycle is filed under."
@@ -614,10 +596,8 @@ def _bench_line(
     )
 
 
-class BenchScore(StrictModel):
+class BenchScore(FrozenModel):
     """The headline: the selection and the origin, scored on a bench set no optimizer node read."""
-
-    model_config = ConfigDict(frozen=True)
 
     bench_size: int
     scorer_id: str = Field(

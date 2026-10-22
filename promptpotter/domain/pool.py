@@ -6,10 +6,8 @@ import enum
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 
-from pydantic import ConfigDict
-
 from promptpotter.domain.optimizer_state import StateSlice
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
@@ -51,9 +49,7 @@ def entry_id(field: str, text: str) -> str:
     return f"{field}.{stable_hash(text, length=10)}"
 
 
-class PoolEntry(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class PoolEntry(FrozenModel):
     id: str
     # The leading run an `active` path may name: ``(field, source)`` for a block.
     group: tuple[str, ...]

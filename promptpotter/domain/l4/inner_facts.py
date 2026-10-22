@@ -2,18 +2,16 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 
 __all__ = ["InnerCellFacts"]
 
 
-class InnerCellFacts(StrictModel):
+class InnerCellFacts(FrozenModel):
     """Carried BESIDE the measurement, never as ``OuterSampleProxies`` fields the formula could score."""
-
-    model_config = ConfigDict(frozen=True)
 
     origin_level: float | None = Field(
         description="The origin's θ on the search split's level series; null where "

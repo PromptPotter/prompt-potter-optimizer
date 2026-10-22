@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Annotated, Literal, NamedTuple, TypedDict
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.campaign import Campaign
@@ -34,7 +34,7 @@ from promptpotter.domain.results import (
     panel_cuts,
 )
 from promptpotter.domain.run_records import ElectionRecord, ForkDirection
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
@@ -75,10 +75,8 @@ CourseKind = Literal["root", "fork", "diag", "inner"]
 _MAX_COURSE_DEPTH = 3
 
 
-class LineageDivergence(StrictModel):
+class LineageDivergence(FrozenModel):
     """Where an alternative criterion would have elected someone else, on the node it describes."""
-
-    model_config = ConfigDict(frozen=True)
 
     alternative_candidate_id: str | None = Field(
         default=None,
@@ -87,10 +85,8 @@ class LineageDivergence(StrictModel):
     )
 
 
-class ForkStamp(StrictModel):
+class ForkStamp(FrozenModel):
     """What marks an attempt the operator cut: a fork is NOT a node, so its identity rides them."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: CourseKind
     trigger: str
@@ -115,10 +111,8 @@ class ForkStamp(StrictModel):
 RankMove = Literal["up", "down", "unchanged"]
 
 
-class LensShift(StrictModel):
+class LensShift(FrozenModel):
     """What the request's lens did to one course's sibling ordering, over the arms on its timeline."""
-
-    model_config = ConfigDict(frozen=True)
 
     top_composite: str | None = Field(
         description="The timeline label of the arm ranked first by composite; null where that "
@@ -131,10 +125,8 @@ class LensShift(StrictModel):
     unchanged: int
 
 
-class MainLineStep(StrictModel):
+class MainLineStep(FrozenModel):
     """One round on the main line to an arm."""
-
-    model_config = ConfigDict(frozen=True)
 
     round: int
     rows: list[int] = Field(
@@ -143,9 +135,7 @@ class MainLineStep(StrictModel):
     )
 
 
-class _Node(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class _Node(FrozenModel):
     id: str = Field(
         description="Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin."
     )

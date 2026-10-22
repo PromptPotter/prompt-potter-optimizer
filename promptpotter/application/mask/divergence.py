@@ -3,16 +3,14 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.application.mask.record import MaskCycle, MaskRecord, MaskRound
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 
 
-class VerdictOutcome(StrictModel):
+class VerdictOutcome(FrozenModel):
     """``alternative_candidate_id`` names the one-step counterfactual only where it was MEASURED, else ``None``."""
-
-    model_config = ConfigDict(frozen=True)
 
     diverged: bool
     alternative_candidate_id: str | None = None
@@ -21,18 +19,14 @@ class VerdictOutcome(StrictModel):
 Verdict = Callable[[MaskRound], VerdictOutcome]
 
 
-class Divergence(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class Divergence(FrozenModel):
     cycle_id: str
     round: int
     alternative_candidate_id: str | None = None
 
 
-class DivergenceResult(StrictModel):
+class DivergenceResult(FrozenModel):
     """``divergences`` are the markers; ``divergent`` the dimmed ``(cycle_id, round)`` coordinates STRICTLY after each."""
-
-    model_config = ConfigDict(frozen=True)
 
     divergences: list[Divergence] = Field(default_factory=list)
     divergent: list[tuple[str, int]] = Field(default_factory=list)

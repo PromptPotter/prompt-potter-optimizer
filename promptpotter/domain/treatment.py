@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-from pydantic import ConfigDict
-
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import stable_hash
 
 
-class Treatment(StrictModel):
+class Treatment(FrozenModel):
     """Two runs are one treatment only where ``digest`` agrees; no measurement key reads it."""
-
-    model_config = ConfigDict(frozen=True)
 
     optimizer: str
     version: str

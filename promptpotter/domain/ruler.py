@@ -6,9 +6,9 @@ from enum import StrEnum
 from statistics import NormalDist
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
@@ -23,11 +23,9 @@ Ruler = Mapping[str, RulerEntry]
 type RulerRow = tuple[str, str, float]
 
 
-class RulerScope(StrictModel):
+class RulerScope(FrozenModel):
     """What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale only through
     cells they share, and two datasets share none, so a δ is never compared across datasets."""
-
-    model_config = ConfigDict(frozen=True)
 
     scorer: str
     dataset: str
@@ -47,21 +45,17 @@ class CellScopes(NamedTuple):
         return len({self.by_key[k] for k in keys})
 
 
-class RulerFold(StrictModel):
+class RulerFold(FrozenModel):
     """One line of the tenant's ruler: an election's rows, folded after it. The line count is the
     version, so a version is a prefix and a re-fit at it is the fit an election read."""
-
-    model_config = ConfigDict(frozen=True)
 
     scope: RulerScope
     rows: list[RulerRow]
 
 
-class RulerStamp(StrictModel):
+class RulerStamp(FrozenModel):
     """The δ scale a reading was taken on: the tenant ruler at ``version`` less the rows of
     ``excluded``, the judged individuals it held. A cold stamp's ``id`` is flat."""
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     version: int = Field(ge=0)
@@ -251,9 +245,7 @@ def anchor_id_of(
     )
 
 
-class DeltaRuler(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class DeltaRuler(FrozenModel):
     delta: dict[str, float]
     delta_se: dict[str, float]
     # 2PL only; empty under 1PL, where a ≡ 1.
@@ -322,10 +314,8 @@ if _missing_delta_labels:
     )
 
 
-class RulerStanding(StrictModel):
+class RulerStanding(FrozenModel):
     """Whether a scope has a δ ruler, and which one."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: Literal["fitted", "not_fitted"]
     ruler_id: str | None = Field(
@@ -353,10 +343,8 @@ class RulerStanding(StrictModel):
         return DeltaState.LINKED if carried else DeltaState.UNLINKED
 
 
-class AbilityReading(StrictModel):
+class AbilityReading(FrozenModel):
     """A Rasch θ and the δ scale it was read on, held as one value because apart they mean nothing."""
-
-    model_config = ConfigDict(frozen=True)
 
     theta: float
     se: float | None
@@ -399,10 +387,8 @@ def theta_band(theta: float | None, se: float | None) -> tuple[float, float] | N
     return theta - _THETA_BAND_Z * se, theta + _THETA_BAND_Z * se
 
 
-class SeriesReading(StrictModel):
+class SeriesReading(FrozenModel):
     """A round's level as its series read it, under the one caveat that withholds it."""
-
-    model_config = ConfigDict(frozen=True)
 
     reading: AbilityReading = Field(
         description="The round's level: the individual it ended on, read on the series' one scale"
@@ -413,10 +399,8 @@ class SeriesReading(StrictModel):
     )
 
 
-class LevelSeries(StrictModel):
+class LevelSeries(FrozenModel):
     """Every round's ended-on individual read on ONE δ scale, so any two of its levels difference."""
-
-    model_config = ConfigDict(frozen=True)
 
     stamp: RulerStamp = Field(
         description="The scale every level is read on: the tenant ruler at the run's clock, less "

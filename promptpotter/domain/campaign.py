@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Any, Literal, TypedDict, Unpack, assert_never
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
 from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
@@ -13,15 +13,13 @@ from promptpotter.domain.paired_reading import CellSet, instrument_of
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.run_records import WallClock
 from promptpotter.domain.spend import Budget, CeilingMeter, money_axes_only
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.hashing import stable_hash
 
 
-class BenchSet(StrictModel):
+class BenchSet(FrozenModel):
     """The bench set and grader behind a headline; two compare only where every field agrees."""
-
-    model_config = ConfigDict(frozen=True)
 
     # `instrument_of`: the id a pair refuses two members across.
     instrument_id: str
@@ -57,11 +55,9 @@ def bench_set_of(
     )
 
 
-class StoppingRule(StrictModel):
+class StoppingRule(FrozenModel):
     """What stops a run short of its budget, so no arm outlasts another on a stall the other was
     stopped for."""
-
-    model_config = ConfigDict(frozen=True)
 
     lives: dict[str, int] | None
     convergence_patience: int | None
@@ -104,27 +100,21 @@ class DeterminismClamp(StrictModel):
     )
 
 
-class Arm(StrictModel):
+class Arm(FrozenModel):
     """The head-to-head a campaign is an arm of, frozen at mint."""
-
-    model_config = ConfigDict(frozen=True)
 
     head_to_head_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     arm_key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-class Optimize(StrictModel):
+class Optimize(FrozenModel):
     """Every measurement and steer on disk is admissible."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: Literal["optimize"] = "optimize"
 
 
-class Compare(StrictModel):
+class Compare(FrozenModel):
     """A run of *arm*, and every L4 cell spawned under it: it reads only what a fresh run would."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: Literal["compare"] = "compare"
     arm: Arm
@@ -134,21 +124,17 @@ class Compare(StrictModel):
 Purpose = Annotated[Optimize | Compare, Field(discriminator="kind")]
 
 
-class Environment(StrictModel):
+class Environment(FrozenModel):
     """What the target runs on and is graded by (``target``: the set keys of its node models, host
     pins, chain, framing and grader), behind ``connector``, whose identity contributions derive
     from it and the dataset."""
-
-    model_config = ConfigDict(frozen=True)
 
     connector: str = Field(min_length=1)
     target: dict[str, Any]
 
 
-class SharedPart(StrictModel):
+class SharedPart(FrozenModel):
     """What every arm of a head-to-head declares alike: the record its arms join on."""
-
-    model_config = ConfigDict(frozen=True)
 
     dataset_hash: str
     run_seed: int | None
@@ -159,12 +145,10 @@ class SharedPart(StrictModel):
     bench_defaults_pin: str
 
 
-class RunDeclaration(StrictModel):
+class RunDeclaration(FrozenModel):
     """What a campaign, an L4 seat and a head-to-head arm each ARE: every part is what a layer
     named, never a default restated, beside ``bench_defaults_pin``, the bench defaults it is a
     delta over as they stood when it was declared — its optimizer's are its campaign's ``Treatment``."""
-
-    model_config = ConfigDict(frozen=True)
 
     dataset_hash: str = Field(min_length=1)
     run_seed: int | None
@@ -210,11 +194,9 @@ def _pinned(loop: Mapping[str, Any], keys: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-class HeadToHeadRecord(StrictModel):
+class HeadToHeadRecord(FrozenModel):
     """``head_to_heads/{id}.json``: what its arms declare alike, and the origin each resolved to —
     an arm declaring another is refused at its mint."""
-
-    model_config = ConfigDict(frozen=True)
 
     head_to_head_id: str
     created_at: str
@@ -244,9 +226,7 @@ def comparison_line(purpose: Purpose) -> str:
             assert_never(purpose)
 
 
-class Launch(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class Launch(FrozenModel):
     started_at: str
     finished_at: str
     clock: WallClock
@@ -262,11 +242,9 @@ def worked_seconds(launches: list[Launch]) -> float | None:
     return sum(worked) if worked else None
 
 
-class CampaignResult(StrictModel):
+class CampaignResult(FrozenModel):
     """``campaigns/{id}/result.json``, rewritten at every launch end by the cycle holding the line.
     Its calls and spend are folds of the line's ledgers, read where they are asked for."""
-
-    model_config = ConfigDict(frozen=True)
 
     # The cycle answering for the line when this was written — the root, or where rebases led.
     cycle_id: str
@@ -294,10 +272,8 @@ class CampaignEdit(TypedDict, total=False):
     standing_budget: Budget
 
 
-class Campaign(StrictModel):
+class Campaign(FrozenModel):
     """Identity, declaration and visibility INTENT only, never run state."""
-
-    model_config = ConfigDict(frozen=True)
 
     campaign_id: str
     dataset_name: str

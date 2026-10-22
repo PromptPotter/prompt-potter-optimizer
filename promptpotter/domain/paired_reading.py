@@ -7,11 +7,11 @@ from collections.abc import Collection
 from enum import StrEnum
 from typing import Annotated, Literal, NamedTuple, NewType, Self
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
@@ -194,10 +194,8 @@ def interval_side(
 ArmKey = NewType("ArmKey", str)
 
 
-class ArmName(StrictModel):
+class ArmName(FrozenModel):
     """One arm of the run: its key, and where it was first walked."""
-
-    model_config = ConfigDict(frozen=True)
 
     key: ArmKey = Field(
         description="THE join: the individual's content id, or the slot hash of a proposal "
@@ -210,10 +208,8 @@ class ArmName(StrictModel):
     )
 
 
-class MemberAddress(StrictModel):
+class MemberAddress(FrozenModel):
     """Where one member of a pair was read: the cycle, the individual, and the pass."""
-
-    model_config = ConfigDict(frozen=True)
 
     path: tuple[CycleHop, ...] = Field(
         min_length=1, description="The cycle the member was read in, root to leaf."
@@ -227,10 +223,8 @@ class MemberAddress(StrictModel):
     )
 
 
-class PairMember(StrictModel):
+class PairMember(FrozenModel):
     """One side of a pair, and what it holds on the pair's cell set."""
-
-    model_config = ConfigDict(frozen=True)
 
     address: MemberAddress
     n: int = Field(description="Cells of the set this member holds a scoreable row on.")
@@ -255,10 +249,8 @@ class CellSetBasis(StrEnum):
     MASKED = "masked"
 
 
-class CellSet(StrictModel):
+class CellSet(FrozenModel):
     """The cells a pair is read on, as an identity two readings can be compared by."""
-
-    model_config = ConfigDict(frozen=True)
 
     name: CellSetName
     basis: CellSetBasis
@@ -306,10 +298,8 @@ class MeasurandUnit(StrEnum):
     SCORE = "score"
 
 
-class Measurand(StrictModel):
+class Measurand(FrozenModel):
     """What is read off each cell, and under which scorer."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: MeasurandKind
     key: str = Field(description="The grade, the channel name or the expression text.")
@@ -321,10 +311,8 @@ class Measurand(StrictModel):
     unit: MeasurandUnit
 
 
-class EstimatorSpec(StrictModel):
+class EstimatorSpec(FrozenModel):
     """How a lift's two-sided interval and test were taken; the estimate is the mean paired difference."""
-
-    model_config = ConfigDict(frozen=True)
 
     alpha: float
     null_value: float = Field(description="The difference the test and `side` are read against.")
@@ -334,10 +322,8 @@ class EstimatorSpec(StrictModel):
 ROUND_LIFT_SPEC = EstimatorSpec(alpha=0.05, null_value=0.0)
 
 
-class LiftEstimate(StrictModel):
+class LiftEstimate(FrozenModel):
     """A mean paired difference with its interval and test."""
-
-    model_config = ConfigDict(frozen=True)
 
     value: float
     ci_lo: float
@@ -353,10 +339,8 @@ class LiftEstimate(StrictModel):
     )
 
 
-class TestFamily(StrictModel):
+class TestFamily(FrozenModel):
     """The set of tests one multiple-comparison correction was taken across."""
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     n_tests: int
@@ -364,20 +348,16 @@ class TestFamily(StrictModel):
     p_adjusted: float
 
 
-class FlipCounts(StrictModel):
+class FlipCounts(FrozenModel):
     """What moving from member `a` to member `b` did cell by cell, on a binary measurand."""
-
-    model_config = ConfigDict(frozen=True)
 
     gained: int = Field(description="Cells `a` missed and `b` hit.")
     lost: int = Field(description="Cells `a` hit and `b` missed.")
     unchanged: int
 
 
-class MeasuredLift(StrictModel):
+class MeasuredLift(FrozenModel):
     """One measurand's lift of member `b` over member `a`, on the cells both scored."""
-
-    model_config = ConfigDict(frozen=True)
 
     measurand: Measurand
     rate_a: float = Field(description="`a`'s mean over the cells BOTH scored, never its own level.")
@@ -403,10 +383,8 @@ class CoverageState(StrEnum):
     INCIDENTAL = "incidental"
 
 
-class Coverage(StrictModel):
+class Coverage(FrozenModel):
     """How much of the cell set a lift stands on."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: CoverageState
     shared: int = Field(description="Cells of the set both members hold a row on.")
@@ -425,10 +403,8 @@ class Coverage(StrictModel):
         return self
 
 
-class PairedReading(StrictModel):
+class PairedReading(FrozenModel):
     """One pair of addressed individuals read on one cell set."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: ReadingState
     a: PairMember | None

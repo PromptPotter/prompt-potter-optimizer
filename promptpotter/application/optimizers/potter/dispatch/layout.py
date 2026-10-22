@@ -3,13 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from pydantic import ConfigDict
-
 from promptpotter.application.optimizer_manifest import declared_node_override
 from promptpotter.application.optimizers.nodes import LlmNode
 from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -82,9 +80,7 @@ assert [f for f in _OPTIMIZER_ORDER if f in L1_LAYOUT_SLOTS] == list(L1_LAYOUT_S
 )
 
 
-class NodeLayoutSpec(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class NodeLayoutSpec(FrozenModel):
     possible: frozenset[str]
     mandatory: frozenset[str]
     floor: L1Layout

@@ -4,7 +4,7 @@ from collections.abc import Callable, Collection, Sequence
 from enum import StrEnum
 from typing import TYPE_CHECKING, NamedTuple, Self
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from promptpotter.application.campaign_config import over_the_default
 from promptpotter.application.datasets.authored import scorer_of
@@ -36,7 +36,7 @@ from promptpotter.domain.campaign import (
 from promptpotter.domain.cycle_listing import RunStatus
 from promptpotter.domain.paired_reading import PairedReading, ReadingState
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.shared.clock import epoch_seconds
 
@@ -131,12 +131,10 @@ assert GUARD_DIFFERENCE_INFO.keys() == set(GuardDifference)
 assert set(BenchSet.model_fields) <= {d.value for d in GuardDifference}
 
 
-class PairGuard(StrictModel):
+class PairGuard(FrozenModel):
     """The comparability guard: whether the bench headlines it is taken over — a pair's, a row's
     against the table's standard, the whole table's — are one quantity. It LABELS a comparison
     and refuses none: a pair that differs is still read, and says on what."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: GuardState
     sentence: str = Field(description="`state` in words, with what differs behind it.")

@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal, cast
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING, RoundOutput, StateSlice
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_records import CheckpointKind
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -104,10 +104,8 @@ class L3Memory(StateSlice, kind="l3_memory"):
     )
 
 
-class LayerCounters(StrictModel):
+class LayerCounters(FrozenModel):
     """The peak a stall is read against is seeded at the layer's first patience fire and moved only by an advance clearing it."""
-
-    model_config = ConfigDict(frozen=True)
 
     fires: int = 0
     stall_count: int = 0
