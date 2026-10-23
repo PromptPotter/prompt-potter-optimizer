@@ -8,537 +8,40 @@ import textwrap
 import types
 import typing
 from collections.abc import Mapping
-from pathlib import Path
 
-from pydantic import BaseModel, TypeAdapter
+from fastapi.routing import APIRoute
+from processes import REPO
+from pydantic import BaseModel
 from pydantic.fields import ComputedFieldInfo, FieldInfo
 
-# ruff: noqa: E402 -- we import from promptpotter after adjusting sys.path
-_REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_REPO))
+sys.path.insert(0, str(REPO))
 
-from promptpotter.application.bench.task_context import OriginNextAction, OriginQuestion
-from promptpotter.application.campaign_listing import CampaignListResponse, CampaignSummary
-from promptpotter.application.commands.origin_resolving import ResolveOriginResponse
-from promptpotter.application.commands.payloads import (
-    CommandAcceptedBody,
-    DatasetReplaced,
-    EditDraftCampaignPayload,
-    StartCheckinPayload,
-    StartRunPayload,
-)
-from promptpotter.application.config_map import (
-    ConfigCoupling,
-    ConfigEstimandGroup,
-    ConfigKnob,
-    ConfigMapResponse,
-)
-from promptpotter.application.cycle_files import FileContentResponse, FileEntry, FilesResponse
-from promptpotter.application.cycle_listing import CyclesResponse
-from promptpotter.application.datasets.draft_build import DraftCampaignWire, DraftDependency
-from promptpotter.application.datasets.draft_campaign import (
-    EditDraftPatch,
-    NodeOutputEdit,
-    OptimizationOverrides,
-)
-from promptpotter.application.datasets.origin_readiness import (
-    FieldGap,
-    OriginLastResolution,
-    OriginReadiness,
-    OriginResolution,
-    RaisedCommand,
-)
-from promptpotter.application.evidence.comparison import (
-    ArmReplicate,
-    Comparability,
-    EnvironmentReading,
-    EvidencePower,
-    EvidenceVariance,
-    LiftProfile,
-    MetricReading,
-    OrderConfound,
-    PairwiseComparison,
-    RankAgreement,
-)
-from promptpotter.application.evidence.grid import (
-    FactorCell,
-    FactorGridReading,
-    FactorLevel,
-    FactorReading,
-)
-from promptpotter.application.evidence.head_to_head import (
-    HeadToHead,
-    HeadToHeadRow,
-    PairGuard,
-    SelectionPair,
-)
-from promptpotter.application.evidence.metric_catalogue import MetricSpec
-from promptpotter.application.evidence.read import (
-    ConfigKeys,
-    EditSpread,
-    EffectProvenance,
-    Evidence,
-    RankedEdit,
-)
-from promptpotter.application.evidence.subjects import (
-    ScenarioReading,
-    SubjectMask,
-    SubjectReading,
-    WinnerChainPoint,
-)
-from promptpotter.application.jobs.account_activity import ActivityBucket, ActivityResponse
-from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
-from promptpotter.application.jobs.machine_status import (
-    MachineNotice,
-    MachineQueueEntry,
-    MachineRefusal,
-    MachineSlot,
-    MachineStatusResponse,
-)
-from promptpotter.application.jobs.quota import QuotaStatus
-from promptpotter.application.jobs.registry import CampaignLaunch, ScoringPass
-from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
-from promptpotter.application.maintenance.storage_report import (
-    CampaignStorageResponse,
-    DatasetStorageEntry,
-    DatasetStorageResponse,
-    WorkspaceStorageEntry,
-    WorkspaceStorageResponse,
-)
-from promptpotter.application.origin_listing import DatasetIndexEntry, OriginEntry
-from promptpotter.application.pipeline_resolve import (
-    CampaignPipelineResponse,
-    CampaignRunsWith,
-    DatasetPipelineResponse,
-    KnobRow,
-    NodeKnobs,
-    OptimizerEntry,
-    OptimizerKnobsResponse,
-    OptimizerPipelineResponse,
-    OptimizerRoster,
-    RunsWithParam,
-    StartPrompt,
-    VendorModels,
-)
-from promptpotter.application.served_dashboard import (
-    RoundAxis,
-    SampleWalk,
-    ServedDashboard,
-    VerifyPassProgress,
-    WarmingDashboard,
-)
-from promptpotter.domain.activity import (
-    ActivityDecision,
-    ActivityItem,
-    ActivityState,
-    DecisionAction,
-    DecisionFact,
-)
-from promptpotter.domain.backend import ServedBackpressure
-from promptpotter.domain.bench import (
-    BandedValue,
-    BenchReading,
-    BenchScope,
-    BenchScore,
-    BenchStatus,
-    DatasetSplit,
-    LiftCost,
-    OwnLevel,
-    PassStop,
-)
-from promptpotter.domain.campaign import Arm, ArmBudget, BenchSet
-from promptpotter.domain.cells import (
-    Cell,
-    CellCandidate,
-    CellRow,
-    CellSpan,
-    CellsResponse,
-    DatasetItem,
-)
-from promptpotter.domain.command_kinds import CommandKind, OriginGateDecisionPayload
-from promptpotter.domain.cycle_listing import CycleListEntry, LineStanding, RunStatus
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.dashboard_rows import (
-    DashboardCandidate,
-    DashboardSample,
-    LiveCandidate,
-    OptimizerLimit,
-    RunLimits,
-    ServedRound,
-)
-from promptpotter.domain.dataset_start import DatasetStartBlock
-from promptpotter.domain.l4.proxies import PanelPrecision
-from promptpotter.domain.launch_limits import LaunchLimits, RunMode
-from promptpotter.domain.opt_search_point import (
-    EvidenceGrounding,
-    IndividualLineage,
-    OptSearchPoint,
-    Variation,
-)
-from promptpotter.domain.optimizer_state import OptimizerState
-from promptpotter.domain.paired_reading import (
-    ArmPointer,
-    CellSet,
-    Coverage,
-    EstimatorSpec,
-    FlipCounts,
-    LiftEstimate,
-    Measurand,
-    MeasuredLift,
-    MemberAddress,
-    PairedReading,
-    PairMember,
-    TestFamily,
-)
-from promptpotter.domain.phases import (
-    PauseReading,
-    ProducerAlert,
-    ProducerReading,
-    RunAdmission,
-)
-from promptpotter.domain.pipeline_schema import (
-    ManifestNodeOverlay,
-    ModelCapability,
-    NestedPipelineRef,
-    NodeConfigParam,
-    NodeOutputSchema,
-    NodeReach,
-    NodeSearchNarrowing,
-    ParamIntent,
-    PipelineView,
-    PipelineViewEdge,
-    PipelineViewNode,
-)
-from promptpotter.domain.projection_envelope import ProjectionEnvelope
-from promptpotter.domain.results import (
-    ArmAbility,
-    ArmElection,
-    ArmPanel,
-    ArmReading,
-    ArmSpend,
-    DegradationContext,
-    DegradationHealth,
-    LineRate,
-    LivesReading,
-    OptimizerFact,
-    OverlapReading,
-    RoundResult,
-    RunStanding,
-    ScoreboardRow,
-    ScoredCandidate,
-    VerifyReading,
-)
-from promptpotter.domain.round_audit import (
-    LoopWarning,
-    NodeBlock,
-    NodeInput,
-    NodeOutput,
-    RoundAudit,
-)
-from promptpotter.domain.ruler import AbilityReading, RulerStanding
-from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ForkRemainder, SpawnedBy
-from promptpotter.domain.scoring import (
-    SHEET_ROW,
-    Diagnostics,
-    JudgeReading,
-    NodeWarning,
-    PipelineData,
-    RerunComparison,
-    TurnRecord,
-)
-from promptpotter.domain.spend import (
-    CloseSpend,
-    KindSpend,
-    MeteredSpend,
-    PrefixReading,
-    SpendBucket,
-    SpendCeilings,
-    SpendRollup,
-    StepUsage,
-    TokenAccount,
-)
-from promptpotter.domain.wire_record import record_of
-from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
-from promptpotter.infrastructure.projections.live_dashboard.state import (
-    BackendWarning,
-    BenchPassProgress,
-    CatchUpLogEntry,
-    CurrentRound,
-    DashboardError,
-    RacingBlock,
-)
-from promptpotter.infrastructure.store.account_spend import LifetimeSpend
-from promptpotter.infrastructure.store.family_ray_queries import RayItem, RayResponse
-from promptpotter.infrastructure.store.lineage_queries import (
-    ArmNode,
-    CourseNode,
-    ForkStamp,
-    LensShift,
-    LineageDivergence,
-    MainLineStep,
-)
-from promptpotter.main import HealthResponse
-from promptpotter.presentation.api.routers.active import ActiveSessionResponse
-from promptpotter.presentation.api.routers.auth import (
-    ConnectedAccount,
-    MeResponse,
-    UserSettings,
-)
-from promptpotter.presentation.api.routers.backends import (
-    BackendHealthResponse,
-    BackendResponse,
-)
-from promptpotter.presentation.api.routers.campaigns.manifests import (
-    CheckinReopenResponse,
-    ForkPreviewResponse,
-)
-from promptpotter.presentation.api.routers.datasets.index import DatasetIndexResponse
-from promptpotter.presentation.api.routers.origins import OriginListResponse
-
-EXPORTED_MODELS: list[type] = [
-    # The emitter does not recurse: register every nested type, before its container.
-    ArchiveReport,
-    AbilityReading,
-    VerifyReading,
-    ArmPanel,
-    PrefixReading,
-    ArmSpend,
-    ArmAbility,
-    ArmElection,
-    ArmReading,
-    DashboardCandidate,
-    DashboardSample,
-    DegradationHealth,
-    PanelPrecision,
-    OverlapReading,
-    LineRate,
-    OptimizerFact,
-    ServedRound,
-    ValidationFailure,
-    RuntimeFailure,
-    DegradationContext,
-    ScoredCandidate,
-    ScoreboardRow,
-    EvidenceGrounding,
-    Variation,
-    IndividualLineage,
-    OptimizerState,
-    OptSearchPoint,
-    record_of(StepUsage),
-    TurnRecord,
-    record_of(NodeWarning),
-    record_of(Diagnostics),
-    record_of(JudgeReading),
-    record_of(PipelineData),
-    RerunComparison,
-    SHEET_ROW,
-    RoundResult,
-    SpendBucket,
-    SpendRollup,
-    KindSpend,
-    MeteredSpend,
-    LifetimeSpend,
-    ForkRemainder,
-    ServedBackpressure,
-    BackendWarning,
-    LoopWarning,
-    DashboardError,
-    OptimizerLimit,
-    SpendCeilings,
-    RunLimits,
-    CloseSpend,
-    LivesReading,
-    RunStanding,
-    CatchUpLogEntry,
-    RacingBlock,
-    LiveCandidate,
-    TokenAccount,
-    NodeInput,
-    NodeOutput,
-    NodeBlock,
-    RoundAudit,
-    CurrentRound,
-    BenchPassProgress,
-    VerifyPassProgress,
-    ArmPointer,
-    ProducerAlert,
-    ProducerReading,
-    RunAdmission,
-    PauseReading,
-    SampleWalk,
-    RoundAxis,
-    ServedDashboard,
-    WarmingDashboard,
-    MemberAddress,
-    PairMember,
-    CellSet,
-    Measurand,
-    EstimatorSpec,
-    LiftEstimate,
-    TestFamily,
-    FlipCounts,
-    MeasuredLift,
-    Coverage,
-    PairedReading,
-    DatasetItem,
-    CellCandidate,
-    CellRow,
-    RulerStanding,
-    CellsResponse,
-    CellSpan,
-    Cell,
-    ModelCapability,
-    NodeConfigParam,
-    NodeOutputSchema,
-    NodeReach,
-    PipelineViewNode,
-    PipelineViewEdge,
-    PipelineView,
-    NestedPipelineRef,
-    DatasetPipelineResponse,
-    ActiveSessionResponse,
-    SpawnedBy,
-    BandedValue,
-    OwnLevel,
-    BenchReading,
-    PassStop,
-    BenchStatus,
-    LiftCost,
-    BenchScope,
-    BenchScore,
-    CycleListEntry,
-    RunStatus,
-    LineStanding,
-    CyclesResponse,
-    CommandAcceptedBody,
-    LaunchLimits,
-    RunMode,
-    StartCheckinPayload,
-    StartRunPayload,
-    RunsWithParam,
-    VendorModels,
-    CampaignRunsWith,
-    Arm,
-    CampaignSummary,
-    CampaignListResponse,
-    CampaignPipelineResponse,
-    ForkPreviewResponse,
-    EffectProvenance,
-    EditSpread,
-    RankedEdit,
-    ConfigKeys,
-    Comparability,
-    ArmReplicate,
-    FactorCell,
-    FactorGridReading,
-    FactorLevel,
-    FactorReading,
-    EvidenceVariance,
-    EvidencePower,
-    OrderConfound,
-    MetricSpec,
-    SubjectMask,
-    ScenarioReading,
-    WinnerChainPoint,
-    SubjectReading,
-    PairwiseComparison,
-    MetricReading,
-    EnvironmentReading,
-    RankAgreement,
-    LiftProfile,
-    DatasetSplit,
-    BenchSet,
-    ArmBudget,
-    PairGuard,
-    HeadToHeadRow,
-    SelectionPair,
-    HeadToHead,
-    Evidence,
-    FileEntry,
-    FilesResponse,
-    FileContentResponse,
-    CycleHop,
-    LineageDivergence,
-    ForkStamp,
-    LensShift,
-    MainLineStep,
-    ArmNode,
-    CourseNode,
-    RayItem,
-    RayResponse,
-    ProjectionEnvelope,
-    ActivityItem,
-    DecisionFact,
-    DecisionAction,
-    ActivityDecision,
-    ActivityState,
-    ConnectedAccount,
-    MeResponse,
-    QuotaStatus,
-    UserSettings,
-    ActivityBucket,
-    ActivityResponse,
-    HealthResponse,
-    BackendResponse,
-    BackendHealthResponse,
-    CampaignLaunch,
-    ScoringPass,
-    MachineSlot,
-    MachineNotice,
-    MachineQueueEntry,
-    MachineRefusal,
-    MachineStatusResponse,
-    StartPrompt,
-    OptimizerPipelineResponse,
-    DatasetIndexEntry,
-    DatasetStartBlock,
-    DatasetIndexResponse,
-    OriginEntry,
-    OriginListResponse,
-    CampaignStorageResponse,
-    WorkspaceStorageEntry,
-    WorkspaceStorageResponse,
-    DatasetStorageEntry,
-    DatasetStorageResponse,
-    OptimizerKnobsResponse,
-    NodeKnobs,
-    KnobRow,
-    OptimizerRoster,
-    OptimizerEntry,
-    ConfigKnob,
-    ConfigEstimandGroup,
-    ConfigCoupling,
-    ConfigMapResponse,
-    ConfigOverrides,
-    ManifestNodeOverlay,
-    NodeSearchNarrowing,
-    CycleSeed,
-    OriginGateDecisionPayload,
-    OptimizationOverrides,
-    ParamIntent,
-    NodeOutputEdit,
-    EditDraftPatch,
-    EditDraftCampaignPayload,
-    FieldGap,
-    OriginReadiness,
-    DraftDependency,
-    DraftCampaignWire,
-    OriginQuestion,
-    OriginNextAction,
-    OriginLastResolution,
-    RaisedCommand,
-    OriginResolution,
-    ResolveOriginResponse,
-    CheckinReopenResponse,
-    StartCheckinResponse,
-    DatasetReplaced,
-]
-
-_OUT_PATH = _REPO / "webapp" / "lib" / "api" / "types.generated.ts"
+from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
+from promptpotter.main import API_ROUTERS, app
+from promptpotter.presentation.api.routers.commands import commands_router
 
 
-def _is_none_type(t: typing.Any) -> bool:
-    return t is type(None)
+def _served_roots() -> list[typing.Any]:
+    roots: list[typing.Any] = [app.router.responses["default"]["model"]]
+    for router in API_ROUTERS:
+        for route in router.routes:
+            # FastAPI sets `response_model` on the instance outside `APIRoute`'s declared attributes.
+            if isinstance(route, APIRoute) and (answer := vars(route)["response_model"]):
+                roots.append(answer)
+    return roots
+
+
+_OUT_PATH = REPO / "webapp" / "lib" / "api" / "types.generated.ts"
+
+# Each named type the roots reach, in the order first reached, held as its interface.
+_EXPORTED: dict[type, str] = {}
+
+
+def _export(owner: type) -> str:
+    if owner not in _EXPORTED:
+        _EXPORTED[owner] = ""  # held before its fields are walked: a type may reach itself
+        _EXPORTED[owner] = _emit_interface(owner)
+    return str(owner.__name__)
 
 
 def _array_of(member: typing.Any) -> str:
@@ -555,10 +58,12 @@ def _emit_type(annotation: typing.Any) -> str:
         return "number"
     if annotation is bool:
         return "boolean"
-    if _is_none_type(annotation):
+    if annotation is type(None):
         return "null"
     if isinstance(annotation, typing.TypeAliasType):
         return _emit_type(annotation.__value__)
+    if isinstance(annotation, typing.NewType):
+        return _emit_type(annotation.__supertype__)
 
     if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
         return " | ".join(
@@ -566,7 +71,7 @@ def _emit_type(annotation: typing.Any) -> str:
         )
 
     if typing.is_typeddict(annotation):
-        return str(annotation.__name__)
+        return _export(annotation)
 
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
@@ -575,14 +80,15 @@ def _emit_type(annotation: typing.Any) -> str:
         return _emit_type(args[0])
 
     if origin in (typing.Union, types.UnionType):
-        has_none = any(_is_none_type(a) for a in args)
-        non_none = [a for a in args if not _is_none_type(a)]
+        has_none = type(None) in args
+        non_none = [a for a in args if a is not type(None)]
         rendered = " | ".join(_emit_type(a) for a in non_none)
         return f"{rendered} | null" if has_none else rendered
 
     if origin is typing.Literal:
+        values = [a.value if isinstance(a, enum.Enum) else a for a in args]
         # `json.dumps` for a non-string: a Python `True` is not a TypeScript literal.
-        return " | ".join(repr(a) if isinstance(a, str) else json.dumps(a) for a in args)
+        return " | ".join(repr(v) if isinstance(v, str) else json.dumps(v) for v in values)
 
     if origin in (list, set, frozenset):
         (inner,) = args
@@ -600,32 +106,35 @@ def _emit_type(annotation: typing.Any) -> str:
         return f"Record<string, {_emit_type(v_type)}>"
 
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return annotation.__name__ if annotation.model_fields else "Record<string, unknown>"
+        return _export(annotation) if annotation.model_fields else "Record<string, unknown>"
 
-    if isinstance(annotation, type) and "__get_pydantic_core_schema__" in vars(annotation):
-        declared = TypeAdapter(annotation).json_schema(mode="serialization")
-        return f"{declared['items']['$ref'].rpartition('/')[2]}[]"
+    if isinstance(annotation, type) and "__get_pydantic_json_schema__" in vars(annotation):
+        hooked: typing.Any = annotation
+        declared = hooked.__get_pydantic_json_schema__(None, lambda schema: schema)
+        return _array_of(declared["items_schema"]["cls"])
 
-    if dataclasses.is_dataclass(annotation) and annotation in EXPORTED_MODELS:
-        return str(annotation.__name__)
+    if isinstance(annotation, type) and dataclasses.is_dataclass(annotation):
+        return _export(annotation)
 
     return "unknown"
 
 
-def _emit_field(name: str, info: FieldInfo, annotation: typing.Any) -> str:
-    # Pydantic serializes defaults on the wire ⇒ no `?` in TS, only `| null` for Optional.
+def _jsdoc(text: str | None) -> str:
+    return f"  /** {textwrap.fill(text, width=78, subsequent_indent='   * ')} */\n" if text else ""
+
+
+def _emit_field(name: str, info: FieldInfo, annotation: typing.Any, *, omittable: bool) -> str:
+    # Pydantic serializes defaults on the wire ⇒ no `?` in TS, unless a serializer drops the field.
     ts_type = _emit_type(annotation)
-    description = info.description
-    comment_block = ""
-    if description:
-        wrapped = textwrap.fill(description, width=78, subsequent_indent="   * ")
-        comment_block = f"  /** {wrapped} */\n"
-    return f"{comment_block}  {info.alias or name}: {ts_type};"
+    return f"{_jsdoc(info.description)}  {info.alias or name}{'?' if omittable else ''}: {ts_type};"
 
 
-def _resolved_hints(model: type[BaseModel]) -> dict[str, typing.Any]:
-    """``model_fields[...].annotation`` can hold a bare ``ForwardRef``, which emits ``unknown``."""
-    return typing.get_type_hints(model)
+def _omitted_unset(model: type[BaseModel]) -> frozenset[str]:
+    """The fields a model's own serializer leaves off the wire when nobody set them."""
+    if any(info.is_required() for info in model.model_fields.values()):
+        return frozenset()
+    dumped = model.model_construct().model_dump(mode="json")
+    return frozenset(name for name in model.model_fields if name not in dumped)
 
 
 def _computed_return_type(model: type[BaseModel], name: str) -> typing.Any:
@@ -637,12 +146,7 @@ def _computed_return_type(model: type[BaseModel], name: str) -> typing.Any:
 
 def _emit_computed_field(model: type[BaseModel], name: str, info: ComputedFieldInfo) -> str:
     ts_type = _emit_type(_computed_return_type(model, name))
-    doc = (info.description or "").strip()
-    comment_block = ""
-    if doc:
-        wrapped = textwrap.fill(doc, width=78, subsequent_indent="   * ")
-        comment_block = f"  /** {wrapped} */\n"
-    return f"{comment_block}  {name}: {ts_type};"
+    return f"{_jsdoc((info.description or '').strip())}  {name}: {ts_type};"
 
 
 def _emit_enum_union(enum_cls: type[enum.Enum], note: str) -> str:
@@ -658,21 +162,37 @@ def _emit_lifecycle_filter() -> str:
     return f"// {note}\nexport type LifecycleFilter = {members};"
 
 
-def _emit_arm_outcomes_ended_early() -> str:
-    from promptpotter.domain.results import ArmOutcome
-
-    members = ", ".join(repr(o.value) for o in ArmOutcome if o.ended_early)
+def _emit_command_contract() -> str:
+    """Exports what it names, so it runs before the exported blocks are collected."""
+    answers = {
+        route.path.removeprefix("/commands/"): vars(route)["response_model"]
+        for route in commands_router.routes
+        if isinstance(route, APIRoute)
+    }
+    kinds = sorted(CommandKind)
+    sent, answered = [], []
+    for kind in kinds:
+        model = PAYLOAD_MODEL_FOR_KIND[kind]
+        required = [name for name, info in model.model_fields.items() if info.is_required()]
+        keys = " | ".join(json.dumps(name) for name in required) or "never"
+        sent.append(f"  {json.dumps(kind.value)}: CommandSent<{_export(model)}, {keys}>;")
+        answered.append(f"  {json.dumps(kind.value)}: {_emit_type(answers[kind.value])};")
+    members = " | ".join(json.dumps(k.value) for k in kinds)
     return (
-        "// The outcomes whose walk stopped before its panel "
-        "(domain/results.py::ArmOutcome.ended_early).\n"
-        f"export const ARM_OUTCOMES_ENDED_EARLY: readonly ArmOutcome[] = [{members}];"
+        "// Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).\n"
+        f"export type CommandKind = {members};\n\n"
+        "type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;\n"
+        "// A body as sent: its required keys, every other one omittable at any depth.\n"
+        "export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } & {\n"
+        "  [P in Exclude<keyof T, K>]?: DeepPartial<T[P]>;\n"
+        "};\n\n"
+        "// Each kind's body IS its payload model "
+        "(domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).\n"
+        "export interface CommandPayloads {\n" + "\n".join(sent) + "\n}\n\n"
+        "// What each kind answers: its route's `response_model` "
+        "(presentation/api/routers/commands.py).\n"
+        "export interface CommandResponses {\n" + "\n".join(answered) + "\n}"
     )
-
-
-def _emit_command_kinds() -> str:
-    members = " | ".join(repr(k.value) for k in sorted(CommandKind))
-    note = "Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py)."
-    return f"// {note}\nexport type CommandKind = {members};"
 
 
 def _emit_stop_reason_tables() -> str:
@@ -711,7 +231,6 @@ def _emit_run_phase_tables() -> str:
         "label",
         "walks",
         "settled",
-        "authoring",
         "awaits_operator",
         "dock_priority",
         "parked",
@@ -734,7 +253,6 @@ def _emit_run_phase_tables() -> str:
         "  label: string;\n"
         "  walks: boolean;\n"
         "  settled: boolean;\n"
-        "  authoring: boolean;\n"
         "  awaits_operator: boolean;\n"
         "  dock_priority: number;\n"
         "  parked: string;\n"
@@ -903,9 +421,10 @@ def _emit_label_tables() -> str:
 
 
 def _emit_display_metrics() -> str:
-    from promptpotter.domain.results import DISPLAY_METRIC_INFO
+    from promptpotter.domain.results import DISPLAY_METRIC_INFO, LevelUnit
 
     members = " | ".join(repr(m) for m in DISPLAY_METRIC_INFO)
+    level_units = " | ".join(repr(u) for u in typing.get_args(LevelUnit))
     rows = "\n".join(
         f"  {{ id: {metric!r}, label: {info.label!r}, glyph: {info.glyph!r},"
         f" title: {info.title!r} }},"
@@ -913,6 +432,9 @@ def _emit_display_metrics() -> str:
     )
     labels = "\n".join(
         f"  {metric!r}: {info.label!r}," for metric, info in DISPLAY_METRIC_INFO.items()
+    )
+    units = "\n".join(
+        f"  {metric!r}: {info.unit!r}," for metric, info in DISPLAY_METRIC_INFO.items()
     )
     return (
         "// A column every arm carries (domain/results.py::DisplayMetric).\n"
@@ -924,6 +446,11 @@ def _emit_display_metrics() -> str:
         "];\n\n"
         "export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {\n"
         f"{labels}\n"
+        "};\n\n"
+        "// A displayed level's unit (domain/results.py::LevelUnit).\n"
+        f"export type LevelUnit = {level_units};\n\n"
+        "export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {\n"
+        f"{units}\n"
         "};"
     )
 
@@ -1008,20 +535,6 @@ def _emit_pipeline_schema_words() -> str:
     )
 
 
-def _emit_prompt_string_fields() -> str:
-    from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
-
-    rows = "\n".join(f"  {name!r}," for name in PROMPT_STRING_FIELDS).replace("'", '"')
-    return (
-        "// The PromptTemplate decomposition field SET. Mirror of\n"
-        "// domain/search_point.py::PROMPT_STRING_FIELDS — canonical MEMBERSHIP only, since each\n"
-        "// prompt kind orders its own render (PromptTemplate.RENDER_ORDER). Don't hand-list these.\n"
-        "export const PROMPT_STRING_FIELDS = [\n"
-        f"{rows}\n"
-        "] as const;"
-    )
-
-
 def _emit_recent_step() -> str:
     from promptpotter.infrastructure.runtime_flags import RECENT_STEP_S
 
@@ -1069,7 +582,8 @@ def _emit_cycle_path_grammar() -> str:
 
 def _doc_block(owner: type) -> str:
     doc = (owner.__doc__ or "").strip().splitlines()
-    return f"/** {doc[0]} */\n" if doc else ""
+    # A dataclass declared with no docstring is handed its signature as one.
+    return f"/** {doc[0]} */\n" if doc and not doc[0].startswith(f"{owner.__name__}(") else ""
 
 
 def _emit_record(record: type) -> str:
@@ -1098,9 +612,11 @@ def _emit_record(record: type) -> str:
 def _emit_interface(model: type) -> str:
     if not issubclass(model, BaseModel):
         return _emit_record(model)
-    hints = _resolved_hints(model)
+    # Not `model_fields[...].annotation`: it can hold a bare `ForwardRef`, which emits `unknown`.
+    hints = typing.get_type_hints(model)
+    omitted = _omitted_unset(model)
     body_lines = [
-        _emit_field(name, info, hints.get(name, info.annotation))
+        _emit_field(name, info, hints.get(name, info.annotation), omittable=name in omitted)
         for name, info in model.model_fields.items()
     ]
     body_lines += [
@@ -1124,15 +640,14 @@ _HEADER = """\
 
 def main() -> int:
     from promptpotter.domain.phases import DashboardState, ProducerState, RunPhase
-    from promptpotter.domain.results import ArmOutcome
 
-    blocks = [_emit_interface(model) for model in EXPORTED_MODELS]
-    blocks.append(
-        _emit_enum_union(
-            ArmOutcome, "How an arm's measurement ended (domain/results.py::ArmOutcome)."
-        )
-    )
-    blocks.append(_emit_arm_outcomes_ended_early())
+    for root in _served_roots():
+        _emit_type(root)
+    command_contract = _emit_command_contract()
+    # Two types of one name would MERGE into one TypeScript interface, silently.
+    if clashes := len(_EXPORTED) - len({owner.__name__ for owner in _EXPORTED}):
+        raise SystemExit(f"{clashes} exported type name(s) are shared by two types")
+    blocks = list(_EXPORTED.values())
     blocks.append(
         _emit_enum_union(RunPhase, "The coarse run-state axis (domain/phases.py::RunPhase).")
     )
@@ -1150,7 +665,7 @@ def main() -> int:
         )
     )
     blocks.append(_emit_lifecycle_filter())
-    blocks.append(_emit_command_kinds())
+    blocks.append(command_contract)
     blocks.append(_emit_stop_reason_tables())
     blocks.append(_emit_run_phase_tables())
     blocks.append(_emit_reading_state_tables())
@@ -1165,15 +680,9 @@ def main() -> int:
     blocks.append(_emit_cell_term_meta())
     blocks.append(_emit_recent_step())
     blocks.append(_emit_cycle_path_grammar())
-    blocks.append(_emit_prompt_string_fields())
     content = _HEADER + "\n\n".join(blocks) + "\n"
-    _OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    prior = _OUT_PATH.read_text(encoding="utf-8") if _OUT_PATH.is_file() else ""
-    if prior == content:
-        print(f"{_OUT_PATH.relative_to(_REPO)} — up to date.")
-        return 0
     _OUT_PATH.write_text(content, encoding="utf-8", newline="\n")
-    print(f"{_OUT_PATH.relative_to(_REPO)} — regenerated.")
+    print(f"wrote {_OUT_PATH.relative_to(REPO)}")
     return 0
 
 

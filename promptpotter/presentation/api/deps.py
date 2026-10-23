@@ -3,13 +3,12 @@ from __future__ import annotations
 import hmac
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 
+from promptpotter.application.account import registered_or_default_identity
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
-from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
-from promptpotter.infrastructure.identity.migration import registered_or_default_identity
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -55,11 +54,18 @@ def require_site_records_token(request: Request) -> None:
         raise UnauthorizedError("site-records token required")
 
 
-def decode_descend(descend: str | None) -> CyclePath:
-    try:
-        return decode_cycle_path(descend or "")
-    except ValueError as exc:
-        raise BadRequestError(str(exc)) from exc
+def require_idempotency_key(
+    key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> str:
+    if not key or not key.strip():
+        raise BadRequestError(
+            "Idempotency-Key header is required on every command.",
+            code="idempotency_key_missing",
+        )
+    return key.strip()
+
+
+IdempotencyKeyDep = Annotated[str, Depends(require_idempotency_key)]
 
 
 def get_job_registry(request: Request) -> JobRegistry:
@@ -70,15 +76,3 @@ def get_job_registry(request: Request) -> JobRegistry:
 
 
 JobRegistryDep = Annotated[JobRegistry, Depends(get_job_registry)]
-
-
-__all__ = [
-    "IdentityDep",
-    "JobRegistryDep",
-    "StoresDep",
-    "auth_is_open",
-    "build_stores_from_identity",
-    "decode_descend",
-    "require_site_records_token",
-    "resolve_identity",
-]

@@ -14,7 +14,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
-from promptpotter.config.prompt_blocks import general_reasoning_blocks, prompt_blocks
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
@@ -24,6 +23,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     described_field,
 )
+from promptpotter.domain.pool import Access
 
 
 def _schema_description_block(
@@ -110,34 +110,28 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
     return [Item("\n".join(lines))]
 
 
-# `off` is absent by construction, so the slot is bit-for-bit a no-library ablation run.
-_BLOCK_LIBRARY_HEADERS: dict[str, str] = {
-    "guidance": "PROMPT BLOCK LIBRARY (reuse one verbatim, adapt one, or write your own):",
-    "restrict": ("PROMPT BLOCK LIBRARY (use only these — do not invent):"),
+# `off` renders nothing, so the slot is bit-for-bit a no-pool ablation run.
+_BLOCK_POOL_HEADERS: dict[Access, str] = {
+    "open": "PROMPT BLOCK POOL (reuse one verbatim, adapt one, or write your own):",
+    "closed": "PROMPT BLOCK POOL — a pooled field takes one of these ids, never your own text:",
 }
 
 
 @signal(
-    "prompt_block_catalogue",
+    "block_pool",
     kind=InjectionKind.DERIVED,
     char_cap=None,
     citable=False,
 )
-def _r_prompt_block_catalogue(b: InjectionBundle) -> list[Item]:
-    """Falls back to general reasoning modules, NEVER silence, which shifts temp-0 generation to weaker mutations."""
-    mode = b.prompt_block_catalogue
-    header = _BLOCK_LIBRARY_HEADERS.get(mode)
-    if header is None:
+def _r_block_pool(b: InjectionBundle) -> list[Item]:
+    window = b.block_window()
+    if not window:
         return []
-    library = (
-        prompt_blocks() if mode == "restrict" else (b.earned_blocks or general_reasoning_blocks())
-    )
-    if not library:
-        return []
-    lines = [header]
-    for field, blocks in library.items():
+    closed = b.block_access == "closed"
+    lines = [_BLOCK_POOL_HEADERS[b.block_access]]
+    for field, blocks in window.items():
         lines.append(f"  {field}:")
-        lines.extend(f"    - {text}" for text in blocks)
+        lines.extend(f"    - {f'{blk.id}: ' if closed else ''}{blk.text}" for blk in blocks)
     return [Item("\n".join(lines))]
 
 
@@ -150,17 +144,22 @@ def _r_prompt_block_catalogue(b: InjectionBundle) -> list[Item]:
 def _r_demo_pool(b: InjectionBundle) -> list[Item]:
     if not b.offers_shots:
         return []
-    rows = {s.id: s for s in b.demo_pool}
-    current = [rows[i] for i in b.opt_sp.shot_ids]
-    others = [s for s in b.demo_pool if s.id not in set(b.opt_sp.shot_ids)]
+    by_key = {s.key: s for s in b.demo_split}
+    held = {
+        node.name: [by_key[k] for k in b.parent.prompt(node.name).shots] for node in b.prompt_nodes
+    }
+    current = list({s.id: s for rows in held.values() for s in rows}.values())
+    others = [s for s in b.demo_pool if s not in current]
     k = min(DEMO_POOL_RENDER_CAP, len(others))
     start = (b.cycle_slice.round_num - 1) * k % len(others) if others else 0
     window = (others[start:] + others[:start])[:k]
-    shown = ", ".join(f"#{s.id}" for s in current) or "none"
+    shown = "; ".join(
+        f"{node}: {', '.join(f'#{s.id}' for s in rows) or 'none'}" for node, rows in held.items()
+    )
     header = (
-        "DEMO POOL — rows held out as shots, never scored. `shot_ids` REPLACES the parent's shots "
-        f"with the ids you list, in order, at most {b.shot_k_max}; omit it to keep them. Parent's "
-        f"shots: {shown}. Below: those, then {len(window)} of the {len(others)} others."
+        "DEMO POOL — rows held out as shots, never scored. `shots` REPLACES a node's shots with "
+        f"the ids you list, in order, at most {b.shot_k_max}; omit a node to keep its shots. "
+        f"Parent's shots — {shown}. Below: those, then {len(window)} of the {len(others)} others."
     )
     return [
         Item(header),

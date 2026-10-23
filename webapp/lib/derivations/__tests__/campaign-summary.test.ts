@@ -20,7 +20,7 @@ function line(over: Partial<LineStanding> = {}): LineStanding {
     stop_reason: null,
     standing: null,
     rounds_closed: 3,
-    max_rounds: 6,
+    budget_rounds: 6,
     rounds_line: "served rounds",
     rounds_cap_note: null,
     human_intervened: false,
@@ -50,8 +50,8 @@ function run(over: {
 
 const runsWith = (
   params: CampaignRunsWith["params"],
-  max_rounds: number | null,
-): CampaignRunsWith => ({ params, vendors: [], optimizer: "potter", max_rounds });
+  budget_rounds: number | null,
+): CampaignRunsWith => ({ params, vendors: [], optimizer: "potter", budget_rounds });
 
 describe("campaignLineParts", () => {
   it("carries no resolved setting at all — the card is where a setup is read", () => {
@@ -70,13 +70,6 @@ describe("campaignLineParts", () => {
       }),
     );
     expect(parts).toEqual(["served rounds", expect.stringContaining("ago")]);
-  });
-
-  it("says nothing about rounds while the campaign is still at its check-in", () => {
-    const parts = campaignLineParts(
-      run({ runsWith: runsWith([], 6), line: { run_phase: "checkin", rounds_closed: 0 } }),
-    );
-    expect(parts).not.toContain("served rounds");
   });
 
   it("says the pipeline is unreadable rather than printing an empty setup", () => {
@@ -114,6 +107,7 @@ describe("benchReading", () => {
     sentence,
     can_grade: false,
     refusal: sentence,
+    offered: false,
     subject: null,
     held_by: null,
     stop: null,

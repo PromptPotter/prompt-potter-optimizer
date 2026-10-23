@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { degradedRoundNotices } from "../round-health";
-import type { DegradationHealth } from "@/lib/api/types";
+import type { RoundHealth } from "@/lib/api/types";
 import { health, summaryRound } from "@/lib/test-fixtures";
 
 const ADVICE =
   "web_search degraded on 25% of samples, all transient. The numbers are soft but " +
   "usable; no action needed if the next round comes back clean.";
 
-const rounds = (...healths: (DegradationHealth | null)[]) =>
+const rounds = (...healths: (RoundHealth | null)[]) =>
   healths.map((h, i) => summaryRound({ round: i + 1, health: h }));
 
 describe("degradedRoundNotices", () => {

@@ -3,32 +3,28 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable, Sequence
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
+from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING
-from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
-from promptpotter.domain.results import ArmOutcome, CycleResult, RoundResult
+from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.results import Cut, CycleResult, RoundResult
+from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import PIPELINE_KEYS, GradedCell, PipelineData
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.statistics import sample_sd
 
 logger = logging.getLogger(__name__)
 
 
-class OuterSampleProxies(StrictModel):
-    """Neither field may be defaulted: a cycle that cannot fill one is floored or excluded, never zeroed."""
-
-    model_config = ConfigDict(frozen=True)
+class OuterSampleProxies(FrozenModel):
+    """Its field may not be defaulted: a cycle that cannot fill it is floored or excluded, never zeroed."""
 
     # The SCORED term: the standing selection's headline on the cell's held-out rows minus the
     # origin's on the same rows, in accuracy points, averaged over the round budget. A promotion
     # on the rows the search selected on is in-sample and reads here only if it holds on fresh ones.
     mean_bench_lift: float = Field(ge=-1.0, le=1.0)
-    # The search pool's own reading of the same trajectory, in θ logits on one ruler, served beside
-    # the scored term. A PLAUSIBILITY bound: two logit abilities differ without bound, so ±4 binds
-    # only a runaway fit.
-    mean_round_delta: float = Field(ge=-4.0, le=4.0)
 
 
 OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
@@ -36,66 +32,80 @@ OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 # Here because the `promptpotter` connector declares it too and may not import `application/runner`.
 INNER_RESULT_KEY = "final_ranking"
 
-# The SE of the arm's own parent level, NOT of the delta.
-PARENT_LEVEL_SE_KEY = "mean_parent_level_se"
-
-
-class InnerCellFacts(StrictModel):
-    """Carried BESIDE the measurement, never as ``OuterSampleProxies`` fields the formula could score."""
-
-    model_config = ConfigDict(frozen=True)
-
-    inner_origin_level: float
-    inner_final_lift: float
-    inner_peak_lift: float
-    inner_rounds_ran: int
-    inner_round_budget: int
-    inner_stop_reason: StopReason
-    # The share of origin rows still missed: 0 is a cell no arm can lift, however sharply it reads.
-    inner_origin_headroom: float | None
-    # The origin's headline on the held-out rows, and where the last standing selection landed against it.
-    inner_bench_origin_level: float | None
-    inner_bench_final_lift: float | None
-    # Reporting only, cumulative across attempts: billing is each call's own, and these enter no ledger.
-    inner_sent_usd: float | None
-    inner_tokens: int | None
-
-
-INNER_FACT_KEYS: tuple[str, ...] = tuple(InnerCellFacts.model_fields)
-
 
 def _origin_headroom(result: CycleResult) -> float | None:
     accuracy = result.origin.accuracy if result.origin is not None else None
     return None if accuracy is None else 1.0 - accuracy.value
 
 
-def inner_cell_facts(result: CycleResult) -> InnerCellFacts | None:
-    """``None`` where there is no trajectory (a floored cell, an unscored origin): absent, never zeroed."""
-    levels = result.round_levels
-    if result.origin_level is None or not levels:
+def unread_rounds(result: CycleResult) -> list[int]:
+    series = result.level_series
+    return [] if series is None else [r for r in series.rounds if series.reading(r) is None]
+
+
+def series_reason(result: CycleResult) -> ThetaCaveat | SeriesGap | None:
+    """Why the search split's θ trajectory differences nothing; ``None`` where it does."""
+    series = result.level_series
+    if series is None:
+        return SeriesGap.NEVER_STARTED
+    if series.caveat is not None:
+        return series.caveat
+    if unread_rounds(result):
+        return SeriesGap.UNREAD_ROUND
+    for rnd in series.rounds:
+        read = series.reading(rnd)
+        if read is not None and read.caveat is not None:
+            return read.caveat
+    if len(series.rounds) < 2:
+        return SeriesGap.NO_L1_ROUND
+    return None
+
+
+def _trajectory(result: CycleResult) -> tuple[AbilityReading, list[AbilityReading]] | None:
+    series = result.level_series
+    if series is None or series_reason(result) is not None:
         return None
-    origin = result.origin_level
+    levels = [level for rnd in series.rounds if (level := series.level(rnd)) is not None]
+    return levels[0], levels[1:]
+
+
+def parent_levels(result: CycleResult) -> tuple[float, list[float]] | None:
+    """``None`` where the series differences nothing (`series_reason` names why)."""
+    trajectory = _trajectory(result)
+    if trajectory is None:
+        return None
+    return trajectory[0].theta, [level.theta for level in trajectory[1]]
+
+
+def inner_cell_facts(result: CycleResult) -> InnerCellFacts:
+    held = parent_levels(result)
+    origin = None if held is None else held[0]
+    levels = [] if held is None else held[1]
+    padded = parent_level_series(result)
     bench_origin = result.bench_origin_level
     bench_last = result.bench_round_levels[-1] if result.bench_round_levels else None
     return InnerCellFacts(
-        inner_origin_level=origin,
-        inner_final_lift=levels[-1] - origin,
-        inner_peak_lift=max(levels) - origin,
-        inner_rounds_ran=result.n_rounds_after_origin,
-        inner_round_budget=effective_round_budget(result),
-        inner_stop_reason=result.stop_reason,
-        inner_origin_headroom=_origin_headroom(result),
-        inner_bench_origin_level=bench_origin,
-        inner_bench_final_lift=(
+        origin_level=origin,
+        final_lift=None if origin is None else levels[-1] - origin,
+        peak_lift=None if origin is None else max(levels) - origin,
+        mean_round_delta=None if origin is None else sum(padded) / len(padded) - origin,
+        series_reason=series_reason(result),
+        mean_parent_level_se=mean_parent_level_se(result),
+        rounds_ran=result.n_rounds_after_origin,
+        round_budget=effective_round_budget(result),
+        stop_reason=result.stop_reason,
+        origin_headroom=_origin_headroom(result),
+        bench_origin_level=bench_origin,
+        bench_final_lift=(
             None if bench_origin is None or bench_last is None else bench_last - bench_origin
         ),
-        inner_sent_usd=result.spend.sent_usd if result.spend else None,
-        inner_tokens=result.spend.total_tokens_used if result.spend else None,
+        sent_usd=result.spend.sent_usd if result.spend else None,
+        tokens=result.spend.total_tokens_used if result.spend else None,
     )
 
 
 def effective_round_budget(result: CycleResult) -> int:
-    ran = len(result.round_levels)
+    ran = result.n_rounds_after_origin
     return ran if result.round_budget is None else max(result.round_budget, ran)
 
 
@@ -108,7 +118,8 @@ def _held_forward(levels: Sequence[float], result: CycleResult) -> list[float]:
 
 
 def parent_level_series(result: CycleResult) -> list[float]:
-    return _held_forward(result.round_levels, result)
+    held = parent_levels(result)
+    return [] if held is None else _held_forward(held[1], result)
 
 
 def bench_level_series(result: CycleResult) -> list[float]:
@@ -121,21 +132,25 @@ def bench_level_series(result: CycleResult) -> list[float]:
 
 def mean_parent_level_se(result: CycleResult) -> float | None:
     """One arm's half of a paired difference (two add in quadrature). A PRECISION, never a penalty or rank key."""
-    ses = result.round_level_ses
-    if not ses:
+    trajectory = _trajectory(result)
+    rounds = [] if trajectory is None else trajectory[1]
+    ses = [level.se for level in rounds if level.se is not None]
+    if not ses or len(ses) < len(rounds):
         return None
-    # Mean of the SEs, never `σ/√n` (the levels NEST); `origin_level` cancels in `variant - origin`.
+    # Mean of the SEs, never `σ/√n` (the levels NEST); the origin's cancels in `variant - origin`.
     return float(sum(ses) / len(ses))
 
 
 def _is_evidential(rnd: RoundResult) -> bool:
     """A round that lost its candidates to an empty optimizer response is missing data, not a bad mutation."""
-    if not rnd.candidate_scores:
-        return not rnd.optimizer_state.payload.lost_to_empty_response()
+    panel = rnd.panel.values()
+    if not panel:
+        return not rnd.closed_state.lost_to_empty_response()
     return not all(
-        cs.outcome is ArmOutcome.INVALID
-        and any(vf.reason == PARSE_FAILURE_TOOLING for vf in cs.validation_failures)
-        for cs in rnd.candidate_scores
+        isinstance(arm, Cut)
+        and arm.kind == "invalid"
+        and any(vf.reason == PARSE_FAILURE_TOOLING for vf in arm.validation_failures)
+        for arm in panel
     )
 
 
@@ -149,10 +164,6 @@ def no_evidence_reason(result: CycleResult) -> str | None:
         )
     if not result.rounds:
         return f"it ran no L1 rounds (stop_reason={result.stop_reason})"
-    if result.origin_level is None:
-        return "its origin was never scored, so there is no floor to difference its rounds against"
-    if not result.round_levels:
-        return "it held no parent levels to difference against its origin"
     if result.bench_origin_level is None:
         return "its origin's bench pass read nothing, so there is no held-out floor to difference against"
     if holes := [r + 1 for r, level in enumerate(result.bench_round_levels) if level is None]:
@@ -176,11 +187,10 @@ def floor_reason(result: CycleResult) -> str | None:
 
 def _floor_proxies() -> OuterSampleProxies:
     """``-1`` sits at or below the bottom of every re-anchoring window, so the composed fitness is exactly 0.0."""
-    return OuterSampleProxies(mean_bench_lift=-1.0, mean_round_delta=-1.0)
+    return OuterSampleProxies(mean_bench_lift=-1.0)
 
 
 def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
-    """Origin and rounds share one fit, so the ruler cancels in the delta."""
     if (floor := floor_reason(result)) is not None:
         logger.warning("inner cycle scored at the floor: %s", floor)
         return _floor_proxies()
@@ -189,23 +199,16 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
         # The inner cycle forwarded its own spend onto the outer ledger as it ran.
         raise CellUnscoreableError(reason, spent={})
 
-    # Both guaranteed by no_evidence_reason.
-    assert result.origin_level is not None and result.bench_origin_level is not None
+    # Guaranteed by no_evidence_reason.
+    assert result.bench_origin_level is not None
     bench = bench_level_series(result)
-    # Levels are abilities in LOGITS on the fixed ruler; nothing normalizes for difficulty.
-    levels = parent_level_series(result)
-    return OuterSampleProxies(
-        mean_bench_lift=sum(bench) / len(bench) - result.bench_origin_level,
-        mean_round_delta=sum(levels) / len(levels) - result.origin_level,
-    )
+    return OuterSampleProxies(mean_bench_lift=sum(bench) / len(bench) - result.bench_origin_level)
 
 
-class PanelPrecision(StrictModel):
+class PanelPrecision(FrozenModel):
     """How sharply each cell was measured, against how far apart the cells landed."""
 
     # In θ logits, never fitness: a cell's precision cannot cross the user-editable scoring formula.
-    model_config = ConfigDict(frozen=True)
-
     # sqrt(mean over cells of (se_variant² + se_origin²)): the spread if every cell had ONE true value.
     estimation_sd: float
     # Sample SD (n−1) of the per-cell paired diffs. Contains `estimation_sd` plus any real spread.
@@ -214,24 +217,24 @@ class PanelPrecision(StrictModel):
     # No RATIO of the two is served: a clamped share rounds noise above the total spread into "100% noise".
 
 
-assert {*OUTER_PROXY_KEYS, PARENT_LEVEL_SE_KEY, *INNER_FACT_KEYS} <= PIPELINE_KEYS, (
+assert set(OUTER_PROXY_KEYS) <= PIPELINE_KEYS, (
     "an L4 key PipelineData does not declare is filed as a dataset observation, and no field "
     "reader finds it"
 )
 
 
 def _level(pipeline: PipelineData) -> float | None:
-    return pipeline.mean_round_delta
+    return None if pipeline.inner is None else pipeline.inner.mean_round_delta
 
 
 def _level_se(pipeline: PipelineData) -> float | None:
-    return pipeline.mean_parent_level_se
+    return None if pipeline.inner is None else pipeline.inner.mean_parent_level_se
 
 
 def cell_values(
     rows: Iterable[GradedCell], read: Callable[[PipelineData], float | None]
 ) -> dict[str, float]:
-    """Keyed by QUERY: a per-campaign ``sample_id`` names a different cell in each campaign."""
+    """Keyed by QUERY: a per-campaign ``position`` names a different cell in each campaign."""
     acc: dict[str, list[float]] = {}
     for r in rows:
         value = read(r.facts.pipeline)
@@ -254,22 +257,3 @@ def panel_precision(
     assert observed is not None
     estimation = (sum(v_se[c] ** 2 + o_se[c] ** 2 for c in cells) / len(cells)) ** 0.5
     return PanelPrecision(estimation_sd=float(estimation), observed_sd=observed, n_cells=len(cells))
-
-
-__all__ = [
-    "INNER_FACT_KEYS",
-    "OUTER_PROXY_KEYS",
-    "PARENT_LEVEL_SE_KEY",
-    "InnerCellFacts",
-    "OuterSampleProxies",
-    "PanelPrecision",
-    "bench_level_series",
-    "cell_values",
-    "compute_outer_proxies",
-    "floor_reason",
-    "inner_cell_facts",
-    "mean_parent_level_se",
-    "no_evidence_reason",
-    "panel_precision",
-    "parent_level_series",
-]

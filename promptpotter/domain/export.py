@@ -4,41 +4,30 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.bench import BenchScore, OwnLevel
-from promptpotter.domain.campaign import Treatment
-from promptpotter.domain.opt_search_point import FEW_SHOT_BLOCK, PromptTemplate
 from promptpotter.domain.paired_reading import PairedReading
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.ruler import SeriesReading
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.domain.treatment import Treatment
 
-EXPORT_ARTIFACT_VERSION = 6
+EXPORT_ARTIFACT_VERSION = 8
 """Bumped only when a reader of the old shape would MISREAD the new one, never for an added field."""
-
-__all__ = [
-    "EXPORT_ARTIFACT_VERSION",
-    "ExportMeasurement",
-    "ExportVersionError",
-    "PromptExport",
-    "build_prompt_export",
-    "parse_prompt_export",
-]
 
 
 class ExportVersionError(ValueError):
     """The artifact names a version this build does not read."""
 
 
-class ExportMeasurement(StrictModel):
+class ExportMeasurement(FrozenModel):
     """Every field is read off the round that crowned the winner, so all stand on one measurement."""
-
-    model_config = ConfigDict(frozen=True)
 
     round: int
     # ``None`` when the cycle resolved no round formula; never ``""``, which reads as a formula called "".
@@ -55,14 +44,12 @@ class ExportMeasurement(StrictModel):
         description="The winner over the origin on the origin panel (the round's overlap lead), "
         "or the state that says why it was not read. The origin's level is its `rate_a`."
     )
-    # ``None`` when never fit, or where the winner's selector stamps no θ.
-    ability: AbilityReading | None
+    # ``None`` where no scored cell sits on the series' scale.
+    ability: SeriesReading | None
 
 
-class PromptExport(StrictModel):
+class PromptExport(FrozenModel):
     """One campaign's answer, self-describing. ``model_dump_json()`` IS ``export.json``."""
-
-    model_config = ConfigDict(frozen=True)
 
     artifact_version: int
     tool: str
@@ -74,22 +61,18 @@ class PromptExport(StrictModel):
     treatment: Treatment | None
     stop_reason: StopReason
     finished_at: str
-    # The round file's dict, NOT ``CycleResult.result_prompt_fields`` (the wire-side projection).
-    prompt_fields: dict[str, Any]
-    # Resolved: a reader outside this campaign has no demo pool to resolve a shot id against.
-    few_shot_block: str
-    # Minus each node's rendered ``prompt``, which is ``prompt_fields`` rendered.
+    # Per prompt node, each field AS SCORED in render order — framing spliced, shots resolved as
+    # `few_shot_block`, since a reader outside this campaign has no demo pool to resolve a key against.
+    prompts: dict[str, dict[str, str]]
+    # Minus each node's rendered ``prompt``, which is ``prompts`` rendered.
     tuned_params: dict[str, dict[str, Any]]
     # The optimizer's own reading on the rows that chose it: not an estimate.
     measurement: ExportMeasurement
     # The deployment estimate: the same prompt on a bench set no optimizer node read.
     bench: BenchScore
 
-    def template(self) -> PromptTemplate:
-        return PromptTemplate.from_prompt_fields(self.prompt_fields)
-
-    def render(self) -> str:
-        return "\n\n".join(p for p in (self.template().render(), self.few_shot_block) if p)
+    def render(self, node: str) -> str:
+        return "\n\n".join(self.prompts[node].values())
 
 
 def parse_prompt_export(text: str) -> PromptExport:
@@ -118,18 +101,20 @@ def build_prompt_export(
     finished_at: str,
     formula: str | None,
     own: OwnLevel,
+    level: SeriesReading | None,
+    schema: PipelineSchema,
     framing: TaskDecomposition,
     demo: Sequence[Sample],
     bench: BenchScore,
 ) -> PromptExport:
     """*winner* may be the origin round: a campaign that never selected past it exports round 0."""
-    fields = dict(winner.prompt_fields)
-    fields.pop("shot_ids", None)
-    selected = next(iter(winner.selected_scores), None)
+    election, head = winner.election, winner.head
+    selected = (
+        None if election is None or election.selected is None else winner.fit(election.selected)
+    )
     # Framing splices in at render: the stored fields alone re-render a prompt nothing was scored on.
-    rendered = dict(winner.opt_sp.target_fields(framing, demo=demo)) if winner.opt_sp else {}
-    if spliced := rendered.get("problem_description"):
-        fields["problem_description"] = spliced
+    individual = None if head is None else head.individual
+    prompts = {} if individual is None else individual.scored_prompts(schema, framing, demo=demo)
     return PromptExport(
         artifact_version=EXPORT_ARTIFACT_VERSION,
         tool="promptpotter",
@@ -141,16 +126,15 @@ def build_prompt_export(
         treatment=treatment,
         stop_reason=stop_reason,
         finished_at=finished_at,
-        prompt_fields=fields,
-        few_shot_block=rendered.get(FEW_SHOT_BLOCK, ""),
-        tuned_params=_tuned_params(winner.pipeline_params),
+        prompts=prompts,
+        tuned_params=_tuned_params(None if individual is None else individual.pipeline_params),
         measurement=ExportMeasurement(
             round=winner.round,
             formula=formula,
             own=own,
             vs_reference=selected.vs_reference if selected else None,
             vs_origin=winner.overlap.lead,
-            ability=winner.ability,
+            ability=level,
         ),
         bench=bench,
     )

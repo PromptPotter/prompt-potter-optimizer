@@ -13,7 +13,7 @@ Both halves are derived from the dataset NAME by `_justlogic_bank`, the held hal
 `dataset_split` is `justlogic/d234`'s, value for value. A bench-only row is held out by
 declaration and never ranked (`promptpotter/domain/bench.py::partition_bank`), so:
 
-- **the search pool (520) and the demo pool (50) are `justlogic/d234`'s, key for key** — every
+- **the search split (520) and the demo pool (50) are `justlogic/d234`'s, key for key** — every
   cell measured there replays here under the same instrument;
 - **the bench is 930 rows**: the 30 `justlogic/d234` holds out, plus the 900.
 

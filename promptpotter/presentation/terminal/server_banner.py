@@ -19,8 +19,6 @@ _SHADE = (None, None, None, ".:@@", ".:@@@", None)
 _GLYPH_WIDTH = max(len(row) for row in _GLYPH_PLAIN)
 _GLYPH_GUTTER = "   "
 
-__all__ = ["render_server_banner"]
-
 
 def _glyph_row(row: str, shade: str | None) -> str:
     """Pad on the PLAIN row first, then wrap in color — padding must never count escape bytes."""

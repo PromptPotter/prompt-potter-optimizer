@@ -1,17 +1,13 @@
 "use client";
 import { memo, useCallback, useMemo } from "react";
-import { fmtTheta } from "@/lib/format";
-import {
-  fmtDisplayValue,
-  nodeKeyOf,
-  type DisplayMetric,
-} from "@/lib/derivations";
+import { fmtLevel } from "@/lib/format";
+import { nodeKeyOf, type DisplayMetric } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { fmtPaired } from "@/lib/derivations";
 import type { CourseNode } from "@/lib/api";
-import { DISPLAY_METRIC_LABELS } from "@/lib/api/types.generated";
+import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
   DIRECTION_GLYPH,
   HEADER_H,
@@ -92,16 +88,16 @@ const CandidateNode = memo(function CandidateNode({
       )}
       {...pressable(() => onPick(n))}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${DISPLAY_METRIC_LABELS[metric]} ${fmtDisplayValue(metric, level)}`}${n.crown === "elected" ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${DISPLAY_METRIC_LABELS[metric]} ${fmtLevel(DISPLAY_METRIC_UNITS[metric],level)}`}${n.crown === "elected" ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       style={{ cursor: "pointer" }}
     >
       <title>
         {n.candidateLabel} ·{" "}
         {invalidated
           ? "unknown"
-          : fmtDisplayValue(metric, level)}
+          : fmtLevel(DISPLAY_METRIC_UNITS[metric],level)}
         {!invalidated && metric !== "ability" && typeof theta === "number"
-          ? ` · ability θ ${fmtTheta(theta)}`
+          ? ` · ${fmtLevel(DISPLAY_METRIC_UNITS.ability, theta)}`
           : ""}
         {n.node.variations
           .map((v) => `\n${v.node} (${v.mode}): ${v.loci.join(", ") || "nothing"}`)
@@ -149,7 +145,7 @@ const CandidateNode = memo(function CandidateNode({
           className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
           style={ink ? { fill: ink } : undefined}
         >
-          {n.candidateLabel} {invalidated ? "?" : fmtDisplayValue(metric, level)}
+          {n.candidateLabel} {invalidated ? "?" : fmtLevel(DISPLAY_METRIC_UNITS[metric],level)}
         </text>
       )}
       <rect
@@ -379,7 +375,7 @@ export function Forest({
                       className="family-cladogram-roundlabel"
                       textAnchor="middle"
                     >
-                      R{n.round} {fmtDisplayValue(metric, valOf(n))}
+                      R{n.round} {fmtLevel(DISPLAY_METRIC_UNITS[metric],valOf(n))}
                     </text>
                   )}
                   {d.labels && rowLabelText && (
@@ -398,9 +394,9 @@ export function Forest({
                     </text>
                   )}
                   <title>
-                    {nodeCycleId} · R{n.round} · {fmtDisplayValue(metric, valOf(n))}
+                    {nodeCycleId} · R{n.round} · {fmtLevel(DISPLAY_METRIC_UNITS[metric],valOf(n))}
                     {metric !== "ability" && typeof thetaOf(n) === "number"
-                      ? ` · ability θ ${fmtTheta(thetaOf(n))}`
+                      ? ` · ${fmtLevel(DISPLAY_METRIC_UNITS.ability, thetaOf(n))}`
                       : ""}
                     {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
                     {isDivergence ? "\ndivergence under the scoring lens" : ""}

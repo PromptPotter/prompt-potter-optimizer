@@ -9,8 +9,25 @@ interface Variant {
   evidence_grounding?: { field?: string; citation?: string } | null;
   targets_rows?: number[] | null;
   pipeline_overlay?: Record<string, unknown> | null;
-  prompt_fields_updates?: Record<string, unknown> | null;
+  // Per prompt node: its field updates, and its shots as demo-pool ids.
+  prompt_fields_updates?: Record<string, Record<string, unknown> | null> | null;
+  shots?: Record<string, unknown> | null;
   changes_description?: string | null;
+}
+
+// Keyed `node.field`, one row per locus the variant writes.
+function promptLoci(v: Variant): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [node, fields] of Object.entries(v.prompt_fields_updates ?? {})) {
+    for (const [field, text] of Object.entries(fields ?? {})) out[`${node}.${field}`] = text;
+  }
+  for (const [node, ids] of Object.entries(v.shots ?? {})) out[`${node}.shots`] = ids;
+  return out;
+}
+
+function locusLabel(key: string): string {
+  const dot = key.lastIndexOf(".");
+  return dot < 0 ? promptFieldLabel(key) : `${key.slice(0, dot)} · ${promptFieldLabel(key.slice(dot + 1))}`;
 }
 
 export function variantsOf(response: unknown): Variant[] | null {
@@ -32,7 +49,7 @@ function Overrides({ title, map }: { title: string; map: Record<string, unknown>
       <dl className="l1v-fields">
         {entries.map(([k, v]) => (
           <div key={k} className="l1v-field">
-            <dt>{promptFieldLabel(k)}</dt>
+            <dt>{locusLabel(k)}</dt>
             <dd>
               <pre>{fmtValue(v, { pretty: true })}</pre>
             </dd>
@@ -91,7 +108,7 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
         </div>
       )}
 
-      <Overrides title="Prompt changes" map={shown.prompt_fields_updates} />
+      <Overrides title="Prompt changes" map={promptLoci(shown)} />
       <Overrides title="Param changes" map={shown.pipeline_overlay} />
     </section>
   );

@@ -2,18 +2,15 @@
 
 import { useRef, useState } from "react";
 import {
+  ApiError,
   failureKind,
-  IngestApiError,
   operatorMessage,
   postDraftFromDataset,
   postDraftFromOrigin,
-  getCampaignCheckin,
-  postEditDraftCampaign,
+  getDraft,
+  postCommand,
   postIngestDataset,
-  postStartCheckin,
   postBuildCandidateLibraryFromColumn,
-  postReplaceDataset,
-  postResolveOrigin,
   postUploadCandidateLibrary,
   type DatasetIndexEntry,
   type DraftCampaignWire,
@@ -24,6 +21,7 @@ import {
   type StartCheckinOptions,
 } from "@/lib/api";
 import { useThread, type MessageTone } from "@/lib/chat/thread";
+import { invalidateReads } from "@/lib/read-cache";
 type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 
 type IngestPhase =
@@ -60,7 +58,8 @@ export interface IngestFlow {
   onDatasetFile: (file: File) => void;
   pickDataset: (entry: DatasetIndexEntry) => void;
   openOrigin: (entry: OriginEntry) => void;
-  reopenCheckin: (campaignId: string) => void;
+  reopenDraft: (draftId: string) => void;
+  discardDraft: (draftId: string) => void;
   submitContext: () => void;
   applyPatch: (patch: DraftPatch) => void;
   uploadCandidateLibrary: (file: File) => void;
@@ -69,7 +68,6 @@ export interface IngestFlow {
   startFromReady: (limits: StartCheckinOptions) => void;
   useExistingFromCollision: () => void;
   saveAsNew: () => void;
-  replaceExisting: () => void;
   cancelCollision: () => void;
   reset: () => void;
 }
@@ -110,7 +108,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     let degradedCause: string | null = null;
     let recap = "";
     try {
-      const r = await postResolveOrigin(draft.draft_id);
+      const r = await postCommand("resolve-origin", { draft_id: draft.draft_id });
       resolved = r.draft;
       resolution = r.resolution.last_resolution;
       raised = r.resolution.raised;
@@ -127,6 +125,7 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   };
 
   const advance = (draft: DraftCampaignWire) => {
+    invalidateReads("drafts");
     if (draft.raw_task_description.trim()) {
       setInputText("");
       say(`Parsed ${draft.n_samples} rows — task already on file. Checking the setup…`);
@@ -156,18 +155,14 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     try {
       draft = await postIngestDataset(file, slug);
     } catch (e) {
-      if (
-        e instanceof IngestApiError &&
-        e.status === 409 &&
-        e.existingSlug &&
-        e.suggestedSlug
-      ) {
+      const taken = e instanceof ApiError && e.code === "slug_collision" ? e.details : null;
+      if (typeof taken?.slug === "string" && typeof taken.suggested_slug === "string") {
         setPhase({
           stage: "collision",
           file,
           chipId: id,
-          existingSlug: e.existingSlug,
-          suggestedSlug: e.suggestedSlug,
+          existingSlug: taken.slug,
+          suggestedSlug: taken.suggested_slug,
         });
         return;
       }
@@ -224,19 +219,19 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   };
 
   // Only an unauthored draft re-runs the resolver: it would re-propose over the operator's edits.
-  const reopenCheckin = async (campaignId: string) => {
+  const reopenDraft = async (draftId: string) => {
     thread.clear();
     setPhase({ stage: "uploading" });
     let res;
     try {
-      res = await getCampaignCheckin(campaignId);
+      res = await getDraft(draftId);
     } catch (e) {
       setPhase({ stage: "idle" });
       sayError(e);
       return;
     }
     const draft = res.draft;
-    if (Object.keys(draft.origin_prompt_fields).length === 0) {
+    if (Object.keys(draft.origin_prompts).length === 0) {
       say("Reopened your check-in — picking up where the setup left off.");
       advance(draft);
       return;
@@ -261,7 +256,10 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     echo(text);
     let updated = draft;
     try {
-      updated = await postEditDraftCampaign(draft.draft_id, { raw_task_description: text });
+      updated = await postCommand("edit-draft-campaign", {
+        draft_id: draft.draft_id,
+        patch: { raw_task_description: text },
+      });
     } catch (e) {
       sayError(e);
       setPhase({ stage: "awaiting-context", draft });
@@ -292,7 +290,9 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
 
   const applyPatch = (patch: DraftPatch) => {
     if (phase.stage !== "ready") return;
-    void mutateDraft(() => postEditDraftCampaign(phase.draft.draft_id, patch));
+    void mutateDraft(() =>
+      postCommand("edit-draft-campaign", { draft_id: phase.draft.draft_id, patch }),
+    );
   };
 
   const uploadCandidateLibrary = async (file: File) => {
@@ -325,15 +325,36 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
       while (pendingDraftWrites.current.size > 0) {
         await Promise.allSettled([...pendingDraftWrites.current]);
       }
-      const r = await postStartCheckin(phase.draft.draft_id, limits);
-      say("Campaign started.");
+      // Sparse, so the `CommandRecord` shows what the operator declared.
+      const r = await postCommand("start-checkin", { draft_id: phase.draft.draft_id, ...limits });
+      invalidateReads("drafts");
       setPhase({ stage: "idle" });
-      onMint({ campaignId: r.campaign_id, cycleId: r.cycle_id });
+      // No hop while queued: the campaign is minted when a machine slot frees.
+      if (r.hop === null) {
+        say("Campaign queued — it is minted and starts when a machine slot frees.");
+        return;
+      }
+      say("Campaign started.");
+      onMint({ campaignId: r.hop.campaign_id, cycleId: r.hop.cycle_id });
     } catch (e) {
       refuse(e);
     } finally {
       setMinting(false);
     }
+  };
+
+  // Its spend stays banked to the account: a discard deletes the draft, never what it cost.
+  const discardDraft = async (draftId: string) => {
+    if (busy) return;
+    try {
+      await postCommand("discard-draft", { draft_id: draftId });
+    } catch (e) {
+      sayError(e);
+      return;
+    }
+    invalidateReads("drafts");
+    if ((phase.stage === "ready" || phase.stage === "awaiting-context") && phase.draft.draft_id === draftId)
+      setPhase({ stage: "idle" });
   };
 
   const useExistingFromCollision = () => {
@@ -344,20 +365,6 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
   const saveAsNew = () => {
     if (phase.stage !== "collision") return;
     void ingestAndResolve(phase.file, phase.suggestedSlug, phase.chipId);
-  };
-
-  const replaceExisting = async () => {
-    if (phase.stage !== "collision") return;
-    const { file, existingSlug, chipId } = phase;
-    setPhase({ stage: "uploading" });
-    try {
-      await postReplaceDataset(existingSlug);
-    } catch (e) {
-      setPhase({ stage: "idle" });
-      sayError(e);
-      return;
-    }
-    await ingestAndResolve(file, existingSlug, chipId);
   };
 
   const cancelCollision = () => setPhase({ stage: "idle" });
@@ -378,7 +385,8 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     onDatasetFile: (file) => void ingestAndResolve(file),
     pickDataset,
     openOrigin: (entry) => void openOrigin(entry),
-    reopenCheckin: (campaignId) => void reopenCheckin(campaignId),
+    reopenDraft: (draftId) => void reopenDraft(draftId),
+    discardDraft: (draftId) => void discardDraft(draftId),
     submitContext: () => void submitContext(),
     applyPatch,
     uploadCandidateLibrary: (file) => void uploadCandidateLibrary(file),
@@ -387,7 +395,6 @@ export function useIngestFlow({ onMint }: { onMint: OnMinted }): IngestFlow {
     startFromReady: (limits) => void startFromReady(limits),
     useExistingFromCollision,
     saveAsNew,
-    replaceExisting: () => void replaceExisting(),
     cancelCollision,
     reset,
   };

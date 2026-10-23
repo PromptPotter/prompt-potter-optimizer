@@ -4,20 +4,17 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.initialization.loop_start import (
-    arm_diagnostic_scoring,
     diagnostic_pass,
     diagnostic_trace,
+    open_diagnostic,
 )
-from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.jobs.launcher.admission import paid_pass
-from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.results import DiagnosticRunRecord, RescoreCount
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import Budget
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import DiagnosticError
 from promptpotter.shared.statistics import mean_ci
@@ -26,8 +23,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
-
-__all__ = ["measure_noise_floor"]
 
 
 @dataclass(frozen=True)
@@ -42,50 +37,38 @@ async def measure_noise_floor(
     hop: CycleHop,
     k: RescoreCount,
 ) -> NoiseFloorOutcome:
-    async with paid_pass(stores=stores, verb="noise-floor", hop=hop, declared=SpendCeilings()):
+    async with paid_pass(stores=stores, verb="noise-floor", hop=hop, declared=Budget()):
         return await _rescore_origin(stores, hop, k)
 
 
 async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> NoiseFloorOutcome:
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
-
     standing = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(0)
     if standing is None:
         raise DiagnosticError(
             f"round 0 never closed in {hop.campaign_id}/{hop.cycle_id} — the origin was never scored."
         )
     round_file = standing.close
-    if not round_file.candidate_scores:
+    if round_file.election is None:
         raise DiagnosticError(f"round 0 of {hop.campaign_id}/{hop.cycle_id} carries no origin arm.")
     origin = round_file.origin
-    sample_ids = {sample_id for _, sample_id, _, _ in round_file.cells.arms[origin.candidate_id]}
-    if not sample_ids:
+    sample_keys = {key for key, _, _ in round_file.cells.arms[round_file.election.ended_on]}
+    if not sample_keys:
         raise DiagnosticError(
             f"origin arm in {hop.campaign_id}/{hop.cycle_id} round 0 carries no scored samples."
         )
 
-    session, campaign_config = await bind_cycle_session(stores, campaign, hop)
-    # Normally `run_optimization`'s: a pp-self origin's connector dispatches no inner run without it.
-    publish_inner_spawn_context(session)
-
-    arm_diagnostic_scoring(session, campaign_config, source=RunSource.NOISE_FLOOR)
-
+    opened = await open_diagnostic(stores, hop, source=RunSource.NOISE_FLOOR)
+    session = opened.session
     schema = session.pipeline_schema
-    jsp = origin.searchpoint(
-        schema=schema,
-        framing=campaign_framing(stores, campaign_config, session.dataset),
-        demo=session.scoring.require_partition().demo,
-    )
-    scoring_set = [s for s in session.samples if s.id in sample_ids]
+    jsp = opened.points.measured(origin)
+    scoring_set = [s for s in session.bank.samples if s.key in sample_keys]
     if not scoring_set:
         raise DiagnosticError(
-            f"none of round 0's {len(sample_ids)} scored sample id(s) resolve against "
-            f"the current {campaign.dataset_name} bank."
+            f"none of round 0's {len(sample_keys)} scored sample(s) is in the bank the cycle drew."
         )
     config_hash = jsp.sp_hash(schema)
-    if (source_composite := round_file.composite_fitness) is None:
+    source = round_file.fold
+    if source is None or (source_composite := source.composite_fitness) is None:
         raise DiagnosticError(
             f"round 0 of {hop.campaign_id}/{hop.cycle_id} read no cell, so there is no recorded "
             "composite for the band to stand beside."
@@ -128,16 +111,16 @@ async def _rescore_origin(stores: Stores, hop: CycleHop, k: RescoreCount) -> Noi
 
     record = DiagnosticRunRecord(
         ts=utcnow_iso(),
-        dataset=campaign.dataset_name,
+        dataset=opened.campaign.dataset_name,
         source_campaign=hop.campaign_id,
         source_cycle=hop.cycle_id,
-        source_candidate_id=origin.candidate_id,
+        source_candidate_id=origin.individual.id,
         config_hash=config_hash[:12],
         workspace_n=len(scoring_set),
         workspace_accuracy=sum(accuracies) / len(accuracies),
-        source_campaign_accuracy=round_file.accuracy,
+        source_campaign_accuracy=source.accuracy,
         source_campaign_composite=source_composite,
-        source_campaign_n=round_file.total,
+        source_campaign_n=source.total,
         noise_floor_k=k,
         noise_floor_mean=mean_composite,
         noise_floor_ci_lo=ci_lo,

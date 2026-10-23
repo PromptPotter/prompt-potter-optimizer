@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from promptpotter.domain.pipeline_overlay import node_config_items
 
-__all__ = ["INNER_ORIGIN_KEY", "inner_origin_of"]
-
 # Measurement identity, never a wire tunable: the adapter strips it before building ``optimizer_prompt_overrides``.
 INNER_ORIGIN_KEY = "inner_origin"
 

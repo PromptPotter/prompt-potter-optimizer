@@ -1,16 +1,9 @@
 "use client";
 import type { PairwiseComparison } from "@/lib/api/types";
-import type { SampleRow } from "@/lib/types";
+import type { CellRow } from "@/lib/api";
+import { usePresetCells } from "@/lib/hard-samples";
 import { cx } from "@/lib/cx";
 import { HoverCard } from "@/components/ui";
-
-type Rows = Map<number, SampleRow>;
-
-function byId(rows: readonly SampleRow[]): Rows {
-  const out: Rows = new Map();
-  for (const r of rows) if (r.sample_id != null) out.set(r.sample_id, r);
-  return out;
-}
 
 export function SubjectFlips({
   vsOrigin,
@@ -20,14 +13,15 @@ export function SubjectFlips({
 }: {
   vsOrigin: PairwiseComparison | null;
   partial: { scored: number; expected: number | null } | null;
-  before: readonly SampleRow[];
-  after: readonly SampleRow[];
+  // The two arm keys whose cells the flips are read off, on the viewed cycle.
+  before: string | null;
+  after: string | null;
 }) {
   const counts = vsOrigin?.hit.headline?.flips;
   const coverage = vsOrigin?.hit.coverage;
   if (!vsOrigin || !counts || !coverage) return null;
   const { gained, lost } = vsOrigin;
-  const rows = { was: byId(before), now: byId(after) };
+  const arms = { before, after };
   return (
     <div className="subject-flips">
       <span className="subject-flip-ref">vs origin</span>
@@ -38,8 +32,8 @@ export function SubjectFlips({
           ? ` — scoring, ${partial.scored}${partial.expected === null ? "" : ` of ${partial.expected}`} so far`
           : ""}
       </span>
-      {gained.length > 0 ? <FlipIds label="now right" kind="gained" ids={gained} rows={rows} /> : null}
-      {lost.length > 0 ? <FlipIds label="now wrong" kind="lost" ids={lost} rows={rows} /> : null}
+      {gained.length > 0 ? <FlipKeys label="now right" kind="gained" keys={gained} arms={arms} /> : null}
+      {lost.length > 0 ? <FlipKeys label="now wrong" kind="lost" keys={lost} arms={arms} /> : null}
       <FlipSep />
       <span className="subject-flip-same">
         {gained.length + lost.length === 0
@@ -59,43 +53,58 @@ function FlipSep() {
   );
 }
 
-function FlipIds({
+type Arms = { before: string | null; after: string | null };
+
+function FlipKeys({
   label,
   kind,
-  ids,
-  rows,
+  keys,
+  arms,
 }: {
   label: string;
   kind: "gained" | "lost";
-  ids: number[];
-  rows: { was: Rows; now: Rows };
+  keys: string[];
+  arms: Arms;
 }) {
   return (
     <>
       <FlipSep />
-      <HoverCard
-        className="subject-flip-card"
-        content={
-          <ul className="subject-flip-list">
-            {ids.map((id) => {
-              const now = rows.now.get(id);
-              return (
-                <li key={id}>
-                  <span className="subject-flip-id">#{String(id).padStart(3, "0")}</span>
-                  <span className="subject-flip-was">{rows.was.get(id)?.predicted || "∅"}</span>
-                  <span aria-hidden="true">→</span>
-                  <span className="subject-flip-now">{now?.predicted || "∅"}</span>
-                  <span className="subject-flip-gt">want {now?.ground_truth_text ?? "—"}</span>
-                </li>
-              );
-            })}
-          </ul>
-        }
-      >
+      <HoverCard className="subject-flip-card" content={<FlipList keys={keys} arms={arms} />}>
         <span className={cx("subject-flip-line", `is-${kind}`)} tabIndex={0}>
-          <strong>{ids.length}</strong> {label}
+          <strong>{keys.length}</strong> {label}
         </span>
       </HoverCard>
     </>
+  );
+}
+
+function bySlot(cells: readonly CellRow[]): Map<number, CellRow> {
+  return new Map(cells.map((c) => [c.position, c]));
+}
+
+// Mounted only while the card is open, so the two reads cost nothing until a hover asks.
+function FlipList({ keys, arms }: { keys: string[]; arms: Arms }) {
+  const was = usePresetCells(arms.before ? { candidateId: arms.before, scope: "cycle" } : null);
+  const now = usePresetCells(arms.after ? { candidateId: arms.after, scope: "cycle" } : null);
+  const item = new Map([...was.items, ...now.items].map((it) => [it.sample_key, it]));
+  const wasAt = bySlot(was.cells);
+  const nowAt = bySlot(now.cells);
+  return (
+    <ul className="subject-flip-list">
+      {keys.map((key) => {
+        const it = item.get(key);
+        return (
+          <li key={key}>
+            <span className="subject-flip-id">
+              {it === undefined ? "#—" : `#${String(it.position).padStart(3, "0")}`}
+            </span>
+            <span className="subject-flip-was">{(it && wasAt.get(it.position)?.predicted) || "∅"}</span>
+            <span aria-hidden="true">→</span>
+            <span className="subject-flip-now">{(it && nowAt.get(it.position)?.predicted) || "∅"}</span>
+            <span className="subject-flip-gt">want {it?.ground_truth ?? "—"}</span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

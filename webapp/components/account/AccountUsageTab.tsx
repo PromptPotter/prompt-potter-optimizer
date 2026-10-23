@@ -17,7 +17,7 @@ import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import {
   quotaRead,
-  postSetConcurrentCycles,
+  postCommand,
   type MachineSlot,
   type MachineStatusResponse,
   type QuotaStatus,
@@ -31,7 +31,7 @@ export function AccountUsageTab() {
   const quota = shownData(read);
 
   if (read.status === "failed" && quota === null) {
-    return <AccountFailure kind={read.failure.kind} subject="your usage" />;
+    return <AccountFailure message={read.failure.message} subject="your usage" />;
   }
   if (quota === null) return <AccountLoading subject="your usage" />;
   return (
@@ -280,7 +280,10 @@ function LimitControl({
 
   const save = async (next: number) => {
     if (next === limit || !Number.isInteger(next) || next < 1) return;
-    await cmd.run("set-concurrent-cycles", () => postSetConcurrentCycles(next), () =>
+    await cmd.run(
+      "set-concurrent-cycles",
+      () => postCommand("set-concurrent-cycles", { max_concurrent_cycles: next }),
+      () =>
       invalidateReads("quota"),
     );
   };

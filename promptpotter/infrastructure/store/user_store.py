@@ -3,28 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     write_json,
 )
 
 
-class ConsentRecord(StrictModel):
+class ConsentRecord(FrozenModel):
     """``accepted_at`` is SERVER-stamped, never client-supplied: its legal weight rests on that clock."""
-
-    model_config = ConfigDict(frozen=True)
 
     version: str
     accepted_at: str
 
 
-class User(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class User(FrozenModel):
     user_id: str
     tenant_id: str
     email: str | None = None
@@ -103,15 +99,3 @@ def read_accounts(projects_root: Path) -> list[AccountDir]:
         if user is not None:
             accounts.append(AccountDir(tenant_dir, user))
     return accounts
-
-
-__all__ = [
-    "AccountDir",
-    "ConsentRecord",
-    "Torn",
-    "User",
-    "UserStore",
-    "account_dirs",
-    "count_accounts",
-    "read_accounts",
-]

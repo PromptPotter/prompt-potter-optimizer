@@ -6,17 +6,48 @@ import hashlib
 import importlib.metadata
 import json
 import os
-import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from stat import S_ISDIR, S_ISREG
 
-REPO = Path(__file__).resolve().parents[1]
+from processes import REPO, git
 
 # No prose is among them, so a docs edit reruns nothing that only RUNS the engine.
-ENGINE_RUNTIME = ("promptpotter/", "datasets/", "examples/", "pyproject.toml", "uv.lock")
+ENGINE_RUNTIME = ("promptpotter/", "examples/", "pyproject.toml", "uv.lock")
 OFFLINE_RUN = "offline-run"
-OFFLINE_RUN_READS = (*ENGINE_RUNTIME, "scripts/offline_run.py", "scripts/last_green.py")
+OFFLINE_RUN_READS = (
+    *ENGINE_RUNTIME,
+    "scripts/offline_run.py",
+    "scripts/offline_world.py",
+    "scripts/last_green.py",
+    "scripts/processes.py",
+)
+# Stamped by size and mtime, so a late reader is keyed on the file as it is when IT asks.
+_DIGESTS: dict[Path, tuple[tuple[int, int], bytes]] = {}
+
+
+def digest(*chunks: bytes) -> bytes:
+    return hashlib.sha256(b"\0".join(chunks)).digest()
+
+
+def file_digest(path: Path) -> bytes:
+    try:
+        stat = path.stat()
+    except OSError:  # listed and since deleted: its absence is the content
+        return b""
+    if S_ISDIR(stat.st_mode) and (path / ".git").exists():  # a gitlink: its content is its commit
+        code, head = git("-C", str(path), "rev-parse", "HEAD")
+        if code:
+            raise RuntimeError(f"{path}: a gitlink whose commit git cannot read: {head}")
+        return digest(head.encode())
+    if not S_ISREG(stat.st_mode):
+        raise RuntimeError(f"{path}: git lists it, and it is neither a file nor a gitlink")
+    stamp = (stat.st_size, stat.st_mtime_ns)
+    held = _DIGESTS.get(path)
+    if held is None or held[0] != stamp:
+        held = _DIGESTS[path] = stamp, digest(path.read_bytes())
+    return held[1]
 
 
 def reads(rel: str, prefixes: Sequence[str]) -> bool:
@@ -32,38 +63,17 @@ class LastGreen:
 
     def __init__(self, listed: str) -> None:
         self._files = sorted(filter(None, listed.split("\0")))
-        # Stamped by size and mtime, so a late check is keyed on the files as they are when IT starts.
-        self._hashes: dict[str, tuple[tuple[int, int], bytes]] = {}
         tools = sorted(f"{d.name}={d.version}" for d in importlib.metadata.distributions())
         tools.append(sys.version)  # the interpreter is a tool no distribution names
-        self._tools = hashlib.sha256("\0".join(tools).encode()).digest()
+        self._tools = digest(*(tool.encode() for tool in tools))
 
     @classmethod
     def open(cls) -> LastGreen | None:
         """``None`` under ``CI``, and where git cannot list the tree: a key over no files matches every tree."""
         if os.environ.get("CI"):
             return None
-        listing = subprocess.run(
-            ["git", "ls-files", "-co", "--exclude-standard", "-z"],
-            cwd=REPO,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        return None if listing.returncode else cls(listing.stdout)
-
-    def _hash(self, rel: str) -> bytes:
-        path = REPO / rel
-        try:
-            stat = path.stat()
-        except OSError:  # listed and since deleted: its absence is the content
-            return b""
-        stamp = (stat.st_size, stat.st_mtime_ns)
-        held = self._hashes.get(rel)
-        if held is None or held[0] != stamp:
-            held = self._hashes[rel] = stamp, hashlib.sha256(path.read_bytes()).digest()
-        return held[1]
+        code, listed = git("ls-files", "-co", "--exclude-standard", "-z")
+        return None if code else cls(listed)
 
     def key(self, prefixes: Sequence[str], products: Sequence[str] = ()) -> str:
         # git ignores a built product, so it is walked.
@@ -73,11 +83,14 @@ class LastGreen:
             for root, _, names in os.walk(REPO / product)
             for name in names
         )
-        digest = hashlib.sha256(self._tools)
         sources = (rel for rel in self._files if reads(rel, prefixes))
-        for rel in (*self._INSTALLED, *sources, *built):
-            digest.update(rel.encode() + b"\0" + self._hash(rel))
-        return digest.hexdigest()
+        return digest(
+            self._tools,
+            *(
+                rel.encode() + b"\0" + file_digest(REPO / rel)
+                for rel in (*self._INSTALLED, *sources, *built)
+            ),
+        ).hex()
 
     def _load(self) -> dict[str, str]:
         try:

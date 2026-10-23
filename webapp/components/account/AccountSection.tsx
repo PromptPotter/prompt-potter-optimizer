@@ -1,6 +1,5 @@
 
 import type { ReactNode } from "react";
-import type { FailureKind } from "@/lib/api";
 
 export function AccountSection({
   title,
@@ -36,18 +35,10 @@ export function AccountEmpty({ title, children }: { title: string; children: Rea
   );
 }
 
-const FAILURE_SENTENCE: Record<FailureKind, string> = {
-  transient: "The server did not answer. It retries when you reopen this pane.",
-  auth: "Your session has ended. Sign in again to see this.",
-  gone: "The server no longer has this.",
-  denied: "This account may not read this.",
-  invalid: "The server refused the request.",
-};
-
-export function AccountFailure({ kind, subject }: { kind: FailureKind | null; subject: string }) {
+export function AccountFailure({ message, subject }: { message: string; subject: string }) {
   return (
     <p className="account-failure" role="alert">
-      Could not load {subject}. {FAILURE_SENTENCE[kind ?? "transient"]}
+      Could not load {subject}. {message}
     </p>
   );
 }

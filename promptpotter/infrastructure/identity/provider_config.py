@@ -76,11 +76,3 @@ def _parse_provider(name: str, raw: object) -> OIDCProviderConfig | None:
         token_url=str(raw["token_url"]) if raw.get("token_url") else None,
         jwks_url=str(raw["jwks_url"]) if raw.get("jwks_url") else None,
     )
-
-
-__all__ = [
-    "SUPPORTED_PROVIDERS",
-    "OIDCProviderConfig",
-    "ProviderConfigBundle",
-    "load_provider_config",
-]

@@ -4,8 +4,16 @@ import { CEILING_METER_LABELS, RATE_PRICED_LABEL } from "@/lib/api/types.generat
 import { replayShareLine, spendLines } from "@/lib/derivations";
 import { fmtUsd } from "@/lib/format";
 
-export function SpendBuckets({ metered }: { metered: MeteredSpend }) {
+// `campaignUsd`: served `campaign_metered_usd`, every cycle of the campaign; null on a replay or with no manifest.
+export function SpendBuckets({
+  metered,
+  campaignUsd,
+}: {
+  metered: MeteredSpend;
+  campaignUsd: number | null;
+}) {
   const lines = spendLines(metered);
+  const meter = CEILING_METER_LABELS[metered.meter];
   return (
     <div className="spend-buckets">
       <table>
@@ -38,8 +46,14 @@ export function SpendBuckets({ metered }: { metered: MeteredSpend }) {
       </table>
       <p className="spend-buckets-replay">{replayShareLine(metered)}</p>
       <dl>
+        {campaignUsd !== null && (
+          <div className="spend-buckets-total">
+            <dt>Campaign spend against the campaign cap, every cycle, {meter}</dt>
+            <dd>{fmtUsd(campaignUsd)}</dd>
+          </div>
+        )}
         <div className="spend-buckets-total">
-          <dt>Counted against cap, {CEILING_METER_LABELS[metered.meter]}</dt>
+          <dt>This cycle&rsquo;s spend against the campaign cap, {meter}</dt>
           <dd>{fmtUsd(metered.metered_usd)}</dd>
         </div>
         {lines

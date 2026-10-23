@@ -3,20 +3,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.application import optimizers
-from promptpotter.application.mask.divergence import Verdict, find_divergences
+from promptpotter.application.mask.divergence import (
+    Verdict,
+    find_divergences,
+    make_abort_verdict,
+    make_scoring_verdict,
+)
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import Lens, MaskReading, MaskRecord
-from promptpotter.application.mask.verdicts import make_abort_verdict, make_scoring_verdict
-from promptpotter.application.scoring.formula import ScoringFormulaError
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.lineage_tree import ArmNode, CourseNode, LineageDivergence
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.infrastructure.store.lineage_queries import (
-    ArmNode,
-    CourseNode,
-    LineageDivergence,
-    build_lineage_tree,
-    rank_moves,
-)
+from promptpotter.infrastructure.store.lineage_queries import build_lineage_tree, rank_moves
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError
 
@@ -50,10 +48,7 @@ def _mask_records(
         path = tuple(node.path)
         if path not in out:
             leaf_store, leaf = resolve_cycle_path(stores, path)
-            try:
-                out[path] = load_mask_record(leaf_store, leaf.campaign_id, samples, lens=lens)
-            except (ValueError, SyntaxError, ScoringFormulaError) as exc:
-                raise BadRequestError(f"Invalid mask scoring formula: {exc}") from exc
+            out[path] = load_mask_record(leaf_store, leaf.campaign_id, samples, lens=lens)
         for arm in node.children:
             for run in arm.children:
                 visit(run)
@@ -93,7 +88,7 @@ class _Overlay:
                 self.criteria.setdefault(course, record.criterion)
                 for rnd_rec in cyc.rounds:
                     for cand in rnd_rec.candidates:
-                        self.readings[(course, cand.candidate_id)] = cand.reading
+                        self.readings[(course, cand.key)] = cand.reading
         self.dimmed: frozenset[tuple[CyclePath, int]] = frozenset(dimmed)
 
     def apply(self, node: CourseNode) -> CourseNode:
@@ -152,6 +147,3 @@ def lensed_tree(
         verdict,
         subset_size=len(samples) if samples else None,
     ).apply(tree)
-
-
-__all__ = ["CourseNode", "lensed_tree"]

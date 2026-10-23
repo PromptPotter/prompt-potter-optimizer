@@ -1,22 +1,28 @@
 "use client";
 
-import type { DatasetIndexEntry, OriginEntry } from "@/lib/api";
+import type { DatasetIndexEntry, DraftSummary, OriginEntry } from "@/lib/api";
 import { fmtPct0 } from "@/lib/format";
 
 export function DatasetPickList({
+  drafts,
   origins,
   datasets,
+  onReopenDraft,
+  onDiscardDraft,
   onOpenOrigin,
   onPick,
   busy,
 }: {
+  drafts: DraftSummary[];
   origins: OriginEntry[];
   datasets: DatasetIndexEntry[];
+  onReopenDraft: (draftId: string) => void;
+  onDiscardDraft: (draftId: string) => void;
   onOpenOrigin: (entry: OriginEntry) => void;
   onPick: (entry: DatasetIndexEntry) => void;
   busy: boolean;
 }) {
-  if (origins.length === 0 && datasets.length === 0) {
+  if (drafts.length === 0 && origins.length === 0 && datasets.length === 0) {
     return (
       <div className="chat-msg ai ingest-picklist">
         <p>
@@ -35,6 +41,35 @@ export function DatasetPickList({
 
   return (
     <div className="chat-msg ai ingest-picklist">
+      {drafts.length > 0 ? (
+        <div className="ingest-picklist-group">
+          <span className="ingest-picklist-head">Open check-ins</span>
+          <ul className="ingest-picklist-items ingest-picklist-scroll">
+            {drafts.map((d) => (
+              <li key={d.draft_id}>
+                <button
+                  type="button"
+                  className="ingest-pick-btn"
+                  disabled={busy}
+                  onClick={() => onReopenDraft(d.draft_id)}
+                >
+                  <span className="ingest-pick-name">{d.slug}</span>
+                  <span className="ingest-pick-meta">{d.n_samples}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-label={`Discard the ${d.slug} check-in`}
+                  onClick={() => onDiscardDraft(d.draft_id)}
+                >
+                  Discard
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {origins.length > 0 ? (
         <div className="ingest-picklist-group">
           <span className="ingest-picklist-head">Origins</span>

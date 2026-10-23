@@ -34,7 +34,7 @@ export function useVerify(
     const readings = new Map<string, VerifyReading>();
     for (const r of rounds ?? []) {
       for (const { reading } of r.candidates) {
-        if (reading.verify) readings.set(reading.arm.label, reading.verify);
+        if (reading.verify) readings.set(reading.arm.key, reading.verify);
       }
     }
     return { readings, pass, unit };

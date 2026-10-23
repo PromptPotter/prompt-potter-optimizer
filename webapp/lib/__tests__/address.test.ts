@@ -147,15 +147,6 @@ describe("parseAddress round trip", () => {
       },
     ],
     [
-      "a check-in cycle id",
-      {
-        kind: "cycle",
-        path: [{ campaignId: "justlogic__cf67b3", cycleId: "cycle_chk_a1b2c3d4e5f6" }],
-        tab: "chat",
-        candidateId: null, at: null, cell: null,
-      },
-    ],
-    [
       "following, a cell open on the default view",
       { kind: "follow", tab: "chat", cell: { answer: "9f2a1c0b7d3e4f5a.ab12cd34ef56" } },
     ],

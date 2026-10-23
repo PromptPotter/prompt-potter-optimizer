@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import { postSkipSearchpoint, postSetSampleLookahead } from "@/lib/api";
+import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { phaseIs } from "@/lib/run-phase";
 import { pathOf, readSpend, runningInnerRun } from "@/lib/derivations";
@@ -35,14 +35,14 @@ export function useRemoteModel() {
   if (!viewedPath || !cycleId) return null;
 
   // No `settled` gate: a verb is still offered there, and this gates `RunControlButton`'s only mount.
-  if (!dash || phaseIs(dash.run_phase, "authoring")) return null;
+  if (!dash) return null;
   const terminal = phaseIs(dash.run_phase, "settled");
   const skipRefusal = dash.run_admission.skip_refusal;
   const armRefusal = dash.run_admission.lookahead_refusal;
 
   const innerHop = innerRun ? pathOf(innerRun).at(-1) : undefined;
 
-  const { metered, lines, budgetUsd, budgetTokens } = readSpend(dash);
+  const { metered, lines } = readSpend(dash);
 
   const lookahead = dash.sample_lookahead;
   const autoArmed = dash.sample_lookahead_auto;
@@ -59,7 +59,8 @@ export function useRemoteModel() {
   const armDisabled = concurrencyUnavailable || armRefusal !== "" || cmd.pending !== null;
   const arm = (cells: number, auto: boolean) =>
     void cmd.run("sample-lookahead", () =>
-      postSetSampleLookahead(viewedPath, cells, auto),
+      // `cells: 1` disarms; sent unclamped, the walk clamps it to `max_cells_in_flight`.
+      postCommand("set-sample-lookahead", { ...cycleAddress(viewedPath), cells, auto }),
     );
   const armCells = (raw: string) => {
     const cells = Number(raw);
@@ -82,7 +83,7 @@ export function useRemoteModel() {
   return {
     cycleId,
     datasetName: leafEntry?.dataset_name,
-    updatedAt: dash.wallclock_serialized_at,
+    updatedAt: dash.at_time,
     babysat: Boolean(leafEntry?.human_intervened),
     offline: status === "offline",
     inner: !isOuterView,
@@ -92,9 +93,8 @@ export function useRemoteModel() {
     skipRefusal,
     metered,
     lines,
-    budgetUsd,
-    budgetTokens,
-    maxRounds: dash.run_limits.max_rounds,
+    budget: dash.run_limits.budget,
+    share: dash.allotment,
     benchLiftPerUsd: dash.bench_score?.cost.lift_per_usd ?? null,
     lookahead,
     autoArmed,
@@ -115,7 +115,8 @@ export function useRemoteModel() {
     depthSegments,
     arm,
     armCells,
-    skip: () => void cmd.run("skip", () => postSkipSearchpoint(viewedPath)),
+    skip: () =>
+      void cmd.run("skip", () => postCommand("skip-searchpoint", cycleAddress(viewedPath))),
     pending: cmd.pending,
     failure: cmd.failure,
   };

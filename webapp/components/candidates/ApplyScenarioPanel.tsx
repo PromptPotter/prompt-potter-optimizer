@@ -1,19 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { postSteerFork } from "@/lib/api";
+import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
+import type { CyclePath } from "@/lib/ids";
 
 export function ApplyScenarioPanel({
-  campaignId,
-  cycleId,
+  path,
   isLive,
   criterion,
   divergentRound,
   nextRound,
 }: {
-  campaignId: string | null;
-  cycleId: string | null;
+  path: CyclePath | null;
   isLive: boolean;
   criterion: string | null;
   divergentRound: number | null;
@@ -22,7 +21,7 @@ export function ApplyScenarioPanel({
   const cmd = useCommand<"apply-scenario">("apply-scenario");
   const [done, setDone] = useState(false);
 
-  if (!criterion || !campaignId || !cycleId) return null;
+  if (!criterion || !path) return null;
   const at = divergentRound ?? nextRound;
   const pending = cmd.pending !== null;
 
@@ -30,10 +29,12 @@ export function ApplyScenarioPanel({
     void cmd.run(
       "apply-scenario",
       () =>
-        postSteerFork([{ campaignId, cycleId }], at, "", {
-          // No `origin_prompt_fields`: the lifted round 0 is the origin, and the server refuses the pair.
+        postCommand("fork-cycle", {
+          ...cycleAddress(path),
+          round: at,
+          // No `origin_prompts`: the lifted round 0 is the origin, and the server refuses the pair.
           seed: { config_overrides: { scoring: { per_cell: criterion } } },
-          keepRounds: true,
+          keep_rounds: true,
         }),
       () => setDone(true),
     );

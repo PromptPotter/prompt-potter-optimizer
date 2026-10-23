@@ -282,8 +282,7 @@ What we measure on, each dataset's starting score and the protocol a published n
 
 ```bash
 git clone https://github.com/PromptPotter/prompt-potter-optimizer && cd prompt-potter-optimizer
-pip install -e ".[all,dev]"
-python scripts/gate.py          # every check CI runs
+python scripts/gate.py          # every check CI runs; the first run builds .venv from uv.lock
 ```
 
 The optimizer is itself a pipeline of nodes, so it can be pointed at its own optimizer prompts — an outer campaign whose individuals are configurations of the inner optimizer ([self-optimization, L4](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/l4-outer-loop.md)). Every optimizer runs end to end at zero spend ([`offline-run.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/offline-run.md)). Start at **[the developer guide](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/README.md)** — the engine's four seams on one page — then [`CONTRIBUTING.md`](CONTRIBUTING.md).

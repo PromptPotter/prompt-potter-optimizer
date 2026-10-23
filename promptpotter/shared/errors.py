@@ -4,9 +4,11 @@ import asyncio
 import enum
 import logging
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Annotated, Any
+
+from pydantic import BaseModel, ValidationError
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -22,6 +24,7 @@ class ErrorCategory(enum.StrEnum):
     PROVIDER_THROTTLED = "PROVIDER_THROTTLED"
     SPEND_CEILING = "SPEND_CEILING"
     TOKEN_CEILING = "TOKEN_CEILING"
+    WALL_CLOCK = "WALL_CLOCK"
     # Never sent, so not CONNECTION: the backend the cell would have reached is untouched.
     PRICE_LIST_UNREACHABLE = "PRICE_LIST_UNREACHABLE"
     # Not SPEND_CEILING: no amount of room admits a send no rate bounds.
@@ -129,6 +132,14 @@ class NotFoundError(PotterError):
     code = "not_found"
 
 
+class DatasetAccessError(NotFoundError):
+    """A 404, never a 403: the existence-leak posture."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Dataset '{name}' not found")
+        self.name = name
+
+
 class ConflictError(PotterError):
     http_status = 409
     code = "version_conflict"
@@ -199,6 +210,26 @@ class PayloadInvalidError(PotterError):
     http_status = 422
     code = "payload_invalid"
 
+    @classmethod
+    def refusing(cls, errors: Iterable[Mapping[str, Any]]) -> PayloadInvalidError:
+        """A model's refusal in its own words, its validator's sentence where one raised."""
+        found: list[dict[str, Any]] = []
+        for error in errors:
+            said = error["ctx"]["error"] if error["type"] == "value_error" else error["msg"]
+            found.append({"loc": [str(part) for part in error["loc"]], "msg": str(said)})
+        reason = "; ".join(
+            f"{'.'.join(e['loc'])}: {e['msg']}" if e["loc"] else e["msg"] for e in found
+        )
+        return cls(reason, details={"errors": found})
+
+    @classmethod
+    def validating[M: BaseModel](cls, model: type[M], fields: Mapping[str, Any]) -> M:
+        """A payload a terminal or a host built, refused in the words the REST body's 422 carries."""
+        try:
+            return model.model_validate(fields)
+        except ValidationError as exc:
+            raise cls.refusing(exc.errors()) from exc
+
 
 class ServiceUnavailableError(PotterError):
     http_status = 503
@@ -215,6 +246,19 @@ class StoredConfigInvalidError(PotterError):
         super().__init__(
             f"{path} is no longer readable by this build: {reason}. "
             "`python -m promptpotter restamp --apply` rewrites it.",
+            details={"path": path, "reason": reason},
+        )
+
+
+class ManifestUnreadableError(ConflictError):
+    """A campaign manifest is never migrated: one this build cannot read is refused by name."""
+
+    code = "manifest_unreadable"
+
+    def __init__(self, *, path: str, reason: str) -> None:
+        super().__init__(
+            f"{path} was written in a shape this build does not read ({reason}). No migration "
+            "exists: delete that campaign, or wipe the store.",
             details={"path": path, "reason": reason},
         )
 
@@ -281,39 +325,6 @@ class OptimizerTimeoutError(TimeoutError):
     """The run halts with ``OPTIMIZER_TIMEOUT``; any other timeout is a crash."""
 
 
-class DatasetIdentityError(RuntimeError):
-    _PREVIEW = 160
-
-    def __init__(
-        self,
-        *,
-        dataset_name: str,
-        sample_id: int,
-        stored: tuple[str, str],
-        current: tuple[str, str],
-    ) -> None:
-        self.dataset_name = dataset_name
-        self.sample_id = sample_id
-        lines = [
-            f"Dataset {dataset_name!r}: sample_id {sample_id} was measured against different "
-            "content than the row now sitting at that position.",
-        ]
-        for field, was, now in (
-            ("query", stored[0], current[0]),
-            ("ground_truth", stored[1], current[1]),
-        ):
-            if was != now:
-                lines.append(f"  {field} measured: {was[: self._PREVIEW]!r}")
-                lines.append(f"  {field} now:      {now[: self._PREVIEW]!r}")
-        lines.append(
-            "Per-sample history (difficulty, hit rates, hard samples) is keyed on (dataset_name, "
-            "sample_id), so continuing under this name would pool two questions in one slot. Cut "
-            "the changed rows under a NEW dataset name: every sample it shares with this one "
-            "still replays, because replay matches on content."
-        )
-        super().__init__("\n".join(lines))
-
-
 @shapes_optimizer_prompt
 def is_error_result(result: Mapping[str, Any]) -> bool:
     """``predicted == "ERROR"`` is a display token and ``error`` a message: neither detects."""
@@ -351,6 +362,7 @@ ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] 
     ErrorCategory.PROVIDER_THROTTLED: False,
     ErrorCategory.SPEND_CEILING: False,
     ErrorCategory.TOKEN_CEILING: False,
+    ErrorCategory.WALL_CLOCK: False,
     ErrorCategory.PRICE_LIST_UNREACHABLE: False,
     ErrorCategory.NO_RATE: False,
     ErrorCategory.PIPELINE: True,
@@ -359,36 +371,3 @@ ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] 
     ErrorCategory.UNKNOWN: True,
 }
 assert set(ERROR_IS_CHARGED) == set(ErrorCategory), "every ErrorCategory must take a side"
-
-
-__all__ = [
-    "ERROR_IS_CHARGED",
-    "BadRequestError",
-    "CellHaltedError",
-    "CellInfrastructureError",
-    "CellSendRefusedError",
-    "CellThrottledError",
-    "CellUnscoreableError",
-    "ConflictError",
-    "ContentTooLargeError",
-    "CycleBusyError",
-    "DatasetIdentityError",
-    "DiagnosticError",
-    "ErrorCategory",
-    "MachineBusyError",
-    "NotFoundError",
-    "PayloadInvalidError",
-    "PotterError",
-    "PromptCompositionError",
-    "RequestTooLargeError",
-    "ResumeDivergenceError",
-    "SendRefusedError",
-    "ServiceUnavailableError",
-    "StoredConfigInvalidError",
-    "UnauthorizedError",
-    "cell_failure",
-    "error_category",
-    "graceful",
-    "is_error_result",
-    "is_provider_credit_refusal",
-]

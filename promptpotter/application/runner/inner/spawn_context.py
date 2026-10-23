@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import contextvars
-from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
+from promptpotter.application.bench.difficulty import ruler_clock
 from promptpotter.application.runner.inner.tasks import (
     InnerCells,
     is_self_optimization,
@@ -15,27 +15,20 @@ from promptpotter.application.runner.inner.tasks import (
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.llm.telemetry import current_round
-from promptpotter.infrastructure.store.archive_queries import CampaignWalks, fence_memory
+from promptpotter.infrastructure.store.archive_queries import (
+    CampaignWalks,
+    CellOf,
+    bind_memory_scope,
+)
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import enter_instrument_mode
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.ruler import DeltaRuler
+    from promptpotter.domain.campaign import Purpose
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-    from promptpotter.infrastructure.store.read_model import Moment
     from promptpotter.shared.identity import IdentityContext
-
-__all__ = [
-    "InnerSpawnContext",
-    "enter_inner_cell",
-    "inner_cells",
-    "inner_spawn_context",
-    "publish_inner_spawn_context",
-    "retarget_inner_spawn",
-    "set_inner_rulers",
-]
 
 
 @dataclass(frozen=True)
@@ -49,10 +42,12 @@ class InnerSpawnContext:
     spawn_cycle_id: str
     # Outermost first, ending at the asker's: a pause on any of their ledgers stops the cell.
     enclosing: tuple[Path, ...]
+    # What the spawner is FOR: each cell declares it, so withholds what the spawner would.
+    purpose: Purpose
+    # The tenant ruler version the spawner's open round reads, which every cell it spawns reads too.
+    ruler_version: int
     # Resolved ONCE at publish: a per-cell read lets an edit split one run's cells.
     cells: InnerCells | None = None
-    # A dataset absent until a scale can be identified: its cells read cold, never fitting their own.
-    rulers: Mapping[str, DeltaRuler] = field(default_factory=dict)
 
 
 # No default: unbound is "nobody published"; a published ``None`` is a run with no cycle to spawn under.
@@ -72,7 +67,7 @@ def _outer_cells(session: Session) -> InnerCells | None:
 
 
 def publish_inner_spawn_context(session: Session) -> None:
-    cycle_id = session.state.cycle_id
+    cycle_id = session.cycle_id
     if not cycle_id or session.dataset is None or not session.campaign_id:
         _INNER_SPAWN.set(None)
         return
@@ -91,7 +86,12 @@ def publish_inner_spawn_context(session: Session) -> None:
             shared_root=shared_root,
             spawn_campaign_id=session.campaign_id,
             spawn_cycle_id=cycle_id,
-            enclosing=(*session.control.enclosing, session.store.campaigns.cycle_dir(session.hop)),
+            enclosing=(
+                *session.state.control.enclosing,
+                session.store.campaigns.cycle_dir(session.hop),
+            ),
+            purpose=session.purpose,
+            ruler_version=ruler_clock(session),
             cells=cells,
         )
     )
@@ -116,28 +116,24 @@ def inner_cells() -> InnerCells | None:
     return None if ctx is None else ctx.cells
 
 
-def set_inner_rulers(ctx: InnerSpawnContext) -> None:
-    _INNER_SPAWN.set(ctx)
+def pin_inner_ruler(version: int) -> None:
+    """At each outer round's open, so every cell the round spawns reads the version it reads."""
+    ctx = inner_spawn_context()
+    if ctx is not None and ctx.ruler_version != version:
+        _INNER_SPAWN.set(replace(ctx, ruler_version=version))
 
 
-def enter_inner_cell(
-    campaigns: CampaignStore,
-    campaign_id: str,
-    *,
-    ruler: DeltaRuler | None,
-    moment: Moment | None,
-) -> None:
-    """Inside the cell's own task. *ruler* is the spawner's, so every candidate reads the cell's
-    origin at one θ; the archive stays its CACHE, and is MEMORY only for its campaign's walks."""
+def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_id: str) -> None:
+    """The archive stays the cell's CACHE, and MEMORY only for its campaign's walks."""
     # Before the cell's run binds its own round, so this still reads the spawner's.
-    enter_instrument_mode(ruler=ruler, spawned_in=current_round())
-    fence_memory(CampaignWalks(campaigns, campaign_id, moment))
+    enter_instrument_mode(spawned_in=current_round())
+    bind_memory_scope(CellOf(CampaignWalks(campaigns, campaign_id), ctx.ruler_version))
 
 
 def retarget_inner_spawn(session: Session) -> None:
     """Moves only the asker; the sandbox owner never follows a fork."""
     ctx = inner_spawn_context()
-    cycle_id = session.state.cycle_id
+    cycle_id = session.cycle_id
     if ctx is None or not cycle_id:
         return
     asking_dir = session.store.campaigns.cycle_dir(session.hop)

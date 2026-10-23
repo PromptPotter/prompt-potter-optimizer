@@ -28,12 +28,6 @@ pipeline:
           - temperature
           - max_tokens
           - reasoning_effort
-          - persona
-          - task_intent
-          - problem_description
-          - instruction
-          - thinking_style
-          - answer_format
         observation_name: llm_only
         observation_mappings:
           - pipeline_key: final_ranking
@@ -45,5 +39,5 @@ pipeline:
 campaign:
   scoring: label_match(predicted, ground_truth)
   optimization:
-    max_rounds: 8
+    budget: {rounds: 8}
     degradation_threshold: 0.4

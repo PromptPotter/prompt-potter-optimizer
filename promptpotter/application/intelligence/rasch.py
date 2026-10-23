@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -10,47 +9,20 @@ from numpy.typing import NDArray
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import decision_order
 from promptpotter.domain.ruler import (
-    AbilityReading,
     CalibrationModel,
     DeltaRuler,
     Ruler,
     anchor_id_of,
     ruler_entry,
 )
+from promptpotter.domain.scoring import is_hit
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.statistics import logistic
 
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
-
-logger = logging.getLogger(__name__)
-
-# C0 inside the δ-calibrating fit; the archive's copies of the origin fold onto this one id.
-ORIGIN_ABILITY_ID = "__origin__"
-
-__all__ = [
-    "ORIGIN_ABILITY_ID",
-    "Observation",
-    "RaschPosterior",
-    "RoundAbilities",
-    "build_observations",
-    "candidate_abilities",
-    "dedup_observations",
-    "extend_ruler",
-    "fit_rasch",
-    "fit_rasch_2pl",
-    "fit_theta",
-    "fit_theta_given_delta",
-    "graded_response",
-    "graduate_ruler_model",
-    "observations_from_results",
-    "parent_level_trajectory",
-    "responses_of",
-    "select_round_subset",
-    "theta_bounds_given_delta",
-    "theta_lift_over_parent",
-]
 
 
 class Observation(NamedTuple):
@@ -65,7 +37,7 @@ def graded_response(cell: GradedCell) -> float:
     """``objective``, never ``fitness``: the one place a formula's cost term reaches the election."""
     if cell.grade.objective is None:
         raise KeyError(
-            f"graded_response: the cell at slot {cell.sample_id} carries no objective. Only a "
+            f"graded_response: the cell of sample {cell.key} carries no objective. Only a "
             "cell ``Scorer.grade`` scored may be read here."
         )
     return min(max(cell.grade.objective, 0.0), 1.0)
@@ -73,31 +45,6 @@ def graded_response(cell: GradedCell) -> float:
 
 def responses_of(sheet: CellSheet) -> dict[str, float]:
     return {cell.key: graded_response(cell) for cell in sheet.scoreable}
-
-
-def parent_level_trajectory(
-    origin: AbilityReading | None,
-    winners: Sequence[AbilityReading | None],
-    ruler: DeltaRuler | None,
-) -> tuple[tuple[float, float] | None, list[tuple[float, float]]]:
-    """The PARENT's level per round; a round off the origin's scale carries the previous one forward."""
-    if origin is None or origin.se is None or ruler is None or not ruler.delta:
-        return None, []
-    if origin.ruler_id != ruler.anchor_id:
-        logger.warning(
-            "origin ability sits on %s, not the cycle's ruler %s — no level series on this scale",
-            origin.scale(),
-            ruler.anchor_id,
-        )
-        return None, []
-    origin_pair = (origin.theta, origin.se)
-    prev = origin_pair
-    out: list[tuple[float, float]] = []
-    for level in winners:
-        if level is not None and level.se is not None and level.comparable_to(origin):
-            prev = (level.theta, level.se)
-        out.append(prev)
-    return origin_pair, out
 
 
 _INIT_SIGMA_THETA = 1.5
@@ -152,11 +99,15 @@ class RaschPosterior:
         )
 
 
-@dataclass
-class RoundAbilities(RaschPosterior):
-    """``parent`` is its ``(θ, se)`` on the arms' δ; ``None`` is an absence, never a logit-0 floor."""
+@dataclass(frozen=True)
+class RoundAbilities:
+    """``bar`` is, per arm, the parent's ``(θ, se)`` it is judged against; an arm absent from it
+    has no bar, never a logit-0 floor. ``cells`` counts each θ's ``theta_cells``."""
 
-    parent: tuple[float, float] | None = None
+    theta: dict[str, float]
+    theta_se: dict[str, float]
+    bar: dict[str, tuple[float, float]]
+    cells: dict[str, int]
 
 
 def _map_fit(
@@ -184,16 +135,14 @@ def _map_fit(
         old_theta = theta.copy()
         old_delta = delta.copy()
 
-        eta = theta[rows] - delta[cols]
-        p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+        p = logistic(theta[rows] - delta[cols])
         w = p * (1.0 - p)
 
         grad_theta = np.bincount(rows, weights=responses - p, minlength=n_c) - inv_var_theta * theta
         info_theta = np.bincount(rows, weights=w, minlength=n_c) + inv_var_theta
         theta = theta + _newton_step(grad_theta, info_theta)
 
-        eta = theta[rows] - delta[cols]
-        p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+        p = logistic(theta[rows] - delta[cols])
         w = p * (1.0 - p)
 
         grad_delta = -np.bincount(cols, weights=responses - p, minlength=n_s) - inv_var_delta * (
@@ -214,8 +163,7 @@ def _map_fit(
             converged = True
             break
 
-    eta = theta[rows] - delta[cols]
-    p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+    p = logistic(theta[rows] - delta[cols])
     w = p * (1.0 - p)
     info_theta = np.bincount(rows, weights=w, minlength=n_c) + inv_var_theta
     info_delta = np.bincount(cols, weights=w, minlength=n_s) + inv_var_delta
@@ -335,14 +283,14 @@ def _fit_one(
     h_arr = np.fromiter((y for _, _, y in rows), dtype=np.float64)
     theta = 0.0
     for _ in range(max_iter):
-        p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
+        p = logistic(a_arr * (theta - d_arr))
         grad = float(np.sum(a_arr * (h_arr - p))) - inv_var * theta
         info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
         step = float(_newton_step(grad, info))
         theta += step
         if abs(step) < tol:
             break
-    p = 1.0 / (1.0 + np.exp(-np.clip(a_arr * (theta - d_arr), -50, 50)))
+    p = logistic(a_arr * (theta - d_arr))
     info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
     # Never a pooled φ̄: that makes an arm's SE depend on which arms shared its round.
     var = np.clip(p * (1.0 - p), 1e-6, None)
@@ -379,68 +327,18 @@ def theta_bounds_given_delta(
 
     low, high = fit(0.0) - _FIT_SLACK, fit(1.0) + _FIT_SLACK
 
-    def p_at(theta: NDArray[np.float64], d: NDArray[np.float64], a: NDArray[np.float64]) -> Any:
-        return 1.0 / (1.0 + np.exp(-np.clip(a * (theta - d), -50, 50)))
-
     d, a = (np.array([params[s][k] for s in params], dtype=np.float64) for k in (0, 1))
-    p = p_at(np.clip(d, low, high), d, a)
+    p = logistic(a * (np.clip(d, low, high) - d))
     info = 1.0 / (_INIT_SIGMA_THETA * _INIT_SIGMA_THETA) + float(np.sum(a * a * p * (1.0 - p)))
     on = [s for s in measured if s in params]
     y = np.fromiter((measured[s] for s in on), dtype=np.float64, count=len(on))
     dm, am = (np.array([params[s][k] for s in on], dtype=np.float64) for k in (0, 1))
-    ends = p_at(np.array([low, high]), dm[:, None], am[:, None])
+    ends = logistic(am[:, None] * (np.array([low, high]) - dm[:, None]))
     pm = np.clip(y, ends.min(axis=1), ends.max(axis=1))
     misfit = float(np.sum((y - pm) ** 2 / np.clip(pm * (1.0 - pm), 1e-6, None)))
     dof = max(len(params) - 1, 1)
     phi = (misfit + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
     return low, high, float(np.sqrt(phi) / np.sqrt(info))
-
-
-def extend_ruler(
-    ruler: DeltaRuler,
-    observations: list[Observation],
-    *,
-    history: list[Observation],
-    max_iter: int = 50,
-    tol: float = 1e-4,
-) -> DeltaRuler:
-    """Fixed-common-item link: a written δ never moves or re-anchors, and a cell no anchored arm answered stays OFF it."""
-    seen = dedup_observations(history, observations)
-    inv_var = 1.0 / (ruler.sigma_delta * ruler.sigma_delta)
-    while True:
-        # `_INIT_SIGMA_THETA`, not `ruler.sigma_theta`: regularized as the election's own θ read is.
-        theta = fit_theta_given_delta(seen, ruler.entries())
-
-        by_s: dict[str, list[tuple[float, float]]] = {}
-        for o in seen:
-            arm = theta.get(o.candidate_id)
-            if o.key in ruler.delta or arm is None:
-                continue
-            by_s.setdefault(o.key, []).append((arm[0], o.response))
-        if not by_s:
-            return ruler
-
-        delta = dict(ruler.delta)
-        delta_se = dict(ruler.delta_se)
-        for key, rows in by_s.items():
-            t_arr = np.fromiter((t for t, _ in rows), dtype=np.float64)
-            y_arr = np.fromiter((y for _, y in rows), dtype=np.float64)
-            d = ruler.mu_delta
-            for _ in range(max_iter):
-                p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
-                grad = -float(np.sum(y_arr - p)) - inv_var * (d - ruler.mu_delta)
-                info = float(np.sum(p * (1.0 - p))) + inv_var
-                step = float(_newton_step(grad, info))
-                d += step
-                if abs(step) < tol:
-                    break
-            p = 1.0 / (1.0 + np.exp(-np.clip(t_arr - d, -50, 50)))
-            info = float(np.sum(p * (1.0 - p))) + inv_var
-            delta[key] = d
-            delta_se[key] = float(1.0 / np.sqrt(max(info, 1e-9)))
-
-        # A new cell keeps a ≡ 1 even under 2PL: one round's arms cannot identify a discrimination.
-        ruler = ruler.model_copy(update={"delta": delta, "delta_se": delta_se})
 
 
 # log(aₛ) ~ N(0, σ_a²): collapses 2PL to 1PL absent evidence and identifies a against θ/δ spread.
@@ -483,7 +381,7 @@ def fit_rasch_2pl(
         old_theta, old_delta, old_log_a = theta.copy(), delta.copy(), log_a.copy()
         a = np.exp(log_a)
 
-        p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
+        p = logistic(a[cols] * (theta[rows] - delta[cols]))
         grad_t = (
             np.bincount(rows, weights=a[cols] * (responses - p), minlength=n_c)
             - inv_var_theta * theta
@@ -493,7 +391,7 @@ def fit_rasch_2pl(
         )
         theta = theta + _newton_step(grad_t, info_t)
 
-        p = 1.0 / (1.0 + np.exp(-np.clip(a[cols] * (theta[rows] - delta[cols]), -50, 50)))
+        p = logistic(a[cols] * (theta[rows] - delta[cols]))
         grad_d = -np.bincount(
             cols, weights=a[cols] * (responses - p), minlength=n_s
         ) - inv_var_delta * (delta - mu_delta)
@@ -503,7 +401,7 @@ def fit_rasch_2pl(
         delta = delta + _newton_step(grad_d, info_d)
 
         eta = a[cols] * (theta[rows] - delta[cols])
-        p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+        p = logistic(eta)
         grad_la = (
             np.bincount(cols, weights=(responses - p) * eta, minlength=n_s) - inv_var_a * log_a
         )
@@ -527,7 +425,7 @@ def fit_rasch_2pl(
 
     a = np.exp(log_a)
     eta = a[cols] * (theta[rows] - delta[cols])
-    p = 1.0 / (1.0 + np.exp(-np.clip(eta, -50, 50)))
+    p = logistic(eta)
     w = p * (1.0 - p)
     info_t = np.bincount(rows, weights=a[cols] ** 2 * w, minlength=n_c) + inv_var_theta
     info_d = np.bincount(cols, weights=a[cols] ** 2 * w, minlength=n_s) + inv_var_delta
@@ -553,8 +451,7 @@ def fit_rasch_2pl(
 
 
 def _logp(y: float, theta: float, delta: float, a: float) -> float:
-    p = 1.0 / (1.0 + np.exp(-float(np.clip(a * (theta - delta), -50, 50))))
-    p = min(max(p, 1e-9), 1.0 - 1e-9)
+    p = min(max(float(logistic(a * (theta - delta))), 1e-9), 1.0 - 1e-9)
     return float(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
 
 
@@ -642,7 +539,11 @@ def observations_from_results(sheets_by_id: Mapping[str, CellSheet]) -> list[Obs
 
 
 def build_observations(rounds: list[RoundResult]) -> list[Observation]:
-    return [o for rr in rounds for o in observations_from_results(rr.all_candidate_results)]
+    return [
+        o
+        for rr in rounds
+        for o in observations_from_results({key: rr.rows(key) for key in rr.panel})
+    ]
 
 
 def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
@@ -654,30 +555,46 @@ def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
     return list(cells.values())
 
 
+def theta_cells[V](
+    own: Mapping[str, V], parent: Collection[str], ruler: DeltaRuler | None
+) -> dict[str, V]:
+    """The cells an arm's θ is read on, which every coverage floor counts: warm, those the ruler
+    carries; cold, flat δ adjusts for no difficulty, so those the parent answered too."""
+    carried: Collection[str] = parent if ruler is None else ruler.delta
+    return {key: value for key, value in own.items() if key in carried}
+
+
 def candidate_abilities(
     results_by_id: Mapping[str, CellSheet],
     parent_results: CellSheet,
     ruler: DeltaRuler | None,
 ) -> RoundAbilities:
-    """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows."""
+    """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows.
+    Cold, the bar is the parent on the arm's own cells; warm, on all of its cells."""
     entries = ruler.entries() if ruler is not None else None
-    fit = fit_theta_given_delta(observations_from_results(results_by_id), entries)
-    split = {key: ruler_entry(v) for key, v in (entries or {}).items()}
-    return RoundAbilities(
-        theta={cid: t for cid, (t, _) in fit.items()},
-        theta_se={cid: se for cid, (_, se) in fit.items()},
-        delta={key: d for key, (d, _) in split.items()},
-        delta_se={},
-        discrimination={key: a for key, (_, a) in split.items() if a != 1.0},
-        parent=fit_theta(responses_of(parent_results), entries),
-    )
+    parent = responses_of(parent_results)
+    whole = fit_theta(parent, entries)
+    abilities = RoundAbilities(theta={}, theta_se={}, bar={}, cells={})
+    for cid, sheet in results_by_id.items():
+        own = theta_cells(responses_of(sheet), parent, ruler)
+        if (read := fit_theta(own, entries)) is None:
+            continue
+        abilities.theta[cid], abilities.theta_se[cid] = read
+        abilities.cells[cid] = len(own)
+        against = (
+            whole if entries is not None else fit_theta({key: parent[key] for key in own}, None)
+        )
+        if against is not None:
+            abilities.bar[cid] = against
+    return abilities
 
 
 def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> float | None:
     theta_c = abilities.theta.get(candidate_id)
-    if theta_c is None or abilities.parent is None:
+    bar = abilities.bar.get(candidate_id)
+    if theta_c is None or bar is None:
         return None
-    return theta_c - abilities.parent[0]
+    return theta_c - bar[0]
 
 
 def select_round_subset(
@@ -687,11 +604,10 @@ def select_round_subset(
     *,
     ruler: DeltaRuler | None = None,
     anchor_floor: int = 0,
-    leader_ids: Collection[str] | None = None,
     worth: Mapping[int, float],
 ) -> list[Sample]:
     """Never ``fit_rasch`` here: the δ that CHOOSES the cells is the locked δ that SCORES them."""
-    # `leader_ids` bounds the target θ to this race: *observations* carries the whole archive.
+    # *observations* are the race's own: its best θ is the target, never another run's.
     # `worth` is each cell's information per unit price; a cell it omits stands at the median.
     if budget <= 0 or not bank:
         return []
@@ -709,13 +625,8 @@ def select_round_subset(
     delta_se_map = {sid: ruler.delta_se.get(s.key, ruler.sigma_delta) for sid, s in by_id.items()}
     anchored = {sid for sid, s in by_id.items() if s.key in ruler.delta}
     theta = fit_theta_given_delta(observations, ruler.entries())
-    in_race = (
-        [ts for cid, ts in theta.items() if cid in leader_ids]
-        if leader_ids is not None
-        else list(theta.values())
-    )
-    if in_race:
-        leader_theta, leader_se = max(in_race, key=lambda ts: ts[0])
+    if theta:
+        leader_theta, leader_se = max(theta.values(), key=lambda ts: ts[0])
         leader_var = leader_se**2
     else:
         leader_theta, leader_var = 0.0, _INIT_SIGMA_THETA**2
@@ -801,3 +712,59 @@ def _with_anchor_block(
             out[i] = spare.pop(0)
             have += 1
     return out
+
+
+def build_round_order(
+    parent_grades: Mapping[str, float],
+    ruler: DeltaRuler | None,
+    cells: Mapping[int, str],
+    *,
+    n_min: int,
+) -> list[int]:
+    """*cells* maps each slot on the panel to its ``Sample.key``: grades and δ read by key, ties break by slot."""
+    # `None` (never answered) has its own stratum: read as a miss, an unshared panel leads with its easiest cell.
+    # An unmeasured δ stands at the ruler's CENTRE, never 0.0, which is a position on this scale.
+    miss_stratum: list[int] = []
+    hit_stratum: list[int] = []
+    unknown_stratum: list[int] = []
+    for sid, key in cells.items():
+        grade = parent_grades.get(key)
+        if grade is None:
+            unknown_stratum.append(sid)
+        else:
+            (hit_stratum if is_hit(grade) else miss_stratum).append(sid)
+
+    centre = ruler.mu_delta if ruler is not None else 0.0
+    known = ruler.delta if ruler is not None else {}
+
+    def _delta(sid: int) -> float:
+        return known.get(cells[sid], centre)
+
+    miss_stratum.sort(key=lambda sid: (_delta(sid), sid))
+    hit_stratum.sort(key=lambda sid: (-_delta(sid), sid))
+    # No evidence either way: a cell discriminates most where its δ sits nearest the centre.
+    unknown_stratum.sort(key=lambda sid: (abs(_delta(sid) - centre), sid))
+
+    # θ-readable cells fill the first `n_min` slots, so a cut can land there; a losing arm then
+    # buys fewer off-ruler cells, and the ruler learns those more slowly.
+    slot_of = {key: sid for sid, key in cells.items()}
+    readable = set(theta_cells(slot_of, parent_grades, ruler).values())
+    lead = min(n_min, len(readable))
+    strata = (miss_stratum, unknown_stratum, hit_stratum)
+    order: list[int] = []
+    for pos in range(1, len(cells) + 1):
+        miss, unknown, hit = (
+            next((sid for sid in stratum if pos > lead or sid in readable), None)
+            for stratum in strata
+        )
+        if pos % 4 == 0 and hit is not None and (miss is not None or unknown is not None):
+            pick = hit
+        else:
+            pick = next(sid for sid in (miss, unknown, hit) if sid is not None)
+        order.append(pick)
+        for stratum in strata:
+            if pick in stratum:
+                stratum.remove(pick)
+    if sorted(order) != sorted(cells):
+        raise ValueError("build_round_order: the order is not a permutation of the panel")
+    return order

@@ -13,6 +13,7 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.errors import BadRequestError
 from promptpotter.shared.statistics import mean_ci
 
 MetricUnit = Literal["level", "delta", "seconds", "usd", "tokens", "rank", "rounds", "composed"]
@@ -52,7 +53,7 @@ CHANNELS: tuple[str, ...] = CELL_CHANNELS
 
 
 def cell_channels(rows: Iterable[GradedCell]) -> dict[str, dict[str, float]]:
-    """Keyed by the row's `query`: a per-campaign `sample_id` names a different cell across campaigns."""
+    """Keyed by the row's `query`: a per-campaign `position` names a different cell across campaigns."""
     sums: dict[str, dict[str, list[float]]] = {}
     for row in rows:
         answered = cell_channels_of(row.facts, row.grade.fitness)
@@ -239,7 +240,7 @@ def compile_metric(expression: str) -> CompiledExpression:
     compiled = compile_expression(expression, source="compare metric expression")
     unknown = compiled.names - set(CHANNELS)
     if unknown:
-        raise ValueError(
+        raise BadRequestError(
             f"Metric expression {expression!r} names {sorted(unknown)}, which no cell carries. "
             f"Available: {sorted(CHANNELS)}."
         )
@@ -252,7 +253,7 @@ def resolve_metric(
     if selector.startswith(CUSTOM_METRIC_PREFIX):
         expression = selector[len(CUSTOM_METRIC_PREFIX) :].strip()
         if not expression:
-            raise ValueError(f"{CUSTOM_METRIC_PREFIX!r} was given no expression.")
+            raise BadRequestError(f"{CUSTOM_METRIC_PREFIX!r} was given no expression.")
         return (
             MetricSpec(
                 key=CUSTOM_METRIC_KEY,
@@ -269,25 +270,9 @@ def resolve_metric(
     named = next((m for m in catalogue if m.key == selector), None)
     if named is None:
         offered = sorted(m.key for m in catalogue)
-        raise ValueError(
+        raise BadRequestError(
             f"Metric {selector!r} is not one this selection can answer. It offers "
             f"{offered or 'nothing — no channel is carried by every campaign here'}, or "
             f"'{CUSTOM_METRIC_PREFIX}<expression>' over {sorted(available)}."
         )
     return (named, compile_metric(named.expression))
-
-
-__all__ = [
-    "CHANNELS",
-    "CUSTOM_METRIC_KEY",
-    "CUSTOM_METRIC_PREFIX",
-    "MEASURAND",
-    "MetricSpec",
-    "MetricUnit",
-    "available_channels",
-    "catalogue_for",
-    "cell_channels",
-    "compile_metric",
-    "merge_cells",
-    "resolve_metric",
-]

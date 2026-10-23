@@ -2,7 +2,7 @@ import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import type { HeadToHeadRow, MeteredSpend } from "@/lib/api";
 import type { LiftEstimate } from "@/lib/api/types";
 import { GuardBadge } from "@/components/shell/GuardBadge";
-import { liftOf, pathOf, readPaired, spendStat, type LineStep } from "@/lib/derivations";
+import { liftOf, pathOf, readPaired, cycleSpendStat, type LineStep } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import {
   sideTone,
@@ -109,7 +109,7 @@ export function benchLead(row: HeadToHeadRow | null): {
 
 export function SpentReading({ metered }: { metered: MeteredSpend | null }) {
   if (metered === null) return "—";
-  const { value, sub } = spendStat(metered);
+  const { value, sub } = cycleSpendStat(metered);
   return (
     <span className="cmp-metric">
       {value}

@@ -8,20 +8,21 @@ import { CriterionLine } from "@/components/shell/scoring/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import {
   benchReading,
+  budgetAxis,
   campaignLineParts,
   campaignModels,
   campaignVendors,
+  capLines,
   fmtLift,
   ratePricedText,
   readSpend,
   spendHeadline,
 } from "@/lib/derivations";
-import { CEILING_METER_LABELS } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
-import { fmtUsd, shortModel } from "@/lib/format";
+import { shortModel } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
-import { measuringLabel, useCycleStream } from "@/lib/poll";
+import { measuringArm, useCycleStream } from "@/lib/poll";
 import { useRegistry } from "@/lib/registry";
 import { statusTone } from "@/lib/run-phase";
 import { TERMS } from "@/lib/terms";
@@ -55,10 +56,12 @@ export function RunMasthead() {
   const best = dash?.run_standing ?? null;
   const bench = benchReading(dash?.bench_score);
   const round = dash?.round_axis.position ?? null;
-  const roundsCap = dash?.run_limits.max_rounds ?? null;
-  const position = measuringLabel(dash) ?? (round != null ? `R${round}` : "—");
+  const roundsCap = dash ? budgetAxis(dash.run_limits.budget, "rounds") : null;
+  const position = measuringArm(dash)?.label ?? (round != null ? `R${round}` : "—");
 
-  const { metered, budgetUsd } = readSpend(dash);
+  const spend = readSpend(dash);
+  const { metered } = spend;
+  const caps = capLines(spend);
   const priced = metered
     ? ratePricedText(metered.rate_priced_usd, metered.calls_rate_priced)
     : null;
@@ -151,23 +154,19 @@ export function RunMasthead() {
           <span className={cx("chip", metered?.bill_is_floor && "chip-warn")}>
             <span className="chip-lbl">Spend</span>
             {metered ? (
-              <Term content={<SpendBuckets metered={metered} />}>
+              <Term content={<SpendBuckets metered={metered} campaignUsd={spend.campaignUsd} />}>
                 {spendHeadline(metered)}
               </Term>
             ) : (
               "—"
             )}
             {priced && <span className="chip-of"> + {priced}</span>}
-            {budgetUsd != null &&
-              (metered && !metered.metered_is_bill ? (
-                <span className="chip-of">
-                  {" "}
-                  · {fmtUsd(metered.metered_usd)} / {fmtUsd(budgetUsd)} cap{" "}
-                  {CEILING_METER_LABELS[metered.meter]}
-                </span>
-              ) : (
-                <span className="chip-of"> / {fmtUsd(budgetUsd)} cap</span>
-              ))}
+            {caps.map((line) => (
+              <span key={line} className="chip-of">
+                {" "}
+                · {line}
+              </span>
+            ))}
           </span>
         </div>
       </div>

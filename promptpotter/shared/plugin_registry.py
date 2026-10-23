@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 # Which member answers a node name decides the text an optimizer prompt carries.
 shapes_optimizer_prompt(__name__)
 
-__all__ = ["BUILT_IN", "load_plugins", "load_registry", "lookup"]
 
 BUILT_IN = "built-in"
 

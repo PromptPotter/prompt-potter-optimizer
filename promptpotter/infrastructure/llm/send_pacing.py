@@ -10,7 +10,7 @@ import weakref
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -24,14 +24,14 @@ from promptpotter.infrastructure.llm.telemetry import (
 from promptpotter.shared.errors import ErrorCategory, RequestTooLargeError, SendRefusedError
 
 if TYPE_CHECKING:
+    import httpx
+
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
 # The first send and each resend after a 5xx or a broken connection; a 429 spends none.
 SEND_ATTEMPTS: int = 5
-# Longer than a relay's own retries can run, so no reply is terminal.
-CELL_WAIT_S: float = 600.0
 HELD_POLL_S: float = 0.25
 
 
@@ -39,7 +39,10 @@ class SendBudget:
     def __init__(self, deadline_s: float | None, *, attempts: int) -> None:
         self.deadline_s = deadline_s
         self.attempts = attempts
-        self.clock = None if deadline_s is None else asyncio.timeout(deadline_s)
+        # Unbounded is a clock with no deadline: it never fires and gives nothing back.
+        self.clock = asyncio.Timeout(
+            None if deadline_s is None else asyncio.get_running_loop().time() + deadline_s
+        )
         self.resent = 0
         self.given_back = 0.0
 
@@ -55,8 +58,7 @@ class SendBudget:
 
     def give_back(self, seconds: float) -> None:
         """The clock bounds the provider WORKING, never the wait for it."""
-        when = None if self.clock is None else self.clock.when()
-        if self.clock is None or when is None:
+        if (when := self.clock.when()) is None:
             return
         try:
             self.clock.reschedule(when + seconds)
@@ -124,9 +126,9 @@ def throttle_stall_given_to(sink: Callable[[float], None]) -> Iterator[None]:
 _RATE_TENANT: ContextVar[str] = ContextVar("rate_tenant")
 
 
-def set_rate_tenant(tenant: str) -> None:
+def set_rate_tenant(tenant: str) -> Token[str]:
     """The ACCOUNT, never the campaign: N campaigns must not take one user N shares."""
-    _RATE_TENANT.set(tenant)
+    return _RATE_TENANT.set(tenant)
 
 
 def _rate_tenant() -> str:
@@ -272,6 +274,11 @@ _PROVIDER_SENTENCES = tuple(
 )
 
 
+def loop_now() -> float:
+    """The clock every wait here sleeps on, so a wait ends when its own sleeps say it has."""
+    return asyncio.get_running_loop().time()
+
+
 def _cooldown_s(strikes: int) -> float:
     base = min(_COOLDOWN_BASE_S * 2.0 ** (strikes - 1), _COOLDOWN_CAP_S)
     return base + random.uniform(0.0, base * 0.25)
@@ -309,9 +316,9 @@ class Backpressure:
         while (hold := self._hold()) > 0:
             if abort is not None and abort():
                 raise asyncio.CancelledError(f"backpressure wait aborted ({self.sender})")
-            started = time.monotonic()
+            started = loop_now()
             await asyncio.sleep(min(1.0, hold))
-            report_throttle_stall(time.monotonic() - started)
+            report_throttle_stall(loop_now() - started)
             self._announce()
         self._out += 1
         try:
@@ -320,7 +327,7 @@ class Backpressure:
             self._out -= 1
 
     def _hold(self) -> float:
-        cooling = self._resumes_at - time.monotonic()
+        cooling = self._resumes_at - loop_now()
         if cooling > 0:
             return cooling
         if self._at_once is not None and self._out >= self._at_once:
@@ -328,7 +335,7 @@ class Backpressure:
         return 0.0
 
     def throttled(self, ticket: int, *, headers: object | None, body: str) -> None:
-        now = time.monotonic()
+        now = loop_now()
         detail = _provider_words(body)
         scope = diagnose_rate_limit_scope(headers, body)
         if scope in _UNWAITABLE_SCOPES:
@@ -363,7 +370,7 @@ class Backpressure:
             self._announce()
             return
         if self._since is not None:
-            held_s = time.monotonic() - self._since
+            held_s = loop_now() - self._since
             for ledger in list(self._heard):
                 emit_provider_eased(ledger=ledger, sender=self.sender, held_s=held_s)
             self._heard.clear()
@@ -390,9 +397,9 @@ class Backpressure:
         here = bound_ledger(f"{self.sender}'s provider hold")
         if here is None:
             return
-        # A nested run sends under its root's book, so the root hears what holds its cells.
+        # A nested run's book is enclosed by its root's, so the root hears what holds its cells.
         book = bound_spend_book()
-        root = book.ledger if book is not None and book.foreign(here) else None
+        root = book.root().ledger if book is not None and book.enclosing is not None else None
         for ledger in (here,) if root is None else (here, root):
             if self._heard.get(ledger) != self._strikes:
                 self._heard[ledger] = self._strikes
@@ -408,16 +415,16 @@ class Backpressure:
 
 async def held_wait(total_sec: float, label: str) -> None:
     abort = _ABORT_CHECK.get()
-    started = time.monotonic()
+    started = loop_now()
     end = started + total_sec
     # Reported on EVERY exit, abort included: waiting is not working.
     try:
-        while (remaining := end - time.monotonic()) > 0:
+        while (remaining := end - loop_now()) > 0:
             if abort is not None and abort():
                 raise asyncio.CancelledError(f"resend wait aborted ({label})")
             await asyncio.sleep(min(1.0, remaining))
     finally:
-        report_throttle_stall(time.monotonic() - started)
+        report_throttle_stall(loop_now() - started)
 
 
 def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> int:
@@ -444,11 +451,10 @@ def _parse_int_header(headers: Mapping[str, Any] | Any, key: str) -> int | None:
         return None
 
 
-def raise_if_request_too_large(exc: Exception, provider_name: str) -> None:
-    status = getattr(exc, "status_code", None)
-    if status not in (413, 429):
+def raise_if_request_too_large(exc: httpx.HTTPStatusError, provider_name: str) -> None:
+    if exc.response.status_code not in (413, 429):
         return
-    parsed = _parse_tpm_overflow(str(exc))
+    parsed = _parse_tpm_overflow(exc.response.text)
     if parsed is None:
         return
     limit, requested = parsed
@@ -552,14 +558,14 @@ class RateLimiter:
             self.tpm = tpm
 
     async def _acquire(self, estimated_tokens: int) -> _TokenReservation:
-        started = time.monotonic()
+        started = loop_now()
         waiter = _Waiter(tenant=_rate_tenant(), tokens=estimated_tokens)
         self._waiting.append(waiter)
         try:
             while True:
                 # Never held across the sleep: there, ``asyncio.Lock``'s FIFO becomes the scheduler.
                 async with self._lock:
-                    now = time.monotonic()
+                    now = loop_now()
                     self._prune(now)
                     if self._next_up(now) is waiter:
                         self._waiting.remove(waiter)
@@ -574,7 +580,7 @@ class RateLimiter:
         finally:
             if waiter in self._waiting:
                 self._waiting.remove(waiter)
-            report_throttle_stall(time.monotonic() - started)
+            report_throttle_stall(loop_now() - started)
 
     def _served(self, tenant: str) -> float:
         if self.tpm is not None:
@@ -646,32 +652,3 @@ def build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
         rpm_pinned=rpm is not None,
         tpm_pinned=tpm is not None,
     )
-
-
-__all__ = [
-    "ANTHROPIC_RPM_HEADER",
-    "ANTHROPIC_TPM_HEADER",
-    "CELL_WAIT_S",
-    "HELD_POLL_S",
-    "OPENAI_RPM_HEADER",
-    "OPENAI_TPM_HEADER",
-    "SEND_ATTEMPTS",
-    "Backpressure",
-    "RateLimiter",
-    "SendBudget",
-    "apply_discovered_caps",
-    "build_rate_limiter",
-    "drawn_budget",
-    "get_abort_check",
-    "held_wait",
-    "parse_retry_after",
-    "raise_if_request_too_large",
-    "report_throttle_stall",
-    "set_abort_check",
-    "set_rate_tenant",
-    "set_throttle_stall_sink",
-    "throttle_stall_given_to",
-    "throttle_stall_seconds",
-    "under_budget",
-    "window_slot",
-]

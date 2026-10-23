@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.campaign import LIFECYCLE_STATUS_LABELS, LifecycleStatus
 from promptpotter.domain.cycle_paths import CycleHop
@@ -23,40 +23,23 @@ from promptpotter.domain.run_records import (
     SpawnedBy,
     sibling_cycle_id,
 )
-from promptpotter.domain.strict_model import StrictModel
-
-__all__ = [
-    "CycleIndex",
-    "CycleListEntry",
-    "IndexRound",
-    "Intervention",
-    "LineStanding",
-    "RunStatus",
-    "rounds_cap_note",
-    "rounds_line",
-]
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 
-class IndexRound(StrictModel):
+class IndexRound(FrozenModel):
     """The level is ``None`` where the round's measurand is not an accuracy: an L4 outer round."""
-
-    model_config = ConfigDict(frozen=True)
 
     round: int
     accuracy: float | None
 
 
-class Intervention(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class Intervention(FrozenModel):
     kind: str
     at: str
 
 
-class CycleIndex(StrictModel):
+class CycleIndex(FrozenModel):
     """Folded off the ledger; ``index.json`` is this written out for a human, and no code reads it."""
-
-    model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     created_at: str
@@ -105,7 +88,6 @@ type StatusMark = Literal[
     "queued",
     "gate",
     "paused",
-    "checkin",
     "detached",
     "success",
     "halted",
@@ -114,10 +96,8 @@ type StatusMark = Literal[
 ]
 
 
-class RunStatus(StrictModel):
+class RunStatus(FrozenModel):
     """How a run reads on a row: one word and the mark drawn beside it."""
-
-    model_config = ConfigDict(frozen=True)
 
     label: str
     mark: StatusMark
@@ -148,7 +128,6 @@ class CycleListEntry(StrictModel):
         description="Immediate parent for siblings (forks/diag); null for roots. Sidebar uses this to nest siblings.",
     )
     dataset_name: str = ""
-    backend_id: str = ""
     # The raw separator is NOT served beside it: the browser parses the id itself (`lib/ids.ts`).
     mint_kind: MintKind
     is_root: bool
@@ -157,13 +136,9 @@ class CycleListEntry(StrictModel):
         description="Why the cycle ended; null while it has not. Label, outcome and next step "
         "derive from the one STOP_REASON_INFO table — never re-mapped per surface.",
     )
-    superseded_by: str | None = Field(
-        default=None,
-        description="The cycle_id that took this cycle's line, set on the LEFT-BEHIND side of a supersede cut. This is the successor pointer — follow it to find which cycle answers for the campaign; it is a fact of its own precisely so it survives on a parent that had already stopped for its own reason, which `stop_reason` cannot express. Null on a root, an offshoot, and any cycle still holding the line.",
-    )
     run_phase: RunPhase = Field(
         default=RunPhase.DETACHED,
-        description="The single run-state value (RunPhase). Computed once by derive_run_state from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'checkin' wins first (the campaign hasn't run); 'terminal' pairs with `stop_reason` for the reason label.",
+        description="The single run-state value (RunPhase). Computed once by derive_run_state from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'terminal' pairs with `stop_reason` for the reason label.",
     )
     producer_attached: bool = Field(
         description="A process holds this cycle (`ProducerReading.attached`, derived with `run_phase`): running, holding for the operator, or running out a pause. What the dock counts as in flight.",
@@ -181,37 +156,19 @@ class CycleListEntry(StrictModel):
         description="Why the cycle reads `paused` — what caused it, who asked and what the "
         "operator does next (`RunState.pause`); null in every other phase.",
     )
-    standing: RunStanding | None = Field(
-        default=None,
-        description="Where the run stands as its newest standing round left it: its selection, "
-        "that selection against the origin on the origin panel, and what the cycle has cost. "
-        "Null until round 0 closes. Never the headline; `CampaignSummary.bench` is.",
-    )
     rounds_closed: int = Field(
         default=0,
         description="Rounds this cycle has closed AFTER the origin — the unit a rounds cap counts.",
     )
-    created_at: str = ""
     updated_at: str = ""
     human_intervened: bool = Field(
         default=False,
         description="True once an operator manually intervened (e.g. skip-searchpoint); the cycle is babysat and no longer purely reproducible. Drives the 'babysat' badge; orthogonal to run_phase.",
     )
-    spawned_by: SpawnedBy | None = Field(
-        default=None,
-        description=(
-            "Which outer work-item asked for this cycle, when it is an L4 inner "
-            "measurement; null for an ordinary campaign, which is the only reason it is "
-            "null. Lets the sidebar name an inner run by the candidate that produced it "
-            "instead of by launch order."
-        ),
-    )
 
 
-class LineStanding(StrictModel):
+class LineStanding(FrozenModel):
     """A campaign's line as one value: the cycle that answers for it now, and how that cycle stands."""
-
-    model_config = ConfigDict(frozen=True)
 
     holder: CycleHop = Field(description="The cycle answering for the campaign.")
     status: RunStatus = Field(
@@ -227,30 +184,30 @@ class LineStanding(StrictModel):
         description="Where the holder's run stands; null until its round 0 closes."
     )
     rounds_closed: int = Field(description="Rounds the holder closed AFTER the origin.")
-    max_rounds: int | None = Field(
-        description="The rounds cap binding the holder: what its last launch declared with the "
-        "standing operator ceiling laid over, as its dashboard's `run_limits` reads; before any "
-        "launch, the cap its campaign declares. 0 is origin only; null is no cap."
+    budget_rounds: int | None = Field(
+        description="The `budget.rounds` binding the holder: what its last launch declared with "
+        "the standing operator budget laid over, as its dashboard's `run_limits` reads; before "
+        "any launch, its campaign's. 0 is origin only; null is no rounds axis."
     )
     rounds_line: str = Field(
-        description="`rounds_closed` against `max_rounds` as a campaign row prints it "
+        description="`rounds_closed` against `budget_rounds` as a campaign row prints it "
         "(`rounds_line`)."
     )
     rounds_cap_note: str | None = Field(
-        description="What `max_rounds` says beside a rounds count (`rounds_cap_note`); null "
-        "where no cap binds."
+        description="What `budget_rounds` says beside a rounds count (`rounds_cap_note`); null "
+        "where no rounds axis binds."
     )
     human_intervened: bool
 
 
-def rounds_line(rounds_closed: int, max_rounds: int | None) -> str:
+def rounds_line(rounds_closed: int, budget_rounds: int | None) -> str:
     """Capped at zero it measured its origin and stopped; `R0` would read as a run that went nowhere."""
-    if max_rounds == 0:
+    if budget_rounds == 0:
         return "origin"
-    return f"R{rounds_closed}" if max_rounds is None else f"R{rounds_closed}/{max_rounds}"
+    return f"R{rounds_closed}" if budget_rounds is None else f"R{rounds_closed}/{budget_rounds}"
 
 
-def rounds_cap_note(max_rounds: int | None) -> str | None:
-    if max_rounds is None:
+def rounds_cap_note(budget_rounds: int | None) -> str | None:
+    if budget_rounds is None:
         return None
-    return "origin only" if max_rounds == 0 else f"of {max_rounds} — rounds cap"
+    return "origin only" if budget_rounds == 0 else f"of {budget_rounds} — rounds cap"

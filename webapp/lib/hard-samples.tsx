@@ -4,6 +4,7 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 import type {
   CellCandidate,
   CellRow,
+  CellStatus,
   DatasetItem,
   HardSampleOrder,
   HardSamplesScope,
@@ -11,6 +12,7 @@ import type {
 import { useCycleStream } from "@/lib/poll";
 import { useCells, type SeriesTotals } from "@/lib/hooks/useCells";
 import type { CyclePath } from "@/lib/ids";
+import { useWorkspace } from "@/lib/workspace";
 
 interface HardSamples {
   datasetName: string | null;
@@ -89,4 +91,81 @@ export function useHardSamples(): HardSamples {
   const v = useContext(Ctx);
   if (!v) throw new Error("useHardSamples must be used inside <HardSamplesProvider>");
   return v;
+}
+
+// IDENTITY only: an unset field is the viewed unit's, the shared roster's scope or dataset.
+export interface CellsPreset {
+  path?: CyclePath;
+  datasetName?: string;
+  candidateId?: string;
+  round?: number;
+  scope?: HardSamplesScope;
+}
+
+export type PresetCells = Pick<
+  HardSamples,
+  | "datasetName"
+  | "items"
+  | "measuredCount"
+  | "unmeasuredCount"
+  | "candidates"
+  | "cells"
+  | "totals"
+  | "rankedBy"
+  | "stale"
+  | "error"
+>;
+
+const NO_PRESET: PresetCells = {
+  datasetName: null,
+  items: [],
+  measuredCount: 0,
+  unmeasuredCount: 0,
+  candidates: [],
+  cells: [],
+  totals: null,
+  rankedBy: null,
+  stale: false,
+  error: null,
+};
+
+// Every list of measured cells reads here, so a pane and a host naming one preset share one flight.
+export function usePresetCells(preset: CellsPreset | null, status?: CellStatus): PresetCells {
+  const shared = useHardSamples();
+  const { viewedPath } = useWorkspace();
+  const { isLive } = useCycleStream();
+  const scope = preset?.scope ?? shared.scope;
+  const datasetName = preset?.datasetName ?? shared.datasetName;
+  // Unfiltered on the viewed unit IS the shared roster — never a second fetch of it.
+  const ownRead =
+    preset !== null &&
+    (preset.path !== undefined ||
+      preset.datasetName !== undefined ||
+      preset.candidateId !== undefined ||
+      preset.round !== undefined ||
+      status !== undefined ||
+      scope !== shared.scope);
+  const own = useCells(
+    ownRead ? (preset.path ?? viewedPath) : null,
+    datasetName,
+    scope,
+    shared.rankedByPick,
+    // The dashboard's liveness is the VIEWED unit's; a preset on another one does not poll.
+    preset?.path === undefined && isLive,
+    { candidateId: preset?.candidateId, round: preset?.round, status },
+  );
+  if (preset === null) return NO_PRESET;
+  if (!ownRead) return shared;
+  return {
+    datasetName,
+    items: own.items,
+    measuredCount: own.measuredCount,
+    unmeasuredCount: own.unmeasuredCount,
+    candidates: own.candidates,
+    cells: own.cells,
+    totals: own.totals,
+    rankedBy: own.order,
+    stale: own.isStale,
+    error: own.error,
+  };
 }

@@ -11,9 +11,12 @@ from promptpotter.domain.cycle_paths import (
     decode_cycle_path,
     encode_cycle_path,
 )
+from promptpotter.domain.results import ArmStateKind
 from promptpotter.domain.ruler import AbilityReading
-from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES, CandidateState
+from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.errors import BadRequestError
+from promptpotter.shared.identity import Principal
 
 SubjectKind = Literal["campaign", "course", "candidate"]
 
@@ -78,7 +81,7 @@ def _parse_segments(spec: str, segments: list[str], *, allowed: frozenset[str]) 
     for segment in segments:
         name, _, value = segment.partition("=")
         if name not in allowed:
-            raise ValueError(
+            raise BadRequestError(
                 f"Unknown segment {segment!r} on {spec!r} "
                 f"(expected {', '.join(f'{a}=' for a in sorted(allowed))})."
             )
@@ -94,7 +97,7 @@ def _parse_segments(spec: str, segments: list[str], *, allowed: frozenset[str]) 
 def parse_tree_address(spec: str) -> TreeAddress:
     name, *segments = spec.split(";")
     if not name:
-        raise ValueError(f"Address {spec!r} names nothing before its segments.")
+        raise BadRequestError(f"Address {spec!r} names nothing before its segments.")
     return TreeAddress(name, _parse_segments(spec, segments, allowed=_ADDRESS_SEGMENTS).inside)
 
 
@@ -104,20 +107,20 @@ def parse_subject(spec: str) -> SubjectSpec:
     address, *segments = spec.split(";")
     kind, sep, rest = address.partition(":")
     if not sep or kind not in _SUBJECT_ARITY:
-        raise ValueError(
+        raise BadRequestError(
             f"Unknown subject kind in {spec!r} (expected one of {sorted(_SUBJECT_ARITY)}, "
             "as `kind:<campaign>[/<cycle>[/<candidate>]]`)."
         )
     parts = rest.split("/")
     arity = _SUBJECT_ARITY[kind]
     if len(parts) != arity or not all(parts):
-        raise ValueError(
+        raise BadRequestError(
             f"Subject {spec!r} addresses {len([p for p in parts if p])} id(s); a "
             f"{kind!r} subject takes exactly {arity}."
         )
     inside, lens, samples = _parse_segments(spec, segments, allowed=_SUBJECT_SEGMENTS)
     if lens and kind != "course":
-        raise ValueError(
+        raise BadRequestError(
             f"A {kind!r} subject takes no lens: an alternative formula re-decides ELECTIONS, and "
             "only a course has any. Address the branch instead."
         )
@@ -125,10 +128,11 @@ def parse_subject(spec: str) -> SubjectSpec:
     return SubjectSpec(kind, ids[0], ids[1], ids[2], inside=inside, lens=lens, samples=samples)
 
 
-def authorship_of(source: str, issued_by: str) -> str:
-    if source not in OPERATOR_ORIGIN_SOURCES:
+def authorship_of(source: str, issued_by: Principal | None) -> str:
+    """An operator-authored origin under the principal whose fork seeded it; a root names its source."""
+    if source not in OPERATOR_ORIGIN_SOURCES or issued_by is None:
         return source
-    return f"operator:{issued_by}"
+    return f"operator:{issued_by.id}"
 
 
 class SubjectMask(StrictModel):
@@ -142,7 +146,7 @@ class SubjectMask(StrictModel):
 class ScenarioReading(StrictModel):
     """What the mask did to this branch: how far it agrees with the record, and the round it stops.
 
-    The chain ENDS where the two readings part (`mask/scenario.py`), so the pair of winners below is
+    The chain ENDS where the two readings part (`mask/divergence.py`), so the pair of winners below is
     one round's disagreement — both read at ``first_divergent_round``, or at the branch's last round
     where there is none. Reading a mid-chain counterfactual against the branch's final crown instead
     would compare two different rounds and report the gap between them as a change.
@@ -151,8 +155,8 @@ class ScenarioReading(StrictModel):
     honest limit of a lens is not something a surface can be trusted to remember.
     """
 
-    recorded_winner_id: str | None
-    scenario_winner_id: str | None
+    recorded_winner_key: str | None
+    scenario_winner_key: str | None
     winner_changed: bool
     first_divergent_round: int | None
     invariant_rounds: int
@@ -171,7 +175,7 @@ class WinnerChainPoint(StrictModel):
     OPPOSITE basis — that same chain on one shared set of cells. Two readings of one sequence
     that disagree by construction, and under one word a reader could tell them apart from
     neither name. The word survives where a series genuinely is one (`p_best_trajectory`,
-    `parent_level_trajectory`, the Sample-trajectory grid)."""
+    the Sample-trajectory grid)."""
 
     candidate_id: str
     round: int
@@ -216,12 +220,12 @@ class SubjectReading(StrictModel):
     # `""` where the ledger names no source for the point, which groups with nothing.
     authorship: str
     human_intervened: bool
-    status: CandidateState = Field(
-        description="Where the resolved searchpoint stands, in the lineage tree's own words. "
-        "`minted` = it has no score report yet: its walk is still open (or ended with its "
-        "producer), so `n_cells`, `values` and `cell_means` cover only the cells it has scored SO "
-        "FAR and every reading here is a prefix, of `expected_samples`. `measured` = its walk "
-        "ended and these are all its cells.",
+    status: ArmStateKind = Field(
+        description="Where the resolved searchpoint's arm stands, in the lineage tree's own words. "
+        "`proposed` / `measuring` = its walk is still open (or ended with its producer), so "
+        "`n_cells`, `values` and `cell_means` cover only the cells it has scored SO FAR and every "
+        "reading here is a prefix, of `expected_samples`. `cut` = its walk stopped short of its "
+        "panel; `measured` = its walk ended and these are all its cells.",
     )
     expected_samples: int | None = Field(
         description="How many cells the point's walk was sized for — the denominator `n_cells` is "
@@ -231,6 +235,7 @@ class SubjectReading(StrictModel):
     # `None` where the point carries no score report — never 0, which means "it earned every cell".
     cached_samples: int | None
     instrument_id: str
+    # The point's own rows on the scale its cycle's last close read the series on; null off it.
     ability: AbilityReading | None
     round: int
     cycle_spend_usd: float | None
@@ -251,18 +256,3 @@ class SubjectReading(StrictModel):
     n_cells: int
     unscorable_cells: list[str]
     levels: dict[str, str] = Field(default_factory=dict)
-
-
-__all__ = [
-    "SUBJECT_KIND_LABELS",
-    "ScenarioReading",
-    "SubjectKind",
-    "SubjectMask",
-    "SubjectReading",
-    "SubjectSpec",
-    "TreeAddress",
-    "WinnerChainPoint",
-    "authorship_of",
-    "parse_subject",
-    "parse_tree_address",
-]

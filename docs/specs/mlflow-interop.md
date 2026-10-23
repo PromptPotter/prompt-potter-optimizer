@@ -38,14 +38,10 @@ self-optimization run of an opted-in campaign leaves only its own cycle on the s
 ## 2. The model on the version, in MLflow's own field
 
 **Decision.** `register_prompt` takes a `model_config` (`PromptModelConfig`: provider, model name,
-temperature, max tokens, top-p, and `extra_params` for the rest), and MLflow's UI renders it. The
-prompt node's config goes there; the `promptpotter.tuned_params` tag keeps every *other* node and
-is omitted when there is none.
-
-**What it needs first.** `PromptExport` does not say which node its prompt was rendered onto, and
-`tuned_params` is keyed by every node. The node is `PipelineSchema.prompt_node_names()[0]`, the one
-`OptSearchPoint.to_job_search_point` writes the prompt to. So `PromptExport` gains `prompt_node`,
-stamped in `domain/export.py::build_prompt_export`, and `stable-api.md` § 5c names it.
+temperature, max tokens, top-p, and `extra_params` for the rest), and MLflow's UI renders it. Each
+prompt is registered per node (`infrastructure/tracing/mlflow_server.py::register_export`), so that node's config goes
+there; the `promptpotter.tuned_params` tag keeps every node that bears no prompt and is omitted when
+there is none.
 
 **Closes when** a registered version shows the winning model in MLflow's model-config panel for a
 one-node and a two-node pipeline.
@@ -55,36 +51,36 @@ one-node and a two-node pipeline.
 This is the step that makes the round trip a team recognises: their prompt in, the winner back as
 the next version of *their* prompt, where today the name is `{tenant_id}.{dataset_name}`.
 
-**The channel exists.** A non-dataset origin already rides `CycleSeed.origin_prompt_fields`, set
-from `origin_override` in `application/jobs/mint.py::_plan` and resolved first in
+**The channel exists.** A non-dataset origin already rides `CycleSeed.origin_prompts`, set
+from `origin_override` in `application/jobs/mint.py::resolve_cycle_plan` and resolved first in
 `application/origin.py::resolve_origin_opt_search_point`. Every mint path reaches `_plan`.
 
 **Decisions.**
 
 - **Fetched once, at mint, and pinned in the seed.** A resume re-resolves the origin from the seed
-  (`mint.py::refuse_drifted_resume`); a live read there would let a moved alias change a running
+  (`application/jobs/mint.py::refuse_drifted_resume`); a live read there would let a moved alias change a running
   campaign's identity.
 - **A new `OriginSource` member** for a registry origin, with its sentence in
   `application/origin.py::_SEED_ORIGIN_LINEAGE` — the import-time assert there fails without it.
   The seed also records the prompt's name and version, which no model carries today.
-- **One string into six fields.** A registry prompt is one text and an origin is six named fields.
-  A foreign prompt lands whole in `instruction`, the same fallback
-  `DraftCampaign.committed_prompt_fields` uses for a bare task description. A version *we* wrote
-  restores exactly: `register_export` gains a `promptpotter.prompt_fields` tag holding
-  `PromptExport.prompt_fields`, and the reader prefers it.
+- **One string into named fields.** A registry prompt is one text and an origin is its node's
+  named fields. A foreign prompt lands whole in `instruction`, the same fallback the check-in uses
+  for a bare task description. A version *we* wrote restores exactly: `register_export` gains a
+  `promptpotter.prompt_fields` tag holding that node's `PromptExport.prompts` entry, and the
+  reader prefers it.
 - **The winner registers under the seed's prompt name** when the origin came from the registry,
   so `register_export` takes the name from the export, which therefore carries it.
 - **Placeholders need no conversion.** A `{{name}}` left in a prompt is already the backend's slot
-  (`OptSearchPoint.compile_prompt`), and that is MLflow's syntax too.
+  (`OptSearchPoint.render`), and that is MLflow's syntax too.
 
-**Parity.** `origin_override` is accepted by `mint_framed_cycle` and `prepare_fresh_cycle` and
-passed by neither `mint_and_start.py::hold_fresh_mint` nor `embedded_run.py::run_campaign`. The
+**Parity.** `origin_override` is accepted by `mint_framed_cycle` and `resolve_cycle_plan` and
+passed by neither `application/jobs/launcher/mint_and_start.py::hold_fresh_mint` nor `application/embedded_run.py::run_campaign`. The
 source is one typed field on `MintCampaignPayload` / `FreshMint` and on `EditDraftPatch`, so the
 CLI, REST, the webapp check-in, the embedded launch and `/potter-run` all name it. An arm refuses
 an origin override and keeps refusing.
 
 **Open.** A version we wrote renders its shots into the text; restoring from the fields tag drops
-them, and whether a restored origin should carry `shot_ids` is undecided.
+them, and whether a restored origin should carry its node's `shots` is undecided.
 
 **Closes when** `new <dataset>` with a registry origin runs, and its winner is version N+1 of the
 prompt it started from.

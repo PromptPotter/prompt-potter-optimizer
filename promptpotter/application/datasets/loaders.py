@@ -7,18 +7,20 @@ import re
 import urllib.request
 from collections import defaultdict
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.datasets.sealqa_panel import write_longseal_panel
-from promptpotter.domain.sample import ArchiveEntry, Sample
+from promptpotter.application.datasets.tabular_ingest import materialize_samples, read_tabular
+from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.infrastructure.store.dataset_access import (
     MATERIALIZED_PANEL_FILE,
     ResolvedDataset,
-    held_rows,
+    dataset_connector,
+    dataset_panel_rows,
     list_readable_datasets,
     read_dataset_definition,
 )
@@ -44,12 +46,18 @@ _HUB_EXTRA = Extra.BENCHMARKS
 class SourceKind(Enum):
     HUB = "hub"
     GITHUB = "github"
+    # A file this tenant uploaded, named by its own content: pinned without a `rev`.
+    UPLOAD = "upload"
     # The rows' inputs are the `source:` section itself.
     INLINE = "inline"
 
     @property
     def extra(self) -> Extra | None:
         return _HUB_EXTRA if self is SourceKind.HUB else None
+
+    @property
+    def local(self) -> bool:
+        return self in (SourceKind.UPLOAD, SourceKind.INLINE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,15 +78,32 @@ class Source:
         recipe = str(params.pop("recipe", ""))
         if not recipe:
             raise ValueError(f"`source:` names no recipe: {sorted(section)}")
-        kind = next((k for k in (SourceKind.HUB, SourceKind.GITHUB) if k.value in params), None)
+        kind = next(
+            (
+                k
+                for k in (SourceKind.HUB, SourceKind.GITHUB, SourceKind.UPLOAD)
+                if k.value in params
+            ),
+            None,
+        )
         if kind is None:
             return cls(recipe, SourceKind.INLINE, "", "", params)
         repo = str(params.pop(kind.value))
+        if kind is SourceKind.UPLOAD:
+            return cls(recipe, kind, repo, "", params)
         # A moving ref re-cuts the bank on the next machine that fetches it, under the name it has.
         rev = str(params.pop("rev", ""))
         if not rev:
             raise ValueError(f"`source:` fetches {repo} at no pinned `rev`")
         return cls(recipe, kind, repo, rev, params)
+
+    @property
+    def identity(self) -> str:
+        """A new ``rev`` is a new recipe, so it cuts a bank of its own."""
+        return stable_hash(
+            [self.recipe, self.kind.value, self.repo, self.rev, dict(self.params)],
+            length=ADDRESS_HEX,
+        )
 
     def __getitem__(self, key: str) -> Any:
         try:
@@ -119,12 +144,10 @@ def samples_from_dicts(items: list[dict[str, Any]]) -> list[Sample]:
     return [Sample.from_dict(item, fallback_id=i) for i, item in enumerate(items)]
 
 
-def bank_samples(items: list[dict[str, Any]]) -> list[Sample]:
+def kept_rows(samples: list[Sample]) -> list[Sample]:
     # No row labelled = a verifier-graded dataset, which dropping unlabelled rows would empty.
-    labelled = any(item.get("ground_truth") for item in items)
-    return samples_from_dicts(
-        [item for item in items if item.get("query") and (item.get("ground_truth") or not labelled)]
-    )
+    labelled = any(s.ground_truth for s in samples)
+    return [s for s in samples if s.query and (s.ground_truth or not labelled)]
 
 
 def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
@@ -134,7 +157,7 @@ def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
     return dataset[:sample_size]
 
 
-# The one seed every bank's shuffle and draw takes; changing it re-cuts each (dataset_name, id) history.
+# The one seed every bank's shuffle and draw takes; changing it re-cuts each bank, so its hash.
 _BANK_SEED: int = 42
 
 
@@ -364,8 +387,26 @@ def _columns(src: Source) -> BankLoader:
     )
 
 
+def _table(src: Source) -> BankLoader:
+    """An uploaded table's two columns, in file order."""
+    path = Path(src.repo)
+
+    def rows() -> list[Row]:
+        samples = materialize_samples(
+            read_tabular(path.read_bytes(), path.name),
+            query_col=src["query"],
+            ground_truth_col=src["truth"],
+        )
+        return [{"query": s.query, "ground_truth": s.ground_truth} for s in samples]
+
+    return BankLoader(src.kind, rows, shuffled=False)
+
+
 BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
     "columns": _columns,
+    # The rows themselves, inline: a hand-authored bank small enough to ship as its definition.
+    "rows": lambda src: _bank(src, lambda: [dict(row) for row in src["items"]]),
+    "table": _table,
     "hotpotqa": _hub_rows(_hotpotqa),
     "trec": lambda src: _bank(
         src,
@@ -423,11 +464,26 @@ def definition_source(dataset_dir: Path) -> Source | None:
     return None if definition is None else Source.of(definition.source)
 
 
-def dataset_loader(dataset_dir: Path) -> BankLoader | None:
+def _loader(stores: Stores, src: Source) -> BankLoader:
+    if src.kind is SourceKind.UPLOAD:
+        # The definition names the kept file; where this tenant keeps it is the store's.
+        src = replace(src, repo=str(stores.tenant_datasets.upload_path(src.repo)))
+    return BANK_RECIPES[src.recipe](src)
+
+
+def dataset_loader(stores: Stores, dataset_dir: Path) -> BankLoader | None:
     src = definition_source(dataset_dir)
     if src is None or src.recipe not in BANK_RECIPES:
         return None
-    return BANK_RECIPES[src.recipe](src)
+    return _loader(stores, src)
+
+
+def cut_bank(stores: Stores, section: Mapping[str, Any]) -> list[Sample]:
+    """What a ``source:`` section cuts, read before any definition names it."""
+    src = Source.of(section)
+    if src is None or src.recipe not in BANK_RECIPES:
+        raise ValueError(f"`source:` names no bank recipe: {dict(section)}")
+    return _loader(stores, src).load()
 
 
 def source_extra(dataset_dir: Path) -> Extra | None:
@@ -439,6 +495,15 @@ def source_extra(dataset_dir: Path) -> Extra | None:
 def has_source(dataset_dir: Path) -> bool:
     src = definition_source(dataset_dir)
     return src is not None and (src.recipe in BANK_RECIPES or src.recipe in PANEL_RECIPES)
+
+
+def no_dataset_hint(stores: Stores) -> str:
+    """Every dataset this account reads: its own definitions first, then the installed templates."""
+    lines = [
+        f"  python -m promptpotter new {ref.dataset.name}" for ref in list_readable_datasets(stores)
+    ]
+    body = "\n".join(lines) if lines else "  (no datasets readable here)"
+    return "Available datasets:\n\n" + body
 
 
 def loadable_dataset_names(stores: Stores) -> list[str]:
@@ -461,29 +526,46 @@ def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:
     return True
 
 
-def fetch_dataset_items(stores: Stores, dataset: ResolvedDataset) -> list[dict[str, Any]]:
-    """The ladder's last rung: fetch through the definition's source and bank the rows."""
+def _cut(loader: BankLoader) -> Bank:
+    return Bank.of(kept_rows(loader.load()))
+
+
+def fetch_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
+    """The ladder's last rung: it records the bank its recipe cut, and moves no label."""
     if build_panel(stores, dataset):
-        return held_rows(stores, dataset) or []
-    loader = dataset_loader(dataset.directory)
-    if loader is None:
-        return []
-    loader_items = loader.load()
-    logger.info("Loaded dataset '%s' from its source: %d items", dataset.name, len(loader_items))
-    stores.tenant_datasets.save_materialized_rows(dataset.name, loader_items)
-    return [s.model_dump() for s in loader_items]
+        return held_bank(stores, dataset) or Bank.of(())
+    src = definition_source(dataset.directory)
+    if src is None or src.recipe not in BANK_RECIPES:
+        return Bank.of(())
+    bank = _cut(_loader(stores, src))
+    logger.info("Loaded dataset '%s' from its source: %d items", dataset.name, len(bank.samples))
+    stores.tenant_datasets.record_cut(src.identity, bank)
+    return bank
 
 
-def resolve_dataset_items(stores: Stores, dataset: ResolvedDataset) -> list[dict[str, Any]]:
-    """The one row ladder: what is held (`held_rows`), else a fetch."""
-    held = held_rows(stores, dataset)
-    return held if held is not None else fetch_dataset_items(stores, dataset)
+def held_bank(stores: Stores, dataset: ResolvedDataset) -> Bank | None:
+    """No fetch, no write; a connector owning a panel answers from it ALONE, since a same-named bank is another instrument."""
+    connector = dataset_connector(dataset)
+    if connector is not None and connector.owns_panel:
+        rows = dataset_panel_rows(stores, dataset)
+        return None if rows is None else Bank.of(samples_from_dicts(rows))
+    src = definition_source(dataset.directory)
+    if src is None or src.recipe not in BANK_RECIPES:
+        return stores.tenant_datasets.labelled(dataset.name)
+    if src.kind.local:
+        return _cut(_loader(stores, src))
+    return stores.tenant_datasets.cut(src.identity)
+
+
+def resolve_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
+    held = held_bank(stores, dataset)
+    return held if held is not None else fetch_bank(stores, dataset)
 
 
 def archive_entry(
     search_point: JobSearchPoint,
     *,
-    dataset_name: str | None,
+    dataset_hash: str,
     pipeline_schema: PipelineSchema,
 ) -> ArchiveEntry:
     sp_h = search_point.sp_hash(pipeline_schema)
@@ -492,8 +574,7 @@ def archive_entry(
     return ArchiveEntry(
         config_key=config_key(node_configs or [("", {"prompt_fields_id": sp_h})]),
         prompt_fields_id=sp_h,
-        rendered_prompt_hash=stable_hash(search_point.render(), length=ADDRESS_HEX),
         node_configs=node_configs,
         pipeline_params=params,
-        dataset_name=dataset_name,
+        dataset_hash=dataset_hash,
     )

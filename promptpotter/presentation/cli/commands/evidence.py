@@ -4,13 +4,21 @@ import argparse
 import logging
 from typing import get_args
 
-from promptpotter.application.evidence.head_to_head import GuardState, HeadToHeadRow
+from pydantic import BaseModel
+
+from promptpotter.application.cycle_listing import resolve_campaign_id_hint
+from promptpotter.application.evidence.head_to_head import (
+    GuardDifference,
+    GuardState,
+    HeadToHeadRow,
+)
 from promptpotter.application.evidence.metric_catalogue import MEASURAND, MetricUnit
 from promptpotter.application.evidence.read import Evidence, select_evidence
+from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.bench import BandedValue, BenchColumn, BenchScore, DatasetSplit
-from promptpotter.domain.campaign import ArmBudget, BenchSet
+from promptpotter.domain.campaign import BenchSet
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     CellSet,
@@ -60,7 +68,7 @@ def _roster_lines(ev: Evidence) -> list[str]:
     ]
     for r in ev.subjects:
         value = "         ." if r.value is None else f"{spec.format(r.value):>10}"
-        ruler = (r.ability.ruler_id if r.ability is not None else None) or "-"
+        ruler = r.ability.ruler.id if r.ability is not None else "-"
         mark = {True: " ", False: "x", None: "?"}[r.comparable]
         # `~` on the kind: a masked channel shares its label with the record it masks, and two rows must not read alike.
         kind = f"{r.kind}~" if r.mask else r.kind
@@ -121,7 +129,7 @@ def _bench_set_text(bench_set: BenchSet | None, field: str) -> str:
         return "—"
     value = getattr(bench_set, field)
     if isinstance(value, DatasetSplit):
-        return f"bench {value.bench}, demo {value.demo}, seed {value.seed}"
+        return f"bench {value.bench}, demo {value.demo}"
     if isinstance(value, CellSet):
         return f"{value.id} ({value.size} cells)"
     if isinstance(value, dict):
@@ -129,17 +137,30 @@ def _bench_set_text(bench_set: BenchSet | None, field: str) -> str:
     return "—" if value is None else str(value)
 
 
-def _differing_text(row: HeadToHeadRow, field: str) -> str:
-    if field in BenchSet.model_fields:
-        return _bench_set_text(row.bench_set, field)
-    if field == "origin_reading":
-        return _origin_text(row.bench)
-    value = getattr(row, field)
-    if isinstance(value, ArmBudget):
-        return ", ".join(f"{k}={v}" for k, v in value.model_dump().items() if v is not None) or "—"
-    if isinstance(value, list):
-        return ", ".join(value) or "—"
-    return str(value)
+def _axes_text(model: BaseModel | None) -> str:
+    # Named axes only, and a named null is a lift: printed, never dropped.
+    if model is None:
+        return "—"
+    return ", ".join(f"{k}={v}" for k, v in model.model_dump().items()) or "—"
+
+
+def _differing_text(row: HeadToHeadRow, field: GuardDifference) -> str:
+    match field:
+        case GuardDifference.ORIGIN_READING:
+            return _origin_text(row.bench)
+        case GuardDifference.BUDGET:
+            return (
+                f"{_axes_text(row.budget)} · stopping {_axes_text(row.stopping)} · "
+                f"clamp {_axes_text(row.determinism)}"
+            )
+        case GuardDifference.DEFAULTS:
+            return row.bench_defaults_pin
+        case GuardDifference.OPTIMIZER_MODELS:
+            return ", ".join(row.optimizer_models) or "—"
+        case GuardDifference.HUMAN_INTERVENED:
+            return str(row.human_intervened)
+        case _:
+            return _bench_set_text(row.bench_set, field.value)
 
 
 def _head_to_head_lines(ev: Evidence) -> list[str]:
@@ -156,7 +177,7 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
             "  Not every subject asked for carries a bench headline: the roster below reads the "
             "selection subject by subject."
         )
-    differs_on = [d.value for d in h2h.guard.differs_on]
+    differs_on = h2h.guard.differs_on
     shared = next(
         (
             r.bench_set
@@ -165,17 +186,17 @@ def _head_to_head_lines(ev: Evidence) -> list[str]:
         ),
         None,
     )
-    if shared is not None and not set(differs_on) & set(BenchSet.model_fields):
+    if shared is not None and not {d.value for d in differs_on} & set(BenchSet.model_fields):
         lines.append(
             "  bench set: "
             + " · ".join(
                 f"{field} {_bench_set_text(shared, field)}" for field in BenchSet.model_fields
             )
         )
-    for field in differs_on:
+    for differing in differs_on:
         lines.append(
-            f"  {field} DIFFERS: "
-            + "; ".join(f"{r.campaign_id[:22]}={_differing_text(r, field)}" for r in h2h.rows)
+            f"  {differing.value} DIFFERS: "
+            + "; ".join(f"{r.campaign_id[:22]}={_differing_text(r, differing)}" for r in h2h.rows)
         )
     lines += [
         "",
@@ -422,7 +443,7 @@ def _scenario_lines(ev: Evidence) -> list[str]:
             continue
         verdict = (
             f"parts at round {s.first_divergent_round}, where it would have crowned "
-            f"{(s.scenario_winner_id or '-')[:8]} instead of {(s.recorded_winner_id or '-')[:8]}"
+            f"{(s.scenario_winner_key or '-')[:8]} instead of {(s.recorded_winner_key or '-')[:8]}"
             if s.winner_changed
             else "never parts from the record"
         )
@@ -626,19 +647,22 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
 
     setup_logging(style="full" if args.verbose else "cli")
     stores = open_stores(args)
-    try:
-        ev = select_evidence(
-            stores,
-            subjects=args.subject,
-            dataset=args.dataset or "",
-            grid=args.grid or "",
-            include_ranking=args.ranking,
-            include_winner_chain=args.winner_chain,
-            include_config=args.config,
-            metric=args.metric or MEASURAND,
+    subjects = [
+        spec._replace(
+            campaign_id=resolve_campaign_id_hint(stores, spec.campaign_id, inside=spec.inside)
         )
-    except (ValueError, SyntaxError) as exc:
-        return CommandResult(data={"error": str(exc)}, human=str(exc))
+        for spec in map(parse_subject, args.subject)
+    ]
+    ev = select_evidence(
+        stores,
+        subjects=subjects,
+        dataset=args.dataset or "",
+        grid=args.grid or "",
+        include_ranking=args.ranking,
+        include_winner_chain=args.winner_chain,
+        include_config=args.config,
+        metric=args.metric or MEASURAND,
+    )
     lines = [
         *_head_to_head_lines(ev),
         *_roster_lines(ev),
@@ -651,6 +675,3 @@ async def cmd_evidence(args: argparse.Namespace) -> CommandResult:
         *_ranking_lines(ev, args.top),
     ]
     return CommandResult(data=ev.model_dump(), human="\n".join(lines))
-
-
-__all__ = ["cmd_evidence"]

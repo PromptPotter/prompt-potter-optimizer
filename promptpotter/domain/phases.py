@@ -3,9 +3,9 @@ from __future__ import annotations
 import enum
 from typing import TYPE_CHECKING, Literal, NamedTuple
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import duration_words, utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
 
@@ -13,44 +13,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.domain.run_records import RebaseRequest
-
-__all__ = [
-    "DASHBOARD_STATE_PAUSE_WORDS",
-    "INNER_ARMS_REFUSAL",
-    "INNER_GATE_REFUSAL",
-    "INNER_LAUNCH_REFUSAL",
-    "INNER_PAUSE_REFUSAL",
-    "INNER_SKIP_REFUSAL",
-    "PRODUCER_STATE_INFO",
-    "QUEUE_STARTS_ITSELF",
-    "REFUSAL_STOPS",
-    "RUN_PHASE_INFO",
-    "CampaignPhase",
-    "DashboardState",
-    "DeclaredRunPhase",
-    "ErrorRecord",
-    "GateDecision",
-    "GateKind",
-    "LaunchStage",
-    "PauseCause",
-    "PauseReading",
-    "ProducerAlert",
-    "ProducerReading",
-    "ProducerState",
-    "RunAction",
-    "RunAdmission",
-    "RunPhase",
-    "RunPhaseInfo",
-    "RunState",
-    "StopCategory",
-    "StopLoop",
-    "StopOutcome",
-    "StopReason",
-    "WalkEnd",
-    "run_phase_label",
-    "stop_next_step",
-    "stop_reason_outcome",
-]
 
 
 class CampaignPhase(enum.StrEnum):
@@ -71,7 +33,7 @@ class StopReason(enum.StrEnum):
     """Why a cycle's run ended or paused."""
 
     PERFECT = "perfect_score"
-    MAX_ROUNDS = "max_rounds"
+    ROUNDS_BUDGET = "rounds_budget"
     LIVES_EXHAUSTED = "lives_exhausted"
     PAUSED = "paused"
     PANEL_CUT = "panel_cut"
@@ -86,6 +48,7 @@ class StopReason(enum.StrEnum):
     TARGET_HIT = "target_hit"
     SPEND_BUDGET = "spend_budget"
     TOKEN_BUDGET = "token_budget"
+    WALL_CLOCK = "wall_clock"
     ORIGIN_GATE = "origin_gate"
     # Raised at the first cell the backend could not reach once its own retries were spent.
     BACKEND_UNREACHABLE = "backend_unreachable"
@@ -119,7 +82,6 @@ assert not {end.value for end in WalkEnd} & {reason.value for reason in StopReas
 class RunPhase(enum.StrEnum):
     """The one run-state vocabulary every surface reads.
 
-    - ``checkin``: still authoring its origin; holds no machine slot.
     - ``queued``: a launch claimed the cycle and waits for a machine slot.
     - ``starting``: a claimed launch past the queue, its process coming up.
     - ``running``: a process is attached and driving the cycle.
@@ -129,7 +91,6 @@ class RunPhase(enum.StrEnum):
     - ``terminal``: the cycle finished, and its stop reason says why.
     """
 
-    CHECKIN = "checkin"
     QUEUED = "queued"
     STARTING = "starting"
     RUNNING = "running"
@@ -166,10 +127,8 @@ class PauseCause(enum.StrEnum):
     BOUND = "bound"
 
 
-class PauseReading(StrictModel):
+class PauseReading(FrozenModel):
     """Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach."""
-
-    model_config = ConfigDict(frozen=True)
 
     stop_reason: StopReason | None
     cause: PauseCause
@@ -192,7 +151,7 @@ class ProducerState(enum.StrEnum):
     SILENT = "silent"
     # No process runs the cycle yet and a live launch has CLAIMED it.
     CLAIMED = "claimed"
-    # No producer and none owed: check-in, never launched, paused, ended, or lost at the gate.
+    # No producer and none owed: never launched, paused, ended, or lost at the gate.
     ABSENT = "absent"
 
 
@@ -238,19 +197,15 @@ if _missing_producer_info:
     )
 
 
-class ProducerAlert(StrictModel):
+class ProducerAlert(FrozenModel):
     """What a producer's state raises on its own, worded once for every surface."""
-
-    model_config = ConfigDict(frozen=True)
 
     title: str
     detail: str
 
 
-class ProducerReading(StrictModel):
+class ProducerReading(FrozenModel):
     """One cycle's producer as served: its state, its two server-measured clocks and its words."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: ProducerState
     label: str = Field(
@@ -359,7 +314,7 @@ class RunState(NamedTuple):
     @property
     def resumable(self) -> bool:
         """A launch may take this cycle up, and a rewrite of its ledger races nobody."""
-        return not self.producer.attached and self.run_phase is not RunPhase.CHECKIN
+        return not self.producer.attached
 
     @property
     def launch_refusal(self) -> str:
@@ -368,8 +323,6 @@ class RunState(NamedTuple):
             return INNER_LAUNCH_REFUSAL
         if self.resumable:
             return ""
-        if (info := RUN_PHASE_INFO[self.run_phase]).authoring:
-            return info.no_action
         return "A run of this cycle is in flight. Pause it or let it end, then ask again."
 
     @property
@@ -418,7 +371,6 @@ class RunPhaseInfo(NamedTuple):
     label: str
     walks: bool
     settled: bool
-    authoring: bool
     awaits_operator: bool
     dock_priority: int
     action: RunAction | None
@@ -430,21 +382,8 @@ class RunPhaseInfo(NamedTuple):
 QUEUE_STARTS_ITSELF = "it starts by itself when a slot frees"
 
 RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
-    RunPhase.CHECKIN: RunPhaseInfo(
-        "Check-in",
-        False,
-        False,
-        True,
-        False,
-        3,
-        None,
-        "Still in check-in — start it from the setup panel.",
-        "",
-        "",
-    ),
     RunPhase.QUEUED: RunPhaseInfo(
         "Queued",
-        False,
         False,
         False,
         False,
@@ -459,18 +398,16 @@ RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
         False,
         False,
         False,
-        False,
         1,
         None,
         "Starting up…",
         "coming up",
         "coming up",
     ),
-    RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, False, 1, "pause", "", "", ""),
+    RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", "", "", ""),
     # Asked to pause, an attached producer runs on to its checkpoint.
     RunPhase.PAUSED: RunPhaseInfo(
         "Paused",
-        False,
         False,
         False,
         False,
@@ -485,7 +422,6 @@ RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
         "Holding",
         False,
         False,
-        False,
         True,
         0,
         None,
@@ -494,10 +430,10 @@ RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
         "awaiting your decision",
     ),
     RunPhase.DETACHED: RunPhaseInfo(
-        "Detached", False, False, False, False, 3, "start", "", "producer gone", "producer gone"
+        "Detached", False, False, False, 3, "start", "", "producer gone", "producer gone"
     ),
     RunPhase.TERMINAL: RunPhaseInfo(
-        "Ended", False, True, False, False, 3, "start", "", "", "writing its last files"
+        "Ended", False, True, False, 3, "start", "", "", "writing its last files"
     ),
 }
 
@@ -515,12 +451,10 @@ def run_phase_label(run_phase: RunPhase, stop_reason: StopReason | None) -> str:
     return "—" if stop_reason is None else STOP_REASON_INFO[stop_reason].label
 
 
-class RunAdmission(StrictModel):
+class RunAdmission(FrozenModel):
     """Which run verbs a cycle admits now: the one answer the run control and the dispatcher read.
 
     Each ``*_refusal`` is the sentence that verb is refused with, empty where it is admitted."""
-
-    model_config = ConfigDict(frozen=True)
 
     offers: RunAction | None = Field(
         description="The verb the one run control offers; null where it offers none."
@@ -634,8 +568,8 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "`verify` the winner on more cells — this is one round's panel, not the dataset.",
         True,
     ),
-    StopReason.MAX_ROUNDS: StopReasonInfo(
-        "Max rounds",
+    StopReason.ROUNDS_BUDGET: StopReasonInfo(
+        "Rounds budget reached",
         StopOutcome.SUCCESS,
         StopCategory.LIMIT,
         False,
@@ -708,6 +642,17 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         "`set-limits --max-tokens <above what is already spent>` then `resume`.",
         True,
     ),
+    # A cell still open at the edge was cut; each launch's clock starts afresh.
+    StopReason.WALL_CLOCK: StopReasonInfo(
+        "Wall clock reached",
+        StopOutcome.HALTED,
+        StopCategory.BUDGET,
+        True,
+        False,
+        "`resume` runs another launch under the same clock; `set-limits --max-wall-clock` "
+        "moves it.",
+        True,
+    ),
     StopReason.ORIGIN_GATE: StopReasonInfo(
         "Origin gate (unhealthy origin)",
         StopOutcome.HALTED,
@@ -771,7 +716,7 @@ STOP_REASON_INFO: dict[StopReason, StopReasonInfo] = {
         False,
         "Nothing was sent: no rate bounds the call, so the dollar cap cannot be enforced for it. "
         "Run it on a (provider, model) pair the rate table prices (`nodes.{node}.config`), or "
-        "drop the dollar cap and bound the run in tokens (`ceiling: {usd: null, tokens: N}`); "
+        "drop the dollar cap and bound the run in tokens (`budget: {usd: null, tokens: N}`); "
         "then `resume`.",
         True,
     ),
@@ -846,6 +791,7 @@ REFUSAL_STOPS: dict[ErrorCategory, StopReason] = {
     ErrorCategory.PROVIDER_THROTTLED: StopReason.PROVIDER_THROTTLED,
     ErrorCategory.SPEND_CEILING: StopReason.SPEND_BUDGET,
     ErrorCategory.TOKEN_CEILING: StopReason.TOKEN_BUDGET,
+    ErrorCategory.WALL_CLOCK: StopReason.WALL_CLOCK,
     ErrorCategory.PRICE_LIST_UNREACHABLE: StopReason.PRICE_LIST_UNREACHABLE,
     ErrorCategory.NO_RATE: StopReason.NO_RATE,
 }
@@ -868,10 +814,8 @@ class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
         super().__init__(reason.value)
 
 
-class ErrorRecord(StrictModel):
+class ErrorRecord(FrozenModel):
     """An arm of ``CycleRecord`` declared here, since ``CycleResult.error`` sits below that union."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["error"] = "error"
     # Exception class name — operator-facing diagnostic, never load-bearing for routing.

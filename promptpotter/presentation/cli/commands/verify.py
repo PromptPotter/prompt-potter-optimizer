@@ -1,23 +1,20 @@
 from __future__ import annotations
 
 import argparse
-import uuid
-
-from pydantic import ValidationError
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import VerifyCandidatePayload
+from promptpotter.application.cycle_listing import resolve_campaign_id_hint
 from promptpotter.application.diagnostics.verify import VerifyOutcome
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.bench import BandedValue
+from promptpotter.domain.command_kinds import VerifyCandidatePayload
+from promptpotter.domain.cycle_paths import CycleHop, command_address
 from promptpotter.domain.paired_reading import READING_STATE_INFO
-from promptpotter.domain.results import BankedSearchPointError
-from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_campaign_hint
-from promptpotter.shared.errors import DiagnosticError
+from promptpotter.presentation.cli.commands.workspace import open_stores
+from promptpotter.shared.errors import BadRequestError, PayloadInvalidError
 
 
 def _level(level: BandedValue | None) -> str:
@@ -28,34 +25,26 @@ def _level(level: BandedValue | None) -> str:
 
 async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
-    try:
-        spec = parse_subject(args.subject)
-    except ValueError as exc:
-        raise SystemExit(f"ERROR: {exc}") from None
+    spec = parse_subject(args.subject)
     if spec.kind != "candidate" or spec.lens or spec.samples:
-        raise SystemExit(
-            "ERROR: verify takes one searchpoint and no mask: "
+        raise BadRequestError(
+            "verify takes one searchpoint and no mask: "
             "`candidate:<campaign>/<cycle>/<candidate_id>[;in=<c::y~…>]`."
         )
-    stores = descend_store(open_stores(args), spec.inside)
-
-    try:
-        dispatched = await CommandDispatcher(stores).dispatch_cycle_command(
-            CommandCall(
-                VerifyCandidatePayload(
-                    campaign_id=resolve_campaign_hint(stores, spec.campaign_id),
-                    cycle_id=spec.cycle_id,
-                    candidate_id=spec.candidate_id,
-                    samples=args.samples,
-                    strategy=args.strategy,
-                    seed=args.seed,
-                ),
-                uuid.uuid4().hex,
-            ),
-            expected_version=None,
-        )
-    except (DiagnosticError, BankedSearchPointError, ValidationError) as exc:
-        raise SystemExit(f"ERROR: {exc}") from exc
+    stores = open_stores(args)
+    leaf = CycleHop(
+        campaign_id=resolve_campaign_id_hint(stores, spec.campaign_id, inside=spec.inside),
+        cycle_id=spec.cycle_id,
+    )
+    fields = {
+        **command_address((*spec.inside, leaf)),
+        "candidate_id": spec.candidate_id,
+        "samples": args.samples,
+        "strategy": args.strategy,
+        "seed": args.seed,
+    }
+    payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
+    dispatched = await CommandDispatcher(stores).dispatch(CommandCall(payload))
 
     outcome = dispatched.result
     assert isinstance(outcome, VerifyOutcome), "a fresh key applies, and the applier answers one"
@@ -63,7 +52,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     if reading is None:
         return CommandResult(
             human=(
-                f"{spec.candidate_id}: every sample in the {outcome.dataset_name} search pool is "
+                f"{spec.candidate_id}: every sample in the {outcome.dataset_name} search split is "
                 f"already measured for this config ({outcome.already_measured} total). "
                 "Nothing to add."
             ),
@@ -87,6 +76,3 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         )
         lines.append(f"  lift over C0, paired on {pair.coverage.scored} shared cells: {lifts}")
     return CommandResult(data=reading.model_dump(mode="json"), human="\n".join(lines))
-
-
-__all__ = ["cmd_verify"]

@@ -14,14 +14,10 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
-from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.phases import StopOutcome
-from promptpotter.infrastructure.store.layout import tenant_workspace
-from promptpotter.infrastructure.store.session_pointer import active_pointer_exists
 from promptpotter.presentation.cli.commands.verbs import VERBS
-from promptpotter.presentation.cli.parsers import build_parser, identity_from_args
+from promptpotter.presentation.cli.parsers import build_parser
 from promptpotter.shared.errors import (
     PotterError,
     RequestTooLargeError,
@@ -33,8 +29,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
     from promptpotter.presentation.cli.commands.result import CommandResult
-
-__all__ = ["main"]
 
 
 _COMMANDS_PACKAGE = "promptpotter.presentation.cli.commands"
@@ -51,23 +45,15 @@ def _handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, Co
     return handler
 
 
-# TOTAL by construction: the verb is a column of the kind's own row, so none lands browser-only in silence.
-CLI_VERB_FOR_KIND: dict[CommandKind, str | None] = {kind: kind.cli_verb for kind in CommandKind}
-_named_verbs = {v for v in CLI_VERB_FOR_KIND.values() if v is not None}
-if not _named_verbs <= COMMANDS.keys():
-    raise RuntimeError(
-        f"CommandKind names verbs that do not exist: {sorted(_named_verbs - COMMANDS.keys())}"
-    )
-
-
 def main() -> None:
 
     parser = _PARSER
     args = parser.parse_args()
 
     if args.command is None:
-        identity = identity_from_args(args)
-        if not active_pointer_exists(tenant_workspace(DEFAULT_PROJECTS_ROOT, identity.tenant_id)):
+        # Named as a string like the handlers: `--help` loads no use case.
+        listing = importlib.import_module("promptpotter.application.cycle_listing")
+        if not listing.holds_active_pointer(tenant=args.tenant):
             print(
                 f"Welcome to {settings.BRAND_SHORT_NAME}.\n\n"
                 "Pick a verb to get started:\n"

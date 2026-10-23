@@ -4,7 +4,6 @@ import {
   configRows,
   descriptionSubtree,
   effortLadder,
-  knobValue,
   nodeLockPatch,
   parseKnob,
   nodeOverlayPatch,
@@ -475,7 +474,7 @@ describe("descriptionSubtree (one click on a schema-tree row)", () => {
   });
 });
 
-describe("parseKnob / knobValue (an optimizer knob typed in on the check-in)", () => {
+describe("parseKnob (an optimizer knob typed in on the check-in)", () => {
   const knob = (over: Partial<KnobRow>): KnobRow => ({
     key: "k",
     description: "",
@@ -502,13 +501,6 @@ describe("parseKnob / knobValue (an optimizer knob typed in on the check-in)", (
     expect(parseKnob(epsilon, "0")).toBeUndefined();
     expect(parseKnob(epsilon, "0.3")).toBe(0.3);
     expect(parseKnob(knob({ minimum: 1 }), "1")).toBe(1);
-  });
-
-  it("reads the draft's value where it sets the key, the manifest's where it does not", () => {
-    const nodes = { paired_t: { config: { alpha: 0.1 } } };
-    expect(knobValue(nodes, "paired_t", knob({ key: "alpha", value: 0.2 }))).toBe(0.1);
-    expect(knobValue(nodes, "paired_t", knob({ key: "survivors", value: 10 }))).toBe(10);
-    expect(knobValue(null, "blocks", knob({ key: "block_size", value: 30 }))).toBe(30);
   });
 });
 

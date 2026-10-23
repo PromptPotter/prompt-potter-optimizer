@@ -4,7 +4,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
 
-__all__ = ["FENCE_CLOSE", "FENCE_OPEN_PREFIX", "FENCE_OVERHEAD", "fence_untrusted"]
 
 FENCE_OPEN_PREFIX = "<UNTRUSTED_DATASET_CONTENT"
 FENCE_CLOSE = "</UNTRUSTED_DATASET_CONTENT>"

@@ -76,12 +76,3 @@ def cleanup_stub_fork_if_empty(*, campaign_store: CampaignStore, hop: CycleHop) 
     elif deleted:
         logger.info("Stub fork cleaned up: %s (parent=%s)", hop.cycle_id, parent_cycle_id)
     return deleted, reason
-
-
-__all__ = [
-    "active_pointer_exists",
-    "cleanup_stub_fork_if_empty",
-    "clear_active_pointer",
-    "read_active_pointer",
-    "save_active_pointer",
-]

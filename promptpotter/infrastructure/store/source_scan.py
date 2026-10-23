@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Iterable
     from types import ModuleType
 
-__all__ = ["optimizer_prompt_shapers"]
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 

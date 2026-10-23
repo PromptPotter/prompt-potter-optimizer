@@ -11,14 +11,12 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from pydantic import ConfigDict, Field
-
 from promptpotter.domain import activity
 from promptpotter.domain.activity import ActivityFeed, ActivityItem
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
+from promptpotter.domain.cycle_paths import CyclePath, encode_cycle_path
 from promptpotter.domain.projection_envelope import RECORD_KINDS, bearing_record
+from promptpotter.domain.ray import MAX_RAY_LIMIT, RayItem, RayResponse
 from promptpotter.domain.run_records import LLMCallProgressRecord
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     course_validator_ns,
@@ -28,23 +26,10 @@ from promptpotter.infrastructure.store.lineage_queries import FamilyCourse
 from promptpotter.infrastructure.store.read_model import LineIndex
 from promptpotter.shared.clock import epoch_seconds
 
-__all__ = [
-    "DEFAULT_RAY_LIMIT",
-    "MAX_RAY_LIMIT",
-    "RayItem",
-    "RayResponse",
-    "build_family_ray",
-    "decode_ray_cursor",
-    "ray_validator_parts",
-]
-
-DEFAULT_RAY_LIMIT = 200
-MAX_RAY_LIMIT = 1000
-
 # `encoded_path`, not the walk's rank: a rank is request-relative, so cursors would not compare.
 RayCursor = tuple[float, str, int]
 
-_INNER_KINDS: frozenset[str] = frozenset({"cycle_seed", "round_standing", "round_warning", "error"})
+_INNER_KINDS: frozenset[str] = frozenset({"cycle_seed", "round_closed", "round_warning", "error"})
 
 assert _INNER_KINDS <= RECORD_KINDS, (
     f"curation names unknown record kinds: {sorted(_INNER_KINDS - RECORD_KINDS)}"
@@ -55,54 +40,6 @@ _CURATION_TAG = (
     sorted(_INNER_KINDS),
     hashlib.sha256(Path(activity.__file__).read_bytes()).hexdigest(),
 )
-
-
-class RayItem(StrictModel):
-    """One ray event, addressed by ``path``: a bare ``cycle_id`` is ambiguous in an L4 family."""
-
-    model_config = ConfigDict(frozen=True)
-
-    path: list[CycleHop] = Field(
-        description="The cycle this record belongs to, root → leaf — THE address.",
-    )
-    offset: int = Field(
-        ge=0,
-        description="Physical 0-based line index in this cycle's own ledger — the same space "
-        "as ProjectionEnvelope.sequence, so a live SSE frame de-duplicates against a ray "
-        "item on (path, offset). SPARSE: a record no line is made of rides nowhere, so "
-        "consecutive items skip offsets; a gap between ray offsets is not a missing record.",
-    )
-    ts: str = Field(
-        description="Effective timestamp: the record's own, raised to its file predecessor's "
-        "when the two invert (records are stamped at construction but appended later).",
-    )
-    gap_before_s: float = Field(
-        ge=0,
-        description="Seconds since the item before it in this window; 0 on the window's first.",
-    )
-    activity: ActivityItem | None = Field(
-        description="The record's reading — its line, and the round and candidate it is about. "
-        "Null on a bare heartbeat alone: the process proved alive and there is nothing to read, "
-        "so it ends a silence without becoming a step. A `running` item with no later reading "
-        "on its path is a call still open.",
-    )
-
-
-class RayResponse(StrictModel):
-    """One ordered window of a family's chronology, oldest-first."""
-
-    model_config = ConfigDict(frozen=True)
-
-    items: list[RayItem] = Field(
-        default_factory=list,
-        description="The window, oldest-first: every record a line was read off, and each bare "
-        "heartbeat between them.",
-    )
-    cursor_prev: str | None = Field(
-        default=None,
-        description="Opaque cursor for the window immediately older than this one; null when "
-        "this window already reaches the family's beginning.",
-    )
 
 
 class _Raw(NamedTuple):

@@ -38,7 +38,7 @@ from promptpotter.domain.phase_views import (
     VerifyEnterView,
     VerifyGradedView,
 )
-from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat, is_flat_ruler_id
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
 from promptpotter.domain.spend import CEILING_METER_LABELS, RATE_PRICED_LABEL
 from promptpotter.domain.wounds import COLLAPSE_WORDS
 from promptpotter.shared.composite import render_composite_fitness_block
@@ -46,7 +46,7 @@ from promptpotter.shared.composite import render_composite_fitness_block
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.domain.ruler import AbilityReading
+    from promptpotter.domain.ruler import SeriesReading
 
 
 def _render_init_enter(v: InitEnterView) -> str:
@@ -86,7 +86,9 @@ def _render_round_start(v: RoundStartView) -> str:
     round_label = (
         f"ROUND {v.round}  {standing.lives.bar}"
         if standing is not None and standing.lives is not None
-        else f"ROUND {v.round}/{v.max_rounds or 999}"
+        else f"ROUND {v.round}"
+        if v.budget_rounds is None
+        else f"ROUND {v.round}/{v.budget_rounds}"
     )
     arms = "?" if v.arms is None else str(v.arms)
     return "\n".join(
@@ -123,7 +125,7 @@ def _render_measure_enter(v: MeasureEnterView) -> str:
 
 
 def render_round_verdict(
-    v: RoundCompleteView, basis: Sequence[str], ability: AbilityReading | None
+    v: RoundCompleteView, basis: Sequence[str], level: SeriesReading | None
 ) -> str:
     out: list[str] = [""]
     if board := _scoreboard(v.arms):
@@ -131,19 +133,20 @@ def render_round_verdict(
 
     formula = v.composite_fitness_formula_short or v.composite_fitness_formula
     show_inline = not formula
+    fold = v.fold
+    accuracy = None if fold is None else fold.accuracy
+    composite = None if fold is None else fold.composite_fitness
     comp_tag = (
-        f"  composite_fitness={v.composite_fitness:.4f}"
-        if show_inline and v.composite_fitness is not None and v.composite_fitness != v.accuracy
+        f"  composite_fitness={composite:.4f}"
+        if show_inline and composite is not None and composite != accuracy
         else ""
     )
 
-    acc_txt = fmt_pct(v.accuracy)
-    # A cold θ is logit-accuracy on the arm's own subset, so the headline stays accuracy.
+    acc_txt = fmt_pct(accuracy)
+    # A cold θ is logit-accuracy, so the headline stays accuracy.
     theta = (
-        ability.theta
-        if v.display_metric == "ability"
-        and ability is not None
-        and not is_flat_ruler_id(ability.ruler_id or "")
+        level.reading.theta
+        if v.display_metric == "ability" and level is not None and not level.reading.ruler.cold
         else None
     )
     headline = acc_txt if theta is None else f"θ {theta:+.3f}"
@@ -163,14 +166,14 @@ def render_round_verdict(
             f" ({', '.join(detail)}){comp_tag}"
         )
     else:
-        detail += ["the best-so-far held", f"n={v.total}"]
+        detail += ["the best-so-far held", f"n={0 if fold is None else fold.total}"]
         out.append(f"  {YELLOW}{BOLD}· HELD{RESET}  {headline} ({', '.join(detail)}){comp_tag}")
     if v.verdict_reason:
         out.append(f"  {DIM}why: {v.verdict_reason}{RESET}")
     # Every number above still renders under a SILENT caveat: this line is the terminal's only notice.
     caveats: dict[ThetaCaveat, list[str]] = {}
-    if ability is not None and ability.caveat is not None:
-        caveats[ability.caveat] = []
+    if level is not None and level.caveat is not None:
+        caveats[level.caveat] = []
     for arm in v.arms:
         if arm.ability is not None and arm.ability.caveat is not None:
             caveats.setdefault(arm.ability.caveat, []).append(arm.arm.label)
@@ -182,10 +185,10 @@ def render_round_verdict(
         )
     out.extend(f"  {line}" for line in basis)
 
-    if not show_inline and v.composite_fitness is not None:
+    if not show_inline and fold is not None and composite is not None:
         for line in render_composite_fitness_block(
-            v.composite_fitness,
-            v.evaluators,
+            composite,
+            fold.evaluators,
             formula,
             reference=selected.reference_level("objective") if selected else None,
             use_short_names=bool(v.composite_fitness_formula_short),
@@ -235,7 +238,9 @@ def to_text(view: PhaseView) -> str:
         case BenchScoredView():
             return _render_bench_scored(view)
         case VerifyEnterView():
-            return f"  {DIM}verify {view.label}: {view.rows} unseen cells, {view.strategy}{RESET}"
+            return (
+                f"  {DIM}verify {view.arm.label}: {view.rows} unseen cells, {view.strategy}{RESET}"
+            )
         case VerifyGradedView():
             return _render_verify_graded(view)
         case RoundCompleteView():
@@ -252,9 +257,17 @@ def render_run_spend(v: RunSpendView) -> str:
     ]
     counted = CEILING_METER_LABELS[v.meter]
     if v.usd_cap is not None:
-        bits.append(f"cap ${v.metered_usd:.4f} of ${v.usd_cap:.2f} {counted}")
+        share = "" if v.usd_share is None else f" of its ${v.usd_share:.2f} share"
+        bits.append(
+            f"campaign cap ${v.campaign_metered_usd:.4f} of ${v.usd_cap:.2f} {counted}, "
+            f"this cycle ${v.metered_usd:.4f}{share}"
+        )
     if v.token_cap is not None:
-        bits.append(f"cap {v.metered_tokens:,} of {v.token_cap:,} tokens {counted}")
+        share = "" if v.token_share is None else f" of its {v.token_share:,} share"
+        bits.append(
+            f"campaign cap {v.campaign_metered_tokens:,} of {v.token_cap:,} tokens {counted}, "
+            f"this cycle {v.metered_tokens:,}{share}"
+        )
     return f"  {DIM}spend: {' · '.join(bits)}{RESET}"
 
 
@@ -443,7 +456,7 @@ def render_sp_diff(view: SpDiffView) -> str:
         out.append(
             _node_line(
                 f"{CYAN}Values{RESET} {DIM}— full text in {rf}"
-                f"::candidate_scores[].prompt_fields / .pipeline_params, joined on label{RESET}"
+                f"::arms{{}}.individual.prompts / .pipeline_params, joined on label{RESET}"
             )
         )
         key_w = max(len(" ".join(sorted(keys))) for _, keys, _ in legend.values())
@@ -456,6 +469,3 @@ def render_sp_diff(view: SpDiffView) -> str:
             )
 
     return "\n".join(out)
-
-
-__all__ = ["render_round_verdict", "render_run_spend", "render_sp_diff", "to_text"]

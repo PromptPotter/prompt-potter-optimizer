@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { DraftPatch } from "@/lib/api";
+import type { DraftPatch, NodePrompt } from "@/lib/api";
 import { cx } from "@/lib/cx";
-import { PROMPT_STRING_FIELDS, promptFieldLabel } from "@/lib/prompt-fields";
+import { promptFieldLabel } from "@/lib/prompt-fields";
 import { LockButton } from "./NodeConfigEditor";
 
 const FIELD_META: Record<string, { hint: string; rows: number }> = {
@@ -14,68 +14,73 @@ const FIELD_META: Record<string, { hint: string; rows: number }> = {
   thinking_style: { hint: "How to reason before answering", rows: 2 },
   answer_format: { hint: "Exact shape of the output", rows: 2 },
 };
-const FIELDS = PROMPT_STRING_FIELDS.map((key) => ({
-  key,
-  label: promptFieldLabel(key),
-  ...FIELD_META[key],
-}));
 
-function asStrings(value: Record<string, unknown>): Record<string, string> {
+function asStrings(keys: readonly string[], value: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const f of FIELDS) {
-    const v = value[f.key];
-    out[f.key] = typeof v === "string" ? v : "";
-  }
+  for (const key of keys) out[key] = value[key] ?? "";
   return out;
 }
 
+// One prompt node's loci. `fields` is the roster the node declares: its served `prompt` rows.
 export function PromptFieldsEditor({
-  value,
+  node,
+  prompts,
+  fields: keys,
   onApply,
   readOnly = false,
   compact = false,
   locks,
   onLock,
 }: {
-  value: Record<string, unknown>;
+  node: string;
+  prompts: Record<string, NodePrompt>;
+  fields: readonly string[];
   onApply?: (patch: DraftPatch) => void;
   locks?: Record<string, boolean>;
   onLock?: (field: string, locked: boolean) => void;
   readOnly?: boolean;
   compact?: boolean;
 }) {
-  // `ui/CommitInput`'s two latches, not CommitInput itself: all six fields merge into ONE patch.
-  const fingerprint = JSON.stringify(asStrings(value));
+  const own = prompts[node];
+  const value = own?.fields ?? {};
+  // `ui/CommitInput`'s two latches, not CommitInput itself: every field merges into ONE patch.
+  const fingerprint = JSON.stringify(asStrings(keys, value));
   const [prevFp, setPrevFp] = useState(fingerprint);
   const [sentFp, setSentFp] = useState(fingerprint);
-  const [fields, setFields] = useState<Record<string, string>>(() => asStrings(value));
+  const [draft, setDraft] = useState<Record<string, string>>(() => asStrings(keys, value));
   if (fingerprint !== prevFp) {
     setPrevFp(fingerprint);
     setSentFp(fingerprint);
-    setFields(asStrings(value));
+    setDraft(asStrings(keys, value));
   }
 
-  const setField = (key: string, v: string) => setFields((prev) => ({ ...prev, [key]: v }));
+  const setField = (key: string, v: string) => setDraft((prev) => ({ ...prev, [key]: v }));
 
-  // Never re-sends a sent value: each patch is a CommandRecord on the check-in ledger.
+  // Never re-sends a sent value: each patch is a CommandRecord on the draft's ledger.
   const commit = () => {
     if (readOnly || !onApply) return;
-    // Through `asStrings` so both sides of the compare are keyed in `FIELDS` order.
-    const draftFp = JSON.stringify(asStrings(fields));
+    const draftFp = JSON.stringify(asStrings(keys, draft));
     if (draftFp === sentFp) return;
     setSentFp(draftFp);
-    const merged: Record<string, unknown> = { ...value };
-    for (const f of FIELDS) merged[f.key] = fields[f.key];
-    onApply({ origin_prompt_fields: merged });
+    // The whole map, every other node as it stands: the patch REPLACES the draft's `origin_prompts`.
+    const next: Record<string, Record<string, string>> = {};
+    for (const [name, p] of Object.entries(prompts)) next[name] = p.fields;
+    next[node] = Object.fromEntries(
+      Object.entries(asStrings(keys, draft)).filter(([, v]) => v.trim() !== ""),
+    );
+    onApply({ origin_prompts: next });
   };
 
-  const fewShot = Array.isArray(value.shot_ids) ? (value.shot_ids as unknown[]).length : 0;
-
-  const shown = compact && readOnly ? FIELDS.filter((f) => (fields[f.key] ?? "").trim()) : FIELDS;
+  const fewShot = own?.shots.length ?? 0;
+  const rows = keys.map((key) => ({ key, label: promptFieldLabel(key), ...FIELD_META[key] }));
+  const shown = compact && readOnly ? rows.filter((f) => (draft[f.key] ?? "").trim()) : rows;
 
   return (
     <section className={cx("prompt-editor", compact && "is-compact")}>
-      <span className="prompt-editor-title">{readOnly ? "Prompt, as banked" : "Starting prompt"}</span>
+      <span className="prompt-editor-title">
+        {readOnly ? "Prompt, as banked" : "Starting prompt"}
+        {Object.keys(prompts).length > 1 ? <code className="opt-detail-id">{node}</code> : null}
+      </span>
       <div className="prompt-editor-grid">
         {shown.map((f) => {
           const locked = locks?.[f.key];
@@ -95,8 +100,8 @@ export function PromptFieldsEditor({
               <textarea
                 className="prompt-field-input"
                 aria-label={f.label}
-                rows={compact ? 2 : f.rows}
-                value={fields[f.key]}
+                rows={compact ? 2 : (f.rows ?? 2)}
+                value={draft[f.key] ?? ""}
                 placeholder={f.hint}
                 readOnly={readOnly}
                 disabled={readOnly}

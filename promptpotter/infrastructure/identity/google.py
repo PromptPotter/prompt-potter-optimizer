@@ -13,7 +13,7 @@ from promptpotter.infrastructure.identity.verifier import (
     VerifiedIDToken,
     verify_id_token,
 )
-from promptpotter.infrastructure.tls import tls_context
+from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,3 @@ class GoogleProviderClient:
             email=verified.email,
             provider="google",
         )
-
-
-__all__ = ["GoogleProviderClient", "GoogleTokenExchangeError", "ProviderIdentity"]

@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import { fmtPct0 } from "@/lib/format";
-import { phaseIs } from "@/lib/run-phase";
 import { fitnessStyle } from "@/lib/derivations";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
@@ -21,16 +20,13 @@ export function HardSamplesHeatmap() {
   const [heatExpanded, setHeatExpanded] = useState(false);
   const [bankExpanded, setBankExpanded] = useState(false);
 
-  // A check-in 404s `/cells` by construction (`datasets/{slug}/` is written at Start): not a broken dataset.
   const rosterNote = datasetError
     ? `Couldn’t read this campaign’s samples${datasetName ? ` (${datasetName})` : ""}.`
     : datasetItems.length > 0
       ? null
-      : phaseIs(dash?.run_phase, "authoring")
-        ? "Not committed yet — the sample bank is written when this campaign starts."
-        : datasetStale
-          ? "Loading this campaign’s samples…"
-          : "No samples on this campaign’s dataset yet.";
+      : datasetStale
+        ? "Loading this campaign’s samples…"
+        : "No samples on this campaign’s dataset yet.";
 
   const outcome =
     datasetTotals && datasetTotals.mean_fitness != null
@@ -62,7 +58,7 @@ export function HardSamplesHeatmap() {
                 const mean = it.mean_fitness ?? null;
                 return (
                   <span
-                    key={it.sample_id}
+                    key={it.position}
                     className="hs-mini-cell"
                     style={mean == null ? undefined : fitnessStyle(mean)}
                   />

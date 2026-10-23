@@ -30,7 +30,7 @@ function ConfigPanels({ evidence, loading }: { evidence: Evidence; loading: bool
       <p className={loading ? "note-lede" : "note-empty"}>
         {loading
           ? "Reading the searchpoints…"
-          : "None of these searchpoints recorded a configuration. A round file written before `resolved_pipeline_params` carries none, and nothing here reconstructs one."}
+          : "None of these searchpoints recorded a configuration. A proposed arm resolves none, and nothing here reconstructs one."}
       </p>
     );
   }

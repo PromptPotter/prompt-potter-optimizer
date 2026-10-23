@@ -41,6 +41,3 @@ class IdentityPaths:
 
 def default_identity_paths() -> IdentityPaths:
     return IdentityPaths(root=user_data_root() / "identity")
-
-
-__all__ = ["IdentityPaths", "default_identity_paths"]

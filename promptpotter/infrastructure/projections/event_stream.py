@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import json
-import logging
 from pathlib import Path
 from typing import Any, cast
 
 from promptpotter.domain.activity import ActivityFeed
-from promptpotter.domain.cycle_paths import CyclePath
 from promptpotter.domain.projection_envelope import (
     RECORD_KINDS,
     ProjectionEnvelope,
@@ -14,18 +11,19 @@ from promptpotter.domain.projection_envelope import (
     bearing_record,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
-
-logger = logging.getLogger(__name__)
-
-__all__ = ["CycleLedgerTail"]
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    feed_fold,
+    ledger_record,
+    line_dict,
+)
 
 
 class CycleLedgerTail:
     """Synchronous file I/O: a caller on an event loop uses ``asyncio.to_thread``."""
 
-    def __init__(self, cycle_dir: Path, path: CyclePath) -> None:
-        self._path = path
-        self._cycle_id = path[-1].cycle_id
+    def __init__(self, cycle_dir: Path, cycle_id: str) -> None:
+        self._cycle_id = cycle_id
         self._ledger_path = CycleLayout(cycle_dir).ledger
         self._byte_pos = 0
         self._line_index = 0
@@ -44,7 +42,7 @@ class CycleLedgerTail:
             cycle_id=self._cycle_id,
             sequence=offset,
             payload=body,
-            activity=self._feed.state(self._path),
+            activity=self._feed.state(),
         )
 
     def read_new(self) -> list[ProjectionEnvelope]:
@@ -70,34 +68,29 @@ class CycleLedgerTail:
 
     def _park(self, line: int | None) -> int:
         """Walks the bytes, not the number: a rewind or a fork leaves a ledger shorter than ``line``."""
-        self._feed = ActivityFeed()
         self._byte_pos = 0
         self._line_index = 0
-        if not self._ledger_path.exists():
-            return 0
-        data = self._ledger_path.read_bytes()
-        while line is None or self._line_index < line:
-            nl = data.find(b"\n", self._byte_pos)
-            if nl == -1:
-                break
-            self._read(data[self._byte_pos : nl])
-            self._byte_pos = nl + 1
-            self._line_index += 1
+        if self._ledger_path.exists():
+            data = self._ledger_path.read_bytes()
+            while line is None or self._line_index < line:
+                nl = data.find(b"\n", self._byte_pos)
+                if nl == -1:
+                    break
+                self._byte_pos = nl + 1
+                self._line_index += 1
+        self._feed = LedgerIndex.of(self._ledger_path, ()).view(ActivityFeed, self._line_index)
         return self._line_index
 
     def _read(self, raw: bytes) -> tuple[ProjectionKind, dict[str, Any]] | None:
-        try:
-            rec = json.loads(raw)
-        except json.JSONDecodeError:
-            logger.warning("skipping malformed ledger line at offset %d", self._line_index)
-            return None
-        if not isinstance(rec, dict):
+        offset = self._line_index
+        rec = ledger_record(line_dict, raw, ledger=self._ledger_path, offset=offset)
+        if rec is None:
             return None
         kind = rec.get("record_type")
         if not isinstance(kind, str) or kind not in RECORD_KINDS:
             return None
         if (record := bearing_record(kind, rec)) is not None:
-            self._feed.read(self._line_index, record)
+            feed_fold(self._feed, offset, record, ledger=self._ledger_path)
         return cast(ProjectionKind, kind), rec
 
     def _to_envelope(self, raw: bytes) -> ProjectionEnvelope | None:
@@ -109,5 +102,5 @@ class CycleLedgerTail:
             cycle_id=self._cycle_id,
             sequence=self._line_index,
             payload=rec,
-            activity=self._feed.state(self._path),
+            activity=self._feed.state(),
         )

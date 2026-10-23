@@ -5,21 +5,22 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict
 
-from promptpotter.application.intelligence.rasch import graded_response
+from promptpotter.application.intelligence.rasch import graded_response, theta_cells
 from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.scoring.selection import (
     PairedPosterior,
+    cells_read,
     elimination_p_best_bounds,
     paired_p_best,
     priors_covering,
 )
-from promptpotter.domain.results import ArmOutcome
 from promptpotter.domain.scoring import NO_RESULT, is_answer_collapsed
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.statistics import discordant_counts
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
+    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
@@ -63,11 +64,10 @@ class EliminationContext(TypedDict, total=False):
     gate: EliminationGate
     p_best: float
     epsilon: float
-    leader_id: str
+    leader: ArmKey
     queries_scored: int
     total_queries: int
     n_priors: int
-    leader_label: str
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,7 @@ class PoBBStop(StopSignal):
 
     check_result: EliminationContext
     fit: PairedPosterior | None
-    paired_breakdown: dict[str, dict[str, float]]
+    paired_breakdown: dict[ArmKey, dict[str, float]]
 
 
 class PoBBCheck:
@@ -91,9 +91,11 @@ class PoBBCheck:
         n_min: int,
         n_samples: int,
         ruler: DeltaRuler | None,
+        parent: ArmKey,
     ) -> None:
         # The SAME δ scale the round-winner election reads; ``None`` ⇒ flat, the ruler still cold.
         self.ruler = ruler
+        self.parent = parent
         self.n_min = n_min
         self.epsilon = knobs.epsilon
         self.epsilon_floor = knobs.epsilon_floor
@@ -103,27 +105,27 @@ class PoBBCheck:
         self.leader_lock_in = knobs.leader_lock_in
         self.n_samples = n_samples
         # The GRADED response, never a binarized hit, which is degenerate on a graded backend.
-        self.priors_by_sample: dict[str, dict[str, float]] = {}
-        self._current_id: str = ""
+        self.priors_by_sample: dict[ArmKey, dict[str, float]] = {}
+        self._current: ArmKey | None = None
         self._on_snapshot: Callable[[RaceSnapshot], None] | None = None
 
     @property
-    def prior_ids(self) -> list[str]:
+    def prior_keys(self) -> list[ArmKey]:
         return list(self.priors_by_sample)
 
     def set_current(
         self,
-        candidate_id: str,
+        key: ArmKey,
         on_snapshot: Callable[[RaceSnapshot], None] | None = None,
     ) -> None:
-        self._current_id = candidate_id
+        self._current = key
         self._on_snapshot = on_snapshot
 
-    def register_completed(self, results: Iterable[GradedCell], *, candidate_id: str) -> None:
-        self.priors_by_sample[candidate_id] = _graded(results)
+    def register_completed(self, results: Iterable[GradedCell], *, key: ArmKey) -> None:
+        self.priors_by_sample[key] = _graded(results)
 
-    def extend_prior(self, candidate_id: str, rows: Iterable[GradedCell]) -> None:
-        self.priors_by_sample[candidate_id].update(_graded(rows))
+    def extend_prior(self, key: ArmKey, rows: Iterable[GradedCell]) -> None:
+        self.priors_by_sample[key].update(_graded(rows))
 
     def epsilon_at(self, n: int) -> float:
         if self.epsilon <= self.epsilon_floor:
@@ -139,7 +141,7 @@ class PoBBCheck:
         if is_answer_collapsed(results):
             return PoBBStop(
                 self.name,
-                ArmOutcome.ELIMINATED,
+                "eliminated",
                 {
                     "gate": EliminationGate.COLLAPSED,
                     "queries_scored": n,
@@ -148,12 +150,18 @@ class PoBBCheck:
                 fit=None,
                 paired_breakdown={},
             )
+        # Every posterior gate and the ε ramp read the depth the election's coverage floor counts.
+        read = cells_read(
+            "ability", results, self.priors_by_sample.get(self.parent, {}), self.ruler
+        )
+        if read < self.n_min:
+            return None
         fit = paired_p_best(results, self.priors_by_sample, self.ruler)
         if fit is None:
             return None
-        leader_id = min(fit.p_better, key=lambda k: fit.p_better[k])
+        leader = min(fit.p_better, key=lambda k: fit.p_better[k])
 
-        paired_breakdown: dict[str, dict[str, float]] = {
+        paired_breakdown: dict[ArmKey, dict[str, float]] = {
             pid: {
                 "p_better": float(p_better),
                 # The graded cells the fit read, never `n`, which counts errored rows too.
@@ -163,37 +171,37 @@ class PoBBCheck:
             for pid, p_better in fit.p_better.items()
         }
 
-        if self._on_snapshot is not None:
+        if self._on_snapshot is not None and self._current is not None:
             self._on_snapshot(
                 RaceSnapshot(
                     p_best=float(fit.p_best),
-                    current_id=self._current_id or "__current__",
+                    current=self._current,
                     n_samples=n,
                     paired_breakdown=paired_breakdown,
-                    decision_grade=n >= self.lock_in_n_min,
+                    decision_grade=read >= self.lock_in_n_min,
                 )
             )
 
         context: EliminationContext = {
             "gate": EliminationGate.LOCK_IN,
             "p_best": float(fit.p_best),
-            "leader_id": leader_id,
+            "leader": leader,
             "queries_scored": n,
             "total_queries": self.n_samples,
             "n_priors": len(fit.priors),
         }
-        if self.leader_lock_in and n >= self.lock_in_n_min and fit.p_best >= self.lock_in:
+        if self.leader_lock_in and read >= self.lock_in_n_min and fit.p_best >= self.lock_in:
             return PoBBStop(
-                self.name, ArmOutcome.LOCKED_IN, context, fit=fit, paired_breakdown=paired_breakdown
+                self.name, "locked_in", context, fit=fit, paired_breakdown=paired_breakdown
             )
 
         # ε is the ONLY futility gate; the priors include the round's parent (`potter/race.py`).
-        bar = self.epsilon_at(n)
+        bar = self.epsilon_at(read)
         if not self.epsilon_elimination or fit.p_best >= bar:
             return None
         return PoBBStop(
             self.name,
-            ArmOutcome.ELIMINATED,
+            "eliminated",
             {**context, "gate": EliminationGate.EPSILON, "epsilon": float(bar)},
             fit=fit,
             paired_breakdown=paired_breakdown,
@@ -204,7 +212,7 @@ class PoBBCheck:
         results: Sequence[GradedCell],
         upcoming: Sequence[tuple[Sample, GradedCell | None]],
         *,
-        unresolved: Mapping[str, Iterable[GradedCell]] | None = None,
+        unresolved: Mapping[ArmKey, Iterable[GradedCell]] | None = None,
     ) -> int | None:
         """An ``unresolved`` candidate may never become a prior: graded where its rows say, anything elsewhere, never counted on."""
         measured = [cell for cell in results if cell.scored]
@@ -229,7 +237,10 @@ class PoBBCheck:
             # Collapse needs one answer everywhere; a second, or an empty one, rules it out for good.
             if len(said) <= 1 and not said & {"", NO_RESULT}:
                 return m
-            if not priors:
+            # Cold, a catch-up may yet give the parent any cell, and a depth below what `check` will
+            # read lands the horizon past its stop: so it counts the most it could read.
+            read = len(theta_cells(dict.fromkeys(cells), cells, self.ruler))
+            if not priors or read < self.n_min:
                 continue
             settled = [
                 pid
@@ -239,18 +250,8 @@ class PoBBCheck:
             low, high = elimination_p_best_bounds(
                 cells, grades, priors, self.ruler, settled=settled
             )
-            if self.leader_lock_in and m >= self.lock_in_n_min and high >= self.lock_in:
+            if self.leader_lock_in and read >= self.lock_in_n_min and high >= self.lock_in:
                 return m
-            if self.epsilon_elimination and low < self.epsilon_at(m):
+            if self.epsilon_elimination and low < self.epsilon_at(read):
                 return m
         return None
-
-
-__all__ = [
-    "ABORT_LENS_LABELS",
-    "ABORT_LENS_SUPPRESS",
-    "EliminationContext",
-    "EliminationGate",
-    "PoBBCheck",
-    "PoBBStop",
-]

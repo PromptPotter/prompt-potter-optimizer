@@ -5,101 +5,71 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
-    L1_CONFIG_NOT_IN_RUNTIME_FAILURES,
-    L1_INNER_LAYOUT_APPLIES,
-    L1_INNER_PLACEHOLDERS_INTACT,
-    L1_INNER_STEER_IS_LEGAL,
-    L1_PROMPT_BLOCKS_IN_LIBRARY,
-    L1_PROMPT_FIELD_NOT_GUTTED,
-    L1_PROMPT_FIELDS_OPEN,
-    L1_SHOTS_IN_DEMO_POOL,
+    l1_config_not_in_runtime_failures,
+    l1_inner_layout_applies,
+    l1_inner_placeholders_intact,
+    l1_inner_steer_is_legal,
+    l1_prompt_field_not_gutted,
+    l1_prompt_fields_open,
 )
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_overlay import merge_pipeline_params
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import CandidateProposal
+from promptpotter.domain.results import Proposal
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
     from promptpotter.application.runner.inner.tasks import InnerCells
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["parse_population"]
-
 
 def parse_population(
-    proposals: list[CandidateProposal],
+    proposals: list[Proposal],
     parent: OptSearchPoint,
     pipeline_params: dict[str, Any] | None,
     schema: PipelineSchema,
     *,
     runtime_failures: Sequence[RuntimeFailure],
-    demo_ids: frozenset[int],
-    shot_k_max: int,
     inner_cells: InnerCells | None,
-    prompt_block_catalogue: PromptBlockCatalogue,
-) -> None:
-    """L1's rejections only: search space, route keys and backend placeholders are the bench's (``NodeContext.child``)."""
-    parent_fields = parent.prompt_fields()
+) -> list[Proposal]:
+    """L1's rejections only: search space, route keys and backend placeholders are the bench's (``NodeContext.child``); shots are judged on the wire (``generate.py``), where demo ids still exist."""
+    parsed: list[Proposal] = []
     for cp in proposals:
-        pipeline_overlay = cp.pipeline_overlay
-        opt_sp = cp.opt_sp
+        pipeline_overlay = cp.overlay
+        opt_sp = cp.individual
         merged_pp = merge_pipeline_params(pipeline_params, pipeline_overlay, schema)
         failures: list[ValidationFailure] = []
-        if opt_sp.shot_ids != parent.shot_ids:
-            shots_outcome = L1_SHOTS_IN_DEMO_POOL.check(
-                {"shot_ids": opt_sp.shot_ids}, demo_ids=demo_ids, k_max=shot_k_max
-            )
-            if shots_outcome is not None:
-                failures.extend(shots_outcome.evidence["failures"])
         if schema:
             # The DELTA, never the child's whole prompt: an inherited field was not proposed.
-            prompt_edit = candidate_delta(opt_sp.prompt_fields(), parent_fields, None, None).prompt
-            block_outcome = L1_PROMPT_BLOCKS_IN_LIBRARY.check(
-                prompt_edit,
-                prompt_block_catalogue=prompt_block_catalogue,
-            )
-            if block_outcome is not None:
-                failures.extend(block_outcome.evidence["failures"])
-            held_outcome = L1_PROMPT_FIELDS_OPEN.check(prompt_edit, pipeline_schema=schema)
-            if held_outcome is not None:
-                failures.extend(held_outcome.evidence["failures"])
+            prompt_edit = candidate_delta(opt_sp.prompts, parent.prompts, None, None).prompt
+            failures += l1_prompt_fields_open(prompt_edit, pipeline_schema=schema)
             if pipeline_overlay:
-                rf_outcome = L1_CONFIG_NOT_IN_RUNTIME_FAILURES.check(
-                    pipeline_overlay,
-                    runtime_failures=runtime_failures,
-                    pipeline_params=merged_pp,
-                )
-                if rf_outcome is not None:
-                    failures.extend(rf_outcome.evidence["failures"])
                 # The DELTA, unlike the placeholder check below: these convict what was PROPOSED.
-                for outcome in (
-                    L1_INNER_STEER_IS_LEGAL.check(
+                failures += [
+                    *l1_config_not_in_runtime_failures(
+                        pipeline_overlay,
+                        runtime_failures=runtime_failures,
+                        pipeline_params=merged_pp,
+                    ),
+                    *l1_inner_steer_is_legal(
                         pipeline_overlay,
                         inner_nodes=() if inner_cells is None else inner_cells.owners,
                     ),
-                    L1_INNER_LAYOUT_APPLIES.check(pipeline_overlay),
-                    L1_PROMPT_FIELD_NOT_GUTTED.check(
+                    *l1_inner_layout_applies(pipeline_overlay),
+                    *l1_prompt_field_not_gutted(
                         pipeline_overlay,
                         inner_cells=inner_cells,
                         pipeline_params=pipeline_params,
                     ),
-                ):
-                    if outcome is not None:
-                        failures.extend(outcome.evidence["failures"])
+                ]
             # The MERGED params: a child of a broken parent inherits a severed port without proposing it.
-            ph_outcome = L1_INNER_PLACEHOLDERS_INTACT.check(
-                merged_pp or {}, inner_cells=inner_cells
-            )
-            if ph_outcome is not None:
-                failures.extend(ph_outcome.evidence["failures"])
+            failures += l1_inner_placeholders_intact(merged_pp or {}, inner_cells=inner_cells)
         # A replayed proposal already carries them: the bench banks the walk's arms validated.
         failures = [vf for vf in failures if vf not in cp.validation_failures]
         if failures:
-            cp.validation_failures = [*cp.validation_failures, *failures]
+            cp = cp.model_copy(update={"validation_failures": [*cp.validation_failures, *failures]})
             for vf in failures:
                 logger.warning(
                     "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
@@ -109,3 +79,5 @@ def parse_population(
                     vf.allowed,
                     vf.reason,
                 )
+        parsed.append(cp)
+    return parsed

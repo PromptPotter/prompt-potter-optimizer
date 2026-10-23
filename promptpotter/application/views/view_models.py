@@ -12,27 +12,16 @@ from promptpotter.domain.results import (
     OptimizerFact,
     OverlapReading,
     RunStanding,
+    ScoreSummary,
 )
-from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.ruler import SeriesReading
 from promptpotter.domain.spend import SpendRollup
-
-__all__ = [
-    "DigestStatusView",
-    "FinalWinnerView",
-    "ForkSummaryView",
-    "HardSamplesView",
-    "LogMdView",
-    "RoundDigestView",
-    "ViewContext",
-]
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import LedgerSpend
 
 
 @dataclass
 class ViewContext:
-    max_rounds: int = 0
     patience: int | None = None
-    # Its cap is every ♥ readout's denominator: a run banking stalls may have no ``max_rounds``.
-    run_standing: RunStanding | None = None
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
     display_metric: DisplayMetric = "accuracy"
@@ -55,6 +44,8 @@ class DigestStatusView:
     optimizer: str | None
     stop_reason: StopReason | None
     standing: RunStanding | None
+    # The cycle chain's ledger, folded when the digest renders.
+    spent: LedgerSpend
     rounds_completed: int
     started_at: str | None
     finished_at: str | None
@@ -66,17 +57,14 @@ class DigestStatusView:
 class RoundDigestView:
     round: int
     label: str
-    accuracy: float | None
+    fold: ScoreSummary | None
     improved: bool
-    total: int
-    composite_fitness: float | None
     changes_description: str
     facts: tuple[OptimizerFact, ...]
-    evaluators: dict[str, float]
     overlap: OverlapReading
     # ``None`` where the round matched nothing: the cycle origin is a different basis, not a default.
     composite_floor: float | None = None
-    ability: AbilityReading | None = None
+    level: SeriesReading | None = None
     verdict_reason: str | None = None
     # Empty for resumed rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)

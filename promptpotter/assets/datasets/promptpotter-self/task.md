@@ -36,7 +36,7 @@ converge **faster and further** on the proxy benchmark.
 ## What the inner cycle is solving (so you mutate toward the right behaviour)
 
 The inner benchmark is **justlogic deductive reasoning** (NOT
-arithmetic; the specific depth mix is the dataset's, in `dataset.yaml::panel` — not
+arithmetic; the specific depth mix is the dataset's, in `panel/dataset.yaml::panel` — not
 restated here, where a stale number would only anchor you). Each inner sample is
 a set of premises plus a candidate conclusion;
 the inner model must answer **TRUE / FALSE / Uncertain** — TRUE/FALSE when the
@@ -58,13 +58,14 @@ finding the discipline; do not hard-code task answers into it.
 
 ## Fitness
 
-ONE number, in ``dataset.yaml::campaign.scoring``:
+ONE number, in ``family.yaml::campaign.scoring``:
 
 - ``mean_bench_lift`` — the mean, over the inner rounds, of the accuracy of the
   prompt the search had ADOPTED by that round on HELD-OUT rows no inner node ever
   read, minus the origin prompt's accuracy on the same rows. Accuracy points,
-  linearly re-anchored into [0,1]. The search pool's own θ lift
-  (``mean_round_delta``) is reported beside it and scores nothing.
+  linearly re-anchored into [0,1]. The search split's own θ lift
+  (``mean_round_delta``) is reported beside it wherever the inner series
+  differences, and scores nothing.
 
 Better = the inner optimizer adopted a GENERALLY stronger prompt EARLY and kept it.
 The mean rewards the shape a healthy search has — most cells lift in round 1, about
@@ -100,7 +101,7 @@ not seen.
 
 ## Proxy realism
 
-The committed inner config (``dataset.yaml::panel`` — the source of truth for the
+The committed inner config (``panel/dataset.yaml::panel`` — the source of truth for the
 inner geometry; don't restate its numbers here) keeps each outer "sample" at
 order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
 publication runs. Cost shape + what remains:

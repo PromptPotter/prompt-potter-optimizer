@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import type { Evidence, PairwiseComparison, SubjectReading } from "@/lib/api/types";
 import { invalidateReads } from "@/lib/read-cache";
-import { armAt, type ObservePoint } from "@/lib/derivations";
+import { armAt, individualOf, type ObservePoint } from "@/lib/derivations";
 import { useViewedLineage } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
@@ -55,8 +55,8 @@ export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
   const { viewedPath } = useWorkspace();
   const { index } = useViewedLineage();
   const { dash, isLive } = useCycleStream();
-  const placed = point ? armAt(index, viewedPath, point) : null;
-  const pair = useCompareWithOrigin(viewedPath, placed?.id ?? null);
+  const placed = point ? armAt(index, viewedPath, point.key) : null;
+  const pair = useCompareWithOrigin(viewedPath, placed ? placed.reading.arm.key : null);
   const { evidence, error } = useEvidence(
     pair.subjects,
     isLive ? LIVE_EVIDENCE_MS : null,
@@ -86,7 +86,9 @@ export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
     changes:
       point !== null && placed === null
         ? { status: "pending" }
-        : changesOf(evidence, error, origin, shownKey === undefined ? undefined : shown),
+        : placed !== null && individualOf(index, placed) === null
+          ? { status: "unrecorded" }
+          : changesOf(evidence, error, origin, shownKey === undefined ? undefined : shown),
     compare: pair.run,
   };
 }

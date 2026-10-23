@@ -31,7 +31,7 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 
 Operator-pinned model for the self-optimizing campaign focus: leading open-source at the 20B-active scale, chosen on price and `:nitro` throughput ([`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md) carries both), and conservative at `low` so the optimizer climbs from the floor — `medium` / `high` stay L1-reachable mutations when sibling-yield supports them.
 
-Pinning is via the `nodes.llm_only.config` overlay in each dataset's `dataset.yaml::pipeline`, and the pin holds because these datasets do not list `model` in `optimizer.param_keys` — the engine searches `model` wherever a dataset opens it. `provider` cannot be opened at all (`PARAM_FORBIDDEN_KEYS`).
+Pinning is via the `nodes.llm_only.config` overlay in each dataset's `{dataset}/dataset.yaml::pipeline`, and the pin holds because these datasets do not list `model` in `optimizer.param_keys` — the engine searches `model` wherever a dataset opens it. `provider` cannot be opened at all (`PARAM_FORBIDDEN_KEYS`).
 
 ## The roster
 
@@ -115,9 +115,10 @@ Three things the table is for, none of them the headline number:
 
 - **The tail is the operational fact, not the median.** `sealqa` reads a comfortable 48.6 s at p50
   and 710.7 s at its worst — a 25× spread *inside one dataset at one setting*. Spend inside an
-  episode is bounded per send (`connectors/harbor.py::_sent_spend_bound`); its wall clock is not.
-  `Connector.cell_envelope_s` is what bounds that, and harbor declares none — the tail here is the
-  measurement that would set one.
+  episode is bounded per send (`connectors/harbor.py::_sent_spend_bound`), its wall clock by the
+  `Connector.cell_envelope_s` every connector declares (harbor's is
+  `connectors/harbor.py::_CELL_ENVELOPE_S`) — the tail here is the measurement that envelope must
+  clear.
 - **`n = 1` is not a distribution.** `harbor-tbench-regex-log` has one measured cell. It is quoted
   here so the omission is checkable, and it is why that dataset gets no cost anchor below.
 - **Turns are the prompt's; seconds are partly the weather.** On `sealqa`, 730 of 861 episodes end

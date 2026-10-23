@@ -80,6 +80,10 @@ class Settings(BaseSettings):
         names = frozenset(n.strip() for n in self.DATASET_OFFER.split(",") if n.strip())
         return names or None
 
+    # Empty: each account's archive is its own. A name: one install-owned archive home every account
+    # files into and replays from, disclosing what each ran to the others (ADR-0002 § Contract B).
+    SHARED_ARCHIVE: str = ""
+
     # `own`: an account sees another's slots only as a count — a box anyone can sign up to. The host sees all.
     MACHINE_STATUS_SCOPE: Literal["own", "all"] = "own"
 

@@ -38,6 +38,3 @@ def build_identity_bundle(paths: IdentityPaths) -> IdentityBundle:
         google=google,
         github=github,
     )
-
-
-__all__ = ["IdentityBundle", "build_identity_bundle"]

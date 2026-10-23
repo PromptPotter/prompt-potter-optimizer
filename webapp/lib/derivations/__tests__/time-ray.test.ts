@@ -22,7 +22,7 @@ function read(over: Partial<ActivityItem>): ActivityItem {
     detail: null,
     tone: "good",
     round: 1,
-    candidate: null,
+    arm: null,
     ...over,
   };
 }
@@ -101,15 +101,15 @@ describe("raySteps", () => {
     expect(steps[2]?.cluster).toBe(1);
   });
 
-  it("carries the round and the candidate label a click needs", () => {
+  it("carries the round and the arm key a click needs", () => {
     const minted = item({
       ts: at(0),
-      activity: read({ kind: "candidate", label: "C2.1", round: 2, candidate: "C2.1" }),
+      activity: read({ kind: "candidate", label: "C2.1", round: 2, arm: "c2a" }),
     });
     const steps = raySteps([minted, round(1, 3, 1)], ROOT);
-    expect(steps[0]?.candidateLabel).toBe("C2.1");
+    expect(steps[0]?.arm).toBe("c2a");
     expect(steps[0]?.round).toBe(2);
-    expect(steps[1]?.candidateLabel).toBeNull();
+    expect(steps[1]?.arm).toBeNull();
     expect(steps[1]?.round).toBe(3);
   });
 });

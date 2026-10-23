@@ -17,9 +17,9 @@ PROMPTPOTTER_HOME=.scratch/offline-home .venv/Scripts/python.exe scripts/offline
 .venv/Scripts/python.exe scripts/offline_run.py --digests
 ```
 
-`--rounds` (each campaign's `max_rounds`; the interrupted legs run one round, their contract being
+`--rounds` (each campaign's `budget.rounds`; the interrupted legs run one round, their contract being
 the pause and the resume rather than the search) and `--rows` (the synthetic bank) size it.
-`--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`grade_line_bench`), so
+`--bench-trigger manual` fails on a bench cell sent by the launch, then asks for the pass as an operator does (`application/embedded_run.py::grade_bench`), so
 its `decisions.json` holds the same rounds and headline as the default `at_end` run's.
 Run it from the tree under test with that tree's own venv — a worktree probe run through another
 tree's interpreter answers for that other tree.
@@ -30,8 +30,7 @@ engine change has every optimizer run end to end and its resume proven without a
 docs or webapp edit reruns nothing. `--changed` leaves it out: it proves a landing, not an edit.
 
 **A green run is not taken twice.** A home that already holds the green run of the same arguments
-over the same sources — the package (its datasets included), `examples/`, the two lock files and this script,
-by content — is left standing, and the script says `unchanged since green` and exits 0. Name a
+over the same sources — `scripts/last_green.py::OFFLINE_RUN_READS`, by content — is left standing, and the script says `unchanged since green` and exits 0. Name a
 different home, or pass `--against`, to run it regardless; a default-argument green by hand is
 the gate check's green too (`scripts/last_green.py`).
 
@@ -41,9 +40,9 @@ capo by default) of one head-to-head, one of them after a foreign campaign on th
 origin differs — the one layout that puts several optimizers' campaigns in ONE workspace, so the
 webapp's Compare tab can read them together. It fails
 unless a skip on an arm is refused, an arm searches its prompt's fields alone, each arm's memory
-holds only runs it filed, and both arms'
-decisions are byte-identical with and without the foreign campaign; `head_to_head.json` beside
-them is the evidence read of all three.
+holds only runs it filed, and every election of every arm read the one ruler version its
+head-to-head froze at open. Whether the foreign campaign moved the arms' decisions is printed as a
+reading: its rows are in that version. `head_to_head.json` beside them is the evidence read of all three.
 
 ## Why it cannot be mistaken for a real run
 
@@ -60,8 +59,8 @@ them is the evidence read of all three.
 
 One workspace per optimizer, `<home>/<optimizer>/`, because the measurement archive and the δ ruler
 pool across the campaigns of one workspace — a shared one lets one optimizer's run move another's
-decisions. Each campaign is a child process, all of them at once up to the core count. In each
-workspace:
+decisions. Each campaign is a child process, as many at once as free memory holds
+(`scripts/gate.py::RamBudget`), never past the core count. In each workspace:
 
 | Path | What it is |
 |---|---|
@@ -70,6 +69,7 @@ workspace:
 | `decisions.json` | Every decision the run made, canonical: ids mapped to candidate labels; timestamps, paths and hashes dropped; floats rounded; concurrent records compared as sets. `harness` adds the stop reason, the unrouted URLs and the call counts. |
 | `run.log` | The child's stdout and stderr. |
 | `resumed/` | The same campaign in a workspace of its own, paused at a round boundary and ended on a session rebuilt from disk. |
+| `diverged/` | The first optimizer's campaign paused like `resumed/`, then resumed with `--fork-on-divergence` under an edited proposer prompt: run init must fork, its parent end on one `REBASED` stop carrying spend with its lock released and its readout naming the fork, and the fork run on. |
 | `interrupted/`, `interrupted-twice/` | The first optimizer's one-round campaign launched by the CLI's own `main` as a terminal dispatches it, under one and under two SIGINTs, then `resume`d. |
 
 **The interrupted legs are the Ctrl+C contract, run**: `new` must exit 130 with its slot released and
@@ -107,6 +107,10 @@ re-key an inner cell leaves equal.
 
 ## What is faked, and how
 
+The fake world is `scripts/offline_world.py` — one LLM provider, one backend, one router over
+every network edge — and the test suite's `offline` fixture installs the same one; this script adds
+only the bank and the call-identity policy below.
+
 - **The bank** is synthetic JustLogic-shaped rows for `justlogic/d234`, written to the workspace's
   benchmark rows before the session opens, so nothing is downloaded and nothing licensed is copied.
 - **The backend** is TermNorm's wire: one `llm_only` node, whose answer is correct with probability
@@ -119,7 +123,7 @@ re-key an inner cell leaves equal.
   per potter node. A paper preset's text call is matched to the llm node whose manifest template
   it opens with, and answered in the form that template asks for — a `<prompt>` block, a fenced
   block, or an array.
-- **The knobs** are the dataset's `dataset.yaml::campaign` under the script's `BENCH` sizes. The template's
+- **The knobs** are the dataset's `{dataset}/dataset.yaml::campaign` under the script's `BENCH` sizes. The template's
   node overlay rides only the optimizer it selects; any other takes its `SCALED` entry, which
   sizes it to the bank, or runs its manifest as declared when it has none. A sampler that
   declares a size knob draws `ROUND_CELLS` whichever optimizer runs. Any optimizer but the

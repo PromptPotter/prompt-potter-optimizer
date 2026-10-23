@@ -15,16 +15,12 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import CLUSTER_
 from promptpotter.application.optimizers.potter.validators.behavior_base import (
     CheckFn,
     ValidatorContext,
+    judged,
 )
+from promptpotter.domain.opt_search_point import Locus, OptimizerPromptTemplate
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.round_audit import NodeBlock, RoundAudit
-from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, PROMPT_STRING_FIELDS
-
-__all__ = [
-    "CHECK_REGISTRY",
-    "extract_l1_variants",
-    "run_all_checks",
-]
+from promptpotter.domain.search_point import PARAM_SCOPE_KEYS
 
 
 def _l1_block(audit: RoundAudit | None) -> NodeBlock | None:
@@ -54,15 +50,18 @@ _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 def _variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
     """Prose rides two carriers by campaign kind: reading one answers inverted on the other."""
+    updates = variant.get("prompt_fields_updates") or {}
     written = {
-        f: str(v)
-        for f, v in (variant.get("prompt_fields_updates") or {}).items()
-        if f in PROMPT_STRING_FIELDS and v
+        Locus(n, f).name: str(v)
+        for n, fields in updates.items()
+        if isinstance(fields, dict)
+        for f, v in fields.items()
+        if v
     }
     for n, cfg in node_config_items(variant.get("pipeline_overlay")):
         for p, v in cfg.items():
-            if p in PROMPT_STRING_FIELDS and v:
-                written[f"{n}.{p}"] = str(v)
+            if p in OptimizerPromptTemplate.model_fields and v:
+                written[Locus(n, p).name] = str(v)
     return written
 
 
@@ -84,14 +83,15 @@ def _key_phrases(text: str, *, min_len: int = 4, max_phrases: int = 6) -> list[s
     return seen
 
 
-def _check_context_object_honored(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
-    items = [c for c in ctx.context_object if isinstance(c, str) and c.strip()]
-    variants = extract_l1_variants(audit)
-    if not items:
-        return CheckResult("context_object_honored", True, "no context_object items to honour")
-    if not variants:
-        return CheckResult("context_object_honored", True, "no variants emitted")
+Variants = list[dict[str, Any]]
 
+
+def _check_context_object_honored(
+    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+) -> tuple[bool, str]:
+    items = [c for c in ctx.context_object if isinstance(c, str) and c.strip()]
+    if not items:
+        return True, "no context_object items to honour"
     item_seeds = [_key_phrases(item) for item in items]
     misses: list[str] = []
     for i, v in enumerate(variants):
@@ -99,52 +99,33 @@ def _check_context_object_honored(audit: RoundAudit, ctx: ValidatorContext) -> C
         if not any(any(seed in blob for seed in seeds) for seeds in item_seeds if seeds):
             misses.append(f"C{i + 1}")
     if misses:
-        return CheckResult(
-            "context_object_honored",
-            False,
-            f"{len(misses)}/{len(variants)} variants ignored context_object: {misses[:3]}",
-        )
-    return CheckResult(
-        "context_object_honored",
-        True,
-        f"{len(variants)}/{len(variants)} variants reference ≥1 context_object item",
-    )
+        return False, f"{len(misses)}/{len(variants)} variants ignored context_object: {misses[:3]}"
+    return True, f"{len(variants)}/{len(variants)} variants reference ≥1 context_object item"
 
 
-def _check_param_scope_discipline(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
-    variants = extract_l1_variants(audit)
-    if not variants:
-        return CheckResult("param_scope_discipline", True, "no variants emitted")
-
-    stale_field = _stale_prompt_field(ctx, _held_prompt_fields(audit))
+def _check_param_scope_discipline(
+    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+) -> tuple[bool, str]:
+    stale_field = _stale_prompt_field(ctx, _shown_prompt_loci(audit))
     if stale_field is None:
-        return CheckResult("param_scope_discipline", True, "unlocked: no stale prompt field")
-
-    offenders: list[str] = []
-    for i, v in enumerate(variants):
-        pp = v.get("pipeline_overlay") or {}
-        if _touches_param_scope(pp):
-            offenders.append(f"C{i + 1}")
+        return True, "unlocked: no stale prompt field"
+    offenders = [
+        f"C{i + 1}"
+        for i, v in enumerate(variants)
+        if _touches_param_scope(v.get("pipeline_overlay") or {})
+    ]
     if offenders:
-        return CheckResult(
-            "param_scope_discipline",
-            False,
+        return False, (
             f"{len(offenders)} variant(s) touched param scope (prompt field {stale_field!r} "
-            f"unchanged for ≥2 rounds): {offenders[:3]}",
+            f"unchanged for ≥2 rounds): {offenders[:3]}"
         )
-    return CheckResult(
-        "param_scope_discipline",
-        True,
-        "no variant touched temperature/max_tokens/reasoning_effort",
-    )
+    return True, "no variant touched temperature/max_tokens/reasoning_effort"
 
 
-def _check_evidence_grounding_present(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+def _check_evidence_grounding_present(
+    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+) -> tuple[bool, str]:
     """A round that banked no menu is judged on the quote alone."""
-    variants = extract_l1_variants(audit)
-    if not variants:
-        return CheckResult("evidence_grounding_present", True, "no variants emitted")
-
     citable = ctx.citable
     shown = _rendered_l1_prompt(audit)
     offenders: list[tuple[str, str]] = []
@@ -172,68 +153,40 @@ def _check_evidence_grounding_present(audit: RoundAudit, ctx: ValidatorContext) 
 
     if offenders:
         sample = ", ".join(f"{label}({reason})" for label, reason in offenders[:3])
-        return CheckResult(
-            "evidence_grounding_present",
-            False,
-            f"{len(offenders)}/{len(variants)} variants lack valid evidence: {sample}",
-        )
-    return CheckResult(
-        "evidence_grounding_present",
-        True,
-        f"{len(variants)}/{len(variants)} variants cite a panel field",
-    )
+        return False, f"{len(offenders)}/{len(variants)} variants lack valid evidence: {sample}"
+    return True, f"{len(variants)}/{len(variants)} variants cite a panel field"
 
 
-def _check_not_only_param_variants(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
-    variants = extract_l1_variants(audit)
-    if not variants:
-        return CheckResult("not_only_param_variants", True, "no variants emitted")
-    if _held_prompt_fields(audit) >= set(PROMPT_STRING_FIELDS):
-        return CheckResult("not_only_param_variants", True, "every prompt field is held")
-
-    for v in variants:
-        if _variant_prose_written(v):
-            return CheckResult(
-                "not_only_param_variants",
-                True,
-                "≥1 variant mutates a prompt-field axis",
-            )
-    return CheckResult(
-        "not_only_param_variants",
-        False,
-        f"all {len(variants)} variants mutate only non-prompt-field params",
-    )
+def _check_not_only_param_variants(
+    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+) -> tuple[bool, str]:
+    shown = _shown_prompt_loci(audit)
+    if shown and all(shown.values()):
+        return True, "every prompt field is held"
+    if any(_variant_prose_written(v) for v in variants):
+        return True, "≥1 variant mutates a prompt-field axis"
+    return False, f"all {len(variants)} variants mutate only non-prompt-field params"
 
 
-def _check_changes_description_english(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
-    variants = extract_l1_variants(audit)
-    if not variants:
-        return CheckResult("changes_description_english", True, "no variants emitted")
-
+def _check_changes_description_english(
+    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+) -> tuple[bool, str]:
     offenders: list[str] = []
     for i, v in enumerate(variants):
         letters = [c for c in str(v.get("changes_description") or "") if c.isalpha()]
         if letters and sum(1 for c in letters if not c.isascii()) * 2 > len(letters):
             offenders.append(f"C{i + 1}")
     if offenders:
-        return CheckResult(
-            "changes_description_english",
-            False,
-            f"{len(offenders)}/{len(variants)} descriptions are majority non-ASCII: "
-            f"{offenders[:3]}",
+        return False, (
+            f"{len(offenders)}/{len(variants)} descriptions are majority non-ASCII: {offenders[:3]}"
         )
-    return CheckResult(
-        "changes_description_english",
-        True,
-        f"{len(variants)}/{len(variants)} descriptions readable",
-    )
+    return True, f"{len(variants)}/{len(variants)} descriptions readable"
 
 
-def _check_targets_a_cluster(audit: RoundAudit, ctx: ValidatorContext) -> CheckResult:
+def _check_targets_a_cluster(
+    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+) -> tuple[bool, str]:
     """The seam for ``targets_rows``: the wire's ``minItems`` binds nothing, and an id is checkable where a label is not."""
-    variants = extract_l1_variants(audit)
-    if not variants:
-        return CheckResult("targets_a_cluster", True, "no variants emitted")
     marked = {int(m) for m in _ROW_MARK_RE.findall(_shown_l1_prompt(audit))}
     offenders: list[tuple[str, str]] = []
     for i, v in enumerate(variants):
@@ -246,19 +199,13 @@ def _check_targets_a_cluster(audit: RoundAudit, ctx: ValidatorContext) -> CheckR
             offenders.append((f"C{i + 1}", "spans_clusters"))
     if offenders:
         sample = ", ".join(f"{label}({reason})" for label, reason in offenders[:3])
-        return CheckResult(
-            "targets_a_cluster",
-            False,
-            f"{len(offenders)}/{len(variants)} variants target no cluster: {sample}",
-        )
-    return CheckResult(
-        "targets_a_cluster",
-        True,
-        f"{len(variants)}/{len(variants)} variants target ≥{CLUSTER_ROWS_MIN} rows of one cluster",
+        return False, f"{len(offenders)}/{len(variants)} variants target no cluster: {sample}"
+    return True, (
+        f"{len(variants)}/{len(variants)} variants target ≥{CLUSTER_ROWS_MIN} rows of one cluster"
     )
 
 
-CHECK_REGISTRY: dict[str, CheckFn] = {
+CHECK_REGISTRY: dict[str, CheckFn[Variants]] = {
     "targets_a_cluster": _check_targets_a_cluster,
     "context_object_honored": _check_context_object_honored,
     "param_scope_discipline": _check_param_scope_discipline,
@@ -270,9 +217,8 @@ CHECK_REGISTRY: dict[str, CheckFn] = {
 
 def run_all_checks(audit: RoundAudit, ctx: ValidatorContext) -> list[CheckResult]:
     """Empty on no variants: every check passes on none, and "nothing to check" is not a pass."""
-    if not extract_l1_variants(audit):
-        return []
-    return [fn(audit, ctx) for fn in CHECK_REGISTRY.values()]
+    variants = extract_l1_variants(audit)
+    return judged(CHECK_REGISTRY, variants, audit, ctx) if variants else []
 
 
 _NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
@@ -369,22 +315,30 @@ def _touches_param_scope(pipeline_overlay: dict[str, Any]) -> bool:
     return False
 
 
-def _held_prompt_fields(audit: RoundAudit) -> frozenset[str]:
-    """Read off the prompt the round rendered: a held field is not stale."""
-    shown = _shown_l1_prompt(audit)
-    return frozenset(f for f in PROMPT_STRING_FIELDS if f"[{f}{HELD_PROMPT_FIELD_MARK}]" in shown)
+# One `[node.field]` section header per prose locus `rendered_prompt` showed, marked when held.
+_LOCUS_SECTION_RE = re.compile(
+    r"^\[([\w\-]+\.\w+)(" + re.escape(HELD_PROMPT_FIELD_MARK) + r")?\]$", re.MULTILINE
+)
 
 
-def _stale_prompt_field(ctx: ValidatorContext, held: frozenset[str]) -> str | None:
+def _shown_prompt_loci(audit: RoundAudit) -> dict[str, bool]:
+    """Read off the prompt the round rendered, in its order: locus → held. A held field is not stale."""
+    block = _l1_block(audit)
+    fields = {} if block is None else block.input.template_fields
+    return {
+        m.group(1): m.group(2) is not None
+        for text in fields.values()
+        if isinstance(text, str)
+        for m in _LOCUS_SECTION_RE.finditer(text)
+    }
+
+
+def _stale_prompt_field(ctx: ValidatorContext, shown: dict[str, bool]) -> str | None:
     if len(ctx.prior_rounds) < 2:
         return None
     recent_two = ctx.prior_rounds[-2:]
-    mutated_fields: set[str] = set()
+    mutated: set[str] = set()
     for r in recent_two:
         for v in extract_l1_variants(r):
-            # Leaf of `field` / `node.field` — same axis either carrier wrote it through.
-            mutated_fields.update(k.rpartition(".")[2] for k in _variant_prose_written(v))
-    for field_name in PROMPT_STRING_FIELDS:
-        if field_name not in mutated_fields and field_name not in held:
-            return field_name
-    return None
+            mutated.update(_variant_prose_written(v))
+    return next((locus for locus, held in shown.items() if not held and locus not in mutated), None)

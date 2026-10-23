@@ -1,7 +1,12 @@
-import type { KindSpend, MeteredSpend } from "@/lib/api/types";
-import { RATE_PRICED_LABEL, SPEND_KINDS, type SpendKind } from "@/lib/api/types.generated";
+import type { Budget, KindSpend, MeteredSpend } from "@/lib/api/types";
+import {
+  CEILING_METER_LABELS,
+  RATE_PRICED_LABEL,
+  SPEND_KINDS,
+  type SpendKind,
+} from "@/lib/api/types.generated";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { fmtPct0, fmtUsd } from "@/lib/format";
+import { fmtPct0, fmtTokens, fmtUsd } from "@/lib/format";
 
 export interface SpendLine {
   key: SpendKind;
@@ -49,19 +54,59 @@ export function meteredBucketsLine(m: MeteredSpend): string {
 export interface SpendView {
   metered: MeteredSpend | null;
   lines: SpendLine[];
-  // From `run_limits`, the gate's source; `null` = that ceiling is disarmed.
+  // The CAMPAIGN's caps off `run_limits.budget`, the gate's source; `null` = that axis is unbounded.
   budgetUsd: number | null;
   budgetTokens: number | null;
+  // What those caps count, every cycle of the campaign; `metered` is this cycle's own spend.
+  campaignUsd: number | null;
+  campaignTokens: number | null;
+  // This cycle's share of the campaign cap, what its run's book binds; `null` = no run holds one.
+  shareUsd: number | null;
+  shareTokens: number | null;
+}
+
+// Campaign spend against the campaign cap, this cycle's beside it: the CLI's `render_run_spend` line.
+export function capLines(v: SpendView): string[] {
+  const m = v.metered;
+  if (!m) return [];
+  const counted = CEILING_METER_LABELS[m.meter];
+  const lines: string[] = [];
+  if (v.budgetUsd != null && v.campaignUsd != null) {
+    const share = v.shareUsd != null ? ` of its ${fmtUsd(v.shareUsd)} share` : "";
+    lines.push(
+      `campaign cap ${fmtUsd(v.campaignUsd)} of ${fmtUsd(v.budgetUsd)} ${counted}, ` +
+        `this cycle ${fmtUsd(m.metered_usd)}${share}`,
+    );
+  }
+  if (v.budgetTokens != null && v.campaignTokens != null) {
+    const share = v.shareTokens != null ? ` of its ${fmtTokens(v.shareTokens)} share` : "";
+    lines.push(
+      `campaign cap ${fmtTokens(v.campaignTokens)} of ${fmtTokens(v.budgetTokens)} ${counted}, ` +
+        `this cycle ${fmtTokens(m.metered_tokens)}${share}`,
+    );
+  }
+  return lines;
+}
+
+// The served budget is fully laid over, so an axis it does not name has nothing beneath it.
+export function budgetAxis(budget: Budget, axis: keyof Budget): number | null {
+  const value = budget[axis];
+  return value === undefined ? null : value;
 }
 
 export function readSpend(dash: DashboardSnapshot | null): SpendView {
   const metered = dash?.spend_metered ?? null;
-  const limits = dash?.run_limits;
+  const budget = dash?.run_limits.budget;
+  const share = dash?.allotment ?? null;
   return {
     metered,
     lines: metered ? spendLines(metered) : [],
-    budgetUsd: limits?.ceiling.usd ?? null,
-    budgetTokens: limits?.ceiling.tokens ?? null,
+    budgetUsd: budget ? budgetAxis(budget, "usd") : null,
+    budgetTokens: budget ? budgetAxis(budget, "tokens") : null,
+    campaignUsd: dash?.campaign_metered_usd ?? null,
+    campaignTokens: dash?.campaign_metered_tokens ?? null,
+    shareUsd: share ? budgetAxis(share, "usd") : null,
+    shareTokens: share ? budgetAxis(share, "tokens") : null,
   };
 }
 

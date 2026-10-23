@@ -9,8 +9,6 @@ from promptpotter.presentation.cli.commands.workspace import open_stores
 
 logger = logging.getLogger("promptpotter.presentation.cli.reindex")
 
-__all__ = ["cmd_reindex"]
-
 
 async def cmd_reindex(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)

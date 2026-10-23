@@ -5,9 +5,9 @@ import json
 from collections.abc import Iterable
 from typing import Annotated, Any
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
@@ -24,8 +24,8 @@ INVARIANT_REASONS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozense
     {"no_op_variant", "duplicate_variant", "repeat_variant"}
 )
 
-# The OPERATOR's word for each; a prompt renderer spells its own inside its hashed prose.
-COLLAPSE_WORDS: dict[str, str] = {
+# The word for each, on every surface: the inner narrative renders it into the outer's prompt.
+COLLAPSE_WORDS: Annotated[dict[str, str], shapes_optimizer_prompt] = {
     "no_op_variant": "no-op",
     "duplicate_variant": "duplicate",
     "repeat_variant": "repeat",
@@ -33,12 +33,10 @@ COLLAPSE_WORDS: dict[str, str] = {
 assert COLLAPSE_WORDS.keys() == INVARIANT_REASONS
 
 
-class ValidationFailure(StrictModel):
+class ValidationFailure(FrozenModel):
     """An L1 output that broke a parse-time invariant, scoring its candidate a synthetic zero."""
 
     # Rendered into L2's prompt as JSON (``model_dump``): a field renamed here rewrites that prompt.
-    model_config = ConfigDict(frozen=True)
-
     axis: str = Field(
         description=(
             "The parameter path that failed, ``{node_name}.{param}`` "
@@ -104,12 +102,10 @@ def collapse_counts(populations: Iterable[Iterable[ValidationFailure]]) -> dict[
     return counts
 
 
-class RuntimeFailure(StrictModel):
+class RuntimeFailure(FrozenModel):
     """One candidate's degradation evidence from its evaluation, beside a score that stands."""
 
     # Rendered into L2's prompt as JSON (``model_dump``): a field renamed here rewrites that prompt.
-    model_config = ConfigDict(frozen=True)
-
     source: str = Field(
         description=(
             "Failure family: ``degradation`` (mid-eval DegradationCheck "
@@ -122,6 +118,13 @@ class RuntimeFailure(StrictModel):
             "``{node_name}:{warning_type}`` of the most frequent warning "
             "across the candidate's measurements; the prefix selects the "
             "node whose config is captured in ``observed_config``."
+        ),
+    )
+    node: str | None = Field(
+        description=(
+            "The node whose config ``observed_config`` captures: the ``dominant_warning`` "
+            "prefix. ``None`` on a ``scoring_error_abort``, which names an error, not a node, "
+            "and captures the whole config."
         ),
     )
     degraded_rate: float = Field(
@@ -140,9 +143,9 @@ class RuntimeFailure(StrictModel):
         default=0,
         description="Round number that first recorded this failure (dedup key component).",
     )
-    candidate_label: str = Field(
+    changes_description: str = Field(
         default="",
-        description="Label of the originating candidate; informational, not a join key.",
+        description="What the originating candidate changed; informational, not a join key.",
     )
     owner: NurseOwner = Field(
         default=NurseOwner.L1,
@@ -155,6 +158,14 @@ class RuntimeFailure(StrictModel):
     )
 
 
+_NON_FATAL_REASONS = frozenset({"hallucinated_node"})
+assert not INVARIANT_REASONS & _NON_FATAL_REASONS
+
+
+def fatal_validation_failures(failures: Iterable[ValidationFailure]) -> list[ValidationFailure]:
+    return [vf for vf in failures if vf.reason not in _NON_FATAL_REASONS]
+
+
 def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
     """Canonical, so intra-cycle dedup and cross-cycle sibling-wound inheritance match."""
     return (
@@ -162,15 +173,3 @@ def rf_dedup_key(rf_dict: dict[str, Any]) -> tuple[str, str, str]:
         rf_dict["dominant_warning"],
         json.dumps(rf_dict["observed_config"], sort_keys=True, default=str),
     )
-
-
-__all__ = [
-    "COLLAPSE_WORDS",
-    "INVARIANT_REASONS",
-    "NurseOwner",
-    "RuntimeFailure",
-    "ValidationFailure",
-    "collapse_counts",
-    "collapse_reason",
-    "rf_dedup_key",
-]

@@ -44,7 +44,7 @@ runs the reported cells:
 
 ## What is owed after the gate
 
-- **The campaign** on the search pool, supervised, on the operator's model.
+- **The campaign** on the search split, supervised, on the operator's model.
 - **The reported comparison:** origin against the selected candidate over all 42 questions at
   zero, two and four retries, by difficulty tier, with the visible-error and silently-wrong shares.
   Their published rows are quoted beside it and never pooled with it. The held-out bench questions

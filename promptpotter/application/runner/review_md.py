@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, get_args
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.optimizers.nodes import CheckResult, ReviewReading, ReviewStat
 from promptpotter.application.views.render.primitives import (
@@ -11,15 +11,13 @@ from promptpotter.application.views.render.primitives import (
     overlap_series,
 )
 from promptpotter.domain.bench import BandedValue, BenchColumn, BenchReading, BenchScore
-from promptpotter.domain.paired_reading import LiftEstimate
+from promptpotter.domain.paired_reading import ArmKey, LiftEstimate
 from promptpotter.domain.phases import StopReason, stop_next_step
 from promptpotter.domain.results import (
     CEILING_FRACTION,
     DegradationHealth,
     RoundClocks,
     RoundResult,
-    ScoredCandidate,
-    candidate_label,
     round_clocks,
 )
 from promptpotter.domain.spend import (
@@ -31,11 +29,9 @@ from promptpotter.domain.spend import (
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.cycle_listing import CycleIndex
-    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.run_records import CycleFinal, WallClock
-
-__all__ = ["render_review_md"]
 
 
 def render_review_md(
@@ -335,10 +331,10 @@ def _render_wall_clock(clock: WallClock | None) -> list[str]:
     lines.append(
         f"- unattributed — no phase, gate or fresh call held it: {_minutes(clock.unattributed_s)}"
     )
-    # Never suppressed on truthiness: `None` (no envelope observed a wait) and 0.0 are opposite readings.
+    # Never suppressed on truthiness: `None` (no fresh cell measured) and 0.0 are opposite readings.
     lines.append(
         f"- cells not ALLOWED to spend: "
-        f"{'no envelope observed one' if clock.unworked_s is None else _minutes(clock.unworked_s)}"
+        f"{'no fresh cell measured' if clock.unworked_s is None else _minutes(clock.unworked_s)}"
     )
     worked = _node_rows(clock.worked_s)
     if worked:
@@ -398,23 +394,24 @@ def _render_round(
         f"### Round {round_data.round}{suffix}",
         "",
     ]
+    head, fold, election = round_data.head, round_data.fold, round_data.election
     if not is_peek:
         parts += [
-            f"- accuracy: {fmt_pct(round_data.accuracy)}",
-            f"- composite_fitness: `{fmt_fitness(round_data.composite_fitness)}`",
+            f"- accuracy: {fmt_pct(None if fold is None else fold.accuracy)}",
+            f"- composite_fitness: `{fmt_fitness(None if fold is None else fold.composite_fitness)}`",
             f"- improved: **{'yes' if round_data.improved else 'no'}**",
         ]
         if series := overlap_series(round_data.overlap):
             parts.append(f"- overlap: {series}")
-        if round_data.verdict_reason:
-            parts.append(f"- verdict: {round_data.verdict_reason}")
+        if election is not None and election.verdict_reason:
+            parts.append(f"- verdict: {election.verdict_reason}")
     if schema_repair_retries:
         parts.append(f"- schema_repair_retries: {schema_repair_retries}")
-    parts += _render_lineage(round_data.opt_sp)
+    parts += _render_lineage(None if head is None else head.individual)
     if review is None:
         return parts
     parts += _render_check_checklist(review.checks[index])
-    parts += _render_variants_table(review.variants[index], round_data, scored=not is_peek)
+    parts += _render_variants_table(round_data, scored=not is_peek)
     parts += _render_critique(review.feedback[index])
     return parts
 
@@ -444,60 +441,55 @@ def _render_check_checklist(checks: list[CheckResult]) -> list[str]:
     return parts
 
 
-def _render_variants_table(
-    variants: list[dict[str, Any]],
-    round_data: RoundResult,
-    *,
-    scored: bool,
-) -> list[str]:
-    """Joined on :func:`candidate_label`: on anything else every score column prints ``—``."""
-    if not variants:
+def _render_variants_table(round_data: RoundResult, *, scored: bool) -> list[str]:
+    panel = round_data.panel
+    if not panel:
         return []
     parts: list[str] = ["**Variants**", ""]
     if scored:
-        by_label = {c.label: c for c in round_data.candidate_scores}
         parts.append(
             "| variant | composite_fitness | acc | θ | lift vs parent | won | evidence | changes |"
         )
         parts.append("|---|---|---|---|---|---|---|---|")
-        for i, v in enumerate(variants):
-            changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
-            evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
-            label = candidate_label(round_data.round, i)
-            cells = _score_cells(by_label.get(label), round_data.selected_labels)
-            parts.append(f"| `{label}` | {cells} | {evidence} | {changes} |")
     else:
         parts.append("| cand_id | changes | derived_axes | evidence |")
         parts.append("|---|---|---|---|")
-        for i, v in enumerate(variants):
-            changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
-            axes = ", ".join(sorted((v.get("pipeline_overlay") or {}).keys()))
-            evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
-            parts.append(f"| `C{i + 1}` | {changes} | {axes} | {evidence} |")
+    for key, arm in panel.items():
+        lineage = arm.individual.lineage
+        changes = lineage.changes_description.replace("|", "\\|").strip()[:80]
+        evidence = _fmt_evidence_cell(lineage.evidence_grounding)
+        if scored:
+            cells = _score_cells(round_data, key)
+            parts.append(f"| `{arm.label}` | {cells} | {evidence} | {changes} |")
+        else:
+            axes = ", ".join(sorted(arm.overlay))
+            parts.append(f"| `{arm.label}` | {changes} | {axes} | {evidence} |")
     parts.append("")
     return parts
 
 
-def _score_cells(c: ScoredCandidate | None, selected_labels: Sequence[str]) -> str:
-    if c is None:
+def _score_cells(round_data: RoundResult, key: ArmKey) -> str:
+    if (fold := round_data.folds.get(key)) is None:
         return "— | — | — | — | —"
-    theta = "—" if c.theta is None else f"{c.theta:+.3f}"
-    read = c.vs_reference.headline if c.vs_reference else None
+    fit = round_data.fit(key)
+    theta = "—" if fit is None or fit.theta is None else f"{fit.theta:+.3f}"
+    read = fit.vs_reference.headline if fit is not None and fit.vs_reference else None
     lift = (
         "—"
         if read is None
         else f"{read.estimate.value:+.3f} [{read.estimate.ci_lo:+.3f}, {read.estimate.ci_hi:+.3f}]"
     )
-    won = "✓" if c.label in selected_labels else "·"
-    fitness = fmt_fitness(c.composite_fitness)
-    return f"`{fitness}` | {fmt_pct(c.accuracy)} | {theta} | {lift} | {won}"
+    election = round_data.election
+    won = "✓" if election is not None and key == election.selected else "·"
+    fitness = fmt_fitness(fold.composite_fitness)
+    return f"`{fitness}` | {fmt_pct(fold.accuracy)} | {theta} | {lift} | {won}"
 
 
-def _fmt_evidence_cell(raw: object) -> str:
-    if not isinstance(raw, dict):
+def _fmt_evidence_cell(grounding: EvidenceGrounding | None) -> str:
+    if grounding is None:
         return "—"
-    field_name = str(raw.get("field") or "").strip()
-    citation = str(raw.get("citation") or "").replace("|", "\\|").strip()
+    field_name = grounding.field.strip()
+    citation = grounding.citation.replace("|", "\\|").strip()
     if not field_name:
         return "—"
     if citation:

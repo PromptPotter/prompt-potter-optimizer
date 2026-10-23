@@ -6,12 +6,11 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.difficulty import DifficultyView, calibrate_delta_ruler
+from promptpotter.application.bench.difficulty import judging_ruler, session_ruler_scope
 from promptpotter.application.bench.resume_and_fork.replayers import (
     ReplayMismatch,
     replay_all_mismatches,
 )
-from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.mask.divergence import (
     Divergence,
     Verdict,
@@ -27,12 +26,9 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import CellSheet, Scorer
 
 logger = logging.getLogger(__name__)
-
-__all__ = ["AbReport", "ab_replay_cycle"]
 
 
 @dataclass(frozen=True)
@@ -89,37 +85,42 @@ class AbReport:
 
 
 def _regraded(rd: RoundResult, scorer: Scorer) -> RoundResult:
-    """All four row sets: a replayer reads an individual across them, and a sheet holds one scorer."""
+    """Both row sets: a replayer reads an individual across them, and a sheet holds one scorer."""
 
-    def under(sheets: dict[str, CellSheet]) -> dict[str, CellSheet]:
-        return {cid: regraded(sheet) for cid, sheet in sheets.items()}
-
-    def regraded(sheet: CellSheet) -> CellSheet:
-        return scorer.sheet(cell.facts for cell in sheet)
+    def under[K: str](sheets: dict[K, CellSheet]) -> dict[K, CellSheet]:
+        return {key: scorer.sheet(cell.facts for cell in sheet) for key, sheet in sheets.items()}
 
     return rd.model_copy(
-        update={
-            "results": regraded(rd.results),
-            "all_candidate_results": under(rd.all_candidate_results),
-            "reference_results": under(rd.reference_results),
-            "overlap_results": under(rd.overlap_results),
-        }
+        update={"cells": under(rd.cells), "overlap_results": under(rd.overlap_results)}
     )
 
 
 def _make_replay_verdict(
     session: Session,
-    ruler: DeltaRuler | None,
+    campaign_config: CampaignConfig,
     sink: list[ReplayMismatch],
 ) -> Verdict:
-    """Rescored HERE: the fold only asks about rounds still on the carried-over side of the departure."""
-    scorer = session.scoring.require_scorer()
+    """Rescored HERE, each round on the scale its election read: the fold asks only of carried-over rounds."""
+    scorer = session.state.scoring.require_scorer()
+    scope = session_ruler_scope(session)
+    opt = campaign_config.optimization
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
         if rnd.round_data is None:
             return VerdictOutcome(diverged=False)
         rd = _regraded(rnd.round_data, scorer)
-        # No anchor passed: each decision carries the anchor its election used.
+        if rd.election is None:
+            return VerdictOutcome(diverged=False)
+        read = rd.election.ruler
+        ruler = judging_ruler(
+            session.store.ruler,
+            scope,
+            read.version,
+            read.excluded,
+            objective_id=scorer.id,
+            n_min=opt.elimination_n_min,
+            enable_2pl=opt.enable_2pl_graduation,
+        ).ruler
         found = replay_all_mismatches(rd, rnd.decisions, ruler=ruler)
         if not found:
             return VerdictOutcome(diverged=False)
@@ -128,8 +129,7 @@ def _make_replay_verdict(
             (
                 m.current_outcome
                 for m in found
-                if isinstance(m.current_outcome, str)
-                and m.current_outcome in rd.all_candidate_results
+                if isinstance(m.current_outcome, str) and m.current_outcome in rd.panel
             ),
             None,
         )
@@ -144,8 +144,7 @@ def ab_replay_cycle(
     campaign_config: CampaignConfig,
 ) -> AbReport:
     """The walk is the CAMPAIGN's: a fork shares its parent's measurements."""
-    sc = session.scoring
-    scorer = sc.require_scorer()
+    scorer = session.state.scoring.require_scorer()
 
     record = load_mask_record(session.store, hop.campaign_id, lens=None, with_replay=True)
     round_0 = next(
@@ -160,30 +159,11 @@ def ab_replay_cycle(
     )
     if round_0 is None:
         raise DiagnosticError(
-            f"{hop.campaign_id}/{hop.cycle_id} has no scored round 0, so there is no origin to "
-            "calibrate the δ ruler on and every replayed decision would be read against nothing."
+            f"{hop.campaign_id}/{hop.cycle_id} has no scored round 0, so it names no origin and "
+            "every replayed decision would be read against nothing."
         )
-    # Rescored first: a ruler fit on another scorer's grades measures arm B against arm A's δ.
-    origin_sheet = scorer.sheet(cell.facts for cell in round_0.results)
-    origin_sp_hash = round_0.origin.searchpoint(
-        schema=session.pipeline_schema,
-        framing=campaign_framing(session.store, campaign_config, session.dataset),
-        demo=sc.require_partition().demo,
-    ).sp_hash(session.pipeline_schema)
-    view = DifficultyView(
-        session=session,
-        n_min=campaign_config.optimization.elimination_n_min,
-        enable_2pl=campaign_config.optimization.enable_2pl_graduation,
-        # Scorer B's grades anchor B's scale: the replay fits one whatever the cycle was handed.
-        derives=True,
-        origin_sp_hash=origin_sp_hash,
-    )
-    ruler, _ = calibrate_delta_ruler(
-        origin_sheet, view.n_min, enable_2pl=view.enable_2pl, archive_obs=view.archive()
-    )
-
     mismatches: list[ReplayMismatch] = []
-    result = find_divergences(record, _make_replay_verdict(session, ruler, mismatches))
+    result = find_divergences(record, _make_replay_verdict(session, campaign_config, mismatches))
     n_rounds = sum(len(c.rounds) for c in record.cycles)
     logger.info(
         "A/B replay: campaign %s, %d cycle(s), %d round(s), %d mismatch(es), %d divergence(s)",

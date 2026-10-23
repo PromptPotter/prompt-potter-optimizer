@@ -14,8 +14,6 @@ if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
     from promptpotter.application.commands.payloads import CompactArchivePayload
 
-__all__ = ["compact_archive"]
-
 
 def compact_archive(
     dispatcher: CommandDispatcher, payload: CompactArchivePayload

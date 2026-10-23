@@ -84,14 +84,14 @@ owned by `/potter-self`.
 | Verb | Behavior |
 |---|---|
 | `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `promptpotter/assets/datasets/<name>/`, run from round 0 on the framing committed in `task.md`'s front matter — none committed, the mint decomposes its body and commits it first (one `checkin` call on the run's spend); `task_framing: off` in the campaign config runs unframed on purpose. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
-| `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). |
-| `new … --set optimizer=<name>` | Pick the optimizer, either form: any `GET /optimizers` roster name (potter, capo, gepa, levi), plus `--set nodes.<node>.<knob>=V` for its knobs (`GET /optimizers/{name}/knobs`). The CLI spelling of `dataset.yaml::campaign.optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`; the web check-in's optimizer picker writes the same two. A knob the manifest does not take is refused before anything mints. |
+| `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). One that stops short keeps its check-in and names it: finish it in the browser or `discard-draft <draft_id>`. |
+| `new … --set optimizer=<name>` | Pick the optimizer, either form: any `GET /optimizers` roster name (potter, capo, gepa, levi), plus `--set nodes.<node>.<knob>=V` for its knobs (`GET /optimizers/{name}/knobs`). The CLI spelling of `{dataset}/dataset.yaml::campaign.optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`; the web check-in's optimizer picker writes the same two. A knob the manifest does not take is refused before anything mints. |
 | `new … --arm <h2h>:<key>` | Mint a CONTROLLED arm of a head-to-head, for an optimizer comparison rather than a best result: the first arm declares its instrument and budget, a later one adopts its split and budget and is refused on any other instrument, and each arm reads no other campaign's measurements, refuses steer/skip, and spends its declared search budget; `set-limits` moves one arm's cap alone, and the read then serves that arm's guard as `differs` on `budget`. `evidence` then reads the arms under the declared scorer. |
 | `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. The run's shape — `--from`, `--no-check`, `--fork-on-divergence`, `--diag` — is the `start-run` command's `mode` (`from_round` / `no_divergence_check` / `fork_on_divergence` / `diag`), so REST takes it too and an embedded host passes the same `RunMode` to `run_campaign`. |
-| `set-limits` | Raise (or lower) an existing cycle's ceiling: `--max-usd` / `--max-tokens` / `--max-rounds N\|none`. |
+| `set-limits` | Raise (or lower) a cap, each flag `N\|none` — the same four `new` and `resume` take for a launch. `--max-usd` / `--max-tokens` move the CAMPAIGN cap, one book every live cycle shares; `--max-rounds` / `--max-wall-clock` move this cycle's own. A `resume --steer`/`--rewind` fork takes the cycle pair only. |
 | `pause` | Ask a RUNNING cycle to stop at its next checkpoint — resumable, and the same dispatcher verb the webapp control fires. This is the HALT this skill keeps asking for. A launch still `queued` / `starting` refuses it: withdraw that one with `cancel-queued <job_id>` (`machine-status` lists it). |
-| `submit-arms` | Answer a round holding at the arm gate (`optimization.arm_gate: review \| author`, `off` by default): `submit-arms --file arms.yaml [--keep 0,2]`. The file is a YAML list of arms, each an edit of the round's parent (`changes_description` + `prompt_fields` and/or `pipeline_overlay`); `--keep` takes the listed drafts by index and is refused under `author`. The readout names the hold and its drafts; a run under this knob blocks every round until answered. |
-| `bench` | Grade the campaign's result on its held-out bench set: `bench [--campaign ID] [--cycle ID]`; admitted exactly where the served dashboard's `bench_score.status.can_grade` is true, and refused in its `refusal` otherwise (a run in flight, a selection already graded, a cycle beside the line). When a launch sends the pass itself is `bench_trigger` (`docs/architecture.md` § The bench score is not an optimizer's selection). Head-to-head arms grade at their own end. |
+| `submit-arms` | Answer a round holding at the arm gate (`optimization.arm_gate: review \| author`, `off` by default): `submit-arms --arms arms.yaml [--keep 0,2]`. The file is a YAML list of arms, each an edit of the round's parent (`changes_description` + any of `prompt_fields` per prompt node, `shots` per prompt node, `pipeline_overlay`); `--keep` takes the listed drafts by index and is refused under `author`. The readout names the hold and its drafts; a run under this knob blocks every round until answered. |
+| `bench` | Grade the campaign's result on its held-out bench set: `bench [--campaign ID]`; admitted exactly where the served dashboard's `bench_score.status.can_grade` is true, and refused in its `refusal` otherwise (a run in flight, a selection already graded, a cycle beside the line). When a launch sends the pass itself is `bench_trigger` (`docs/architecture.md` § The bench score is not an optimizer's selection). Head-to-head arms grade at their own end. |
 | `verify` | Re-score one candidate (`candidate:<campaign>/<cycle>/<candidate_id>`) on search cells it has never met; moves no round and no election. The sanctioned way to settle a candidate — never re-ask a cell it already answered. |
 | `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
 | `compact-archive <mode>` | Reclaim the measurement archive: `inventory` COUNTS it first — configurations, answers and bytes by dataset, role and age, and the read that sizes every other mode. Then `compact` moves the fields nothing reads out of candidates' own answers into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `parent` answers are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
@@ -99,11 +99,12 @@ owned by `/potter-self`.
 **Every ending states its own next verb** (`STOP_REASON_INFO::next_step`), so read the run's
 readout rather than a ladder here. What it cannot tell you is the two ways a raise silently fails:
 the ceiling is clamped against the account allowance, so read the ARMED value back off
-the served dashboard's `run_limits` (the file banks only what INIT declared) rather than trusting the number you sent; and the counter is
-CUMULATIVE across resume, so the new ceiling must exceed the total already spent, not the work
-remaining. Only `ceiling.usd` is armed by default — `ceiling.tokens` is `null` until set.
+the served dashboard's `run_limits.budget` (the file banks only what INIT declared) rather than trusting the number you sent; and the counter is
+CUMULATIVE across resume and across the campaign's cycles, so the new ceiling must exceed the total
+the campaign already spent, not the work remaining. Only `budget.usd` and `budget.rounds` are
+named by default — `budget.tokens` and `budget.wall_clock_s` bind nothing until set.
 
-Flags are the verbs' own (`--help`); a dataset's defaults live in its `dataset.yaml::campaign` — never
+Flags are the verbs' own (`--help`); a dataset's defaults live in its `{dataset}/dataset.yaml::campaign` — never
 guessed. `new` overwrites the tenant pointer; `resume` is the happy path and needs no flags. Stop with Ctrl+C:
 first pauses (resumable, exit 130), second force-quits. Every query lands in
 `measurements/cells/{config_key}.jsonl` immediately, so a hard kill loses zero work and `resume`
@@ -177,7 +178,7 @@ where the selector elects on θ (`elects_on == "ability"`). A peer's round is or
 own manifest's nodes, so read those instead; none of what follows carries over.
 
 **The hit sequence is difficulty-ordered, so a tail of 1s is the ORDER, never a surge.**
-`build_round_order` (`intelligence/adaptive_queue_mechanism.py`) puts parent-MISS win-opportunities
+`build_round_order` (`intelligence/rasch.py`) puts parent-MISS win-opportunities
 first (ascending δ), a parent-HIT regression probe every 4th position while a miss or unknown is
 still unplaced, and cells the parent never answered last, ordered by DISTANCE FROM THE RULER'S
 CENTRE — never as misses, which front-loaded the easiest cells. (Not "by discrimination": that is
@@ -196,7 +197,7 @@ are defined by the *parent's own* grades, so on a truncated prefix the score is 
 construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
 `⌊n/4⌋/n`). `PairedReading.reference_level` answers `None` unless both sides scored every cell
 of the set, so a cut arm reports where it stopped plus its θ, never a standing.
-**A `vs_reference` rate on a row whose `scored_samples < expected_samples` is not a standing —
+**A `vs_reference` rate on a row whose `panel.scored < panel.expected` is not a standing —
 do not quote it, and do not compare it across arms.**
 
 **The ordering does not starve the posterior.** `p_best` moves across most of the budget, so arms
@@ -215,10 +216,10 @@ wrong after reading both numbers, ask what the round measured, not which estimat
 ## Configs are the source of truth
 
 The skill carries no parallel default-ladder. `README.md` (source, split, sample shape) ·
-`dataset.yaml::campaign` (max_rounds, and the node knobs n_variants, sp_budget_round, patiences) · `dataset.yaml::pipeline` (pipeline,
+`{dataset}/dataset.yaml::campaign` (budget, and the node knobs n_variants, sp_budget_round, patiences) · `{dataset}/dataset.yaml::pipeline` (pipeline,
 model, caps). BBEH's notebook run alone passes overrides beside the file:
 `docs/research/bbeh-comparison/bbeh_potter_runner.py::build_campaign_config` merges them over
-`dataset.yaml::campaign`, and an override wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
+`{dataset}/dataset.yaml::campaign`, and an override wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
 [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md)
 — CHECK a campaign's `pipeline_overlay` against it rather than assuming.
 

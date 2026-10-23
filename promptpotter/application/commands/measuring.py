@@ -6,18 +6,13 @@ from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.diagnostics import verify
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.runner.grade_bench import grade_line_bench
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import Budget
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.application.commands.payloads import (
-        GradeBenchPayload,
-        VerifyCandidatePayload,
-    )
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.command_kinds import GradeBenchPayload, VerifyCandidatePayload
     from promptpotter.domain.cycle_paths import CycleHop
-
-__all__ = ["grade_bench", "verify_candidate"]
 
 
 def verify_candidate(
@@ -28,9 +23,7 @@ def verify_candidate(
 ) -> Applier[object]:
     async def _apply_verify() -> verify.VerifyOutcome:
         # Taken HERE, not inside `verify_candidate`: the loop's saturation check calls that under its book.
-        async with paid_pass(
-            stores=dispatcher.stores, verb="verify", hop=hop, declared=SpendCeilings()
-        ):
+        async with paid_pass(stores=dispatcher.stores, verb="verify", hop=hop, declared=Budget()):
             return await verify.verify_candidate(
                 stores=dispatcher.stores,
                 hop=hop,

@@ -7,24 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NewType
 
-from pydantic import ConfigDict
-
-from promptpotter.domain.strict_model import StrictModel
-
-__all__ = [
-    "ALL_DOTS_PATTERN",
-    "HOP_SEP",
-    "ID_COMPONENT_PATTERN",
-    "UNIT_SEP",
-    "Cut",
-    "CycleDir",
-    "CycleHop",
-    "CyclePath",
-    "WorkspaceDir",
-    "command_address",
-    "encode_cycle_path",
-]
-
+from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.errors import BadRequestError
 
 CycleDir = NewType("CycleDir", Path)
 WorkspaceDir = NewType("WorkspaceDir", Path)
@@ -49,10 +33,8 @@ if any(ID_COMPONENT_RE.match(ch) for ch in HOP_SEP + UNIT_SEP):
     )
 
 
-class CycleHop(StrictModel):
+class CycleHop(FrozenModel):
     """One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle alone."""
-
-    model_config = ConfigDict(frozen=True)
 
     campaign_id: str
     cycle_id: str
@@ -83,15 +65,15 @@ def command_address(path: CyclePath) -> dict[str, str]:
     return address
 
 
-def decode_cycle_path(encoded: str) -> CyclePath:
-    """``""`` decodes to ``()`` (no hops below the root); component VALIDATION is ``descend_store``'s."""
+def decode_cycle_path(encoded: str | None) -> CyclePath:
+    """Absent decodes to ``()`` (no hops below the root); component VALIDATION is ``descend_store``'s."""
     if not encoded:
         return ()
     hops: list[CycleHop] = []
     for seg in encoded.split(HOP_SEP):
         campaign, sep, cycle = seg.partition(UNIT_SEP)
         if not sep or not campaign or not cycle:
-            raise ValueError(
+            raise BadRequestError(
                 f"Malformed cycle-path hop: {seg!r} (expected 'campaign{UNIT_SEP}cycle')."
             )
         hops.append(CycleHop(campaign_id=campaign, cycle_id=cycle))

@@ -4,7 +4,7 @@ import { activeSeries, type SeriesCtx } from "./series";
 import { type PlotGeometry, geomEqual } from "./FitnessChart";
 import { setCandidatesState, useCandidatesState } from "@/lib/candidates-store";
 import { useCandidateBars } from "./useCandidateBars";
-import { measuringLabel, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { measuringArm, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
@@ -67,7 +67,7 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
       ? withMask(
           subjectKey(
             "candidate",
-            [leafCampaignId, selectedCandidate.cycle_id, selectedCandidate.candidate_id],
+            [leafCampaignId, selectedCandidate.cycle_id, selectedCandidate.arm],
             viewedPath.slice(0, -1),
           ),
           { lens: activeLens, samples: sampleSet?.length ? sampleSet.join(",") : null },
@@ -96,11 +96,14 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
 
   const onSelect = useCallback(
     (v: CandidateBar | null) => {
-      if (!v || !leafCycleId) {
+      // A course bar is no arm: there is nothing to inspect.
+      if (!v?.arm || !leafCycleId) {
         setSelectionForCandidate(null);
         return;
       }
-      setSelectionForCandidate(selectedCandidateOf(leafCycleId, roundOf(v), v.node.id, v.label));
+      setSelectionForCandidate(
+        selectedCandidateOf(leafCycleId, roundOf(v), v.arm.reading.arm.key, v.label),
+      );
     },
     [setSelectionForCandidate, leafCycleId],
   );
@@ -115,8 +118,10 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
 
   const selectedKey = useMemo(
     () =>
-      views.find((v) =>
-        isSelectedCandidate(selectedCandidate, leafCycleId, roundOf(v), v.node.id),
+      views.find(
+        (v) =>
+          v.arm !== null &&
+          isSelectedCandidate(selectedCandidate, leafCycleId, roundOf(v), v.arm.reading.arm.key),
       )?.key ?? null,
     [views, selectedCandidate, leafCycleId],
   );
@@ -139,17 +144,16 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
     return idx >= 0 ? idx : null;
   }, [divergentRound, views]);
 
-  const measuring = measuringLabel(dash);
-  const measuringRound = dash.current_round.round;
+  const measuring = measuringArm(dash);
   const inFlightIndex = useMemo(() => {
     if (!isLive || measuring === null) return null;
-    // `findLastIndex`: a fork's timeline also holds the parent's arm of that label, earlier on it.
+    // `findLastIndex`: a fork's timeline also holds the parent's arm of that key, earlier on it.
     const idx = views.findLastIndex(
       (v) =>
-        v.arm?.reading.arm.label === measuring && v.arm.reading.arm.round === measuringRound,
+        v.arm?.reading.arm.key === measuring.key && v.arm.reading.arm.round === measuring.round,
     );
     return idx >= 0 ? idx : null;
-  }, [isLive, measuring, measuringRound, views]);
+  }, [isLive, measuring, views]);
 
   const lensActive = lens !== "" && !scoringMaskActive;
 
@@ -169,7 +173,7 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
       setSelectionForSampleSet(null);
       setCandidatesState({ showOverlap: false });
     } else if (rung === 1 || !hasOverlap) {
-      setSelectionForSampleSet(overlap?.sample_ids ?? sampleUniverse);
+      setSelectionForSampleSet(overlap?.positions ?? sampleUniverse);
       setCandidatesState({ showOverlap: true });
     } else {
       setCandidatesState({ showOverlap: true });
@@ -207,8 +211,6 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
   };
 
   return {
-    campaignId,
-    cycleId,
     isLive,
     unit,
     viewedPath,
@@ -216,7 +218,7 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
     viewedLabel: viewedNode?.label ?? "runs",
     navigate,
     history,
-    ability: history.at(-1)?.ability ?? null,
+    ability: history.at(-1)?.series_reading ?? null,
     electedMetric,
     wonOnTheta,
     views,

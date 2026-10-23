@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterator
-from contextlib import suppress
 from pathlib import Path
-
-from pydantic import ValidationError
 
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.run_records import (
@@ -17,11 +13,13 @@ from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, appended_here
-
-logger = logging.getLogger(__name__)
-
-__all__ = ["CycleEventLog", "continued_chain", "ledger_chain", "open_with_history"]
+from promptpotter.infrastructure.store.read_model import (
+    LedgerSpan,
+    Moment,
+    appended_here,
+    feed_fold,
+    ledger_record,
+)
 
 
 def _fork_link(cycle_dir: Path) -> tuple[CycleMintedRecord, Path] | None:
@@ -137,20 +135,16 @@ class CycleEventLog:
             offset = self._next_offset
             self._next_offset += 1
             # A line no arm reads still CONSUMES its offset, as ``iter`` counts it.
-            with suppress(ValidationError, ValueError):
-                self._fan_out(RECORD_ADAPTER.validate_json(raw), offset)
+            record: CycleRecord | None = ledger_record(
+                RECORD_ADAPTER.validate_json, raw, ledger=self._path, offset=offset
+            )
+            if record is not None:
+                self._fan_out(record, offset)
         self._end = upto
 
     def _fan_out(self, record: CycleRecord, offset: int) -> None:
         for sub in self._subscribers:
-            try:
-                sub.on_record(record, offset)
-            except Exception:
-                logger.exception(
-                    "projection %s failed on offset %d",
-                    type(sub).__name__,
-                    offset,
-                )
+            feed_fold(sub, offset, record, ledger=self._path)
 
     def iter(self, own_limit: int | None = None) -> Iterator[tuple[int, CycleRecord]]:
         """`own_limit` counts OWN records, as `forked_at_offset` does, never a position over the chain."""
@@ -158,21 +152,15 @@ class CycleEventLog:
             yield from self._inherit_parent.iter(self._inherit_offset)
         if not self._path.exists():
             return
-        with self._path.open("r", encoding="utf-8") as fh:
+        with self._path.open("rb") as fh:
             for offset, line in enumerate(fh):
                 if own_limit is not None and offset >= own_limit:
                     return
-                stripped = line.strip()
-                if not stripped:
-                    continue
-                try:
-                    yield offset, RECORD_ADAPTER.validate_json(stripped)
-                except (ValidationError, ValueError):
-                    logger.warning(
-                        "skipping unparseable ledger line at offset %d in %s",
-                        offset,
-                        self._path,
-                    )
+                record: CycleRecord | None = ledger_record(
+                    RECORD_ADAPTER.validate_json, line, ledger=self._path, offset=offset
+                )
+                if record is not None:
+                    yield offset, record
 
     def inherit_from(self, parent: CycleEventLog, offset: int) -> None:
         if self._inherit_parent is parent and self._inherit_offset == offset:

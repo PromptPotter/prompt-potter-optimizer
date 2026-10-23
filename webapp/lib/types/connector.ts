@@ -6,6 +6,7 @@ import type {
   NodeConfigParam,
   NodeOutputSchema,
   NodeReach,
+  OptimizerSetup,
 } from "@/lib/api";
 import type { PipelineView } from "./pipeline";
 
@@ -26,7 +27,7 @@ export interface ConnectorView {
   // served: `CampaignPipelineResponse.self_optimization`; false until the resolution lands.
   selfOptimization: boolean;
   optimizer: string | null;
-  optimizerKnobs: Record<string, Record<string, unknown>> | null;
+  optimizerSetup: OptimizerSetup | null;
   view: PipelineView | null;
   schema: NodeSchemaReading;
   active: BackendResponse | null;

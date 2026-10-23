@@ -4,154 +4,152 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from contextvars import ContextVar
-from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
 from promptpotter.domain.results import CellFold
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
 from promptpotter.infrastructure.store.measurement_archive import standing
 from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
-from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.domain.sample import ArchiveEntry, FiledAnswer
+    from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer
     from promptpotter.domain.scoring import MeasuredCell, WalkedCell
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-    from promptpotter.infrastructure.store.read_model import Moment
     from promptpotter.infrastructure.store.stores import Stores
-
-__all__ = [
-    "CampaignWalks",
-    "FiledBy",
-    "SampleFoldRow",
-    "as_of_moment",
-    "bench_reads",
-    "campaign_fenced",
-    "fence_memory",
-    "list_populations",
-    "load_population",
-    "memory_scoped",
-    "population_signatures",
-    "sample_fold_rows",
-    "walked_answers",
-    "write_sample_fold",
-]
-
-
-class FiledBy(NamedTuple):
-    """Every campaign's answers, as the archive held them at *moment*."""
-
-    moment: Moment
 
 
 class CampaignWalks(NamedTuple):
-    """One campaign's walks, read when memory is: a cycle it forks after the fence is its own too."""
+    """One campaign's walks, read when memory is: a cycle it forks after the scope is its own too."""
 
     campaigns: CampaignStore
     campaign_id: str
-    moment: Moment | None
 
     def spans(self) -> list[LedgerSpan]:
-        held = self.campaigns.campaign_walk_spans(self.campaign_id)
-        return held if self.moment is None else self.moment.spans(held)
+        return self.campaigns.campaign_walk_spans(self.campaign_id)
 
 
-# MEMORY reads fence an arm, or an instrument's cell, to its campaign's walks, and any other task
-# re-read at a past moment to what was filed by then.
-_FENCE: ContextVar[CampaignWalks | FiledBy] = ContextVar("memory_fence")
+class OpenAt(NamedTuple):
+    """Optimize: every campaign's answers as filed, and the ruler version at each round's open."""
 
 
-def fence_memory(fence: CampaignWalks | FiledBy) -> None:
+class ArmOf(NamedTuple):
+    """Compare: its campaign's walks alone, on the ruler version its head-to-head froze at open."""
+
+    walks: CampaignWalks
+    ruler_version: int
+
+
+class CellOf(NamedTuple):
+    """An L4 cell remembers its campaign's walks alone and reads its spawner's round version."""
+
+    walks: CampaignWalks
+    ruler_version: int
+
+
+type MemoryScope = OpenAt | ArmOf | CellOf
+
+# Unbound reads the archive whole: a served read outside every run.
+_UNBOUND = OpenAt()
+_SCOPE: ContextVar[MemoryScope] = ContextVar("memory_scope", default=_UNBOUND)
+
+
+def bind_memory_scope(scope: MemoryScope) -> None:
     """Inside the task it scopes."""
-    _FENCE.set(fence)
+    _SCOPE.set(scope)
 
 
-def memory_scoped() -> bool:
-    return _FENCE.get(None) is not None
-
-
-def campaign_fenced() -> bool:
-    """An arm, or an instrument's cell: no other campaign is its memory."""
-    return isinstance(_FENCE.get(None), CampaignWalks)
-
-
-def as_of_moment() -> Moment | None:
-    """The moment this task re-reads the world at — its ledgers as its archive; ``None`` is now."""
-    fence = _FENCE.get(None)
-    return None if fence is None else fence.moment
+def memory_scope() -> MemoryScope:
+    return _SCOPE.get()
 
 
 def _remembered() -> Callable[[FiledAnswer], bool] | None:
     """An open span grows with its ledger, so a walk is remembered once its record lands."""
-    fence = _FENCE.get(None)
-    if fence is None:
-        return None
-    if isinstance(fence, FiledBy):
-        instant = fence.moment.instant
-        return lambda answer: (at := epoch_seconds(answer.created_at)) is not None and at <= instant
-    own = scan_ledger_answers(fence.spans())
-    return lambda answer: answer.answer in own
+    match scope := _SCOPE.get():
+        case OpenAt():
+            return None
+        case ArmOf(walks=walks) | CellOf(walks=walks):
+            own = scan_ledger_answers(walks.spans())
+            return lambda answer: answer.answer in own
+        case _:
+            assert_never(scope)
+
+
+def every_campaign_now() -> bool:
+    """Whether this task's memory is the whole archive as it stands: the one a shared fold serves."""
+    match scope := _SCOPE.get():
+        case OpenAt():
+            return True
+        case ArmOf() | CellOf():
+            return False
+        case _:
+            assert_never(scope)
 
 
 def walked_answers(stores: Stores, cells: Iterable[WalkedCell]) -> list[MeasuredCell]:
-    """``sample_id`` is the WALK's: an answer filed by another dataset holds that dataset's slot."""
-    walked: list[MeasuredCell] = []
-    for _, sample_id, answer, _ in cells:
-        if (stored := stores.archive.answer(answer)) is not None:
-            walked.append(replace(stored.cell, sample_id=sample_id))
-    return walked
+    return [
+        stored.cell
+        for _, answer, _ in cells
+        if (stored := stores.archive.answer(answer)) is not None
+    ]
 
 
-def bench_reads(stores: Stores, *, dataset_name: str, sample_ids: frozenset[int]) -> int:
-    """Never memory-scoped: a holdout was spent by every read, seen or not."""
+def _configurations_on(stores: Stores, bank: Bank, keys: frozenset[str]) -> list[ArchiveEntry]:
+    """One entry per configuration filed under any bank measuring *keys*: history is by content."""
+    banks = {bank.dataset_hash} | stores.tenant_datasets.banks_sharing(keys)
+    first: dict[str, ArchiveEntry] = {}
+    for entry in stores.archive.list_all():
+        if entry.dataset_hash in banks:
+            first.setdefault(entry.config_key, entry)
+    return list(first.values())
+
+
+def bench_reads(stores: Stores, *, bank: Bank, sample_keys: frozenset[str]) -> int:
+    """Never memory-scoped, under either purpose: a holdout was spent by every read, on every bank."""
     graded: set[str] = set()
-    for entry in stores.archive.list_all(dataset_name=dataset_name):
+    for entry in _configurations_on(stores, bank, sample_keys):
         if any(
-            answer.role == MeasurementRole.BENCH and answer.cell.sample_id in sample_ids
-            for answer in stores.archive.population(entry)
+            answer.role == MeasurementRole.BENCH
+            for answer in stores.archive.measured(entry, sample_keys)
         ):
             graded.add(entry.individual)
     return len(graded)
 
 
-def load_population(stores: Stores, entry: ArchiveEntry) -> list[FiledAnswer]:
-    answers = stores.archive.population(entry)
+def load_population(stores: Stores, entry: ArchiveEntry, bank: Bank) -> list[FiledAnswer]:
+    """The configuration's answers on *bank*'s rows, whichever bank measured them."""
+    answers = stores.archive.measured(entry, frozenset(bank.slot_of))
     if (remembered := _remembered()) is not None:
         answers = [answer for answer in answers if remembered(answer)]
     return list(standing(answers).values())
 
 
-def list_populations(stores: Stores, *, dataset_name: str | None = None) -> list[ArchiveEntry]:
-    entries = stores.archive.list_all(dataset_name=dataset_name)
-    if (remembered := _remembered()) is None:
+def list_populations(stores: Stores, bank: Bank) -> list[ArchiveEntry]:
+    entries = _configurations_on(stores, bank, frozenset(bank.slot_of))
+    if _remembered() is None:
         return entries
-    return [e for e in entries if any(remembered(a) for a in stores.archive.population(e))]
+    return [e for e in entries if load_population(stores, e, bank)]
 
 
-def population_signatures(
-    stores: Stores, *, dataset_name: str | None = None
-) -> dict[str, list[list[Any]]]:
+def population_signatures(stores: Stores, bank: Bank) -> dict[str, list[list[Any]]]:
     sigs = stores.archive.cell_signatures()
     out: dict[str, list[list[Any]]] = {}
-    for entry in stores.archive.list_all(dataset_name=dataset_name):
+    for entry in _configurations_on(stores, bank, frozenset(bank.slot_of)):
         held = stores.archive.signature(entry, sigs) or ()
         out[entry.config_key] = [list(part) for part in held]
     return out
 
 
-def _sample_fold_path(stores: Stores, dataset_name: str) -> Path:
-    return stores.archive.derived_dir() / f"sample_fold__{dataset_name}.jsonl"
+def _sample_fold_path(stores: Stores, dataset_hash: str) -> Path:
+    return stores.archive.derived_dir() / f"sample_fold__{dataset_hash}.jsonl"
 
 
-class SampleFoldRow(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class SampleFoldRow(FrozenModel):
     config_key: str
     sp: str
     fk: str
@@ -159,26 +157,26 @@ class SampleFoldRow(StrictModel):
     # ``(Sample.key, objective, provenance)`` per graded cell.
     graded: list[tuple[str, float, str]]
     unscoreable: bool = False
-    # ``(sample_id, hit, degraded, failure_mode)`` per cell, in walk order.
+    # ``(slot, hit, degraded, failure_mode)`` per cell, in walk order; a slot in the fold's own bank.
     cells: list[tuple[int, bool, bool, str | None]] = Field(default_factory=list)
-    # ``(sample_id, query, ground_truth)`` per sample this row was first to introduce.
+    # ``(slot, query, ground_truth)`` per sample this row was first to introduce.
     new_samples: list[tuple[int, str, str]] = Field(default_factory=list)
     reading: CellFold | None = None
 
 
-def sample_fold_rows(stores: Stores, *, dataset_name: str) -> list[SampleFoldRow]:
-    """A fenced task reads none: the fold is every campaign's, at every moment."""
-    if memory_scoped():
+def sample_fold_rows(stores: Stores, *, dataset_hash: str) -> list[SampleFoldRow]:
+    """Every campaign's, as it stands: a task remembering less reads none."""
+    if not every_campaign_now():
         return []
     return [
         SampleFoldRow.model_validate(row)
-        for row in iter_jsonl(_sample_fold_path(stores, dataset_name))
+        for row in iter_jsonl(_sample_fold_path(stores, dataset_hash))
     ]
 
 
-def write_sample_fold(stores: Stores, *, dataset_name: str, rows: Iterable[SampleFoldRow]) -> None:
-    if memory_scoped():
+def write_sample_fold(stores: Stores, *, dataset_hash: str, rows: Iterable[SampleFoldRow]) -> None:
+    if not every_campaign_now():
         return
     write_jsonl(
-        _sample_fold_path(stores, dataset_name), (row.model_dump(mode="json") for row in rows)
+        _sample_fold_path(stores, dataset_hash), (row.model_dump(mode="json") for row in rows)
     )

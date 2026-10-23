@@ -22,7 +22,7 @@ states:
              cannot perform where they are standing. Same distinction `gone` draws below,
              one state earlier: collapsed into offline, it meets a first-run account with a
              critical alert telling it to go run a CLI command.'
-  warming:   campaign selected, its cycle still at check-in (warming_up:true).
+  warming:   campaign selected, its cycle has declared no wiring yet (warming_up:true).
   live:      logged in, campaign streaming dashboard.json.
   loading:   a fetch is in flight — transient, MUST resolve to live/empty/error.
   error:     a fetch failed for a non-auth reason (5xx, network, parse).
@@ -107,7 +107,7 @@ invariants:
                       membership is NOT an existence test, because an L4 inner hop is absent
                       from /cycles and an archived campaign is absent from the active filter
                       while both are alive. Archived is not gone. The server side of this is
-                      the same rule: `warming_up` means "still at check-in" and a missing cycle
+                      the same rule: `warming_up` means "no wiring declared yet" and a missing cycle
                       dir means GONE, and one route must never answer both with the same body.'
   I8_floor_named:     'A rendered Δ NAMES which floor it cleared, and the two floors are not
                       interchangeable. ORIGIN is C0 — the campaign root, or a fork''s branch
@@ -126,8 +126,8 @@ invariants:
                       the sanctioned case and says so at its own seam.'
   I9_pipeline_resolution_server_owned: 'What config a node RUNS in a campaign has ONE
                       server-owned answer: GET /campaigns/{id}/pipeline?at=<subject>, resolved by
-                      application/pipeline_resolve.py::resolve_pipeline_for_campaign. A campaign
-                      still authoring its origin takes that function''s check-in arm
+                      application/pipeline_resolve.py::resolve_pipeline_for_campaign. A check-in
+                      draft, which is no campaign yet, takes its sibling
                       (resolve_pipeline_for_draft), which the draft response also carries — so
                       StaticConnectorProvider is a second TRANSPORT of one answer, not a second
                       source, and overlaying anything else into it re-opens this. The campaign

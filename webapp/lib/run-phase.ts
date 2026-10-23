@@ -12,7 +12,7 @@ import {
 } from "@/lib/api/types.generated";
 
 // served: `RUN_PHASE_INFO` is `domain/phases.py`
-type PhaseFact = "settled" | "authoring" | "awaits_operator";
+type PhaseFact = "settled" | "awaits_operator";
 
 export function phaseWalks(runPhase: RunPhase | null | undefined): boolean {
   return runPhase != null && RUN_PHASE_INFO[runPhase].walks;
@@ -47,7 +47,6 @@ export const STATUS_MARK: Record<RunStatus["mark"], RunPhaseMark> = {
   queued: { glyph: "…", tone: "quiet" },
   gate: { glyph: "◆", tone: "attention" },
   paused: { glyph: "‖", tone: "quiet" },
-  checkin: { glyph: "✎", tone: "quiet" },
   detached: { glyph: "⊘", tone: "warn" },
   success: { glyph: "✓", tone: "success" },
   halted: { glyph: "■", tone: "warn" },

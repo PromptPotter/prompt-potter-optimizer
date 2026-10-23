@@ -9,97 +9,139 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import functools
+import inspect
 import json
 import random
-import selectors
 import ssl
 import threading
+import time
 import types
 import urllib.error
-from collections.abc import Callable, Coroutine, Iterator
+import urllib.request
+import uuid
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, get_args
 from unittest import mock
 
 import httpx
-import openai
 import pytest
 from factories import (
+    PROMPT_INFO,
     SANDBOX_CAMPAIGN,
+    arm_state,
+    arm_walk,
     backend_client,
     cycle_result,
     inner_sandbox,
+    jumping_clock,
+    loop_session,
+    minted_campaign,
+    on_jumping_clock,
     pipeline_schema,
     pobb_knobs,
-    scored_candidate,
+    score_summary,
     spend_book,
+    workspace,
 )
-from openai.types.chat import ChatCompletion
-from pydantic import BaseModel, Field
+from offline_world import Hang, Router, Said, completion
+from pydantic import BaseModel, Field, JsonValue, ValidationError
 
-import promptpotter.infrastructure.llm.spend_book as spending
 from promptpotter.application.account import account_of
 from promptpotter.application.bench import llm_call as call_mod
-from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.commands.dispatcher import CommandDispatcher
-from promptpotter.application.commands.limits_and_queue import _apply_change_run_limits
+from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.limits_and_queue import change_run_limits
+from promptpotter.application.commands.payloads import EditDraftCampaignPayload, StartCheckinPayload
+from promptpotter.application.datasets.draft_campaign import EditDraftPatch, new_draft
+from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.application.diagnostics.probe_reasoning import probe_reasoning
 from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
-from promptpotter.application.jobs.launcher.admission import paid_pass
+from promptpotter.application.jobs import mint
+from promptpotter.application.jobs.launcher.admission import (
+    admit_and_share,
+    embedded_share,
+    open_spend_book,
+    paid_pass,
+)
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
     admit_launch,
     clamp_budget_change,
+    hold_budget_change,
     paid_call,
     spends_the_hosts_own_key,
 )
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes
-from promptpotter.application.jobs.registry import CampaignLaunch, JobRegistry
-from promptpotter.application.optimizer_manifest import resolve_optimizer
+from promptpotter.application.jobs.registry import (
+    UNRESOLVED_HOP,
+    CampaignLaunch,
+    EmbeddedRun,
+    Job,
+    JobRegistry,
+)
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
+from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
-from promptpotter.application.runner.entry import _arm_spend_book
 from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.application.runner.inner import spawn, spawn_context
-from promptpotter.application.runner.inner.tasks import InnerCell, InnerCells, parse_panel
-from promptpotter.application.runner.loop import _round_bounds
-from promptpotter.application.runner.measurement import _skips_on_record
+from promptpotter.application.runner.inner.tasks import parse_panel
+from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
-from promptpotter.application.scoring.formula import cell_channels_of, compile_scorer
-from promptpotter.application.scoring.metrics import INVALID_SCORES
+from promptpotter.application.scoring.formula.compiler import cell_channels_of, compile_scorer
 from promptpotter.application.scoring.sample_measurement import (
     cell_billing,
     emit_replayed_step_tokens,
     measure_sample,
 )
+from promptpotter.application.scoring.search_point_scorer import (
+    open_walk,
+    replayable_on,
+    score_search_point,
+)
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import InProcessWorkload
+from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.command_kinds import ChangeRunLimitsPayload, DiscardDraftPayload
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.l4.proxies import inner_cell_facts
-from promptpotter.domain.launch_limits import HeldLimits, RoundsCap, RunMode
-from promptpotter.domain.phases import REFUSAL_STOPS, PauseCause, RunPhase, StopLoop, StopReason
-from promptpotter.domain.pipeline_schema import PipelineNode, WebSpendBound
-from promptpotter.domain.results import ArmOutcome
+from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, RunSource
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.phases import (
+    REFUSAL_STOPS,
+    PauseCause,
+    RunPhase,
+    StopLoop,
+    StopReason,
+    WalkEnd,
+)
+from promptpotter.domain.pipeline_schema import (
+    PipelineNode,
+    WebSpendBound,
+)
+from promptpotter.domain.results import CutKind, RescoreCount
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
-    RECORD_ADAPTER,
-    CandidateScoredRecord,
+    BankedSubject,
     ConfigOverrides,
     CycleSeed,
     CycleSeedRecord,
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
-    RunLimitsRecord,
+    RoundEnteredRecord,
     RunPhaseRecord,
+    SampleScoredRecord,
+    SampleStartedRecord,
     SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
@@ -108,34 +150,35 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, PipelineData, Scorer
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import (
-    MeteredSpend,
-    SpendCeilings,
+    CYCLE_AXES,
+    MONEY_AXES,
+    Budget,
+    CeilingMeter,
+    HeldBudget,
     SpendRollup,
     StepUsage,
     TokenAccount,
 )
 from promptpotter.domain.validators import StopSignal
-from promptpotter.infrastructure import backend as backend_mod
 from promptpotter.infrastructure.backend import CELL, BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, heartbeat, pricing, telemetry
-from promptpotter.infrastructure.llm.anthropic import AnthropicClient
 from promptpotter.infrastructure.llm.litellm_sends import ReportedCost
-from promptpotter.infrastructure.llm.openai_compat import (
-    OpenAICompatibleClient,
-    ProviderSpec,
-    _billed_cost,
-    reply_cost,
-)
+from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
 from promptpotter.infrastructure.llm.pricing import PriceTier, Rate, RateCeiling, RateTable
+from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
-from promptpotter.infrastructure.llm.response import LLMResponse
-from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
+from promptpotter.infrastructure.llm.send_pacing import (
+    SEND_ATTEMPTS,
+    SendBudget,
+    under_budget,
+)
 from promptpotter.infrastructure.llm.spend_book import (
     Admission,
     Billed,
     CallLabel,
     SendBound,
+    SpendBook,
     admitted,
     answered,
     bind_spend_book,
@@ -158,11 +201,14 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_priced_keys,
     scan_ledger_spend,
     scan_ledger_spend_by_round,
+    scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import append_line, write_jsonl
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
+from promptpotter.infrastructure.store.io import write_jsonl, write_yaml
+from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, draft_dirs
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
+from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -175,52 +221,26 @@ from promptpotter.shared.errors import (
     CellInfrastructureError,
     CellSendRefusedError,
     CellUnscoreableError,
+    ConflictError,
     CycleBusyError,
     ErrorCategory,
+    NotFoundError,
+    PayloadInvalidError,
     SendRefusedError,
 )
-from promptpotter.shared.identity import IdentityContext, Issuer, TenantId, UserId, default_identity
-from promptpotter.shared.measurement_context import (
-    MeasuredCandidate,
-    measured_candidate,
-    measured_candidate_context,
+from promptpotter.shared.identity import (
+    SYSTEM_PRINCIPAL,
+    IdentityContext,
+    Issuer,
+    TenantId,
+    UserId,
+    default_identity,
 )
-
-
-class _SpentWaits(selectors.DefaultSelector):
-    """A selector that spends a wait on the clock instead of sitting through it."""
-
-    now = 0.0
-
-    def select(self, timeout: float | None = None) -> Any:
-        if timeout is None:  # nothing scheduled: only real I/O can wake the loop
-            return super().select(None)
-        self.now += max(timeout, 0.0)
-        return super().select(0)
-
-
-class _JumpingClockLoop(asyncio.SelectorEventLoop):
-    """Its clock jumps to the next timer: sleeps keep their ORDER and cost no wall clock."""
-
-    def __init__(self) -> None:
-        self._waits = _SpentWaits()
-        super().__init__(self._waits)
-
-    def time(self) -> float:
-        return self._waits.now
-
-
-def _on_jumping_clock[T](main: Coroutine[Any, Any, T]) -> T:
-    with asyncio.Runner(loop_factory=_JumpingClockLoop) as runner:
-        return runner.run(main)
-
-
-def on_jumping_clock[**P, T](test: Callable[P, Coroutine[Any, Any, T]]) -> Callable[P, T]:
-    @functools.wraps(test)
-    def run(*args: P.args, **kwargs: P.kwargs) -> T:
-        return _on_jumping_clock(test(*args, **kwargs))
-
-    return run
+from promptpotter.shared.measurement_context import (
+    MeasuredPass,
+    MeasurementRole,
+    measured_pass,
+)
 
 
 @pytest.fixture
@@ -231,93 +251,98 @@ def run_bound(tmp_path: Path) -> Iterator[None]:
     telemetry.reset_cycle_ledger(ledger)
 
 
-def _reply(model: str, content: str, usage: dict[str, Any] | None) -> ChatCompletion:
-    return ChatCompletion.model_validate(
-        {
-            "id": "c",
-            "object": "chat.completion",
-            "created": 0,
-            "model": model,
-            "choices": [
-                {
-                    "index": 0,
-                    "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": content},
-                }
-            ],
-            **({"usage": usage} if usage is not None else {}),
-        }
+def _held(
+    registry: JobRegistry,
+    admitted: Budget,
+    *,
+    reserve: Budget | None = None,
+    standing: Budget | None = None,
+    step_rounds: int | None = None,
+) -> HeldBudget:
+    """Admitted alone, on a job of its own: the cycle's share is the whole of its money axes."""
+    job = registry.create(
+        user_id="solo",
+        principal_id="solo",
+        workspace=WorkspaceDir(registry.jobs_dir),
+        hop=UNRESOLVED_HOP,
+        holder=EmbeddedRun("ds1"),
+    )
+    registry.mark_admitted(
+        job.job_id, Budget() if reserve is None else reserve, admitted.only(MONEY_AXES)
+    )
+    return HeldBudget(
+        admitted=admitted,
+        standing=Budget() if standing is None else standing,
+        job_id=job.job_id,
+        step_rounds=step_rounds,
     )
 
 
-def _observing(*bills: TokenUsageRecord) -> Any:
-    spend = SpendRollup()
-    for bill in bills:
-        spend.bank(bill)
-    return types.SimpleNamespace(
-        dashboard=types.SimpleNamespace(
-            spend_metered=lambda meters: MeteredSpend.of(spend, meters)
-        ),
-        arm_spend_book=lambda _book: None,
+def _armed(
+    stores: Stores, hop: CycleHop | None, held: HeldBudget, registry: JobRegistry
+) -> SpendBook:
+    """A run's book, live on its job and its cycle's standing record where it has one."""
+    return open_spend_book(
+        held,
+        stores=stores,
+        job_registry=registry,
+        hop=hop,
+        meters="bill",
+        opened=time.monotonic(),
+        live=hop is not None,
     )
+
+
+def _budgeted(budget: Budget) -> CampaignConfig:
+    config = CampaignConfig.model_validate({"optimization": {"degradation_threshold": 0.05}})
+    optimization = config.optimization.model_copy(update={"budget": budget})
+    return config.model_copy(update={"optimization": optimization})
+
+
+def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Budget) -> None:
+    payload = ChangeRunLimitsPayload(
+        campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget
+    )
+    campaign = minted_campaign(hop)
+
+    async def apply() -> None:
+        ran = change_run_limits(dispatcher, payload, campaign, hop).run()
+        assert inspect.isawaitable(ran)
+        await ran
+
+    asyncio.run(apply())
 
 
 # 1. What a call costs
 
 
-def _counting_client(reply: str) -> tuple[Any, list[int]]:
-    calls: list[int] = []
-
-    async def create(**_kw: Any) -> Any:
-        calls.append(1)
-        # A stub reporting no `cached_tokens` cannot catch the metering dropping the discount.
-        usage = {
-            "prompt_tokens": 11,
-            "completion_tokens": 1,
-            "total_tokens": 12,
-            "prompt_tokens_details": {"cached_tokens": 8},
-        }
-        completion = _reply("grader-1", reply, usage)
-        return types.SimpleNamespace(headers={}, parse=lambda: completion)
-
-    client = OpenAICompatibleClient(api_key="k", provider="p", spec=ProviderSpec("P", ""))
-    client._client = types.SimpleNamespace(  # type: ignore[assignment]
-        chat=types.SimpleNamespace(
-            completions=types.SimpleNamespace(
-                with_raw_response=types.SimpleNamespace(create=create)
-            )
-        )
-    )
-    return client, calls
-
-
 async def _grade_twice(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, reply: str
-) -> tuple[list[int], list[Any], Any]:
-    client, calls = _counting_client(reply)
-    monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: client)
-    metered: list[Any] = []
-    monkeypatch.setattr(judge_call, "emit_token_usage", lambda **kw: metered.append(kw))
-    monkeypatch.setattr(spending, "emit_token_usage", lambda **kw: metered.append(kw))
-
+    tmp_path: Path, offline: Router, *, reply: str
+) -> tuple[int, list[TokenUsageRecord], Any]:
+    # A provider reporting no `cached_tokens` cannot catch the metering dropping the discount.
+    usage = {
+        "prompt_tokens": 11,
+        "completion_tokens": 1,
+        "total_tokens": 12,
+        "prompt_tokens_details": {"cached_tokens": 8},
+    }
+    offline.llm.says = lambda body: completion(reply, model=body["model"], usage=usage)
+    offline.llm.sent.clear()
     cache = LLMReuseCache(tmp_path, "judge_reuse")
-    (ev,) = build_evaluators(
-        {"answer": JudgeSpec(name="sealqa", stages=[JudgeStage(model="grader-1", provider="p")])},
-        cache=cache,
-    )
-    with spending_under(unbounded_spend_book()):
+    judge = JudgeStage(model="grader-1", provider="openai")
+    (ev,) = build_evaluators({"answer": JudgeSpec(name="sealqa", stages=[judge])}, cache=cache)
+    graded = CycleEventLog(tmp_path / "graded.jsonl")
+    with _billing_on(graded, unbounded_spend_book()):
         for _ in range(2):
-            row = MeasuredCell(sample_id=0, query="who?", predicted="Ada", ground_truth="Ada")
-            last = await ev.compute(result=row, schema=None)
-    return calls, metered, last
+            row = MeasuredCell(sample_key="k0", query="who?", predicted="Ada", ground_truth="Ada")
+            computed = ev.compute(result=row, schema=None)
+            assert inspect.isawaitable(computed)
+            last = await computed
+    return len(offline.llm.sent), _token_bills(graded), last
 
 
 class _Reply(BaseModel):
     answer: str = Field(description="The answer.")
-
-
-class _SentError(Exception):
-    pass
 
 
 _MESSAGES = [{"role": "user", "content": "q"}]
@@ -334,7 +359,7 @@ _EVERY_FIELD: dict[str, Any] = {
 
 
 async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_bound: None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_bound: None, offline: Router
 ) -> None:
     def row(input_usd: float, output_usd: float, lister: str, **tiers: float) -> dict[str, Any]:
         return {
@@ -344,8 +369,8 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             **tiers,
         }
 
-    table = pricing._models_to_rates(
-        {
+    listed = {
+        "models": {
             # DeepSeek's first-party key, character-for-character OpenRouter's model id.
             "deepseek/deepseek-v4-flash": row(0.00000014, 0.00000028, "deepseek"),
             "openrouter/openai/gpt-oss-20b": row(0.00000004, 0.00000015, "openrouter"),
@@ -362,9 +387,13 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             "openrouter/openrouter/auto": row(0.000002, 0.000004, "openrouter"),
             "orphan-model": {"input_cost_per_token": 0.000001},
         }
-    )
-    with monkeypatch.context() as patched:
-        patched.setattr(pricing, "load_rates", lambda: table)
+    }
+    (tmp_path / "rates.json").write_text(json.dumps(listed), encoding="utf-8")
+    with monkeypatch.context() as patched, contextlib.ExitStack() as unpatching:
+        patched.setattr(pricing, "BUNDLED_PATH", tmp_path / "rates.json")
+        patched.setattr(pricing, "CACHE_PATH", tmp_path / "never_fetched.json")
+        pricing.load_rates.cache_clear()
+        unpatching.callback(pricing.load_rates.cache_clear)
         lookup, usd = pricing.lookup_rate, pricing.compute_usd
         for model, provider, rate in (
             ("deepseek-v4-flash", "deepseek", Rate(0.00000014, 0.00000028)),
@@ -397,9 +426,8 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         )
         cold = usd("gpt-4o", 1000, 0, provider="openai")
         hit = usd("gpt-4o", 1000, 0, provider="openai", cache_read_tokens=800)
-        assert (cold, hit) == (
-            pytest.approx(1000 * 0.0000025),
-            pytest.approx(200 * 0.0000025 + 800 * 0.00000025),
+        assert (cold, hit) == pytest.approx(
+            (1000 * 0.0000025, 200 * 0.0000025 + 800 * 0.00000025)
         ), "a cache read is a SUBSET of the input count: re-priced out of it, never added on top"
         assert usd(
             "openai/gpt-oss-20b", 1000, 0, provider="openrouter", cache_read_tokens=800
@@ -416,11 +444,15 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         "cost_details": {"upstream_inference_cost": 0},
         "is_byok": False,
     }
-    assert reply_cost(_reply("m", "{}", priced)) == 7.938e-05, (
+
+    def wired(usage: dict[str, Any] | None) -> ChatReply:
+        return ChatReply.model_validate(completion("{}", model="m", usage=usage))
+
+    assert wired(priced).cost == 7.938e-05, (
         "wire cost never reached the response, so nothing prices the optimizer"
     )
     for usage in ({"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}, None):
-        assert reply_cost(_reply("m", "{}", usage)) is None, (
+        assert wired(usage).cost is None, (
             f"{usage}: None, not 0.0 — 0.0 is a measurement, and satisfies the cap that should "
             "escalate to the table"
         )
@@ -430,18 +462,12 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         ((1e-05, None), 1e-05),
         ((None, None), None),
     ):
-        assert _billed_cost(*reported) == (None if billed is None else pytest.approx(billed)), (
+        assert billed_cost(*reported) == (None if billed is None else pytest.approx(billed)), (
             f"{reported}: a bill is the sum of the parts that named one, absent only when none did"
         )
 
     # What a client cannot send never reaches the provider, and the gateway wire holds: a banked
     # reply is keyed on node config, never the wire, so the gateway body is pinned whole.
-    sent: list[dict[str, Any]] = []
-
-    async def create(**params: Any) -> None:
-        sent.append(params)
-        raise _SentError
-
     async def ceiling(*_: Any, **__: Any) -> RateCeiling:
         return RateCeiling(tiers=(PriceTier(0, 0.5, 0.25),))
 
@@ -452,25 +478,18 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
                 ChatRequest(_MESSAGES, "m", **asked), label=CallLabel("l1", "optimizer")
             )
 
-    raw = types.SimpleNamespace(with_raw_response=types.SimpleNamespace(create=create))
+    offline.llm.says = lambda _body: '{"answer": "a"}'
     gateway = {
-        "model": "m",
         "messages": _MESSAGES,
+        "model": "m",
         "temperature": 0.0,
-        "extra_body": {"usage": {"include": True}, "provider": _MAX_PRICE},
+        "usage": {"include": True},
+        "provider": _MAX_PRICE,
     }
     every_field = {
-        "model": "m",
         "messages": _MESSAGES,
-        "temperature": 0.3,
+        "model": "m",
         "max_tokens": 64,
-        "seed": 7,
-        "top_p": 0.9,
-        "extra_body": {
-            "usage": {"include": True},
-            "provider": {**_MAX_PRICE, "order": ["Alibaba"], "allow_fallbacks": True},
-            "reasoning": {"effort": "low"},
-        },
         "response_format": {
             "type": "json_schema",
             "json_schema": {
@@ -483,8 +502,13 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
                 "strict": False,
             },
         },
+        "seed": 7,
+        "temperature": 0.3,
+        "top_p": 0.9,
+        "usage": {"include": True},
+        "provider": {**_MAX_PRICE, "order": ["Alibaba"], "allow_fallbacks": True},
+        "reasoning": {"effort": "low"},
     }
-    client: Any
     with monkeypatch.context() as patched:
         patched.setattr(base, "rate_ceiling", ceiling)
         for host, asked, wire in (
@@ -495,17 +519,14 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             ("openrouter", {}, gateway),
             ("openrouter", _EVERY_FIELD, every_field),
         ):
-            sent.clear()
-            if host == "anthropic":
-                client = AnthropicClient(api_key="k")
-                client._client = types.SimpleNamespace(messages=raw)
+            offline.llm.sent.clear()
+            sending = asyncio.create_task(send(get_llm_client(host), asked))
+            if wire:
+                await sending
             else:
-                spec = ProviderSpec(host.title(), "", gateway=host == "openrouter")
-                client = OpenAICompatibleClient(api_key="k", provider=host, spec=spec)
-                client._client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=raw))
-            with pytest.raises(_SentError if wire else ValueError):
-                await asyncio.create_task(send(client, asked))
-            assert [json.dumps(body) for body in sent] == ([json.dumps(wire)] if wire else []), (
+                with pytest.raises(ValueError):
+                    await sending
+            assert offline.llm.sent == ([wire] if wire else []), (
                 f"{host} {sorted(asked)}: a field its client cannot send reached the provider, "
                 "or the gateway body a banked reply stands for moved"
             )
@@ -516,18 +537,18 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
         raise CellUnscoreableError("verifier timed out", spent=spent)
 
     cells = CycleEventLog(tmp_path / "cells.jsonl")
-    session = types.SimpleNamespace(
-        pipeline_schema=pipeline_schema([]),
-        identity_keys={},
-        state=types.SimpleNamespace(ledger=None),
-        backend_client=backend_client(execution="in_process", in_process_run=ran_ungraded),
-        scoring=types.SimpleNamespace(
-            scorer=compile_scorer("max(0.0, min(1.0, env_reward))", verifier_graded=True)
-        ),
+    unbounded = unbounded_spend_book()
+    session = loop_session(
+        workspace(tmp_path / "ungraded"),
+        pipeline_schema([]),
+        [],
+        control=RunControl(book=unbounded),
+        client=backend_client(execution="in_process", in_process_run=ran_ungraded),
+        scorer=compile_scorer("max(0.0, min(1.0, env_reward))", verifier_graded=True),
     )
     token = telemetry.set_cycle_ledger(cells)
     try:
-        with spending_under(unbounded_spend_book()):
+        with spending_under(unbounded):
             row_ = await measure_sample(Sample(id=0, query="10452", ground_truth=None), session)
         banked = {"agent": StepUsage(input=1200, output=300, rate_priced_usd=0.25)}
         emit_replayed_step_tokens(banked, {})
@@ -543,22 +564,18 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
     )
 
     # The replay of a grading is still METERED, flagged `cached`: its cost ignores cache history.
-    with monkeypatch.context() as patched:
-        calls, metered, score = await _grade_twice(tmp_path / "judge", patched, reply="A")
-        blank_calls, _, blank = await _grade_twice(tmp_path / "blank", patched, reply="   ")
+    calls, metered, score = await _grade_twice(tmp_path / "judge", offline, reply="A")
+    blank_calls, _, blank = await _grade_twice(tmp_path / "blank", offline, reply="   ")
     assert score.score == 1.0, "the replayed reply must grade identically, not merely cheaply"
-    assert len(calls) == 1, f"an identical comparison re-billed the provider: {len(calls)}x"
-    assert [m.get("cached", False) for m in metered] == [False, True], (
-        "a served grading went unmetered"
-    )
-    assert {m["kind"] for m in metered} == {"judge"}, "grading spend landed outside its own bucket"
+    assert calls == 1, f"an identical comparison re-billed the provider: {calls}x"
+    assert [m.cached for m in metered] == [False, True], "a served grading went unmetered"
+    assert {m.kind for m in metered} == {"judge"}, "grading spend landed outside its own bucket"
     # `cached`: OUR cache served the reply. `cache_read`: the PROVIDER discounted a sent call.
-    wire_usage = metered[0]["usage"]
-    assert (wire_usage.cache_read, wire_usage.input) == (8, 11), (
+    assert (metered[0].cache_read_tokens, metered[0].input_tokens) == (8, 11), (
         "cache_read is a SUBSET of input, never a deduction from it"
     )
     assert blank.score is None, "an unreadable grading is an absent verdict, never a zero"
-    assert len(blank_calls) == 2, "an empty reply was cached and replayed as if it were a verdict"
+    assert blank_calls == 2, "an empty reply was cached and replayed as if it were a verdict"
 
 
 # 2. What a run is billed
@@ -588,7 +605,6 @@ class _OrderedFakeBackend:
         finally:
             self._inflight -= 1
         return MeasuredCell(
-            sample_id=sample.id,
             sample_key=sample.key,
             query=sample.query,
             ground_truth=sample.ground_truth or "",
@@ -605,19 +621,19 @@ class _CutAfter:
     def __init__(self, n: int) -> None:
         self.n = n
 
-    def earliest_stop(self, results: list[Any], upcoming: list[Any]) -> int | None:
+    def earliest_stop(
+        self, results: Sequence[GradedCell], upcoming: Sequence[tuple[Sample, GradedCell | None]]
+    ) -> int | None:
         m = max(self.n, len(results) + 1)
         return m if m <= len(results) + len(upcoming) else None
 
-    def check(self, results: list[Any]) -> Any:
+    def check(self, results: Sequence[GradedCell]) -> StopSignal | None:
         if len(results) < self.n:
             return None
-        return StopSignal(self.name, ArmOutcome.ELIMINATED, {"queries_scored": len(results)})
+        return StopSignal(self.name, "eliminated", {"queries_scored": len(results)})
 
 
-def _row_scoring() -> Any:
-    scorer = Scorer(id="hit", per_cell=None, fitness=lambda _row: 1.0, objective=None)
-    return types.SimpleNamespace(scorer=scorer, require_scorer=lambda: scorer)
+_HIT = Scorer(id="hit", per_cell=None, fitness=lambda _row: 1.0, objective=None)
 
 
 def _searching(usd_per_query: float) -> Any:
@@ -625,49 +641,11 @@ def _searching(usd_per_query: float) -> Any:
     return pipeline_schema([PipelineNode(name="search", tunes_llm=False, spend_bound=bound)])
 
 
-def _walk_over(
-    dataset: list[Sample],
-    session: Any,
-    *,
-    checks: list[Any],
-    measured: Any = None,
-    slot: Any = None,
-    on_taken: Any = None,
-    cached: dict[int, Any] | None = None,
-    banked: dict[int, Any] | None = None,
-    rereads: list[int] | None = None,
-    keyed: str = "cell",
-) -> Any:
-    class _Recorder:
-        def scores(self, cells: Any) -> Any:
-            return INVALID_SCORES.model_copy(update={"accuracy": 1.0})
-
-        def take(self, cell: GradedCell) -> GradedCell:
-            if on_taken and not cell.facts.cached:
-                on_taken(cell)
-            return cell
-
-        def bank(self, cells: Any) -> None:
-            if banked is not None:
-                banked.update({cell.sample_id: cell.facts for cell in cells})
-
-        def close(self, cells: Any, scores: Any) -> None:
-            return None
-
-    ctx = query_loop.QueryLoopState(
-        search_point=JobSearchPoint(),
-        session=session,
-        cached_sample_results=dict(cached or {}),
-        slot=slot,
-        role="panel",
-        sample_index=None,
-        deprecated_samples={},
-        recorder=_Recorder(),
-        claim_cell=None,
-        cell_keys={s.id: f"{keyed}_{s.id}" for s in dataset},
-        rereads=frozenset(rereads or ()),
+def _filed(stores: Stores, sp: JobSearchPoint, session: Any) -> ReplayFeed:
+    entry = archive_entry(
+        sp, dataset_hash=session.bank.dataset_hash, pipeline_schema=session.pipeline_schema
     )
-    return query_loop.Walk(dataset, ctx, checks, measured_candidate_context(measured))
+    return ReplayFeed(stores.archive, entry.node_configs)
 
 
 def _control_pausing(pressed: Callable[[], bool], **bound: Any) -> RunControl:
@@ -676,6 +654,11 @@ def _control_pausing(pressed: Callable[[], bool], **bound: Any) -> RunControl:
             return pressed()
 
     return _Pressed(**bound)
+
+
+def _ended_on(walk: query_loop.Walk) -> WalkEnd | None:
+    assert walk.outcome is not None, "a walk the phase ran ended without an outcome"
+    return walk.outcome.ended_on
 
 
 async def _stopped_by_operator(phase: Any) -> str | None:
@@ -691,6 +674,7 @@ async def _stopped_by_operator(phase: Any) -> str | None:
 
 
 async def _walk(
+    stores: Stores,
     dataset: list[Sample],
     *,
     armed: int,
@@ -699,16 +683,15 @@ async def _walk(
     parent_lacks_cells: bool = False,
     backfill_pace: float = 0.01,
     pause_after_call: int | None = None,
-    cached: dict[int, Any] | None = None,
+    resumes: JobSearchPoint | None = None,
     stall: int | None = None,
     skip_at: int | None = None,
     cap_usd: float | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset))
-    priced: set[str] = set()
-    telemetry.bind_priced(priced)
-    banked: dict[int, Any] = {}
-    depths: list[int] = []
+    telemetry.bind_priced(set())
+    # An individual of its own, so a walk replays only the cells of the one it resumes.
+    sp = resumes or JobSearchPoint(pipeline_params={"search": {"walk": uuid.uuid4().hex}})
     committed: list[int] = []
     returned: list[int] = []
     book = spend_book(cap_usd)
@@ -728,71 +711,82 @@ async def _walk(
 
         def _commit() -> list[Any]:
             committed.append(sample.id)
-            return [_row_scoring().scorer.grade(call.result())]
+            return [_HIT.grade(call.result())]
 
         return call, _commit, call.cancel
 
     # A parent measured on none of the round's cells, so every cell owes it one catch-up call.
     priors = CatchUpPool(
-        PoBBCheck(pobb_knobs(), n_min=6, n_samples=len(dataset), ruler=None),
+        PoBBCheck(
+            pobb_knobs(), n_min=6, n_samples=len(dataset), ruler=None, parent=ArmKey("parent")
+        ),
         _backfill,
         "elimination",
     )
-    priors.admit("parent", [], JobSearchPoint())
+    priors.admit(ArmKey("parent"), [], JobSearchPoint())
 
-    def _started(*, sample_lookahead: int, **_record: Any) -> None:
-        depths.append(sample_lookahead)
-
-    with (
-        mock.patch.object(query_loop, "measure_sample", _measure),
-        mock.patch.object(query_loop, "emit_sample_started", _started),
-        spending_under(book),
-    ):
-        session = types.SimpleNamespace(
-            scoring=_row_scoring(),
-            state=types.SimpleNamespace(ledger=None),
-            control=_control_pausing(
-                lambda: pause_after_call is not None and len(returned) >= pause_after_call,
-                held_lookahead=armed,
-                book=book,
-            ),
-            backend_client=backend_client(max_cells_in_flight=max_cells),
-            # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
-            pipeline_schema=_searching(1.0),
-            flight=None,
-        )
-        walk = _walk_over(
-            dataset,
-            session,
-            checks=[_CutAfter(cut_at)] if cut_at else [],
-            slot=query_loop.ArmSlot(0, 1, "arm"),
-            cached=cached,
-            banked=banked,
-        )
-        walk.skip_at = skip_at
-        stopped = await _stopped_by_operator(
-            query_loop.run_walks(
-                [walk],
-                session,
-                keep_cut=False,
-                backfills=priors if parent_lacks_cells else None,
+    # The walk's own ledger: what each launch recorded of the look-ahead it was sent under.
+    started = CycleEventLog.open(CycleDir(stores.projects_root / "walks" / uuid.uuid4().hex))
+    bound = telemetry.set_cycle_ledger(started)
+    try:
+        with mock.patch.object(query_loop, "measure_sample", _measure), spending_under(book):
+            session = loop_session(
+                stores,
+                # One node the backend bounds at the cell's dollar, so the scheduler counts in them.
+                _searching(1.0),
+                dataset,
+                backend_id="walks",
+                scorer=_HIT,
+                control=_control_pausing(
+                    lambda: pause_after_call is not None and len(returned) >= pause_after_call,
+                    held_lookahead=armed,
+                    book=book,
+                ),
+                client=backend_client(max_cells_in_flight=max_cells),
             )
-        )
+            walk = open_walk(
+                sp,
+                dataset,
+                session,
+                label=MeasurementRole.PANEL,
+                checks=[_CutAfter(cut_at)] if cut_at else [],
+                measured=MeasuredPass(individual_id="arm"),
+                skip_at=skip_at,
+            )
+            stopped = await _stopped_by_operator(
+                query_loop.run_walks(
+                    {"arm": walk},
+                    session,
+                    keep_cut=False,
+                    backfills=priors if parent_lacks_cells else None,
+                )
+            )
+    finally:
+        telemetry.reset_cycle_ledger(bound)
+    depths = [r.sample_lookahead for _, r in started.iter() if isinstance(r, SampleStartedRecord)]
+    feed = _filed(stores, sp, session)
+    taken = {cell.key for cell in walk.results}
+    priced = scan_ledger_priced_keys([started.path])
     return {
-        "rows": list(walk.results),
-        "stop_reason": stopped or walk.outcome.ended_on,
+        "sp": sp,
+        # Each row's answer is its address in this walk's own archive: the record is the facts.
+        "rows": [cell.filed(dataclasses.replace(cell.facts, answer=None)) for cell in walk.results],
+        "stop_reason": stopped or _ended_on(walk),
         "calls": list(backend.calls),
         "entries": list(backend.entries),
         "committed": committed,
-        "banked": banked,
-        "priced": set(priced),
+        "banked": {s.id for s in dataset if s.key not in taken}
+        & set(replayable_on(dataset, feed.advance())),
+        "priced": {s.id for s in dataset if feed.cell_key(s.key) in priced},
         "returned": returned,
         "billed": book.usd_metered,
         "max_depth": max(depths) if depths else 0,
+        "ledger": started.path,
     }
 
 
 async def _round(
+    stores: Stores,
     dataset: list[Sample],
     *,
     armed: int,
@@ -801,44 +795,60 @@ async def _round(
     pause_after_call: int | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
-    events: list[tuple[str, int, int]] = []
     flag = {"pause": False}
+    ledger = CycleEventLog.open(CycleDir(stores.projects_root / "rounds" / uuid.uuid4().hex))
+
+    def absorbed() -> list[tuple[int, int]]:
+        return [
+            (int(r.individual_id[1:]), r.position)
+            for _, r in ledger.iter()
+            if isinstance(r, SampleScoredRecord)
+        ]
+
+    # Each call beside how many cells the round had absorbed when it went out.
+    asked: list[tuple[int, int, int]] = []
 
     async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
         call = len(backend.calls) + 1
-        events.append(("call", cast("MeasuredCandidate", measured_candidate()).idx, sample.id))
+        walk = int(cast("MeasuredPass", measured_pass()).individual_id[1:])
+        asked.append((walk, sample.id, len(absorbed())))
         row = await backend.measure(sample, session, pipeline_params=pipeline_params)
         if call == pause_after_call:
             flag["pause"] = True
         return row
 
-    def _taken(walk: int, cell: GradedCell) -> None:
-        events.append(("absorb", walk, cell.sample_id))
-
-    session = types.SimpleNamespace(
-        scoring=_row_scoring(),
-        state=types.SimpleNamespace(ledger=None),
+    session = loop_session(
+        stores,
+        pipeline_schema([]),
+        dataset,
+        scorer=_HIT,
         control=_control_pausing(lambda: flag["pause"], held_lookahead=armed),
-        backend_client=backend_client(max_cells_in_flight=armed, holds_own_sends=True),
-        flight=None,
+        client=backend_client(max_cells_in_flight=armed, holds_own_sends=True),
     )
     walks = [
-        _walk_over(
+        open_walk(
+            JobSearchPoint(),
             dataset,
             session,
+            label=MeasurementRole.PANEL,
             checks=[_CutAfter(cut)] if cut else [],
-            measured=MeasuredCandidate(idx=w, candidate_id=f"c{w}", label=f"C1.{w + 1}"),
-            on_taken=functools.partial(_taken, w),
+            measured=MeasuredPass(individual_id=f"c{w}"),
         )
         for w, cut in enumerate(cuts)
     ]
-    with mock.patch.object(query_loop, "measure_sample", _measure):
-        stopped = await _stopped_by_operator(query_loop.run_walks(walks, session, keep_cut=False))
+    bound = telemetry.set_cycle_ledger(ledger)
+    try:
+        with mock.patch.object(query_loop, "measure_sample", _measure):
+            stopped = await _stopped_by_operator(
+                query_loop.run_walks(dict(enumerate(walks)), session, keep_cut=False)
+            )
+    finally:
+        telemetry.reset_cycle_ledger(bound)
     return {
         "rows": [list(walk.results) for walk in walks],
-        "stops": [stopped or walk.outcome.ended_on for walk in walks],
-        "absorbed": [(w, sid) for kind, w, sid in events if kind == "absorb"],
-        "events": events,
+        "stops": [stopped or _ended_on(walk) for walk in walks],
+        "absorbed": absorbed(),
+        "asked": asked,
         "calls": list(backend.calls),
         "peak": max(backend.entries),
     }
@@ -846,7 +856,11 @@ async def _round(
 
 @on_jumping_clock
 async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resume(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, run_bound: None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    built_stores: Stores,
+    run_bound: None,
+    offline: Router,
 ) -> None:
     # An identity rebuilt from the tenant alone carries no issuer, and no issuer IS the operator.
     signup = IdentityContext(
@@ -862,39 +876,52 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         projects_root=built_stores.projects_root,
         install_datasets_root=built_stores.install_datasets_root,
     )
-    held = HeldLimits(
-        halt_at_accuracy=0.9,
-        ceiling=SpendCeilings(0.25, 40_000),
-        operator=SpendCeilings(0.25, None),
-        reserve=SpendCeilings(0.5, 80_000),
+    spawned = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    held = _held(
+        spawned,
+        Budget(usd=0.25, tokens=40_000, rounds=None, wall_clock_s=900.0),
+        reserve=Budget(usd=0.5, tokens=80_000),
+        # The operator named the USD axis and LIFTED the rounds cap: a lift stands as a lift.
+        standing=Budget(usd=0.25, rounds=None),
         step_rounds=2,
     )
+    assert held.standing == Budget(usd=0.25, rounds=None), (
+        "the standing budget holds another axis than the operator named, or a lift as a bound"
+    )
+    # Equality is over the axes NAMED: a lift is no bound, and an omitted axis no lift.
+    for one, other, same in (
+        (Budget(usd=1.0), Budget(usd=1.0), True),
+        (Budget(usd=None), Budget(), False),
+        (Budget(usd=1.0, tokens=None), Budget(usd=1.0), False),
+        (Budget(usd=1.0), Budget(usd=2.0), False),
+    ):
+        assert (one == other) is same and (hash(one) == hash(other)) is same, (
+            f"{one!r} and {other!r} read {'apart' if same else 'as one'}: equality saw another "
+            "set of axes than the ones each names"
+        )
+    assert Budget(usd=1.0).only(MONEY_AXES).named == {"usd"}, "only() named an axis self did not"
     hop = CycleHop(campaign_id="ds__000001", cycle_id="cycle_root")
     mode = RunMode(from_round=2, diag=True)
     launched = HeldRun(
-        job_registry=JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1),
-        job_id="job-a",
-        session=types.SimpleNamespace(store=stores, hop=hop),
-        campaign_config=None,
-        limits=held,
+        job_registry=spawned,
+        job_id=held.job_id,
+        session=loop_session(stores, pipeline_schema([]), [], hop=hop),
+        campaign_config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
+        budget=held,
     )
     spec = JobSpec.model_validate_json(launched.job_spec(mode).model_dump_json())
     assert (spec.identity, spec.hop, spec.mode) == (signup, hop, mode), (
         "a run in its own process spent as another account, cycle or mode than launched it"
     )
-    assert spec.limits == held, (
-        "the round allowance crosses with the limits: dropped, a step runs to the campaign's end"
+    assert spec.budget == held, (
+        "the round allowance crosses with the budget: dropped, a step runs to the campaign's end"
     )
-    book = _arm_spend_book(
-        _observing(),
-        None,
-        declared=spec.limits.ceiling,
-        meters="bill",
-        reserve=spec.limits.reserve,
-    )
-    assert (book.ceiling, book.reserve) == (held.ceiling, held.reserve), (
-        "the book the spawned run armed is not the ceiling its launch held"
-    )
+    book = _armed(stores, None, spec.budget, spawned)
+    assert (book.budget, book.allotment, book.reserve) == (
+        held.admitted.only(CYCLE_AXES),
+        Budget(usd=0.25, tokens=40_000),
+        Budget(usd=0.5, tokens=80_000),
+    ), "the book the spawned run armed is not the budget its launch held"
     rebuilt = build_stores(
         spec.identity,
         projects_root=spec.projects_root,
@@ -908,15 +935,15 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
 
     # The look-ahead changes the bill and never the record.
     dataset = [Sample(id=i, query=f"q{i}", ground_truth=str(i % 2)) for i in range(1, 9)]
-    d1 = await _walk(dataset, armed=1, cut_at=None)
-    d2 = await _walk(dataset, armed=2, cut_at=None)
+    d1 = await _walk(built_stores, dataset, armed=1, cut_at=None)
+    d2 = await _walk(built_stores, dataset, armed=2, cut_at=None)
     assert (d1["max_depth"], d2["max_depth"]) == (1, 2), (
         "arming did not open the window — the rest proves nothing"
     )
     assert d1["rows"] == d2["rows"] and d1["calls"] == d2["calls"], "a window moved the record"
-    assert [r.sample_id for r in d2["rows"]] == [s.id for s in dataset], "a window reordered rows"
-    c1 = await _walk(dataset, armed=1, cut_at=4)
-    c2 = await _walk(dataset, armed=2, cut_at=4)
+    assert [r.key for r in d2["rows"]] == [s.key for s in dataset], "a window reordered rows"
+    c1 = await _walk(built_stores, dataset, armed=1, cut_at=4)
+    c2 = await _walk(built_stores, dataset, armed=2, cut_at=4)
     assert c2["max_depth"] == 2, "window never opened on the cut walk"
     assert c1["stop_reason"] == c2["stop_reason"] == "stop_rule", "a window moved the cut"
     assert c1["rows"] == c2["rows"], "a window moved what a cut walk recorded"
@@ -924,9 +951,9 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     # AT MOST one extra call: equality would pin a scheduling accident, two an overgrown window.
     assert 0 <= len(c2["calls"]) - len(c1["calls"]) <= 1, "a window bought more than one call"
     for cells in (1, 2):
-        wide = await _walk(dataset, armed=4, cut_at=None, max_cells=cells)
+        wide = await _walk(built_stores, dataset, armed=4, cut_at=None, max_cells=cells)
         assert wide["max_depth"] == cells, "the window outgrew the cells its backend holds"
-    deep = await _walk(dataset, armed=8, cut_at=4, max_cells=8)
+    deep = await _walk(built_stores, dataset, armed=8, cut_at=4, max_cells=8)
     assert deep["stop_reason"] == "stop_rule" and deep["rows"] == c1["rows"], (
         "a deep window moved the cut walk's record"
     )
@@ -938,11 +965,19 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         "a discarded remote call still bills: the provider charges whether or not anyone waits"
     )
     # A catch-up holds a slot like a cell, and is archived only for a cell the walk absorbed.
-    lone = await _walk(dataset, armed=1, cut_at=4, parent_lacks_cells=True)
-    wide = await _walk(dataset, armed=3, cut_at=4, max_cells=3, parent_lacks_cells=True)
+    lone = await _walk(built_stores, dataset, armed=1, cut_at=4, parent_lacks_cells=True)
+    wide = await _walk(
+        built_stores, dataset, armed=3, cut_at=4, max_cells=3, parent_lacks_cells=True
+    )
     # Catch-up far faster than a cell, so the one started past the cut is back before the cut.
     quick = await _walk(
-        dataset, armed=8, cut_at=4, max_cells=8, parent_lacks_cells=True, backfill_pace=0.0001
+        built_stores,
+        dataset,
+        armed=8,
+        cut_at=4,
+        max_cells=8,
+        parent_lacks_cells=True,
+        backfill_pace=0.0001,
     )
     assert max(lone["entries"]) == 1 and max(wide["entries"]) <= 3, (
         "a catch-up ran past the slots a cell would hold"
@@ -953,8 +988,8 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     )
     assert lone["rows"] == wide["rows"] == quick["rows"] == c1["rows"], "a catch-up moved a record"
     # A round's walks measure AT ONCE and decide IN TURN; the depth bounds the ROUND, not each walk.
-    serial = await _round(dataset, armed=1, cuts=[4, None, 6])
-    fanned = await _round(dataset, armed=4, cuts=[4, None, 6])
+    serial = await _round(built_stores, dataset, armed=1, cuts=[4, None, 6])
+    fanned = await _round(built_stores, dataset, armed=4, cuts=[4, None, 6])
     assert serial["peak"] == 1 and fanned["peak"] <= 4, "the depth did not bound the round"
     assert fanned["rows"] == serial["rows"], "measuring walks at once moved a record"
     assert fanned["stops"] == serial["stops"] == ["stop_rule", None, "stop_rule"], (
@@ -962,18 +997,18 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     )
     assert fanned["absorbed"] == serial["absorbed"], "walks decided out of turn"
     # First cells fastest: the second walk's calls go out while the first still has cells to take.
-    ahead = await _round(dataset, armed=4, cuts=[None, None], slowest_last=True)
+    ahead = await _round(built_stores, dataset, armed=4, cuts=[None, None], slowest_last=True)
     assert ahead["absorbed"] == [(w, s.id) for w in (0, 1) for s in dataset], (
         "a later candidate's cell was absorbed before an earlier one's"
     )
-    last_of_first = max(i for i, e in enumerate(ahead["events"]) if e[:2] == ("absorb", 0))
-    assert any(e[:2] == ("call", 1) for e in ahead["events"][:last_of_first]), (
+    last_of_first = max(i for i, (w, _) in enumerate(ahead["absorbed"]) if w == 0)
+    assert any(w == 1 and before <= last_of_first for w, _, before in ahead["asked"]), (
         "no later candidate measured ahead — the identity check below proves nothing"
     )
     for w in (0, 1):
-        calls = sorted(sid for kind, who, sid in ahead["events"] if kind == "call" and who == w)
+        calls = sorted(sid for who, sid, _ in ahead["asked"] if who == w)
         assert calls == [s.id for s in dataset], f"walk {w}'s calls ran under another identity"
-    paused = await _round(dataset, armed=1, cuts=[None], pause_after_call=3)
+    paused = await _round(built_stores, dataset, armed=1, cuts=[None], pause_after_call=3)
     assert paused["stops"] == ["graceful"], "a pause read as another stop"
     assert len(paused["rows"][0]) == len(paused["calls"]) == 3, (
         "the call that returned as the pause was pressed is absorbed, not paid again on resume"
@@ -981,6 +1016,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     # A pause starts nothing: an unstarted catch-up stays so, one already out launches no cell.
     for armed_, pace, after, taken in ((1, 0.01, 2, 2), (2, 0.02, 1, 1)):
         owing = await _walk(
+            built_stores,
             dataset,
             armed=armed_,
             cut_at=None,
@@ -995,43 +1031,74 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         )
     head = dataset[0].id
     stopped = await _walk(
-        dataset, armed=4, max_cells=4, cut_at=None, pause_after_call=3, stall=head
+        built_stores, dataset, armed=4, max_cells=4, cut_at=None, pause_after_call=3, stall=head
     )
     assert stopped["rows"] == [] and set(stopped["banked"]) == set(stopped["returned"]), (
         "what came back behind a head still out was not banked"
     )
-    assert stopped["priced"] == {f"cell_{sid}" for sid in stopped["banked"]}, (
+    assert stopped["priced"] == stopped["banked"], (
         "a banked cell's price was not recorded against its key"
     )
-    resumed = await _walk(dataset, armed=4, max_cells=4, cut_at=None, cached=stopped["banked"])
+    resumed = await _walk(
+        built_stores, dataset, armed=4, max_cells=4, cut_at=None, resumes=stopped["sp"]
+    )
     assert not set(resumed["calls"]) & set(stopped["banked"]), "a banked cell was paid again"
-    assert [r.sample_id for r in resumed["rows"]] == [s.id for s in dataset], (
+    assert [r.key for r in resumed["rows"]] == [s.key for s in dataset], (
         "the resumed walk did not replay what it banked"
     )
-    capped = await _walk(dataset, armed=4, max_cells=4, cut_at=2, pause_after_call=2, stall=head)
+    capped = await _walk(
+        built_stores, dataset, armed=4, max_cells=4, cut_at=2, pause_after_call=2, stall=head
+    )
     assert set(capped["banked"]) == {head, dataset[1].id}, (
         "a cell past where a rule could cut was banked: the serial walk would not have measured it"
     )
-    ceiling = await _walk(dataset, armed=4, max_cells=4, cut_at=None, cap_usd=5.0)
+    ceiling = await _walk(built_stores, dataset, armed=4, max_cells=4, cut_at=None, cap_usd=5.0)
     assert (ceiling["stop_reason"], ceiling["billed"]) == ("spend_budget", 5.0), (
         "a spend ceiling binds BEFORE a call: every cell out is counted at its bound"
     )
     # A skip made before a stop outlives it: the LAST decision on record per candidate replays.
     skips = CycleEventLog(tmp_path / "skips.jsonl")
-    for cid, n, reason in (
+    superseding: tuple[tuple[str, int, CutKind | None], ...] = (
         ("a", 3, "skipped"),
         ("b", 2, "skipped"),
-        ("b", 8, "measured"),
+        ("b", 8, None),
         ("c", 4, "skipped"),
-    ):
-        scores = scored_candidate(cid, scored_samples=n, outcome=reason)
-        skips.append(
-            CandidateScoredRecord(round=2, candidate_idx=0, candidate_total=3, scores=scores)
-        )
-    assert _skips_on_record(skips, 2) == {"a": 3, "c": 4}, "a superseded skip replayed"
-    replayed = await _walk(dataset, armed=4, max_cells=4, cut_at=None, skip_at=3)
+    )
+    with telemetry.at_round(2):
+        for cid, n, cut in superseding:
+            arm_walk(
+                skips,
+                [(n, (f"k{n}", "a", False))],
+                rnd=2,
+                individual=cid,
+                role=MeasurementRole.PANEL,
+                running=score_summary(walked=n),
+            )
+            RunCallbacks(skips).on_arm(2, ArmKey(cid), arm_state(cid, cut=cut))
+
+    def standing_skips() -> dict[tuple[int, ArmKey], int]:
+        return scan_standing_rounds([LedgerSpan(skips.path)]).skipped
+
+    assert standing_skips() == {(2, "a"): 3, (2, "c"): 4}, "a superseded skip replayed"
+    RunCallbacks(skips).on_round_entered(2)
+    assert standing_skips() == {(2, "a"): 3, (2, "c"): 4}, "a resume re-entering lost a skip"
+    skips.append(RoundEnteredRecord(round=2, rewound=True))
+    assert standing_skips() == {}, "a regenerated round inherited a displaced skip"
+    replayed = await _walk(built_stores, dataset, armed=4, max_cells=4, cut_at=None, skip_at=3)
     assert replayed["stop_reason"] == "skip" and len(replayed["rows"]) == 3, "a skip did not hold"
     assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]], "a skipped cell was paid"
+    # A second resume replays the skipped walk: its depth is what the replay records, never zero.
+    again = await _walk(
+        built_stores, dataset, armed=4, max_cells=4, cut_at=None, skip_at=3, resumes=replayed["sp"]
+    )
+    depth = [
+        r.running.walked
+        for _, r in CycleEventLog(again["ledger"]).iter()
+        if isinstance(r, SampleScoredRecord) and r.running is not None
+    ]
+    assert not again["calls"] and depth[-1:] == [3], (
+        "a replayed skip recorded no depth, so the next resume skips at zero cells"
+    )
 
     # A cell's envelope cancels the inner campaign it spawned, so nothing spends past it.
     monkeypatch.setattr(heartbeat, "HEARTBEAT_INTERVAL_S", 0.01)
@@ -1053,7 +1120,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     inner = tmp_path / "inner"
     inner.mkdir()
     # Through the real validator: the run resolves its panel ONCE and carries it.
-    seat = {"kind": "seat", "id": "justlogic-d234/seed-0", "inner_dataset_seed": 0}
+    seat: dict[str, JsonValue] = {"kind": "seat", "id": "justlogic-d234/seed-0", "run_seed": 0}
     panel = parse_panel(
         {
             "inner_benchmark": "justlogic/d234",
@@ -1073,14 +1140,9 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
             spawn_campaign_id="ppself__aaaaaa",
             spawn_cycle_id="cycle_deadbeef0000",
             enclosing=(),
-            # No inner dataset read: the stubbed inner run never opens one.
-            cells=InnerCells(
-                cells=tuple(panel.tasks),
-                by_dataset={
-                    "justlogic/d234": InnerCell({}, None, resolve_optimizer("potter", {}), "o")
-                },
-                specs={s.id: panel._seat_spec("o", s) for s in panel.tasks},
-            ),
+            cells=panel.resolve_cells(build_stores(default_identity(), projects_root=inner)),
+            purpose=Optimize(),
+            ruler_version=0,
         )
     )
     token = telemetry.set_cycle_ledger(CycleEventLog(inner / "outer.jsonl"))
@@ -1099,35 +1161,30 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert cancelled.is_set(), "the inner campaign outlived its envelope and kept spending"
 
     # A resumed arm re-reads its cells unbilled, and its bench pass still runs past the ceiling.
-    class _Provider:
-        async def chat(self, *_a: Any, **_kw: Any) -> LLMResponse:
-            return LLMResponse(content="ok", model="m", cost_usd=0.01)
-
-    monkeypatch.setattr(call_mod, "get_llm_client", lambda _p: _Provider())
-    monkeypatch.setattr(judge_call, "get_llm_client", lambda _p: _Provider())
+    billed_cent = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.01}
+    offline.llm.says = lambda body: completion("ok", model=body["model"], usage=billed_cent)
     loop_reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")
     judge_reuse = LLMReuseCache(tmp_path / "reuse", "judge_reuse")
 
     async def round_calls() -> None:
         await call_mod.llm_call(
             [{"role": "user", "content": "q"}],
-            config={"provider": "p", "model": "m"},
+            config={"provider": "openai", "model": "m"},
             context=call_mod.LLMCallContext(cache=loop_reuse),
         )
         with judge_call.bind_cache(judge_reuse):
-            await judge_call.ask(JudgeStage(model="m", provider="p"), "grade", judge="j")
+            await judge_call.ask(JudgeStage(model="m", provider="openai"), "grade", judge="j")
 
     # Another campaign's run banks both replies; this arm only ever replays them.
     telemetry.bind_priced(set())
-    other = telemetry.set_cycle_ledger(CycleEventLog(tmp_path / "other.jsonl"))
-    await round_calls()
-    telemetry.reset_cycle_ledger(other)
+    with _billing_on(CycleEventLog(tmp_path / "other.jsonl"), unbounded_spend_book()):
+        await round_calls()
 
     reread = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(4)]
     step = {"solve": StepUsage(input=10, output=5, cost_usd=0.01)}
     banked = {
         s.id: MeasuredCell(
-            sample_id=s.id,
+            sample_key=s.key,
             query=s.query,
             ground_truth="a",
             predicted="a",
@@ -1136,30 +1193,43 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         for s in reread
     }
     # The ceiling already spent: no cell fits, and the control reads it as reached.
-    arm = spend_book(0.02, meters="search_incurred", usd_metered=0.02)
+    arm = spend_book(0.02, meters="search_incurred", metered=Budget.amount(0.02, 0))
     ledger = CycleEventLog.open(CycleDir(tmp_path / "cycle"))
     ledger.bind(arm)
-    session = types.SimpleNamespace(
-        scoring=_row_scoring(),
-        state=types.SimpleNamespace(ledger=None),
+    session = loop_session(
+        built_stores,
+        _searching(0.01),
+        reread,
+        backend_id="reread",
+        scorer=_HIT,
         control=RunControl(book=arm),
-        backend_client=backend_client(max_cells_in_flight=1),
-        pipeline_schema=_searching(0.01),
-        flight=None,
+        client=backend_client(max_cells_in_flight=1),
     )
-    taken = [s.id for s in reread[:3]]
-    walk = _walk_over(reread, session, checks=[], cached=banked, rereads=taken)
-    bench = _walk_over(reread, session, checks=[], cached=banked, keyed="bench")
+    # The arm's individual and the one the bench grades, every cell of each already filed.
+    picked, graded = (JobSearchPoint(pipeline_params={"search": {"sp": n}}) for n in "pg")
+    for sp in (picked, graded):
+        built_stores.archive.file_answers(
+            archive_entry(
+                sp, dataset_hash=session.bank.dataset_hash, pipeline_schema=session.pipeline_schema
+            ),
+            ((cell, REUSABLE_MIN_GRADE) for cell in banked.values()),
+            role=MeasurementRole.PANEL,
+            source=RunSource.OPTIMIZATION_LOOP,
+            created_at="2026-01-01T00:00:00Z",
+        )
+    feed = _filed(built_stores, picked, session)
     token = telemetry.set_cycle_ledger(ledger)
     try:
         # The stopped launch priced the cells it took.
-        telemetry.bind_priced({f"cell_{sid}" for sid in taken})
+        telemetry.bind_priced({feed.cell_key(s.key) for s in reread[:3]})
         with spending_under(arm):
+            walk = open_walk(picked, reread, session, label=MeasurementRole.PANEL, measured=None)
             halted = await _stopped_by_operator(
-                query_loop.run_walks([walk], session, keep_cut=False)
+                query_loop.run_walks({"arm": walk}, session, keep_cut=False)
             )
-            with telemetry.filed_as("bench"):
-                await query_loop.run_walks([bench], session, keep_cut=False)
+            bench = await score_search_point(
+                graded, reread, session, label=MeasurementRole.BENCH, measured=None
+            )
             # The stopped launch made the round's calls; the resumed one learns them off the ledger.
             telemetry.bind_priced(set())
             await round_calls()
@@ -1167,16 +1237,20 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
             await round_calls()
     finally:
         telemetry.reset_cycle_ledger(token)
-    assert [c.sample_id for c in walk.results] == taken, "the ceiling held back a re-read"
+    assert [c.key for c in walk.results] == [s.key for s in reread[:3]], (
+        "the ceiling held back a re-read"
+    )
     assert halted == "spend_budget", "a spent ceiling did not stop the arm"
-    assert len(bench.results) == len(reread), "the search's ceiling stopped the bench pass"
+    assert len(bench.cells) == len(reread), "the search's ceiling stopped the bench pass"
     kinds = [r.kind for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
     assert kinds == ["bench"] * len(reread) + ["optimizer", "judge"], (
         f"a re-read was metered a second time: {kinds}"
     )
     assert arm.usd_metered == pytest.approx(0.04), "the arm's book read another bill than metered"
     priced = scan_ledger_priced_keys([ledger.path])
-    assert {f"bench_{s.id}" for s in reread} <= priced and len(priced) == len(reread) + 2, (
+    benched = _filed(built_stores, graded, session)
+    benched_keys = {benched.cell_key(s.key) for s in reread}
+    assert benched_keys <= priced and len(priced) == len(reread) + 2, (
         "the ledger names another set of priced calls than the arm paid for"
     )
 
@@ -1268,61 +1342,55 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     )
 
 
-# 3. Ceilings
+# 3. A campaign's ceiling
 
 
-def _priced_wire(monkeypatch: pytest.MonkeyPatch) -> types.SimpleNamespace:
-    async def no_wait(*_: Any) -> None:
-        return None
+async def _no_wait(*_: Any) -> None:
+    return None
 
-    monkeypatch.setattr(base, "held_wait", no_wait)
-    monkeypatch.setattr(backend_mod, "held_wait", no_wait)
+
+@dataclasses.dataclass
+class _Provider:
+    """What the world's provider does as the journey flips it: an unpriced reply, at a random
+    lag, sometimes timed out, hung, cut by a TLS fault once, unbilled, or down."""
+
+    rng: random.Random = dataclasses.field(default_factory=lambda: random.Random(7))
+    flaky: bool = False
+    hang: bool = False
+    broken_once: bool = False
+    unbilled: bool = False
+    down: bool = False
+
+    async def __call__(self, body: dict[str, Any]) -> Said:
+        if self.down:
+            return httpx.Response(500, json={"error": "down"})
+        if self.broken_once:
+            self.broken_once = False
+            raise ssl.SSLError("bad record mac")
+        await asyncio.sleep(self.rng.random() * 0.02)
+        if self.flaky and self.rng.random() < 0.2:
+            raise httpx.ReadTimeout("late")
+        if self.hang:
+            await asyncio.Event().wait()
+        prompt = self.rng.randint(1, len(body["messages"][0]["content"]))
+        said = self.rng.randint(0, body["max_tokens"])
+        usage = {"prompt_tokens": prompt, "completion_tokens": said, "total_tokens": prompt + said}
+        return completion("ok", model="gpt-x", usage=None if self.unbilled else usage)
+
+
+def _priced_wire(monkeypatch: pytest.MonkeyPatch, offline: Router) -> _Provider:
     rates = RateTable({("openai", "gpt-x"): Rate(1e-6, 2e-6)})
     monkeypatch.setattr(pricing, "load_rates", lambda: rates)
-    rng = random.Random(7)
-    request = httpx.Request("POST", "https://x")
-    flaky, hang = [False], [False]
-
-    async def create(**params: Any) -> Any:
-        await asyncio.sleep(rng.random() * 0.02)
-        if flaky[0] and rng.random() < 0.2:
-            raise openai.APITimeoutError(request=request)
-        if hang[0]:
-            await asyncio.Event().wait()
-        prompt = rng.randint(1, len(params["messages"][0]["content"]))
-        completion = rng.randint(0, params["max_tokens"])
-        usage = {
-            "prompt_tokens": prompt,
-            "completion_tokens": completion,
-            "total_tokens": prompt + completion,
-        }
-        reply = _reply("gpt-x", "ok", usage)
-        return types.SimpleNamespace(headers={}, parse=lambda: reply)
-
-    client = OpenAICompatibleClient(api_key="k", provider="openai", spec=ProviderSpec("OpenAI", ""))
-    raw = types.SimpleNamespace(create=create)
-    client._client = types.SimpleNamespace(  # type: ignore[assignment]
-        chat=types.SimpleNamespace(completions=types.SimpleNamespace(with_raw_response=raw))
-    )
-    return types.SimpleNamespace(
-        client=client,
-        raw=raw,
-        create=create,
-        flaky=flaky,
-        hang=hang,
-        rng=rng,
-        request=request,
-        no_wait=no_wait,
-    )
+    offline.llm.says = provider = _Provider()
+    return provider
 
 
-async def _owned_chat(
-    client: Any, node: str, content: str = "x", *, kind: Any = "optimizer", max_tokens: int = 10
-) -> Any:
+async def _owned_chat(node: str, content: str = "x", *, max_tokens: int = 10) -> Any:
+    """One optimizer send through the registry's client, owned as an entry owns it."""
     with under_budget(SendBudget(None, attempts=SEND_ATTEMPTS)):
-        return await client.chat(
+        return await get_llm_client("openai").chat(
             ChatRequest([{"role": "user", "content": content}], "gpt-x", max_tokens=max_tokens),
-            label=CallLabel(node, kind),
+            label=CallLabel(node, "optimizer"),
         )
 
 
@@ -1340,122 +1408,438 @@ def _token_bills(ledger: CycleEventLog) -> list[TokenUsageRecord]:
     return [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
 
 
-def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceiling(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, run_bound: None
+def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
 ) -> None:
-    """A record of spend is only ever a BILL: an unreported send binds from its open hold."""
     # The declared ceiling lives on the ledger alone, so a launch's flag sweep cannot take it.
-    campaigns = CampaignStore(WorkspaceDir(tmp_path / "ws"))
+    monkeypatch.setattr(
+        "promptpotter.application.jobs.registry.default_jobs_dir", lambda: tmp_path / "jobs"
+    )
+    campaigns = built_stores.campaigns
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
     campaigns.mint_cycle(hop)
     cycle_dir = campaigns.cycle_dir(hop)
+    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    declared = _held(jobs, Budget())
 
-    def declare(ceiling: SpendCeilings, rounds: RoundsCap | None = None) -> None:
-        campaigns.write_run_limits(
-            hop, ceiling, rounds=rounds, pause_at_round=None, reserve=SpendCeilings()
-        )
+    def declare(budget: Budget) -> None:
+        # Money binds on the cycle's share, held on its job; the rest on its own axes: both live.
+        campaigns.write_standing_budget(hop, budget.only(CYCLE_AXES), pause_at_round=None)
+        jobs.set_held(declared.job_id, Budget(), budget.only(MONEY_AXES))
 
-    spent = TokenUsageRecord(
-        kind="optimizer", node="l1_generate", input_tokens=9_000, output_tokens=0, cost_usd=1.0
-    )
-    control = RunControl(
-        book=_arm_spend_book(
-            _observing(spent),
-            cycle_dir,
-            declared=SpendCeilings(),
-            meters="bill",
-            reserve=SpendCeilings(),
+    CycleEventLog.open(CycleDir(cycle_dir)).append(
+        TokenUsageRecord(
+            kind="optimizer", node="l1_generate", input_tokens=9_000, output_tokens=0, cost_usd=1.0
         )
     )
+    control = RunControl(book=_armed(built_stores, hop, declared, jobs))
     assert control.budget_tripped() is None, (
         "a run that declared NOTHING still holds a book, which stays silent until a ceiling exists"
     )
-    declare(SpendCeilings(0.50, None))
+    declare(Budget(usd=0.50))
     assert control.budget_tripped() == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no book"
     CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
     assert control.budget_tripped() == StopReason.SPEND_BUDGET, "a launch swept the ceiling"
-    declare(SpendCeilings(None, 5_000))
+    declare(Budget(tokens=5_000))
     assert control.budget_tripped() == StopReason.TOKEN_BUDGET, "a token ceiling bound nothing"
-    session = types.SimpleNamespace(
-        state=types.SimpleNamespace(cycle_id="cyc"),
-        hop=hop,
-        store=types.SimpleNamespace(campaigns=campaigns),
+    session = loop_session(built_stores, pipeline_schema([]), [], hop=hop)
+    config = _budgeted(Budget(usd=0.025, rounds=50))
+    declare(Budget(rounds=3))
+    bounded, pause_at = round_bounds(session, config)
+    assert (bounded.optimization.budget.rounds, pause_at) == (3, None), (
+        "a mid-run round cap reached no loop"
     )
-    config = CampaignConfig.model_validate(
-        {"optimization": {"degradation_threshold": 0.05, "max_rounds": 50}}
-    )
-    declare(SpendCeilings(), RoundsCap(max_rounds=3))
-    assert _round_bounds(session, config) == (3, None), "a mid-run round cap reached no loop"
     assert control.budget_tripped() is None, "a lifted ceiling still governed the run"
-    # Another PROCESS's ceiling lands as bytes no append in this one handed over, behind its own.
-    append_line(
-        CycleLayout(cycle_dir).ledger,
-        RECORD_ADAPTER.dump_json(RunLimitsRecord(ceiling=SpendCeilings(0.50, None))),
+    # Another PROCESS's reshare lands on the job file, behind this process's own write of it.
+    JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1).set_held(
+        declared.job_id, Budget(), Budget(usd=0.50)
     )
     assert control.budget_tripped() == StopReason.SPEND_BUDGET, (
-        "a ceiling another process appended was hidden behind this process's own appends"
+        "a share another process moved was hidden from the running book"
     )
-    declare(SpendCeilings(), RoundsCap(max_rounds=None))
-    assert _round_bounds(session, config) == (None, None), (
+    declare(Budget(rounds=None))
+    bounded, _ = round_bounds(session, config)
+    assert bounded.optimization.budget.rounds is None, (
         "a LIFT of the round cap reads as no cap, never a fall back to the config's"
     )
 
     # Moving one ceiling leaves the other at its launch cap.
     moved = CycleHop(campaign_id="camp-4", cycle_id="cycle_budget0001")
-    registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    built_stores.campaigns.create_campaign(minted_campaign(moved))
+    built_stores.campaigns.mint_cycle(moved)
+    CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(moved))).append(
+        TokenUsageRecord(
+            kind="optimizer",
+            node="l1_generate",
+            input_tokens=210_000,
+            output_tokens=0,
+            cost_usd=0.10,
+        )
+    )
+    registry = JobRegistry(tmp_path / "jobs-4", capacity=lambda _live: 1)
     job = registry.request_slot(
-        user_id="default", principal_id="default", holder=CampaignLaunch("ds1"), hop=moved
+        user_id="default",
+        principal_id="default",
+        workspace=built_stores.campaigns.workspace,
+        holder=CampaignLaunch("ds1"),
+        hop=moved,
     )
-    registry.mark_admitted(job.job_id, SpendCeilings(0.30, 5_000_000))
-    at_tokens = TokenUsageRecord(
-        kind="optimizer", node="l1_generate", input_tokens=210_000, output_tokens=0, cost_usd=0.10
+    registry.mark_admitted(
+        job.job_id, Budget(usd=0.30, tokens=5_000_000), Budget(usd=0.30, tokens=210_000)
     )
-    control = RunControl(
-        book=_arm_spend_book(
-            _observing(at_tokens),
-            built_stores.campaigns.cycle_dir(moved),
-            declared=SpendCeilings(0.30, 210_000),
-            meters="bill",
-            reserve=SpendCeilings(),
-        )
+    caps = HeldBudget(
+        admitted=Budget(usd=0.30, tokens=210_000),
+        standing=Budget(),
+        job_id=job.job_id,
+        step_rounds=None,
     )
+    moved_book = _armed(built_stores, moved, caps, registry)
+    control = RunControl(book=moved_book)
     assert control.budget_tripped() == StopReason.TOKEN_BUDGET, "the token ceiling bound nothing"
-    asyncio.run(
-        _apply_change_run_limits(
-            CommandDispatcher(built_stores, registry), moved, SpendCeilings(0.50, None), None
-        )
-    )
+    dispatcher = CommandDispatcher(built_stores, registry)
+    _change_run_limits(dispatcher, moved, Budget(usd=0.50))
     assert control.budget_tripped() == StopReason.TOKEN_BUDGET, (
         "a USD raise lifted the token ceiling"
     )
+    assert moved_book.allotment.usd == pytest.approx(0.50), (
+        "$0.50 ceiling, $0.10 of it this cycle's own: the running book binds another share"
+    )
+    _change_run_limits(dispatcher, moved, Budget(usd=None))
+    assert moved_book.allotment.usd is None, "a lifted ceiling still bounds the running share"
 
-    # An offshoot is capped at what its parent has left; a cap the fork's seed names is the operator's.
-    parent = SpendCeilings(2.0, 9_000)
-    left = ForkRemainder.of(rounds_closed=3, max_rounds=5, metered_usd=0.75, ceiling=parent)
+    # An offshoot takes the rounds its parent has left; a cap the fork's seed names is the operator's.
+    left = ForkRemainder.of(rounds_closed=3, rounds=5)
     for overrides, expected in (
-        (ConfigOverrides(), (2, SpendCeilings(1.25, None))),
+        (ConfigOverrides(), Budget(rounds=2)),
         (
-            ConfigOverrides(max_rounds=9, ceiling=SpendCeilings(0.0, 500)),
-            (9, SpendCeilings(0.0, 500)),
+            ConfigOverrides(budget=Budget(rounds=9, wall_clock_s=60.0)),
+            Budget(rounds=9, wall_clock_s=60.0),
         ),
+        (ConfigOverrides(budget=Budget(rounds=None)), Budget(rounds=None)),
     ):
-        under = left.under(overrides)
-        assert (under.max_rounds, under.ceiling) == expected, (
-            f"{overrides}: an offshoot ran past what its parent left, or over its operator's cap"
+        assert left.under(overrides).budget == expected, (
+            f"{overrides}: an offshoot ran past the rounds its parent left, or over its operator's"
         )
-    for remainder, expected_left in (
-        (
-            ForkRemainder.of(rounds_closed=7, max_rounds=5, metered_usd=3.0, ceiling=parent),
-            (1, 0.0),
-        ),
-        (
-            ForkRemainder.of(rounds_closed=1, max_rounds=None, metered_usd=None, ceiling=parent),
-            (None, None),
-        ),
+    # A fork's money is its campaign's share (below), so no entry point's seed may name its own.
+    for money in (Budget(usd=1.0), Budget(tokens=1_000)):
+        with pytest.raises(ValidationError):
+            ConfigOverrides(budget=money)
+    for remainder, rounds_left in (
+        (ForkRemainder.of(rounds_closed=7, rounds=5), 1),
+        (ForkRemainder.of(rounds_closed=1, rounds=None), None),
     ):
-        assert (remainder.max_rounds, remainder.ceiling.usd) == expected_left, (
-            "a parent spent past its cap left its offshoot room, or an unread one invented a cap"
+        assert remainder.rounds == rounds_left, (
+            "a parent run past its cap left its offshoot no round, or an uncapped one invented a cap"
         )
+
+    # Spend is no remainder: forks of one campaign launched side by side hold ONE ceiling between
+    # them, so the second is admitted only what the first left.
+    root = CycleHop(campaign_id="camp-5", cycle_id="cycle_share0005")
+    forks = [
+        CycleHop(campaign_id="camp-5", cycle_id=f"cycle_share0005_fork_{name}")
+        for name in ("a", "b", "c")
+    ]
+    built_stores.campaigns.create_campaign(minted_campaign(root))
+    built_stores.campaigns.mint_cycle(root)
+    root_dir = built_stores.campaigns.cycle_dir(root)
+
+    def bill(at: CycleHop, usd: float) -> None:
+        CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(at))).append(
+            TokenUsageRecord(
+                kind="optimizer", node="l1_generate", input_tokens=1, output_tokens=0, cost_usd=usd
+            )
+        )
+
+    bill(root, 0.25)
+    for fork in forks:
+        built_stores.campaigns.mint_fork_cycle(
+            fork,
+            root_dir,
+            ForkSpec(
+                trigger=ForkTrigger.OPERATOR_REWIND,
+                reason="",
+                issued_by=SYSTEM_PRINCIPAL,
+                from_round=1,
+            ),
+            cut=CycleEventLog.open(CycleDir(root_dir)).next_offset,
+            from_round=1,
+        )
+    fork_a, fork_b, fork_c = forks
+    # The jobs dir every reader attaches to, with room for every fork.
+    shared = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 4)
+    payer = account_of(built_stores)
+
+    def launch(fork: CycleHop, usd: float | None) -> tuple[Any, HeldBudget]:
+        job = shared.request_slot(
+            user_id=payer.user_id,
+            principal_id=payer.user_id,
+            workspace=built_stores.campaigns.workspace,
+            holder=CampaignLaunch("ds1"),
+            hop=fork,
+        )
+        try:
+            held = admit_and_share(
+                Budget(usd=usd),
+                Budget(usd=usd),
+                stores=built_stores,
+                job_registry=shared,
+                job=job,
+                hop=fork,
+                step_rounds=None,
+            )
+        except QuotaExceededError as exc:
+            shared.release(job.job_id, refusal=str(exc))
+            raise
+        return job, held
+
+    def share(held: HeldBudget) -> float | None:
+        job = shared.get(held.job_id)
+        assert job is not None
+        return job.allotment.usd
+
+    _, held_a = launch(fork_a, 0.5)
+    assert share(held_a) == pytest.approx(0.25), (
+        "fork a was not admitted its ceiling less the spent"
+    )
+    bill(fork_a, 0.125)
+    job_b, held_b = launch(fork_b, 1.0)
+    assert share(held_b) == pytest.approx(0.5), (
+        "$1.00 ceiling, $0.375 spent, fork a holding $0.125 more: fork b may reach $0.50 — no "
+        "more, and its own spend counted once"
+    )
+    assert share(held_a) == pytest.approx(0.25), (
+        "fork b's launch raised the campaign's ceiling and handed fork a fork b's money"
+    )
+    beside = _armed(built_stores, fork_b, held_b, shared)
+    eighth = SendBound(input_tokens=0, output_tokens=0, usd=0.125)
+    assert beside.fits(eighth, eighth) == 4, (
+        "fork b's book spends what fork a still holds: two forks, two ceilings"
+    )
+    with pytest.raises(QuotaExceededError) as held_whole:
+        launch(fork_c, 1.0)
+    assert held_whole.value.code == "campaign_ceiling_held", (
+        "a third fork was admitted past a ceiling its siblings hold whole"
+    )
+
+    # An embedded run holds a share through the same admission, and never a machine slot.
+    async def embedded() -> None:
+        async with embedded_share(
+            _budgeted(Budget(usd=1.0)),
+            stores=built_stores,
+            dataset_name="ds1",
+            hop=fork_c,
+            requested=Budget(),
+            step_rounds=None,
+        ) as (_, held):
+            assert held.admitted.usd == pytest.approx(1.0)
+            run = shared.running_job_for(built_stores.campaigns.workspace, fork_c)
+            assert run is not None and run.allotment.usd == pytest.approx(0.5), (
+                "an embedded run held no share, or another one"
+            )
+            assert fork_c not in {j.hop for j in shared.list_running()}, (
+                "an embedded run took a machine slot to carry its share"
+            )
+
+    with pytest.raises(QuotaExceededError):
+        asyncio.run(embedded())
+    shared.release(job_b.job_id)
+    asyncio.run(embedded())
+    assert shared.running_job_for(built_stores.campaigns.workspace, fork_c) is None, (
+        "an embedded run kept its share past its exit"
+    )
+
+    # A raised ceiling is re-shared over every live cycle, never handed whole to one: A runs at $1,
+    # B is admitted at $3 beside it ($2), and the raise to $3 leaves A its $1, not B's money too.
+    pair = [CycleHop(campaign_id="camp-6", cycle_id=f"cycle_pair000{n}") for n in (1, 2)]
+    built_stores.campaigns.create_campaign(minted_campaign(pair[0]))
+    for cycle in pair:
+        built_stores.campaigns.mint_cycle(cycle)
+    job_a, held_a = launch(pair[0], 1.0)
+    book_a = _armed(built_stores, pair[0], held_a, shared)
+    job_b6, held_b6 = launch(pair[1], 3.0)
+    assert (share(held_a), share(held_b6)) == (1.0, 2.0), (
+        "two live cycles were admitted more than their campaign's ceiling between them"
+    )
+    _change_run_limits(CommandDispatcher(built_stores, shared), pair[0], Budget(usd=3.0))
+    shares = {job.job_id: job.allotment.usd for job in shared.list_holding_spend()}
+    assert (book_a.allotment.usd, shares[job_a.job_id], shares[job_b6.job_id]) == (1.0, 1.0, 2.0), (
+        "a raised ceiling handed one cycle what its sibling holds: the two may spend past it"
+    )
+    assert book_a.fits(eighth, eighth) == 8, "A's live book binds on another share than it holds"
+    # One campaign's money axis binds every live cycle or none, whichever arrived first.
+    with pytest.raises(QuotaExceededError) as unbounded_beside:
+        launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0003"), None)
+    for job in (job_a, job_b6):
+        shared.release(job.job_id)
+    open_c, _ = launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0004"), None)
+    with pytest.raises(QuotaExceededError) as bounded_beside:
+        launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0005"), 1.0)
+    shared.release(open_c.job_id)
+    assert (
+        unbounded_beside.value.code == bounded_beside.value.code == "campaign_ceiling_unshared"
+    ), (
+        "an unbounded cycle was admitted beside a bounded one, or the reverse: one ceiling, two rules"
+    )
+
+    # A launch landing mid-reshare waits it out: A holds $1 of $1 while a raise to $3 re-shares,
+    # and B, launching at $3 meanwhile, is admitted on the shares as moved, never on a torn split.
+    race = [CycleHop(campaign_id="camp-8", cycle_id=f"cycle_race000{n}") for n in (1, 2)]
+    built_stores.campaigns.create_campaign(minted_campaign(race[0]))
+    for cycle in race:
+        built_stores.campaigns.mint_cycle(cycle)
+    launch(race[0], 1.0)
+    resharing, b_at_gate, go = threading.Event(), threading.Event(), threading.Event()
+    metered_spend, gate = built_stores.campaigns.metered_spend, shared.admission_gate
+    landed: list[object] = []
+
+    def paused_metered(campaign_id: str, meter: Any) -> Budget:
+        if threading.current_thread() is raiser and not resharing.is_set():
+            resharing.set()
+            go.wait(timeout=60)
+        return metered_spend(campaign_id, meter)
+
+    def watched_gate() -> Any:
+        if threading.current_thread() is launcher:
+            b_at_gate.set()
+        return gate()
+
+    def raise_to_three() -> None:
+        hold_budget_change(
+            job_registry=shared,
+            stores=built_stores,
+            hop=race[0],
+            change=Budget(usd=3.0),
+            reserve=Budget(),
+        )
+
+    def launch_b() -> None:
+        try:
+            landed.append(launch(race[1], 3.0))
+        except QuotaExceededError as exc:
+            landed.append(exc)
+
+    raiser = threading.Thread(target=raise_to_three)
+    launcher = threading.Thread(target=launch_b)
+    with monkeypatch.context() as patched:
+        patched.setattr(built_stores.campaigns, "metered_spend", paused_metered)
+        patched.setattr(shared, "admission_gate", watched_gate)
+        raiser.start()
+        assert resharing.wait(timeout=60), "the raise never reached its re-share"
+        launcher.start()
+        assert b_at_gate.wait(timeout=60), "the launch never reached the admission gate"
+        go.set()
+        raiser.join(timeout=60)
+        launcher.join(timeout=60)
+    racing = [
+        job.allotment.usd or 0.0
+        for job in shared.list_holding_spend()
+        if job.on_campaign(built_stores.campaigns.workspace, "camp-8")
+    ]
+    assert landed and sum(racing) <= 3.0 + 1e-9, (
+        f"shares {racing} of a $3 ceiling: a launch admitted mid-reshare overcommitted it"
+    )
+    for job in shared.list_holding_spend():
+        if job.on_campaign(built_stores.campaigns.workspace, "camp-8"):
+            shared.release(job.job_id)
+    # A ceiling its campaign has spent admits nothing, siblings or none.
+    bill(race[0], 3.0)
+    with pytest.raises(QuotaExceededError) as spent_whole:
+        launch(race[1], 3.0)
+    assert spent_whole.value.code == "campaign_ceiling_held", (
+        "a launch alone on its campaign was admitted past a ceiling already spent"
+    )
+
+    # Sharing divides the CAMPAIGN's ceiling, never what the account admits: a $2 delegate on a
+    # $10 campaign that has spent $3 shares the $7 left, and its account binds through the reserve.
+    delegate = build_stores(
+        IdentityContext(
+            user_id=UserId("sub-d"),
+            tenant_id=TenantId("sub-d"),
+            issuer=Issuer("https://accounts.google.com"),
+            claims={"spend_ceiling_usd": 2.0},
+            capabilities=frozenset({"campaign.run"}),
+        ),
+        projects_root=built_stores.projects_root,
+        install_datasets_root=built_stores.install_datasets_root,
+    )
+    delegate.users.save(
+        account_of(delegate).model_copy(
+            update={"spend_budget_usd_total": 50.0, "token_budget_total": 50_000}
+        )
+    )
+    spender, claimed = (
+        CycleHop(campaign_id="camp-9", cycle_id=f"cycle_claim000{n}") for n in (1, 2)
+    )
+    delegate.campaigns.create_campaign(minted_campaign(spender))
+    delegate.campaigns.mint_cycle(spender)
+    delegate.campaigns.mint_cycle(claimed)
+    CycleEventLog.open(CycleDir(delegate.campaigns.cycle_dir(spender))).append(
+        TokenUsageRecord(
+            kind="optimizer", node="l1_generate", input_tokens=1, output_tokens=0, cost_usd=3.0
+        )
+    )
+    claim = shared.request_slot(
+        user_id="sub-d",
+        principal_id="sub-d",
+        workspace=delegate.campaigns.workspace,
+        holder=CampaignLaunch("ds1"),
+        hop=claimed,
+    )
+    admit_and_share(
+        Budget(usd=10.0),
+        Budget(usd=10.0),
+        stores=delegate,
+        job_registry=shared,
+        job=claim,
+        hop=claimed,
+        step_rounds=None,
+    )
+    claim_held = shared.get(claim.job_id)
+    assert claim_held is not None and claim_held.allotment.usd == pytest.approx(7.0), (
+        "a $2 delegate's share was cut from its account's claim, not the campaign's $7 left"
+    )
+    assert claim_held.reserve.usd == pytest.approx(2.0), "the delegate's claim did not bind it"
+    shared.release(claim.job_id)
+
+
+# 4. What a send is held at
+
+
+def test_a_send_is_held_at_its_bound_until_its_bill_lands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_bound: None, offline: Router
+) -> None:
+    """A record of spend is only ever a BILL: an unreported send binds from its open hold."""
+    # A remote cell still open at the run's wall clock is CUT: the clock bounds every cell.
+    offline.backend.faults = {"/matches": [Hang()]}
+    remote = backend_client(cell_envelope_s=cell_envelope_of(600.0))
+    clock = spend_book(None, usd_reserve=None, wall_clock_s=30.0)
+    cut_session = loop_session(
+        workspace(tmp_path / "cut"),
+        pipeline_schema([]),
+        [],
+        scorer=_HIT,
+        control=RunControl(book=clock),
+        client=remote,
+    )
+
+    async def cut_cell() -> tuple[MeasuredCell, float]:
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        with spending_under(clock):
+            row = await measure_sample(Sample(id=0, query="q", ground_truth="a"), cut_session)
+        return row, loop.time() - began
+
+    row, waited = jumping_clock(cut_cell())
+    assert row.error_category == ErrorCategory.HALTED, (
+        "a cell open at the wall clock's edge ended as anything but a HALTED cut"
+    )
+    assert waited == pytest.approx(30.0, abs=1.0), (
+        f"the cell ran {waited:.0f}s: its envelope, not the run's clock, bounded it"
+    )
+    clock.opened -= 31.0
+    assert cut_session.state.control.budget_tripped() == StopReason.WALL_CLOCK, (
+        "a run past its wall clock was not stopped on it"
+    )
 
     # The reserve holds a send's bound, and the ceiling what such sends bill.
     cell = CallLabel("cell", "backend")
@@ -1465,17 +1849,17 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
         assert own.fits(worst, worst) == 4, (
             f"reserve {reserve}: nothing billed yet, the bound holds"
         )
-        own.learn(cell, 0.03125, 100)
-        own.learn(cell, 0.0, 0)
+        own.learn(cell, Budget.amount(0.03125, 100))
+        own.learn(cell, Budget.amount(0.0, 0))
         held = own.held_at(cell, worst)
         assert own.fits(held, worst) == depth, (
             f"reserve {reserve}: held at its bound against both, a ceiling a few bounds wide "
             "walks one cell at a time"
         )
         for _ in range(depth):
-            own.hold(held, worst, "backend", what="cell")
+            own.hold(held, worst, "backend", what="cell", reservation=None)
         with pytest.raises(SendRefusedError):
-            own.hold(held, worst, "backend", what="cell")
+            own.hold(held, worst, "backend", what="cell", reservation=None)
         billed = 0
         while own.exhausted() is None:
             own.release(held, worst, "backend")
@@ -1514,10 +1898,9 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
             )
         return outage.value
 
+    # A model no other call in the suite names, so neither route memo holds it yet.
     with monkeypatch.context() as patched:
-        patched.setattr(pricing.urllib.request, "urlopen", down)
-        patched.setattr(pricing, "_ROUTE_OUTAGE", {})
-        patched.setattr(pricing, "_ROUTE_MEMO", {})
+        patched.setattr(urllib.request, "urlopen", down)
         outage = asyncio.run(held_twice())
     assert len(fetches) == 1, f"{len(fetches)} fetches — one per send, each a full timeout"
     assert run_stop_reason(outage) is StopReason.PRICE_LIST_UNREACHABLE, "an outage read as no rate"
@@ -1540,7 +1923,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     fresh = spend_book(0.10, meters="search_incurred")
     fresh.count(replay(0.09))
     pass_bound = SendBound(input_tokens=100, output_tokens=100, usd=5.0)
-    fresh.hold(pass_bound, pass_bound, "bench", what="bench pass")
+    fresh.hold(pass_bound, pass_bound, "bench", what="bench pass", reservation=None)
     fresh.release(pass_bound, pass_bound, "bench")
     fresh.count(
         TokenUsageRecord(kind="bench", node="b", input_tokens=1, output_tokens=1, cost_usd=5.0)
@@ -1555,11 +1938,11 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
         pass
     small = SendBound(input_tokens=1, output_tokens=1, usd=0.02)
     with pytest.raises(SendRefusedError):
-        fresh.hold(small, small, "optimizer", what="o")
+        fresh.hold(small, small, "optimizer", what="o", reservation=None)
 
     # No burst of sends records spend past its ceiling.
-    wire = _priced_wire(monkeypatch)
-    wire.flaky[0] = True
+    wire = _priced_wire(monkeypatch, offline)
+    wire.flaky = True
     rng = wire.rng
     burst_ledger = CycleEventLog(tmp_path / "burst.jsonl")
     ceiling_usd = 0.05
@@ -1568,9 +1951,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
 
     async def burst() -> list[Any]:
         async def one(i: int) -> Any:
-            return await _owned_chat(
-                wire.client, f"n{i}", "x" * rng.randint(10, 400), max_tokens=1500
-            )
+            return await _owned_chat(f"n{i}", "x" * rng.randint(10, 400), max_tokens=1500)
 
         tasks = [asyncio.ensure_future(one(i)) for i in range(40)]
         await asyncio.sleep(0.005)
@@ -1579,8 +1960,8 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
         return await asyncio.gather(*tasks, return_exceptions=True)
 
     with _billing_on(burst_ledger, book):
-        outcomes = _on_jumping_clock(burst())
-    wire.flaky[0] = False
+        outcomes = jumping_clock(burst())
+    wire.flaky = False
     records = _token_bills(burst_ledger)
     assert all(r.cost_usd is None for r in records), "a reply that reported no cost read as one"
     recorded = sum(r.rate_priced_usd or 0.0 for r in records)
@@ -1591,9 +1972,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
         "no reply reported a cost: each record is priced at our rate, and the ceiling binds on that"
     )
     assert any(isinstance(o, SendRefusedError) for o in outcomes), "the ceiling never bound"
-    unreported = sum(
-        isinstance(o, asyncio.CancelledError | openai.APITimeoutError) for o in outcomes
-    )
+    unreported = sum(isinstance(o, asyncio.CancelledError | httpx.ReadTimeout) for o in outcomes)
     left_out = unreported_on(burst_ledger)
     assert unreported and left_out.sends == unreported, "a send that left unbilled lost its hold"
     assert len(records) == sum(not isinstance(o, BaseException) for o in outcomes), (
@@ -1605,8 +1984,15 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     )
     # A hard exit runs no `finally`: the hold written ahead of the call is all that says it left.
     hold_usd = 0.0036
-    killed = {"kind": "optimizer", "input_tokens": 600, "output_tokens": 1500, "cost_usd": hold_usd}
-    burst_ledger.append(SpendHoldRecord(hold_id="killed", node="killed", **killed))
+    killed = SpendHoldRecord(
+        hold_id="killed",
+        node="killed",
+        kind="optimizer",
+        input_tokens=600,
+        output_tokens=1500,
+        cost_usd=hold_usd,
+    )
+    burst_ledger.append(killed)
     account = billed_spend([burst_ledger.path])
     assert account.used_usd == 0.0, "a price off our rate table was read as spent"
     assert account.rate_priced_usd == pytest.approx(recorded), "the rate-priced sum moved"
@@ -1616,7 +2002,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     assert unreported_on(burst_ledger).sends == unreported + 1, "a killed send's hold went unread"
     # A bill naming no price closes its hold in tokens alone; the money stays at the hold's bound.
     bare = CycleEventLog(tmp_path / "bare" / "ledger.jsonl")
-    bare.append(SpendHoldRecord(hold_id="bare", node="bare", **killed))
+    bare.append(killed.model_copy(update={"hold_id": "bare", "node": "bare"}))
     bare.append(
         TokenUsageRecord(
             kind="optimizer", node="bare", input_tokens=40, output_tokens=9, hold_id="bare"
@@ -1627,14 +2013,18 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
         "the account read a priceless bill as settling its hold"
     )
 
-    # A nested run's send is held and billed on its root's ledger.
+    # A nested run's send is admitted by its own book AND its root's, held and billed on the root's
+    # ledger.
     root = CycleEventLog(tmp_path / "root.jsonl")
     book = spend_book(0.05)
     root.bind(book)
     book.ledger = root
     nested = CycleEventLog(tmp_path / "nested.jsonl")
-    with _billing_on(nested, book):
-        _on_jumping_clock(_owned_chat(wire.client, "inner", "nested"))
+    inner = spend_book(5.0)
+    nested.bind(inner)
+    inner.ledger, inner.enclosing = nested, book
+    with _billing_on(nested, inner):
+        jumping_clock(_owned_chat("inner", "nested"))
     assert [(r.node, r.mirrored) for r in _token_bills(root)] == [("inner:inner", False)], (
         "a nested send was not billed on its root's ledger"
     )
@@ -1644,12 +2034,26 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     assert 0.0 < book.usd_metered == pytest.approx(billed_spend([root.path]).sent_usd), (
         "the root's book read another bill than its ledger holds"
     )
+    assert inner.usd_metered == pytest.approx(book.usd_metered), (
+        "the nested book counted another bill than its root's"
+    )
+    room = (inner.money_left(), book.money_left())
+    past_root = SendBound(input_tokens=0, output_tokens=0, usd=0.06)
+    with pytest.raises(SendRefusedError):
+        inner.hold(past_root, past_root, "optimizer", what="past the root", reservation=None)
+    assert (inner.money_left(), book.money_left()) == room, (
+        "a nested send past its ROOT's ceiling was admitted on its own book's room, or held "
+        "half-way"
+    )
     cut = SendBound(input_tokens=600, output_tokens=1500, usd=hold_usd)
-    with _billing_on(nested, book):
+    with _billing_on(nested, inner):
         Admission(
-            book, CallLabel("cut", "optimizer"), cut, cut, model="gpt-x", provider="openai"
+            inner, CallLabel("cut", "optimizer"), cut, cut, model="gpt-x", provider="openai"
         ).unreported()
     assert unreported_on(root).sends == 1, "a nested send cut short was held nowhere"
+    assert book.usd_unreported == pytest.approx(hold_usd), (
+        "a nested send cut short stayed held on its own book and freed its root's"
+    )
     # An inner campaign whose provider reports no bill is not a free cell: cost reads our rate.
     silent = SpendRollup()
     silent.bank(
@@ -1660,11 +2064,11 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     facts = inner_cell_facts(cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}))
     assert facts is not None and silent.total_used_usd == 0.0, "an unbilled inner cell vanished"
     inner_row = MeasuredCell(
-        sample_id=0,
+        sample_key="k0",
         query="q",
         predicted="",
         ground_truth="",
-        pipeline=PipelineData.from_wire(facts.model_dump(mode="json")),
+        pipeline=PipelineData(inner=facts),
     )
     assert cell_channels_of(inner_row, None)["cost"] == pytest.approx(0.02), (
         "an inner campaign whose provider reported no bill read as a free cell"
@@ -1674,36 +2078,21 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     held_ledger = CycleEventLog(tmp_path / "held.jsonl")
     book = spend_book(0.05)
     held_ledger.bind(book)
-    broke = [True]
-
-    async def create_once_broken(**params: Any) -> Any:
-        if broke[0]:
-            broke[0] = False
-            try:
-                raise ssl.SSLError("bad record mac")
-            except ssl.SSLError as err:
-                raise openai.APIConnectionError(request=wire.request) from err
-        return await wire.create(**params)
-
-    async def create_unbilled(**params: Any) -> Any:
-        reply = (await wire.create(**params)).parse().model_copy(update={"usage": None})
-        return types.SimpleNamespace(headers={}, parse=lambda: reply)
-
-    wire.raw.create = create_once_broken
+    wire.broken_once = True
     with _billing_on(held_ledger, book):
-        _on_jumping_clock(_owned_chat(wire.client, "tls"))
+        jumping_clock(_owned_chat("tls"))
     assert unreported_on(held_ledger).sends == 1, (
         "a TLS record fault after the request left is resent like a 5xx, and the broken send held"
     )
-    wire.raw.create = create_unbilled
+    wire.unbilled = True
     bills, spent_usd = len(_token_bills(held_ledger)), book.usd_metered
     with _billing_on(held_ledger, book):
-        _on_jumping_clock(_owned_chat(wire.client, "unbilled"))
+        jumping_clock(_owned_chat("unbilled"))
     assert unreported_on(held_ledger).sends == 2 and book.usd_metered == spent_usd, (
         "a reply reporting no usage is a bill that never came: held, never settled at 0"
     )
     assert len(_token_bills(held_ledger)) == bills, "a reply with no usage wrote a bill"
-    wire.raw.create = wire.create
+    wire.unbilled = False
     nitro = CallLabel("nitro", "optimizer")
     before, held_usd, spent_usd = unreported_on(held_ledger), book.usd_unreported, book.usd_metered
     with _billing_on(held_ledger, book):
@@ -1720,41 +2109,33 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     assert after.usd == pytest.approx(before.usd + hold_usd), "a priceless hold left its bound"
 
     # One unit of work resends from one budget, whichever loop asks.
-    attempts: list[int] = []
-
-    async def create_down(**_params: Any) -> Any:
-        attempts.append(1)
-        raise openai.InternalServerError(
-            "down", response=httpx.Response(500, request=wire.request), body=None
-        )
-
     async def two_rungs() -> None:
         with under_budget(SendBudget(None, attempts=SEND_ATTEMPTS)):
             for _rung in range(2):
-                with pytest.raises(openai.InternalServerError):
-                    await wire.client.chat(
+                with pytest.raises(httpx.HTTPStatusError):
+                    await get_llm_client("openai").chat(
                         ChatRequest([{"role": "user", "content": "x"}], "gpt-x", max_tokens=10),
                         label=CallLabel("down", "optimizer"),
                     )
 
-    wire.raw.create = create_down
-    monkeypatch.setattr(judge_call, "get_llm_client", lambda _provider: wire.client)
+    wire.down = True
     with spending_under(unbounded_spend_book()):
-        _on_jumping_clock(two_rungs())
-        assert len(attempts) == SEND_ATTEMPTS + 1, f"{len(attempts)} attempts in one unit of work"
-        attempts.clear()
-        _reply_text, error = _on_jumping_clock(
+        offline.llm.sent.clear()
+        jumping_clock(two_rungs())
+        attempts = len(offline.llm.sent)
+        assert attempts == SEND_ATTEMPTS + 1, f"{attempts} attempts in one unit of work"
+        offline.llm.sent.clear()
+        _reply_text, error = jumping_clock(
             judge_call.ask(JudgeStage(model="gpt-x", provider="openai"), "grade", judge="j")
         )
-    assert error and len(attempts) == SEND_ATTEMPTS, (
-        f"{len(attempts)} attempts on one grading: a grading opens its own budget, and spends that"
+    attempts = len(offline.llm.sent)
+    assert error and attempts == SEND_ATTEMPTS, (
+        f"{attempts} attempts on one grading: a grading opens its own budget, and spends that"
     )
-    wire.raw.create = wire.create
+    wire.down = False
 
     # A backend cell is never sent again while it may still bill.
     cell_ledger = CycleEventLog(tmp_path / "termnorm.jsonl")
-    posts: list[int] = []
-    probes: list[int] = []
     billed_step = {
         "step_tokens": {"n": {"attempts": 3, "input": 10, "output": 5, "cost_usd": 0.001}}
     }
@@ -1763,30 +2144,22 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
         "detail": {"error_code": "llm_timeout", "retryable": False, "message": "no reply in 164s"},
         "data": {"step_tokens": None},
     }
-
-    def termnorm(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/status":
-            probes.append(1)
-            if len(probes) == 1:
-                raise httpx.ConnectError("still restarting", request=request)
-            return httpx.Response(200, json={"status": "ok"})
-        posts.append(1)
-        if len(posts) == 1:
-            raise httpx.ConnectError("refused", request=request)
-        if len(posts) == 2:
-            return httpx.Response(500, json={"detail": "upstream", "data": billed_step})
-        if len(posts) == 4:
-            return httpx.Response(504, json=deadline)
-        raise httpx.ReadTimeout("slow", request=request)
-
-    monkeypatch.setattr(backend_mod, "_OUTAGE_POLL_S", 0.0)
+    offline.backend.faults = {
+        "/status": [httpx.ConnectError("still restarting")],
+        "/matches": [
+            httpx.ConnectError("refused"),
+            httpx.Response(500, json={"detail": "upstream", "data": billed_step}),
+            httpx.ReadTimeout("slow"),
+            httpx.Response(504, json=deadline),
+        ],
+    }
+    offline.backend.asked.clear()
     remote = backend_client(session_factory=TermNormSession)
-    remote._http = httpx.AsyncClient(transport=httpx.MockTransport(termnorm))
     whole_cell = SendBound(input_tokens=100, output_tokens=50, usd=0.01)
     wallet = spend_book()
 
     async def remote_cell() -> Any:
-        async with CellEnvelope(None, attempts=remote.cell_attempts, label="q"):
+        async with CellEnvelope(600.0, attempts=remote.cell_attempts, label="q"):
             return await remote.run_query(
                 Sample(id=0, query="q", ground_truth=None),
                 bound=whole_cell,
@@ -1795,9 +2168,10 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
 
     for ends in (httpx.ReadTimeout, CellHaltedError):
         with _billing_on(cell_ledger, wallet), pytest.raises(ends):
-            _on_jumping_clock(remote_cell())
-    assert len(posts) == 4, (
-        f"{len(posts)} POSTs — a read timeout is NEVER resent: the backend still works it, and a "
+            jumping_clock(remote_cell())
+    posts = offline.backend.asked.count("/matches")
+    assert posts == 4, (
+        f"{posts} POSTs — a read timeout is NEVER resent: the backend still works it, and a "
         "second POST bills twice"
     )
     assert [r.cost_usd for r in _token_bills(cell_ledger)] == [0.0, 0.001], (
@@ -1822,28 +2196,19 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
         raise CellInfrastructureError("no such host", spent={})
 
     monkeypatch.setattr(harbor, "_attempt", registry_down)
-    episode = harbor._Episode(
-        query="task",
-        task={},
-        task_root=tmp_path,
-        reward_key="reward",
-        agent_name="terminus-2",
-        agent_kwargs={},
-        model=None,
-        provider=None,
-        environment="docker",
-        cached=False,
-        prompt=None,
-        in_system_prompt=False,
-        tools=(),
-    )
+    run_trial = harbor.CONNECTOR.in_process_run
+    assert run_trial is not None
 
     async def container_cell() -> Any:
-        async with CellEnvelope(None, attempts=harbor.CONNECTOR.cell_attempts, label="task"):
-            return await harbor._run_episode(episode)
+        async with CellEnvelope(600.0, attempts=harbor.CONNECTOR.cell_attempts, label="task"):
+            return await run_trial(
+                InProcessWorkload(experiment={}, experiment_dir=tmp_path, program=None),
+                Sample(id=0, query="task", ground_truth=None, source_pin={}),
+                {harbor.SKILL_DELIVERY_KEY: "agent_skill"},
+            )
 
     with pytest.raises(CellInfrastructureError):
-        _on_jumping_clock(container_cell())
+        jumping_clock(container_cell())
     assert len(trials) == harbor.CONNECTOR.cell_attempts, (
         f"{len(trials)} trials: a container cell reran past the budget its connector sized"
     )
@@ -1854,11 +2219,11 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
 
     from promptpotter.connectors import dspy_module  # extras: dspy
 
-    monkeypatch.setattr(dspy_module, "held_wait", wire.no_wait)
+    monkeypatch.setattr(dspy_module, "held_wait", _no_wait)
     sends: list[int] = []
     script: list[Exception] = []
 
-    class _Provider:
+    class _Engine:
         def complete(self, _request: Any) -> Any:
             sends.append(1)
             if script:
@@ -1877,7 +2242,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
             super().__init__()
             self.steps = [dspy.Predict("question -> answer") for _ in range(calls)]
             for step in self.steps:
-                step.lm = dspy.LM("openai/gpt-x", engine=_Provider(), cache=False)
+                step.lm = dspy.LM("openai/gpt-x", engine=_Engine(), cache=False)
 
         def forward(self, question: str) -> Any:
             for step in self.steps:
@@ -1905,7 +2270,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
         pairs = {dspy_module.PROGRAM_NODE: client.priced_as(config)}
 
         async def one_cell() -> Any:
-            async with CellEnvelope(None, attempts=client.cell_attempts, label="q"):
+            async with CellEnvelope(600.0, attempts=client.cell_attempts, label="q"):
                 return await client.run_query(
                     Sample(id=0, query="q", ground_truth="4"),
                     {dspy_module.PROGRAM_NODE: config},
@@ -1913,8 +2278,9 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
                     billed=cell_billing(pipeline_schema([]), pairs, {}),
                 )
 
+        # A real clock: the student runs in a worker thread, which a jumping clock outruns.
         with _billing_on(dspy_ledger, purse):
-            data, spent = _on_jumping_clock(one_cell())
+            data, spent = asyncio.run(one_cell())
         rows.append(spent)
         return cast("dict[str, Any]", data)
 
@@ -1930,9 +2296,12 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
         "a student's call left no bill of its own"
     )
     call_usd = 11 * 1e-6 + 3 * 2e-6
-    assert [(r.cost_usd, r.rate_priced_usd) for r in lm_bills()] == [
-        (None, pytest.approx(call_usd))
-    ] * 2, "the engine reports tokens and no cost: each call is priced at our rate"
+    priced = lm_bills()
+    assert [r.cost_usd for r in priced] == [None, None] and [
+        r.rate_priced_usd for r in priced
+    ] == pytest.approx([call_usd] * 2), (
+        "the engine reports tokens and no cost: each call is priced at our rate"
+    )
     assert purse.usd_metered == pytest.approx(2 * call_usd), "the ceiling bound another price"
     banked_step = rows[-1].step_tokens[dspy_module.PROGRAM_NODE]
     assert (banked_step.model, banked_step.provider) == ("gpt-x", "openai"), (
@@ -1980,9 +2349,9 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
 
     async def episode_run(_workload: Any, _sample: Any, _payload: dict[str, Any]) -> dict[str, Any]:
         for n in range(4):
-            wire.hang[0] = cut_short[0] and n == 3
+            wire.hang = cut_short[0] and n == 3
             turns.append(
-                await wire.client.chat(
+                await get_llm_client("openai").chat(
                     ChatRequest(
                         [{"role": "user", "content": f"turn {n}"}], "gpt-x", max_tokens=100
                     ),
@@ -1998,7 +2367,7 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     whole = SendBound(input_tokens=100_000, output_tokens=50_000, usd=0.5)
 
     async def agent_cell(sample_id: int) -> Any:
-        async with CellEnvelope(None, attempts=agent.cell_attempts, label="q"):
+        async with CellEnvelope(600.0, attempts=agent.cell_attempts, label="q"):
             return await agent.run_query(
                 Sample(id=sample_id, query="q", ground_truth=None),
                 bound=whole,
@@ -2015,20 +2384,21 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
             await running
 
     with _billing_on(turns_ledger, purse):
-        _on_jumping_clock(cancel_mid_episode())
+        jumping_clock(cancel_mid_episode())
     cut_bills = _token_bills(turns_ledger)
     assert [r.node for r in cut_bills] == ["agent"] * 3, "a turn that answered left no bill"
     assert purse.usd_metered == pytest.approx(sum(r.bill_or_rate_usd or 0.0 for r in cut_bills)), (
         "the book read another bill than the turns wrote"
     )
     out = unreported_on(turns_ledger)
+    assert whole.usd is not None
     assert out.sends == 1 and out.usd < whole.usd / 100, f"a cancel left ${out.usd} unreported"
     assert purse.usd_unreported == pytest.approx(out.usd), "the book held another sum than is out"
     assert purse.fits(whole, whole) == 1, "a cell's bound was not reserved whole"
     assert purse.held_at(CELL, whole) == whole, "a cut cell taught the book a price"
     cut_short[0] = False
     with _billing_on(turns_ledger, purse):
-        _on_jumping_clock(agent_cell(1))
+        jumping_clock(agent_cell(1))
     episode_usd = sum(r.bill_or_rate_usd or 0.0 for r in _token_bills(turns_ledger)) - sum(
         r.bill_or_rate_usd or 0.0 for r in cut_bills
     )
@@ -2042,6 +2412,9 @@ def test_a_runs_book_holds_each_send_at_its_bound_and_stops_the_run_at_its_ceili
     assert resumed.held_at(turn, whole) == purse.held_at(turn, whole) != whole, (
         "a book armed over that ledger (a resume) holds a turn at its bound, not what turns billed"
     )
+
+
+# 5. An account's ceiling
 
 
 _WEB = "https://accounts.google.com"
@@ -2059,11 +2432,13 @@ def _account_stores(
     spent: dict[str, Any] | None,
     grant: float | None = None,
 ) -> Any:
-    """`issuer` set makes this a WEB identity; the box operator has none and is unmetered."""
-    ledgers: list[Path] = []
+    """`issuer` set makes this a WEB identity; the box operator has none and is unmetered. Its one
+    campaign's cycle is `_HELD_HOP`, which holds what the account *spent*."""
+    campaigns = CampaignStore(WorkspaceDir(tmp_path / "ws"))
+    campaigns.create_campaign(minted_campaign(_HELD_HOP, config=_budgeted(Budget())))
+    campaigns.mint_cycle(_HELD_HOP)
     if spent is not None:
-        ledgers.append(tmp_path / "spent.jsonl")
-        CycleEventLog(ledgers[0]).append(
+        CycleEventLog.open(CycleDir(campaigns.cycle_dir(_HELD_HOP))).append(
             TokenUsageRecord(
                 kind="backend",
                 node="solve",
@@ -2073,24 +2448,35 @@ def _account_stores(
             )
         )
     return types.SimpleNamespace(
-        identity=types.SimpleNamespace(
-            issuer=issuer,
-            user_id=user.user_id,
-            tenant_id=user.tenant_id,
+        identity=IdentityContext(
+            user_id=UserId(user.user_id),
+            tenant_id=TenantId(user.tenant_id),
+            issuer=None if issuer is None else Issuer(issuer),
+            email="",
             claims={} if grant is None else {"spend_ceiling_usd": grant},
         ),
-        campaigns=types.SimpleNamespace(
-            iter_cycle_ledgers=lambda: ledgers,
-            workspace=tmp_path / "ws",
-            cycle_dir=lambda _hop: tmp_path / "no-producer",
-        ),
+        campaigns=campaigns,
         users=types.SimpleNamespace(load=lambda: user),
     )
 
 
-def _running(admitted_at: str | None, reserve: SpendCeilings) -> Any:
-    held = types.SimpleNamespace(job_id="job-b", hop=None, admitted_at=admitted_at, reserve=reserve)
-    return types.SimpleNamespace(list_running=lambda *, user_id: [held], get=lambda _id: None)
+def _running(admitted_at: str | None, reserve: Budget) -> Any:
+    held = Job(
+        job_id="job-b",
+        user_id="sub-9",
+        principal_id="sub-9",
+        workspace="",
+        campaign_id=UNRESOLVED_HOP.campaign_id,
+        cycle_id=UNRESOLVED_HOP.cycle_id,
+        holder=CampaignLaunch(dataset_name="d"),
+        stage=RunPhase.RUNNING,
+        created_at="",
+        started_at=None,
+        released_at=None,
+        reserve=reserve,
+        admitted_at=admitted_at,
+    )
+    return types.SimpleNamespace(list_holding_spend=lambda *, user_id: [held], get=lambda _id: None)
 
 
 async def _paid_door(door: str, stores: Any) -> None:
@@ -2101,7 +2487,7 @@ async def _paid_door(door: str, stores: Any) -> None:
         case "bench":
             await grade_line_bench(stores=stores, hop=_HELD_HOP)
         case "noise-floor":
-            await measure_noise_floor(stores=stores, hop=_HELD_HOP, k=2)
+            await measure_noise_floor(stores=stores, hop=_HELD_HOP, k=RescoreCount(2))
         case "seed-screen":
             await screen_inner_seeds(
                 stores=stores, identity=stores.identity, dataset_name="d", seeds=[1], n_samples=1
@@ -2148,7 +2534,7 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
 
     for n, (door, issuer, budget, declared, grant, running, spent, admitted_caps) in enumerate(
         (
-            ("launch", _WEB, {}, None, None, None, None, SpendCeilings(_STEP_USD, _TOKENS)),
+            ("launch", _WEB, {}, None, None, None, None, Budget(usd=_STEP_USD, tokens=_TOKENS)),
             ("launch", _WEB, {}, 10.0, None, None, None, None),
             (
                 "launch",
@@ -2158,12 +2544,12 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                 None,
                 _running(
                     "2026-01-01T00:00:00+00:00",
-                    SpendCeilings(settings.FREE_TIER_SPEND_CAP_USD, _TOKENS),
+                    Budget(usd=settings.FREE_TIER_SPEND_CAP_USD, tokens=_TOKENS),
                 ),
                 None,
                 None,
             ),
-            ("launch", _WEB, {}, None, None, _running(None, SpendCeilings()), None, None),
+            ("launch", _WEB, {}, None, None, _running(None, Budget()), None, None),
             (
                 "launch",
                 _WEB,
@@ -2172,11 +2558,11 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                 None,
                 None,
                 _UNPRICEABLE,
-                SpendCeilings(_STEP_USD, _TOKENS - 500_000),
+                Budget(usd=_STEP_USD, tokens=_TOKENS - 500_000),
             ),
-            ("launch", None, {}, None, None, None, None, SpendCeilings()),
-            ("launch", _WEB, _GENEROUS, 10.0, 2.0, None, None, SpendCeilings(2.0, 50_000)),
-            ("launch", _WEB, _GENEROUS, 10.0, None, None, None, SpendCeilings(10.0, 50_000)),
+            ("launch", None, {}, None, None, None, None, Budget(usd=None, tokens=None)),
+            ("launch", _WEB, _GENEROUS, 10.0, 2.0, None, None, Budget(usd=2.0, tokens=50_000)),
+            ("launch", _WEB, _GENEROUS, 10.0, None, None, None, Budget(usd=10.0, tokens=50_000)),
             (
                 "launch",
                 _WEB,
@@ -2185,9 +2571,9 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                 2.0,
                 None,
                 None,
-                SpendCeilings(1.0, 50_000),
+                Budget(usd=1.0, tokens=50_000),
             ),
-            ("turn", None, {}, None, None, None, _SPENT_THE_CAP, SpendCeilings()),
+            ("turn", None, {}, None, None, None, _SPENT_THE_CAP, Budget(usd=None, tokens=None)),
             *(
                 (door, _WEB, {}, None, None, None, _SPENT_THE_CAP, None)
                 for door in ("turn", "bench", "noise-floor", "seed-screen", "probe-reasoning")
@@ -2199,38 +2585,38 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         monkeypatch.setattr(
             "promptpotter.application.jobs.registry.default_jobs_dir", functools.partial(Path, at)
         )
-        user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01", **budget)
+        user = User.model_validate(
+            {"user_id": "sub-9", "tenant_id": "sub-9", "created_at": "2026-01-01", **budget}
+        )
         stores = _account_stores(at, issuer=issuer, user=user, spent=spent, grant=grant)
         refused = pytest.raises(QuotaExceededError)
         with refused if admitted_caps is None else contextlib.nullcontext():
-            knocked = SpendCeilings()
+            knocked = Budget(usd=None, tokens=None)
             if door == "launch":
                 knocked = admit_launch(
-                    declared=SpendCeilings(declared, None),
+                    declared=Budget() if declared is None else Budget(usd=declared),
                     user=user,
                     stores=stores,
-                    job_registry=running
-                    or types.SimpleNamespace(list_running=lambda **_: [], get=lambda _id: None),
+                    job_registry=running or JobRegistry(at / "jobs", capacity=lambda _live: 1),
                     job_id="job-a",
                     hop=None,
                 )[0]
             else:
                 asyncio.run(_paid_door(door, stores))
+            assert admitted_caps is not None
             assert knocked == admitted_caps, (
                 f"door {n} ({door}): an account was admitted under another ceiling than it holds"
             )
 
     # A paid verb never bills a cycle its producer still holds.
     operator = User(user_id="op", tenant_id="op", created_at="")
-    held_stores = _account_stores(tmp_path, issuer=None, user=operator, spent=None)
-    held_stores.campaigns = CampaignStore(WorkspaceDir(tmp_path / "held"))
-    held_stores.campaigns.mint_cycle(_HELD_HOP)
+    held_stores = _account_stores(tmp_path / "held", issuer=None, user=operator, spent=None)
     cycle_dir = held_stores.campaigns.cycle_dir(_HELD_HOP)
     hold_cycle(cycle_dir)
 
     async def bill_held() -> None:
         stub = cast("Stores", held_stores)
-        async with paid_pass(stores=stub, verb="bench", hop=_HELD_HOP, declared=SpendCeilings()):
+        async with paid_pass(stores=stub, verb="bench", hop=_HELD_HOP, declared=Budget()):
             pass
 
     with pytest.raises(CycleBusyError):
@@ -2264,13 +2650,16 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
     )
     slots = JobRegistry.attach()
 
-    def launch_beside() -> SpendCeilings:
+    def launch_beside() -> Budget:
         launch = slots.request_slot(
-            user_id="sub-8", principal_id="sub-8", holder=CampaignLaunch("ds1")
+            user_id="sub-8",
+            principal_id="sub-8",
+            workspace=passing.campaigns.workspace,
+            holder=CampaignLaunch("ds1"),
         )
         try:
             return admit_launch(
-                declared=SpendCeilings(),
+                declared=Budget(),
                 user=payer,
                 stores=passing,
                 job_registry=slots,
@@ -2282,10 +2671,10 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
 
     async def pass_beside() -> None:
         async with paid_pass(
-            stores=passing, verb="verify", hop=None, declared=SpendCeilings()
+            stores=passing, verb="verify", hop=None, declared=Budget()
         ) as pass_book:
-            assert pass_book.declared.usd == pytest.approx(1.0), (
-                "a pass declared nothing and did not hold the account's headroom"
+            assert pass_book.reserve.usd == pass_book.allotment.usd == pytest.approx(1.0), (
+                "a pass declared nothing and did not hold the account's headroom, or ran unshared"
             )
             assert len(machine_status(slots, identity=passing.identity).running) == 1, (
                 "a paid pass ran beside the machine's slot count"
@@ -2298,6 +2687,30 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         "a pass kept its slot past its exit"
     )
     assert launch_beside().usd == pytest.approx(1.0), "the pass kept its reservation past its exit"
+
+    # A free-tier step is its share: the account reserves more for it, and it meters the step.
+    stepper = build_stores(
+        IdentityContext(
+            user_id=UserId("sub-6"),
+            tenant_id=TenantId("sub-6"),
+            issuer=Issuer(_WEB),
+            claims={},
+            capabilities=frozenset(),
+        ),
+        projects_root=built_stores.projects_root,
+        install_datasets_root=built_stores.install_datasets_root,
+    )
+
+    async def step_pass() -> None:
+        async with paid_pass(stores=stepper, verb="verify", hop=None, declared=Budget()) as book:
+            assert book.reserve.usd is not None and book.reserve.usd > _STEP_USD, (
+                "the setup lost its point: the account reserves the step alone"
+            )
+            assert book.money_left().usd == pytest.approx(_STEP_USD), (
+                "a free-tier step may meter past its step, up to what the account reserves"
+            )
+
+    asyncio.run(step_pass())
 
     # A budget change leaves the arm it did not touch alone.
     def web_account(sub: str) -> Stores:
@@ -2315,63 +2728,66 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
 
     metered = web_account("sub-9")
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
-    campaign = Campaign(
-        campaign_id="camp-3", dataset_name="ds1", created_at="", root_cycle_id=hop.cycle_id
-    )
+    campaign = minted_campaign(hop)
     metered.campaigns.create_campaign(campaign)
     registry = JobRegistry(tmp_path / "jobs-3", capacity=lambda _live: 1)
     job = registry.request_slot(
-        user_id="sub-9", principal_id="sub-9", holder=CampaignLaunch("ds1"), hop=hop
+        user_id="sub-9",
+        principal_id="sub-9",
+        workspace=metered.campaigns.workspace,
+        holder=CampaignLaunch("ds1"),
+        hop=hop,
     )
     assert job.holds_slot, "an empty box must hand out a slot, not a place in line"
-    registry.mark_admitted(job.job_id, SpendCeilings(0.30, 5_000_000))
+    registry.mark_admitted(
+        job.job_id, Budget(usd=0.30, tokens=5_000_000), Budget(usd=0.15, tokens=2_500_000)
+    )
     dispatcher = CommandDispatcher(metered, registry)
-    asyncio.run(_apply_change_run_limits(dispatcher, hop, SpendCeilings(), RoundsCap(max_rounds=3)))
-    asyncio.run(_apply_change_run_limits(dispatcher, hop, SpendCeilings(None, 1_000), None))
+    _change_run_limits(dispatcher, hop, Budget(rounds=3))
+    _change_run_limits(dispatcher, hop, Budget(tokens=1_000))
     held = registry.get(job.job_id)
-    assert held is not None and held.reserve == SpendCeilings(0.30, 2_000), (
+    assert held is not None and held.reserve == Budget(usd=0.30, tokens=2_000), (
         "the untouched USD reservation was released, or the token one did not move with its "
         "ceiling: as much again for the calls out"
     )
-    standing = metered.campaigns.read_run_limits(hop)
-    assert standing.reserve == held.reserve, "the standing record holds another reservation"
-    assert standing.rounds == RoundsCap(max_rounds=3), (
+    assert held.allotment == Budget(usd=0.15, tokens=1_000), (
+        "the moved token ceiling was not re-shared, or the untouched USD share moved with it"
+    )
+    standing = metered.campaigns.read_standing_budget(hop)
+    assert standing.budget == Budget(rounds=3), (
         "the standing record is written WHOLE: a spend move must carry the round cap it did not touch"
     )
-    delegated = types.SimpleNamespace(
-        identity=types.SimpleNamespace(
-            issuer=_WEB, user_id="sub-9", tenant_id="sub-9", claims={"spend_ceiling_usd": 2.0}
-        ),
-        campaigns=types.SimpleNamespace(
-            iter_cycle_ledgers=lambda: [],
-            workspace=tmp_path / "ws-d",
-            load_campaign=lambda _id: campaign,
-            cycle_dir=lambda _hop: tmp_path / "cycle-d",
-        ),
+    reread = metered.campaigns.load_campaign("camp-3")
+    assert reread is not None and reread.standing_budget == Budget(tokens=1_000), (
+        "a money ceiling landed on one cycle, not the campaign every cycle shares"
     )
+    # An UNCAP lifts the campaign's ceiling; the account still binds it through the reservation.
+    _change_run_limits(dispatcher, hop, Budget(usd=None))
+    lifted, held = metered.campaigns.load_campaign("camp-3"), registry.get(job.job_id)
+    assert lifted is not None and lifted.standing_budget == Budget(usd=None, tokens=1_000), (
+        "an uncapped campaign ceiling was stored as the account's headroom"
+    )
+    assert held is not None and held.allotment.usd is None and held.reserve.usd is not None, (
+        "an uncap became a bounded share, or left the account nothing held back for the run"
+    )
+    granted = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     caps, _ = clamp_budget_change(
-        requested=SpendCeilings(None, 1_000),
-        user=User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01"),
-        stores=delegated,
-        job_registry=types.SimpleNamespace(
-            list_running=lambda *, user_id: [], running_job_for=lambda _hop: None
+        requested=Budget(tokens=1_000),
+        user=granted,
+        stores=_account_stores(
+            tmp_path / "delegated", issuer=_WEB, user=granted, spent=None, grant=2.0
         ),
-        hop=hop,
+        job_registry=JobRegistry(tmp_path / "jobs-d", capacity=lambda _live: 1),
+        hop=_HELD_HOP,
     )
-    assert (caps.usd, caps.tokens) == (None, 1_000), (
-        "a grant became a ceiling on an arm the caller left alone"
-    )
+    assert caps == Budget(tokens=1_000), "a grant became a ceiling on an axis the caller left alone"
 
-    # A moved ceiling counts the cycle's own spend once: what the parent billed past the cut is not
-    # the fork's history, and binds it as spend.
+    # A moved ceiling is the CAMPAIGN's: every cycle's spend counts against it once, a fork's
+    # walked prefix not twice, and what the parent billed past the cut counts too.
     forker = web_account("sub-7")
     root = CycleHop(campaign_id="camp-7", cycle_id="cycle_budget0007")
     fork = CycleHop(campaign_id="camp-7", cycle_id="cycle_budget0007_fork_r1")
-    forker.campaigns.create_campaign(
-        Campaign(
-            campaign_id="camp-7", dataset_name="ds1", created_at="", root_cycle_id=root.cycle_id
-        )
-    )
+    forker.campaigns.create_campaign(minted_campaign(root))
     forker.campaigns.mint_cycle(root)
 
     def bill(at: CycleHop, usd: float) -> None:
@@ -2390,7 +2806,9 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
     forker.campaigns.mint_fork_cycle(
         fork,
         root_dir,
-        ForkSpec(trigger=ForkTrigger.OPERATOR_REWIND, reason="", issued_by="", from_round=1),
+        ForkSpec(
+            trigger=ForkTrigger.OPERATOR_REWIND, reason="", issued_by=SYSTEM_PRINCIPAL, from_round=1
+        ),
         cut=CycleEventLog.open(CycleDir(root_dir)).next_offset,
         from_round=1,
     )
@@ -2398,45 +2816,48 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
     bill(fork, 0.3)
     registry = JobRegistry(tmp_path / "jobs-7", capacity=lambda _live: 1)
     job = registry.request_slot(
-        user_id="sub-7", principal_id="sub-7", holder=CampaignLaunch("ds1"), hop=fork
+        user_id="sub-7",
+        principal_id="sub-7",
+        workspace=forker.campaigns.workspace,
+        holder=CampaignLaunch("ds1"),
+        hop=fork,
     )
-    registry.mark_admitted(job.job_id, SpendCeilings(0.8, None))
+    registry.mark_admitted(job.job_id, Budget(usd=0.8), Budget(usd=0.8))
     allowance = User(
         user_id="sub-7", tenant_id="sub-7", created_at="2026-01-01", spend_budget_usd_total=1.0
     )
     caps, reserve = clamp_budget_change(
-        requested=SpendCeilings(5.0, None),
+        requested=Budget(usd=5.0),
         user=allowance,
         stores=forker,
         job_registry=registry,
         hop=fork,
     )
     relaunched, _ = admit_launch(
-        declared=SpendCeilings(),
+        declared=Budget(),
         user=allowance,
         stores=forker,
         job_registry=registry,
         job_id=job.job_id,
         hop=fork,
     )
-    assert caps.usd == relaunched.usd == pytest.approx(0.9), (
-        "$1.00 allowance, $0.40 in this cycle's history and $0.10 beside it: it may reach $0.90"
+    assert caps.usd == relaunched.usd == pytest.approx(1.0), (
+        "$1.00 allowance, $0.50 of it the campaign's own: its ceiling is the whole $1.00, which "
+        "already counts that $0.50 — not $1.10 off a fork prefix counted twice"
     )
-    assert reserve.usd == pytest.approx(0.9), "the reservation moved off the ceiling it backs"
+    assert reserve.usd == pytest.approx(1.0), "the reservation moved off the ceiling it backs"
 
 
-# 4. Spend outlives what spent it
+# 6. Spend outlives what spent it
 
 
 def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
-    built_stores: Stores,
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stores = built_stores
     root = "cycle_root0000"
     stub, retried = f"{root}_fork_aaaa", f"{root}_fork_bbbb"
-    campaign_dir = stores.campaigns.campaign_root_dir("camp-2")
-    campaign_dir.mkdir(parents=True, exist_ok=True)
-    (campaign_dir / "campaign.json").write_text(json.dumps({"campaign_id": "camp-2"}), "utf-8")
+    stores.campaigns.create_campaign(minted_campaign(CycleHop(campaign_id="camp-2", cycle_id=root)))
 
     def spent_cycle(cycle_id: str, *, cost_usd: float) -> Path:
         hop = CycleHop(campaign_id="camp-2", cycle_id=cycle_id)
@@ -2456,7 +2877,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         )
         return CycleLayout(cycle_dir).ledger
 
-    root_ledger = spent_cycle(root, cost_usd=0.07)
+    spent_cycle(root, cost_usd=0.07)
     stub_ledger = spent_cycle(stub, cost_usd=0.11)
     retried_ledger = spent_cycle(retried, cost_usd=0.05)
 
@@ -2479,24 +2900,45 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     assert not cleanup(root) and account_usd() == pytest.approx(before), (
         "a cycle the delete REFUSES must not be banked: it keeps its rows, the same money twice"
     )
+
+    def ceiling_counts_now() -> tuple[float, int]:
+        counted = stores.campaigns.metered_spend("camp-2", "bill")
+        return counted.usd_amount, counted.token_amount
+
+    ceiling_counts = ceiling_counts_now()
+    assert ceiling_counts == pytest.approx((before, 3 * 2_800)), (
+        "the campaign's ceiling read another sum than its cycles metered"
+    )
     assert cleanup(stub) and not stub_ledger.exists(), "a spent stub fork survived its delete"
     assert account_usd() == pytest.approx(before), "deleting a spent stub fork un-spent it"
+    assert ceiling_counts_now() == pytest.approx(ceiling_counts), (
+        "deleting a spent stub fork handed its money back to the campaign's ceiling"
+    )
     retried_hop = CycleHop(campaign_id="camp-2", cycle_id=retried)
     for _crashed_attempt in range(2):
         bank_spend(
             workspace=stores.campaigns.workspace,
             cycle_dirs=[stores.campaigns.cycle_dir(retried_hop)],
-            campaign_id="camp-2",
-            cycle_id=retried,
+            subject=BankedSubject(campaign_id="camp-2", cycle_id=retried),
+            metered={
+                meter: stores.campaigns.cycle_metered(retried_hop, meter)
+                for meter in get_args(CeilingMeter)
+            },
         )
     assert cleanup(retried) and not retried_ledger.exists(), "a banked fork survived its delete"
     assert account_usd() == pytest.approx(before), (
         "banking precedes the delete: a retry after a crash in between must find the tombstone"
     )
-    stores.campaigns.delete_campaign(
-        "camp-2", keep_results=False, changed_at="2026-01-02T00:00:00Z"
+    assert ceiling_counts_now() == pytest.approx(ceiling_counts), (
+        "a crash retried between bank and delete counted the cycle's metered spend twice, or none"
     )
-    assert not root_ledger.exists(), "a deleted campaign kept its ledger"
+    # A campaign whose manifest is gone still deletes, and banks: nothing reads its rows as one.
+    camp_dir = stores.campaigns.campaign_root_dir("camp-2")
+    CampaignLayout(camp_dir).manifest.unlink()
+    assert stores.campaigns.delete_campaign(
+        "camp-2", keep_results=True, changed_at="2026-01-02T00:00:00Z"
+    )
+    assert not camp_dir.exists(), "a manifest-less campaign kept rows nothing marks deleted"
     assert account_usd() == pytest.approx(before), (
         "banked by the destroyer itself, under BOTH `keep_results` arms, so no caller can skip it"
     )
@@ -2526,6 +2968,130 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     )
     assert not sandbox.exists(), "a reclaimed sandbox survived"
     banked = tombstones()[banked_before:]
-    assert [(b.used_usd, b.used_tokens) for b in banked] == [(pytest.approx(0.15), 600 + 100)], (
+    assert [b.used_tokens for b in banked] == [600 + 100] and [
+        b.used_usd for b in banked
+    ] == pytest.approx([0.15]), (
         "a forwarded inner cycle was banked twice, or its own spend not at all"
     )
+
+    # A draft never minted banks under its own id, and a Start's claim on it holds off a discard.
+    def spent_draft(draft_id: str, cost_usd: float) -> Path:
+        draft_dir = stores.drafts.draft_dir(draft_id)
+        CycleEventLog.open(CycleDir(draft_dir)).append(
+            TokenUsageRecord(
+                kind="backend",
+                node="checkin",
+                model="openai/gpt-4o",
+                provider="openrouter",
+                input_tokens=300,
+                output_tokens=100,
+                cost_usd=cost_usd,
+            )
+        )
+        return draft_dir
+
+    draft = new_draft(
+        tenant_id=stores.identity.tenant_id,
+        owner_user_id=str(stores.identity.user_id),
+        slug="drafted",
+        n_samples=1,
+        sample_preview=[],
+        headers=[],
+        source_dataset="drafted",
+    )
+    stores.drafts.write_draft(draft.draft_id, draft.to_disk())
+    undrafted = account_usd()
+    draft_dir = spent_draft(draft.draft_id, 0.04)
+    with_draft = account_usd()
+    assert with_draft == pytest.approx(undrafted + 0.04), "a draft's check-in calls went unbilled"
+
+    def command(
+        payload: DiscardDraftPayload | StartCheckinPayload | EditDraftCampaignPayload,
+    ) -> object:
+        return asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(payload)))
+
+    # An edit racing a Start's mint is refused while the claim holds, and finds nothing once the
+    # draft closed: it never lands inside the mint nor writes the closed draft's dir back.
+    edit = EditDraftCampaignPayload(
+        draft_id=draft.draft_id, patch=EditDraftPatch(raw_task_description="raced")
+    )
+    held_ledger, held_draft = stores.drafts.ledger(draft.draft_id), draft_dir / "draft.json"
+    ledger_before, draft_before = held_ledger.read_bytes(), held_draft.read_bytes()
+    claim = stores.drafts.claim(draft.draft_id)
+    for refused in (
+        DiscardDraftPayload(draft_id=draft.draft_id),
+        StartCheckinPayload(draft_id=draft.draft_id),
+        edit,
+    ):
+        with pytest.raises(ConflictError) as held:
+            command(refused)
+        assert held.value.code == "draft_held", (
+            f"a {type(refused).__name__} on a draft a Start holds was not refused as one"
+        )
+    assert draft_dir.is_dir(), "a discard refused under a Start's claim still took the draft"
+    assert held_ledger.read_bytes() == ledger_before, "an edit under a Start's claim was recorded"
+    assert held_draft.read_bytes() == draft_before, "an edit landed on a draft a Start holds"
+    intruder = dataclasses.replace(
+        stores, identity=dataclasses.replace(stores.identity, user_id=UserId("intruder"))
+    )
+    with pytest.raises(NotFoundError):
+        asyncio.run(CommandDispatcher(intruder).dispatch(CommandCall(edit)))
+    claim.release()
+    command(DiscardDraftPayload(draft_id=draft.draft_id))
+    assert not draft_dir.exists(), "a discard left the draft's dir, or wrote it back"
+    with pytest.raises(NotFoundError):
+        command(edit)
+    assert not draft_dir.exists(), "an edit on a closed draft wrote its dir back"
+    (draft_bank,) = [t for t in tombstones() if t.draft_id == draft.draft_id]
+    assert not draft_bank.campaign_id and draft_bank.used_usd == pytest.approx(0.04), (
+        "a discarded draft banked under a campaign's id, or not its own spend"
+    )
+    assert account_usd() == pytest.approx(with_draft), "discarding a spent draft un-spent it"
+    with pytest.raises(NotFoundError):
+        command(StartCheckinPayload(draft_id=draft.draft_id))
+    with pytest.raises(NotFoundError):
+        stores.drafts.claim(draft.draft_id)
+    assert not draft_dir.exists(), "a Start on a discarded draft wrote its dir back"
+
+    # A framing paid before its cycle exists bills a draft with no check-in, and its discard banks it.
+    async def framed(*_: object, ledger: CycleEventLog, **__: object) -> None:
+        ledger.append(
+            TokenUsageRecord(
+                kind="optimizer",
+                node="checkin",
+                model="openai/gpt-4o",
+                provider="openrouter",
+                input_tokens=500,
+                output_tokens=200,
+                cost_usd=0.03,
+            )
+        )
+        raise PayloadInvalidError("refused after the framing", code="refused")
+
+    monkeypatch.setattr(mint, "commit_task_framing", framed)
+    unframed = {"optimization": {"degradation_threshold": 0.4}}
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("drafted") / DEFINITION_FILE,
+        {"pipeline": {"backend_type": "termnorm"}, "campaign": unframed},
+    )
+    rows = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(30)]
+    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
+    framing = loop_session(
+        stores,
+        pipeline_schema([solve], name="drafted"),
+        rows,
+        dataset=resolve_dataset(stores, "drafted"),
+    )
+    declared = mint.declare(framing, CampaignConfig.model_validate(unframed), purpose=Optimize())
+    with pytest.raises(PayloadInvalidError):
+        asyncio.run(
+            mint.mint_framed_cycle(
+                framing, declared, rows, campaign_id="framed__000001", task_text="frame this"
+            )
+        )
+    assert not draft_dirs(stores.campaigns.workspace), "an unminted framing left its ledger"
+    (framing_bank,) = [t for t in tombstones() if t.draft_id not in ("", draft.draft_id)]
+    assert not framing_bank.campaign_id and framing_bank.used_usd == pytest.approx(0.03), (
+        "a refused mint's framing went unbanked, or banked under the campaign it never minted"
+    )
+    assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"

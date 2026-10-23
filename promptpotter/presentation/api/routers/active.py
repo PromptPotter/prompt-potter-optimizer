@@ -14,12 +14,12 @@ from promptpotter.application.pipeline_resolve import (
     optimizer_roster,
     resolve_pipeline_for_optimizer,
 )
+from promptpotter.domain.cycle_paths import decode_cycle_path
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import (
     IdentityDep,
     JobRegistryDep,
     StoresDep,
-    decode_descend,
 )
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 
@@ -70,7 +70,7 @@ def get_cycles(
     return conditional_json(
         request,
         list_cycles(
-            stores, inside=decode_descend(descend), campaign_id=campaign, attached_only=attached
+            stores, inside=decode_cycle_path(descend), campaign_id=campaign, attached_only=attached
         ),
     )
 
@@ -111,6 +111,3 @@ def get_optimizer_knobs(name: str) -> OptimizerKnobsResponse:
     404 when no such optimizer is registered.
     """
     return optimizer_knobs(name)
-
-
-__all__ = ["ActiveSessionResponse"]

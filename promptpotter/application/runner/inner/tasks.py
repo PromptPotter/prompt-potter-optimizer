@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import itertools
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ConfigDict, Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from promptpotter import connectors
 from promptpotter.application.campaign_config import (
     DEFAULT_ORIGIN_BUDGET,
+    ArmGateMode,
     CampaignConfig,
-    DeterminismClamp,
     LivesConfig,
     OptimizationConfig,
     merge_node_overlays,
@@ -23,17 +23,19 @@ from promptpotter.application.campaign_config import (
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
 from promptpotter.domain.bench import DatasetSplit
+from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
     NodeKind,
     NodeRole,
     NodeSearchNarrowing,
+    PipelineNode,
 )
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
-from promptpotter.domain.spend import SpendCeilings
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.spend import Budget
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_pipeline,
     resolve_dataset,
@@ -46,10 +48,8 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 
-class InnerBenchmarkConfig(StrictModel):
+class InnerBenchmarkConfig(FrozenModel):
     """A SPEND bound only: a target score or default ladder rescales every fitness against an undeclared benchmark."""
-
-    model_config = ConfigDict(frozen=True)
 
     n_samples_per_inner_round: int = Field(ge=1)
     # Explicit `null` ⇒ the per-round count; the inner-origin θ is the term BOTH arms of every paired delta subtract.
@@ -81,10 +81,8 @@ def _level_slug(value: object) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", str(value)).strip("-") or "none"
 
 
-class InnerTasks(StrictModel):
+class InnerTasks(FrozenModel):
     """A panel of seats, each a fresh inner campaign run as an inner hop of the arm's cell."""
-
-    model_config = ConfigDict(frozen=True)
 
     inner_benchmark: str = Field(min_length=1)
     inner_benchmark_config: InnerBenchmarkConfig
@@ -186,7 +184,7 @@ class InnerTasks(StrictModel):
         return InnerTaskSpec(
             inner_dataset=self.dataset_for(cell),
             optimizer_treatment=treatment,
-            seed=cell.inner_dataset_seed,
+            run_seed=cell.run_seed,
             n_samples=cfg.n_samples_per_inner_round,
             n_samples_origin=cfg.n_samples_origin,
             n_samples_bench=cfg.n_samples_bench,
@@ -213,7 +211,7 @@ class InnerTasks(StrictModel):
             # `n_rounds` is absent deliberately: two cells differing only in depth ARE one cell.
             key = (
                 self.dataset_for(task),
-                task.inner_dataset_seed,
+                task.run_seed,
                 task.inner_model,
                 task.inner_provider,
                 tuple(task.inner_route_order or ()),
@@ -221,7 +219,7 @@ class InnerTasks(StrictModel):
             if (twin := seen_specs.get(key)) is not None:
                 raise ValueError(
                     f"tasks {twin!r} and {task.id!r} resolve to the same inner campaign "
-                    f"(dataset={key[0]!r}, seed={key[1]}) — give one a different seed, or "
+                    f"(dataset={key[0]!r}, run_seed={key[1]}) — give one a different seed, or "
                     "drop it; two names for one cell is not two cells. A different "
                     "`n_rounds` does not separate them: depth is CONTINUED on one cell, "
                     "never forked into a second."
@@ -234,11 +232,9 @@ def parse_panel(raw: object) -> InnerTasks:
     return InnerTasks.model_validate(raw)
 
 
-class ResolvedPanel(StrictModel):
+class ResolvedPanel(FrozenModel):
     """The panel with each cell's instrument (`connector.py::_resolve_panel`): the ONE document run
     init, the samples and the fingerprint read."""
-
-    model_config = ConfigDict(frozen=True)
 
     panel: InnerTasks
     # By cell id.
@@ -274,12 +270,10 @@ def parse_resolved(raw: object) -> ResolvedPanel:
     return ResolvedPanel.model_validate(raw)
 
 
-class InnerTaskSpec(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class InnerTaskSpec(FrozenModel):
     inner_dataset: str
     optimizer_treatment: str
-    seed: int
+    run_seed: int
     n_samples: int
     n_samples_origin: int | None = None
     n_samples_bench: int
@@ -309,6 +303,9 @@ def is_self_optimization(backend_type: str) -> bool:
     return connectors.registered().get(backend_type) is _recursion_connector()
 
 
+INNER_ARM_GATE: ArmGateMode = "off"
+
+
 def _inner_manifest_nodes(
     optimizer: str,
     own: Mapping[str, ManifestNodeOverlay],
@@ -319,7 +316,7 @@ def _inner_manifest_nodes(
 ) -> dict[str, ManifestNodeOverlay]:
     """``n_samples=None`` leaves the sampler's size out, which is what the identity hashes."""
     merged = merge_node_overlays(merge_node_overlays(own, nodes), depth_nodes)
-    sampler = resolve_optimizer(optimizer, merged).sampler
+    sampler = resolve_optimizer(optimizer, merged, gate=INNER_ARM_GATE).sampler
     if n_samples is None or sampler.size_knob is None:
         return merged
     size = {sampler.name: ManifestNodeOverlay(config={sampler.size_knob: n_samples})}
@@ -340,12 +337,15 @@ def _select_inner_optimizer(
     }
     name = opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
     return resolve_optimizer(
-        name, _inner_manifest_nodes(name, own, nodes, depth_nodes, n_samples=n_samples)
+        name,
+        _inner_manifest_nodes(name, own, nodes, depth_nodes, n_samples=n_samples),
+        gate=INNER_ARM_GATE,
     )
 
 
 # `problem_description` and `answer_format` are absent: they carry the injection slots and the output contract.
 OUTER_PROMPT_FIELDS: tuple[str, ...] = ("persona", "task_intent", "instruction", "thinking_style")
+assert set(OUTER_PROMPT_FIELDS) <= set(OptimizerPromptTemplate.RENDER_ORDER)
 
 _OUTER_KINDS = frozenset({NodeKind.LLM, NodeKind.GATEWAY})
 
@@ -365,7 +365,9 @@ def _chain(inner: SelectedOptimizer) -> list[str]:
 
 def _lever(inner: SelectedOptimizer, node: str) -> dict[str, Any]:
     """What an arm's edit to *node* lands on; the knobs are left out, being how much a cell buys."""
-    declared = {k: v for k, v in inner.document["nodes"][node].items() if k != "config"}
+    declared = inner.manifest.nodes[node].model_dump(
+        mode="json", exclude_unset=True, exclude={"config"}
+    )
     return {**declared, "config": inner.call_config(node)}
 
 
@@ -473,20 +475,16 @@ def inner_instrument_config(
     spec: InnerTaskSpec,
     base: CampaignConfig,
     *,
-    llm_node: str,
+    solver: Sequence[PipelineNode],
     n_search: int,
 ) -> CampaignConfig:
-    """Token and spend caps are CLEARED: one tripping on measured tokens truncates the trajectory nondeterministically.
-
-    *n_search* is the bank less its bench-only rows: the origin reads all of it.
-    """
+    """Caps are LIFTED: one tripping on measured tokens truncates nondeterministically; the outer book admits every send."""
     opt_update: dict[str, Any] = {
-        "max_rounds": spec.n_rounds,
+        "budget": Budget(usd=None, tokens=None, rounds=spec.n_rounds, wall_clock_s=None),
         "lives": spec.lives,
-        "ceiling": SpendCeilings(),
         # Each gate's await is unbounded, and an instrument cannot ask a human anything.
         "origin_gate": "off",
-        "arm_gate": "off",
+        "arm_gate": INNER_ARM_GATE,
         # Under 2PL θ is in units of 1/a and each cycle graduates on its OWN CV, so the panel would average a mixture of scales.
         "enable_2pl_graduation": False,
         "nodes": _inner_manifest_nodes(
@@ -501,48 +499,41 @@ def inner_instrument_config(
         # The clamp's seed is the CELL's, so every candidate measured on a cell draws one random stream (CRN).
         opt_update["determinism"] = (
             base.optimization.determinism or DeterminismClamp()
-        ).model_copy(update={"temperature": spec.inner_optimizer_temperature, "seed": spec.seed})
+        ).model_copy(
+            update={
+                "temperature": spec.inner_optimizer_temperature,
+                "seed": spec.run_seed,
+            }
+        )
+    if not solver:
+        raise ValueError("the inner pipeline declares no prompt node: no solver to pin")
     po: dict[str, Any] = {k: dict(v) for k, v in (base.pipeline_overlay or {}).items()}
-    node = dict(po.get(llm_node, {}))
-    node["seed"] = spec.seed
-    if spec.inner_model:
-        node["model"] = spec.inner_model
-        if spec.inner_provider:
-            node["provider"] = spec.inner_provider
-    if spec.inner_route_order:
-        node["route_order"] = list(spec.inner_route_order)
-    po[llm_node] = node
-    # The solver's SPEND AXES — model, effort, output cap, temperature — are the instrument, so the
-    # inner generator writes prompt text alone: a lift bought with tokens is not optimizer learning.
     narrowing = dict(base.optimizer_narrowing)
-    own = narrowing.get(llm_node) or NodeSearchNarrowing()
-    narrowing[llm_node] = own.model_copy(update={"param_keys": list(PROMPT_STRING_FIELDS)})
+    for prompt_node in solver:
+        node = dict(po.get(prompt_node.name, {}))
+        node["seed"] = spec.run_seed
+        if spec.inner_model:
+            node["model"] = spec.inner_model
+            if spec.inner_provider:
+                node["provider"] = spec.inner_provider
+        if spec.inner_route_order:
+            node["route_order"] = list(spec.inner_route_order)
+        po[prompt_node.name] = node
+        # The solver's SPEND AXES — model, effort, output cap, temperature — are the instrument, so the
+        # inner generator writes prompt text alone: a lift bought with tokens is not optimizer learning.
+        own = narrowing.get(prompt_node.name) or NodeSearchNarrowing()
+        narrowing[prompt_node.name] = own.model_copy(
+            update={"param_keys": list(prompt_node.prompt_fields)}
+        )
     return base.model_copy(
         update={
             "sp_budget_origin": n_search,
             # Every bench-only row of the bank is held out; `bench: 0` ranks no search row away.
-            "dataset_split": DatasetSplit(
-                bench=0, seed=spec.seed, tolerance=spec.n_samples_bench // 10
-            ),
+            "dataset_split": DatasetSplit(bench=0, tolerance=spec.n_samples_bench // 10),
+            "run_seed": spec.run_seed,
             "bench_trigger": "each_round",
             "optimization": base.optimization.model_copy(update=opt_update),
             "pipeline_overlay": po,
             "optimizer_narrowing": narrowing,
         }
     )
-
-
-__all__ = [
-    "OUTER_PROMPT_FIELDS",
-    "InnerBenchmarkConfig",
-    "InnerCell",
-    "InnerCells",
-    "InnerTaskSpec",
-    "InnerTasks",
-    "ResolvedPanel",
-    "inner_instrument_config",
-    "is_self_optimization",
-    "panel_cell",
-    "parse_panel",
-    "parse_resolved",
-]

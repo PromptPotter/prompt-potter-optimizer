@@ -42,7 +42,7 @@ export function SampleSetControl({
   const inSet = new Set(sampleSet);
   const coverage = roundsCoveringSample(rounds);
   const fullyCovered = roundSets.length;
-  const shared = new Set(overlap?.sample_ids ?? []);
+  const shared = new Set(overlap?.positions ?? []);
 
   return (
     <div className="ss-control">
@@ -85,13 +85,13 @@ export function SampleSetControl({
         </HoverCard>
         {overlap != null && (
           <HoverCard
-            content={`The ${unitCount(overlap.sample_ids.length, unit)} C0 and each new best since have all answered — the one basis they can be differenced on, and what the overlap bars sit on until you replace it.`}
+            content={`The ${unitCount(overlap.positions.length, unit)} C0 and each new best since have all answered — the one basis they can be differenced on, and what the overlap bars sit on until you replace it.`}
           >
             <Chip
-              on={sameSampleSet(sampleSet, overlap.sample_ids)}
-              onClick={() => setSelectionForSampleSet(overlap.sample_ids)}
+              on={sameSampleSet(sampleSet, overlap.positions)}
+              onClick={() => setSelectionForSampleSet(overlap.positions)}
             >
-              overlap · {overlap.sample_ids.length}
+              overlap · {overlap.positions.length}
             </Chip>
           </HoverCard>
         )}

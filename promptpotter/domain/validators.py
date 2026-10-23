@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import asyncio
 
-    from promptpotter.domain.results import ArmOutcome, DegradationContext
+    from promptpotter.domain.paired_reading import ArmKey
+    from promptpotter.domain.results import DegradationContext
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
 
@@ -22,29 +23,14 @@ class ValidatorOutcome:
     evidence: dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass(frozen=True)
-class LLMOutputValidator:
-    id: str
-    check: Callable[..., ValidatorOutcome | None]
-
-
-def run_validators(
-    validators: tuple[LLMOutputValidator, ...],
-    source_output: Mapping[str, Any],
-    **context: Any,
-) -> list[ValidatorOutcome]:
-    outcomes: list[ValidatorOutcome] = []
-    for validator in validators:
-        outcome = validator.check(source_output, **context)
-        if outcome is not None:
-            outcomes.append(outcome)
-    return outcomes
+#: How a stop ends the walk: cut against the arm, or locked in for it.
+WalkStop = Literal["broken", "eliminated", "locked_in"]
 
 
 @dataclass(frozen=True)
 class StopSignal:
     check_name: str
-    outcome: ArmOutcome
+    outcome: WalkStop
     check_result: Mapping[str, Any]
 
 
@@ -75,7 +61,7 @@ class CaughtUp:
     """What one settle took: the racing member, and each prior's catch-up cells."""
 
     member: str
-    cells: Mapping[str, Sequence[GradedCell]]
+    cells: Mapping[ArmKey, Sequence[GradedCell]]
 
 
 class CatchUps(Protocol):
@@ -94,15 +80,3 @@ class CatchUps(Protocol):
     def bank_backfills(self, samples: Sequence[Sample]) -> CaughtUp | None: ...
 
     def discard_backfills(self) -> None: ...
-
-
-__all__ = [
-    "BrokenSignal",
-    "CatchUps",
-    "CaughtUp",
-    "LLMOutputValidator",
-    "StopRule",
-    "StopSignal",
-    "ValidatorOutcome",
-    "run_validators",
-]

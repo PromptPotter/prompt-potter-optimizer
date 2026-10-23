@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.scoring.row_diagnostics import extract_sample_diagnostics
+from promptpotter.application.scoring.row_diagnostics import (
+    count_degraded_samples,
+    extract_sample_diagnostics,
+)
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
@@ -23,7 +26,6 @@ if TYPE_CHECKING:
 
 shapes_optimizer_prompt(__name__)
 
-__all__ = ["compute_round_diagnostics"]
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,7 @@ def compute_round_diagnostics(
     round_result: RoundResult,
     rounds_history: list[RoundResult],
     pipeline_schema: PipelineSchema | None,
+    slot_of: Mapping[str, int],
 ) -> RoundDiagnostics:
     """*rounds_history* MUST hold *round_result* as its LAST element."""
     results = round_result.results.cells
@@ -45,7 +48,7 @@ def compute_round_diagnostics(
     error_rate, warning_rate = _pipeline_health(results)
     evolution_rows, anomalies = _evolution(rounds_history)
     trend, trend_desc = _trend(rounds_history)
-    diff_lines = _cross_candidate_diff(round_result)
+    diff_lines = _cross_candidate_diff(round_result, slot_of)
     samples = _sample_diagnostics(results, pipeline_schema)
 
     return RoundDiagnostics(
@@ -123,21 +126,22 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]
     max_plateau = 0
     prev_acc: float | None = None
     for r in rounds:
+        accuracy = None if r.fold is None else r.fold.accuracy
         # An unreadable round breaks the series: a 0.0 delta would count as a flat round below.
-        delta = (r.accuracy - prev_acc) if prev_acc is not None and r.accuracy is not None else None
+        delta = (accuracy - prev_acc) if prev_acc is not None and accuracy is not None else None
         rows.append(
             EvolutionRow(
                 round=r.round,
-                accuracy=r.accuracy,
+                accuracy=accuracy,
                 delta=delta,
-                degraded=r.degraded_samples,
-                n_candidates=len(r.candidate_scores),
+                degraded=count_degraded_samples(r.results),
+                n_candidates=len(r.panel),
                 elected=bool(r.improved),
             )
         )
         plateau_run = plateau_run + 1 if delta is not None and abs(delta) < _PLATEAU_DELTA else 0
         max_plateau = max(max_plateau, plateau_run)
-        prev_acc = r.accuracy
+        prev_acc = accuracy
 
     anomalies: list[str] = []
     if max_plateau >= _PLATEAU_FLAG_THRESHOLD:
@@ -171,20 +175,20 @@ def _trend(rounds: list[RoundResult]) -> tuple[TrendClass, str]:
     return "plateau", f"{since} rounds since the last election ({total} in total)"
 
 
-def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
+def _cross_candidate_diff(round_result: RoundResult, slot_of: Mapping[str, int]) -> list[str]:
     winner_results = round_result.results
-    all_results = round_result.all_candidate_results
-    if not winner_results or len(all_results) < 2:
+    panel = round_result.panel
+    if not winner_results or len(panel) < 2:
         return []
 
-    winner_misses = {r.sample_id for r in winner_results if not r.hit}
-    solvers: dict[int, int] = {}
-    for results in all_results.values():
-        for r in results:
-            if r.sample_id in winner_misses and r.hit:
-                solvers[r.sample_id] = solvers.get(r.sample_id, 0) + 1
+    winner_misses = {r.key for r in winner_results if not r.hit}
+    solvers: dict[str, int] = {}
+    for key in panel:
+        for r in round_result.rows(key):
+            if r.key in winner_misses and r.hit:
+                solvers[r.key] = solvers.get(r.key, 0) + 1
     ranked = sorted(solvers.items(), key=lambda kv: -kv[1])
-    return [f"  #{sid} — solved by {n} other candidate(s)" for sid, n in ranked[:5]]
+    return [f"  #{slot_of[key]} — solved by {n} other candidate(s)" for key, n in ranked[:5]]
 
 
 def _sample_diagnostics(

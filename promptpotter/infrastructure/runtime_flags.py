@@ -4,6 +4,8 @@ import sys
 import time
 from pathlib import Path
 
+from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -16,8 +18,9 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.run_records import RunLimitsRecord
-from promptpotter.domain.spend import declare_ceiling
+from promptpotter.domain.run_records import StandingBudgetRecord
+from promptpotter.domain.spend import Budget
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, held
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -28,9 +31,15 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_controls,
     scan_ledger_declared_phase,
     scan_ledger_progress,
-    scan_ledger_run_limits,
+    scan_ledger_standing_budget,
 )
-from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, in_inner_sandbox
+from promptpotter.infrastructure.store.io import read_json_optional
+from promptpotter.infrastructure.store.layout import (
+    CampaignLayout,
+    CycleLayout,
+    campaign_cycles_dir,
+    in_inner_sandbox,
+)
 
 
 def standing_controls(cycle_dir: Path) -> Controls:
@@ -49,17 +58,20 @@ def requested_lookahead(controls: Controls) -> int:
     return sys.maxsize if ask.auto else ask.cells
 
 
-def standing_run_limits(cycle_dir: Path) -> RunLimitsRecord:
-    return scan_ledger_run_limits(CycleLayout(cycle_dir).ledger)
+def standing_budget(cycle_dir: Path) -> StandingBudgetRecord:
+    return scan_ledger_standing_budget(CycleLayout(cycle_dir).ledger)
 
 
 def armed_run_limits(cycle_dir: Path, declared: RunLimits) -> RunLimits:
-    standing = standing_run_limits(cycle_dir)
-    return RunLimits(
-        max_rounds=declared.max_rounds if standing.rounds is None else standing.rounds.max_rounds,
-        ceiling=declare_ceiling(declared.ceiling, standing.ceiling),
-        optimizer=declared.optimizer,
+    manifest = read_json_optional(CampaignLayout(_campaign_dir(cycle_dir)).manifest)
+    money = Budget() if manifest is None else Campaign.model_validate(manifest).standing_budget
+    return declared.model_copy(
+        update={"budget": declared.budget.over(money, standing_budget(cycle_dir).budget)}
     )
+
+
+def _campaign_dir(cycle_dir: Path) -> Path:
+    return cycle_dir.parent.parent
 
 
 # `RUN_FRESH_S` bounds ANY ledger append (a heartbeat is one); the other two, the last NON-heartbeat one.
@@ -98,7 +110,6 @@ def _beating(cycle_dir: Path) -> bool:
 
 def read_run_state(
     *,
-    checkin: bool,
     terminal: bool,
     pause_requested: bool,
     declared: str,
@@ -112,11 +123,8 @@ def read_run_state(
 ) -> RunState:
     """`held` alone decides attachment; the clocks only grade it, so a quiet producer reads WEDGED, still attached."""
     absent = ProducerReading.of(ProducerState.ABSENT)
-    taken = ProducerReading.of(ProducerState.CLAIMED)
-    if checkin:
-        return RunState(RunPhase.CHECKIN, absent if claimed is None else taken)
     if not held and claimed is not None:
-        return RunState(claimed, taken)
+        return RunState(claimed, ProducerReading.of(ProducerState.CLAIMED))
     if not held:
         owed = declared == RunPhase.RUNNING and not pause_requested and not terminal
         producer = ProducerReading.of(ProducerState.SILENT) if owed else absent
@@ -143,20 +151,17 @@ def read_run_state(
 
 def derive_run_state(cycle_dir: Path) -> RunState:
     ledger = CycleLayout(cycle_dir).ledger
-    checkin = scan_cycle_facts(ledger).checkin
     declared, gate, drafts = scan_ledger_declared_phase(ledger)
     terminal = declared == RunPhase.TERMINAL
-    settled = checkin or terminal
     producer_held = cycle_held(cycle_dir)
     progress = scan_ledger_progress(ledger) if producer_held else Progress()
-    asked = None if settled else standing_controls(cycle_dir).pause
+    asked = None if terminal else standing_controls(cycle_dir).pause
     claim = None if producer_held else scan_launch_claim(ledger)
     now = time.time()
     run = read_run_state(
-        checkin=checkin,
         terminal=terminal,
         pause_requested=asked is not None,
-        declared="" if settled else declared,
+        declared="" if terminal else declared,
         held=producer_held,
         beating=_beating(cycle_dir),
         silent_for_s=None
@@ -188,7 +193,7 @@ def derive_run_state(cycle_dir: Path) -> RunState:
         pause=PauseReading(
             stop_reason=None,
             cause=PauseCause.COMMAND,
-            detail=f"pause-cycle by {asked.issued_by}" if asked.issued_by else "pause-cycle",
+            detail=f"pause-cycle by {asked.issued_by.display}",
             next_step="The run stops at its next checkpoint.",
             at=asked.at,
         )
@@ -198,14 +203,22 @@ def derive_run_state(cycle_dir: Path) -> RunState:
 def run_phase_validator_epoch(cycle_dir: Path) -> float | None:
     """Stats only, no parse: this is the 2 s poll's 304 path."""
     layout = CycleLayout(cycle_dir)
-    campaign_manifest = CampaignLayout(cycle_dir.parent.parent).manifest
+    campaign = CampaignLayout(_campaign_dir(cycle_dir))
+    cycles = campaign_cycles_dir(campaign.campaign_dir)
+    # The campaign's metered spend is served too: every cycle's ledger, and a deleted one's tombstone.
+    siblings = (
+        [CycleLayout(sibling).ledger for sibling in cycles.iterdir()] if cycles.is_dir() else []
+    )
+    tombstones = CycleEventLog.workspace_path(WorkspaceDir(campaign.campaign_dir.parent.parent))
     stamps: list[float] = []
     for path in (
         layout.cycle_dir,
-        layout.dashboard,
         layout.runtime,  # the producer lock: a directory's mtime sees a child's create AND unlink
         layout.ledger,
-        campaign_manifest,
+        campaign.manifest,
+        cycles,
+        *siblings,
+        tombstones,
     ):
         try:
             stamps.append(path.stat().st_mtime)
@@ -218,19 +231,3 @@ def run_phase_validator_epoch(cycle_dir: Path) -> float | None:
     if scan_launch_claim(layout.ledger) is not None:
         stamps.append(time.time())
     return max(stamps) if stamps else None
-
-
-__all__ = [
-    "RECENT_STEP_S",
-    "RUN_FRESH_S",
-    "WEDGED_AFTER_S",
-    "armed_run_limits",
-    "derive_run_state",
-    "effective_lookahead",
-    "read_run_state",
-    "requested_lookahead",
-    "run_phase_validator_epoch",
-    "standing_controls",
-    "standing_run_limits",
-    "verify_stale_after",
-]

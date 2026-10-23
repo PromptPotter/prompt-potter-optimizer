@@ -3,13 +3,13 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
+    from promptpotter.domain.results import Concluded, ScoreSummary
     from promptpotter.domain.run_records import (
-        CandidateScoredRecord,
         RoundClosedRecord,
         RoundEnteredRecord,
         RunPhaseRecord,
@@ -80,11 +80,7 @@ class QueryScoreEnd:
     node_outputs: dict[str, Any]
 
 
-MeasurementEvent = Union[
-    QueryScoreStart,
-    QueryNodeSpan,
-    QueryScoreEnd,
-]
+MeasurementEvent = QueryScoreStart | QueryNodeSpan | QueryScoreEnd
 
 
 class TraceSink:
@@ -108,7 +104,9 @@ class TraceSink:
         self, campaign_id: str, round_num: int | None, span_id: str, *, error: str | None
     ) -> None: ...
 
-    def on_candidate_scored(self, campaign_id: str, record: CandidateScoredRecord) -> None: ...
+    def on_arm_concluded(
+        self, campaign_id: str, round_num: int, arm: Concluded, fold: ScoreSummary | None
+    ) -> None: ...
     def on_round_closed(self, campaign_id: str, record: RoundClosedRecord) -> None: ...
 
     def on_run_stopped(
@@ -119,16 +117,3 @@ class TraceSink:
     def on_query_node_span(self, event: QueryNodeSpan) -> None: ...
     def on_query_score_end(self, event: QueryScoreEnd) -> None: ...
     def flush(self) -> None: ...
-
-
-__all__ = [
-    "CampaignStart",
-    "DatasetRegistered",
-    "MeasurementEvent",
-    "QueryNodeSpan",
-    "QueryScoreEnd",
-    "QueryScoreStart",
-    "TraceSink",
-    "dataset_item_id",
-    "generate_observation_id",
-]

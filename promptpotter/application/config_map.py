@@ -18,15 +18,9 @@ from promptpotter.application.knobs import (
     declared_couplings,
     resolve_knob_states,
 )
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.strict_model import StrictModel
-
-__all__ = [
-    "ConfigCoupling",
-    "ConfigEstimandGroup",
-    "ConfigKnob",
-    "ConfigMapResponse",
-    "config_map",
-]
+from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 
 
 class ConfigKnob(StrictModel):
@@ -73,6 +67,11 @@ class ConfigMapResponse(StrictModel):
         description="Declared couplings in reading order: the ones this config violates first, "
         "then gravest severity first, declaration order within a severity"
     )
+
+
+def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
+    campaign = owned_campaign(stores, campaign_id)
+    return config_map(resolve_campaign_config(stores, campaign, campaign.root_hop))
 
 
 def config_map(config: CampaignConfig) -> ConfigMapResponse:

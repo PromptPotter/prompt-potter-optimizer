@@ -27,6 +27,3 @@ def list_datasets(stores: StoresDep) -> DatasetIndexResponse:
 def get_dataset_pipeline(name: str, stores: StoresDep) -> DatasetPipelineResponse:
     """One dataset's declared pipeline, gated by the resolver every dataset read shares."""
     return resolve_pipeline_for_dataset(stores, name)
-
-
-__all__ = ["DatasetIndexResponse"]

@@ -16,6 +16,7 @@ import type {
   OptimizerPipelineResponse,
   CyclesResponse,
   DatasetIndexResponse,
+  DraftListResponse,
   Cell,
   CellsResponse,
   DatasetStorageResponse,
@@ -33,7 +34,7 @@ import type {
   QuotaStatus,
   RayResponse,
   RoundAudit,
-  RoundResult,
+  RoundView,
   ServedDashboard,
   SubjectReading,
   UserSettings,
@@ -99,6 +100,10 @@ export function originsRead(): ReadDescriptor<OriginListResponse> {
   return once("origins", `${API}/origins`);
 }
 
+export function draftsRead(): ReadDescriptor<DraftListResponse> {
+  return once("drafts", `${API}/drafts`);
+}
+
 export function optimizerPipelineRead(optimizer: string): ReadDescriptor<OptimizerPipelineResponse> {
   return once("optimizer-pipeline", `${API}/optimizer-pipeline?optimizer=${enc(optimizer)}`);
 }
@@ -155,7 +160,7 @@ export function roundRead(
   path: CyclePath,
   round: number,
   at: number | null = null,
-): ReadDescriptor<RoundResult> {
+): ReadDescriptor<RoundView> {
   return once("round", cyclePathUrl(path, `/rounds/${round}${at == null ? "" : `?at=${at}`}`));
 }
 

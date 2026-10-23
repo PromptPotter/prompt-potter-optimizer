@@ -5,9 +5,10 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimizer_manifest import (
+    PipelineManifest,
     SelectedOptimizer,
     checkin_manifest,
-    llm_node_document,
+    llm_node_manifest,
     optimizer_prompt,
     running_prompt,
 )
@@ -15,10 +16,9 @@ from promptpotter.application.optimizers.potter.dispatch.injections.registry imp
     validate_template,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import resolve_node_layout
-from promptpotter.application.optimizers.potter.records import L1Layout, L2L3Memory
+from promptpotter.application.optimizers.potter.records import L1Layout, L2Memory
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -28,20 +28,12 @@ shapes_optimizer_prompt(__name__)
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "base_optimizer_template",
-    "effective_optimizer_prompts",
-    "inner_template",
-    "load_optimizer_prompt",
-    "node_layout",
-]
-
 
 def base_optimizer_template(inner: SelectedOptimizer, name: str) -> OptimizerPromptTemplate:
     """Override-free, off *inner*'s manifest file unless the bench's check-in declares *name*."""
     checkin = checkin_manifest()
-    document = checkin.document if checkin.schema.get_node(name) is not None else inner.document
-    return optimizer_prompt(name, (document["nodes"][name] or {}).get("config") or {}, document)
+    manifest = checkin.manifest if checkin.schema.get_node(name) is not None else inner.manifest
+    return optimizer_prompt(name, manifest.nodes[name].config, manifest)
 
 
 def inner_template(cells: InnerCells, name: str) -> OptimizerPromptTemplate | None:
@@ -51,9 +43,9 @@ def inner_template(cells: InnerCells, name: str) -> OptimizerPromptTemplate | No
 
 
 def _running_template(
-    name: str, config: Mapping[str, Any], document: Mapping[str, Any]
+    name: str, config: Mapping[str, Any], manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
-    template = running_prompt(name, config, document)
+    template = running_prompt(name, config, manifest)
     validate_template(name, template)
     return template
 
@@ -69,7 +61,11 @@ def effective_optimizer_prompts(
     params = pipeline_params or {}
     out: dict[str, dict[str, str]] = {}
     for node_name in schema.active_steps:
-        fields = [f for f in PROMPT_STRING_FIELDS if f in keys_by_node.get(node_name, set())]
+        fields = [
+            f
+            for f in OptimizerPromptTemplate.RENDER_ORDER
+            if f in keys_by_node.get(node_name, set())
+        ]
         base = inner_template(cells, node_name) if fields else None
         if base is None:
             continue
@@ -82,11 +78,11 @@ def effective_optimizer_prompts(
 
 
 def load_optimizer_prompt(name: str) -> OptimizerPromptTemplate:
-    _node, config, document = llm_node_document(name)
-    return _running_template(name, config, document)
+    _node, config, manifest = llm_node_manifest(name)
+    return _running_template(name, config, manifest)
 
 
-def node_layout(node: str, memory: L2L3Memory) -> L1Layout:
-    """A layer's steer this cycle, else what an outer declared for the inner cycle, else the floor."""
-    steered = memory.steered_layout(node)
+def node_layout(node: str, l2: L2Memory) -> L1Layout:
+    """L2's steer this cycle, else what an outer declared for the inner cycle, else the floor."""
+    steered = l2.steered_layout(node)
     return resolve_node_layout(node) if steered is None else steered

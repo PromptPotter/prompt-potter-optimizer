@@ -15,10 +15,6 @@ from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.row_diagnostics import rank_ground_truth
-from promptpotter.domain.l4.proxies import (
-    INNER_FACT_KEYS,
-    PARENT_LEVEL_SE_KEY,
-)
 from promptpotter.domain.pipeline_schema import LLMSpendBound, WebSpendBound
 from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
 from promptpotter.domain.sample import Sample
@@ -118,8 +114,6 @@ def interpolate_pipeline_params(
     return out
 
 
-__all__ = ["execute_stale_data_protocol", "measure_sample"]
-
 # Kept whatever the schema declares; ``pipeline_params`` is NOT here: the archive lifts it onto the index entry.
 _INFRA_KEYS: frozenset[str] = frozenset(
     {
@@ -129,9 +123,7 @@ _INFRA_KEYS: frozenset[str] = frozenset(
         "turns",
         "outcome_note",
         "step_phases",
-        # An infra key, not a declared observation: the panel reads it and the formula must not.
-        PARENT_LEVEL_SE_KEY,
-        *INNER_FACT_KEYS,
+        "inner",
     }
 )
 assert _INFRA_KEYS <= PIPELINE_KEYS, (
@@ -415,7 +407,6 @@ def _error_result(
     category: ErrorCategory,
 ) -> MeasuredCell:
     return MeasuredCell(
-        sample_id=sample.id,
         sample_key=sample.key,
         query=sample.query,
         ground_truth=sample.ground_truth or "",
@@ -511,11 +502,9 @@ async def measure_sample(
 
         pd = _observations(data, ranked, pipeline_schema, spent)
         # The envelope's final reading, taken AFTER its scope closed.
-        if envelope.budget_s is not None:
-            pd["unworked_s"] = envelope.unworked
+        pd["unworked_s"] = envelope.unworked
         pd.update(_candidate_and_sample_facts(sample, pipeline_schema, pipeline_params or {}))
         result = MeasuredCell(
-            sample_id=sample.id,
             sample_key=sample.key,
             query=sample.query,
             ground_truth=ground_truth,
@@ -533,7 +522,7 @@ async def measure_sample(
 
         # Banked HERE and top-level: a replay never re-enters this function, and a formula names no nested value.
         terms = await materialize_sample_values(
-            pipeline_schema, result, extra=session.scoring.judges
+            pipeline_schema, result, extra=session.state.scoring.judges
         )
         if declared := PIPELINE_KEYS & terms.values.keys():
             raise ValueError(
@@ -564,8 +553,17 @@ async def _send_cell(
     query = sample.query
     client = session.backend_client
     bound = await cell_bound(session, wire_params)
+    # The run's wall clock bounds every cell, so one still open at its edge is cut.
+    budget_s = client.cell_envelope_s(sample, wire_params)
+    if (left := session.state.control.book.clock_left()) is not None:
+        if left <= 0.0:
+            raise SendRefusedError(
+                f"cell {sample.id}: the launch's wall clock is spent, so nothing was sent",
+                category=ErrorCategory.WALL_CLOCK,
+            )
+        budget_s = min(budget_s, left)
     envelope = CellEnvelope(
-        client.cell_envelope_s(sample, wire_params),
+        budget_s,
         attempts=client.cell_attempts,
         label=f"{sample.id}:{query[:40]}",
     )
@@ -643,10 +641,15 @@ def _candidate_and_sample_facts(
 ) -> dict[str, Any]:
     facts: dict[str, Any] = {}
     # Off `pipeline_params`, never `wire_params`: no sample's own length may reach a prompt-length term.
-    prompt_nodes = pipeline_schema.prompt_node_names()
-    node_cfg = pipeline_params.get(prompt_nodes[0]) if prompt_nodes else None
-    if isinstance(node_cfg, dict) and isinstance(node_cfg.get("prompt"), str):
-        facts["target_prompt_chars"] = len(node_cfg["prompt"])
+    # Summed over every prompt node: the term prices the whole prompt the configuration ships.
+    rendered = [
+        cfg["prompt"]
+        for node in pipeline_schema.prompt_nodes()
+        if isinstance(cfg := pipeline_params.get(node.name), dict)
+        and isinstance(cfg.get("prompt"), str)
+    ]
+    if rendered:
+        facts["target_prompt_chars"] = sum(map(len, rendered))
     # Banked so a JUDGE can read it: a judge is handed this row and never the `Sample`.
     if sample.question:
         facts["question"] = sample.question
@@ -739,7 +742,7 @@ async def execute_stale_data_protocol(
     result = cached_result
 
     for step in STALE_DATA_LOAD_PROTOCOL:
-        if session.control.pause_requested():
+        if session.state.control.pause_requested():
             return result, "paused"
         if step == "rerun":
             historical = sample_index.degradation_count(sample.id) if sample_index else 0
@@ -762,7 +765,7 @@ async def execute_stale_data_protocol(
                 rerun,
                 retry_of_degraded=True,
                 rerun_comparison=compare_rerun(
-                    cached_result, rerun, session.scoring.require_scorer()
+                    cached_result, rerun, session.state.scoring.require_scorer()
                 ),
             )
             if not is_deprecated(result):

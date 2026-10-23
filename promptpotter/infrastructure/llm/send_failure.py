@@ -7,8 +7,6 @@ import ssl
 from promptpotter.infrastructure.llm.spend_book import SendOutcome, replied
 from promptpotter.shared.errors import ErrorCategory, RequestTooLargeError, SendRefusedError
 
-__all__ = ["failed_send"]
-
 
 def failed_send(
     exc: BaseException, *, credit_statuses: frozenset[int] | None = None

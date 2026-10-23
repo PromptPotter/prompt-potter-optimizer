@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.initialization.session import Session
 
-__all__ = ["hold_for_operator"]
 
 _POLL_S = 1.0
 
@@ -26,7 +25,7 @@ async def hold_for_operator[T](
     beat = asyncio.create_task(
         heartbeat(
             session.state.ledger,
-            call_id=f"{node}:{session.state.cycle_id}",
+            call_id=f"{node}:{session.cycle_id}",
             node=node,
             round_num=round_num,
             start_monotonic=time.monotonic(),
@@ -34,7 +33,7 @@ async def hold_for_operator[T](
     )
     try:
         while True:
-            if session.control.pause_requested():
+            if session.state.control.pause_requested():
                 return None
             answered = take()
             if answered is not None:

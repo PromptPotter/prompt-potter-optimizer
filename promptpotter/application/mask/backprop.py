@@ -14,17 +14,18 @@ NodeKey = tuple[str, int]
 
 @dataclass(frozen=True)
 class NodeStats:
-    """``visits`` is the size of the subtree rooted here, across every fork."""
+    """``visits`` is the size of the subtree rooted here, across every fork; ``valued`` the nodes
+    in it whose θ differences."""
 
     cycle_id: str
     round: int
     visits: int
+    valued: int
     value_sum: float
 
     @property
-    def q(self) -> float:
-        """``visits`` is >= 1 for every node the fold emits."""
-        return self.value_sum / self.visits
+    def q(self) -> float | None:
+        return self.value_sum / self.valued if self.valued else None
 
 
 def _canonical_rounds(cycle: SpineCycle) -> list[int]:
@@ -46,7 +47,7 @@ def _parent_of(cycle: SpineCycle, rnd: int, first_round: int) -> NodeKey | None:
 
 def accumulate_node_stats(spine: list[SpineCycle]) -> dict[NodeKey, NodeStats]:
     parents: dict[NodeKey, NodeKey | None] = {}
-    own: dict[NodeKey, float] = {}
+    own: dict[NodeKey, float | None] = {}
     for cycle in spine:
         rounds = _canonical_rounds(cycle)
         if not rounds:
@@ -57,7 +58,10 @@ def accumulate_node_stats(spine: list[SpineCycle]) -> dict[NodeKey, NodeStats]:
             own[key] = cycle.theta_by_round[rnd]
             parents[key] = _parent_of(cycle, rnd, first)
 
-    stats = {k: NodeStats(k[0], k[1], visits=1, value_sum=v) for k, v in own.items()}
+    stats = {
+        k: NodeStats(k[0], k[1], 1, int(v is not None), 0.0 if v is None else v)
+        for k, v in own.items()
+    }
     # Depth is a lineage's length (tens), so the walk beats materializing a child adjacency map.
     for key, value in own.items():
         seen: set[NodeKey] = {key}
@@ -66,7 +70,11 @@ def accumulate_node_stats(spine: list[SpineCycle]) -> dict[NodeKey, NodeStats]:
             seen.add(cur)
             prev = stats[cur]
             stats[cur] = NodeStats(
-                prev.cycle_id, prev.round, prev.visits + 1, prev.value_sum + value
+                prev.cycle_id,
+                prev.round,
+                prev.visits + 1,
+                prev.valued + int(value is not None),
+                prev.value_sum + (0.0 if value is None else value),
             )
             cur = parents.get(cur)
     return stats
@@ -101,19 +109,19 @@ def select_rewind_round(
 ) -> int | None:
     """The round is in the current cycle's coordinates; ``None`` ⇒ the caller must not fork."""
     stats = accumulate_node_stats(spine)
+    qs = {key: q for key, s in stats.items() if (q := s.q) is not None}
     node: NodeKey = (cycle_id, current_round)
-    candidates = [a for a in _ancestors(stats, spine, node) if a[1] < current_round]
+    candidates = [a for a in _ancestors(stats, spine, node) if a[1] < current_round and a in qs]
     if not candidates:
         return None
 
     # θ is in logits and UCB1 assumes [0, 1]; a one-θ forest collapses to pure exploration.
-    values = [s.q for s in stats.values()]
-    lo, hi = min(values), max(values)
+    lo, hi = min(qs.values()), max(qs.values())
     span = hi - lo
 
     def _ucb(key: NodeKey) -> float:
         child = stats[key]
-        q = (child.q - lo) / span if span > 0 else 0.0
+        q = (qs[key] - lo) / span if span > 0 else 0.0
         parent_visits = max(stats[key].visits, 1)
         for other in _ancestors(stats, spine, key)[:1]:
             parent_visits = stats[other].visits
@@ -121,6 +129,3 @@ def select_rewind_round(
 
     best = max(candidates, key=_ucb)
     return best[1]
-
-
-__all__ = ["accumulate_node_stats", "select_rewind_round"]

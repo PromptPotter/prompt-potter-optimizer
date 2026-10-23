@@ -58,7 +58,7 @@ export function AccountActivityTab() {
         </select>
       </div>
       {read.status === "failed" ? (
-        <AccountFailure kind={read.failure.kind} subject="activity" />
+        <AccountFailure message={read.failure.message} subject="activity" />
       ) : read.status !== "ready" ? (
         <AccountLoading subject="activity" />
       ) : read.data.total_requests === 0 ? (

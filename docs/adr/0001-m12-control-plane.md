@@ -42,31 +42,30 @@ Chosen option: **A — OpenAPI 3.1 + AsyncAPI 3.0**.
 
 The contract bounds the entire interactivity envelope (what a client can send, what it can observe) with two industry-standard schemas. Drift is CI-detectable by off-the-shelf linters. The schemas constrain only the wire — internals remain free. Permanent — the contract stays alive after M12 ships; what is enforced and what has shipped are recorded elsewhere (§ Where enforcement is recorded).
 
-The §0 amendment defining the Control-remote I/O kind is the precondition. Schemas are declared in `docs/specs/api-openapi.yaml` (inbound) and `docs/specs/events-asyncapi.yaml` (outbound). Adding a command or event kind requires updating the YAML first.
+The §0 amendment defining the Control-remote I/O kind is the precondition. The declaration is the payload and record models; `scripts/build_specs.py` generates `docs/specs/openapi.generated.json` (inbound) and `docs/specs/events-asyncapi.generated.json` (outbound) from them. Adding a command or event kind requires declaring its model first.
 
 ### Consequences
 
 * **Good** — drift detectable by industry tooling (Spectral, AsyncAPI Studio CLI).
 * **Good** — readers recognize the shape from any of 100+ projects using OpenAPI/AsyncAPI.
-* **Good** — closed sets bound the interactivity envelope; new feature = YAML update first.
+* **Good** — closed sets bound the interactivity envelope; new feature = model declared first.
 * **Good** — schemas constrain only the wire; the optimizer's internal richness is untouched.
 * **Good** — Stage-1-ready: capability gates + identity scoping plug in at Profile C without touching handlers.
-* **Neutral** — adds ~6 KB of YAML boilerplate at Profile −1.
 * **Neutral** — needs no new runtime dependency: `pyyaml` is already core (the operator config tier), with `types-PyYAML` a dev stub.
 
 ### Confirmation
 
-These are the contract requirements the two control-plane YAMLs must satisfy
+These are the contract requirements the two generated control-plane specs must satisfy
 (verified by review + schema lint — there is no standing `test_contracts.py`;
 the structural/contract suite was cut to the silent-harm core, see
 [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)):
 
 1. OpenAPI 3.1 + AsyncAPI 3.0 versions are declared.
-2. Reusable trust-boundary parameters (`IdempotencyKey`, `ExpectedVersion`) are required headers.
-3. Reusable schemas (`CommandEnvelope`, `CommandAcceptedBody`, `ErrorEnvelope`) exist with the closed error-code set.
+2. The reusable trust-boundary parameter `IdempotencyKey` is a required header. There is no version header: a client's ledger offset is stale against a running loop's next append, so a check on it would refuse the pause it exists to send.
+3. Each command kind's request body is its payload model, answered by `CommandAcceptedBody` or the kind's typed response.
 4. AsyncAPI `cycleEvents` channel + `ProjectionEnvelope` schema with the required envelope fields exist.
 5. Heartbeat shape is declared (security box 15).
-6. **Closed outbound set parity** — every `record_type: Literal[...]` in `domain/run_records.py::CycleRecord` is covered by `domain/projection_envelope.py::ProjectionKind`, which raises at import on drift in either direction; extra kinds must be on its `_PROJECTION_ONLY` allowlist. `ProjectionKind` against the AsyncAPI `kind` enum is kept by hand — [`../developer/event-stream.md`](../developer/event-stream.md) § Testing.
+6. **Closed outbound set parity** — every `record_type: Literal[...]` in `domain/run_records.py::CycleRecord` is covered by `domain/projection_envelope.py::ProjectionKind`, which raises at import on drift in either direction; extra kinds must be on its `_PROJECTION_ONLY` allowlist. The AsyncAPI `kind` enum is generated from `ProjectionEnvelope` — [`../developer/event-stream.md`](../developer/event-stream.md) § Testing.
 7. **Anchors table integrity** — every file path in the ## Anchors section of this ADR exists on disk, and no anchor cites a test file (anchors name stable contracts; tests move freely).
 
 No CI job runs a schema linter yet; Spectral on the OpenAPI YAML and AsyncAPI Studio CLI on the AsyncAPI YAML wire in as the ADR's schemas accumulate operations / messages.
@@ -111,7 +110,7 @@ No CI job runs a schema linter yet; Spectral on the OpenAPI YAML and AsyncAPI St
 The wire surface rides the canonical per-cycle `.runtime/ledger.jsonl` ledger alongside every other record. The "highway" is the existing Persistence stream; this contract promotes the path commands and events take through that highway to the optimal sequence by eliminating four middlemen (mirroring the spend-and-tenancy arc):
 
 1. **No process global.** `emit_command` and `emit_command_ack` both append to the ledger bound in `_CYCLE_LEDGER: ContextVar[CycleEventLog | None]`, which the dispatcher binds to the target cycle's ledger around its work. Per-asyncio-task isolation; concurrent commands across cycles get isolation for free.
-2. **No wrapper dataclass.** `emit_command(*, command_id, kind, payload, idempotency_key, issued_by_user_id)` and `emit_command_ack(*, command_id, status, detail)` are kwargs-only; both build their `*Record` directly inside the helper. Mirrors `emit_token_usage` verbatim. (`expected_version` is a dispatch-time concurrency check against the ledger offset — it is consumed at the seam, not stored on the record.)
+2. **No wrapper dataclass.** `emit_command(*, command_id, kind, payload, idempotency_key, issued_by)` and `emit_command_ack(*, command_id, status, detail)` are kwargs-only; both build their `*Record` directly inside the helper. Mirrors `emit_token_usage` verbatim.
 3. **Sole writer per surface, and the ack names who TOOK the command.** ONE `CommandDispatcher` (`application/commands/`) writes every `CommandRecord`, whether HTTP, a terminal verb or the producing terminal's Ctrl+C dispatched the kind (`domain/command_kinds.py::CommandKind.cli_verb` is the terminal's map). It also writes the ack of every command it applies itself. A command only a running loop can take is acked `accepted` by the dispatcher — armed in the cycle's inbox, a fold of those two record kinds — and `applied` by the loop at the checkpoint that takes it (`application/run_phase_control.py::RunControl`); one no loop will take is `rejected` at dispatch. So `applied` always means the effect happened, and a subscriber owning acks (the `RunnerCommandSubscriber` this ADR first specified) stays unbuilt: the taker writes its own. Outbound SSE frames have no writer at all — the in-process `EventStreamView` fan-out this ADR originally specified was replaced by `CycleLedgerTail`, which tails the on-disk ledger directly (cross-process; the API server, the CLI, or a spawned runner can all be the writer, any reader can subscribe). See [`../developer/event-stream.md`](../developer/event-stream.md).
 4. **No dual ingress.** Commands ARE events. The dispatcher records the `CommandRecord`, applies the kind and acks it — no in-memory queue, no `commands.jsonl`, no parallel pipeline; a verb that must reach a running cycle is delivered by the ledger it was recorded on, which the runner folds at each checkpoint — there is no flag file beside it. The pre-M12 sanctioned POSTs migrate to ride this highway at Profile B (no-back-compat — they migrate, they don't shim); the table under Profile B names each.
 
@@ -119,8 +118,8 @@ Identity scope rides the ledger path (tenant prefix on the per-cycle directory) 
 
 ### Closed sets
 
-- **Inbound commands.** `docs/specs/api-openapi.yaml` (OpenAPI 3.1).
-- **Outbound events.** `docs/specs/events-asyncapi.yaml` (AsyncAPI 3.0).
+- **Inbound commands.** `domain/command_kinds.py::CommandKind`, generated into `docs/specs/openapi.generated.json` (OpenAPI 3.1).
+- **Outbound events.** `domain/run_records.py::CycleRecord`, generated into `docs/specs/events-asyncapi.generated.json` (AsyncAPI 3.0).
 
 ### Addendum — served reads (2026-09-08, not a supersession)
 
@@ -135,7 +134,7 @@ next read surface is not invented again.
 entry in the closed inbound set. What it inherits is everything else:
 
 - **It rides the existing resource, never a sidecar.** A read about a campaign is a GET in the
-  campaigns router, sharing `owned_campaign` / `StoresDep` / `decode_descend` — that IS the existing
+  campaigns router, sharing `owned_campaign` / `StoresDep` / `decode_cycle_path` — that IS the existing
   channel, and Consequence 4 above (*no dual ingress*) is satisfied by it and would be violated
   by a second pipeline endpoint outside that router. `GET /campaigns/{id}/config-map` is the
   shipped precedent: a read-only server-authored projection of the frozen campaign config, every
@@ -178,7 +177,7 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 | `POST /backends` | dropped — a backend is a connector at the operator's configured endpoint |
 | `POST /backends/{id}/sync` | dropped — no backend sync verb exists |
 
-**Closed inbound set draft.** The full enumeration lives in `docs/specs/api-openapi.yaml` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (run-limits / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register). All v0 — operator-redline cycle precedes any handler.
+**Closed inbound set draft.** The full enumeration lives in `domain/command_kinds.py::CommandKind` and is the single source of truth for the inbound surface; the ADR keeps only the migration table above + the category map below. Categories (= OpenAPI `tags`): cycle-control (pause / step / rewind — `pause-cycle` is the single operator-interrupt, no separate stop/resume-cycle), cycle-lifecycle (fork / delete / cleanup-empty / archive / mint-campaign / start-run), budget (run-limits / sample), pipeline-params (change-pipeline-param / reset-pipeline-overlay), scoring (change-scoring-composite), operator-feedback (mark / unmark hard-sample / annotate-round / endorse-candidate), backends (register). All v0 — operator-redline cycle precedes any handler.
 
 **Profile C** — Stage 1 of identity-foundation. `resolve_identity` swaps from Stage-0 default to OIDC verification. `presentation/api/middleware/oidc.py` populates `IdentityContext` from a verified ID Token. Session cookies are opaque server-side ids, NOT JWTs (identity-foundation no-drift gate #2). The capability matrix as built is [`../operations/access-model.md`](../operations/access-model.md).
 
@@ -190,8 +189,8 @@ Each profile is a named, stable conformance level. Newer profiles compose with o
 
 This ADR fixes the *contract*; it does not track how much of it is on disk. **What is enforced,
 by which symbol, is owned by [`../operations/access-model.md`](../operations/access-model.md); what has shipped is owned by**
-**[`../specs/roadmap.md`](../specs/roadmap.md)'s Status column.** The closed sets themselves are the two YAMLs, and they
-are the only self-checking record: a command with no schema there has nowhere to land.
+**[`../specs/roadmap.md`](../specs/roadmap.md)'s Status column.** The closed sets themselves are `CommandKind` and
+`CycleRecord`, and they are the only self-checking record: a command with no payload model has nowhere to land.
 
 ### Anchors
 
@@ -205,8 +204,8 @@ enforcement detail that must move freely, so they are named in prose (see
 |---|---|
 | §0 Control-remote definition | `docs/architecture.md` § Control-remote |
 | §0.5 Control-remote load-bearing-surface entry | `docs/architecture.md` (§0.5 load-bearing surface) |
-| Closed inbound command set | `docs/specs/api-openapi.yaml` |
-| Closed outbound event set | `docs/specs/events-asyncapi.yaml` |
+| Closed inbound command set | `promptpotter/domain/command_kinds.py` |
+| Closed outbound event set | `promptpotter/domain/run_records.py` |
 | Identity seam consumed | `promptpotter/presentation/api/deps.py::resolve_identity` |
 | `emit_token_usage` template (mirrored by `emit_command`) | `promptpotter/infrastructure/llm/telemetry.py::emit_token_usage` |
 | Sole-writer template | `promptpotter/infrastructure/projections/live_dashboard/projection.py::LiveDashboardProjection._handle_token_usage` |

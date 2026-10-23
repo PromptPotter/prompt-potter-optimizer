@@ -10,12 +10,12 @@ from typing import TYPE_CHECKING
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
+    ErrorRecord,
     StopLoop,
     StopOutcome,
     StopReason,
 )
 from promptpotter.domain.results import RoundAdvance
-from promptpotter.domain.run_records import ErrorRecord
 from promptpotter.infrastructure.llm.telemetry import emit_error_record, emit_round_warning
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -76,7 +76,7 @@ def end_run_on(
         logger.warning(
             "Optimization cancelled %s (%s); finalizing as paused (resumable).",
             where,
-            session.state.cycle_id or "no cycle",
+            session.cycle_id,
         )
     elif isinstance(exc, KeyboardInterrupt):
         logger.warning("Optimization paused %s (%s).", where, str(exc) or "user-initiated")
@@ -125,17 +125,19 @@ def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
     """The declared pick's own reading, never a high-water across rounds: those sat different rows."""
     if target is None:
         return None
-    accuracy = cycle.selection.accuracy
+    fold = cycle.selection.fold
+    accuracy = None if fold is None else fold.accuracy
     return StopReason.TARGET_HIT if accuracy is not None and accuracy >= target else None
 
 
 def standing_tripped(cycle: Cycle, standing: RunStanding) -> StopReason | None:
     # The OBJECTIVE, not accuracy: where it prices tokens, 100% correct at 3x the tokens is no ceiling.
-    objective = cycle.tracking.current_composite_fitness
+    fold = cycle.parent_fold
     if (
         cycle.rounds[-1].overlap.advance is RoundAdvance.ADVANCED
-        and objective is not None
-        and objective >= 1.0
+        and fold is not None
+        and fold.composite_fitness is not None
+        and fold.composite_fitness >= 1.0
     ):
         return StopReason.PERFECT
     if standing.stalls_left == 0:
@@ -144,15 +146,3 @@ def standing_tripped(cycle: Cycle, standing: RunStanding) -> StopReason | None:
     if patience is not None and standing.rounds_without_advance >= patience:
         return StopReason.CONVERGED
     return None
-
-
-__all__ = [
-    "RUN_ENDS",
-    "RUN_STOPS",
-    "end_run_on",
-    "origin_gate_tripped",
-    "panel_gate_tripped",
-    "run_stop_reason",
-    "standing_tripped",
-    "target_tripped",
-]

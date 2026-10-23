@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import parent_grades
 from promptpotter.application.intelligence.hard_sample_sorter import (
+    arm_thetas,
     build_hard_samples,
     rank_hard_samples,
     read_hard_samples,
-    stamped_abilities,
 )
 from promptpotter.application.intelligence.rasch import build_observations
 from promptpotter.application.runner.campaign_result import read_cycle_bench
@@ -29,10 +29,12 @@ from promptpotter.application.views.view_models import (
 from promptpotter.domain.cycle_listing import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.results import HardSampleOrder, RoundResult
+from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    LedgerSpend,
     scan_ledger_spend,
     scan_ledger_spend_by_round,
 )
@@ -55,29 +57,21 @@ if TYPE_CHECKING:
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
-__all__ = [
-    "publish_export",
-    "write_hard_samples_artifacts",
-    "write_log_md",
-    "write_review_md",
-]
-
 
 def write_hard_samples_artifacts(session: Session, cycle: Cycle) -> None:
     """The ONE ``hard_samples.json``: campaign scope reads one cycle's, dataset scope folds per request."""
-    if not session.state.cycle_id:
-        return
-
     ruler = cycle.difficulty.ruler
-    frontier, arm_theta = stamped_abilities(cycle.rounds, ruler)
+    cells = cycle.frontier
+    frontier = cycle.difficulty.scale.frontier(cells)
     view = build_hard_samples(
         build_observations(cycle.rounds),
         ruler,
-        frontier=frontier,
-        arm_theta=arm_theta,
-        parent_grades=parent_grades(cycle.tracking.current_results),
-        slots={s.key: int(s.id) for s in session.samples},
-        cycle_id=session.state.cycle_id,
+        frontier=None if frontier is None or frontier.se is None else (frontier.theta, frontier.se),
+        arm_theta=arm_thetas(cycle.rounds),
+        parent_grades=parent_grades(cells),
+        slots=session.bank.slot_of,
+        n_min=cycle.config.optimization.elimination_n_min,
+        cycle_id=session.cycle_id,
     )
     with graceful("hard_samples.json write failed"):
         write_json(
@@ -116,18 +110,21 @@ def from_disk_log(
     index: CycleIndex,
     rounds: list[RoundResult],
     *,
+    spend_by_round: dict[int, SpendRollup],
+    spent: LedgerSpend,
+    level_series: LevelSeries | None,
     hard_samples: HardSamples | None = None,
     streams_dir: Path | None = None,
     fork_indices: Sequence[CycleIndex] = (),
     hard_sample_order: HardSampleOrder = "info_gain",
-    spend_by_round: dict[int, SpendRollup] | None = None,
 ) -> LogMdView:
     final = index.final
     status = DigestStatusView(
         campaign_id=index.cycle_id,
-        optimizer=next((t.optimizer_state.manifest for t in rounds), None),
+        optimizer=next((t.closed_state.manifest for t in rounds), None),
         stop_reason=index.stop_reason,
         standing=index.standing,
+        spent=spent,
         rounds_completed=len(index.rounds),
         started_at=final.started_at if final else None,
         finished_at=index.finished_at,
@@ -137,31 +134,29 @@ def from_disk_log(
     round_views: list[RoundDigestView] = []
     for t in rounds:
         traj, _ = _load_p_best_trajectory(streams_dir, t.round)
-        lineage = t.opt_sp.lineage if t.opt_sp else None
-        selected = next(iter(t.selected_scores), None)
+        head, fold, election = t.head, t.fold, t.election
+        selected = None if election is None else election.selected
+        fit = None if selected is None else t.fit(selected)
         round_views.append(
             RoundDigestView(
                 round=t.round,
-                label=t.label,
-                accuracy=t.accuracy,
+                label="" if head is None else head.label,
+                fold=fold,
                 improved=t.improved,
-                total=t.total,
-                composite_fitness=t.composite_fitness,
-                changes_description=(lineage.changes_description if lineage else "").strip(),
+                changes_description="" if head is None else head.changes_description.strip(),
                 facts=tuple(t.optimizer_facts),
-                evaluators=dict(t.evaluators),
                 composite_floor=(
-                    selected.vs_reference.reference_level("objective")
-                    if selected and selected.vs_reference
+                    fit.vs_reference.reference_level("objective")
+                    if fit and fit.vs_reference
                     else None
                 ),
-                ability=t.ability,
-                verdict_reason=t.verdict_reason,
+                level=None if level_series is None else level_series.reading(t.round),
+                verdict_reason=None if election is None else election.verdict_reason,
                 overlap=t.overlap,
                 p_best_trajectory=traj,
-                candidate_labels={c.candidate_id: c.label for c in t.candidate_scores},
-                winner_id=selected.candidate_id if selected else "",
-                spend=(spend_by_round or {}).get(t.round),
+                candidate_labels={key: arm.label for key, arm in t.panel.items()},
+                winner_id=selected or "",
+                spend=spend_by_round.get(t.round),
             )
         )
 
@@ -178,7 +173,7 @@ def from_disk_log(
         measured = hard_samples.sample_order
         resolved, ranked = rank_hard_samples(
             hard_samples,
-            {key: hard_samples.sample_ids[key] for key in measured},
+            {key: hard_samples.positions[key] for key in measured},
             measured=set(measured),
             order=hard_sample_order,
         )
@@ -212,8 +207,6 @@ def _fork_summary_from_index(fork_index: CycleIndex) -> ForkSummaryView:
 
 def write_log_md(session: Session, config: CampaignConfig) -> None:
     """Called once more AFTER the run ends: the stop and the winner reach the ledger after the last round rendered."""
-    if not session.state.cycle_id:
-        return
     with graceful("log.md render failed"):
         _render_cycle_log_md(session, config)
         _render_campaign_log_md(session)
@@ -221,6 +214,10 @@ def write_log_md(session: Session, config: CampaignConfig) -> None:
 
 def _spend_by_round(layout: CycleLayout) -> dict[int, SpendRollup]:
     return scan_ledger_spend_by_round(ledger_chain(CycleDir(layout.cycle_dir), moment=None))
+
+
+def _spent(layout: CycleLayout) -> LedgerSpend:
+    return scan_ledger_spend(ledger_chain(CycleDir(layout.cycle_dir), moment=None))
 
 
 def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
@@ -238,6 +235,8 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
             streams_dir=layout.streams,
             hard_sample_order=config.hard_sample_order,
             spend_by_round=_spend_by_round(layout),
+            spent=_spent(layout),
+            level_series=store.standing_rounds(hop, moment=None).level_series,
         )
     )
     write_text(layout.log_md, content)
@@ -260,6 +259,8 @@ def _render_campaign_log_md(session: Session) -> None:
             streams_dir=root_layout.streams,
             fork_indices=_load_sibling_indices(store, campaign_id, exclude=root.cycle_id),
             spend_by_round=_spend_by_round(root_layout),
+            spent=_spent(root_layout),
+            level_series=store.standing_rounds(root, moment=None).level_series,
         )
     )
     write_text(CampaignLayout(store.campaign_root_dir(campaign_id)).log_md, content)
@@ -277,7 +278,7 @@ def _load_sibling_indices(
 
 
 def _banked_rounds(session: Session, hop: CycleHop) -> list[RoundResult]:
-    scoring = session.scoring
+    scoring = session.state.scoring
     # A run stopped before its origin closed has no round and may have no scorer either.
     if not session.store.campaigns.standing_rounds(hop, moment=None).rounds:
         return []
@@ -303,8 +304,6 @@ def write_review_md(
     optimizer: SelectedOptimizer,
     framing: TaskDecomposition,
 ) -> None:
-    if not session.state.cycle_id:
-        return
     with graceful("review.md render failed"):
         store = session.store.campaigns
         index = store.load(session.hop, moment=None)

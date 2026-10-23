@@ -3,32 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, JsonValue
+from pydantic import Field, JsonValue
 
 from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.ruler import DELTA_STATE_LABEL, DeltaState, RulerStanding
 from promptpotter.domain.scoring import SampleStatus, is_hit
-from promptpotter.domain.strict_model import StrictModel
-
-__all__ = [
-    "DEPTH_FIELDS",
-    "HARD_SAMPLES_VERSION",
-    "Cell",
-    "CellCandidate",
-    "CellRow",
-    "CellSpan",
-    "CellsResponse",
-    "DatasetItem",
-    "HardSampleCell",
-    "HardSamples",
-    "HeatmapScope",
-    "HitSpread",
-    "PinnedCell",
-    "SampleDifficulty",
-    "Seat",
-    "hit_spread",
-]
-
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 # How much evidence a cell buys, never what it is: out of every key, so a deepened cell CONTINUES
 # its campaign. Named as `runner/inner/tasks.py::InnerTaskSpec` names them, which subtracts the same set.
@@ -37,18 +17,16 @@ DEPTH_FIELDS: frozenset[str] = frozenset(
 )
 
 
-class Seat(StrictModel):
-    """One fresh inner campaign. ``id`` is the outer query; omitted overrides inherit the panel's
-    benchmark and model."""
-
-    model_config = ConfigDict(frozen=True)
+class Seat(FrozenModel):
+    """One fresh inner campaign, declared off its panel. ``id`` is the outer query; omitted
+    overrides inherit the panel's benchmark and model."""
 
     # In every pin, so in every banked cell's `Sample.key`: dropping it re-keys them all.
     kind: Literal["seat"]
     id: str = Field(min_length=1)
     # Graded, never elected on: where the cell sits this campaign, not what it measures.
     held_out: bool = False
-    inner_dataset_seed: int = Field(default=0, ge=0)
+    run_seed: int = Field(default=0, ge=0)
     n_rounds: int | None = Field(default=None, ge=1)
     inner_dataset: str | None = None
     inner_model: str | None = None
@@ -66,11 +44,9 @@ class Seat(StrictModel):
 _INSTRUMENT = "instrument"
 
 
-class PinnedCell(StrictModel):
+class PinnedCell(FrozenModel):
     """A declared cell with what measures it, digested where its panel resolves
     (`runner/inner/connector.py`): in the pin, so its key moves with its own instrument alone."""
-
-    model_config = ConfigDict(frozen=True)
 
     cell: Seat
     instrument: str = Field(min_length=1)
@@ -129,7 +105,7 @@ class HardSampleCell(StrictModel):
 
 class HardSamples(StrictModel):
     """``hard_samples.json``, and the same view folded per request over an archive; it fits nothing.
-    Every sample is its ``Sample.key``; ``sample_ids`` places each at its row in the dataset served."""
+    Every sample is its ``Sample.key``; ``positions`` places each at its row in the dataset served."""
 
     schema_version: int
     cycle_id: str | None
@@ -138,7 +114,7 @@ class HardSamples(StrictModel):
     # Stamped θ descending; an individual no round stamped trails, by id.
     candidate_order: list[str]
     theta: dict[str, float]
-    sample_ids: dict[str, int]
+    positions: dict[str, int]
     # The samples this scope measured: δ descending, then the ones off the ruler; ties by row.
     sample_order: list[str]
     samples: dict[str, SampleDifficulty]
@@ -194,7 +170,7 @@ class CellCandidate(StrictModel):
 class CellRow(StrictModel):
     """One cell as a table row — enough to scan, sort by the served order and open."""
 
-    sample_id: int
+    position: int
     answer: str = Field(description="The address of the answer this row read — what opens it.")
     candidate: str = Field(description="`CellCandidate.key` of the candidate that measured it.")
     status: SampleStatus
@@ -252,12 +228,12 @@ class Cell(StrictModel):
     """One answer opened — the detail panel's whole read."""
 
     answer: str
-    sample_id: int = Field(description="Its slot in the dataset that measured it.")
-    dataset_name: str | None = None
+    position: int = Field(description="Its sample's slot in the dataset the read names.")
+    dataset_hash: str = Field(description="The bank that measured it, by content.")
     role: str = Field(default="", description="Why the pass that measured it ran.")
     created_at: str | None = None
     prompt_fields_id: str | None = Field(
-        default=None, description="The configuration's address (`ScoredCandidate.sp_hash`)."
+        default=None, description="The configuration's address (a measured arm's `sp_hash`)."
     )
     query: str
     ground_truth: str | None = Field(
@@ -285,7 +261,11 @@ class Cell(StrictModel):
 
 
 class DatasetItem(StrictModel):
-    sample_id: int
+    position: int
+    sample_key: str = Field(
+        description="What the sample IS (`Sample.key`) — what an evidence comparison's "
+        "`gained` / `lost` name."
+    )
     query: str
     ground_truth: str | None = Field(
         default=None,
@@ -294,7 +274,6 @@ class DatasetItem(StrictModel):
         "declaration `Sample.ground_truth` makes; a placeholder string would read as a miss on "
         "every row of such a bank.",
     )
-    task: str | None = None
     hard_sample_rank: int = Field(
         description="1-based position in the served hard-sample ranking under this response's "
         "`order`. THE ordering — a client renders rows in it and never re-derives one, since "

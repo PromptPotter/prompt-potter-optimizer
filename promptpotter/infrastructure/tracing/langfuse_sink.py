@@ -19,8 +19,8 @@ from promptpotter.infrastructure.tracing.events import (
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 if TYPE_CHECKING:
+    from promptpotter.domain.results import Concluded, ScoreSummary
     from promptpotter.domain.run_records import (
-        CandidateScoredRecord,
         RoundClosedRecord,
         RoundEnteredRecord,
         RunPhaseRecord,
@@ -137,17 +137,21 @@ class LangfuseSink(TraceSink):
 
         threading.Thread(target=_register, name="langfuse-dataset", daemon=True).start()
 
-    def on_candidate_scored(self, campaign_id: str, record: CandidateScoredRecord) -> None:
+    def on_arm_concluded(
+        self, campaign_id: str, round_num: int, arm: Concluded, fold: ScoreSummary | None
+    ) -> None:
         trace_id = self._trace_ids.get(campaign_id)
         if not trace_id:
             return
-        scores = record.scores
         self._lf.create_span(
             trace_id=trace_id,
-            name=f"walk_{scores.label}",
-            input={"candidate_id": scores.candidate_id, "prompt_fields_id": scores.sp_hash},
-            output={"accuracy": scores.accuracy, "total": scores.total},
-            parent_observation_id=self._round_observation_ids.get((campaign_id, record.round)),
+            name=f"walk_{arm.label}",
+            input={"individual_id": arm.individual.id, "prompt_fields_id": arm.sp_hash},
+            output={
+                "accuracy": None if fold is None else fold.accuracy,
+                "total": 0 if fold is None else fold.total,
+            },
+            parent_observation_id=self._round_observation_ids.get((campaign_id, round_num)),
             as_type="span",
         )
 
@@ -209,8 +213,10 @@ class LangfuseSink(TraceSink):
         if not trace_id:
             return
         round_observation_id = self._round_observation_ids.pop((campaign_id, record.round), None)
-        winner = record.opt_sp
-        if winner is not None:
+        head, fold = record.head, record.fold
+        accuracy = None if fold is None else fold.accuracy
+        if head is not None:
+            winner = head.individual
             self._lf.create_span(
                 trace_id=trace_id,
                 name="prompt_version",
@@ -219,7 +225,7 @@ class LangfuseSink(TraceSink):
                     "family": "target_prompt",
                     "version": winner.id[:8] if winner.id else "unknown",
                 },
-                metadata={"layer1_fields": record.prompt_fields},
+                metadata={"prompts": winner.prompts_dump()},
                 parent_observation_id=round_observation_id,
                 as_type="span",
             )
@@ -227,20 +233,20 @@ class LangfuseSink(TraceSink):
             self._lf.end_observation(
                 round_observation_id,
                 output={
-                    "winner_accuracy": record.accuracy,
+                    "winner_accuracy": accuracy,
                     "improved": record.improved,
                     "candidates_scored": record.candidates_scored,
                 },
                 metadata={"round": record.round, "candidates_scored": record.candidates_scored},
             )
-        if record.accuracy is not None:
+        if accuracy is not None:
             self._lf.create_score(
                 trace_id=trace_id,
                 name=f"accuracy_round_{record.round}",
-                value=record.accuracy,
+                value=accuracy,
                 comment=f"Round {record.round}: {'improved' if record.improved else 'no change'}",
             )
-        for ev_name, ev_value in record.evaluators.items():
+        for ev_name, ev_value in ({} if fold is None else fold.evaluators).items():
             self._lf.create_score(
                 trace_id=trace_id, name=f"{ev_name}_round_{record.round}", value=float(ev_value)
             )
@@ -391,6 +397,3 @@ class LangfuseSink(TraceSink):
 
         self._persist()
         return query_to_item_id
-
-
-__all__ = ["LangfuseSink"]

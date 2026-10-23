@@ -58,7 +58,7 @@ without it rather than inherit one.
 ## The second pass is free, and `PP_E2E_TAPE` is what proves it
 
 The three caches
-[`layout.py::SHARED_CACHE_DIRS`](../../promptpotter/infrastructure/store/layout.py) names are
+[`config/paths.py::SHARED_CACHE_DIRS`](../../promptpotter/config/paths.py) names are
 content-addressed and survive the reset (`reset_world.py`), and **the optimizer's replies
 chain** — round 1's messages carry round 0's results — so with all three warm the same campaign
 re-runs to the same candidates, the same scores and the same winner, for nothing.

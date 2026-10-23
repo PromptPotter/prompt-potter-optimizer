@@ -4,10 +4,10 @@ import logging
 import re
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.scoring.formula import split_scoring_block
+from promptpotter.application.scoring.formula.compiler import split_scoring_block
 from promptpotter.application.views.render.ansi import (
     render_round_verdict,
     render_run_spend,
@@ -34,7 +34,6 @@ from promptpotter.application.views.render.primitives import (
     _box_bottom_info,
     _box_line,
     _box_top,
-    _fmt_delta,
     _node_bottom,
     _node_line,
     _node_top,
@@ -45,6 +44,7 @@ from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import (
     InitExitView,
     RoundCompleteView,
@@ -53,16 +53,19 @@ from promptpotter.domain.phase_views import (
 )
 from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
 from promptpotter.domain.results import (
-    ArmOutcome,
+    Concluded,
+    Cut,
+    Measured,
+    Measuring,
+    Proposed,
     ScoreboardRankKey,
-    ScoredCandidate,
-    candidate_label,
+    ScoreSummary,
+    arm_elimination,
     scoreboard_rank_key,
 )
 from promptpotter.domain.run_records import (
-    CandidateMintedRecord,
-    CandidateScoredRecord,
-    CandidateStartedRecord,
+    AnnouncedArms,
+    ArmRecord,
     ElectionRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
@@ -73,11 +76,13 @@ from promptpotter.domain.run_records import (
     RaceCatchUpRecord,
     RaceStandingRecord,
     RoundClosedRecord,
+    RoundEnteredRecord,
     RoundProposedRecord,
-    RoundStandingRecord,
+    RoundRestatedRecord,
+    RoundStatement,
     RoundWarningRecord,
     RunPhaseRecord,
-    SampleOrderRecord,
+    RunWiringRecord,
     SampleScoredRecord,
     SampleStartedRecord,
 )
@@ -89,6 +94,7 @@ from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.composite import render_composite_fitness_block
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -128,7 +134,7 @@ class ReadoutProjection(Projection):
         self.scoring_formula = scoring_formula
         self.measured_unit = measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
-        self._closed: dict[int, RoundClosedRecord] = {}
+        self._closed: dict[int, RoundStatement] = {}
         self.sample_counter = 0
         self._anchors = ViewAnchors()
         self._sample_lookahead_depth: int | None = None
@@ -147,6 +153,10 @@ class ReadoutProjection(Projection):
         self._cycle_dir: Path | None = None
         self._verdict: RoundCompleteView | None = None
         self._held: dict[str, BackpressureReading] = {}
+        # Each arm's label as its announcement named it: the election and a race speak in keys.
+        self._labels: dict[ArmKey, str] = {}
+        self._arms = AnnouncedArms()
+        self._order_shown: list[int] = []
 
     @classmethod
     def for_campaign(
@@ -234,12 +244,19 @@ class ReadoutProjection(Projection):
             n = self._round_num
             self._write(f"\n  [ARM GATE] round {n} holds for the operator's arms")
             for idx, draft in enumerate(record.drafts):
-                lineage = draft.opt_sp.lineage
+                lineage = draft.individual.lineage
                 said = lineage.changes_description.encode("ascii", "replace").decode()
                 self._write(f"    draft {idx} ({lineage.source or 'unsourced'}): {said or '-'}")
             if not record.drafts:
                 self._write("    no proposer ran: every arm this round measures is the operator's")
-            self._write("    answer: python -m promptpotter submit-arms --file <arms.yaml>")
+            self._write("    answer: python -m promptpotter submit-arms --arms <arms.yaml>")
+
+    def _handle_run_wiring(self, record: RunWiringRecord) -> None:
+        if (drift := record.defaults_drift) is not None:
+            self._write(
+                f"  {YELLOW}⚠ what this campaign's declaration is a delta over moved since it was "
+                f"declared ({', '.join(drift.moved())}): this launch runs today's values{RESET}"
+            )
 
     def _handle_round_proposed(self, record: RoundProposedRecord) -> None:
         if record.submitted:
@@ -248,14 +265,13 @@ class ReadoutProjection(Projection):
                 f"{len(record.proposals)} arm(s); each is a round_proposed record on the ledger"
             )
 
-    def _handle_round_standing(self, record: RoundStandingRecord) -> None:
-        self._anchors = record.anchors
-        self.on_round_complete(
-            self._closed[record.round], record.run_standing.rounds_without_advance
-        )
+    def _handle_round_restated(self, record: RoundRestatedRecord) -> None:
+        self._closed[record.round] = record
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
         self._closed[record.round] = record
+        self._anchors = record.anchors
+        self.on_round_complete(record)
 
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         self._pending_calls[record.call_id] = record.started_at_ms
@@ -352,10 +368,11 @@ class ReadoutProjection(Projection):
         """One line and no numbers: the board, reason and overlap series first all exist at round close."""
         if not record.verdict_reason:
             return
+        key = record.selected
         self._write(
-            f"  {GREEN}✓ selected {', '.join(record.selected_labels)}{RESET}"
-            if record.selected_labels
-            else f"  {DIM}· held the best-so-far{RESET}"
+            f"  {DIM}· held the best-so-far{RESET}"
+            if key is None
+            else f"  {GREEN}✓ selected {self._labels.get(key, key[:6])}{RESET}"
         )
 
     def _handle_sample_started(self, record: SampleStartedRecord) -> None:
@@ -378,50 +395,53 @@ class ReadoutProjection(Projection):
             tail = " (back to sequential)"
         self._write(f"  {DIM}⇉ sample look-ahead depth {depth}{tail}{RESET}")
 
+    def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
+        self._arms.enter(record)
+
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
-        self.on_sample_scored(record.result.facts, record.result.grade)
+        self._arms.take(record)
+        self.on_sample_scored(record.position, record.result.facts, record.result.grade)
 
-    def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None:
-        if chain := " → ".join(
-            f"{v.node} ({v.mode}): {', '.join(v.loci) or 'nothing'}"
-            for v in record.lineage.variations
-        ):
-            self._write(f"  {DIM}◆ {record.label} ← {chain}{RESET}")
-
-    def _handle_candidate_started(self, record: CandidateStartedRecord) -> None:
-        self.on_candidate_started(
-            record.candidate_idx,
-            record.candidate_total,
-            record.changes_description,
-            record.pipeline_overlay,
-            record.block,
-        )
-
-    def _handle_candidate_scored(self, record: CandidateScoredRecord) -> None:
-        self._anchors = record.anchors
-        self.on_candidate_scored(record.candidate_total, record.scores)
+    def _handle_arm(self, record: ArmRecord) -> None:
+        self._arms.announce(record)
+        state = record.state
+        # A reference re-read is no arm the round proposed: its numbers print on the verdict line.
+        if state.role is MeasurementRole.PARENT:
+            return
+        self._labels[record.arm] = state.label
+        match state:
+            case Proposed():
+                if chain := " → ".join(
+                    f"{v.node} ({v.mode}): {', '.join(v.loci) or 'nothing'}"
+                    for v in state.individual.lineage.variations
+                ):
+                    self._write(f"  {DIM}◆ {state.label} ← {chain}{RESET}")
+            case Measuring():
+                self.on_sample_order(state.sample_order, state.n_priors)
+                self.on_arm_measuring(state)
+            case Cut() | Measured():
+                self._anchors = record.anchors
+                self.on_arm_concluded(state, self._arms.fold(record.round, record.arm))
 
     def _handle_race_standing(self, record: RaceStandingRecord) -> None:
         self.on_race_standing(
             record.member,
-            record.current_id,
+            record.current,
             record.n_samples,
             record.p_best,
             record.paired_breakdown,
             record.decision_grade,
         )
 
-    def _handle_sample_order(self, record: SampleOrderRecord) -> None:
-        self.on_sample_order(record.sample_order, record.n_priors)
-
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None:
-        self.on_race_catch_up(record.member, record.sample_id, record.prior_ids)
+        self.on_race_catch_up(record.member, record.position, record.prior_keys)
 
-    def on_sample_scored(self, facts: MeasuredCell, grade: Grade) -> None:
+    def on_sample_scored(self, position: int, facts: MeasuredCell, grade: Grade) -> None:
         self.sample_counter += 1
         prefix = f"  [{self.sample_counter:>3d}] "
         self._write(
             fmt_query_result(
+                position,
                 facts,
                 grade,
                 prefix=prefix,
@@ -436,7 +456,7 @@ class ReadoutProjection(Projection):
         current_id: str,
         n_samples: int,
         p_best: float,
-        paired_breakdown: dict[str, dict[str, float]],
+        paired_breakdown: dict[ArmKey, dict[str, float]],
         decision_grade: bool,
     ) -> None:
         if (
@@ -463,8 +483,10 @@ class ReadoutProjection(Projection):
             )
 
     def on_sample_order(self, sample_order: list[int], n_priors: int) -> None:
-        if not sample_order or self._block_racing:
+        """Once per order: every turn of a round's walk announces the one it shares."""
+        if not sample_order or self._block_racing or sample_order == self._order_shown:
             return
+        self._order_shown = sample_order
         prior_s = "" if n_priors == 1 else "s"
         head = ", ".join(f"#{sid:03d}" for sid in sample_order[:3])
         self._write(
@@ -473,11 +495,11 @@ class ReadoutProjection(Projection):
             f"{n_priors} candidate prior{prior_s})"
         )
 
-    def on_race_catch_up(self, member: str, sample_id: int, prior_ids: list[str]) -> None:
-        if not prior_ids:
+    def on_race_catch_up(self, member: str, position: int, prior_keys: list[ArmKey]) -> None:
+        if not prior_keys:
             return
-        tags = [cid if cid == "origin" or cid.endswith("_winner") else cid[:6] for cid in prior_ids]
-        self._write(f"  {DIM}↻ {member} catch-up #{sample_id}:{RESET} " + ", ".join(tags))
+        tags = [self._labels.get(key, key[:6]) for key in prior_keys]
+        self._write(f"  {DIM}↻ {member} catch-up #{position}:{RESET} " + ", ".join(tags))
 
     def _render_block_lines(self) -> list[str]:
         lines = []
@@ -492,15 +514,9 @@ class ReadoutProjection(Projection):
             )
         return lines
 
-    def on_candidate_started(
-        self,
-        idx: int,
-        total: int,
-        changes_description: str,
-        pipeline_overlay: dict[str, Any] | None,
-        block: dict[str, int] | None = None,
-    ) -> None:
-        label = candidate_label(self._round_num, idx)
+    def on_arm_measuring(self, arm: Measuring) -> None:
+        assert arm.slot is not None
+        label, idx, total, block = arm.label, arm.slot.idx, arm.slot.total, arm.block
         if block is not None:
             if block["n"] not in self._block_racing:
                 self._block_racing[block["n"]] = block["racing"]
@@ -514,17 +530,20 @@ class ReadoutProjection(Projection):
                 self._write(f"  {label}/{total}")
                 return
             self._headed.add(idx)
-        self._write(fmt_individual_header(label, total, changes_description, pipeline_overlay))
+        self._write(
+            fmt_individual_header(label, total, arm.changes_description, arm.overlay or None)
+        )
 
-    def on_candidate_scored(self, total: int, scores: ScoredCandidate) -> None:
+    def on_arm_concluded(self, scores: Concluded, fold: ScoreSummary | None) -> None:
         w = 66
-        label, outcome = scores.label, scores.outcome
-        if self._block_racing and outcome in (ArmOutcome.ELIMINATED, ArmOutcome.LOCKED_IN):
-            block = -(-scores.scored_samples // self._block_size)
-            self._block_decided.setdefault(block, []).append(
-                (label, outcome == ArmOutcome.ELIMINATED)
-            )
-        summary = individual_summary(scores, unit=self.measured_unit)
+        assert scores.slot is not None
+        label, total = scores.label, scores.slot.total
+        cut = isinstance(scores, Cut) and scores.kind == "eliminated"
+        if self._block_racing and fold is not None and arm_elimination(scores) is not None:
+            block = -(-fold.walked // self._block_size)
+            self._block_decided.setdefault(block, []).append((label, cut))
+        # No reading yet: the election that pairs it against its reference has not run.
+        summary = individual_summary(scores, fold, unit=self.measured_unit)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:
@@ -536,31 +555,24 @@ class ReadoutProjection(Projection):
         else:
             self._write(f"  {_box_bottom(width=w)}")
 
-        if scores.accuracy is not None:
-            self._write(
-                self._fmt_round_leader(
-                    label, scores.accuracy, summary.lift, scores.composite_fitness
-                )
-            )
+        if fold is not None and fold.accuracy is not None:
+            self._write(self._fmt_round_leader(label, fold.accuracy, fold.composite_fitness))
 
-    def _fmt_round_leader(
-        self, label: str, acc: float, lift: float | None, composite: float | None
-    ) -> str:
-        """The Δ is the SERVED lift: recomputed here it would crown whichever arm was cut earliest."""
+    def _fmt_round_leader(self, label: str, acc: float, composite: float | None) -> str:
         key = scoreboard_rank_key(composite, acc)
         new_round_max = self._round_best_key is None or key > self._round_best_key
         if new_round_max:
             self._round_best_key = key
             self._round_best_acc = acc
             self._round_best_label = label
-            vs = f"  (Δ {_fmt_delta(lift)} vs reference)" if lift is not None else ""
-            return f"  {GREEN}★ leader: {label} {acc:.1%}{vs}{RESET}"
+            return f"  {GREEN}★ leader: {label} {acc:.1%}{RESET}"
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"
         return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
 
-    def on_round_complete(self, round_result: RoundClosedRecord, stall: int) -> None:
+    def on_round_complete(self, round_result: RoundClosedRecord) -> None:
         self.sample_counter = 0
+        series = round_result.level_series
 
         # Never `self._round_num`: the block race advances it before this round's summary prints.
         rn = round_result.round
@@ -572,13 +584,11 @@ class ReadoutProjection(Projection):
         verdict, self._verdict = self._verdict, None
         if verdict is not None:
             self._write(
-                render_round_verdict(
-                    verdict, round_verdict_basis(round_result), round_result.ability
-                )
+                render_round_verdict(verdict, round_verdict_basis(round_result), series.reading(rn))
             )
         self._write("")
         self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
-        table = render_progress_table([self._closed[n] for n in sorted(self._closed)])
+        table = render_progress_table([self._closed[n] for n in sorted(self._closed)], series)
         for line in table.split("\n"):
             self._write(line)
         for line in self._render_block_lines():
@@ -586,21 +596,25 @@ class ReadoutProjection(Projection):
         self._block_racing, self._block_decided, self._headed = {}, {}, set()
         formula_short = self._anchors.composite_fitness_formula_short
         formula_full = self._anchors.composite_fitness_formula
-        composite = round_result.composite_fitness
-        if verdict is None and composite is not None and (formula_short or formula_full):
+        fold, election = round_result.fold, round_result.election
+        composite = None if fold is None else fold.composite_fitness
+        if (
+            verdict is None
+            and fold is not None
+            and election is not None
+            and composite is not None
+            and (formula_short or formula_full)
+        ):
             # No round-0 fallback reference: a cross-subset one reads draw difficulty as candidate lift.
             for line in render_composite_fitness_block(
                 composite,
-                dict(round_result.evaluators),
+                dict(fold.evaluators),
                 formula_short or formula_full,
-                reference=next(
-                    (
-                        s.vs_reference.reference_level("objective")
-                        for s in round_result.selected_scores
-                        if s.vs_reference is not None
-                    ),
-                    None,
-                ),
+                reference=None
+                if election.selected is None
+                or (fit := round_result.fit(election.selected)) is None
+                or fit.vs_reference is None
+                else fit.vs_reference.reference_level("objective"),
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))
@@ -611,10 +625,9 @@ class ReadoutProjection(Projection):
         for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
             self._write(_node_line(f"{fact.label}: {fact.text}"))
         for line in render_patience_status(
-            round_result.overlap.advance, stall, self.patience
+            round_result.overlap.advance,
+            round_result.run_standing.rounds_without_advance,
+            self.patience,
         ).split("\n"):
             self._write(line)
         self._write(_node_bottom())
-
-
-__all__ = ["ReadoutProjection", "StatusFn"]

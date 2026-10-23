@@ -1,175 +1,24 @@
 from __future__ import annotations
 
-from typing import Any, ClassVar, Literal
+from typing import Any, Literal
 
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, OptimizationOverrides
-from promptpotter.domain.campaign import ArmRequest
+from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.command_kinds import (
-    LOOP_TAKEN,
-    CampaignPayload,
+    PAYLOAD_MODEL_FOR_KIND,
     CommandKind,
     CommandPayload,
-    CyclePayload,
+    DraftPayload,
 )
-from promptpotter.domain.launch_limits import LaunchLimits, RoundsCap, RunMode
-from promptpotter.domain.phases import INNER_LAUNCH_REFUSAL
-from promptpotter.domain.results import VerifyStrategy
-from promptpotter.domain.spend import SpendCeilings
-from promptpotter.domain.strict_model import StrictModel, WireInt
+from promptpotter.domain.spend import Budget
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import validate_dataset_name
-from promptpotter.shared.errors import PayloadInvalidError
-
-__all__ = ["KIND_OF_PAYLOAD", "PAYLOAD_MODEL_FOR_KIND", "CommandAcceptedBody"]
-
-_OUTER_OWNS_TREE = "An inner run's cycles live and die with the outer campaign."
 
 
-class ForkCyclePayload(CyclePayload):
-    """The cut, and the shape of the fork's first run (``mode``) — one act, so one command.
-    A parent a producer still holds is paused by the applier once the fork's run is admitted."""
-
-    inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
-
-    mode: RunMode = RunMode()
-    round: int = Field(default=0, ge=0)
-    candidate_id: str = Field(default="", max_length=128)
-    # Validated into a typed `CycleSeed` at the applier, which stamps the provenance the wire omits.
-    seed: dict[str, Any]
-    reason: str = Field(default="", max_length=512)
-    keep_rounds: bool = Field(
-        default=False,
-        description=(
-            "False (the default) is `operator_steered`: a clean offshoot from the origin, "
-            "re-scoring the edited searchpoint. True is `operator_rewind` — rounds 0..round-1 "
-            "are lifted and the fork continues at `round` under the seed's overrides, which is "
-            "what an 'apply this from here' press means and what the terminal spells "
-            "`resume --rewind N`."
-        ),
-    )
-
-
-class DeleteCyclePayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = _OUTER_OWNS_TREE
-
-
-class CleanupEmptyCyclesPayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = _OUTER_OWNS_TREE
-
-
-class ChangeRunLimitsPayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = (
-        "An inner run spends under the outer run's ceiling. Change the outer run's limits instead."
-    )
-
-    ceiling: SpendCeilings = SpendCeilings()
-    # Absent leaves the round cap alone; an explicit `null` lifts it (`rounds_cap`).
-    max_rounds: WireInt | None = Field(default=None, ge=0)
-
-    @property
-    def rounds_cap(self) -> RoundsCap | None:
-        if "max_rounds" not in self.model_fields_set:
-            return None
-        return RoundsCap(max_rounds=self.max_rounds)
-
-    @model_validator(mode="after")
-    def _at_least_one_ceiling(self) -> ChangeRunLimitsPayload:
-        """The domain error, not ``ValueError``: Pydantic wraps that one, and the CLI builds this model too."""
-        if self.ceiling == SpendCeilings() and self.rounds_cap is None:
-            raise PayloadInvalidError(
-                "change-run-limits requires at least one of ceiling.usd / ceiling.tokens / "
-                "max_rounds."
-            )
-        return self
-
-    @model_serializer(mode="wrap")
-    def _omit_unmoved_rounds(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        """The ``CommandRecord`` carries this dump: a ``null`` there records a lift nobody asked for."""
-        data: dict[str, Any] = handler(self)
-        if "max_rounds" not in self.model_fields_set:
-            data.pop("max_rounds", None)
-        return data
-
-
-class StartRunPayload(CyclePayload):
-    """A run of an existing cycle: what bounds it (``limits``) and the shape it takes (``mode``)."""
-
-    inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
-
-    limits: LaunchLimits = LaunchLimits()
-    mode: RunMode = RunMode()
-
-
-class StepCyclePayload(CyclePayload):
-    inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
-
-    rounds: WireInt = Field(default=1, ge=1, le=100)
-
-
-class VerifyCandidatePayload(CyclePayload):
-    """``samples`` omitted is the ANSWER, not an absence: the count is derived from the
-    per-candidate round budget and the rounds run since this cycle's last verification
-    (``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is
-    refused, naming the budget — which is what keeps one click on a million-row dataset from being
-    a million-cell bill.
-
-    Addressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``
-    — so an L4 inner candidate is as reachable as a top-level one."""
-
-    inner_refusal: ClassVar[str | None] = None
-
-    candidate_id: str = Field(min_length=1, max_length=128)
-    samples: WireInt | None = Field(default=None, ge=1, le=10_000)
-    strategy: VerifyStrategy = "random"
-    seed: WireInt | None = None
-
-
-class GradeBenchPayload(CyclePayload):
-    """The cycle holding its campaign's line: the pass grades the campaign's result, so any other
-    cycle is refused."""
-
-    inner_refusal: ClassVar[str | None] = (
-        "The bench grades a campaign's line, and an inner run is a cell of its outer campaign's."
-    )
-
-
-class _LifecyclePayload(CampaignPayload):
-    reason: str = Field(default="", max_length=512)
-
-
-class ArchiveCampaignPayload(_LifecyclePayload):
-    pass
-
-
-class UnarchiveCampaignPayload(_LifecyclePayload):
-    pass
-
-
-class DeleteCampaignPayload(_LifecyclePayload):
-    keep_results: bool = False
-
-
-LifecyclePayload = ArchiveCampaignPayload | UnarchiveCampaignPayload | DeleteCampaignPayload
-
-
-class SetCampaignLabelPayload(CampaignPayload):
-    # Required, and `""` is the CLEAR: a default would give "clear" two spellings.
-    label: str = Field(max_length=200)
-
-
-class ReplaceDatasetPayload(CommandPayload):
-    slug: str = Field(min_length=1, max_length=64)
-
-    @model_validator(mode="after")
-    def _slug_is_a_dataset_name(self) -> ReplaceDatasetPayload:
-
-        validate_dataset_name(self.slug)
-        return self
-
-
-class CompactArchivePayload(CommandPayload):
+class CompactArchivePayload(CommandPayload, kind=CommandKind.COMPACT_ARCHIVE):
     """``apply`` defaults to False on every mode, including the destructive one: a preview is what
     the operator consents on, so the write has to be asked for rather than defaulted into."""
 
@@ -185,66 +34,35 @@ class CompactArchivePayload(CommandPayload):
         return self
 
 
-class _CheckinPayload(CommandPayload):
-    """``draft_id`` and ``campaign_id`` are the same id, re-keyed at ``create_checkin_campaign``;
-    each check-in verb names it whichever way its wire schema does."""
-
-
-class EditDraftCampaignPayload(_CheckinPayload):
-    draft_id: str = Field(min_length=8, max_length=128)
+class EditDraftCampaignPayload(DraftPayload, kind=CommandKind.EDIT_DRAFT_CAMPAIGN):
     # Typed: a dict defers validation past the capability gate. Required: no patch records a no-op.
     patch: EditDraftPatch
 
-    @property
-    def checkin_campaign_id(self) -> str:
-        return self.draft_id
 
-
-class ResolveOriginPayload(_CheckinPayload):
-    draft_id: str = Field(min_length=8, max_length=128)
+class ResolveOriginPayload(DraftPayload, kind=CommandKind.RESOLVE_ORIGIN):
     message: str = Field(default="", max_length=4000)
 
-    @property
-    def checkin_campaign_id(self) -> str:
-        return self.draft_id
 
+class StartCheckinPayload(DraftPayload, kind=CommandKind.START_CHECKIN):
+    """The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no
+    draft field holds it. Acked at admission, so it rides the draft's ledger into the root cycle."""
 
-class StartCheckinPayload(_CheckinPayload):
-    """The draft says what the campaign IS; ``limits`` bounds what THIS launch spends, and no
-    draft field holds it."""
-
-    campaign_id: str = Field(min_length=8, max_length=128)
-    limits: LaunchLimits = LaunchLimits()
+    budget: Budget = Budget()
     diag: bool = Field(default=False, description="Run the diagnostic shape.")
 
-    @property
-    def checkin_campaign_id(self) -> str:
-        return self.campaign_id
 
-
-CheckinPayload = EditDraftCampaignPayload | ResolveOriginPayload | StartCheckinPayload
-
-
-class CancelQueuedRunPayload(CommandPayload):
-    job_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
-
-
-class SetConcurrentCyclesPayload(CommandPayload):
-    max_concurrent_cycles: WireInt = Field(ge=1)
-
-
-class MintCampaignPayload(CommandPayload):
+class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
     dataset_name: str = Field(min_length=1, max_length=64)
-    limits: LaunchLimits = LaunchLimits()
+    budget: Budget = Budget()
     optimization: OptimizationOverrides | None = Field(
         default=None,
         description="Laid over the dataset's own `optimization` before the mint freezes it; only "
         "the fields sent move anything",
     )
-    arm: ArmRequest | None = Field(
-        default=None,
-        description="Mint as a controlled arm of this head-to-head, declared by its first arm; "
-        "an arm off the declared instrument or budget is refused 409",
+    purpose: Purpose = Field(
+        default=Optimize(),
+        description="`compare` mints a controlled arm of its head-to-head, declared by its first "
+        "arm; an arm off the declared instrument or budget is refused 409",
     )
     diag: bool = Field(
         default=False,
@@ -285,33 +103,12 @@ class MintCampaignPayload(CommandPayload):
         return self
 
 
-# `replace-dataset` / `compact-archive` stay OUTSIDE: the generic door then refuses them by type.
-WorkspacePayload = CancelQueuedRunPayload | SetConcurrentCyclesPayload | MintCampaignPayload
-
-# Resolved by NAME (`CommandKind.payload_name`): a kind whose model is missing fails right here.
-KIND_OF_PAYLOAD: dict[type[CommandPayload], CommandKind] = {
-    LOOP_TAKEN.get(kind) or globals()[kind.payload_name]: kind for kind in CommandKind
-}
-PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {
-    kind: model for model, kind in KIND_OF_PAYLOAD.items()
-}
-_unanswered = sorted(
-    kind
-    for kind, model in PAYLOAD_MODEL_FOR_KIND.items()
-    if issubclass(model, CyclePayload) and not hasattr(model, "inner_refusal")
-)
-if _unanswered:
-    raise RuntimeError(f"cycle-scoped kinds declaring no `inner_refusal`: {_unanswered}")
-
-
-class DatasetReplaced(StrictModel):
-    """The ``replace-dataset`` response: the subject echoed, nothing more — the counts and the
-    versioned slug are on the migration's own record, and no caller reads them off the wire."""
-
-    slug: str = Field(description="The dataset name now free for new data.")
+# The last payload model is declared above, so a kind carrying none fails right here.
+if _unpaired := sorted(set(CommandKind) - PAYLOAD_MODEL_FOR_KIND.keys()):
+    raise RuntimeError(f"command kinds carried by no payload model: {_unpaired}")
 
 
 class CommandAcceptedBody(StrictModel):
-    """The 202 response shape declared in ``api-openapi.yaml``."""
+    """What a command whose applied form answers nothing returns: the record it appended."""
 
     command_id: str = Field(description="Stable id of the appended `CommandRecord`.")

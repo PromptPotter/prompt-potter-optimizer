@@ -32,7 +32,7 @@ function tree(task: string | null = "justlogic-d234/seed-0"): CourseNode {
       armNode({
         id: "fork-c1",
         label: "C1.2",
-        reading: armReading({ arm: { round: 1, label: "C1.1", candidate_id: "fork-c1" } }),
+        reading: armReading({ arm: { round: 1, label: "C1.1", key: "fork-c1" } }),
         path: hops(FORK),
         children: [innerRun("inner_c", task)],
       }),
@@ -58,16 +58,14 @@ describe("candidatesAtPath", () => {
 });
 
 describe("armAt", () => {
-  const arm = { round: 1, label: "C1.1" };
-
   it("meets a document's arm at that document's own address", () => {
-    expect(armAt(index(), ROOT, arm)?.id).toBe("root-c1");
-    expect(armAt(index(), FORK, arm)?.id).toBe("fork-c1");
+    expect(armAt(index(), ROOT, "root-c1")?.id).toBe("root-c1");
+    expect(armAt(index(), FORK, "fork-c1")?.id).toBe("fork-c1");
   });
 
   it("is null for an arm the ledger has not minted, and without an address", () => {
-    expect(armAt(index(), ROOT, { round: 2, label: "C2.1" })).toBeNull();
-    expect(armAt(index(), null, arm)).toBeNull();
+    expect(armAt(index(), ROOT, "fork-c1")).toBeNull();
+    expect(armAt(index(), null, "root-c1")).toBeNull();
   });
 });
 

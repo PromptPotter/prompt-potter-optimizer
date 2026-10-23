@@ -3,13 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
-from pydantic import ConfigDict
-
 from promptpotter.application.optimizer_manifest import declared_node_override
 from promptpotter.application.optimizers.nodes import LlmNode
 from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -28,37 +26,6 @@ L1_MANDATORY: frozenset[str] = frozenset(
         "confounds",
         # The one carrier of the parent's shots, which the rendered prompt leaves out.
         "demo_pool",
-    }
-)
-
-# L2-internal signals are excluded, so L1 cannot see L2's own state.
-L1_POSSIBLE: frozenset[str] = frozenset(
-    {
-        "measurand",
-        "precision",
-        "detectable_move",
-        "sample_provenance",
-        "confounds",
-        "budget_state",
-        "plan",
-        "rendered_prompt",
-        "pipeline_param_catalogue",
-        "prompt_block_catalogue",
-        "demo_pool",
-        "diagnostics",
-        "escalation_panel",
-        "l1_wounds",
-        "task_context",
-        "critique",
-        "answer_distribution",
-        "failing_samples",
-        "inner_narratives",
-        "mutation_memory",
-        "axis_memory",
-        "origin_strengths",
-        "archive_top_runs",
-        "rare_hit_samples",
-        "sample_transcripts",
     }
 )
 
@@ -82,16 +49,19 @@ assert [f for f in _OPTIMIZER_ORDER if f in L1_LAYOUT_SLOTS] == list(L1_LAYOUT_S
 )
 
 
-class NodeLayoutSpec(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
-    possible: frozenset[str]
+class NodeLayoutSpec(FrozenModel):
+    # The panels a layout edit may place beyond the floor's.
+    extras: frozenset[str]
     mandatory: frozenset[str]
     floor: L1Layout
     # Only the DISCRETIONARY panels: the mandatory floor is the dataset's, so no whole-prompt ceiling.
     discretionary_chars: int
     # `compile_prompt` extras that are not signals; any other unknown token in a template body raises.
     caller_extras: frozenset[str] = frozenset()
+
+    @property
+    def possible(self) -> frozenset[str]:
+        return frozenset(self.floor.all_placeholders()) | self.extras
 
 
 # `checkin` is excluded: it runs around the loop. `floor` is what a normal campaign runs UNCHANGED.
@@ -101,7 +71,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         # Room for two whole transcripts behind the frame.
         discretionary_chars=11_000,
         caller_extras=frozenset({"n_variants"}),
-        possible=L1_POSSIBLE,
+        extras=frozenset({"diagnostics", "axis_memory", "archive_top_runs", "rare_hit_samples"}),
         mandatory=L1_MANDATORY,
         floor=L1Layout(
             # The one floor placement ahead of `VOLATILE_SLOT`, free because it is prefix-stable.
@@ -114,7 +84,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "detectable_move",
                 "confounds",
                 "sample_provenance",
-                "prompt_block_catalogue",
+                "block_pool",
                 "demo_pool",
                 "plan",
                 "answer_distribution",
@@ -134,21 +104,11 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     "l1_critique": NodeLayoutSpec(
         # Every miss is admitted ahead of this, so it decides only how many transcripts fit beside them.
         discretionary_chars=7_500,
-        possible=frozenset(
+        extras=frozenset(
             {
-                "measurand",
                 "precision",
                 "detectable_move",
                 "sample_provenance",
-                "confounds",
-                "evidence_health",
-                "diagnostics",
-                "mutation_memory",
-                "sample_transcripts",
-                "failing_samples",
-                "inner_narratives",
-                "l1_wounds",
-                "rare_hit_samples",
                 "axis_memory",
                 "archive_top_runs",
                 "origin_strengths",
@@ -174,31 +134,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # `task_context` is off the floor (L2 cannot write the framing); the directives are mandatory so no L4 edit severs the channel.
     "l2_context": NodeLayoutSpec(
         discretionary_chars=5_500,
-        possible=frozenset(
-            {
-                "plan",
-                "l3_to_l2_note",
-                "rendered_prompt",
-                "diagnostics",
-                "evidence_health",
-                "guard_breaches",
-                "axis_memory",
-                "archive_top_runs",
-                "rare_hit_samples",
-                "critique",
-                "l1_overrides",
-                "l1_layout",
-                "task_context",
-                "l1_signal_catalogue",
-                "skill_tiers",
-                "rebase_capability",
-                "terminate_capability",
-                "measurand",
-                "precision",
-                "confounds",
-                "budget_state",
-            }
-        ),
+        extras=frozenset({"task_context", "precision"}),
         mandatory=frozenset(
             {
                 "critique",
@@ -234,26 +170,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     ),
     "l3_plan": NodeLayoutSpec(
         discretionary_chars=6_400,
-        possible=frozenset(
-            {
-                "plan",
-                "task_context",
-                "diagnostics",
-                "l1_wounds",
-                "axis_memory",
-                "guard_breaches",
-                "critique",
-                "evidence_health",
-                "archive_top_runs",
-                "skill_tiers",
-                "rebase_capability",
-                "terminate_capability",
-                "measurand",
-                "precision",
-                "confounds",
-                "budget_state",
-            }
-        ),
+        extras=frozenset({"task_context", "archive_top_runs", "precision"}),
         mandatory=frozenset(
             {
                 "plan",
@@ -285,13 +202,10 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
 
 for _node, _spec in NODE_LAYOUTS.items():
     _floor_ph = set(_spec.floor.all_placeholders())
-    assert _spec.mandatory <= _spec.possible, f"{_node}: mandatory ⊄ possible"
     assert len(_floor_ph) == len(_spec.floor.all_placeholders()), (
         f"{_node}: floor names a placeholder in two places"
     )
-    assert _floor_ph <= _spec.possible, (
-        f"{_node}: floor references a placeholder absent from possible"
-    )
+    assert not _floor_ph & _spec.extras, f"{_node}: extras re-list a floor placeholder"
     assert _floor_ph >= _spec.mandatory, (
         f"{_node}: floor must reference every mandatory placeholder"
     )
@@ -469,22 +383,3 @@ def layout_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
     spec = NODE_LAYOUTS[node]
     layout, _breaches = resolve_layout_override(node, declared.get("layout"))
     return {} if layout == spec.floor else {"layout": layout.model_dump(mode="json")}
-
-
-__all__ = [
-    "L1_LAYOUT_SLOTS",
-    "L1_MANDATORY",
-    "L1_POSSIBLE",
-    "NODE_LAYOUTS",
-    "PREFIX_STABLE_PANELS",
-    "VOLATILE_SLOT",
-    "LayoutNode",
-    "NodeLayoutSpec",
-    "coerce_l1_layout",
-    "layout_json_schema",
-    "layout_levers",
-    "resolve_layout_override",
-    "resolve_node_layout",
-    "unplaceable_edit",
-    "validate_l1_layout",
-]

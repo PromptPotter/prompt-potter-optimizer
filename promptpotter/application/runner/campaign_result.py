@@ -15,39 +15,29 @@ from promptpotter.application.runner.bench import (
 )
 from promptpotter.application.scoring.closed_rounds import cycle_instrument
 from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun
-from promptpotter.domain.campaign import ArmCost, Campaign, CampaignResult, Launch
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.spend import SpendRollup
+from promptpotter.domain.run_records import LaunchClockRecord
+from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    LedgerSpend,
     scan_bench_passes,
+    scan_launch_clocks,
     scan_ledger_spend,
     scan_ledger_wall_clock,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.application.initialization.session import Session
+    from promptpotter.application.initialization.session import LaunchClock, Session
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.scoring import Scorer
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.stores import Stores
-
-__all__ = [
-    "bank_campaign_result",
-    "bench_line",
-    "bench_origin",
-    "bench_under",
-    "cycle_bench",
-    "declare_line_bench",
-    "line_passes",
-    "line_run",
-    "read_cycle_bench",
-    "read_line_spend",
-]
 
 
 def _line(stores: Stores, hop: CycleHop) -> list[CycleHop] | None:
@@ -62,41 +52,36 @@ def bank_campaign_result(
     stores: Stores,
     hop: CycleHop,
     *,
-    started_at: str,
+    ledger: CycleEventLog,
+    clock: LaunchClock,
     finished_at: str,
     optimizer_phases: frozenset[str],
 ) -> None:
+    """Once per launch, on the cycle holding the line as it ends: a rebased parent banks none."""
     line = _line(stores, hop)
     if line is None:
         return
-    ledgers = [CycleLayout(stores.campaigns.cycle_dir(h)).ledger for h in line]
-    prior = stores.campaigns.load_result(hop.campaign_id)
-    calls = scan_ledger_spend(LedgerSpan(ledger) for ledger in ledgers).calls
-    launch = Launch(
-        started_at=started_at,
+    wall_clock = scan_ledger_wall_clock(
+        [stores.campaigns.ledger(h) for h in line],
+        started_at=clock.started_at,
         finished_at=finished_at,
-        clock=scan_ledger_wall_clock(
-            ledgers,
-            started_at=started_at,
-            finished_at=finished_at,
-            optimizer_phases=optimizer_phases,
-        ),
+        optimizer_phases=optimizer_phases,
     )
-    earlier = (
-        [] if prior is None else [r for r in prior.cost.launches if r.started_at != started_at]
-    )
-    stores.campaigns.write_result(
-        hop.campaign_id,
-        CampaignResult(
-            cycle_id=hop.cycle_id,
-            cost=ArmCost(calls=calls, launches=[*earlier, launch]),
-        ),
+    ledger.append(
+        LaunchClockRecord(started_at=clock.started_at, finished_at=finished_at, clock=wall_clock)
     )
 
 
-def _bench_counted(spend: SpendRollup) -> tuple[float, int]:
+def line_launches(stores: Stores, campaign: Campaign) -> list[LaunchClockRecord]:
+    """Each cycle's OWN appends: a launch banks on the cycle holding the line as it ends."""
+    return scan_launch_clocks(
+        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
+    )
+
+
+def _bench_counted(spend: SpendRollup) -> Budget:
     bench = spend.by_kind["bench"]
-    return bench.incurred_usd, bench.input_tokens + bench.output_tokens
+    return Budget.amount(bench.incurred_usd, bench.input_tokens + bench.output_tokens)
 
 
 async def bench_origin(
@@ -110,21 +95,16 @@ async def bench_origin(
     stores, hop = session.store, session.hop
     if _line(stores, hop) is None:
         return None
-    sent = (
-        origin_sp.sp_hash(session.pipeline_schema),
-        [s.key for s in session.scoring.require_partition().bench],
-        session.scoring.require_scorer().id,
-    )
     held = line_passes(stores, hop.campaign_id)
-    if (
-        held is not None
-        and held.origin.stop is None
-        and (held.origin.sp_hash, held.origin.sample_keys, held.origin.scorer_id) == sent
+    if held is not None and held.origin.answers(
+        origin_sp.sp_hash(session.pipeline_schema),
+        [s.key for s in session.state.scoring.require_partition().bench],
+        session.state.scoring.require_scorer().id,
     ):
         passes = held
     else:
         # The bench bucket's own delta: a search call landing while this pass is out is not reserve.
-        usd_before, tokens_before = _bench_counted(spend)
+        before = _bench_counted(spend)
         origin_pass = await score_on_bench(
             session,
             origin_sp,
@@ -134,13 +114,13 @@ async def bench_origin(
             round_num=0,
             cb=cb,
         )
-        split = session.scoring.require_partition().split
-        usd_after, tokens_after = _bench_counted(spend)
+        split = session.state.scoring.require_partition().split
+        after = _bench_counted(spend)
         passes = BenchPasses(
             tolerance=split.tolerance if split is not None else 0,
             origin=origin_pass,
-            reserve_usd=usd_after - usd_before,
-            reserve_tokens=tokens_after - tokens_before,
+            reserve_usd=after.usd_amount - before.usd_amount,
+            reserve_tokens=after.token_amount - before.token_amount,
             # A pass sent beside another reference pairs with nothing on this one.
             selections={},
         )
@@ -150,17 +130,16 @@ async def bench_origin(
         passes.origin,
         subject="origin",
         label=candidate_label(0, 0),
-        reserve=(passes.reserve_usd, passes.reserve_tokens),
+        reserve=Budget.amount(passes.reserve_usd, passes.reserve_tokens),
     )
     return passes
 
 
-def read_line_spend(stores: Stores, campaign: Campaign) -> SpendRollup:
+def read_line_spend(stores: Stores, campaign: Campaign) -> LedgerSpend:
     """Every cycle read WHOLE: what a superseded cycle paid past its cut is the line's cost too."""
     return scan_ledger_spend(
-        LedgerSpan(CycleLayout(stores.campaigns.cycle_dir(h)).ledger)
-        for h in stores.campaigns.line(campaign.root_hop)
-    ).spend
+        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
+    )
 
 
 def line_run(stores: Stores, hop: CycleHop) -> LineRun:
@@ -182,8 +161,7 @@ def line_passes(stores: Stores, campaign_id: str) -> BenchPasses | None:
     if campaign is None:
         return None
     return scan_bench_passes(
-        LedgerSpan(CycleLayout(stores.campaigns.cycle_dir(h)).ledger)
-        for h in stores.campaigns.line(campaign.root_hop)
+        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
     )
 
 
@@ -219,14 +197,15 @@ def bench_line(
     return BenchLine(
         hop=hop,
         on_line=holder == hop,
+        inner=stores.inner,
         held_by=None if holder == hop else holder.cycle_id,
         trigger=config.bench_trigger,
         held_out=len(drawn.bench_ids) if drawn is not None else 0 if split is None else split.bench,
         instrument_id=cycle_instrument(
-            campaign.dataset_name, stores.campaigns.standing_rounds(hop, moment=None).rounds
+            drawn, stores.campaigns.standing_rounds(hop, moment=None).rounds
         ),
         run=run,
-        spend=read_line_spend(stores, campaign),
+        spend=read_line_spend(stores, campaign).spend,
     )
 
 
@@ -263,6 +242,7 @@ def declare_line_bench(
         line = BenchLine(
             hop=hop,
             on_line=False,
+            inner=stores.inner,
             held_by=None,
             trigger=config.bench_trigger,
             held_out=0 if split is None else split.bench,

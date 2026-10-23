@@ -12,6 +12,7 @@ from pydantic import Field, computed_field
 
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.identity.migration import is_host
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.measurement_archive import (
@@ -23,26 +24,12 @@ from promptpotter.infrastructure.store.measurement_archive import (
     rejoined,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import graceful
+from promptpotter.shared.errors import NotFoundError, PayloadInvalidError, graceful
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import FiledAnswer
     from promptpotter.infrastructure.store.stores import Stores
-
-__all__ = [
-    "ArchiveInventory",
-    "ArchiveReport",
-    "InventoryRow",
-    "archive_writers",
-    "compact_measurement_archive",
-    "inventory_measurement_archive",
-    "iter_cycle_ledgers",
-    "purge_cold_store",
-    "reindex_measurement_archive",
-    "restore_measurement_archive",
-    "workspace_trees",
-]
 
 
 def workspace_trees(root: pathlib.Path) -> list[pathlib.Path]:
@@ -76,17 +63,30 @@ ones every later campaign replays. An answer under any other role is SKIPPED and
 never compacted on a guess."""
 
 
+# `panels.py::_inner_narrated` reads an L4 row's trace.
+_READ_ON_L4_ROWS = frozenset({"reasoning_trace"})
+assert _READ_ON_L4_ROWS <= UNREAD_PIPELINE_KEYS
+
+
 def _protected_pipeline_fields(pipeline: PipelineData) -> frozenset[str]:
-    """``panels.py::_inner_narrated`` needs ``reasoning_trace`` beside ``mean_round_delta``."""
-    return frozenset() if pipeline.mean_round_delta is None else frozenset({"reasoning_trace"})
+    return _READ_ON_L4_ROWS if pipeline.inner is not None else frozenset()
 
 
 def _parsed(lines: Iterable[str]) -> list[tuple[str, FiledAnswer | None]]:
     return [(line, answer_of(line)) for line in lines]
 
 
-def _in_scope(answer: FiledAnswer, dataset: str | None) -> bool:
-    return dataset is None or answer.dataset_name == dataset
+def _in_scope(answer: FiledAnswer, dataset_hash: str | None) -> bool:
+    return dataset_hash is None or answer.dataset_hash == dataset_hash
+
+
+def _scope(stores: Stores, label: str | None) -> str | None:
+    if label is None:
+        return None
+    digest = stores.tenant_datasets.hash_of(label)
+    if digest is None:
+        raise NotFoundError(f"no dataset is labelled {label!r}, so it scopes no measurement")
+    return digest
 
 
 def _moved(answer: FiledAnswer) -> bool:
@@ -253,6 +253,10 @@ def inventory_measurement_archive(
 ) -> ArchiveInventory:
     """Off the cell files: an evidence read hides what lies outside its task's memory fence."""
     archive = stores.archive
+    digest = _scope(stores, dataset)
+    named: dict[str, list[str]] = {}
+    for label, held_hash in sorted(stores.tenant_datasets.labels().items()):
+        named.setdefault(held_hash, []).append(label)
     now = datetime.now(UTC)
     by_dataset: dict[str, _Tally] = {}
     by_role: dict[str, _Tally] = {}
@@ -265,15 +269,14 @@ def inventory_measurement_archive(
         moved = sum(1 for _, answer in answers if _moved(answer))
         cold_each = archive.cold_bytes_on_disk(file_key) / moved if moved else 0.0
         for line, answer in answers:
-            if not _in_scope(answer, dataset):
+            if not _in_scope(answer, digest):
                 continue
             configuration = answer.config_key
-            dataset_name = answer.dataset_name or ""
-            held.add((configuration, dataset_name))
+            held.add((configuration, answer.dataset_hash))
             hot = len(line.encode("utf-8"))
             cold = cold_each if _moved(answer) else 0.0
             for table, key in (
-                (by_dataset, dataset_name or "<unstamped>"),
+                (by_dataset, " · ".join(named.get(answer.dataset_hash, [answer.dataset_hash]))),
                 (by_role, _role_family(answer.role)),
                 (by_age, _age_band(answer.created_at, now=now)),
             ):
@@ -282,8 +285,8 @@ def inventory_measurement_archive(
 
     orphans = sum(
         1
-        for entry in archive.list_all(dataset_name=dataset)
-        if (entry.config_key, entry.dataset_name or "") not in held
+        for entry in archive.list_all(dataset_hash=digest)
+        if (entry.config_key, entry.dataset_hash) not in held
     )
     return ArchiveInventory(
         by_dataset=_by_bytes(by_dataset),
@@ -378,14 +381,14 @@ def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool) -> ArchiveReport
 
 # A cell FILE spans datasets and roles, so scope is read off each ANSWER: by file, a pass moves another dataset's rows.
 def _compacted(
-    lines: list[str], cold: list[MovedFields], *, dataset: str | None, stamped_at: str
+    lines: list[str], cold: list[MovedFields], *, dataset_hash: str | None, stamped_at: str
 ) -> tuple[CellRewrite | None, _FileOutcome]:
     out: list[str] = []
     moving: list[MovedFields] = []
     skipped: dict[str, int] = {}
 
     for line, answer in _parsed(lines):
-        if answer is None or not _in_scope(answer, dataset) or answer.compaction is not None:
+        if answer is None or not _in_scope(answer, dataset_hash) or answer.compaction is not None:
             out.append(line)
             continue
         if answer.role != _ELIGIBLE_ROLE:
@@ -415,16 +418,26 @@ def _compacted(
     return CellRewrite(out, payload), _FileOutcome(moved_off, skipped=skipped)
 
 
+def _refuse_unowned_home(stores: Stores) -> None:
+    if stores.archive_home.owner == "install" and not is_host(stores.identity):
+        raise PayloadInvalidError(
+            "This archive is the install's, shared by every account: only whoever runs this box "
+            "compacts, restores or purges it.",
+            code="archive_home_owned_by_install",
+        )
+
+
 def compact_measurement_archive(
     stores: Stores,
     *,
     dataset: str | None = None,
     apply: bool = False,
 ) -> ArchiveReport:
+    _refuse_unowned_home(stores)
     writers = archive_writers(stores.shared_root)
     if writers:
         return _blocked(writers)
-    transform = partial(_compacted, dataset=dataset, stamped_at=utcnow_iso())
+    transform = partial(_compacted, dataset_hash=_scope(stores, dataset), stamped_at=utcnow_iso())
     return _each_file(stores, stores.archive.file_keys(), "compact", transform, apply=apply)
 
 
@@ -432,9 +445,9 @@ _Split = tuple[dict[str, MovedFields], list[MovedFields]]
 
 
 def _split_cold(
-    answers: list[tuple[str, FiledAnswer | None]], cold: list[MovedFields], dataset: str | None
+    answers: list[tuple[str, FiledAnswer | None]], cold: list[MovedFields], dataset_hash: str | None
 ) -> _Split | None:
-    scoped = {a.answer: _in_scope(a, dataset) for _, a in answers if a is not None}
+    scoped = {a.answer: _in_scope(a, dataset_hash) for _, a in answers if a is not None}
     mine: dict[str, MovedFields] = {}
     rest: list[MovedFields] = []
     for moved in cold:
@@ -448,13 +461,13 @@ def _split_cold(
 
 
 def _restored(
-    lines: list[str], cold: list[MovedFields], *, dataset: str | None
+    lines: list[str], cold: list[MovedFields], *, dataset_hash: str | None
 ) -> tuple[CellRewrite | None, _FileOutcome]:
     answers = _parsed(lines)
     unrestorable = sum(
-        1 for _, a in answers if a and a.purged is not None and _in_scope(a, dataset)
+        1 for _, a in answers if a and a.purged is not None and _in_scope(a, dataset_hash)
     )
-    split = _split_cold(answers, cold, dataset)
+    split = _split_cold(answers, cold, dataset_hash)
     if split is None:
         return None, _FileOutcome(_Conflict(), unrestorable=unrestorable)
     mine, rest = split
@@ -476,18 +489,19 @@ def restore_measurement_archive(
     dataset: str | None = None,
     apply: bool = False,
 ) -> ArchiveReport:
+    _refuse_unowned_home(stores)
     writers = archive_writers(stores.shared_root)
     if writers:
         return _blocked(writers)
-    transform = partial(_restored, dataset=dataset)
+    transform = partial(_restored, dataset_hash=_scope(stores, dataset))
     return _each_file(stores, stores.archive.file_keys(), "restore", transform, apply=apply)
 
 
 def _purged(
-    lines: list[str], cold: list[MovedFields], *, dataset: str | None, stamped_at: str
+    lines: list[str], cold: list[MovedFields], *, dataset_hash: str | None, stamped_at: str
 ) -> tuple[CellRewrite | None, _FileOutcome]:
     answers = _parsed(lines)
-    split = _split_cold(answers, cold, dataset)
+    split = _split_cold(answers, cold, dataset_hash)
     if split is None:
         return None, _FileOutcome(_Conflict())
     mine, rest = split
@@ -507,10 +521,11 @@ def purge_cold_store(
     dataset: str | None = None,
     apply: bool = False,
 ) -> ArchiveReport:
+    _refuse_unowned_home(stores)
     writers = archive_writers(stores.shared_root)
     if writers:
         return _blocked(writers)
-    transform = partial(_purged, dataset=dataset, stamped_at=utcnow_iso())
+    transform = partial(_purged, dataset_hash=_scope(stores, dataset), stamped_at=utcnow_iso())
     return _each_file(stores, stores.archive.cold_file_keys(), "purge", transform, apply=apply)
 
 

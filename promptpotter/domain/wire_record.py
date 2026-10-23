@@ -20,20 +20,7 @@ from typing import (
     is_typeddict,
 )
 
-from pydantic import ConfigDict
-
-__all__ = [
-    "ALWAYS",
-    "BY_HAND",
-    "REST",
-    "WireRecord",
-    "always_as",
-    "real",
-    "record_of",
-    "text",
-    "typed_record",
-    "whole",
-]
+from pydantic import BaseModel, ConfigDict
 
 ALWAYS: Mapping[str, object] = {"wire": "always"}
 REST: Mapping[str, object] = {"wire": "rest"}
@@ -91,6 +78,10 @@ def _sequence(value: object, where: str) -> list[Any] | tuple[Any, ...]:
     raise _mistyped(value, where, "a list")
 
 
+def _dumped(model: BaseModel) -> dict[str, object]:
+    return model.model_dump(mode="json")
+
+
 def _read_only(self: object, *_: object, **__: object) -> None:
     raise TypeError(f"{type(self).__name__} is read-only")
 
@@ -112,6 +103,7 @@ _HELPERS: dict[str, object] = {
     **{reader.__name__: reader for reader in _SCALARS.values()},
     "_mapping": _mapping,
     "_sequence": _sequence,
+    "_dumped": _dumped,
     "_frozen": _Frozen,
 }
 
@@ -138,6 +130,14 @@ def _crossing(hint: Any, where: str, scope: dict[str, object]) -> _Crossing:
             lambda held: f"read_{name}(_mapping({held}, {where!r}))",
             lambda held: f"write_{name}({held})",
             _RECORDS[hint].typed,
+        )
+    if isinstance(hint, type) and issubclass(hint, BaseModel):
+        name = hint.__name__
+        scope[f"read_{name}"] = hint.model_validate
+        return _Crossing(
+            lambda held: f"read_{name}(_mapping({held}, {where!r}))",
+            lambda held: f"_dumped({held})",
+            hint,
         )
     if is_typeddict(hint):
         return _Crossing(lambda held: f"_mapping({held}, {where!r})", None, hint)
@@ -344,7 +344,3 @@ def _rest_claims(where: str, claimed: set[str]) -> ValueError:
         f"{where} holds {sorted(claimed)}, which its owner declares as fields: written there, "
         "each would be read back as the field"
     )
-
-
-def record_of(owner: type) -> type:
-    return _RECORDS[owner].typed

@@ -8,10 +8,10 @@ from fastapi import Query, Request, Response
 
 from promptpotter.application.evidence.metric_catalogue import MEASURAND
 from promptpotter.application.evidence.read import Evidence, select_evidence
+from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-from promptpotter.shared.errors import BadRequestError
 
 
 # No capability gate and no L4 gate: tenant-scoped, and an id naming nothing is simply absent.
@@ -115,17 +115,14 @@ def get_evidence(
     ] = "",
 ) -> Response:
     """The cross-subject read: the bench head-to-head, roster, comparability, replicates and decomposition, then a merged interval per subject with every pairwise test under the selected metric."""
-    try:
-        evidence = select_evidence(
-            stores,
-            subjects=subject,
-            dataset=dataset,
-            grid=grid,
-            include_ranking=ranking,
-            include_winner_chain=winner_chain,
-            include_config=config,
-            metric=metric,
-        )
-    except (ValueError, SyntaxError) as exc:
-        raise BadRequestError(str(exc)) from exc
+    evidence = select_evidence(
+        stores,
+        subjects=[parse_subject(raw) for raw in subject],
+        dataset=dataset,
+        grid=grid,
+        include_ranking=ranking,
+        include_winner_chain=winner_chain,
+        include_config=config,
+        metric=metric,
+    )
     return conditional_json(request, evidence, stamp="generated_at")

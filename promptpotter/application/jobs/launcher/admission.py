@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING, NoReturn, assert_never
 
 from promptpotter import connectors
@@ -12,40 +12,58 @@ from promptpotter.application.account import account_of
 from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
-    declare_run_ceiling,
+    declare_run_budget,
+    move_campaign_money,
+    next_launch_budget,
     refuse_verb_rate,
+    share_campaign_ceiling,
 )
 from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
     CampaignLaunch,
+    EmbeddedRun,
+    InnerRun,
     Job,
-    JobHolder,
     JobRegistry,
     ScoringPass,
     ScoringVerb,
+    SlotHolder,
 )
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import HeldLimits
 from promptpotter.domain.phases import (
+    ErrorRecord,
     PauseCause,
     RunPhase,
     StopOutcome,
     StopReason,
     stop_reason_outcome,
 )
-from promptpotter.domain.run_records import ErrorRecord, RunPhaseRecord
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.run_records import RunPhaseRecord
+from promptpotter.domain.spend import (
+    MONEY_AXES,
+    NOTHING_METERED,
+    Budget,
+    CeilingMeter,
+    HeldBudget,
+)
 from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
-from promptpotter.infrastructure.llm.spend_book import SpendBook, spending_under
+from promptpotter.infrastructure.llm.spend_book import (
+    JobHold,
+    SpendBook,
+    bound_spend_book,
+    spending_under,
+)
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import CycleBusyError, MachineBusyError
+from promptpotter.shared.errors import CycleBusyError, MachineBusyError, NotFoundError
 from promptpotter.shared.extras import MissingExtraError, missing
-from promptpotter.shared.identity import acting_principal_id
+from promptpotter.shared.identity import acting_principal
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
 
 logger = logging.getLogger(__name__)
@@ -64,9 +82,9 @@ def release_slot(
     stores: Stores,
     hop: CycleHop | None,
 ) -> None:
-    """A launch that never reached its admission (``Job.admitted_at``) was REFUSED, whatever raised."""
+    """A launch that never reached its admission (``Job.admitted``) was REFUSED, whatever raised."""
     job = job_registry.get(job_id)
-    if (job is not None and job.admitted_at is not None) or launch_interrupted(exc):
+    if (job is not None and job.admitted) or launch_interrupted(exc):
         stop_reason = run_stop_reason(exc)
     else:
         stop_reason = StopReason.NOT_ADMITTED
@@ -121,7 +139,7 @@ def request_job(
     *,
     stores: Stores,
     job_registry: JobRegistry,
-    holder: JobHolder,
+    holder: SlotHolder,
     hop: CycleHop = UNRESOLVED_HOP,
 ) -> Job:
     user = account_of(stores)
@@ -138,7 +156,8 @@ def request_job(
             _refuse_taken_cycle(stores, job_registry, hop)
         job = job_registry.request_slot(
             user_id=str(stores.identity.user_id),
-            principal_id=acting_principal_id(stores.identity),
+            principal_id=acting_principal(stores.identity).id,
+            workspace=stores.campaigns.workspace,
             holder=holder,
             hop=hop,
         )
@@ -154,10 +173,12 @@ def _refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop
     if run.producer.attached:
         claim = stores.campaigns.launch_claim(hop)
         holder = (
-            job_registry.running_job_for(hop) if claim is None else job_registry.get(claim.job_id)
+            job_registry.running_job_for(stores.campaigns.workspace, hop)
+            if claim is None
+            else job_registry.get(claim.job_id)
         )
         status = run.run_phase.value
-    elif (holder := job_registry.pass_on(hop)) is not None:
+    elif (holder := job_registry.pass_on(stores.campaigns.workspace, hop)) is not None:
         status = "scoring"
     else:
         return
@@ -206,8 +227,8 @@ def withdraw_queued(
 
 async def admit_and_hold(
     request: LaunchRequest, *, stores: Stores, job_registry: JobRegistry, job: Job
-) -> HeldLimits:
-    """The request's config is resolved IN here, after the queue wait, so the ceiling admitted is the one the run starts under."""
+) -> HeldBudget:
+    """The request's config is resolved IN here, after the queue wait, so the budget admitted is the one the run starts under."""
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
     hop = None if request.hop == UNRESOLVED_HOP else request.hop
     if job.queued:
@@ -220,13 +241,20 @@ async def admit_and_hold(
     if (down := await probe_backend(request.backend_type(stores))) is not None:
         raise down
     t_probe = time.perf_counter()
-    declared, operator = declare_run_ceiling(
-        request.campaign_config(stores), stores=stores, hop=hop, requested=request.limits.ceiling
+    declared, asked = declare_run_budget(
+        request.campaign_config(stores), stores=stores, hop=hop, requested=request.budget
     )
-    ceiling, reserve = await _admit(
-        declared, stores=stores, job_registry=job_registry, job_id=job.job_id, hop=hop
+    # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
+    held = await asyncio.to_thread(
+        admit_and_share,
+        declared,
+        asked,
+        stores=stores,
+        job_registry=job_registry,
+        job=job,
+        hop=hop,
+        step_rounds=request.step_rounds,
     )
-    held = HeldLimits.admitted(request.limits, ceiling, operator, reserve=reserve)
     t_caps = time.perf_counter()
 
     logger.info(
@@ -240,37 +268,172 @@ async def admit_and_hold(
     return held
 
 
-async def _admit(
-    declared: SpendCeilings,
+def admit_and_share(
+    declared: Budget,
+    asked: Budget,
     *,
     stores: Stores,
     job_registry: JobRegistry,
-    job_id: str,
+    job: Job,
     hop: CycleHop | None,
-) -> tuple[SpendCeilings, SpendCeilings]:
-    def admit() -> tuple[SpendCeilings, SpendCeilings]:
-        ceiling, reserve = admit_launch(
-            declared=declared,
-            user=account_of(stores),
+    step_rounds: int | None,
+    enclosing: Budget | None = None,
+) -> HeldBudget:
+    """THE admission of every run and pass; an inner run is admitted against its *enclosing* book."""
+    meter: CeilingMeter = (
+        "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
+    )
+    with job_registry.admission_gate():
+        if enclosing is None:
+            admitted, reserve = admit_launch(
+                declared=declared,
+                user=account_of(stores),
+                stores=stores,
+                job_registry=job_registry,
+                job_id=job.job_id,
+                hop=hop,
+            )
+            # The campaign's ceiling as composed, never as the account clamped it: the account
+            # binds through the reservation. An axis it leaves open is the headroom admitted on it.
+            ceiling = Budget(
+                usd=admitted.usd if declared.usd is None else declared.usd,
+                tokens=admitted.tokens if declared.tokens is None else declared.tokens,
+            )
+        else:
+            # The enclosing book's room is spendable from NOW, on top of what the campaign spent.
+            spent = (
+                NOTHING_METERED
+                if hop is None
+                else stores.campaigns.metered_spend(hop.campaign_id, meter)
+            )
+            room = Budget(
+                usd=None if enclosing.usd is None else enclosing.usd + spent.usd_amount,
+                tokens=None if enclosing.tokens is None else enclosing.tokens + spent.token_amount,
+            )
+            admitted, reserve = declared.over(_within(declared, room)), Budget()
+            ceiling = admitted
+        allotment = share_campaign_ceiling(
+            ceiling, stores=stores, job_registry=job_registry, job=job, hop=hop, meter=meter
+        )
+        job_registry.mark_admitted(job.job_id, reserve, allotment)
+        if hop is not None:
+            move_campaign_money(
+                asked, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
+            )
+    return HeldBudget(admitted=admitted, standing=asked, job_id=job.job_id, step_rounds=step_rounds)
+
+
+def _within(declared: Budget, enclosing: Budget) -> Budget:
+    usd = [v for v in (declared.usd, enclosing.usd) if v is not None]
+    tokens = [v for v in (declared.tokens, enclosing.tokens) if v is not None]
+    return Budget(usd=min(usd, default=None), tokens=min(tokens, default=None))
+
+
+def open_spend_book(
+    held: HeldBudget,
+    *,
+    stores: Stores,
+    job_registry: JobRegistry,
+    hop: CycleHop | None,
+    meters: CeilingMeter,
+    opened: float,
+    live: bool,
+) -> SpendBook:
+    """Its money is read off the job, which a reshare moves; a *live* book reads the cycle's standing axes too."""
+    return SpendBook(
+        declared=held.admitted,
+        hold=JobHold(job_registry.job_file(held.job_id)),
+        meters=meters,
+        opened=opened,
+        cycle_dir=stores.campaigns.cycle_dir(hop) if live and hop is not None else None,
+        metered=NOTHING_METERED if hop is None else stores.campaigns.cycle_metered(hop, meters),
+    )
+
+
+@asynccontextmanager
+async def embedded_share(
+    config: CampaignConfig,
+    *,
+    stores: Stores,
+    dataset_name: str,
+    hop: CycleHop | None,
+    requested: Budget,
+    step_rounds: int | None,
+) -> AsyncIterator[tuple[str, HeldBudget]]:
+    """A launch's admission with no slot, entered BEFORE anything paid: the job, then its hold."""
+    job_registry = JobRegistry.attach()
+    job = job_registry.create(
+        user_id=str(stores.identity.user_id),
+        principal_id=acting_principal(stores.identity).id,
+        workspace=stores.campaigns.workspace,
+        hop=UNRESOLVED_HOP if hop is None else hop,
+        holder=EmbeddedRun(dataset_name),
+    )
+    admitted = False
+    try:
+        declared, asked = declare_run_budget(config, stores=stores, hop=hop, requested=requested)
+        held = await asyncio.to_thread(
+            admit_and_share,
+            declared,
+            asked,
             stores=stores,
             job_registry=job_registry,
-            job_id=job_id,
+            job=job,
             hop=hop,
+            step_rounds=step_rounds,
         )
-        # Before the caller's next await: a concurrent launch on this account reads a stamped reservation.
-        job_registry.mark_admitted(job_id, reserve)
-        return ceiling, reserve
+        admitted = True
+        job_registry.mark_started(job.job_id)
+        yield job.job_id, held
+    except BaseException as exc:
+        job_registry.release(job.job_id, refusal="" if admitted else str(exc))
+        raise
+    job_registry.release(job.job_id)
 
-    # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
-    return await asyncio.to_thread(admit)
+
+@contextmanager
+def inner_share(
+    config: CampaignConfig, *, stores: Stores, dataset_name: str, hop: CycleHop
+) -> Iterator[HeldBudget]:
+    """An L4 inner campaign's share, of what the enclosing run's book has left at its spawn."""
+    enclosing = bound_spend_book()
+    if enclosing is None:
+        raise RuntimeError("an inner run spawns only under its enclosing run's book")
+    job_registry = JobRegistry.attach()
+    job = job_registry.create(
+        user_id=str(stores.identity.user_id),
+        principal_id=acting_principal(stores.identity).id,
+        workspace=stores.campaigns.workspace,
+        hop=hop,
+        holder=InnerRun(dataset_name),
+    )
+    admitted = False
+    try:
+        declared, asked = declare_run_budget(config, stores=stores, hop=hop, requested=Budget())
+        held = admit_and_share(
+            declared,
+            asked,
+            stores=stores,
+            job_registry=job_registry,
+            job=job,
+            hop=hop,
+            step_rounds=None,
+            enclosing=enclosing.money_left(),
+        )
+        admitted = True
+        job_registry.mark_started(job.job_id)
+        yield held
+    except BaseException as exc:
+        job_registry.release(job.job_id, refusal="" if admitted else str(exc))
+        raise
+    job_registry.release(job.job_id)
 
 
 @asynccontextmanager
 async def paid_pass(
-    *, stores: Stores, verb: ScoringVerb, hop: CycleHop | None, declared: SpendCeilings
+    *, stores: Stores, verb: ScoringVerb, hop: CycleHop | None, declared: Budget
 ) -> AsyncIterator[SpendBook]:
-    """A scoring pass outside any run holds a slot and a reservation, and never queues: its
-    caller waits on the answer, and nothing could deliver a detached one."""
+    """Never queues: its caller waits on the answer."""
     job_registry = JobRegistry.attach()
     job = await asyncio.to_thread(
         request_job,
@@ -283,14 +446,35 @@ async def paid_pass(
         refuse_as_busy(stores, job_registry, job)
     admitted = False
     try:
-        # Its own cycle's spend is no run's to exclude: the pass bills beside it.
-        ceiling, reserve = await _admit(
-            declared, stores=stores, job_registry=job_registry, job_id=job.job_id, hop=None
+        meters: CeilingMeter = (
+            "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
+        )
+        if hop is not None:
+            ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
+            declared = ceiling.over(declared)
+        held = await asyncio.to_thread(
+            admit_and_share,
+            declared,
+            Budget(),
+            stores=stores,
+            job_registry=job_registry,
+            job=job,
+            hop=hop,
+            step_rounds=None,
+        )
+        book = open_spend_book(
+            held,
+            stores=stores,
+            job_registry=job_registry,
+            hop=hop,
+            meters=meters,
+            opened=time.monotonic(),
+            live=False,
         )
         admitted = True
         job_registry.mark_started(job.job_id)
         set_rate_tenant(str(stores.identity.tenant_id))
-        with spending_under(SpendBook(declared=ceiling, reserved=reserve, meters="bill")) as book:
+        with spending_under(book):
             yield book
     except BaseException as exc:
         job_registry.release(job.job_id, refusal="" if admitted else str(exc))
@@ -298,14 +482,9 @@ async def paid_pass(
     job_registry.release(job.job_id)
 
 
-__all__ = [
-    "admit_and_hold",
-    "claim_cycle",
-    "launch_interrupted",
-    "paid_pass",
-    "probe_backend",
-    "refuse_as_busy",
-    "release_slot",
-    "request_job",
-    "withdraw_queued",
-]
+def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    if campaign is None:
+        raise NotFoundError(f"campaign not found: {hop.campaign_id}")
+    config = resolve_campaign_config(stores, campaign, hop)
+    return next_launch_budget(config, stores=stores, hop=hop).only(MONEY_AXES)

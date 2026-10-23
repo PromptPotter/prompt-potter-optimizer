@@ -8,7 +8,6 @@ from typing import NamedTuple
 
 from promptpotter.application.scoring.formula.compiler import (
     CompiledExpression,
-    ScoringFormulaError,
     cell_channels_of,
     compile_expression,
 )
@@ -31,7 +30,13 @@ from promptpotter.domain.paired_reading import (
     TestFamily,
     interval_side,
 )
-from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradeColumn, GradedCell
+from promptpotter.domain.scoring import (
+    ROW_GRADES,
+    CellSheet,
+    GradeColumn,
+    GradedCell,
+    ScoringFormulaError,
+)
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import (
@@ -40,17 +45,6 @@ from promptpotter.shared.statistics import (
     p_floor,
     paired_mean_t,
 )
-
-__all__ = [
-    "FlippedCells",
-    "MemberRows",
-    "absent_pair",
-    "as_family",
-    "flipped_keys",
-    "fresh_cells",
-    "grade_measurands",
-    "read_pair",
-]
 
 
 @dataclass(frozen=True, kw_only=True)

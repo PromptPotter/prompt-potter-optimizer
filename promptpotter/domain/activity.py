@@ -1,27 +1,34 @@
 from __future__ import annotations
 
-from typing import Any, Literal, NamedTuple, assert_never, get_args
+import copy
+from typing import Any, ClassVar, Literal, NamedTuple, assert_never, get_args
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
+from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.command_kinds import CommandKind
-from promptpotter.domain.cycle_paths import CyclePath, command_address
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import BenchEnterView
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     CampaignPhase,
+    ErrorRecord,
     GateDecision,
     GateKind,
     RunPhase,
 )
-from promptpotter.domain.results import DegradationHealth, HealthCause, candidate_label
+from promptpotter.domain.results import (
+    Cut,
+    DegradationHealth,
+    HealthCause,
+    Measured,
+    candidate_label,
+)
 from promptpotter.domain.run_records import (
     AccountEventRecord,
+    AnnouncedArms,
+    ArmRecord,
     BackendWarningRecord,
-    CandidateMintedRecord,
-    CandidateScoredRecord,
-    CandidateStartedRecord,
-    CheckinClosedRecord,
     CommandAckRecord,
     CommandRecord,
     CycleFinalRecord,
@@ -30,90 +37,100 @@ from promptpotter.domain.run_records import (
     CycleSeedRecord,
     CycleSupersededRecord,
     ElectionRecord,
-    ErrorRecord,
     FlightRecord,
     ForkGradedRecord,
     InterventionRecord,
     LaunchClaimRecord,
+    LaunchClockRecord,
     LaunchReleasedRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
-    OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
+    ResolvedRunRecord,
     ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
-    RoundStandingRecord,
+    RoundRestatedRecord,
     RoundWarningRecord,
-    RulerRecord,
-    RunLimitsRecord,
     RunPhaseRecord,
     RunWiringRecord,
-    SampleOrderRecord,
     SampleScoredRecord,
     SampleStartedRecord,
     ScoringLockedRecord,
     SpawnedRecord,
     SpendHoldRecord,
     SpendTombstoneRecord,
+    StandingBudgetRecord,
     TokenUsageRecord,
     TrailTombstoneRecord,
 )
 from promptpotter.domain.spend import TokenAccount, prefix_reading
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import duration_words
 
-__all__ = [
-    "LIFETIME",
-    "SILENT_RECORDS",
-    "ActivityDecision",
-    "ActivityFeed",
-    "ActivityItem",
-    "ActivityKind",
-    "ActivityState",
-    "DecisionAction",
-    "DecisionFact",
-]
-
-# A tail never validates these (`projection_envelope.py::NON_ACTIVITY_KINDS`); `_item` is total over the rest.
-SILENT_RECORDS = (
-    AccountEventRecord,
-    BackendWarningRecord,
-    CheckinClosedRecord,
-    CycleFinalRecord,
-    CycleMintedRecord,
-    CycleSupersededRecord,
-    ElectionRecord,
-    FlightRecord,
-    ForkGradedRecord,
-    InterventionRecord,
-    LaunchClaimRecord,
-    LaunchReleasedRecord,
-    OptimizerStateRecord,
-    PricedKeyRecord,
-    RaceCatchUpRecord,
-    RaceStandingRecord,
-    ResumeCheckpointRecord,
-    RoundProposedRecord,
-    RulerRecord,
-    RunLimitsRecord,
-    RunWiringRecord,
-    SampleOrderRecord,
-    SampleStartedRecord,
-    ScoringLockedRecord,
-    SpawnedRecord,
-    SpendHoldRecord,
-    SpendTombstoneRecord,
-    TokenUsageRecord,
-    TrailTombstoneRecord,
+# A tail never validates one (`projection_envelope.py::NON_ACTIVITY_KINDS`).
+SilentRecord = (
+    AccountEventRecord
+    | BackendWarningRecord
+    | CycleFinalRecord
+    | CycleMintedRecord
+    | CycleSupersededRecord
+    | ElectionRecord
+    | FlightRecord
+    | ForkGradedRecord
+    | InterventionRecord
+    | LaunchClaimRecord
+    | LaunchClockRecord
+    | LaunchReleasedRecord
+    | PartitionRecord
+    | PricedKeyRecord
+    | RaceCatchUpRecord
+    | RaceStandingRecord
+    | ResolvedRunRecord
+    | ResumeCheckpointRecord
+    | RoundProposedRecord
+    | RoundRestatedRecord
+    | RunWiringRecord
+    | SampleStartedRecord
+    | ScoringLockedRecord
+    | SpawnedRecord
+    | SpendHoldRecord
+    | SpendTombstoneRecord
+    | StandingBudgetRecord
+    | TokenUsageRecord
+    | TrailTombstoneRecord
 )
+# What a feed reads, `_item` total over it: with `SilentRecord`, every arm placed exactly once.
+ActivityRecord = (
+    LLMCallStartRecord
+    | LLMCallRecord
+    | LLMCallProgressRecord
+    | ArmRecord
+    | SampleScoredRecord
+    | PhaseRecord
+    | RunPhaseRecord
+    | RoundEnteredRecord
+    | RoundClosedRecord
+    | RoundWarningRecord
+    | ErrorRecord
+    | ProviderHoldRecord
+    | ProviderEasedRecord
+    | CommandRecord
+    | CommandAckRecord
+    | CycleSeedRecord
+)
+_arms = get_args(get_args(CycleRecord)[0])
+_placed = [*get_args(SilentRecord), *get_args(ActivityRecord)]
+if sorted(map(str, _placed)) != sorted(map(str, _arms)):
+    raise RuntimeError("SilentRecord and ActivityRecord must place every CycleRecord arm once")
+del _arms, _placed
 
 ActivityKind = Literal[
     "running",
@@ -141,10 +158,8 @@ LIFETIME: dict[ActivityKind, Lifetime] = {
 }
 
 
-class ActivityItem(StrictModel):
+class ActivityItem(FrozenModel):
     """One record's reading: a line to show, and the round and candidate it is about."""
-
-    model_config = ConfigDict(frozen=True)
 
     id: str = Field(description="The record's kind and ledger offset; one record, one id.")
     kind: ActivityKind
@@ -153,16 +168,13 @@ class ActivityItem(StrictModel):
     detail: str | None = Field(default=None, description="The quieter half of the line.")
     tone: ActivityTone = "muted"
     round: int | None = Field(default=None, description="The round the record names.")
-    candidate: str | None = Field(
-        default=None,
-        description="The candidate the record is about, by the label its course minted.",
+    arm: ArmKey | None = Field(
+        default=None, description="The arm the record is about, by its key; `label` renders it."
     )
 
 
-class ActivityState(StrictModel):
+class ActivityState(FrozenModel):
     """A run's current state: what it is doing, and what was said that still holds."""
-
-    model_config = ConfigDict(frozen=True)
 
     status: ActivityItem | None = Field(
         description="The one line saying what the run is doing; each new one replaces it."
@@ -177,33 +189,25 @@ class ActivityState(StrictModel):
     )
 
 
-class DecisionFact(StrictModel):
+class DecisionFact(FrozenModel):
     """One labelled line of the evidence behind a hold."""
-
-    model_config = ConfigDict(frozen=True)
 
     label: str
     value: str
     tone: ActivityTone = "muted"
 
 
-class DecisionAction(StrictModel):
-    """One button: a press POSTs ``payload`` to ``/commands/{kind}`` unchanged."""
-
-    model_config = ConfigDict(frozen=True)
+class DecisionAction(FrozenModel):
+    """One button: a press sends `decision` as `kind` to the cycle whose activity carries it."""
 
     label: str
     variant: Literal["primary", "ghost", "danger"]
-    kind: CommandKind
-    payload: dict[str, Any] = Field(
-        description="The whole command payload, the cycle's address and `descend` tail included."
-    )
+    kind: Literal[CommandKind.ORIGIN_GATE_DECISION]
+    decision: GateDecision
 
 
-class ActivityDecision(StrictModel):
+class ActivityDecision(FrozenModel):
     """A choice the run is holding for: what to say about it, and the commands that answer it."""
-
-    model_config = ConfigDict(frozen=True)
 
     title: str
     lead: str = Field(description="The paragraph under the title.")
@@ -261,7 +265,7 @@ def _gate_facts(health: DegradationHealth) -> list[DecisionFact]:
     return facts
 
 
-def _origin_gate(address: CyclePath, health: DegradationHealth | None) -> ActivityDecision:
+def _origin_gate(health: DegradationHealth | None) -> ActivityDecision:
     grade = "unknown" if health is None else health.grade
     return ActivityDecision(
         title=f"Origin gate — verdict: {grade}",
@@ -275,7 +279,7 @@ def _origin_gate(address: CyclePath, health: DegradationHealth | None) -> Activi
                 label=label,
                 variant=variant,
                 kind=CommandKind.ORIGIN_GATE_DECISION,
-                payload={**command_address(address), "decision": decision},
+                decision=decision,
             )
             for decision, (label, variant) in _GATE_ACTIONS.items()
         ],
@@ -293,7 +297,7 @@ def _arms_gate(round_num: int | None, drafts: list[DecisionFact]) -> ActivityDec
     return ActivityDecision(
         title=f"{held} holds for your arms",
         lead=f"{held} measures nothing until you answer with "
-        f"`python -m promptpotter submit-arms --file <arms.yaml>`. {drafted}",
+        f"`python -m promptpotter submit-arms --arms <arms.yaml>`. {drafted}",
         facts=drafts,
         reasons=[],
         actions=[],
@@ -301,7 +305,8 @@ def _arms_gate(round_num: int | None, drafts: list[DecisionFact]) -> ActivityDec
 
 
 class _BenchPass(NamedTuple):
-    candidate: str | None
+    arm: ArmKey
+    label: str | None
     who: str
     rows: int | None
 
@@ -326,6 +331,8 @@ def _node_label(node: str, at: int | None) -> str:
 
 
 class ActivityFeed:
+    records: ClassVar[tuple[type[StrictModel], ...]] = get_args(ActivityRecord)
+
     def __init__(self) -> None:
         self._status: ActivityItem | None = None
         self._notices: list[ActivityItem] = []
@@ -336,17 +343,26 @@ class ActivityFeed:
         self._origin_health: DegradationHealth | None = None
         # Each held sender's notice id.
         self._held: dict[str, str] = {}
+        # Each arm's label by its key, off its records: a sample names its individual alone.
+        self._labels: dict[ArmKey, str] = {}
+        self._arms = AnnouncedArms()
 
-    def state(self, address: CyclePath) -> ActivityState:
-        """*address* is passed in: a decision's commands need it, and a ledger does not name its own path."""
+    def state(self) -> ActivityState:
         decision: ActivityDecision | None = None
         if self._gate == "origin":
-            decision = _origin_gate(address, self._origin_health)
+            decision = _origin_gate(self._origin_health)
         elif self._gate == "arms":
             decision = _arms_gate(self._round, self._offered)
         return ActivityState(status=self._status, notices=list(self._notices), decision=decision)
 
-    def read(self, sequence: int, record: CycleRecord) -> ActivityItem | None:
+    def feed(self, offset: int, record: ActivityRecord) -> None:
+        self.read(offset, record)
+
+    def value(self) -> ActivityFeed:
+        """A private copy, which a tail reads on from."""
+        return copy.deepcopy(self)
+
+    def read(self, sequence: int, record: ActivityRecord) -> ActivityItem | None:
         self._declared(record)
         item = self._item(f"{record.record_type}-{sequence}", record)
         if item is None:
@@ -357,7 +373,7 @@ class ActivityFeed:
             self._notices.append(item)
         return item
 
-    def _declared(self, record: CycleRecord) -> None:
+    def _declared(self, record: ActivityRecord) -> None:
         """``RoundEnteredRecord`` alone MOVES the run: every launch re-enters ``origin`` at round 0 to replay it."""
         match record:
             case RunPhaseRecord():
@@ -367,7 +383,7 @@ class ActivityFeed:
                 self._offered = [
                     DecisionFact(
                         label=f"draft {idx} · {candidate_label(self._round or 0, idx)}",
-                        value=draft.opt_sp.lineage.changes_description or "—",
+                        value=draft.individual.lineage.changes_description or "—",
                     )
                     for idx, draft in enumerate(record.drafts)
                 ]
@@ -380,15 +396,14 @@ class ActivityFeed:
                 # The last close stands: a re-score at the gate closes round 0 again.
                 self._origin_health = record.health
             case RoundEnteredRecord():
+                self._arms.enter(record)
                 if self._round is not None and record.round != self._round:
                     self._notices = [n for n in self._notices if LIFETIME[n.kind] == "run"]
                 self._round = record.round
             case PhaseRecord(event="enter", round=int() as opened) if self._round is None:
                 self._round = opened
 
-    def _item(self, item_id: str, record: CycleRecord) -> ActivityItem | None:
-        if isinstance(record, SILENT_RECORDS):
-            return None
+    def _item(self, item_id: str, record: ActivityRecord) -> ActivityItem | None:
         match record:
             case LLMCallStartRecord():
                 return ActivityItem(
@@ -401,27 +416,16 @@ class ActivityFeed:
                 )
             case LLMCallRecord():
                 return self._call(item_id, record)
-            case CandidateStartedRecord():
-                label = candidate_label(record.round, record.candidate_idx)
-                return ActivityItem(
-                    id=item_id,
-                    kind="candidate",
-                    icon="◆",
-                    label=label,
-                    tone="good",
-                    round=record.round,
-                    candidate=label,
-                )
-            case CandidateScoredRecord():
-                return self._candidate_scored(item_id, record)
+            case ArmRecord():
+                return self._arm(item_id, record)
             case SampleScoredRecord():
                 return self._sample_scored(item_id, record)
             case PhaseRecord():
                 return self._phase(item_id, record)
-            case RunPhaseRecord() | RoundEnteredRecord() | RoundClosedRecord():
-                # Read by `_declared`; not SILENT, since a silent record is never handed to this feed.
+            case RunPhaseRecord() | RoundEnteredRecord():
+                # Read by `_declared` alone, so a feed still takes them.
                 return None
-            case RoundStandingRecord():
+            case RoundClosedRecord():
                 return ActivityItem(
                     id=item_id,
                     kind="round",
@@ -481,16 +485,6 @@ class ActivityFeed:
                     label=waiting,
                     detail=duration_words(record.elapsed_s),
                     round=record.round,
-                )
-            case CandidateMintedRecord():
-                return ActivityItem(
-                    id=item_id,
-                    kind="candidate",
-                    icon="◆",
-                    label=record.label,
-                    tone="good",
-                    round=record.round,
-                    candidate=record.label,
                 )
             case CycleSeedRecord():
                 return ActivityItem(
@@ -562,25 +556,33 @@ class ActivityFeed:
             tone="warn",
         )
 
-    def _candidate_scored(self, item_id: str, record: CandidateScoredRecord) -> ActivityItem:
+    def _arm(self, item_id: str, record: ArmRecord) -> ActivityItem:
+        arm = record.state
+        label = arm.label
+        self._labels[record.arm] = label
+        self._arms.announce(record)
+        fold = self._arms.fold(record.round, record.arm)
         return ActivityItem(
             id=item_id,
             kind="candidate",
             icon="◆",
-            label=record.scores.label,
-            detail=_pct(record.scores.composite_fitness),
+            label=label,
+            detail=_pct(fold.composite_fitness)
+            if isinstance(arm, Cut | Measured) and fold is not None
+            else None,
             tone="good",
             round=record.round,
-            candidate=record.scores.label,
+            arm=record.arm,
         )
 
     def _sample_scored(self, item_id: str, record: SampleScoredRecord) -> ActivityItem:
-        at, slot = record.round, record.candidate_idx
+        at = record.round
         scored, total = (record.sample_idx or 0) + 1, record.sample_total
         count = f"{scored}/{total}" if total else None
         running = record.running
-        # A slotless measurement (a bench pass, the parent's re-score) is no candidate of the round.
-        if slot < 0:
+        label = None if (arm := self._arms.take(record)) is None else self._labels[arm]
+        # A pass no arm walks (a bench pass, a verify) is no candidate of the round.
+        if label is None:
             if self._bench is None:
                 return ActivityItem(
                     id=item_id,
@@ -590,7 +592,7 @@ class ActivityFeed:
                     round=at,
                 )
             # The candidate and the count lead: a ray chip truncates.
-            candidate, who, rows = self._bench
+            arm, candidate, who, rows = self._bench
             rows = total or rows
             tally = f"bench {scored}/{'?' if rows is None else rows}"
             so_far = None if running is None else _pct(running.accuracy)
@@ -600,9 +602,8 @@ class ActivityFeed:
                 icon="·",
                 label=f"{candidate} · {tally}" if candidate else tally,
                 detail=f"{who} · {so_far} so far" if so_far else who,
-                candidate=candidate,
+                arm=arm,
             )
-        label = candidate_label(at, slot)
         return ActivityItem(
             id=item_id,
             kind="progress",
@@ -610,7 +611,7 @@ class ActivityFeed:
             label=f"{label} · scoring {count}" if count else f"{label} · scoring",
             detail=None if running is None else _pct(running.composite_fitness),
             round=at,
-            candidate=label,
+            arm=record.arm,
         )
 
     def _phase(self, item_id: str, record: PhaseRecord) -> ActivityItem | None:
@@ -624,12 +625,12 @@ class ActivityFeed:
             return None
         candidate = view.label or None
         who = "origin" if view.subject == "origin" else f"R{view.round} selection"
-        self._bench = _BenchPass(candidate, who, view.rows)
+        self._bench = _BenchPass(view.arm, candidate, who, view.rows)
         return ActivityItem(
             id=item_id,
             kind="round",
             icon="◇",
             label=f"{candidate} · bench pass" if candidate else "bench pass",
             detail=f"{who} · {view.rows} held-out rows",
-            candidate=candidate,
+            arm=view.arm,
         )

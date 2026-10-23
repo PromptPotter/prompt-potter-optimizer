@@ -118,7 +118,33 @@ def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
     return out or None
 
 
+def _flips(rounds: Sequence[RoundResult]) -> list[dict[str, Any]]:
+    """Each sample whose hit moved between consecutive rounds, read off the rounds alone so a resume reads the same."""
+    out: list[dict[str, Any]] = []
+    for prev, rr in pairwise(rounds):
+        if not (prev.results and rr.results):
+            continue
+        first = next(iter(rr.panel.values()), None)
+        desc = "" if first is None else first.changes_description
+        prev_hits = {key: cell.hit for key, cell in prev.results.by_key().items()}
+        out.extend(
+            {
+                "sample_key": key,
+                "query": cell.facts.query,
+                "round": rr.round,
+                "changes_description": desc[:80],
+                "old_hit": prev_hits[key],
+                "new_hit": cell.hit,
+            }
+            for key, cell in rr.results.by_key().items()
+            if key in prev_hits and cell.hit != prev_hits[key]
+        )
+    return out
+
+
 class AxisIndex:
+    """Reads its sample index alone, so it remembers as that index does per purpose."""
+
     def __init__(self, sample_index: SampleIndex) -> None:
         self.sample_index = sample_index
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
@@ -222,11 +248,11 @@ class AxisIndex:
                 fg_lines.append(f"{a.axis} → {', '.join(parts)}")
 
         flips = self._flips[-50:] if rankings5 else []
-        # Counted by sample_id: two samples may phrase the same question, so the text is only a LABEL.
-        flip_counts = Counter(f["sample_id"] for f in flips)
-        flip_labels = {f["sample_id"]: str(f.get("query", "")) for f in flips}
+        # Counted by sample key: two samples may phrase the same question, so the text is only a LABEL.
+        flip_counts = Counter(f["sample_key"] for f in flips)
+        flip_labels = {f["sample_key"]: str(f.get("query", "")) for f in flips}
         volatile = [
-            (flip_labels.get(sid, ""), n) for sid, n in flip_counts.most_common(5) if n >= 2
+            (flip_labels.get(key, ""), n) for key, n in flip_counts.most_common(5) if n >= 2
         ]
 
         return _collect(
@@ -310,7 +336,8 @@ class AxisIndex:
 
         self._axis_failure_group_deltas = new_deltas
 
-    def refresh(self) -> None:
+    def refresh(self, rounds: Sequence[RoundResult]) -> None:
+        self._flips = _flips(rounds)
         if self._folded == self.sample_index.generation:
             return
         # Folded WHOLE each time: a configuration's reading moves as its population grows.
@@ -351,38 +378,6 @@ class AxisIndex:
 
     def top_runs(self, k: int = 3) -> list[RunRecord]:
         return self._top_runs[:k]
-
-    def record_flips_from_rounds(self, rounds: Sequence[RoundResult], round_num: int) -> None:
-        if len(rounds) < 2 or not (rounds[-2].results and rounds[-1].results):
-            return
-        desc = (
-            rounds[-1].candidate_scores[0].changes_description
-            if rounds[-1].candidate_scores
-            else ""
-        )
-        prev_hits = {key: cell.hit for key, cell in rounds[-2].results.by_key().items()}
-
-        count = 0
-        for key, cell in rounds[-1].results.by_key().items():
-            if key not in prev_hits:
-                continue
-            sid = cell.sample_id
-            new_hit = cell.hit
-            old_hit = prev_hits[key]
-            if new_hit != old_hit:
-                self._flips.append(
-                    {
-                        "sample_id": sid,
-                        "query": cell.facts.query,
-                        "round": round_num,
-                        "changes_description": desc[:80],
-                        "old_hit": old_hit,
-                        "new_hit": new_hit,
-                    }
-                )
-                count += 1
-        if count:
-            logger.debug("Round %d: %d query flips recorded", round_num, count)
 
     @staticmethod
     def _fold_entry(
@@ -435,6 +430,3 @@ class AxisIndex:
             top_values=records[:5],
             sample_count=total,
         )
-
-
-__all__ = ["NOISE_THRESHOLD", "AxisIndex"]

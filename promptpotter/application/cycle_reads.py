@@ -5,21 +5,26 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import Field
+
 from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
-from promptpotter.domain.dashboard_rows import sample_status
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.ray import RayResponse
+from promptpotter.domain.results import (
+    ArmReading,
+    ArmState,
+    Election,
+    ScoreboardRow,
+)
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.scoring import CellSheet, ground_truth_text
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.runtime_flags import run_phase_validator_epoch
 from promptpotter.infrastructure.store.family_ray_queries import (
-    DEFAULT_RAY_LIMIT,
-    MAX_RAY_LIMIT,
     RayCursor,
-    RayResponse,
     build_family_ray,
     decode_ray_cursor,
     ray_validator_parts,
@@ -33,19 +38,6 @@ from promptpotter.infrastructure.store.lineage_queries import FamilyCourse, iter
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError
-
-__all__ = [
-    "DEFAULT_RAY_LIMIT",
-    "MAX_RAY_LIMIT",
-    "FamilyRay",
-    "RayResponse",
-    "ViewedCycle",
-    "cycle_event_frames",
-    "open_family_ray",
-    "round_audit",
-    "served_round",
-    "view_cycle",
-]
 
 _TAIL_POLL_INTERVAL_S = 0.5
 
@@ -95,23 +87,30 @@ def round_audit(cycle: ViewedCycle, round_num: int) -> RoundAudit | None:
     return audit
 
 
-@dataclass(frozen=True)
-class _MarkedSheet(CellSheet):
-    def wire(self) -> list[dict[str, object]]:
-        return [
-            {
-                **cell.wire(),
-                "status": sample_status(cell.facts, cell.grade),
-                "ground_truth_text": ground_truth_text(cell.facts.ground_truth),
-            }
-            for cell in self.cells
-        ]
+class RoundView(StrictModel):
+    """One closed round as a surface reads it: its arms and its verdict. Its rows are the
+    measurement log's (`GET /datasets/{name}/cells`); what the engine banks beside them — folds,
+    diagnostics, optimizer state — stays on the ledger."""
+
+    round: int
+    arms: dict[ArmKey, ArmState]
+    election: Election | None
+    scoreboard: list[ScoreboardRow]
+    headline: ArmReading | None = Field(
+        description="The arm the round ENDED on (`election.ended_on`), read: the headline's "
+        "numbers are its own. Null on a diag round, which elects nothing."
+    )
+    fitness_bands: list[int] = Field(
+        description="How many scored rows of the `headline` arm's cells graded into each tenth of "
+        "[0, 1], lowest first: a band is closed above, so a 0.5 counts in the fifth and a 1.0 in "
+        "the tenth. A row carrying no verdict is in none — an uncharged error's 0.0 is a floor, "
+        "not a low score."
+    )
 
 
 def served_round(
     stores: Stores, hop: CycleHop, round_num: int, *, moment: Moment | None
-) -> RoundResult | None:
-    """A served projection: the round a resume, a fork and the round file read carries no ``status``."""
+) -> RoundView | None:
     graded_under = campaign_scorer(stores, hop.campaign_id)
     closed = (
         None
@@ -120,25 +119,18 @@ def served_round(
     )
     if closed is None:
         return None
-
-    def marked(sheet: CellSheet) -> CellSheet:
-        return _MarkedSheet(sheet.scorer_id, sheet.cells)
-
-    def each(arms: dict[str, CellSheet]) -> dict[str, CellSheet]:
-        return {k: marked(v) for k, v in arms.items()}
-
-    return closed.model_copy(
-        update={
-            "results": marked(closed.results),
-            "all_candidate_results": each(closed.all_candidate_results),
-            "reference_results": each(closed.reference_results),
-            "overlap_results": each(closed.overlap_results),
-        }
+    return RoundView(
+        round=closed.round,
+        arms=closed.arms,
+        election=closed.election,
+        scoreboard=closed.scoreboard,
+        headline=closed.headline,
+        fitness_bands=closed.fitness_bands,
     )
 
 
 async def cycle_event_frames(cycle: ViewedCycle) -> AsyncIterator[str]:
-    tail = CycleLedgerTail(cycle.dir, cycle.path)
+    tail = CycleLedgerTail(cycle.dir, cycle.hop.cycle_id)
     snapshot = await asyncio.to_thread(
         lambda: tail.snapshot_frame(
             served_dashboard(cycle.stores, cycle.hop).model_dump(mode="json")

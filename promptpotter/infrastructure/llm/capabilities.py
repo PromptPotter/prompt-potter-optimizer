@@ -8,18 +8,19 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.pipeline_overlay import normalize_model_id
 from promptpotter.domain.pipeline_schema import CapabilityMenu, ModelCapability, PipelineSchema
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_REQUEST_PARAMS
 from promptpotter.infrastructure.llm.pricing import lookup_rate
-from promptpotter.infrastructure.llm.registry import model_profile, normalize_model_id
+from promptpotter.infrastructure.llm.registry import model_profile
 from promptpotter.infrastructure.store.io import (
     read_json_tolerant,
     read_yaml_optional,
     write_json,
 )
 from promptpotter.infrastructure.store.read_model import derived, file_sig
-from promptpotter.infrastructure.tls import tls_context
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +224,6 @@ async def refresh_model_capabilities(workspace: Path, *, timeout: float = 15.0) 
             "supported_parameters": [str(p) for p in params] if isinstance(params, list) else [],
             "name": entry.get("name"),
             "context_length": entry.get("context_length"),
-            "pricing": entry.get("pricing"),
             "top_provider": entry.get("top_provider"),
             "architecture": entry.get("architecture"),
         }
@@ -231,15 +231,3 @@ async def refresh_model_capabilities(workspace: Path, *, timeout: float = 15.0) 
         return 0
     write_json(_cache_path(workspace), {"fetched_at": utcnow_iso(), "models": models})
     return len(models)
-
-
-__all__ = [
-    "CAPABILITY_FILE",
-    "MODELS_URL",
-    "STANDARD_EFFORT_LADDER",
-    "ensure_model_capabilities",
-    "refresh_model_capabilities",
-    "resolve_menu",
-    "resolve_model_capabilities",
-    "resolve_schema_menu",
-]

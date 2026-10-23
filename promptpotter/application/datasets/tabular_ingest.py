@@ -11,7 +11,6 @@ import codecs
 import csv
 import io
 import json
-import random
 import zipfile
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
@@ -62,7 +61,7 @@ IngestReason = Literal[
 
 
 class IngestError(PayloadInvalidError):
-    """``reason`` is declared in ``api-openapi.yaml::ErrorEnvelope``."""
+    """``reason`` rides the error envelope's ``details`` (``main.py::_error_response``)."""
 
     code = "ingest_failed"
 
@@ -446,10 +445,8 @@ def _ods_rows(source: IO[bytes]) -> Iterator[list[str]]:
     raise IngestError(reason="unreadable", message="The OpenDocument file has no sheet.")
 
 
-def materialize_samples(
-    table: Table, *, query_col: str, ground_truth_col: str, order_seed: str | None
-) -> list[Sample]:
-    """``order_seed`` unties ids from a label-grouped upload; seeded, since ids key every history."""
+def materialize_samples(table: Table, *, query_col: str, ground_truth_col: str) -> list[Sample]:
+    """In FILE order: a run's partition seed ranks rows by content, so no position is tied to a label."""
     for label, col in (("query", query_col), ("ground_truth", ground_truth_col)):
         if col not in table.headers:
             raise IngestError(
@@ -474,8 +471,6 @@ def materialize_samples(
                 reason="missing_value", message=f"Row {ordinal}: empty {ground_truth_col!r} cell."
             )
         pairs.append((query, ground_truth))
-    if order_seed is not None:
-        random.Random(order_seed).shuffle(pairs)
     return [
         Sample(id=i, query=query, ground_truth=ground_truth)
         for i, (query, ground_truth) in enumerate(pairs)
@@ -531,20 +526,3 @@ def closed_label_set(
     if len(distinct) > n_rows // 2:
         return None
     return tuple(distinct)
-
-
-__all__ = [
-    "MAX_SAMPLES",
-    "IngestError",
-    "IngestReason",
-    "Table",
-    "candidate_library_from_rows",
-    "closed_label_set",
-    "decode_text",
-    "file_extension",
-    "materialize_samples",
-    "parse_candidate_library",
-    "read_candidate_library_file",
-    "read_tabular",
-    "sniff_format",
-]

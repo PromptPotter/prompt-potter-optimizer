@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Literal, NamedTuple, get_args
 
-from pydantic import ConfigDict, Field
+from pydantic import Field
 
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord
-from promptpotter.domain.scoring import GradedCell
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.errors import BadRequestError
 
 LensKind = Literal["score", "dials", "abort"]
 _LENS_KINDS: dict[str, LensKind] = {kind: kind for kind in get_args(LensKind)}
@@ -36,7 +37,7 @@ def parse_lens(value: str, *, allow_abort: bool) -> Lens:
             else "'score:<formula>' or 'dials:<term=weight,…>'; an abort lens is a lineage-tree "
             "question, not a comparable level"
         )
-        raise ValueError(f"Unknown lens: {value!r} (expected {expected})")
+        raise BadRequestError(f"Unknown lens: {value!r} (expected {expected})")
     return Lens(kind, body)
 
 
@@ -46,25 +47,21 @@ def parse_sample_ids(text: str | None) -> frozenset[int] | None:
     try:
         ids = frozenset(int(tok) for tok in text.split(",") if tok.strip())
     except ValueError as exc:
-        raise ValueError(f"Invalid samples list: {text!r} ({exc})") from exc
+        raise BadRequestError(f"Invalid samples list: {text!r} ({exc})") from exc
     return ids or None
 
 
-class MaskReading(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class MaskReading(FrozenModel):
     composite_fitness: float
     accuracy: float | None
     # `accuracy` is the mean over exactly these.
     n_scored: int
 
 
-class MaskCandidate(StrictModel):
+class MaskCandidate(FrozenModel):
     """``is_eligible`` is a recorded fact, invariant under a scoring swap."""
 
-    model_config = ConfigDict(frozen=True)
-
-    candidate_id: str
+    key: ArmKey
     reading: MaskReading | None = None
     is_selected: bool = False
     is_eligible: bool = True
@@ -72,25 +69,20 @@ class MaskCandidate(StrictModel):
     abort: str | None = None
 
 
-class MaskRound(StrictModel):
+class MaskRound(FrozenModel):
     """``parent`` is round ``N-1``'s winner under the record's scorer; under a SAMPLE-SET mask, ``load.py::_parent``."""
-
-    model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     round: int
     candidates: list[MaskCandidate] = Field(default_factory=list)
     parent: MaskReading | None = None
-    # Carried only under ``with_replay``; the pool is as it stood BEFORE this round ran.
+    # Carried only under ``with_replay``.
     round_data: RoundResult | None = None
-    known_outcomes: list[GradedCell] = Field(default_factory=list)
     decisions: list[ResumeCheckpointRecord] = Field(default_factory=list)
 
 
-class MaskCycle(StrictModel):
+class MaskCycle(FrozenModel):
     """``fork_from_round`` is in PARENT coordinates, even when the fork restarts its own numbering."""
-
-    model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     parent_cycle_id: str | None = None
@@ -98,35 +90,18 @@ class MaskCycle(StrictModel):
     rounds: list[MaskRound] = Field(default_factory=list)
 
 
-class MaskRecord(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class MaskRecord(FrozenModel):
     cycles: list[MaskCycle] = Field(default_factory=list)
     # The `per_cell` formula a fork applying the lens carries: a `dials:` lens realized.
     criterion: str | None = None
 
 
-class SpineCycle(StrictModel):
+class SpineCycle(FrozenModel):
     """Every term is a round-CLOSE fact on the ledger, so a rewind is decided without opening one round file."""
-
-    model_config = ConfigDict(frozen=True)
 
     cycle_id: str
     parent_cycle_id: str | None = None
     fork_from_round: int | None = None
     # Subset-invariant, so it alone averages up a lineage whose rounds scored different subsets.
-    theta_by_round: dict[int, float] = Field(default_factory=dict)
-
-
-__all__ = [
-    "SCORE_LENS_LABELS",
-    "Lens",
-    "MaskCandidate",
-    "MaskCycle",
-    "MaskReading",
-    "MaskRecord",
-    "MaskRound",
-    "SpineCycle",
-    "parse_lens",
-    "parse_sample_ids",
-]
+    # Every round the cycle closed is a node; ``None`` where its level does not difference.
+    theta_by_round: dict[int, float | None]

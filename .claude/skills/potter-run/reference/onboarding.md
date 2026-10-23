@@ -16,9 +16,9 @@ one origin, no hand-written loader. A registered benchmark skips all of it and u
 
 1. Sidebar → "Start a new campaign" opens the IngestPane.
 2. Upload CSV / TSV / JSON / JSONL / XLSX, ≤25 MB (`MAX_UPLOAD_BYTES`), ≤50 000 rows
-   (`MAX_SAMPLES`) → a DURABLE check-in campaign. It is on disk and in the sidebar from this
-   first action, survives a restart, and `draft_id` IS its `campaign_id`; nothing RUNS until
-   Start.
+   (`MAX_SAMPLES`) → a DURABLE check-in draft. It is on disk and in the entry list's open
+   check-ins from this first action and survives a restart; no campaign exists and nothing
+   RUNS until Start mints one. Discard closes it instead.
 3. The user types what the prompt is supposed to do. Submitting marks it CONFIRMED.
 4. One `checkin` turn proposes the column map (`query` + `ground_truth`), the six decomposed
    Layer-1 prompt fields, and the 7-field `task_context`; code fills the closed-label answer
@@ -38,7 +38,8 @@ python -m promptpotter new <file.csv> --set task_description='what the prompt do
 
 Same chain, same seam: `ingest_draft` → `resolve_origin_turn` → `hold_checkin_start`. Omit
 `--set` to let the resolver propose the framing and ask; `--set optimizer=capo` and
-`--set nodes.<node>.<knob>=V` are the picker's two answers.
+`--set nodes.<node>.<knob>=V` are the picker's two answers. A run that stops short of a complete
+origin keeps its check-in and names it — the browser's Discard is `discard-draft <draft_id>`.
 
 Seam: `application/datasets/` (`ingest.py`, `origin_resolve.py`, `origin_readiness.py`) +
 `application/jobs/` (`launcher/checkin.py`, `mint.py`). Web: `webapp/components/ingest/`.
@@ -48,7 +49,7 @@ Seam: `application/datasets/` (`ingest.py`, `origin_resolve.py`, `origin_readine
 When the operator says their data is ready ("just set it up", names a file) **and it loads
 cleanly**, author the origin yourself instead of spending the check-in LLM call.
 
-1. **Test the load first.** Registered name → confirm its `dataset.yaml::source` names a recipe in
+1. **Test the load first.** Registered name → confirm its `dataset.yaml` `source:` names a recipe in
    `application/datasets/loaders.py::BANK_RECIPES`. Raw file → `POST /datasets/ingest`, or open a
    registered dataset as a draft via `POST /datasets/{name}/draft`. A clean parse + sample
    preview is green. **If the load fails, do NOT simulate** — fall back to the real flow.
@@ -58,7 +59,7 @@ cleanly**, author the origin yourself instead of spending the check-in LLM call.
    `POST /commands/edit-draft-campaign`. The closed-label answer space stays **code-owned** —
    never hand-list it. Every edit lands as a `CommandRecord`, so authorship is on disk.
 3. **Gate, then start.** `origin_readiness` must be `complete`, then
-   `POST /commands/start-checkin` with `{campaign_id}`.
+   `POST /commands/start-checkin` with `{draft_id}`.
 
 ## Cold-machine bootstrap
 
@@ -87,5 +88,5 @@ OpenAI/Anthropic/OpenRouter only if named. `.env.example` is the full template.
 ## First-run smoke
 
 If `{name}` has never produced a measurement (`measurements/cells/{config_key}.jsonl`),
-run `python scripts/smoke_campaign.py --dataset {name}` (~90 s; it mints a campaign, so it falls
-under the autonomy mode).
+run a one-round campaign (it mints a campaign, so it falls under the autonomy mode):
+`python -m promptpotter new {name} --set budget.rounds=1 --set nodes.l1_generate.n_variants=3 --set nodes.adaptive_queue.sp_budget_round=5 --set nodes.escalation.l1_patience=1`.

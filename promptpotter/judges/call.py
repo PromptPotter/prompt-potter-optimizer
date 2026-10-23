@@ -27,8 +27,6 @@ from promptpotter.shared.errors import CellSendRefusedError, SendRefusedError
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["absent", "ask", "bind_cache", "graded", "judge_answer", "judge_question"]
-
 
 _CACHE: ContextVar[LLMReuseCache | None] = ContextVar("judge_reuse_cache", default=None)
 

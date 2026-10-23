@@ -33,8 +33,8 @@ export function useCandidateBars(index: LineageIndex) {
       : (entry.course ?? undefined);
   }, [index, viewedPath, viewedCandidateId]);
 
-  const inflightByLabel = useMemo(
-    () => new Map(liveCandidates(dash).map((c) => [c.reading.arm.label, c.reading])),
+  const inflightByKey = useMemo(
+    () => new Map(liveCandidates(dash).map((c) => [c.reading.arm.key, c.reading])),
     [dash],
   );
 
@@ -45,11 +45,11 @@ export function useCandidateBars(index: LineageIndex) {
     () =>
       candidateBars({
         viewedNode,
-        inflightByLabel,
+        inflightByKey,
         sampleSet,
         benchPass,
       }),
-    [viewedNode, inflightByLabel, sampleSet, benchPass],
+    [viewedNode, inflightByKey, sampleSet, benchPass],
   );
 
   const floorPinned = useMemo(

@@ -1,40 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { candidateSearchPoint } from "../candidateSearchPoint";
-import type { RoundResult } from "@/lib/types";
-import { roundDoc, scored } from "@/lib/test-fixtures";
+import type { RoundView } from "@/lib/types";
+import { measuredArm, roundDoc, roundOfArms } from "@/lib/test-fixtures";
 
-const doc: RoundResult = roundDoc({
-  round: 2,
-  candidate_scores: [
-    scored({
-      candidate_id: "cand-a",
-      prompt_fields: { instruction: "evolved A", persona: "solver" },
-      resolved_pipeline_params: {
+const doc: RoundView = roundOfArms(2, [
+  {
+    key: "cand-a",
+    label: "C2.1",
+    arm: measuredArm({
+      prompts: { llm_only: { fields: { instruction: "evolved A", persona: "solver" }, shots: ["d1"] } },
+      resolved_params: {
         llm_only: { model: "openai/gpt-oss-120b", reasoning_effort: "high" },
         steps: ["llm_only"],
       },
     }),
-    scored({
-      candidate_id: "cand-b",
-      prompt_fields: { instruction: "evolved B" },
-      resolved_pipeline_params: null,
-    }),
-  ],
-});
+  },
+]);
 
 describe("candidateSearchPoint", () => {
   it("seeds the fork from the candidate's complete resolved config (steps dropped)", () => {
     const sp = candidateSearchPoint(doc, "cand-a");
     expect(sp).toEqual({
-      origin_prompt_fields: { instruction: "evolved A", persona: "solver" },
+      origin_prompts: {
+        llm_only: { fields: { instruction: "evolved A", persona: "solver" }, shots: ["d1"] },
+      },
       pipeline_overlay: { llm_only: { model: "openai/gpt-oss-120b", reasoning_effort: "high" } },
     });
-  });
-
-  it("defaults a null resolved config to an empty overlay", () => {
-    const sp = candidateSearchPoint(doc, "cand-b");
-    expect(sp?.origin_prompt_fields).toEqual({ instruction: "evolved B" });
-    expect(sp?.pipeline_overlay).toEqual({});
   });
 
   it("returns null for an unknown candidate or unloaded doc", () => {

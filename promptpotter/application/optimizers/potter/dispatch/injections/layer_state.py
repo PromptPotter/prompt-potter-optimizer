@@ -22,10 +22,11 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 )
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.domain.connector import unit_plural
+from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.run_records import MAX_AUTO_REBASES
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
+from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.value_tree import visibility_of
 
 if TYPE_CHECKING:
@@ -46,7 +47,7 @@ _PLAN_HEADER = "PLAN:\n"
     citable=True,
 )
 def _r_plan(b: InjectionBundle) -> list[Item]:
-    plan = b.memory.plan
+    plan = b.l3.plan
     return [Item(f"{_PLAN_HEADER}{plan}" if plan else "")]
 
 
@@ -57,14 +58,14 @@ def _r_plan(b: InjectionBundle) -> list[Item]:
     citable=False,
 )
 def _r_l3_to_l2_note(b: InjectionBundle) -> list[Item]:
-    note = b.memory.wounds.l3_note
+    note = b.l3.note
     return [Item(f"L3 NOTE TO L2:\n{note}" if note else "")]
 
 
 _TARGET_PROMPT_HEADER = (
-    "CURRENT PROMPT — the text an override REPLACES, field by field. These sections "
-    "concatenate VERBATIM in this order to form the prompt, with the operator's upstream and "
-    "downstream framing spliced around problem_description and the output schema's field "
+    "CURRENT PROMPTS — the text an override REPLACES, field by field. Per node, its sections "
+    "concatenate VERBATIM in this order to form that node's prompt, with the operator's "
+    "upstream and downstream framing spliced around problem_description and the output schema's field "
     "descriptions sent beside it; a field you do not name is carried "
     "forward unchanged, so restating one field's text — or that framing — inside another ships "
     "it twice."
@@ -92,18 +93,21 @@ _OPTIMIZER_PROMPT_HEADER = (
 def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     sections: list[str] = []
     # Field by field: as one blob a replacement sweeps in neighbours, SPLICED it absorbs the framing.
-    if fields := b.opt_sp.render_fields():
-        # A HELD field still renders: the fields replaced must fit around it.
-        schema = b.pipeline_schema
-        held = (
-            set(PROMPT_STRING_FIELDS) - set(schema.open_prompt_fields())
-            if schema is not None and schema.prompt_node_names()
-            else set()
-        )
+    # A HELD field still renders: the fields replaced must fit around it.
+    schema = b.pipeline_schema
+    prompts = b.parent.prompts
+    fields = [
+        (Locus(node.name, f).name, text, f not in node.open_prompt_fields)
+        for node in (schema.prompt_nodes() if schema is not None else ())
+        if (prompt := prompts.get(node.name)) is not None
+        for f in node.prompt_fields
+        if (text := prompt.fields.get(f, ""))
+    ]
+    if fields:
         sections.append(_TARGET_PROMPT_HEADER)
         sections.extend(
-            f"[{field}{HELD_PROMPT_FIELD_MARK if field in held else ''}]\n{text}"
-            for field, text in fields
+            f"[{locus}{HELD_PROMPT_FIELD_MARK if held else ''}]\n{text}"
+            for locus, text, held in fields
         )
     inner = effective_optimizer_prompts(
         b.pipeline_schema, b.cycle_slice.pipeline_params, b.inner_cells
@@ -126,7 +130,7 @@ def _r_rendered_prompt(b: InjectionBundle) -> list[Item]:
     citable=False,
 )
 def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
-    overrides = b.memory.steered("l1_generate")
+    overrides = b.l2.steered("l1_generate")
     return [Item(f"CURRENT L1 CONFIG: {json.dumps(overrides)}" if overrides else "")]
 
 
@@ -138,7 +142,7 @@ def _r_l1_overrides(b: InjectionBundle) -> list[Item]:
 )
 def _r_l1_layout(b: InjectionBundle) -> list[Item]:
     """Listed slot → panels, the shape an edit takes, so each line is an edit ready to answer."""
-    steered = b.memory.steered_layout("l1_generate")
+    steered = b.l2.steered_layout("l1_generate")
     layout = resolve_node_layout("l1_generate") if steered is None else steered
     lines = [
         f'  "{slot}": {json.dumps([p for p in layout.slot(slot) if p not in b.silent_l1_panels])}'
@@ -181,7 +185,11 @@ CLUSTER_IDS_SHOWN = 12
 
 
 def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> frozenset[str]:
-    out: set[str] = set(schema.open_prompt_fields()) | ({"shot_ids"} if offers_shots else set())
+    out: set[str] = set()
+    for node in schema.prompt_nodes():
+        out.update(Locus(node.name, f).name for f in node.open_prompt_fields)
+        if offers_shots:
+            out.add(Locus(node.name, SHOTS_KEY).name)
     for node in schema.nodes:
         if node.name:
             out.add(node.name)

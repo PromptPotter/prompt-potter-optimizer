@@ -163,7 +163,7 @@ export function CellPanel({
   return (
     <SidePanel
       panelId="cell"
-      title={read.status === "ready" ? `Sample ${read.data.sample_id}` : "Sample"}
+      title={read.status === "ready" ? `Sample ${read.data.position}` : "Sample"}
       onClose={onClose}
       hasPrev={hasPrev}
       hasNext={hasNext}

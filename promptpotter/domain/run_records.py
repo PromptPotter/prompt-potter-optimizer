@@ -2,20 +2,21 @@ from __future__ import annotations
 
 import enum
 import os
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal, NamedTuple, get_args
+from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
 
-from pydantic import ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
-from promptpotter.domain.l4.proxies import PanelPrecision
-from promptpotter.domain.launch_limits import RoundsCap
-from promptpotter.domain.opt_search_point import IndividualLineage
+from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
+from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import OptimizerState
-from promptpotter.domain.paired_reading import PairedReading
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -29,97 +30,32 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.results import (
-    CandidateProposal,
+    ArmState,
     DisplayMetric,
+    Election,
+    Proposal,
+    Proposed,
     RoundCells,
     RoundOutcome,
     RoundResult,
     RunStanding,
-    ScoredCandidate,
     ScoreSummary,
 )
-from promptpotter.domain.ruler import DeltaRuler, RulerScope, ThetaCaveat
+from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.scoring import LedgerCell, WalkedCell
 from promptpotter.domain.spend import (
-    SpendCeilings,
+    Budget,
+    CeilingMeter,
     TokenUsageKind,
     bill_or_rate_usd,
-    declare_ceiling,
+    cycle_axes_only,
 )
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-from promptpotter.shared.measurement_context import MeasurementRole
-
-__all__ = [
-    "FORK_TRAITS",
-    "MAX_AUTO_REBASES",
-    "MINT_KIND_LABELS",
-    "OPERATOR_ORIGIN_SOURCES",
-    "RECORD_ADAPTER",
-    "AccountEvent",
-    "AccountEventRecord",
-    "BackendWarningRecord",
-    "BenchCheckpointKind",
-    "CandidateMintedRecord",
-    "CandidateScoredRecord",
-    "CandidateStartedRecord",
-    "CheckinClosedRecord",
-    "CheckpointKind",
-    "CommandAckRecord",
-    "CommandAckStatus",
-    "CommandRecord",
-    "ConfigOverrides",
-    "CycleFinal",
-    "CycleFinalRecord",
-    "CycleMintedRecord",
-    "CycleRecord",
-    "CycleSeed",
-    "CycleSeedRecord",
-    "CycleSupersededRecord",
-    "ElectionRecord",
-    "ErrorRecord",
-    "FlightRecord",
-    "ForkGradedRecord",
-    "ForkRemainder",
-    "ForkSpec",
-    "ForkTraits",
-    "ForkTrigger",
-    "InterventionRecord",
-    "LLMCallProgressRecord",
-    "LLMCallRecord",
-    "LLMCallStartRecord",
-    "LaunchClaimRecord",
-    "LaunchReleasedRecord",
-    "LedgerCandidate",
-    "OriginSource",
-    "PhaseRecord",
-    "PricedKeyRecord",
-    "ProviderEasedRecord",
-    "ProviderHoldRecord",
-    "RaceCatchUpRecord",
-    "RaceStandingRecord",
-    "ResumeCheckpointRecord",
-    "RoundClosedRecord",
-    "RoundEnteredRecord",
-    "RoundStandingRecord",
-    "RoundWarningKind",
-    "RoundWarningRecord",
-    "RunLimitsRecord",
-    "RunPhaseRecord",
-    "RunWiringRecord",
-    "SampleOrderRecord",
-    "SampleScoredRecord",
-    "SampleStartedRecord",
-    "ScoringLockedRecord",
-    "SpawnedBy",
-    "SpawnedRecord",
-    "SpendHoldRecord",
-    "TokenUsageRecord",
-    "WallClock",
-    "parent_address",
-    "sibling_cycle_id",
-]
+from promptpotter.shared.identity import Principal
+from promptpotter.shared.measurement_context import ARM_ROLES, MeasurementRole
 
 
 class CheckpointKind(enum.StrEnum):
@@ -131,10 +67,8 @@ class BenchCheckpointKind(CheckpointKind):
     PANEL_COVERAGE = "panel_coverage"
 
 
-class ResumeCheckpointRecord(StrictModel):
+class ResumeCheckpointRecord(FrozenModel):
     """``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["decision"] = "decision"
     # A `CheckpointKind` value or a plugin's string; replayed where `replayers.py::replayers` has it.
@@ -148,9 +82,7 @@ class ResumeCheckpointRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class PhaseRecord(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class PhaseRecord(FrozenModel):
     record_type: Literal["phase"] = "phase"
     phase: str
     event: str
@@ -159,10 +91,8 @@ class PhaseRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RunPhaseRecord(StrictModel):
+class RunPhaseRecord(FrozenModel):
     """The runner's own declaration: every other phase is derived off the last one, never said."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["run_phase"] = "run_phase"
     run_phase: RunPhase
@@ -172,7 +102,7 @@ class RunPhaseRecord(StrictModel):
     spend: RunSpendView | None = None
     gate: GateKind | None = None
     # What an ``arms`` hold offers to keep, in the order `submit-arms --keep` indexes.
-    drafts: list[CandidateProposal] = Field(default_factory=list)
+    drafts: list[Proposal] = Field(default_factory=list)
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @model_validator(mode="after")
@@ -211,10 +141,8 @@ class RunPhaseRecord(StrictModel):
         )
 
 
-class BackendWarningRecord(StrictModel):
+class BackendWarningRecord(FrozenModel):
     """An attempt that failed and will be retried: a transport fault or a 5xx, never a 429."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["backend_warning"] = "backend_warning"
     kind: str
@@ -229,10 +157,8 @@ class BackendWarningRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ProviderHoldRecord(StrictModel):
+class ProviderHoldRecord(FrozenModel):
     """A 429 episode's open or strike, heard by a ledger from its own sends."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["provider_hold"] = "provider_hold"
     sender: str
@@ -244,10 +170,8 @@ class ProviderHoldRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ProviderEasedRecord(StrictModel):
+class ProviderEasedRecord(FrozenModel):
     """The provider answers the sender again: told at once to every ledger that heard the hold."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["provider_eased"] = "provider_eased"
     sender: str
@@ -255,10 +179,8 @@ class ProviderEasedRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RoundEnteredRecord(StrictModel):
+class RoundEnteredRecord(FrozenModel):
     """Entering N displaces N and every later round; ``rewound`` discards their proposals too."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["round_entered"] = "round_entered"
     round: int
@@ -266,133 +188,185 @@ class RoundEnteredRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RoundClosedRecord(RoundOutcome):
-    """The last close per round stands and IS the round; round 0 closes again as the ruler warms."""
+class RoundStatement(RoundOutcome):
+    """A closed round as a ledger states it: the last statement per round stands and IS the round."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
-
-    record_type: Literal["round_closed"] = "round_closed"
+    optimizer_state: OptimizerState
     cells: RoundCells
+    # Each walked cell's position in the bank the cycle drew: a cell carries its key alone.
+    positions: dict[str, int]
+    # Every standing round re-read on this close's one scale: the series moves with the clock.
+    level_series: LevelSeries
+    run_standing: RunStanding
+    # Leading arm against the ORIGIN's rows: a pairing across two rounds of the closing line.
+    panel_precision: PanelPrecision | None
+    anchors: ViewAnchors
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @classmethod
-    def of(cls, rr: RoundResult) -> RoundClosedRecord:
+    def of(
+        cls,
+        line: Sequence[RoundResult],
+        slot_of: Mapping[str, int],
+        level_series: LevelSeries,
+        run_standing: RunStanding,
+        anchors: ViewAnchors,
+        **own: Any,
+    ) -> Self:
+        rr = line[-1]
+        cells = rr.addresses()
+        leading = None if rr.election is None or not rr.round else rr.election.leading
         return cls(
-            **{name: getattr(rr, name) for name in RoundOutcome.model_fields}, cells=rr.cells()
+            **{name: getattr(rr, name) for name in RoundOutcome.model_fields},
+            cells=cells,
+            positions={key: slot_of[key] for key in cells.sample_keys()},
+            level_series=level_series,
+            run_standing=run_standing,
+            panel_precision=None
+            if leading is None
+            else panel_precision(rr.rows(leading).cells, line[0].results.cells),
+            anchors=anchors,
+            **own,
         )
 
-
-class OptimizerStateRecord(StrictModel):
-    """A CLOSED round's state restated, never a close: the last after its standing close stands."""
-
-    model_config = ConfigDict(frozen=True)
-
-    record_type: Literal["optimizer_state"] = "optimizer_state"
-    round: int
-    optimizer_state: OptimizerState
-    timestamp: str = Field(default_factory=utcnow_iso)
+    def restated(self, optimizer_state: OptimizerState) -> RoundRestatedRecord:
+        """This round holding *optimizer_state*: what a member banks once the round has closed."""
+        body = {name: getattr(self, name) for name in RoundStatement.model_fields}
+        del body["timestamp"]
+        return RoundRestatedRecord(**body | {"optimizer_state": optimizer_state}, remeasured=[])
 
 
-class RoundProposedRecord(StrictModel):
+class RoundClosedRecord(RoundStatement):
+    """The run's clock: a close is its line's latest round, so its standing is the run's."""
+
+    record_type: Literal["round_closed"] = "round_closed"
+
+
+class RoundRestatedRecord(RoundStatement):
+    """A closed round stated again, never a close: it moves no clock and announces nothing."""
+
+    record_type: Literal["round_restated"] = "round_restated"
+    # The arms a repair re-measured onto this ledger, which names them itself from here on.
+    remeasured: list[ArmKey]
+
+
+class RoundProposedRecord(FrozenModel):
     """Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved.
 
     ``submitted`` is the operator's answer at the arm gate: the arms the round measures."""
 
-    model_config = ConfigDict(frozen=True)
-
     record_type: Literal["round_proposed"] = "round_proposed"
     round: int
     consumed: str
-    proposals: list[CandidateProposal]
+    proposals: list[Proposal]
     submitted: bool = False
-    # The manifest pipeline whose walk made the arms, or the arm gate that answered them.
-    walk: str = "default"
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RoundStandingRecord(StrictModel):
-    """Once per round, where a close can repeat, and displaced with its round."""
+class ArmRecord(FrozenModel):
+    """One arm's transition, LAST wins: proposed, walking, then cut or measured."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    record_type: Literal["round_standing"] = "round_standing"
+    record_type: Literal["arm"] = "arm"
     round: int
-    run_standing: RunStanding
-    # Leading arm against the ORIGIN's rows: a pairing across two rounds, so it rides the standing.
-    panel_precision: PanelPrecision | None = None
-    anchors: ViewAnchors
+    arm: ArmKey
+    state: ArmState
+    anchors: ViewAnchors = Field(default_factory=ViewAnchors)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class _ArmFact(StrictModel):
-    """``candidate_idx`` is ``NO_ROUND_SLOT`` for a pass that is no arm of the round."""
-
-    model_config = ConfigDict(frozen=True)
+class _Pass(FrozenModel):
+    """One cell of a pass: an ARM of the round where `role` is one of `ARM_ROLES`."""
 
     round: int
-    candidate_idx: int
-    candidate_total: int
+    individual_id: str
+    role: MeasurementRole
     timestamp: str = Field(default_factory=utcnow_iso)
 
-
-class CandidateStartedRecord(_ArmFact):
-    """Announced before the first cell, so a live surface draws and forks it with no round file."""
-
-    record_type: Literal["candidate_started"] = "candidate_started"
-    changes_description: str = ""
-    pipeline_overlay: dict[str, Any] | None = None
-    prompt_fields: dict[str, Any] = Field(default_factory=dict)
-    node_prompt_fields: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    resolved_pipeline_params: dict[str, Any] | None = None
-    # The turn's place in a block race — ``n`` of ``of``, ``size`` cells, ``racing`` arms live.
-    block: dict[str, int] | None = None
+    @property
+    def arm(self) -> ArmKey | None:
+        """The arm whose walk this cell continues; ``None`` for a pass no arm walks (a bench pass)."""
+        return ArmKey(self.individual_id) if self.role in ARM_ROLES else None
 
 
-class SampleOrderRecord(_ArmFact):
-    record_type: Literal["sample_order"] = "sample_order"
-    n_priors: int = 0
-    sample_order: list[int]
-
-
-class SampleStartedRecord(_ArmFact):
+class SampleStartedRecord(_Pass):
     record_type: Literal["sample_started"] = "sample_started"
     sample_idx: int
     sample_total: int
-    sample_id: int
+    position: int
     # Capped at the writer: the whole query is a dataset fact, in every measurement row.
     query_preview: str = ""
     sample_lookahead: int = 1
 
 
-class SampleScoredRecord(_ArmFact):
+class SampleScoredRecord(_Pass):
     """A re-banked row has no ``sample_idx``."""
 
     record_type: Literal["sample_scored"] = "sample_scored"
-    individual_id: str
-    role: MeasurementRole
     sample_idx: int | None = None
     sample_total: int | None = None
+    # The row's slot in the bank this cycle drew, as `SampleStartedRecord` names it: the cell carries none.
+    position: int
     result: LedgerCell
     running: ScoreSummary | None = None
 
 
-class CandidateScoredRecord(_ArmFact):
-    record_type: Literal["candidate_scored"] = "candidate_scored"
-    scores: ScoredCandidate
-    anchors: ViewAnchors = Field(default_factory=ViewAnchors)
+class _Announced(NamedTuple):
+    state: ArmState
+    running: ScoreSummary | None
 
 
-class FlightWaiting(StrictModel):
-    model_config = ConfigDict(frozen=True)
+class AnnouncedArms:
+    """Each announced arm's last state and running fold by ``(round, key)``; a re-read continues it."""
 
-    sample_id: int
+    def __init__(self) -> None:
+        self._arms: dict[tuple[int, ArmKey], _Announced] = {}
+
+    def __iter__(self) -> Iterator[tuple[int, ArmKey]]:
+        return iter(self._arms)
+
+    def announce(self, record: ArmRecord) -> None:
+        held = self._arms.get((record.round, record.arm))
+        running = None if held is None else held.running
+        self._arms[record.round, record.arm] = _Announced(record.state, running)
+
+    def take(self, record: SampleScoredRecord) -> ArmKey | None:
+        """The arm *record*'s cell continues; ``None`` for a pass no arm walks."""
+        if (arm := record.arm) is None:
+            return None
+        if (held := self._arms.get((record.round, arm))) is None:
+            raise LookupError(
+                f"a round {record.round} cell names arm {arm}, which its own cycle file never "
+                "announced: the SSE tail and the ray fold one file, so each file announces its arms"
+            )
+        if record.running is not None:
+            self._arms[record.round, arm] = held._replace(running=record.running)
+        return arm
+
+    def close(self, record: RoundStatement, keys: Iterable[ArmKey]) -> None:
+        """The statement is each arm's last record: its fold covers the reference reads too."""
+        for key in keys:
+            self._arms[record.round, key] = _Announced(record.arms[key], record.folds.get(key))
+
+    def enter(self, record: RoundEnteredRecord) -> None:
+        self._arms = {at: held for at, held in self._arms.items() if at[0] < record.round}
+
+    def state(self, round_num: int, key: ArmKey) -> ArmState:
+        return self._arms[round_num, key].state
+
+    def fold(self, round_num: int, key: ArmKey) -> ScoreSummary | None:
+        held = self._arms[round_num, key]
+        return None if isinstance(held.state, Proposed) else held.running
+
+
+class FlightWaiting(FrozenModel):
+    position: int
     since: float
 
 
-class FlightRecord(StrictModel):
+class FlightRecord(FrozenModel):
     """The whole round's calls in flight, so it names no candidate."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["flight"] = "flight"
     round: int
@@ -406,42 +380,42 @@ class FlightRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RaceStandingRecord(_ArmFact):
-    """Archive-only, not divergence-gated; ``p_best`` is about ``current_id`` alone."""
+class RaceStandingRecord(FrozenModel):
+    """Archive-only, not divergence-gated; ``p_best`` is about the arm ``current`` alone."""
 
     record_type: Literal["race_standing"] = "race_standing"
+    round: int
     member: str
-    current_id: str
+    current: ArmKey
     n_samples: int
     p_best: float
-    paired_breakdown: dict[str, dict[str, float]] = Field(default_factory=dict)
+    paired_breakdown: dict[ArmKey, dict[str, float]]
     decision_grade: bool
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RaceCatchUpRecord(_ArmFact):
-    """The catch-up walks one just-measured cell took: no slot writes their cells, this does."""
+class RaceCatchUpRecord(FrozenModel):
+    """The catch-up walks one just-measured cell of ``arm`` took: no pass records their cells."""
 
     record_type: Literal["race_catch_up"] = "race_catch_up"
+    round: int
+    arm: ArmKey
     member: str
     # The cell's ``Sample.key``: every address below names it.
     sample_key: str
+    # Its slot in the bank this cycle drew, as a readout names it.
+    position: int
     # By prior.
-    cells: dict[str, WalkedCell] = Field(min_length=1)
+    cells: dict[ArmKey, WalkedCell] = Field(min_length=1)
+    timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
-    def prior_ids(self) -> list[str]:
+    def prior_keys(self) -> list[ArmKey]:
         return list(self.cells)
 
-    @property
-    def sample_id(self) -> int:
-        """The cell's row in the dataset the walks measured, as a readout names it."""
-        return next(iter(self.cells.values()))[1]
 
-
-class TokenUsageRecord(StrictModel):
+class TokenUsageRecord(FrozenModel):
     """ONE answered send, or a replay (``cached``); a send that reported no usage writes none."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["token_usage"] = "token_usage"
     kind: TokenUsageKind
@@ -484,10 +458,8 @@ class TokenUsageRecord(StrictModel):
         return 0 if self.round is None else self.round
 
 
-class SpendHoldRecord(StrictModel):
+class SpendHoldRecord(FrozenModel):
     """Written BEFORE the send, at its bound; unclosed, it binds every ceiling and is not spent."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["spend_hold"] = "spend_hold"
     hold_id: str
@@ -503,25 +475,37 @@ class SpendHoldRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class PricedKeyRecord(StrictModel):
+class PricedKeyRecord(FrozenModel):
     """A key the search has PRICED, so a later read of it, resumed or not, prices nothing again."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["priced_key"] = "priced_key"
     priced_key: str
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class SpendTombstoneRecord(StrictModel):
+class BankedSubject(NamedTuple):
+    """What a tombstone banks: a campaign, one of its cycles, or a draft that never minted one."""
+
+    campaign_id: str = ""
+    cycle_id: str = ""
+    draft_id: str = ""
+
+
+def _one_subject(subject: BankedSubject) -> None:
+    if bool(subject.campaign_id) is bool(subject.draft_id):
+        raise ValueError("a tombstone banks a campaign (or its cycle) or a draft, exactly one")
+    if subject.cycle_id and not subject.campaign_id:
+        raise ValueError("a banked cycle names its campaign")
+
+
+class SpendTombstoneRecord(FrozenModel):
     """On the WORKSPACE ledger, so deleting what spent it cannot re-earn a spend ceiling."""
 
-    model_config = ConfigDict(frozen=True)
-
     record_type: Literal["spend_tombstone"] = "spend_tombstone"
-    campaign_id: str
-    # Empty for a whole-campaign bank; with `campaign_id`, the key of the re-bank guard.
+    campaign_id: str = ""
+    # Empty for a whole-campaign bank.
     cycle_id: str = ""
+    draft_id: str = ""
     used_usd: float
     # What our rate table priced the calls no provider billed (`TokenUsageRecord.rate_priced_usd`).
     rate_priced_usd: float
@@ -530,12 +514,21 @@ class SpendTombstoneRecord(StrictModel):
     # What its unreported sends may have cost (`SpendHoldRecord`) — banked apart, as it is read.
     unreported_usd: float = 0.0
     unreported_tokens: int = 0
+    # What the campaign's ceiling counted of it in each meter, so a bank needs no manifest to name one.
+    metered: dict[CeilingMeter, Budget]
     timestamp: str = Field(default_factory=utcnow_iso)
 
+    @property
+    def subject(self) -> BankedSubject:
+        return BankedSubject(self.campaign_id, self.cycle_id, self.draft_id)
 
-class BankedCommand(StrictModel):
-    model_config = ConfigDict(frozen=True)
+    @model_validator(mode="after")
+    def _one(self) -> SpendTombstoneRecord:
+        _one_subject(self.subject)
+        return self
 
+
+class BankedCommand(FrozenModel):
     at: str
     kind: str
     # The campaign and cycle it addressed, as the trail read it before they went.
@@ -543,23 +536,29 @@ class BankedCommand(StrictModel):
     user_id: str
 
 
-class TrailTombstoneRecord(StrictModel):
+class TrailTombstoneRecord(FrozenModel):
     """On the WORKSPACE ledger, so deleting what was commanded cannot delete that it was."""
 
-    model_config = ConfigDict(frozen=True)
-
     record_type: Literal["trail_tombstone"] = "trail_tombstone"
-    campaign_id: str
-    # Empty for a whole-campaign bank; with `campaign_id`, the key of the re-bank guard.
+    campaign_id: str = ""
+    # Empty for a whole-campaign bank.
     cycle_id: str = ""
+    draft_id: str = ""
     commands: tuple[BankedCommand, ...]
     timestamp: str = Field(default_factory=utcnow_iso)
 
+    @property
+    def subject(self) -> BankedSubject:
+        return BankedSubject(self.campaign_id, self.cycle_id, self.draft_id)
 
-class LLMCallStartRecord(StrictModel):
+    @model_validator(mode="after")
+    def _one(self) -> TrailTombstoneRecord:
+        _one_subject(self.subject)
+        return self
+
+
+class LLMCallStartRecord(FrozenModel):
     """Pairs with :class:`LLMCallRecord` via ``call_id``, so a long call does not look frozen."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["llm_call_start"] = "llm_call_start"
     call_id: str
@@ -582,10 +581,8 @@ class LLMCallStartRecord(StrictModel):
         return sorted(n for n in self.injection_dropped if n not in self.injection_chars)
 
 
-class LLMCallProgressRecord(StrictModel):
-    """Heartbeat while the SDK call is blocked; cache replays skip it."""
-
-    model_config = ConfigDict(frozen=True)
+class LLMCallProgressRecord(FrozenModel):
+    """Heartbeat while the provider call is blocked; cache replays skip it."""
 
     record_type: Literal["llm_call_progress"] = "llm_call_progress"
     call_id: str
@@ -599,10 +596,8 @@ class LLMCallProgressRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class LLMCallRecord(StrictModel):
+class LLMCallRecord(FrozenModel):
     """``payload_kind='synthesized'`` is a replay: its messages, response and usage are absent."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["llm_call"] = "llm_call"
     node: str
@@ -619,10 +614,8 @@ AccountEvent = Literal[
 ]
 
 
-class AccountEventRecord(StrictModel):
+class AccountEventRecord(FrozenModel):
     """On the WORKSPACE ledger; ``user_id`` is the acting principal, a delegate's own id in its delegator's tenant."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["account_event"] = "account_event"
     event: AccountEvent
@@ -636,24 +629,20 @@ class AccountEventRecord(StrictModel):
 CommandAckStatus = Literal["accepted", "applied", "rejected"]
 
 
-class CommandRecord(StrictModel):
+class CommandRecord(FrozenModel):
     """``CommandDispatcher`` alone writes it, to the cycle's, its root's or the workspace ledger."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["command"] = "command"
     command_id: str
     kind: str
     payload: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str
-    issued_by_user_id: str = ""
+    issued_by: Principal
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class CommandAckRecord(StrictModel):
+class CommandAckRecord(FrozenModel):
     """``applied`` = it HAPPENED; a loop command is ``accepted`` first, and stays so if untaken."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["command_ack"] = "command_ack"
     command_id: str
@@ -671,8 +660,10 @@ RoundWarningKind = Literal[
     "send_refused",
     # A `terminate_proposal` carrying no reason: ignored, never silently.
     "layer_terminate_blank",
-    # `l1_generate` ran with its MANDATORY critique panel empty.
-    "l1_critique_unavailable",
+    # A `fork_proposal` with no ancestor holding a level: dropped, naming what withholds θ.
+    "layer_rebase_dropped",
+    # An adapter landed no round output, and the re-runs before the next walk failed: the run halts.
+    "adapter_output_unavailable",
     # A critique cluster spanning fewer marked rows than a cluster is: dropped before the generator reads it.
     "critique_cluster_dropped",
     # Nothing failed: the round promoted an arm the origin panel does not back (`runner/round.py`).
@@ -680,10 +671,8 @@ RoundWarningKind = Literal[
 ]
 
 
-class RoundWarningRecord(StrictModel):
+class RoundWarningRecord(FrozenModel):
     """A mid-round SELF-HEAL the run continued past; never re-add a kind with no emitter."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["round_warning"] = "round_warning"
     kind: RoundWarningKind
@@ -770,73 +759,41 @@ if _unbadged:
 del _unbadged
 
 
-class ConfigOverrides(StrictModel):
+class ConfigOverrides(FrozenModel):
     """A fork's campaign-config delta, in which an absent field inherits the parent's value."""
 
-    model_config = ConfigDict(frozen=True)
-
-    max_rounds: int | None = None
-    ceiling: SpendCeilings = SpendCeilings()
+    # Laid axis by axis over the parent's `optimization.budget`.
+    budget: Budget = Budget()
     # Laid key by key onto the parent's `optimization.nodes`; nothing here switches the manifest.
     nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
     # Laid key by key over the parent's `CampaignConfig.scoring`; `{"per_cell": F}` is the `score:F` lens.
     scoring: str | dict[str, str] | None = None
 
+    _cycle_axes = field_validator("budget")(cycle_axes_only)
 
-class ForkRemainder(StrictModel):
-    """What a cycle's rounds cap and spend cap have left, which an offshoot takes as its own caps.
 
-    A null cap is one the cycle does not carry, or whose spend is unread: the offshoot inherits it.
-    """
-
-    model_config = ConfigDict(frozen=True)
+class ForkRemainder(FrozenModel):
+    """What a cycle's rounds cap has left, which an offshoot takes as its own. Spend is no
+    remainder: the ceiling is the campaign's, and its book already counts every cycle's."""
 
     rounds_closed: int = Field(
-        description="Rounds closed AFTER the origin — what `max_rounds` counts"
+        description="Rounds closed AFTER the origin — what `budget.rounds` counts"
     )
-    parent_max_rounds: int | None
-    max_rounds: int | None = Field(
-        description="`parent_max_rounds` less `rounds_closed`, never under 1"
-    )
-    metered_usd: float | None = Field(description="What the cycle's spend cap has counted")
-    parent_ceiling: SpendCeilings
-    ceiling: SpendCeilings = Field(
-        description="`parent_ceiling.usd` less `metered_usd`, never under 0; the token arm "
-        "is not remaindered, so it is null and the offshoot inherits the parent's"
-    )
+    parent_rounds: int | None = Field(description="The cycle's rounds cap; null where it has none")
+    rounds: int | None = Field(description="`parent_rounds` less `rounds_closed`, never under 1")
 
     @classmethod
-    def of(
-        cls,
-        *,
-        rounds_closed: int,
-        max_rounds: int | None,
-        metered_usd: float | None,
-        ceiling: SpendCeilings,
-    ) -> ForkRemainder:
+    def of(cls, *, rounds_closed: int, rounds: int | None) -> ForkRemainder:
         return cls(
             rounds_closed=rounds_closed,
-            parent_max_rounds=max_rounds,
-            max_rounds=None if max_rounds is None else max(1, max_rounds - rounds_closed),
-            metered_usd=metered_usd,
-            parent_ceiling=ceiling,
-            ceiling=SpendCeilings(
-                usd=None
-                if ceiling.usd is None or metered_usd is None
-                else max(0.0, round(ceiling.usd - metered_usd, 6))
-            ),
+            parent_rounds=rounds,
+            rounds=None if rounds is None else max(1, rounds - rounds_closed),
         )
 
     def under(self, overrides: ConfigOverrides) -> ConfigOverrides:
-        """``0`` is a cap: only ``None`` takes the remainder."""
-        return overrides.model_copy(
-            update={
-                "max_rounds": self.max_rounds
-                if overrides.max_rounds is None
-                else overrides.max_rounds,
-                "ceiling": declare_ceiling(self.ceiling, overrides.ceiling),
-            }
-        )
+        """A rounds axis the overrides NAME wins, ``0`` and a lift included."""
+        left = Budget() if self.rounds is None else Budget(rounds=self.rounds)
+        return overrides.model_copy(update={"budget": left.over(overrides.budget)})
 
 
 class OriginSource(enum.StrEnum):
@@ -849,12 +806,13 @@ class OriginSource(enum.StrEnum):
 OPERATOR_ORIGIN_SOURCES = frozenset(OriginSource) - {OriginSource.REPLAYED}
 
 
-class CycleSeed(StrictModel):
+class CycleSeed(FrozenModel):
     """``pipeline_overlay`` merges ON TOP of the dataset overlay for this cycle only."""
 
-    model_config = ConfigDict(frozen=True)
-
-    origin_prompt_fields: dict[str, Any] = Field(default_factory=dict)
+    origin_prompts: dict[str, NodePrompt] = Field(
+        default_factory=dict,
+        description="C0's prompt loci, per prompt node; empty when the seed carries no origin.",
+    )
     pipeline_overlay: dict[str, Any] = Field(default_factory=dict)
     optimizer_narrowing: dict[str, NodeSearchNarrowing] = Field(
         default_factory=dict,
@@ -876,59 +834,13 @@ class CycleSeed(StrictModel):
 
     @model_validator(mode="after")
     def _origin_needs_provenance(self) -> CycleSeed:
-        if self.origin_prompt_fields and not self.origin_source:
-            raise ValueError("origin_prompt_fields set without an origin_source stamp")
+        if self.origin_prompts and not self.origin_source:
+            raise ValueError("origin_prompts set without an origin_source stamp")
         return self
 
 
-class CandidateMintedRecord(StrictModel):
-    """Identity must outlive a producer that dies mid-flight; ``label`` is MINTED, not read-time."""
-
-    model_config = ConfigDict(frozen=True)
-
-    record_type: Literal["candidate_minted"] = "candidate_minted"
-    round: int
-    idx: int
-    candidate_id: str
-    label: str
-    lineage: IndividualLineage = Field(default_factory=IndividualLineage)
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
-# `invalid` is rejected before it cost a sample. Never `winner`: election is a round-close fact.
-CandidateState = Literal["minted", "measured", "invalid"]
-
-
-class LedgerCandidate(StrictModel):
-    """Derived off the ledger, never a record on it."""
-
-    model_config = ConfigDict(frozen=True)
-
-    round: int
-    idx: int
-    candidate_id: str
-    label: str
-    lineage: IndividualLineage = Field(default_factory=IndividualLineage)
-    walk_length: int | None = None
-    report: ScoredCandidate | None = None
-
-
-class LedgerFit(StrictModel):
-    """Keyed by LABEL in :class:`ElectionRecord`; the close re-reads θ and nothing else."""
-
-    model_config = ConfigDict(frozen=True)
-
-    theta: float | None = None
-    theta_se: float | None = None
-    # This ARM's own reason θ is not ability (`candidate_report.py::arm_theta_caveat`).
-    theta_caveat: ThetaCaveat | None = None
-    vs_reference: PairedReading | None = None
-
-
-class WallClock(StrictModel):
+class WallClock(FrozenModel):
     """CLOCK legs sum to ``elapsed_s``; ``worked_s`` is CALL time, so concurrency pushes it past."""
-
-    model_config = ConfigDict(frozen=True)
 
     # ``None`` where either endpoint is unparseable; every share below is then unanswerable too.
     elapsed_s: float | None
@@ -944,13 +856,11 @@ class WallClock(StrictModel):
     gate_s: float = 0.0
     # ``elapsed_s`` minus every CLOCK leg.
     unattributed_s: float | None = None
-    # ``None`` = no cell was measured under an envelope; 0.0 = enveloped cells waited for nothing.
+    # ``None`` = no fresh cell was measured; 0.0 = the measured cells waited for nothing.
     unworked_s: float | None = None
 
 
-class CycleFinal(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class CycleFinal(FrozenModel):
     started_at: str
     wall_clock: WallClock
     rounds_to_separable: int | None
@@ -964,57 +874,62 @@ class CycleFinal(StrictModel):
     mode: Literal["diag", "full"]
     # The round the optimizer's DECLARED pick was selected in.
     result_round: int
-    result_prompt_fields: dict[str, Any]
+    result_prompt_fields: dict[str, dict[str, str]]
     result_pipeline_params: dict[str, Any] | None
 
 
-class ElectionRecord(StrictModel):
-    """Keyed by LABEL; empty ``selected_labels`` = the round HELD; round 0 selects its ``C0``."""
-
-    model_config = ConfigDict(frozen=True)
+class ElectionRecord(Election):
+    """A round's election, the moment it is held: the close carries the same one."""
 
     record_type: Literal["election"] = "election"
     round: int
-    selected_labels: list[str] = Field(default_factory=list)
-    fit: dict[str, LedgerFit] = Field(default_factory=dict)
-    elects_on: DisplayMetric
-    # The selector's own reason; ``None`` on the origin round, which chose between nobody.
-    verdict_reason: str | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RulerRecord(StrictModel):
-    """Written WHOLE, last per ``scope`` wins: a torn append falls back to a whole ruler."""
+class StandingBudgetRecord(FrozenModel):
+    """A cycle's standing budget, LAST wins; read PHYSICALLY, so a fork never inherits one."""
 
-    model_config = ConfigDict(frozen=True)
-
-    record_type: Literal["ruler"] = "ruler"
-    ruler: DeltaRuler
-    # Its δ keys are `Sample.key`, which name a cell anywhere.
-    scope: RulerScope
-    round: int
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
-class RunLimitsRecord(StrictModel):
-    """LAST wins; read PHYSICALLY, so a fork never inherits a ceiling that overrides its seed."""
-
-    model_config = ConfigDict(frozen=True)
-
-    record_type: Literal["run_limits"] = "run_limits"
-    ceiling: SpendCeilings = SpendCeilings()
-    rounds: RoundsCap | None = None
+    record_type: Literal["standing_budget"] = "standing_budget"
+    # The cycle axes an operator named; the money axes are the campaign's (`Campaign.standing_budget`).
+    budget: Budget = Budget()
     # RUN-scoped: the closed-round count at which the launch in flight pauses (``step-cycle``).
     pause_at_round: int | None = None
-    # ``None`` on an arm this change left alone; a launch declares none and admits its own.
-    reserve: SpendCeilings = SpendCeilings()
     timestamp: str = Field(default_factory=utcnow_iso)
 
+    _cycle_axes = field_validator("budget")(cycle_axes_only)
 
-class RunWiringRecord(StrictModel):
+
+class DefaultsPin(FrozenModel):
+    """What a declaration is a delta over, in two halves: the bench's defaults, which every arm of
+    a head-to-head shares, and its optimizer's whole treatment — manifest, source and prompts —
+    which differs by arm by design."""
+
+    bench: str = Field(min_length=1)
+    treatment: Treatment
+
+
+class DefaultsDrift(FrozenModel):
+    """Something the run's declaration is a delta over moved since it was declared, so the launch
+    runs today's value under the same declaration."""
+
+    declared: DefaultsPin
+    running: DefaultsPin
+
+    def moved(self) -> list[str]:
+        """``bench`` and each part of the treatment that moved."""
+        declared, running = self.declared, self.running
+        return [
+            *(["bench"] if declared.bench != running.bench else []),
+            *(
+                part
+                for part in Treatment.model_fields
+                if getattr(declared.treatment, part) != getattr(running.treatment, part)
+            ),
+        ]
+
+
+class RunWiringRecord(FrozenModel):
     """LAST wins, over the whole chain: a fork stands on its parent's until its own lands."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["run_wiring"] = "run_wiring"
     arms_per_round: int | None
@@ -1027,13 +942,13 @@ class RunWiringRecord(StrictModel):
     # ``None`` when Langfuse is disabled, and on a mint's record: no launch has opened a trace.
     langfuse_trace_url: str | None
     run_limits: RunLimits
+    # `None` on a mint's record: nothing has moved since the declaration was made.
+    defaults_drift: DefaultsDrift | None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ScoringLockedRecord(StrictModel):
+class ScoringLockedRecord(FrozenModel):
     """Appended once, as the origin is scored under dials; a config already locked appends none."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["scoring_locked"] = "scoring_locked"
     declared: dict[str, str]
@@ -1041,22 +956,29 @@ class ScoringLockedRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class CycleSeedRecord(StrictModel):
+class CycleSeedRecord(FrozenModel):
     """A fork inherits its parent's seed VIRTUALLY yet appends its own, which one scan returns."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["cycle_seed"] = "cycle_seed"
     seed: CycleSeed
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ForkSpec(StrictModel):
-    model_config = ConfigDict(frozen=True)
+class ResolvedRunRecord(FrozenModel):
+    """What a run init resolved, read over the chain: the declaration LAST wins, the roster FIRST."""
 
+    record_type: Literal["resolved_run"] = "resolved_run"
+    # The backend's axes with every overlay laid on; empty where the run resolved none.
+    declaration: dict[str, Any]
+    # The roster a connector only NAMES can move under its name; the one every round measured stands.
+    experiment: dict[str, Any] | None
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class ForkSpec(FrozenModel):
     trigger: ForkTrigger
     reason: str
-    issued_by: str
+    issued_by: Principal
     from_round: int | None = None
     from_candidate_id: str | None = None
     seed: CycleSeed | None = None
@@ -1079,30 +1001,22 @@ class SpawnedBy(StrictModel):
         default=None,
         description="Outer round; 0 is the origin (C0). Null when the spawn came from outside any round (the noise-floor diagnostic).",
     )
-    candidate_idx: int | None = Field(
-        default=None, description="Position in the outer round's population; null for the origin."
-    )
-    candidate_id: str | None = Field(
+    individual_id: str | None = Field(
         default=None,
-        description="The outer candidate's `OptSearchPoint.id` — stable across rounds; null for the origin.",
-    )
-    candidate_label: str | None = Field(
-        default=None,
-        description="Canonical label (`C0` for the origin, else `C{round}.{idx+1}`) — the same string the round file and console use.",
+        description="The outer individual's `OptSearchPoint.id` — stable across rounds, and the "
+        "outer ARM's key where `role` is an arm's. Null outside a measured pass.",
     )
     role: str | None = Field(
         default=None,
-        description="WHY this cell ran (`MeasurementRole`). A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the candidate's own panel cell makes a repaired round unreproducible. Null for the origin.",
+        description="WHY this cell ran (`MeasurementRole`). A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass.",
     )
     task: str = Field(
-        description="The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The candidate fields do NOT identify a run: every task runs for every candidate, so one candidate's spawns are as many as the panel has cells and are told apart only by this.",
+        description="The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The individual does NOT identify a run: every task runs for every individual, so one individual's spawns are as many as the panel has cells and are told apart only by this.",
     )
 
 
-class CycleMintedRecord(StrictModel):
-    """The first line of a cycle's own ledger; a ledger chain is walked off this record alone."""
-
-    model_config = ConfigDict(frozen=True)
+class CycleMintedRecord(FrozenModel):
+    """One per cycle's own ledger, after only the lines it adopted; a chain is walked off it alone."""
 
     record_type: Literal["cycle_minted"] = "cycle_minted"
     # The parent's cycle dir relative to this one's, POSIX-separated (`parent_address`): `../<id>`
@@ -1110,8 +1024,6 @@ class CycleMintedRecord(StrictModel):
     parent: str | None = None
     forked_at_offset: int | None = None
     fork: ForkSpec | None = None
-    # The cycle reads ``RunPhase.CHECKIN`` until a :class:`CheckinClosedRecord` follows.
-    checkin: bool = False
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @model_validator(mode="after")
@@ -1119,8 +1031,6 @@ class CycleMintedRecord(StrictModel):
         parts = (self.parent, self.forked_at_offset, self.fork)
         if any(p is None for p in parts) and any(p is not None for p in parts):
             raise ValueError("a fork carries its parent, forked_at_offset and fork together")
-        if self.checkin and self.fork is not None:
-            raise ValueError("a fork is cut from a cycle that ran; it is never minted in check-in")
         return self
 
     def parent_cycle_dir(self, cycle_dir: Path) -> Path | None:
@@ -1142,19 +1052,8 @@ def sibling_cycle_id(parent: str | None) -> str | None:
     return parts[1] if len(parts) == 2 and parts[0] == ".." else None
 
 
-class CheckinClosedRecord(StrictModel):
-    """One per cycle, and nothing reopens it."""
-
-    model_config = ConfigDict(frozen=True)
-
-    record_type: Literal["checkin_closed"] = "checkin_closed"
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
-class CycleFinalRecord(StrictModel):
+class CycleFinalRecord(FrozenModel):
     """Banked only where the cycle's own runner stops it; a later ``running`` retires it."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["cycle_final"] = "cycle_final"
     final: CycleFinal
@@ -1163,40 +1062,43 @@ class CycleFinalRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class CycleSupersededRecord(StrictModel):
-    """On the LEFT-BEHIND side of a supersede cut; a later ``running`` here takes the line back."""
+class LaunchClockRecord(FrozenModel):
+    """Banked by the cycle holding the campaign's line, at every launch end, a pause's included."""
 
-    model_config = ConfigDict(frozen=True)
+    record_type: Literal["launch_clock"] = "launch_clock"
+    started_at: str
+    finished_at: str
+    # Folded across every cycle of the line; only the runner knows a launch's endpoints.
+    clock: WallClock
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class CycleSupersededRecord(FrozenModel):
+    """On the LEFT-BEHIND side of a supersede cut; a later ``running`` here takes the line back."""
 
     record_type: Literal["cycle_superseded"] = "cycle_superseded"
     successor_cycle_id: str
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ForkGradedRecord(StrictModel):
+class ForkGradedRecord(FrozenModel):
     """A cut's MEASURED direction, on the branch: it overrides the one its trigger implies."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["fork_graded"] = "fork_graded"
     direction: ForkDirection
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class InterventionRecord(StrictModel):
+class InterventionRecord(FrozenModel):
     """One is enough to make the cycle babysat for good; appended the moment it happens."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["intervention"] = "intervention"
     kind: str
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class LaunchClaimRecord(StrictModel):
+class LaunchClaimRecord(FrozenModel):
     """Stands only while its process lives: ``claimant_lock`` is the OS lock that process holds."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["launch_claim"] = "launch_claim"
     stage: LaunchStage
@@ -1205,10 +1107,8 @@ class LaunchClaimRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class LaunchReleasedRecord(StrictModel):
+class LaunchReleasedRecord(FrozenModel):
     """Ends that launch's :class:`LaunchClaimRecord` with no run, and without ending the cycle."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["launch_released"] = "launch_released"
     job_id: str
@@ -1216,10 +1116,8 @@ class LaunchReleasedRecord(StrictModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class SpawnedRecord(StrictModel):
+class SpawnedRecord(FrozenModel):
     """Appended at every open, so the last names the work-item the cycle last measured for."""
-
-    model_config = ConfigDict(frozen=True)
 
     record_type: Literal["spawned"] = "spawned"
     spawned_by: SpawnedBy
@@ -1229,13 +1127,10 @@ class SpawnedRecord(StrictModel):
 CycleRecord = Annotated[
     ResumeCheckpointRecord
     | AccountEventRecord
+    | ArmRecord
     | BackendWarningRecord
-    | CandidateMintedRecord
-    | CandidateScoredRecord
-    | CandidateStartedRecord
     | FlightRecord
     | PricedKeyRecord
-    | CheckinClosedRecord
     | CommandAckRecord
     | CommandRecord
     | CycleFinalRecord
@@ -1247,26 +1142,26 @@ CycleRecord = Annotated[
     | ForkGradedRecord
     | InterventionRecord
     | LaunchClaimRecord
+    | LaunchClockRecord
     | LaunchReleasedRecord
     | LLMCallProgressRecord
     | LLMCallRecord
     | LLMCallStartRecord
-    | OptimizerStateRecord
+    | PartitionRecord
     | PhaseRecord
     | ProviderEasedRecord
     | ProviderHoldRecord
     | RaceCatchUpRecord
     | RaceStandingRecord
+    | ResolvedRunRecord
     | RoundClosedRecord
     | RoundEnteredRecord
     | RoundProposedRecord
-    | RoundStandingRecord
+    | RoundRestatedRecord
     | RoundWarningRecord
-    | RulerRecord
-    | RunLimitsRecord
+    | StandingBudgetRecord
     | RunPhaseRecord
     | RunWiringRecord
-    | SampleOrderRecord
     | SampleScoredRecord
     | SampleStartedRecord
     | ScoringLockedRecord
@@ -1278,18 +1173,18 @@ CycleRecord = Annotated[
     Field(discriminator="record_type"),
 ]
 
-RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(CycleRecord)
+RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(
+    CycleRecord, config=ConfigDict(defer_build=True)
+)
 
 
-class RebaseRequest(StrictModel):
+class RebaseRequest(FrozenModel):
     """A policy change and a rewind are ONE move: the new axis is searched only on the sibling."""
-
-    model_config = ConfigDict(frozen=True)
 
     fork_from_round: int
     trigger: ForkTrigger
     reason: str
-    issued_by: str
+    issued_by: Principal
     config_overrides: ConfigOverrides | None = None
 
 

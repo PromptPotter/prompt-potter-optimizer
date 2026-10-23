@@ -3,13 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar, get_args
 
+from promptpotter.domain.bench import PartitionRecord
+from promptpotter.domain.phases import ErrorRecord
 from promptpotter.domain.run_records import (
     AccountEventRecord,
+    ArmRecord,
     BackendWarningRecord,
-    CandidateMintedRecord,
-    CandidateScoredRecord,
-    CandidateStartedRecord,
-    CheckinClosedRecord,
     CommandAckRecord,
     CommandRecord,
     CycleFinalRecord,
@@ -18,46 +17,42 @@ from promptpotter.domain.run_records import (
     CycleSeedRecord,
     CycleSupersededRecord,
     ElectionRecord,
-    ErrorRecord,
     FlightRecord,
     ForkGradedRecord,
     InterventionRecord,
     LaunchClaimRecord,
+    LaunchClockRecord,
     LaunchReleasedRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
-    OptimizerStateRecord,
     PhaseRecord,
     PricedKeyRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
+    ResolvedRunRecord,
     ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
-    RoundStandingRecord,
+    RoundRestatedRecord,
     RoundWarningRecord,
-    RulerRecord,
-    RunLimitsRecord,
     RunPhaseRecord,
     RunWiringRecord,
-    SampleOrderRecord,
     SampleScoredRecord,
     SampleStartedRecord,
     ScoringLockedRecord,
     SpawnedRecord,
     SpendHoldRecord,
     SpendTombstoneRecord,
+    StandingBudgetRecord,
     TokenUsageRecord,
     TrailTombstoneRecord,
 )
 
-__all__ = ["Projection"]
-
-type _Handler = Callable[[Projection, Any], None]
+type RouteHandler = Callable[[Projection, Any], None]
 
 _ARMS = frozenset(get_args(get_args(CycleRecord)[0]))
 
@@ -65,7 +60,7 @@ _ARMS = frozenset(get_args(get_args(CycleRecord)[0]))
 class Projection:
     #: The ``Cut`` folded to, stamped by a fold that materializes itself. ``-1`` = nothing folded yet.
     at_offset: int = -1
-    _routes: ClassVar[dict[type[CycleRecord], _Handler | None]]
+    _routes: ClassVar[dict[type[CycleRecord], RouteHandler | None]]
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -80,7 +75,7 @@ class Projection:
         cls._routes = routes
 
     @classmethod
-    def _route_table(cls) -> dict[type[CycleRecord], _Handler | None]:
+    def _route_table(cls) -> dict[type[CycleRecord], RouteHandler | None]:
         return {
             PhaseRecord: cls._handle_phase,
             RunPhaseRecord: cls._handle_run_phase,
@@ -90,12 +85,10 @@ class Projection:
             ProviderEasedRecord: cls._handle_provider_eased,
             RoundEnteredRecord: cls._handle_round_entered,
             RoundClosedRecord: cls._handle_round_closed,
-            RoundStandingRecord: cls._handle_round_standing,
-            CandidateStartedRecord: cls._handle_candidate_started,
-            SampleOrderRecord: cls._handle_sample_order,
+            RoundRestatedRecord: cls._handle_round_restated,
+            ArmRecord: cls._handle_arm,
             SampleStartedRecord: cls._handle_sample_started,
             SampleScoredRecord: cls._handle_sample_scored,
-            CandidateScoredRecord: cls._handle_candidate_scored,
             FlightRecord: cls._handle_flight,
             RaceStandingRecord: cls._handle_race_standing,
             RaceCatchUpRecord: cls._handle_race_catch_up,
@@ -106,25 +99,24 @@ class Projection:
             LLMCallRecord: cls._handle_llm_call,
             ErrorRecord: cls._handle_error,
             RoundWarningRecord: cls._handle_round_warning,
-            CandidateMintedRecord: cls._handle_candidate_minted,
             ElectionRecord: cls._handle_election,
             RoundProposedRecord: cls._handle_round_proposed,
-            OptimizerStateRecord: cls._handle_optimizer_state,
             # Applied where written (`application/commands/dispatcher.py`); the pair is audit trail only.
             CommandRecord: None,
             CommandAckRecord: None,
             CycleSeedRecord: None,
-            RulerRecord: None,
-            RunLimitsRecord: None,
+            PartitionRecord: None,
+            ResolvedRunRecord: None,
+            StandingBudgetRecord: None,
             ScoringLockedRecord: None,
             CycleMintedRecord: None,
-            CheckinClosedRecord: None,
             CycleFinalRecord: None,
             CycleSupersededRecord: None,
             ForkGradedRecord: None,
             InterventionRecord: None,
             SpawnedRecord: None,
             LaunchClaimRecord: None,
+            LaunchClockRecord: None,
             LaunchReleasedRecord: None,
             # Banked by `store/account_spend.py` for a cycle that no longer exists.
             SpendTombstoneRecord: None,
@@ -135,6 +127,9 @@ class Projection:
             # Read off the ledger by `spend_book.py`: money moves on the bill alone.
             SpendHoldRecord: None,
         }
+
+    def feed(self, offset: int, record: CycleRecord) -> None:
+        self.on_record(record, offset)
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
         self.at_offset = offset
@@ -151,13 +146,11 @@ class Projection:
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None: ...
     def _handle_round_proposed(self, record: RoundProposedRecord) -> None: ...
     def _handle_round_closed(self, record: RoundClosedRecord) -> None: ...
-    def _handle_round_standing(self, record: RoundStandingRecord) -> None: ...
+    def _handle_round_restated(self, record: RoundRestatedRecord) -> None: ...
     def _handle_election(self, record: ElectionRecord) -> None: ...
-    def _handle_candidate_started(self, record: CandidateStartedRecord) -> None: ...
-    def _handle_sample_order(self, record: SampleOrderRecord) -> None: ...
+    def _handle_arm(self, record: ArmRecord) -> None: ...
     def _handle_sample_started(self, record: SampleStartedRecord) -> None: ...
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None: ...
-    def _handle_candidate_scored(self, record: CandidateScoredRecord) -> None: ...
     def _handle_flight(self, record: FlightRecord) -> None: ...
     def _handle_race_standing(self, record: RaceStandingRecord) -> None: ...
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None: ...
@@ -168,8 +161,6 @@ class Projection:
     def _handle_llm_call(self, record: LLMCallRecord) -> None: ...
     def _handle_error(self, record: ErrorRecord) -> None: ...
     def _handle_round_warning(self, record: RoundWarningRecord) -> None: ...
-    def _handle_candidate_minted(self, record: CandidateMintedRecord) -> None: ...
-    def _handle_optimizer_state(self, record: OptimizerStateRecord) -> None: ...
 
     def drain(self) -> None:
         """Settle buffered state on teardown; a no-op where every event already flushes."""

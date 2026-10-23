@@ -20,16 +20,17 @@ from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
-from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
+from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
 from promptpotter.application.scoring.sample_measurement import (
     attempt_bounds,
     cell_billing,
     cell_bound,
     priced_pairs,
 )
-from promptpotter.domain.launch_limits import LaunchLimits, RunMode
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.spend_book import spending_under, unbounded_spend_book
 from promptpotter.presentation.terminal.completion import report_completion
 
@@ -47,7 +48,7 @@ def _normalize(examples: list[Record]) -> list[Sample]:
 def build_campaign_config(
     dataset_dir: Path,
     *,
-    max_rounds: int | None = None,
+    budget_rounds: int | None = None,
     n_variants: int | None = None,
     sp_budget_round: int | None = None,
 ) -> CampaignConfig:
@@ -65,7 +66,7 @@ def build_campaign_config(
         nodes["l1_generate"] = {"config": {"n_variants": n_variants}}
     if sp_budget_round is not None:
         nodes["adaptive_queue"] = {"config": {"sp_budget_round": sp_budget_round}}
-    optimization: dict[str, Any] = {"max_rounds": max_rounds or 5, "nodes": nodes}
+    optimization: dict[str, Any] = {"budget": {"rounds": budget_rounds or 5}, "nodes": nodes}
     return with_optimization(load_dataset_campaign_config(dataset_dir), optimization)
 
 
@@ -74,7 +75,7 @@ async def run_bbeh_campaign(
     test_by_task: dict[str, list[Record]],
     *,
     output_path: Path,
-    max_rounds: int | None = None,
+    budget_rounds: int | None = None,
     n_variants: int | None = None,
     sp_budget_round: int | None = None,
 ) -> dict[str, Any] | None:
@@ -93,32 +94,37 @@ async def run_bbeh_campaign(
     print(f"GLOBAL OPTIMIZATION ({len(train_norm)} train samples)")
     print("=" * 60)
 
-    session = await open_session("bbeh")
+    session = await open_session("bbeh", rows=train_norm)
     try:
         assert session.dataset is not None, "open_session resolves the dataset it names"
         campaign_config = build_campaign_config(
             session.dataset.directory,
-            max_rounds=max_rounds,
+            budget_rounds=budget_rounds,
             n_variants=n_variants,
             sp_budget_round=sp_budget_round,
         )
-        pipeline_params = configure_and_apply_pipeline(session, campaign_config)
+        # Read only: the mint configures the session it is handed, as every launch does.
+        configured = configure_and_apply_pipeline(session, campaign_config)
+        pipeline_params = configured.pipeline_params
         # The model this run actually reaches, resolved from `bbeh/dataset.yaml::pipeline` — never
         # shared_config's MODEL_ID, which describes the route the Colab peers take. Raise rather
         # than default: a results file naming the wrong model is worse than no results file.
-        llm_node = session.llm_node_name()
-        target_model = (pipeline_params.get(llm_node) or {}).get("model")
-        if not target_model:
+        models = {
+            (pipeline_params.get(node.name) or {}).get("model")
+            for node in configured.pipeline_schema.prompt_nodes()
+        }
+        if len(models) != 1 or None in models:
             raise RuntimeError(
-                f"node {llm_node!r} resolved no model — `bbeh/dataset.yaml::pipeline` must pin one."
+                f"the prompt nodes resolve the models {models} — `bbeh/dataset.yaml::pipeline` "
+                "must pin one."
             )
+        target_model = models.pop()
 
-        cycle_result = await run_campaign(
+        session, cycle_result = await run_campaign(
             session,
-            train_norm,
             campaign_config,
             readout_sink=print,
-            limits=LaunchLimits(),
+            budget=Budget(),
             mode=RunMode(),
         )
         report_completion(cycle_result, session=session)
@@ -131,10 +137,6 @@ async def run_bbeh_campaign(
         if stop_reason_outcome(cycle_result.stop_reason) is not StopOutcome.SUCCESS:
             return None
 
-        # The winner comes off the ARTIFACT, not off `CycleResult.result_prompt_fields`: that one
-        # is the wire-side projection and carries a rendered `few_shot_block`, which
-        # `PromptTemplate` rejects outright (`extra="forbid"`) — a crash that waits for the first
-        # winner with demonstrations and lands after the whole campaign is paid for.
         export = session.store.campaigns.read_export(session.hop)
         result_pipeline_params = cycle_result.result_pipeline_params
         train_acc = cycle_result.result_accuracy
@@ -182,14 +184,18 @@ async def run_bbeh_campaign(
             f"(global winner, {total_test} non-mini examples across {len(tasks)} tasks)"
         )
 
-        winner_prompt_str = export.template().render() if export is not None else ""
+        winner_prompt_str = (
+            "\n\n".join(export.render(node) for node in export.prompts)
+            if export is not None
+            else ""
+        )
         opt_cfg = campaign_config.optimization
         return export_results(
             method="promptpotter",
             per_task=per_task_results,
             config={
                 "optimizer": "promptpotter",
-                "max_rounds": opt_cfg.max_rounds,
+                "budget_rounds": opt_cfg.budget.rounds,
                 "n_variants": select_optimizer(opt_cfg).arms_per_round,
                 "sp_budget_round": select_optimizer(opt_cfg).round_cells(len(train_pool)),
                 "model_id": target_model,

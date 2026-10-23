@@ -5,8 +5,6 @@ from typing import Any
 
 from promptpotter.domain.phases import StopOutcome
 
-__all__ = ["CommandResult"]
-
 
 @dataclass
 class CommandResult:

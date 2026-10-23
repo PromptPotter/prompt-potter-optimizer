@@ -15,7 +15,7 @@ export function HardSamplesPreview() {
   const { datasetName, items, measuredCount, totals, stale, error } = useHardSamples();
   const { dash, isLive } = useCycleStream();
   const [showAll, setShowAll] = useState(false);
-  const ranked = useMemo(() => items.map((it) => it.sample_id), [items]);
+  const ranked = useMemo(() => items.map((it) => it.position), [items]);
 
   const walk = isLive ? (dash?.walk ?? null) : null;
   const running = walk != null && walk.ids.length > 0;
@@ -30,7 +30,7 @@ export function HardSamplesPreview() {
     setPinned(null);
   }
 
-  const byId = useMemo(() => new Map(items.map((it) => [it.sample_id, it])), [items]);
+  const byId = useMemo(() => new Map(items.map((it) => [it.position, it])), [items]);
 
   if (error) {
     return (

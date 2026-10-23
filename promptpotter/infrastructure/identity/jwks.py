@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import (
     RSAPublicNumbers,
 )
 
-from promptpotter.infrastructure.tls import tls_context
+from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +84,3 @@ class JWKSCache:
                 logger.warning("Skipping malformed JWK at %s: %s", jwks_uri, exc)
         with self._lock:
             self._entries[jwks_uri] = _JWKSEntry(keys=parsed, fetched_at=time.monotonic())
-
-
-__all__ = ["JWKSCache"]

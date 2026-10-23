@@ -57,13 +57,11 @@ export function ChannelDetail({
             </div>
             <div>
               <dt>arm</dt>
-              <dd>{headline.arm ? headline.arm.arm_key : "none"}</dd>
+              <dd>{headline.purpose.kind === "compare" ? headline.purpose.arm.arm_key : "none"}</dd>
             </div>
             <div>
               <dt>treatment</dt>
-              <dd title={headline.treatment_digest ?? undefined}>
-                {headline.treatment_digest?.slice(0, 8) ?? "—"}
-              </dd>
+              <dd title={headline.treatment_digest}>{headline.treatment_digest.slice(0, 8)}</dd>
             </div>
             <div>
               <dt>bench reads</dt>
@@ -159,17 +157,8 @@ export function ChannelDetail({
             cfg={picked.cfg}
             stats={picked.isOwn && <CellMeans means={reading.cell_means} />}
             measurements={
-              picked.path &&
-              picked.id && (
-                <MeasurementsPane
-                  preset={{
-                    path: picked.path,
-                    datasetName: reading.dataset_name,
-                    candidateId: picked.id,
-                    scope: "cycle",
-                    groupBy: "none",
-                  }}
-                />
+              picked.cellsPreset && (
+                <MeasurementsPane preset={{ ...picked.cellsPreset, groupBy: "none" }} />
               )
             }
             schema={picked.schema}
@@ -205,7 +194,7 @@ export function ChannelDetail({
           choices={searchpointCopyChoices({
             cfg: picked.cfg,
             reading: picked.reading,
-            samples: picked.samples,
+            cells: picked.cells,
           })}
           title="Copy this searchpoint"
         />

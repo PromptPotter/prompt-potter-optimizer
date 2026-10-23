@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { ApiError, failureKind, IngestApiError, operatorMessage } from "@/lib/api";
+import { ApiError, failureKind, operatorMessage } from "@/lib/api";
+import { toApiError } from "@/lib/api/client";
 import { clearIncidents, formatDiagnostics, getIncidents, reportIncident } from "@/lib/diagnostics";
 
 describe("failureKind", () => {
@@ -11,10 +12,20 @@ describe("failureKind", () => {
     expect(failureKind(new ApiError(422, "/api/v1/x"))).toBe("invalid");
   });
 
-  it("treats every server-side and unmapped failure as transient", () => {
-    for (const status of [500, 502, 503, 504, 429, 418]) {
+  it("treats every server-side failure as transient", () => {
+    for (const status of [500, 502, 503, 504]) {
       expect(failureKind(new ApiError(status, "/api/v1/x"))).toBe("transient");
     }
+  });
+
+  it("reads any other answered 4xx as a refusal, worded by the server, read or write", () => {
+    for (const status of [409, 429, 418]) {
+      expect(failureKind(new ApiError(status, "/api/v1/x"))).toBe("refused");
+    }
+    const capped = new ApiError(429, "/api/v1/x", "spend_cap", null, null, "Raise the cap to go on.");
+    expect(operatorMessage(capped, failureKind(capped))).toBe("Raise the cap to go on.");
+    const bare = new ApiError(429, "/api/v1/x");
+    expect(operatorMessage(bare, failureKind(bare))).not.toMatch(/reach/i);
   });
 
   it("treats a non-ApiError (network, parse, abort) as transient", () => {
@@ -24,19 +35,11 @@ describe("failureKind", () => {
     expect(failureKind(undefined)).toBe("transient");
   });
 
-  it("classifies a WRITE failure by its status, like any other", () => {
-    const write = (status: number) =>
-      failureKind(new IngestApiError(status, "/api/v1/commands/compact-archive", "no"));
-    expect(write(403)).toBe("denied");
-    expect(write(422)).toBe("invalid");
-    expect(write(500)).toBe("transient");
-  });
-
   it("words a write failure as the server's sentence, else one per kind — never the raw failure", () => {
-    const said = new IngestApiError(409, "/api/v1/commands/fork-cycle", "Already forked.");
+    const said = new ApiError(409, "/api/v1/commands/fork-cycle", null, null, null, "Already forked.");
     expect(operatorMessage(said, failureKind(said))).toBe("Already forked.");
     // No envelope (a proxy 502) and no response at all: neither may claim the write did not land.
-    const bare = new IngestApiError(502, "/api/v1/commands/fork-cycle", null);
+    const bare = new ApiError(502, "/api/v1/commands/fork-cycle");
     const offline = new TypeError("Failed to fetch");
     for (const e of [bare, offline]) {
       const text = operatorMessage(e, failureKind(e));
@@ -90,15 +93,16 @@ describe("incident ring", () => {
     expect(getIncidents().length).toBeLessThanOrEqual(50);
   });
 
-  it("records a write failure's trace handle, not a blank row", () => {
-    reportIncident(
-      new IngestApiError(500, "/api/v1/commands/start-run", "boom", "internal_error", "wid7"),
-      { surface: "run-control" },
-    );
+  it("records a write failure's trace handle off its envelope, not a blank row", async () => {
+    const envelope = { error: "internal_error", message: "", error_id: "wid7", details: null };
+    const e = await toApiError(new Response(JSON.stringify(envelope), { status: 500 }));
+    reportIncident(e, { surface: "run-control" });
     const [only] = getIncidents();
     expect(only?.errorId).toBe("wid7");
     expect(only?.code).toBe("internal_error");
     expect(only?.status).toBe(500);
+    expect(only?.path).toBeNull();
+    expect(operatorMessage(e, failureKind(e))).toMatch(/may not have been applied/);
   });
 
   it("ignores aborts — a cancelled in-flight request is the app working correctly", () => {

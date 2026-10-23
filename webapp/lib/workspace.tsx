@@ -34,7 +34,6 @@ import {
   type Tab,
 } from "./view-tab";
 import { useActivePointer, useCampaign, useCycleEntry, useRegistry } from "./registry";
-import { phaseIs } from "./run-phase";
 import { useViewMemory } from "./view-memory";
 
 export interface NavigateOptions {
@@ -274,17 +273,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   if (!isWorkspaceTab(tab) && tab !== campaignTab) setCampaignTab(tab);
   const backToCampaign = useCallback(() => openView(campaignTab), [openView, campaignTab]);
 
-  const isCheckin = useCallback(
-    (hop: { campaignId: string; cycleId: string }) =>
-      cycles.some(
-        (c) =>
-          c.campaign_id === hop.campaignId &&
-          c.cycle_id === hop.cycleId &&
-          phaseIs(c.run_phase, "authoring"),
-      ),
-    [cycles],
-  );
-
   const resumed = useCallback(
     (path: CyclePath): [CyclePath, string | null] => {
       const hop = path[0];
@@ -306,8 +294,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const navigate = useCallback(
     (path: CyclePath, opts: NavigateOptions = {}) => {
-      const root = path[0];
-      if (!root) return;
+      if (!path[0]) return;
       const [to, candidate] =
         opts.resume && !opts.candidate ? resumed(path) : [path, opts.candidate ?? null];
       setFollowing(false);
@@ -316,12 +303,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       setMoment(null);
       setCellState(null);
       setListScreen(false);
-      // An inner run is never a check-in, so a descended path never redirects to Chat.
       if (opts.view) openView(opts.view);
-      else if (path.length === 1 && isCheckin(root)) openView("chat");
       else if (isWorkspaceTab(tab)) openView(campaignTab);
     },
-    [resumed, isCheckin, openView, tab, campaignTab],
+    [resumed, openView, tab, campaignTab],
   );
 
   const drillInto = useCallback(

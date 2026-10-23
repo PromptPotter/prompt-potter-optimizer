@@ -9,7 +9,7 @@ from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.identity import TERMINAL_IDENTITY_ID, default_identity
+from promptpotter.shared.identity import TERMINAL_IDENTITY_ID
 
 if TYPE_CHECKING:
     from promptpotter.shared.identity import IdentityContext
@@ -42,13 +42,6 @@ def maybe_claim_default(
         if user_dir.is_dir():
             _rewrite_campaign_ownership(user_dir / "campaigns", user_id)
     return renamed
-
-
-def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:
-    if explicit_tenant:
-        return default_identity(tenant_id=explicit_tenant)
-    uid = registered_user_id(default_identity_paths().default_claim_marker)
-    return default_identity(tenant_id=uid, user_id=uid) if uid else default_identity()
 
 
 def registered_user_id(marker_path: Path) -> str | None:
@@ -98,12 +91,3 @@ def _rewrite_campaign_ownership(campaigns_root: Path, user_id: str) -> None:
         rewritten += 1
     if rewritten:
         logger.info("Rebound %d campaigns to user %s", rewritten, user_id)
-
-
-__all__ = [
-    "is_host",
-    "is_host_tenant_dir",
-    "maybe_claim_default",
-    "registered_or_default_identity",
-    "registered_user_id",
-]

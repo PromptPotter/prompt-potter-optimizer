@@ -4,16 +4,16 @@ from fastapi import Query
 from sse_starlette import EventSourceResponse
 
 from promptpotter.application.cycle_reads import cycle_event_frames, view_cycle
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.presentation.api.deps import StoresDep, decode_descend
+from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
+from promptpotter.domain.projection_envelope import ProjectionEnvelope
+from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-
-__all__ = ["stream_cycle_events"]
 
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe",
     response_class=EventSourceResponse,
+    response_model=ProjectionEnvelope,
     tags=["Stream"],
 )
 async def stream_cycle_events(
@@ -27,7 +27,7 @@ async def stream_cycle_events(
     404 only for an unknown cycle; a running, paused or finished one answers one ``stream_snapshot`` frame (the served dashboard, ``sequence`` = the offset the tail picks up at), then every later record as a ``ProjectionEnvelope`` (``kind`` = its ``record_type``, ``sequence`` = its ledger offset), with a heartbeat comment every 15 s.
     """
     cycle = view_cycle(
-        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_descend(descend))
+        stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     )
     # LF is the contract (the default is CRLF); X-Accel-Buffering is the header sse-starlette omits.
     return EventSourceResponse(

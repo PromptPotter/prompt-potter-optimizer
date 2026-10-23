@@ -11,10 +11,11 @@ from pydantic import BaseModel, ConfigDict
 
 from promptpotter.application.optimizer_manifest import (
     get_optimizer_config_overrides,
-    llm_node_config,
+    llm_node_manifest,
     resolve_node_override,
 )
-from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.pipeline_overlay import pinned_route
 from promptpotter.domain.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
@@ -26,7 +27,7 @@ from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,
 )
-from promptpotter.infrastructure.llm.registry import get_llm_client
+from promptpotter.infrastructure.llm.registry import default_routes, get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -45,14 +46,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
-
-__all__ = [
-    "InjectionBreakdown",
-    "LLMCallContext",
-    "OptimizerResponseModel",
-    "llm_call",
-    "run_optimizer_node",
-]
 
 
 @shapes_optimizer_prompt
@@ -86,7 +79,7 @@ class LLMCallContext:
 
 _LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
 
-# Per round trip: the provider SDK's own timeout is per-read-gap, so a slow stream never trips it.
+# Per round trip: the client's own httpx timeout is per-read-gap, so a slow stream never trips it.
 OPTIMIZER_CALL_DEADLINE_S: float = 180.0
 
 # The parse ladder inside `chat()` is a repair then a clean re-ask, each a whole round trip.
@@ -109,7 +102,6 @@ async def _chat_under_deadline(
     budget = SendBudget(
         OPTIMIZER_CALL_DEADLINE_S * _MAX_ROUND_TRIPS_PER_CALL, attempts=SEND_ATTEMPTS
     )
-    assert budget.clock is not None
     try:
         async with budget.clock:
             with under_budget(budget), throttle_stall_given_to(budget.give_back):
@@ -160,7 +152,7 @@ def _merged_config(
     node: str | None, config: dict[str, Any] | None, overrides: dict[str, Any]
 ) -> dict[str, Any]:
     if config is None:
-        config = llm_node_config(node) if node else {}
+        config = dict(llm_node_manifest(node)[1]) if node else {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
     if node and (specimen := resolve_node_override(node)).model:
         merged["model"] = specimen.model
@@ -172,6 +164,9 @@ def _merged_config(
         # Except the seed a call brings: `NodeContext.ask` draws it FROM the clamp's, one per call.
         if "seed" in overrides:
             merged["seed"] = overrides["seed"]
+    # Keyed and sent as the host it gets, as a target node is (`pin_default_routes`).
+    if route := pinned_route(merged, merged["provider"], default_routes()):
+        merged["route_order"] = route
     return merged
 
 
@@ -415,7 +410,7 @@ async def llm_call(
 async def run_optimizer_node(
     *,
     template_name: str,
-    template: PromptTemplate,
+    template: OptimizerPromptTemplate,
     prompt_vars: dict[str, Any],
     response_model: type[BaseModel] | None,
     temperature: float | None = None,

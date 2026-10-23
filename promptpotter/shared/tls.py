@@ -6,8 +6,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import ssl
 
-__all__ = ["tls_context"]
-
 
 @functools.cache
 def tls_context() -> ssl.SSLContext:

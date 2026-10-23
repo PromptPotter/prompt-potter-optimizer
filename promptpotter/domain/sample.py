@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ConfigDict, JsonValue
 
 from promptpotter.domain.scoring import MeasuredCell
-from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.hashing import stable_hash
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.shared.hashing import dataset_hash, stable_hash
 
 
 class Sample(StrictModel):
@@ -41,11 +41,38 @@ class Sample(StrictModel):
             source_pin=self.source_pin,
         )
 
+    def banked(self) -> dict[str, JsonValue]:
+        return self.model_dump(mode="json", exclude={"id"}, exclude_defaults=True)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any], fallback_id: int | None = None) -> Sample:
         if "id" not in data and fallback_id is not None:
             data = {**data, "id": fallback_id}
         return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class Bank:
+    """Rows by content: a row's slot is its position, so ``dataset_hash`` names every slot too."""
+
+    samples: tuple[Sample, ...]
+    dataset_hash: str
+    slot_of: Mapping[str, int]
+
+    @classmethod
+    def of(cls, rows: Iterable[Sample]) -> Bank:
+        samples = tuple(
+            row if row.id == slot else row.model_copy(update={"id": slot})
+            for slot, row in enumerate(rows)
+        )
+        return cls(samples, dataset_hash(samples), {s.key: s.id for s in samples})
+
+    @classmethod
+    def read(cls, rows: Iterable[Mapping[str, Any]]) -> Bank:
+        return cls.of(Sample(id=slot, **row) for slot, row in enumerate(rows))
+
+    def banked(self) -> list[dict[str, JsonValue]]:
+        return [row.banked() for row in self.samples]
 
 
 def sample_key(
@@ -66,19 +93,16 @@ def sample_key(
     )
 
 
-class ArchiveEntry(StrictModel):
+class ArchiveEntry(FrozenModel):
     """A configuration under ONE dataset; ``name`` and ``created_at`` are its first answer's."""
-
-    model_config = ConfigDict(frozen=True)
 
     config_key: str
     # ``PipelineSchema.sp_hash``: empty where the searchpoint resolves no node config.
     prompt_fields_id: str
-    rendered_prompt_hash: str
     # Empty with it, and its cells are then never replayed.
     node_configs: list[tuple[str, dict[str, Any]]]
     pipeline_params: dict[str, Any]
-    dataset_name: str | None
+    dataset_hash: str
     name: str = ""
     created_at: str = ""
 
@@ -100,11 +124,11 @@ def _stamp(row: Mapping[str, object], key: str) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class FiledAnswer:
-    """``cell.sample_id`` names a slot in ``dataset_name`` and nowhere else."""
+    """Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it."""
 
     cell: MeasuredCell
     config_key: str
-    dataset_name: str | None
+    dataset_hash: str
     role: str
     source: str
     provenance: str
@@ -117,7 +141,7 @@ class FiledAnswer:
         return cls(
             MeasuredCell.from_wire(row),
             config_key=_stated(row, "config_key"),
-            dataset_name=_stamp(row, "dataset_name"),
+            dataset_hash=_stated(row, "dataset_hash"),
             role=_stated(row, "role"),
             source=_stated(row, "source"),
             provenance=_stated(row, "provenance"),
@@ -130,7 +154,7 @@ class FiledAnswer:
         out = {
             **self.cell.wire(),
             "config_key": self.config_key,
-            "dataset_name": self.dataset_name,
+            "dataset_hash": self.dataset_hash,
             "role": self.role,
             "source": self.source,
             "provenance": self.provenance,
@@ -145,8 +169,5 @@ class FiledAnswer:
     @property
     def answer(self) -> str:
         if (address := self.cell.answer) is None:
-            raise TypeError(f"the answer at slot {self.cell.sample_id} carries no archive address")
+            raise TypeError(f"the answer to {self.cell.sample_key} carries no archive address")
         return address
-
-
-__all__ = ["ArchiveEntry", "FiledAnswer", "Sample", "sample_key"]

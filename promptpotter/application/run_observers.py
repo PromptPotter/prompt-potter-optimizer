@@ -5,13 +5,17 @@ from __future__ import annotations
 import logging
 from contextvars import Token
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.pipeline_resolve import defaults_drift
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
+from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
+from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
@@ -28,16 +32,16 @@ from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     bind_spend_book,
+    bound_spend_book,
     reset_spend_book,
 )
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
-from promptpotter.infrastructure.projections.live_dashboard.projection import (
-    LiveDashboardProjection,
-)
+from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.projections.racing_stream import RacingStreamProjection
+from promptpotter.infrastructure.runtime_flags import armed_run_limits
 from promptpotter.infrastructure.tracing.bridge import TracingProjection
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 from promptpotter.shared.measurement_context import instrument_depth
@@ -46,20 +50,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.campaign_config import CampaignConfig
-    from promptpotter.domain.phase_views import RunSpendView
-    from promptpotter.domain.results import CandidateProposal
+    from promptpotter.domain.results import Proposal
 
 logger = logging.getLogger(__name__)
-
-__all__ = [
-    "RunObservers",
-    "build_run_observers",
-    "declare_gate",
-    "declare_run_stop",
-    "declare_run_wiring",
-    "declare_running",
-    "run_limits_from",
-]
 
 
 def declare_running(session: Session) -> None:
@@ -68,9 +61,7 @@ def declare_running(session: Session) -> None:
         ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
 
 
-def declare_gate(
-    session: Session, gate: GateKind, *, drafts: Sequence[CandidateProposal] = ()
-) -> None:
+def declare_gate(session: Session, gate: GateKind, *, drafts: Sequence[Proposal] = ()) -> None:
     ledger = session.state.ledger
     if ledger is not None:
         ledger.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate=gate, drafts=list(drafts)))
@@ -78,29 +69,34 @@ def declare_gate(
 
 def declare_run_stop(
     session: Session,
+    observers: RunObservers,
     stop_reason: StopReason,
     *,
     interrupted_by: PauseCause,
-    spend: RunSpendView | None = None,
 ) -> None:
     """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second record."""
-    ledger = session.state.ledger
-    if ledger is None:
-        return
+    budget = armed_run_limits(
+        Path(observers.cycle_dir), observers.dashboard.state.run_limits
+    ).budget
+    meter = ceiling_meter(session.purpose)
+    spend = run_spend_view(
+        observers.dashboard.spend_metered(meter),
+        campaign_metered=session.store.campaigns.metered_spend(session.campaign_id, meter),
+        usd_cap=budget.usd,
+        token_cap=budget.tokens,
+        share=session.state.control.book.allotment,
+    )
+    ledger = observers.callbacks.ledger
     if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
         ledger.append(RunPhaseRecord.stop(stop_reason, spend=spend))
         return
-    cause, detail = session.control.take_pause() or (interrupted_by, "")
+    cause, detail = session.state.control.take_pause() or (interrupted_by, "")
     ledger.append(RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend))
 
 
 def run_limits_from(config: CampaignConfig) -> RunLimits:
     opt = config.optimization
-    return RunLimits(
-        max_rounds=opt.max_rounds or None,
-        ceiling=opt.ceiling,
-        optimizer=list(select_optimizer(opt).limits),
-    )
+    return RunLimits(budget=opt.budget, optimizer=list(select_optimizer(opt).limits))
 
 
 def declare_run_wiring(
@@ -112,10 +108,12 @@ def declare_run_wiring(
 ) -> None:
     """The one writer of ``RunWiringRecord``; a mint passes no *tracing* — no launch has opened one."""
     selected = select_optimizer(campaign_config.optimization)
+    campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
+    assert campaign is not None, "a run is wired on a campaign its session is bound to"
     ledger.append(
         RunWiringRecord(
             arms_per_round=selected.arms_per_round,
-            sp_budget_round=selected.round_cells(len(session.samples)),
+            sp_budget_round=selected.round_cells(len(session.bank.samples)),
             display_metric=campaign_config.display_metric,
             elects_on=selected.elects_on,
             max_cells_in_flight=session.backend_client.max_cells_in_flight,
@@ -125,6 +123,7 @@ def declare_run_wiring(
             if tracing is None
             else langfuse_trace_url(tracing.langfuse_trace_id()),
             run_limits=run_limits_from(campaign_config),
+            defaults_drift=defaults_drift(campaign),
         )
     )
 
@@ -134,7 +133,7 @@ class RunObservers:
     cycle_dir: CycleDir
     callbacks: RunCallbacks
     audit: AuditTrailProjection
-    dashboard: LiveDashboardProjection
+    dashboard: DashboardCheckout
     racing: RacingStreamProjection
     readout: ReadoutProjection
     tracing: TracingProjection
@@ -144,12 +143,15 @@ class RunObservers:
     def arm_spend_book(self, book: SpendBook) -> None:
         ledger = self.callbacks.ledger
         ledger.bind(book)
-        # A nested run (an L4 inner cell) admits nothing here: its sends stay on the ROOT's ceiling.
-        if instrument_depth() == 0:
-            book.ledger = ledger
-            if self._book_tokens:
-                reset_spend_book(self._book_tokens.pop())
-            self._book_tokens.append(bind_spend_book(book))
+        book.ledger = ledger
+        if self._book_tokens:
+            reset_spend_book(self._book_tokens.pop())
+        # A nested run (an L4 inner cell) admits each send against its own book AND its root's.
+        if instrument_depth() > 0:
+            book.enclosing = bound_spend_book()
+            if book.enclosing is None:
+                raise RuntimeError("a nested run spends only under its enclosing run's book")
+        self._book_tokens.append(bind_spend_book(book))
         unreported = book.take_up(ledger)
         if unreported.sends:
             logger.warning(
@@ -182,15 +184,8 @@ def build_run_observers(
     session: Session,
     campaign_config: CampaignConfig,
     readout_sink: StatusFn | None = None,
-    resumed_from_round: int | None = None,
     forked_from: RunObservers | None = None,
 ) -> RunObservers:
-    if session.state.cycle_id is None:
-        raise RuntimeError(
-            "build_run_observers: session must already be minted via "
-            "jobs.mint.prepare_fresh_cycle — it needs a cycle_id"
-        )
-
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
     hold_cycle(cycle_dir)
@@ -200,16 +195,16 @@ def build_run_observers(
             session=session,
             campaign_config=campaign_config,
             readout_sink=readout_sink,
-            resumed_from_round=resumed_from_round,
             forked_from=forked_from,
         )
     except BaseException:
         release_cycle(cycle_dir)
         raise
+    session.state.locked_cycle = cycle_dir
     if forked_from is not None:
         # The line moved onto this cycle; the one it left is no longer this process's.
         release_cycle(forked_from.cycle_dir)
-        # A fork's config is already admitted; a first build waits for `_prepare_run` to settle it.
+        # A fork's config is already admitted; a first build waits for `prepare_run` to settle it.
         declare_run_wiring(
             session, campaign_config, observers.callbacks.ledger, tracing=observers.tracing
         )
@@ -222,28 +217,23 @@ def _bind_observers(
     session: Session,
     campaign_config: CampaignConfig,
     readout_sink: StatusFn | None,
-    resumed_from_round: int | None,
     forked_from: RunObservers | None,
 ) -> RunObservers:
     audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
     session.state.audit_projection = audit
     racing = RacingStreamProjection.from_cycle_dir(cycle_dir)
-
-    ledger = open_with_history(cycle_dir)
     readout = (
         ReadoutProjection.for_campaign(session, campaign_config, sink=readout_sink)
         if forked_from is None
         else forked_from.readout
     )
-    dashboard = LiveDashboardProjection.for_session(
-        session.hop, tenant_root=session.tenant_root, resumed_from_round=resumed_from_round
-    )
-
+    dashboard = DashboardCheckout.over(cycle_dir)
     if dashboard is None:
         raise RuntimeError(
-            "build_run_observers: LiveDashboardProjection.for_session returned None — the session "
-            f"address is incomplete (tenant_root={session.tenant_root!r}, hop={session.hop})"
+            f"build_run_observers: the ledger of {session.hop} holds no RunWiringRecord"
         )
+    # Opened after the checkout folded, so its catch-up never feeds the checkout a line twice.
+    ledger = open_with_history(cycle_dir)
 
     ledger.bind(dashboard)
     ledger.bind(audit)
@@ -251,7 +241,7 @@ def _bind_observers(
     ledger.bind(readout)
     ledger.bind(racing)
     ledger.bind(CycleIndexProjection(cycle_dir))
-    ledger.bind(RoundFileProjection(session, session.hop))
+    ledger.bind(RoundFileProjection(session.store, session.hop, session.state))
     tracing = (
         TracingProjection.for_cycle(session.tenant_root, session.hop, langfuse=session.langfuse)
         if forked_from is None

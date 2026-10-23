@@ -48,7 +48,11 @@ export function NodeSurface({
   onNarrowing?: (node: string, rows: ParamIntent[]) => void;
 }) {
   const kind = node?.kind;
-  const showPrompt = kind === "llm" || node === null;
+  // A node shows its own prompt; the whole pipeline shows each prompt node's, by its served `prompt` rows.
+  const promptNodes = (schema.config ? Object.entries(schema.config) : [])
+    .filter(([id]) => node === null || id === node.id)
+    .map(([id, params]) => [id, params.filter((p) => p.kind === "prompt")] as const)
+    .filter(([, params]) => params.length > 0);
   // Absent from the served map = no contract declared, distinct from a declared-null one.
   const ownOutput = node && schema.output ? schema.output[node.id] : undefined;
   const nodeOutput = node
@@ -119,19 +123,20 @@ export function NodeSurface({
         keysAskedElsewhere={onAuthor && authored ? described : undefined}
       />
 
-      {showPrompt ? (
-        <>
-          <hr className="setup-preview-divider" />
-          <PromptFieldsEditor
-            value={point.origin_prompt_fields}
-            readOnly={readOnly}
-            compact={compact}
-            onApply={readOnly ? undefined : onApply}
-            locks={rows ? locksOf("prompt") : undefined}
-            onLock={lockKeys ? (field, locked) => lockKeys([field], locked) : undefined}
-          />
-        </>
-      ) : null}
+      {promptNodes.length > 0 ? <hr className="setup-preview-divider" /> : null}
+      {promptNodes.map(([name, params]) => (
+        <PromptFieldsEditor
+          key={name}
+          node={name}
+          prompts={point.origin_prompts}
+          fields={params.map((p) => p.key)}
+          readOnly={readOnly}
+          compact={compact}
+          onApply={readOnly ? undefined : onApply}
+          locks={Object.fromEntries(params.map((p) => [p.key, p.movable_by.length === 0]))}
+          onLock={lockKeys ? (field, locked) => lockKeys([field], locked) : undefined}
+        />
+      ))}
 
       {compact ? (
         <details className="node-output-fold">

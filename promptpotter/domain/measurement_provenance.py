@@ -56,11 +56,3 @@ def grade_answer(
 
 def meets_grade(grade: str, min_grade: str) -> bool:
     return _GRADE_RANK.get(grade, 0) >= _GRADE_RANK.get(min_grade, 0)
-
-
-__all__ = [
-    "REUSABLE_MIN_GRADE",
-    "RunSource",
-    "grade_answer",
-    "meets_grade",
-]

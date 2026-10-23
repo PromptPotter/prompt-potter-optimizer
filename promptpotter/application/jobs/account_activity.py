@@ -34,21 +34,10 @@ _N_BUCKETS = 30
 class ActivityBucket(StrictModel):
     """One time bucket of the Activity pane's three stacked bar charts."""
 
-    ts: float = Field(description="Epoch seconds at the bucket's leading edge")
-    spend_usd: float = Field(description="What providers reported they billed.")
-    rate_priced_usd: float = Field(
-        description="What our rate table prices the bucket's calls no provider billed. Never "
-        "spent, and in no series."
-    )
-    bill_is_floor: bool = Field(
-        description="A call in this bucket carries neither a bill nor a rate's price, so "
-        "`spend_usd` and `rate_priced_usd` understate."
-    )
-    tokens: int
-    requests: int
     series_spend: dict[str, float] = Field(
         description="Billed USD per `series_labels` entry. A call no provider billed adds nothing "
-        "here and still counts in the other two; one no rate prices either sets `bill_is_floor`."
+        "here and still counts in the other two; one no rate prices either sets the response's "
+        "`bill_is_floor`."
     )
     series_tokens: dict[str, int]
     series_requests: dict[str, int]
@@ -62,8 +51,6 @@ class ActivityResponse(StrictModel):
         description="The colour axis: `model` is the exact model id, `api_key` is who billed the "
         "call (`TokenUsageRecord.provider`)."
     )
-    since: float
-    until: float
     buckets: list[ActivityBucket]
     series_labels: list[str] = Field(
         description="Every series in the window, in first-seen order — one colour per label, "
@@ -71,24 +58,26 @@ class ActivityResponse(StrictModel):
     )
     total_spend_usd: float = Field(description="What providers reported they billed.")
     total_rate_priced_usd: float = Field(
-        description="A bucket's `rate_priced_usd`, over the window. Never spent."
+        description="What our rate table prices the window's calls no provider billed. Never "
+        "spent, and in no series."
     )
     calls_rate_priced: bool = Field(
         description="Some call in the window was priced at our rate, so there is a "
         "`total_rate_priced_usd` to show beside the bill."
     )
     bill_is_floor: bool = Field(
-        description="The two totals understate: a bucket's `bill_is_floor`, over the window."
+        description="The two totals understate: a call in the window carries neither a bill nor "
+        "a rate's price."
     )
     total_tokens: int
     total_requests: int
     peak_spend_usd: float | None = Field(
-        description="The tallest bucket's `spend_usd` — the scale the spend bars are drawn "
+        description="The tallest bucket's billed USD — the scale the spend bars are drawn "
         "against. Null where no bucket was billed anything, so there is no bar to scale."
     )
-    peak_tokens: int | None = Field(description="`peak_spend_usd`'s twin over a bucket's `tokens`.")
+    peak_tokens: int | None = Field(description="`peak_spend_usd`'s twin over a bucket's tokens.")
     peak_requests: int | None = Field(
-        description="`peak_spend_usd`'s twin over a bucket's `requests`."
+        description="`peak_spend_usd`'s twin over a bucket's requests."
     )
 
 
@@ -131,43 +120,26 @@ def account_activity(
             unpriced[i] += row.tokens
         tokens[i][label] = tokens[i].get(label, 0) + row.tokens
         requests[i][label] = requests[i].get(label, 0) + 1
-    buckets = [
-        ActivityBucket(
-            ts=since + i * width,
-            spend_usd=sum(spend[i].values()),
-            rate_priced_usd=rate_priced[i],
-            bill_is_floor=bill_is_floor(unpriced[i]),
-            tokens=sum(tokens[i].values()),
-            requests=sum(requests[i].values()),
-            series_spend=spend[i],
-            series_tokens=tokens[i],
-            series_requests=requests[i],
-        )
-        for i in range(_N_BUCKETS)
-    ]
+    spent = [sum(s.values()) for s in spend]
+    used = [sum(t.values()) for t in tokens]
+    asked = [sum(r.values()) for r in requests]
     return ActivityResponse(
         window=window,
         group_by=group_by,
-        since=since,
-        until=until,
-        buckets=buckets,
+        buckets=[
+            ActivityBucket(
+                series_spend=spend[i], series_tokens=tokens[i], series_requests=requests[i]
+            )
+            for i in range(_N_BUCKETS)
+        ],
         series_labels=list(labels),
-        total_spend_usd=round(sum(b.spend_usd for b in buckets), 6),
+        total_spend_usd=round(sum(spent), 6),
         total_rate_priced_usd=round(sum(rate_priced), 6),
         calls_rate_priced=calls_rate_priced(sum(rate_priced)),
         bill_is_floor=bill_is_floor(sum(unpriced)),
-        total_tokens=sum(b.tokens for b in buckets),
-        total_requests=sum(b.requests for b in buckets),
-        peak_spend_usd=_peak([b.spend_usd for b in buckets]),
-        peak_tokens=_peak([b.tokens for b in buckets]),
-        peak_requests=_peak([b.requests for b in buckets]),
+        total_tokens=sum(used),
+        total_requests=sum(asked),
+        peak_spend_usd=_peak(spent),
+        peak_tokens=_peak(used),
+        peak_requests=_peak(asked),
     )
-
-
-__all__ = [
-    "ActivityBucket",
-    "ActivityGroupBy",
-    "ActivityResponse",
-    "ActivityWindow",
-    "account_activity",
-]

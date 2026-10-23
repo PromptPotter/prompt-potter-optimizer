@@ -10,7 +10,7 @@ export function WorkspaceStoragePanel() {
   const read = useRead(workspaceStorageRead());
 
   if (read.status === "failed") {
-    return <AccountFailure kind={read.failure.kind} subject="workspace storage" />;
+    return <AccountFailure message={read.failure.message} subject="workspace storage" />;
   }
   if (read.status !== "ready") return <AccountLoading subject="workspace storage" />;
   const data = read.data;
@@ -22,7 +22,7 @@ export function WorkspaceStoragePanel() {
     <>
       <AccountSection
         title="On disk"
-        lede="Campaign trees, fattest first, then the shared reuse cache and everything else. The parts sum to the total."
+        lede="Campaign trees, fattest first, then the archive home and everything else. The parts you own sum to the total."
         aside={
           <span className="account-figure">
             {fmtBytes(data.total_bytes)}
@@ -64,10 +64,16 @@ export function WorkspaceStoragePanel() {
           <li className="wstorage-item wstorage-aux">
             <div className="wstorage-item-head">
               <span className="wstorage-name">
-                Shared cache
-                <span className="account-note"> — measurements; survives a campaign delete</span>
+                Archive home
+                <span className="account-note">
+                  {" "}
+                  — <code>{data.archive_home_id}</code>
+                  {data.archive_home_owner === "tenant"
+                    ? ": your measurements; survive a campaign delete"
+                    : ": shared by every account on the install; outside your total"}
+                </span>
               </span>
-              <span className="wstorage-bytes">{fmtBytes(data.shared_cache_bytes)}</span>
+              <span className="wstorage-bytes">{fmtBytes(data.archive_home_bytes)}</span>
             </div>
           </li>
           <li className="wstorage-item wstorage-aux">

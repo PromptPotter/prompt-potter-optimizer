@@ -5,25 +5,24 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import uuid
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import (
-    ForkCyclePayload,
-    MintCampaignPayload,
-    StartRunPayload,
-)
+from promptpotter.application.commands.payloads import MintCampaignPayload
+from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.mint import ConfigDriftError
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.command_kinds import ForkCyclePayload, ForkSeed, StartRunPayload
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.launch_limits import RunMode
 from promptpotter.domain.pipeline_overlay import (
-    permitted_models_for_campaign,
+    permitted_models_from_narrowing,
     steers_disallowed_model,
 )
+from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.presentation.cli.commands.launch import (
     backend_unreachable_result,
     confirm_tty,
@@ -37,10 +36,13 @@ from promptpotter.presentation.cli.commands.launch import (
 )
 from promptpotter.presentation.cli.commands.new import mint_and_run
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores, resolve_target
-from promptpotter.presentation.cli.parsers import launch_limits_from_args
-from promptpotter.presentation.cli.session import load_session, no_dataset_hint
-from promptpotter.shared.errors import PotterError, ResumeDivergenceError
+from promptpotter.presentation.cli.commands.workspace import (
+    open_stores,
+    resolve_target,
+)
+from promptpotter.presentation.cli.parsers import budget_from_args
+from promptpotter.presentation.cli.session import load_session
+from promptpotter.shared.errors import PayloadInvalidError, ResumeDivergenceError
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -68,7 +70,7 @@ def _start_run(
     return StartRunPayload(
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
-        limits=launch_limits_from_args(args),
+        budget=budget_from_args(args),
         mode=_run_mode(args, fork_on_divergence=fork_on_divergence),
     )
 
@@ -77,8 +79,8 @@ async def _dispatch_held(
     args: argparse.Namespace, ctx: SessionCtx, payload: StartRunPayload | ForkCyclePayload
 ) -> HeldRun:
     """*ctx* follows the cycle the command answers (a fork, a diag sibling) and stays put when the hold is refused."""
-    outcome = await CommandDispatcher(ctx.store, inline=inline_launch(args)).dispatch_cycle_command(
-        CommandCall(payload, uuid.uuid4().hex), expected_version=None
+    outcome = await CommandDispatcher(ctx.store, inline=inline_launch(args)).dispatch(
+        CommandCall(payload)
     )
     held = held_run(outcome.result)
     ctx.cycle_id = held.session.hop.cycle_id
@@ -90,42 +92,38 @@ async def _dispatch_fork(
     ctx: SessionCtx,
     *,
     from_round: int,
-    seed: dict[str, Any],
+    seed: ForkSeed,
     keep_rounds: bool = False,
     reason: str = "",
 ) -> HeldRun:
     """A refused hold leaves no fork: the applier removes the stub it minted."""
-    try:
-        return await _dispatch_held(
-            args,
-            ctx,
-            ForkCyclePayload(
-                campaign_id=ctx.campaign_id,
-                cycle_id=ctx.cycle_id,
-                round=from_round,
-                seed=seed,
-                keep_rounds=keep_rounds,
-                reason=reason,
-                mode=_run_mode(args, fork_on_divergence=args.fork_on_divergence),
-            ),
-        )
-    except (ConfigDriftError, BackendUnreachableError):
-        raise
-    except PotterError as exc:
-        raise SystemExit(f"ERROR: fork refused — {exc}") from exc
+    budget = budget_from_args(args)
+    if budget.named:
+        seed = seed.model_copy(update={"config_overrides": ConfigOverrides(budget=budget)})
+    return await _dispatch_held(
+        args,
+        ctx,
+        PayloadInvalidError.validating(
+            ForkCyclePayload,
+            {
+                "campaign_id": ctx.campaign_id,
+                "cycle_id": ctx.cycle_id,
+                "round": from_round,
+                "seed": seed,
+                "keep_rounds": keep_rounds,
+                "reason": reason,
+                "mode": _run_mode(args, fork_on_divergence=args.fork_on_divergence),
+            },
+        ),
+    )
 
 
 async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> HeldRun:
     rewind_to: int = args.rewind_to_round
-    if rewind_to < 0:
-        raise SystemExit(f"ERROR: --rewind must be >= 0, got {rewind_to}")
-    if rewind_to == 0:
-        raise SystemExit("ERROR: --rewind 0 mints a fork at the cycle root. Use `--diag` instead.")
-
     reason = args.rewind_reason.strip() or f"operator rewind to round {rewind_to}"
     parent_cycle_id = ctx.cycle_id
     held = await _dispatch_fork(
-        args, ctx, from_round=rewind_to, seed={}, keep_rounds=True, reason=reason
+        args, ctx, from_round=rewind_to, seed=ForkSeed(), keep_rounds=True, reason=reason
     )
     logger.info(
         "Operator rewind: %s → %s at round %d [reason=%s]",
@@ -175,11 +173,11 @@ async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> Hel
     )
     overlay = _steer_overlay(args.steer, typing_session.pipeline_schema)
 
-    # The fork-cycle applier's own gate, over the origin's FROZEN config: `ctx.campaign_config` is the one the seed moved.
-    frozen_config = ctx.campaign.config
-    disallowed = steers_disallowed_model(frozen_config, overlay)
+    # The fork-cycle applier's own gate, over the ROOT's config: `ctx.campaign_config` is the one the seed moved.
+    narrowing = resolve_campaign_config(ctx.store, ctx.campaign, None).optimizer_narrowing
+    disallowed = steers_disallowed_model(narrowing, overlay)
     if disallowed:
-        permitted = permitted_models_for_campaign(frozen_config)
+        permitted = permitted_models_from_narrowing(narrowing)
         steered = ", ".join(
             f"{node}.{param}={value!r}"
             for node, cfg in sorted(overlay.items())
@@ -194,11 +192,8 @@ async def _fork_operator_steer(args: argparse.Namespace, ctx: SessionCtx) -> Hel
         if confirm_tty("Proceed with the babysit steer?", default_no=True) is False:
             raise SystemExit("Cancelled. The active campaign is unchanged.")
 
-    seed: dict[str, Any] = {"pipeline_overlay": overlay}
-    if args.steer_max_rounds is not None:
-        seed["config_overrides"] = {"max_rounds": args.steer_max_rounds}
     parent_cycle_id = ctx.cycle_id
-    held = await _dispatch_fork(args, ctx, from_round=0, seed=seed)
+    held = await _dispatch_fork(args, ctx, from_round=0, seed=ForkSeed(pipeline_overlay=overlay))
     logger.info(
         "Operator steer-fork (%s): %s → %s [overlay=%s]",
         "babysit, grade C" if disallowed else "clean, sanctioned values",
@@ -275,14 +270,14 @@ async def _pivot_to_fresh(
         ctx.store,
         MintCampaignPayload(
             dataset_name=drift.dataset_name,
-            limits=launch_limits_from_args(args),
+            budget=budget_from_args(args),
         ),
         inline_launch(args),
     )
 
 
 def cmd_resume(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
-    prepare_launch(args)
+    prepare_launch()
     return _resume(args)
 
 
@@ -296,14 +291,6 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
             "To start a campaign, run `new` against a dataset:\n\n" + no_dataset_hint(stores)
         )
     ctx = load_session(stores, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id))
-    campaign = ctx.campaign
-    if stores.campaigns.in_checkin(campaign.root_hop):
-        raise SystemExit(
-            f"ERROR: campaign '{ctx.campaign_id}' is still in check-in — its origin "
-            "isn't authored yet, so there's nothing to resume.\n"
-            "Finish + Start it in the webapp, or run "
-            "`python -m promptpotter new <file>` to author and run from the CLI."
-        )
 
     resume_from_round: int | None = args.resume_from_round
     if resume_from_round is not None and resume_from_round < 0:
@@ -336,13 +323,10 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     log_startup_summary(
         session,
         session.pipeline_params,
-        len(session.samples),
+        len(session.bank.samples),
         session.backend_client.base_url,
         session.dataset_name,
     )
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
 
     return await _run_loop(args, ctx, held)
-
-
-__all__ = ["cmd_resume"]

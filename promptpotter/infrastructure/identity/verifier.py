@@ -100,6 +100,3 @@ async def verify_id_token(
         email=email,
         claims=payload,
     )
-
-
-__all__ = ["IDTokenInvalidError", "VerifiedIDToken", "verify_id_token"]

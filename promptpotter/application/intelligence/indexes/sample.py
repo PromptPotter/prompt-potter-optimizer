@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.results import CellFold
 from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
-from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
+from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
@@ -38,8 +38,10 @@ class FailureCluster:
 
 
 class SampleIndex:
-    def __init__(self, *, sample_ids: frozenset[int] | None) -> None:
-        # The search pool, applied at REPLAY so the persisted fold stays whole; ``None`` admits all.
+    def __init__(self, *, bank: Bank, sample_ids: frozenset[int] | None) -> None:
+        # Its populations hold only this bank's rows, whichever bank measured them.
+        self._bank = bank
+        # The search split, applied at REPLAY so the persisted fold stays whole; ``None`` admits all.
         self._admitted = sample_ids
         self._rows: dict[str, SampleFoldRow] | None = None
         self._reset()
@@ -73,7 +75,7 @@ class SampleIndex:
 
         for cell in graded:
             facts = cell.facts
-            sid = facts.sample_id
+            sid = self._bank.slot_of[facts.sample_key]
             if sid not in self._introduced:
                 self._introduced.add(sid)
                 new_samples.append((sid, facts.query, facts.ground_truth))
@@ -271,35 +273,25 @@ class SampleIndex:
             }
         ), None
 
-    def _persisted(
-        self, stores: Stores, dataset_name: str | None, scorer_id: str
-    ) -> dict[str, SampleFoldRow]:
+    def _persisted(self, stores: Stores, scorer_id: str) -> dict[str, SampleFoldRow]:
         """A fold with any row graded under another formula is rejected whole."""
-        if not dataset_name:
-            return {}
-        rows = archive_queries.sample_fold_rows(stores, dataset_name=dataset_name)
+        rows = archive_queries.sample_fold_rows(stores, dataset_hash=self._bank.dataset_hash)
         if any(row.fk != scorer_id for row in rows):
             return {}
         return {row.config_key: row for row in rows}
 
-    def refresh(
-        self,
-        stores: Stores,
-        *,
-        scorer: Scorer,
-        dataset_name: str | None,
-    ) -> None:
+    def refresh(self, stores: Stores, *, scorer: Scorer) -> None:
         """A population this formula cannot score is SKIPPED, never 0.0, which poisons every reading."""
         first = self._rows is None
         if self._rows is None:
-            self._rows = self._persisted(stores, dataset_name, scorer.id)
+            self._rows = self._persisted(stores, scorer.id)
             self._replay()
 
         # Signatures BEFORE populations: one growing between the two keeps the OLDER and refolds.
-        signatures = archive_queries.population_signatures(stores, dataset_name=dataset_name)
-        entries = archive_queries.list_populations(stores, dataset_name=dataset_name)
-        # A fenced task's memory grows by the answers it REPLAYS, which move no file.
-        scoped = archive_queries.memory_scoped()
+        signatures = archive_queries.population_signatures(stores, self._bank)
+        entries = archive_queries.list_populations(stores, self._bank)
+        # A scoped task's memory grows by the answers it REPLAYS, which move no file.
+        scoped = not archive_queries.every_campaign_now()
 
         rows: dict[str, SampleFoldRow] = {}
         moved = 0
@@ -309,7 +301,7 @@ class SampleIndex:
             sig = signatures.get(key) or []
             held = self._rows.get(key)
             if scoped or held is None or held.sig != sig:
-                population = archive_queries.load_population(stores, entry)
+                population = archive_queries.load_population(stores, entry, self._bank)
                 if not population:
                     continue
                 held, unscored = self._fold_population(entry, population, scorer, sig, held)
@@ -329,10 +321,9 @@ class SampleIndex:
         if moved or rows.keys() != self._rows.keys():
             self._rows = rows
             self._replay()
-            if dataset_name:
-                archive_queries.write_sample_fold(
-                    stores, dataset_name=dataset_name, rows=rows.values()
-                )
+            archive_queries.write_sample_fold(
+                stores, dataset_hash=self._bank.dataset_hash, rows=rows.values()
+            )
         elif not first:
             return
         if skipped:
@@ -358,14 +349,11 @@ class SampleIndex:
         stores: Stores | None,
         *,
         scorer: Scorer,
-        dataset_name: str | None,
+        bank: Bank,
         sample_ids: frozenset[int] | None,
     ) -> SampleIndex | None:
         if stores is None:
             return None
-        idx = cls(sample_ids=sample_ids)
-        idx.refresh(stores, scorer=scorer, dataset_name=dataset_name)
+        idx = cls(bank=bank, sample_ids=sample_ids)
+        idx.refresh(stores, scorer=scorer)
         return idx
-
-
-__all__ = ["FailureCluster", "SampleIndex", "SampleRecord"]

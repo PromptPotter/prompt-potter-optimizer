@@ -2,17 +2,15 @@ import enum
 from collections.abc import Collection, Iterable, Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, PROMPT_STRING_FIELDS
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS, SHOTS_KEY
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
-# In `param_keys` too, but the prompt editor owns them: node-config widgets exclude them.
-_PROMPT_OWNED_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
-    PROMPT_STRING_FIELDS
-)
+# A locus's kind, decided by the roster: a prompt field, a prompt node's shots, or a config param.
+type LocusKind = Literal["prompt", "shots", "config"]
 
 type MovableAgent = Literal["proposer", "optimizer"]
 MOVABLE_AGENT_LABELS: dict[MovableAgent, str] = {
@@ -164,10 +162,8 @@ CANDIDATE_LIBRARY = "candidate_library"
 CANDIDATE_LIBRARY_FILE = "candidate_library.txt"
 
 
-class PipelineDependency(StrictModel):
+class PipelineDependency(FrozenModel):
     """Surfaced to the operator as a missing input, never a hidden fabricated default."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: str
     node: str
@@ -199,31 +195,38 @@ def dependencies_from_node_roles(
     return tuple(deps)
 
 
-class ObservationMapping(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class ObservationMapping(FrozenModel):
     pipeline_key: str
     output_field: str | None = None
     is_llm: bool = False
 
 
-class NodeOutputSchema(StrictModel):
+class NodeOutputSchema(FrozenModel):
     """The structured output a target pipeline node produces, parsed from ``GET /pipeline``."""
-
-    model_config = ConfigDict(frozen=True)
 
     fields: list[str] = Field(default_factory=list)
     field_descriptions: dict[str, str] = Field(default_factory=dict)
     json_schema: dict[str, Any] = Field(default_factory=dict)
 
 
-class NodePromptInfo(StrictModel):
+class NodePromptInfo(FrozenModel):
     """Its PRESENCE marks the node prompt-bearing: the injection point for the candidate prompt."""
 
-    # `extra="ignore"`: the backend owns this sub-object; PP reads only `template_variables`.
-    model_config = ConfigDict(frozen=True, extra="ignore")
+    # `extra="ignore"`: the backend owns this sub-object; PP reads `template_variables` and `fields`.
+    model_config = ConfigDict(extra="ignore")
 
     template_variables: list[str] = Field(default_factory=list)
+    # The node's prompt loci, IN RENDER ORDER: the order sits inside every cell key it renders.
+    fields: Annotated[tuple[str, ...], shapes_optimizer_prompt]
+
+    @field_validator("fields")
+    @classmethod
+    def _fields_are_loci(cls, fields: tuple[str, ...]) -> tuple[str, ...]:
+        if not fields or len(set(fields)) != len(fields):
+            raise ValueError(f"a prompt node declares distinct fields, at least one: {fields}")
+        if taken := sorted({SHOTS_KEY, "prompt"} & set(fields)):
+            raise ValueError(f"{taken} name the node's shots and its render, never a field")
+        return fields
 
 
 # Exactly what `pipeline_parsing.py::_derive_node_kind` can emit, plus the two `io` ends.
@@ -232,13 +235,11 @@ ViewKind = Literal["io", "llm", "tool", "retriever", "cache", "measurement"]
 ParamKind = Literal["model", "enum", "number", "bool", "string", "prompt", "description", "nested"]
 
 
-class PipelineViewNode(StrictModel):
+class PipelineViewNode(FrozenModel):
     """One node's place in the flow, as a tier and a rank rather than as pixels.
 
     Tier 0 is the chain a sample runs, tier n>0 the n-th nested alternative pipeline; rank is the tier-0 position it acts on.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     id: str
     label: str
@@ -248,8 +249,8 @@ class PipelineViewNode(StrictModel):
     rank: int = 0
 
 
-class PipelineViewEdge(StrictModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+class PipelineViewEdge(FrozenModel):
+    model_config = ConfigDict(populate_by_name=True)
 
     from_: str = Field(alias="from")
     to: str
@@ -257,10 +258,10 @@ class PipelineViewEdge(StrictModel):
     kind: Literal["forward", "loop", "directive", "alternative"] = "forward"
 
 
-class PipelineView(StrictModel):
+class PipelineView(FrozenModel):
     """The graph projection derived from a manifest's nodes and pipelines; no manifest declares one."""
 
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True)
 
     nodes: list[PipelineViewNode] = Field(default_factory=list)
     edges: list[PipelineViewEdge] = Field(default_factory=list)
@@ -271,10 +272,8 @@ def token_bound_of_bytes(utf8_bytes: int) -> int:
     return utf8_bytes
 
 
-class LLMSpendBound(StrictModel):
+class LLMSpendBound(FrozenModel):
     """In the counts its BACKEND enforces, never a price (``infrastructure/llm/pricing.py::rate_ceiling``)."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: Literal["llm"]
     # Every retry and repair included.
@@ -296,9 +295,7 @@ class LLMSpendBound(StrictModel):
         return held | {"input_tokens": token_bound_of_bytes(int(served["input_bytes"]))}
 
 
-class WebSpendBound(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class WebSpendBound(FrozenModel):
     kind: Literal["web"]
     queries: int = Field(ge=0)
     usd_per_query: float = Field(ge=0)
@@ -307,9 +304,7 @@ class WebSpendBound(StrictModel):
 NodeSpendBound = Annotated[LLMSpendBound | WebSpendBound, Field(discriminator="kind")]
 
 
-class PipelineNode(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class PipelineNode(FrozenModel):
     name: str
     # `None` is "the producer declared no type" — a real state, never read as a default kind.
     kind: NodeKind | None = None
@@ -336,6 +331,18 @@ class PipelineNode(StrictModel):
     @property
     def output_keys(self) -> list[str]:
         return [m.pipeline_key for m in self.observation_mappings]
+
+    @property
+    @shapes_optimizer_prompt
+    def prompt_fields(self) -> tuple[str, ...]:
+        """In render order; ``()`` on a node that bears no prompt."""
+        return () if self.prompt_info is None else self.prompt_info.fields
+
+    @property
+    @shapes_optimizer_prompt
+    def open_prompt_fields(self) -> list[str]:
+        """The ones a search may write: every declared field the operator did not hold."""
+        return [f for f in self.prompt_fields if f not in self.param_keys_held]
 
     @property
     def provider(self) -> str:
@@ -372,7 +379,7 @@ class PipelineNode(StrictModel):
     def param_kind(self, key: str) -> ParamKind:
         if description_path(key) is not None:
             return "description"
-        if key in _PROMPT_OWNED_FIELDS:
+        if key in self.prompt_fields:
             return "prompt"
         if self.param_types.get(key) in NESTED_PARAM_TYPES:
             return "nested"
@@ -390,7 +397,7 @@ ParamSource = Literal[
 ]
 
 
-class NodeConfigParam(StrictModel):
+class NodeConfigParam(FrozenModel):
     """One param a node carries, in the COMPLETE per-node list a reader sums `movable_by` over.
 
     `kind` names the surface that owns it: `model`/`enum` a select, `number`/`bool`/`string` a typed
@@ -402,8 +409,6 @@ class NodeConfigParam(StrictModel):
     structured-output contract); `held` says this campaign closed an axis the dataset offered,
     reversibly. `model` is in neither: an ordinary axis.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     key: str
     value: Any = None
@@ -420,10 +425,8 @@ class NodeConfigParam(StrictModel):
     permitted_stated: bool = False
 
 
-class NodeReach(StrictModel):
+class NodeReach(FrozenModel):
     """How far the search reaches on one node: an unmoved param is SHUT, an absent node unknown."""
-
-    model_config = ConfigDict(frozen=True)
 
     open: int
     openable: int
@@ -465,15 +468,13 @@ class NestedPipelineRef(StrictModel):
     dataset: str = Field(description="Slug of the pipeline that node runs; fetch it the same way.")
 
 
-class ModelCapability(StrictModel):
+class ModelCapability(FrozenModel):
     """What one model accepts and what it costs on one provider, resolved server-side.
 
     `reasoning_efforts` `None` is UNKNOWN, never "unsupported": keep the node's declared ladder.
     `reasoning_note` is populated in every arm. Card fields are optional and a third party's claim,
     except the two prices, which are the rate table's for `provider`.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     model: str
     provider: str
@@ -508,23 +509,19 @@ assert CAPABILITY_ANSWERED_PARAMS.issubset(_MODEL_ANSWER_FIELDS)
 _EFFORT_LADDER_ORDER: tuple[str, ...] = ("none", "minimal", "low", "medium", "high")
 
 
-class NodeSearchNarrowing(StrictModel):
+class NodeSearchNarrowing(FrozenModel):
     """A campaign's own declaration over the dataset's, whose two halves compose differently.
 
     ``param_keys`` SUBSETS the dataset's tunable surface, prompt fields included;
     ``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.
     """
 
-    model_config = ConfigDict(frozen=True)
-
     param_keys: list[str] | None = None
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
 
 
-class ParamIntent(StrictModel):
+class ParamIntent(FrozenModel):
     """What an operator set on one config row: a free param's padlock, or an axis's ticks."""
-
-    model_config = ConfigDict(frozen=True)
 
     key: str
     open: bool
@@ -549,17 +546,13 @@ def narrowing_of(params: list[NodeConfigParam], intents: list[ParamIntent]) -> N
     return NodeSearchNarrowing(param_keys=keys, param_allowed_values=allowed)
 
 
-class ManifestNodeOverlay(StrictModel):
+class ManifestNodeOverlay(FrozenModel):
     """One optimizer node's delta over its manifest's ``config``."""
-
-    model_config = ConfigDict(frozen=True)
 
     config: dict[str, Any] = Field(default_factory=dict)
 
 
-class PipelineSchema(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class PipelineSchema(FrozenModel):
     name: str = ""
     version: str = ""
     description: str = ""
@@ -571,6 +564,9 @@ class PipelineSchema(StrictModel):
     view: PipelineView | None = None
     # Rides the schema, NOT the identity. Empty is UNKNOWN, never "accepts nothing".
     model_capabilities: CapabilityMenu = Field(default_factory=dict)
+    # Per gateway provider, each model's default host order — written into a node naming no
+    # `route_order` before its config is keyed (`pipeline_overlay.py::pin_default_routes`).
+    default_routes: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _names_the_chain_a_round_runs(self) -> "PipelineSchema":
@@ -616,7 +612,7 @@ class PipelineSchema(StrictModel):
         )
 
     def to_pipeline_params(self) -> dict[str, Any]:
-        """The WIRE base only: ``build_origin_cycle_id`` hashes the overlay-merged params instead."""
+        """The WIRE base only: ``origin_content_hash`` hashes the overlay-merged params instead."""
         return {"steps": list(self.active_steps)}
 
     def model_options(self, node: "PipelineNode") -> list[str]:
@@ -724,9 +720,14 @@ class PipelineSchema(StrictModel):
             resolved = (values or {}).get(n.name, n.current_config)
             stamped = (sources or {}).get(n.name, {})
             # `param_keys_held` joins: a closed axis unset in `current_config` otherwise leaves the surface.
-            keys = n.param_keys | n.param_keys_held | set(n.current_config)
+            keys = n.param_keys | n.param_keys_held | set(n.current_config) | set(n.prompt_fields)
             declared_node = declared.get_node(n.name) if declared else None
-            for key in sorted(keys - {OUTPUT_SCHEMA_KEY}):
+            # The prompt rows lead in the node's declared order: that roster is the editor's.
+            ordered = [
+                *n.prompt_fields,
+                *sorted(keys - set(n.prompt_fields) - {OUTPUT_SCHEMA_KEY}),
+            ]
+            for key in ordered:
                 options: list[str] = []
                 permitted: list[str] = []
                 stated = False
@@ -773,7 +774,7 @@ class PipelineSchema(StrictModel):
                     else ""
                 )
                 reach: dict[MovableAgent, Collection[str]] = {
-                    "proposer": n.param_keys,
+                    "proposer": n.param_keys | set(n.open_prompt_fields),
                     "optimizer": (own_axes or {}).get(n.name, set()),
                 }
                 movable: list[MovableAgent] = (
@@ -852,7 +853,11 @@ class PipelineSchema(StrictModel):
                 if nv is None:
                     out.append(n)
                     continue
-                keys = n.param_keys if nv.param_keys is None else n.param_keys & set(nv.param_keys)
+                # A prompt field is narrowed as an axis is, and held beside them; never a config key.
+                fields = set(n.open_prompt_fields)
+                surface = n.param_keys | fields
+                kept = surface if nv.param_keys is None else surface & set(nv.param_keys)
+                keys = kept - fields
                 allowed = {
                     **n.param_allowed_values,
                     **{k: list(v) for k, v in nv.param_allowed_values.items()},
@@ -862,7 +867,7 @@ class PipelineSchema(StrictModel):
                         update={
                             "param_keys": keys,
                             # Accumulated: narrowing composes (config, frozen snapshot, fork seed).
-                            "param_keys_held": n.param_keys_held | (n.param_keys - keys),
+                            "param_keys_held": n.param_keys_held | (surface - kept),
                             "param_allowed_values": allowed,
                             # A list restating the declaration closed nothing.
                             "param_values_narrowed": n.param_values_narrowed
@@ -903,12 +908,9 @@ class PipelineSchema(StrictModel):
     def value_tree(self, *, prompt_delivery: Delivery) -> tuple[ValueLeaf, ...]:
         """``prompt_delivery`` is ``Connector.prompt_delivery``: a default would claim "always arrives"."""
         leaves: list[ValueLeaf] = []
-        prompt_node = next(iter(self.prompt_node_names()), None)
+        prompt_nodes = {node.name for node in self.prompt_nodes()}
         for step in self.declared_nodes:
             declared = set(step.param_keys) - PARAM_FORBIDDEN_KEYS - SCHEMA_OWNED_FIELDS
-            # The prompt node's prompt fields ride `prompt_fields_updates`, never node params.
-            if step.name == prompt_node:
-                declared -= _PROMPT_OWNED_FIELDS
             for key in sorted(declared):
                 leaves.append(
                     ValueLeaf(
@@ -920,7 +922,7 @@ class PipelineSchema(StrictModel):
                         mutable=not self.pinned(step, key),
                     )
                 )
-            if step.name != prompt_node or step.prompt_info is None:
+            if step.name not in prompt_nodes:
                 continue
             if visibility_of(prompt_delivery) == "on_demand":
                 # PINNED: a candidate free to write its own advert wins by making itself uninviting.
@@ -934,7 +936,7 @@ class PipelineSchema(StrictModel):
                         mutable=False,
                     )
                 )
-            for key in self.open_prompt_fields():
+            for key in step.open_prompt_fields:
                 leaves.append(
                     ValueLeaf(
                         path=f"{step.name}.prompt.{key}",
@@ -956,43 +958,17 @@ class PipelineSchema(StrictModel):
         return out
 
     @shapes_optimizer_prompt
-    def prompt_node_names(self) -> list[str]:
-        return [node.name for node in self.nodes if node.prompt_info is not None]
+    def prompt_nodes(self) -> list[PipelineNode]:
+        """The chain's prompt-bearing nodes, in chain order: every one renders its own prompt."""
+        return [node for node in self.nodes if node.prompt_info is not None]
 
-    @shapes_optimizer_prompt
-    def open_prompt_fields(self) -> list[str]:
-        """Only the FIRST prompt node's: the one ``to_job_search_point`` renders the prompt onto."""
-        names = self.prompt_node_names()
-        node = self.get_node(names[0]) if names else None
-        return [f for f in PROMPT_STRING_FIELDS if node is not None and f in node.param_keys]
-
-
-__all__ = [
-    "CANDIDATE_LIBRARY",
-    "CANDIDATE_LIBRARY_FILE",
-    "MEMBER_KINDS",
-    "MOVABLE_AGENTS",
-    "MOVABLE_AGENT_LABELS",
-    "THINKING_KINDS",
-    "LLMSpendBound",
-    "ManifestNodeOverlay",
-    "MovableAgent",
-    "NestedPipelineRef",
-    "NodeConfigParam",
-    "NodeKind",
-    "NodeOutputSchema",
-    "NodePromptInfo",
-    "NodeRole",
-    "NodeSpendBound",
-    "ObservationMapping",
-    "ParamSource",
-    "PipelineDependency",
-    "PipelineNode",
-    "PipelineSchema",
-    "PipelineView",
-    "PipelineViewEdge",
-    "PipelineViewNode",
-    "WebSpendBound",
-    "dependencies_from_node_roles",
-    "token_bound_of_bytes",
-]
+    def locus_kind(self, node: str, key: str) -> LocusKind:
+        """The roster's answer; a node it does not declare holds no locus."""
+        declared = self.get_node(node)
+        if declared is None:
+            raise ValueError(f"locus {node}.{key}: the pipeline declares no node {node!r}")
+        if key in declared.prompt_fields:
+            return "prompt"
+        if key == SHOTS_KEY and declared.prompt_info is not None:
+            return "shots"
+        return "config"

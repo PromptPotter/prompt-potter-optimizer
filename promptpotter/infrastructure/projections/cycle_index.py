@@ -4,24 +4,11 @@ from pathlib import Path
 
 from promptpotter.domain.cycle_listing import CycleIndex, IndexRound, Intervention
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.phases import CampaignPhase
-from promptpotter.domain.run_records import (
-    CycleFinalRecord,
-    CycleMintedRecord,
-    CycleRecord,
-    CycleSupersededRecord,
-    ForkGradedRecord,
-    InterventionRecord,
-    PhaseRecord,
-    RoundClosedRecord,
-    RoundEnteredRecord,
-    RoundStandingRecord,
-    RunPhaseRecord,
-    SpawnedRecord,
-)
+from promptpotter.domain.run_records import CycleRecord
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    moves_index,
     scan_cell_formula,
     scan_cycle_facts,
     scan_standing_rounds,
@@ -29,8 +16,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import Moment
-
-__all__ = ["CycleIndexProjection", "read_cycle_index", "write_cycle_index"]
 
 
 def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | None:
@@ -62,7 +47,10 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
         final=None if final is None else final.final,
         superseded_by=facts.superseded_by,
         rounds=[
-            IndexRound(round=n, accuracy=held.close.accuracy) for n, held in standing.rounds.items()
+            IndexRound(
+                round=n, accuracy=None if (fold := held.close.fold) is None else fold.accuracy
+            )
+            for n, held in standing.rounds.items()
         ],
         standing=standing.standing,
     )
@@ -74,27 +62,11 @@ def write_cycle_index(cycle_dir: Path) -> None:
         write_json(CycleLayout(cycle_dir).manifest, index.model_dump(mode="json"))
 
 
-_INDEXED = (
-    CycleMintedRecord,
-    CycleFinalRecord,
-    CycleSupersededRecord,
-    ForkGradedRecord,
-    InterventionRecord,
-    SpawnedRecord,
-    RunPhaseRecord,
-    RoundEnteredRecord,
-    RoundClosedRecord,
-    RoundStandingRecord,
-)
-
-
 class CycleIndexProjection(Projection):
     def __init__(self, cycle_dir: CycleDir) -> None:
         self._cycle_dir = Path(cycle_dir)
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
         self.at_offset = offset
-        if isinstance(record, _INDEXED) or (
-            isinstance(record, PhaseRecord) and record.phase == CampaignPhase.INIT
-        ):
+        if moves_index(record):
             write_cycle_index(self._cycle_dir)

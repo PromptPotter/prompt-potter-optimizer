@@ -20,6 +20,7 @@ from promptpotter.application.initialization.loop_start import (
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.origin import resolve_origin_opt_search_point
+from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.scoring import (
@@ -27,7 +28,7 @@ from promptpotter.domain.scoring import (
     is_verifier_graded,
     modal_answer_share,
 )
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import DiagnosticError
@@ -39,8 +40,6 @@ if TYPE_CHECKING:
     from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
-
-__all__ = ["class_floor", "draw_bank", "draw_bench", "screen_inner_seeds"]
 
 
 SeedVerdict = Literal["reject", "suspect", "unsettled", "pass", "no_floor"]
@@ -182,13 +181,16 @@ def _call_cost_and_latency(cells: Sequence[GradedCell]) -> tuple[list[float], fl
     return latencies, cost
 
 
-def draw_bank(all_samples: list[Sample], n: int, seed: int) -> list[Sample]:
+def draw_bank(all_samples: Sequence[Sample], n: int, seed: int) -> list[Sample]:
     """The draw ``runner/inner/spawn.py`` imports: a screen must draw the bank a run draws."""
+    # A pure function of the declared seed, so every arm of a head-to-head draws one bank.
     return random.Random(seed).sample(all_samples, min(n, len(all_samples)))
 
 
-def draw_bench(all_samples: list[Sample], bank: list[Sample], n: int, seed: int) -> list[Sample]:
-    """The held-out rows BESIDE a drawn bank, by content: the bank a screen passed stays the search pool byte for byte."""
+def draw_bench(
+    all_samples: Sequence[Sample], bank: list[Sample], n: int, seed: int
+) -> list[Sample]:
+    """The held-out rows BESIDE a drawn bank, by content: the bank a screen passed stays the search split byte for byte."""
     taken = {s.key for s in bank}
     rest = [s for s in all_samples if s.key not in taken]
     drawn = random.Random(seed).sample(rest, min(n, len(rest)))
@@ -212,7 +214,7 @@ async def screen_inner_seeds(
         raise DiagnosticError(f"--parallel must be at least 1, got {parallel}.")
     if provider and not model:
         raise DiagnosticError("--provider is the gateway a --model is asked through; pass both.")
-    async with paid_pass(stores=stores, verb="seed-screen", hop=None, declared=SpendCeilings()):
+    async with paid_pass(stores=stores, verb="seed-screen", hop=None, declared=Budget()):
         return await _screen(
             stores, identity, dataset_name, seeds, n_samples, repeat, parallel, model, provider
         )
@@ -230,7 +232,7 @@ async def _screen(
     provider: str | None,
 ) -> SeedScreenOutcome:
     session = await init_services(dataset_name=dataset_name, identity=identity, stores=stores)
-    all_samples = session.samples
+    all_samples = session.bank.samples
     if not all_samples:
         raise DiagnosticError(f"dataset {dataset_name!r} loaded zero samples.")
 
@@ -240,21 +242,27 @@ async def _screen(
         if dataset_dir is None
         else load_dataset_campaign_config(dataset_dir)
     )
+    solver = session.pipeline_schema.prompt_nodes()
+    if model and not solver:
+        raise DiagnosticError(
+            f"dataset {dataset_name!r} declares no prompt node to pin --model on."
+        )
     if model:
         # The ENVIRONMENT pin an L4 pool cell carries (`panel.tasks[].inner_model`), laid on the
         # dataset's own node config, so a (dataset, solver) pair is screened as its cell would run.
-        llm_node = session.llm_node_name()
         po = dict(campaign_config.pipeline_overlay)
-        po[llm_node] = {
-            **po.get(llm_node, {}),
-            "model": model,
-            **({"provider": provider} if provider else {}),
-        }
+        for node in solver:
+            po[node.name] = {
+                **po.get(node.name, {}),
+                "model": model,
+                **({"provider": provider} if provider else {}),
+            }
         campaign_config = campaign_config.model_copy(update={"pipeline_overlay": po})
+    session = configure_and_apply_pipeline(session, campaign_config)
     arm_diagnostic_scoring(session, campaign_config, source=RunSource.SEED_SCREEN)
     pipeline_params = session.pipeline_params
     # `run_walks` re-reads this at every launch boundary and clamps it to the backend's ceiling.
-    session.control = replace(session.control, held_lookahead=parallel)
+    session.state.control = replace(session.state.control, held_lookahead=parallel)
     ceiling = session.backend_client.max_cells_in_flight
     if parallel > ceiling:
         # A warning: a terminal shows this layer's info only under `--verbose`.
@@ -267,22 +275,19 @@ async def _screen(
         )
     # The run's C0 framing: the origin must be the prompt the campaign will actually score.
     origin = resolve_origin_opt_search_point(
-        [session.llm_node_name()],
         dataset_dir,
         pipeline_params=pipeline_params,
         schema=session.pipeline_schema,
     )
-    if session.pipeline_schema.prompt_node_names() and not any(origin.prompt_field_dict().values()):
+    if unprompted := [node.name for node in solver if not origin.prompt(node.name).fields]:
         # A campaign's check-in writes the missing prompt; a screen has none, so a bare question
         # would be graded under no answer grammar and the matcher's misses read as the model's.
         raise DiagnosticError(
-            f"dataset {dataset_name!r} declares no `{session.llm_node_name()}` prompt in its "
+            f"dataset {dataset_name!r} authors no starting prompt for {unprompted} in its "
             "origin.yaml, so its origin is the bare question. Write one before screening."
         )
-    origin_sp = origin.to_job_search_point(
-        schema=session.pipeline_schema,
-        framing=campaign_framing(stores, campaign_config, session.dataset),
-        demo=session.scoring.require_partition().demo,
+    origin_sp = session.points(campaign_framing(stores, campaign_config, session.dataset)).job(
+        origin
     )
 
     readings: list[SeedReading] = []

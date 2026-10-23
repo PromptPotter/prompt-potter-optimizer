@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { DatasetIndexEntry, DraftPatch, OriginEntry, StartCheckinOptions } from "@/lib/api";
+import type {
+  Budget,
+  DatasetIndexEntry,
+  DraftPatch,
+  DraftSummary,
+  OriginEntry,
+  StartCheckinOptions,
+} from "@/lib/api";
+import { budgetAxis } from "@/lib/derivations";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import type { BlockItem } from "@/lib/chat/thread";
 import { useIngest } from "@/lib/ingest-flow";
@@ -45,11 +53,13 @@ function CheckinLoadingWindow({ model }: { model: string }) {
 
 function EntryList({
   flow,
+  drafts,
   origins,
   datasets,
   open,
 }: {
   flow: IngestFlow;
+  drafts: DraftSummary[];
   origins: OriginEntry[];
   datasets: DatasetIndexEntry[];
   // React writes `open` only when the PROP changes, so a poll tick leaves a hand-opened list alone.
@@ -64,11 +74,16 @@ function EntryList({
       }}
     >
       <summary>
-        Start a campaign — {origins.length} origins · {datasets.length} datasets
+        Start a campaign —{" "}
+        {drafts.length > 0 ? `${drafts.length} open check-ins · ` : ""}
+        {origins.length} origins · {datasets.length} datasets
       </summary>
       <DatasetPickList
+        drafts={drafts}
         origins={origins}
         datasets={datasets}
+        onReopenDraft={flow.reopenDraft}
+        onDiscardDraft={flow.discardDraft}
         onOpenOrigin={flow.openOrigin}
         onPick={flow.pickDataset}
         busy={flow.busy}
@@ -120,6 +135,7 @@ export function useIngestItems(threadEmpty: boolean): { head: BlockItem[]; tail:
             node: (
               <EntryList
                 flow={flow}
+                drafts={collection.drafts}
                 origins={collection.origins}
                 datasets={collection.entries}
                 open={threadEmpty}
@@ -152,10 +168,11 @@ export function IngestComposer() {
   );
 }
 
-function boundsLabel(launch: StartCheckinOptions, maxRounds: number): string {
-  const usd = launch.limits?.ceiling?.usd;
+function boundsLabel(launch: StartCheckinOptions, campaign: Budget): string {
+  const usd = launch.budget?.usd;
   const spend = usd == null ? "account's cap" : `$${usd} cap`;
-  return `${spend} · ${maxRounds} round${maxRounds === 1 ? "" : "s"}`;
+  const rounds = budgetAxis(campaign, "rounds");
+  return `${spend} · ${rounds == null ? "no round cap" : `${rounds} round${rounds === 1 ? "" : "s"}`}`;
 }
 
 type Step = "data" | "scoring" | "pipeline" | "run";
@@ -167,7 +184,6 @@ const STEP_OF_GAP: Record<string, Step> = {
   [ORIGIN_KEY.scoringMatcher]: "scoring",
   [ORIGIN_KEY.connector]: "pipeline",
   [ORIGIN_KEY.backendNodeConfig]: "pipeline",
-  [ORIGIN_KEY.maxRounds]: "run",
 };
 
 function ReadyBlock({ flow }: { flow: IngestFlow }) {
@@ -200,7 +216,6 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
     draft.column_query && draft.column_ground_truth
       ? `${draft.column_query} → ${draft.column_ground_truth}`
       : "columns not set";
-  const maxRounds = draft.optimization_overrides.max_rounds;
   const steps = (draft.setup_schema as FieldSchema).properties ?? {};
   const commit: Commit = (path, value, writeOnly) => {
     if (writeOnly) setLaunch((l) => setIn(l, path, value));
@@ -272,7 +287,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         <OptimizerSetupSection draft={draft} onApply={flow.applyPatch} />
       </SetupStep>
 
-      <SetupStep title="Run bounds" answer={boundsLabel(launch, maxRounds)} open={gapped.has("run")}>
+      <SetupStep title="Run bounds" answer={boundsLabel(launch, draft.optimization_overrides.budget)} open={gapped.has("run")}>
         {steps.run ? (
           <SchemaFields schema={steps.run} values={{ ...draft, ...launch }} onCommit={commit} />
         ) : null}
@@ -333,9 +348,6 @@ function CollisionCard({
         </button>{" "}
         <button type="button" onClick={flow.saveAsNew}>
           Save as new ({suggestedSlug})
-        </button>{" "}
-        <button type="button" onClick={flow.replaceExisting}>
-          Replace {existingSlug} — its campaigns are kept as a version
         </button>{" "}
         <button type="button" onClick={flow.cancelCollision}>
           Cancel

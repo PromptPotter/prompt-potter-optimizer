@@ -10,10 +10,14 @@ from promptpotter.application.bench.llm_call import (
     run_optimizer_node,
 )
 from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.optimizer_manifest import llm_node_document, running_prompt
+from promptpotter.application.optimizer_manifest import llm_node_manifest, running_prompt
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS, TaskDecomposition
+from promptpotter.domain.opt_search_point import (
+    PROMPT_FIELDS,
+    TEMPLATE_TOKEN_RE,
+    OptimizerPromptTemplate,
+)
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.dataset_access import (
@@ -21,18 +25,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     readable_task_context,
 )
 from promptpotter.infrastructure.store.stores import Stores
-
-__all__ = [
-    "CheckinOutput",
-    "CheckinTaskContext",
-    "campaign_framing",
-    "checkin_call_context",
-    "checkin_campaign_call_context",
-    "commit_task_framing",
-    "committed_task_context",
-    "run_checkin",
-]
-
 
 ORIGIN_FIELD_MAX = 600
 
@@ -141,7 +133,7 @@ class CheckinOutput(OptimizerResponseModel):
             if not getattr(self, name).strip()
         ] + [
             f"{name} is {len(value)} chars (at most {ORIGIN_FIELD_MAX})"
-            for name in PROMPT_STRING_FIELDS
+            for name in PROMPT_FIELDS
             if len(value := getattr(self, name)) > ORIGIN_FIELD_MAX
         ]
         if problems:
@@ -150,6 +142,9 @@ class CheckinOutput(OptimizerResponseModel):
                 "move domain detail into task_context."
             )
         return self
+
+
+assert set(PROMPT_FIELDS) <= set(CheckinOutput.model_fields)
 
 
 def campaign_framing(
@@ -172,8 +167,8 @@ def committed_task_context(stores: Stores, dataset: ResolvedDataset | None) -> T
 
 def _checkin_template() -> OptimizerPromptTemplate:
     """No panel is filled into the check-in, so any other ``{{slot}}`` reaches the model literally."""
-    _node, config, document = llm_node_document("checkin")
-    template = running_prompt("checkin", config, document)
+    _node, config, manifest = llm_node_manifest("checkin")
+    template = running_prompt("checkin", config, manifest)
     if unknown := set(TEMPLATE_TOKEN_RE.findall(template.render())) - {"consultation_instruction"}:
         raise KeyError(f"Template 'checkin' references unknown slot(s): {sorted(unknown)}.")
     return template
@@ -196,12 +191,10 @@ async def run_checkin(
     return raw, repair_attempts
 
 
-def checkin_campaign_call_context(stores: Stores, campaign_id: str) -> LLMCallContext:
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None:
-        raise ValueError(f"check-in campaign {campaign_id!r} not found — cannot resolve its origin")
+def draft_call_context(stores: Stores, draft_id: str) -> LLMCallContext:
+    """Billed to the draft's ledger, which Start moves into the root cycle it mints."""
     return checkin_call_context(
-        stores, CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(campaign.root_hop)))
+        stores, CycleEventLog.open(CycleDir(stores.drafts.draft_dir(draft_id)))
     )
 
 

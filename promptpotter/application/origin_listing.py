@@ -7,7 +7,7 @@ from pydantic import Field
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
-from promptpotter.application.datasets.loaders import bank_samples, resolve_dataset_items
+from promptpotter.application.datasets.loaders import resolve_bank
 from promptpotter.application.datasets.prompts import has_dataset_prompts
 from promptpotter.application.datasets.startability import dataset_reading, offered
 from promptpotter.application.origin import resolve_origin_opt_search_point
@@ -16,14 +16,14 @@ from promptpotter.application.pipeline_resolve import (
     experiment_outside_run,
     resolve_pipeline_config_params,
 )
-from promptpotter.application.runner.campaign_ids import build_origin_cycle_id
+from promptpotter.application.runner.campaign_ids import origin_content_hash
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.dataset_start import DatasetStartBlock
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.results import PointContext
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
-    DatasetAccessError,
     DatasetTier,
     ResolvedDataset,
     list_readable_datasets,
@@ -31,21 +31,13 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
+    DatasetAccessError,
     NotFoundError,
     PayloadInvalidError,
     StoredConfigInvalidError,
 )
 
 logger = logging.getLogger(__name__)
-
-__all__ = [
-    "DatasetIndexEntry",
-    "OriginEntry",
-    "canonical_origin_campaign",
-    "list_datasets",
-    "list_origins",
-    "prospective_origin_id",
-]
 
 
 def prospective_origin_id(stores: Stores, dataset: ResolvedDataset) -> str | None:
@@ -72,22 +64,18 @@ def prospective_origin_id(stores: Stores, dataset: ResolvedDataset) -> str | Non
             workspace=stores.base_dir,
         )
         opt_sp = resolve_origin_opt_search_point(
-            prompt_node_names=schema.prompt_node_names(),
             dataset_dir=dataset_dir,
             pipeline_params=base_pp,
             schema=schema,
         )
-        items = resolve_dataset_items(stores, dataset)
-        if not items:
+        bank = resolve_bank(stores, dataset)
+        if not bank.samples:
             return None
-        partition = partition_bank(bank_samples(items), cfg.dataset_split)
-        return build_origin_cycle_id(
-            opt_sp,
-            schema,
-            list(partition.search),
-            framing=campaign_framing(stores, cfg, dataset),
-            demo=partition.demo,
-        ).removeprefix("cycle_")
+        partition = partition_bank(bank.samples, cfg.dataset_split, seed=cfg.run_seed)
+        points = PointContext(
+            schema=schema, framing=campaign_framing(stores, cfg, dataset), demo=partition.demo
+        )
+        return origin_content_hash(opt_sp, points, list(partition.search))
     except (
         OSError,
         ValueError,
@@ -104,10 +92,7 @@ def prospective_origin_id(stores: Stores, dataset: ResolvedDataset) -> str | Non
 
 
 class DatasetIndexEntry(StrictModel):
-    """One row in the dataset registry — backs the Dashboard ``New campaign`` view.
-
-    Wire shape pinned in ``docs/specs/api-openapi.yaml::DatasetIndexEntry``.
-    """
+    """One row in the dataset registry — backs the Dashboard ``New campaign`` view."""
 
     name: str = Field(description="The definition's path under its tier, `/`-separated.")
     title: str | None = Field(default=None, description="Display title (from `README.md`).")

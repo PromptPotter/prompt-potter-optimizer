@@ -1,6 +1,6 @@
 # application/initialization/ — run init
 
-**Run init** — the ordered chain from a `new` / `resume` invocation to the first round: `init_services` (→ `Session`) → `populate_session_scoring` → `init_cycle` (resume or create) → `init_optimization_loop` (preflight, observability, `INIT.exit`, hand off to the round loop). **Each step's preconditions are the prior step's postconditions** — called out of order, the session is left under-wired. One member is deliberately NOT of that chain: `arm_diagnostic_scoring` is step 2 alone, the one path every verb that scores outside the loop takes — never a copy per verb.
+**Run init** — the ordered chain from a `new` / `resume` invocation to the first round: `init_services` (→ `Session`) → `populate_session_scoring` → `init_cycle` (resume or create) → `init_optimization_loop` (preflight, resume or fork) → `finalize_loop_state` (`INIT.exit` on the cycle the loop runs, once its caller moved onto a fork; hand off to the round loop). **Each step's preconditions are the prior step's postconditions** — called out of order, the session is left under-wired. One member is deliberately NOT of that chain: `arm_diagnostic_scoring` is step 2 alone, the one path every verb that scores outside the loop takes, and a verb scoring a cycle's points opens through `loop_start.py::open_diagnostic` — never a copy per verb.
 
 ## Registries complete at a declared step
 
@@ -9,9 +9,8 @@
 ## A schemaless pipeline is a 422
 
 `init_services` raises `pipeline_config_invalid` — **422, typed rather than bare** — when the dataset's
-`dataset.yaml::pipeline` names no `backend_type`, or the declaration (a backend's answer included) names no nodes
+`dataset.yaml` `pipeline` names no `backend_type`, or the declaration (a backend's answer included) names no nodes
 or does not parse, and `backend_unreachable` when a remote backend does not answer `GET /pipeline` or
 answers a 5xx (`BackendClient.fetch_pipeline` classifies) — the local declaration overlays the backend's
 schema, never stands in for it. Every measurement is keyed on that schema, so there is no degraded run to fall through to, and a 500 here reads as `transient` to the webapp,
-which would retry a config only the operator can fix. The one SILENT arm is `init_cycle` returning
-`(None, 1)` on an empty `session.backend_id`: the run continues with no per-cycle persistence.
+which would retry a config only the operator can fix.

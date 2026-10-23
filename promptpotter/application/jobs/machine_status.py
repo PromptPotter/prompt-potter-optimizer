@@ -3,12 +3,18 @@ from __future__ import annotations
 from pydantic import Field
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity, throttle_hold
-from promptpotter.application.jobs.registry import Job, JobHolder, JobRegistry
+from promptpotter.application.jobs.registry import (
+    EmbeddedRun,
+    InnerRun,
+    Job,
+    JobRegistry,
+    SlotHolder,
+)
 from promptpotter.config.settings import settings
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.migration import is_host
-from promptpotter.shared.identity import IdentityContext, acting_principal_id
+from promptpotter.shared.identity import IdentityContext, acting_principal
 
 _WHAT_DOC = (
     "The job in words (`Job.what`), worded once for every surface: a run's `campaign/cycle`, a "
@@ -21,7 +27,7 @@ class MachineSlot(StrictModel):
 
     job_id: str
     what: str = Field(description=_WHAT_DOC)
-    holder: JobHolder = Field(
+    holder: SlotHolder = Field(
         description="WHAT holds the slot, by `kind`: a `campaign_launch` (its run is a cycle "
         "`/cycles` lists) or a `scoring_pass` (a paid verb with no cycle of its own)."
     )
@@ -36,10 +42,12 @@ class MachineSlot(StrictModel):
 
     @classmethod
     def of(cls, job: Job, *, account: str) -> MachineSlot:
+        holder = job.holder
+        assert not isinstance(holder, EmbeddedRun | InnerRun), "holds no slot"
         return cls(
             job_id=job.job_id,
             what=job.what,
-            holder=job.holder,
+            holder=holder,
             user=job.user_id,
             mine=job.user_id == account,
             started_at=job.started_at,
@@ -148,7 +156,7 @@ class MachineStatusResponse(StrictModel):
 
 def machine_status(jobs: JobRegistry, *, identity: IdentityContext) -> MachineStatusResponse:
     """Occupancy is not relative to who asks; which slots are NAMED is. Blocking: threadpool it."""
-    principal_id = acting_principal_id(identity)
+    principal_id = acting_principal(identity).id
     account = str(identity.user_id)
     held = [MachineSlot.of(job, account=account) for job in jobs.list_running()]
     sees_all = settings.MACHINE_STATUS_SCOPE == "all" or is_host(identity)
@@ -193,13 +201,3 @@ def machine_status(jobs: JobRegistry, *, identity: IdentityContext) -> MachineSt
             if job.principal_id == principal_id and job.refusal
         ],
     )
-
-
-__all__ = [
-    "MachineNotice",
-    "MachineQueueEntry",
-    "MachineRefusal",
-    "MachineSlot",
-    "MachineStatusResponse",
-    "machine_status",
-]

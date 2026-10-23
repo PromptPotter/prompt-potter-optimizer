@@ -46,7 +46,7 @@ Adding one *to this repo* is one new file under `promptpotter/connectors/` defin
 
 ## 2. Scoring formula DSL
 
-Configured per dataset via `dataset.yaml::campaign.scoring`:
+Configured per dataset via `{dataset}/dataset.yaml::campaign.scoring`:
 
 ```jsonc
 {
@@ -62,7 +62,7 @@ Configured per dataset via `dataset.yaml::campaign.scoring`:
 **Addressable namespace** (`application/scoring/formula/compiler.py`):
 
 - **Builtins:** the `SAFE_BUILTINS` map in that module — arithmetic and `math` only. Nothing else from `__builtins__`.
-- **Terms:** every per-sample evaluator in `all_evaluators()` (`application/scoring/evaluators.py`, the PACKAGE registry), banked into the row; and, in a `per_cell` formula, the per-cell terms `CELL_TERMS` names (`compiler.py`). `cell_terms_meta()` is their served projection — the criterion's vocabulary, with which terms a dial can weigh (`dial`) and which show by default (`primary`). A per-round evaluator is a reading of a round, never addressable. A campaign's own `judges` (§3) are addressable by their term keys too, and are deliberately not in that registry — a grader belongs to one campaign, not to the process. Names are stable and implementations may change — read the registry, not a list here.
+- **Terms:** every per-sample evaluator in `_REGISTRY` (`application/scoring/evaluators.py`, the PACKAGE registry), banked into the row; and, in a `per_cell` formula, the per-cell terms `CELL_TERMS` names (`compiler.py`). `cell_terms_meta()` is their served projection — the criterion's vocabulary, with which terms a dial can weigh (`dial`) and which show by default (`primary`). A per-round evaluator is a reading of a round, never addressable. A campaign's own `judges` (§3) are addressable by their term keys too, and are deliberately not in that registry — a grader belongs to one campaign, not to the process. Names are stable and implementations may change — read the registry, not a list here.
 - **Matchers:** `SCORING_FUNCTIONS` (`application/scoring/formula/matchers.py`), splatted into the same namespace, so a formula calls one exactly like an evaluator. This is the LABEL arm — it reads answer prose and decides HIT/MISS (`label_match`, `gsm8k_match`, …), which is why a `per_sample` formula almost always names one. Read the map; it holds what a campaign can actually reach, and nothing is kept in it for a caller that does not exist.
 
 Constants, name lookups, arithmetic operators (`+ - * / % **`) addressable. **Calls outside the registry are rejected at compile time** (enforced, not convention).
@@ -124,7 +124,7 @@ The dataset's own rows where a connector reads them (`Connector.owns_panel`).
 
 Each resolves nearest-ancestor-or-self.
 
-- **`origin.yaml`** — 8-field `PromptTemplate` per node, keyed by node and merged root-first. Schema: `domain/opt_search_point.py::PromptTemplate`. Loaded by `promptpotter/application/datasets/prompts.py::load_node_prompt`.
+- **`origin.yaml`** — a starting prompt per node, `{field: text}` under its node name, each field one the node declares (`NodePromptInfo.fields`). Loaded by `promptpotter/application/datasets/prompts.py::declared_origin_prompts`, which refuses an undeclared field.
 - **`task.md`** — the body is free-form markdown, decomposed into the campaign's `task_context` framing (`Cycle.framing`) by the first mint that finds none committed, or by a check-in (`new <name> --task-file`, the web check-in). Its optional YAML front matter is the committed framing — written once by the `checkin` decomposition (`application/bench/task_context.py::commit_task_framing`) or by web ingest at commit, and read free on every later run through `infrastructure/store/dataset_access.py::readable_task_context` on the tenant-first ladder.
 - **`README.md`** — operator guide; free-form, not parsed.
 
@@ -148,7 +148,7 @@ rules; the constants themselves are internal.
 | **Install content** | `promptpotter/assets/` inside the package | The optimizer's own `pipeline.yaml` + `resolved_schemas.json` + `sets/{name}.yaml`, and the exported dashboard. Ships in the wheel; ours, not the operator's. |
 | **User data** | `$PROMPTPOTTER_HOME` → the checkout's `.promptpotter/` when running from a source tree → the OS app-data dir | Campaigns, sessions, measurements, jobs, identity. |
 | **Configuration** | `$PROMPTPOTTER_ENV_FILE` → the checkout's `.env` when running from a source tree → the user-data root's `.env` | Keys and postures (`PROMPTPOTTER_AUTH`). A process variable outranks the file. The gate names an absent file, so no verdict reads the desk's configuration. |
-| **Templates** | `promptpotter/assets/datasets/` (`paths.py::install_datasets_root`) | Template dataset **definitions**, read-only in checkout and wheel alike. Anything DERIVED from one lands in the user-data root, never beside the definition ([`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § Dataset content has two tiers). A tenant dataset of the same name shadows an installed one. |
+| **Templates** | `promptpotter/assets/datasets/` (`config/paths.py::install_datasets_root`) | Template dataset **definitions**, read-only in checkout and wheel alike. Anything DERIVED from one lands in the user-data root, never beside the definition ([`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § Dataset content has two tiers). A tenant dataset of the same name shadows an installed one. |
 
 **`PROMPTPOTTER_HOME` and `PROMPTPOTTER_ENV_FILE` are stable.** Set the first to relocate the
 whole user-data tree and the second to read another configuration file; each is read once at
@@ -172,7 +172,7 @@ nothing resolves to `site-packages/`: `pip` deletes there on upgrade.
 Two behaviours a fork may rely on, neither of them readable off `--help`:
 
 - Every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/campaign_ids.py::mint_campaign_id`). The prior campaign is preserved.
-- A launch flag SETS the cycle's budget, raise or lower, over what the dataset declares, and stays as the cycle's standing ceiling for later resumes; the account admits the result whole or refuses the launch. `set-limits` moves it mid-flight.
+- A launch flag SETS an axis of the cycle's budget, raise or lower, over what the dataset declares, and stays on the cycle's standing budget for later resumes; the account admits the result whole or refuses the launch. `set-limits` moves it mid-flight.
 
 The maintenance and diagnostic verbs are not part of v1.
 
@@ -183,16 +183,32 @@ one campaign inside its own event loop:
 
 ```python
 session = await open_session(dataset_name, *, stores=None,
-                             program=None)
-result = await run_campaign(session, train_data, campaign_config, *, readout_sink=None,
-                            langfuse_session_id=None, limits, mode)
+                             program=None, rows=None)
+session, result = await run_campaign(session, campaign_config=None, *, readout_sink=None,
+                                     langfuse_session_id=None, budget, step_rounds, mode,
+                                     purpose=Optimize())
+report = await compact_archive(stores, *, mode, dataset=None, apply=False)
+counts = reindex_measurement_archive(stores)
 ```
 
-`limits` is a `promptpotter.domain.launch_limits.LaunchLimits(halt_at_accuracy=…,
-ceiling=SpendCeilings(usd=…, tokens=…))`, the model the CLI flags and the `start-run` payload build; a
-ceiling it declares sets the run's over the campaign's own (no admission — the host program holds no
-slot), and `LaunchLimits()` declares none. `mode`
-is `domain/launch_limits.py::RunMode`, the shape the `start-run` payload carries, and `RunMode()` is a plain run.
+`compact_archive` is §5's `compact-archive` verb as the host's call — dispatched, so it lands on
+the ledger and is refused in the words the REST body's 422 carries; `reindex_measurement_archive`
+is `reindex`'s.
+
+The session `run_campaign` answers is bound to the cycle the run ended on, a fork it took
+included; the one handed in stays bound to its own.
+
+A run measures the session's bank, and nothing else: `rows` hands the host's own samples in as
+that bank, which the mint labels `dataset_name` exactly as it labels every other.
+
+`campaign_config` is what a MINT declares, so it is required on a fresh session and refused on one
+bound to a cycle: a resume runs its campaign's declaration, resolved as every other door resolves it.
+
+`budget` is a `promptpotter.domain.spend.Budget(usd=…, tokens=…, rounds=…, wall_clock_s=…)`, the
+model the CLI flags and the `start-run` payload build; an axis it names is laid over the campaign's
+own and holds a share of the campaign's ceiling through the one admission every launch takes, and
+`Budget()` names none. `step_rounds` pauses the run once it has closed that many rounds. `mode` is
+`domain/run_mode.py::RunMode`, the shape the `start-run` payload carries, and `RunMode()` is a plain run.
 
 Two steps rather than one because every caller does its own work between them. It mints through
 the same `mint_framed_cycle` prologue `new` and the web mint run, and scores the origin inside
@@ -214,7 +230,7 @@ the dashboard.
 
 `with_optimization(load_dataset_campaign_config(path), {…})`
 (`application/datasets/authored.py`) is the
-supported way to shape a dataset's `dataset.yaml::campaign` for one launch without editing the shared file:
+supported way to shape a dataset's `{dataset}/dataset.yaml::campaign` for one launch without editing the shared file:
 a sparse `optimization` mapping merged depth-first **before** validation, so an unknown knob raises
 here instead of being silently dropped — the same call a web mint, a check-in and the terminal make.
 
@@ -227,8 +243,8 @@ from the same call that stamps `index.json::final`, so both are projections of o
 ```python
 from promptpotter.domain.export import parse_prompt_export
 export = parse_prompt_export(Path("…/export.json").read_text())
-template = export.template()          # PromptTemplate — fields by name
-prompt = export.render()              # the prompt as scored: those fields, then its shots
+fields = export.prompts["solve"]      # per prompt node, its fields by name, as scored
+prompt = export.render("solve")       # that node's prompt as scored: those fields, then its shots
 export.measurement.own.composite      # under export.measurement.formula, never a bare number
 ```
 
@@ -261,7 +277,7 @@ counts optimization cost plus serving cost over 100k requests, and a reader of t
 Typed records on the per-cycle ledger (`.runtime/ledger.jsonl` — the
 workspace-scoped sibling at `.workspace/events.jsonl` carries workspace
 lifecycle, not cycle records). The record family — `PhaseRecord`,
-the arm-walk records (`SampleScoredRecord`, `CandidateScoredRecord`, …), `ResumeCheckpointRecord`, `TokenUsageRecord`,
+the arm-walk records (`SampleScoredRecord`, `ArmRecord`, …), `ResumeCheckpointRecord`, `TokenUsageRecord`,
 `LLMCallStartRecord`/`LLMCallRecord` — is the discriminated union in
 `domain/run_records.py`; each record's fields are its dataclass, read
 them there.
@@ -292,11 +308,11 @@ Sibling cycles (forks, diag) live flat under `cycles/` alongside the root, each 
 
 - **Internal module structure** beyond §1–§7. The dispatch hub split into `dispatch/{bundle, compose, injections, facade}` is internal — only the public symbols (`DispatchHub`, `injections`, `build_bundle`, `validate_template`) are stable.
 - **Private types** (`_Injection` etc., plus any `_`-prefixed name). Package `__init__` files are namespace markers that re-export nothing — §1–§7 is the whole public surface, not whatever a package surfaces.
-- **`__all__`** — this document is the public surface; `__all__` is a reader's hint and nothing more. It is mechanically inert here (`implicit_reexport = true`, no `import *` anywhere), so neither runtime nor mypy consults it, and a name listed there is not thereby promised. Prune an entry nothing imports rather than reading it as a contract.
+- **`__all__`** — this document is the public surface. A module declares `__all__` only where a tool reads it: ruff and strict mypy take an import as a re-export only by it, and the ledger's `settings_const` reads `config/settings.py`'s.
 - **Runtime dataclass shapes** not in §1–§7 (`CycleSlice`, `RoundDigest`, `InjectionBundle`, `RoundBuffer`, etc.).
 - **In-memory caches** and their invalidation strategies (optimizer LRU caches, the dispatch hub's pipeline-param-catalogue cache, etc.).
 - **Prompt templates** at `promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — data, intentionally tunable. Forks may edit; we may also edit on any release.
 - **The optimizer node types** (`application/optimizers/nodes.py`, registered under `promptpotter.optimizer_nodes`) and the `NodeContext` a member is handed (`application/bench/node_context.py`). The context carries no cycle, session or store, but its roster of readings still moves with the bench.
 - **Test helpers** (`tests/factories.py`, `tests/conftest.py`).
 - **The `webapp/` layout.** The webapp + control plane ship and serve users; internal component layout stays free to move.
-- **The REST API and the events stream**, specified though they are (`docs/specs/api-openapi.yaml`, `events-asyncapi.yaml`). They carry **no inbound credential**: `presentation/api/middleware/oidc.py` derives identity from a browser SESSION COOKIE and nothing else — no bearer token, no API key anywhere on the inbound path — so a third party reaches them only by running the server with `PROMPTPOTTER_AUTH=off`, i.e. with no auth at all. That makes this a same-origin browser surface plus a local no-auth mode, not an integration surface, and saying so is the honest state: per-endpoint guarantees would promise something it cannot yet keep. (The one bearer token the repo holds runs PP→TermNorm — outbound, the other direction.)
+- **The REST API and the events stream**, specified though they are (`docs/specs/openapi.generated.json`, `events-asyncapi.generated.json`). They carry **no inbound credential**: `presentation/api/middleware/oidc.py` derives identity from a browser SESSION COOKIE and nothing else — no bearer token, no API key anywhere on the inbound path — so a third party reaches them only by running the server with `PROMPTPOTTER_AUTH=off`, i.e. with no auth at all. That makes this a same-origin browser surface plus a local no-auth mode, not an integration surface, and saying so is the honest state: per-endpoint guarantees would promise something it cannot yet keep. (The one bearer token the repo holds runs PP→TermNorm — outbound, the other direction.)

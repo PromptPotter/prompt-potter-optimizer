@@ -7,8 +7,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 # Their prose reaches the optimizer prompt's `confounds` panel.
 shapes_optimizer_prompt(__name__)
 
-__all__ = ["ADAPTIVE_QUEUE", "POBB"]
-
 
 ADAPTIVE_QUEUE = (
     MemberCoupling(

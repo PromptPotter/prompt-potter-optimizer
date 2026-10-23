@@ -1,7 +1,9 @@
 "use client";
-import { postCommand } from "@/lib/api";
+import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
+import type { CyclePath } from "@/lib/ids";
 import { Hearts } from "@/components/ui";
 import type {
   ActivityDecision,
@@ -25,12 +27,17 @@ export function LiveSegment({
   lives?: LivesReading | null;
 }) {
   const cmd = useCommand<string>("decision");
+  const { viewedPath } = useWorkspace();
 
   const now = listening ? (status ?? { icon: "·", label: "Listening for activity…", detail: null }) : null;
   if (notices.length === 0 && !now && !decision) return null;
 
-  const decide = (a: DecisionAction) => void cmd.run(a.label, () => postCommand(a.kind, a.payload));
-  const busy = cmd.pending !== null;
+  // The activity is the viewed leaf's, so its decision is addressed there like any command.
+  const decide = (path: CyclePath, a: DecisionAction) =>
+    void cmd.run(a.label, () =>
+      postCommand(a.kind, { ...cycleAddress(path), decision: a.decision }),
+    );
+  const busy = cmd.pending !== null || viewedPath === null;
 
   return (
     <div className="chat-live">
@@ -86,7 +93,7 @@ export function LiveSegment({
                 type="button"
                 className={cx("chat-decision-btn", `btn-${a.variant}`)}
                 disabled={busy}
-                onClick={() => decide(a)}
+                onClick={() => viewedPath && decide(viewedPath, a)}
               >
                 {cmd.pending === a.label ? "…" : a.label}
               </button>

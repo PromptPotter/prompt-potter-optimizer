@@ -1,24 +1,21 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from promptpotter.application.scoring.evaluators import materialize_round_values
-from promptpotter.application.scoring.formula import cell_channels_of
+from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.selection import level_band
-from promptpotter.domain.results import CellFold, ScoreSummary
-from promptpotter.domain.results_health import is_deprecated
+from promptpotter.domain.results import CellFold, ScoreSummary, arm_end, recall_at
+from promptpotter.domain.results_health import is_degraded, is_deprecated
 from promptpotter.domain.scoring import ROW_GRADES
+from promptpotter.domain.spend import TokenAccount
 
 if TYPE_CHECKING:
+    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.results import ArmState
     from promptpotter.domain.scoring import CellSheet, GradedCell
-
-__all__ = [
-    "INVALID_SCORES",
-    "compute_composite_fitness",
-    "fold_cells",
-]
 
 
 # The registry's COMPLEMENT: `fitness`/`errored`/`degraded` are already reported as rates.
@@ -44,6 +41,8 @@ def fold_cells(sheet: CellSheet) -> CellFold:
         accuracy=accuracy,
         composite_fitness=composite,
         deprecated=sum(1 for cell in sheet if is_deprecated(cell.facts)),
+        degraded=sum(1 for cell in sheet if is_degraded(cell.facts)),
+        recall_at=recall_at(sheet),
     )
 
 
@@ -58,18 +57,21 @@ def compute_composite_fitness(
     _, ci_lo, ci_hi = level_band(sheet, ROW_GRADES["fitness"])
     return ScoreSummary(
         **fold_cells(sheet).model_dump(),
+        walked=len(sheet.cells),
+        cached=sum(1 for cell in sheet if cell.facts.cached),
         evaluators=evaluator_values,
         mean_fitness_ci_lo=ci_lo,
         mean_fitness_ci_hi=ci_hi,
+        tokens=TokenAccount.from_measured_rows(cell.facts for cell in sheet),
     )
 
 
-INVALID_SCORES = ScoreSummary(
-    total=0,
-    accuracy=None,
-    composite_fitness=None,
-    deprecated=0,
-    evaluators={},
-    mean_fitness_ci_lo=None,
-    mean_fitness_ci_hi=None,
-)
+def arm_folds(
+    arms: Mapping[ArmKey, ArmState], cells: Mapping[ArmKey, CellSheet], schema: PipelineSchema
+) -> dict[ArmKey, ScoreSummary]:
+    """THE fold of a round's arms, each over the cells the round files for it."""
+    return {
+        key: compute_composite_fitness(cells[key], schema)
+        for key, arm in arms.items()
+        if arm_end(arm) != "invalid"
+    }

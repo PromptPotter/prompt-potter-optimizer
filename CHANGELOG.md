@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Pools.** One `Pool` slice (`BlockPool`, `DemoPool`) any manifest seeds and reads under `off | open | closed`, banked whole; `EarnedLibrary` / `EarnedBlocks` go. (83d049d60, c4a803b3a)
+- `discard-draft` verb. (8f1a0e13e)
+
+### Changed
+
+- **BREAKING — an individual is `{prompts: {node: NodePrompt}, pipeline_params, lineage}`**; each prompt node declares its fields, shots are sample keys; `PromptTemplate` is deleted. (f0625b8b8)
+- **BREAKING — a dataset is its content.** `dataset_hash` hashes the banked rows, the archive keys on `sample_key`, served `sample_id` is `position`; `replace-dataset` is deleted; `StopReason.max_rounds` is `rounds_budget`. (86fe03da0)
+- **BREAKING — `RunDeclaration.purpose`** (`Optimize | Compare(arm)`) replaces `arm`. (2d17020ad)
+- **BREAKING — arms are keyed by content `ArmKey`**; `Candidate*Record`, `ScoredCandidate`, `CandidateProposal` and `CycleResult`'s level lists are deleted, `RoundClosedRecord` carries the `level_series`. (609b060d6)
+- **BREAKING — one tenant δ ruler**: the `RulerRecord` ledger record is deleted. (6a6901b40)
+- **BREAKING — the control-plane specs are generated** (`docs/specs/openapi.generated.json`, `events-asyncapi.generated.json`): the hand-written `api-openapi.yaml` / `events-asyncapi.yaml` are deleted; an invalid payload answers `422 request_invalid`; CLI `step-cycle --step-rounds`, `submit-arms --arms`. (731e31328)
+- **BREAKING — removed routes and flags**: `GET /campaigns/{id}` (2a6adac46); `bench --cycle`, the bench grading the campaign (9b2108d55).
+
+- **BREAKING — start clean. One `Budget` bounds a run** (`domain/spend.py`: `usd`, `tokens`, `rounds`, `wall_clock_s`) as it is asked, admitted and standing. It replaces `LaunchLimits`, `HeldLimits`, `RoundsCap`, `SpendCeilings`, `ArmBudget` and the `optimization.ceiling` / `max_rounds` knobs, now `optimization.budget`; `halt_at_accuracy` is a stopping knob, refused on an arm (`arm_halt_refused`). The ledger's `run_limits` record is `standing_budget`; `mint-campaign`, `start-run`, `start-checkin` and `change-run-limits` carry `budget`, `start-run` also `step_rounds`.
+- **The ceiling is the campaign's**: one book its live cycles share, seeded off every cycle's ledger; admission refuses `campaign_ceiling_held` / `campaign_ceiling_unshared`.
+- **Wall clock is a budget axis** (`--max-wall-clock`): a remote cell is bounded by its connector's `cell_envelope_s` and the launch's clock left, cut `HALTED`, the run stopping `wall_clock`. `Connector.cell_wait_s` is gone.
+- `ArmSpend`, `ArmCost`, `CloseSpend` and `RunStanding.spent` are gone, each a fold of the spend facts read at its scope.
+- **Every optimizer runs on one model by default, `qwen/qwen3.7-flash` with reasoning off** (was `openai/gpt-6-luna`; GEPA and LEVI on `qwen/qwen3-8b`, retired on OpenRouter).
+- **The `openai` and `anthropic` SDKs are gone**: both clients post over httpx; the `anthropic` extra is deleted.
+- **BREAKING — removed on-disk shapes**, each now a ledger record or a fold of one: `campaigns/{id}/result.json` (the line's `launch_clock` records, bench passes and spend), `pipeline.resolved.yaml` and `experiment.resolved.yaml` (`resolved_run`), `bank_partition.json` (`bank_partition`), the `round_standing` record (carried by `round_closed`), and the `optimizer_state` record (a `round_restated` statement, which a repair's re-bank writes too).
+
 ## [0.8.17] — 2026-10-15
 
 > The first people from the internet ran on app.promptpotter.com; what they hit is closed at the root. The arm gate, any table, critique clusters, verify as a banked pass, scoring dials, the trail, MLflow, an L4 environment pool; underneath, typed records end to end and a browser that computes nothing. 81 commits since `v0.8.16`.

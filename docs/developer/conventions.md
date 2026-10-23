@@ -68,7 +68,7 @@ collects everything else.
   does a reader now get wrong?* "Nothing, the type stops them" is rung 1, and
   rung 1 means delete.
 - **Three carve-outs are product surfaces**, not documentation, because a
-  generator reads them: `EXPORTED_MODELS` docstrings
+  generator reads them: the docstring of every type a route's `response_model` reaches
   (→ generated TS JSDoc — regenerate via `scripts/build_ts_types.py`; only a
   CLASS docstring's line 1 ships, so it must be a complete sentence, while a
   `@computed_field` property ships WHOLE), FastAPI route docstrings, and the
@@ -100,10 +100,12 @@ collects everything else.
 
 ## Code shape
 
-- **No fallbacks in service code.** Two sanctioned exceptions:
+- **No fallbacks in service code.** Three sanctioned exceptions:
   the measurement's synthetic-0 on `validation_failures`; load-boundary
-  deprecated-sample gate (uses `classify_result()` fatal codes). Any new
-  fallback must be documented alongside these.
+  deprecated-sample gate (uses `classify_result()` fatal codes); an adapter
+  output a round's close survived without, re-run before the next walk reads it
+  and halting `PAUSED` past `OWED_WRITE_ATTEMPTS` (`runner/round.py::settle_owed_outputs`).
+  Any new fallback must be documented alongside these.
 - **Where a return-value contract must let an exception escape, use `graceful()`**
   (`shared/errors.py`). The contracts themselves — optimizer calls through
   `llm_call()`, a stop rule's verdict through `QueryLoopResult.stop_signal` — are owned
@@ -184,6 +186,13 @@ helpers used by one caller **in the same file**.
 - **A foreground command gets 30 s.** Anything that needs longer — the gate, a build, a
   campaign — is backgrounded and its notification awaited, never given a longer foreground
   timeout or wrapped in `timeout N` (root `CLAUDE.md` `<wall-clock>`).
+- **The gate is sized by memory, never by cores alone, and sibling gates queue.** It reads free
+  memory once (`scripts/gate.py::RamBudget`) and every fan-out it starts sizes from that one
+  reading: the offline run's children, Next's build workers, and whether the two lanes run side by
+  side or in turn. Each figure the budget divides by is measured by hand off the per-check job peak
+  the gate prints, a per-unit figure as its slope across widths; when one moves, re-measure, never
+  guess. A gate in any worktree of the clone waits on an OS lock under the MAIN tree's
+  `.gate_cache/` and says whose gate it waits on; `--staged` and CI never wait.
 - **A campaign launch is backgrounded and SUPERVISED, never fired and left** —
   stdout to a log under `.scratch/`. Which autonomy mode may launch one without
   asking is root [`CLAUDE.md`](../../CLAUDE.md) § Working principles.

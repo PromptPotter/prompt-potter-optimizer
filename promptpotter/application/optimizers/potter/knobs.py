@@ -2,33 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, cast
+from typing import Annotated, Literal
 
 from pydantic import Field
 
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.pool import Access
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
-if TYPE_CHECKING:
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
+shapes_optimizer_prompt(__name__)
 
-__all__ = [
-    "AdaptiveQueueKnobs",
-    "CellStrata",
-    "EscalationKnobs",
-    "EscalationLadder",
-    "L1GenerateKnobs",
-    "PoBBKnobs",
-    "PotterKnobs",
-    "PromptBlockCatalogue",
-    "ThetaElectionKnobs",
-    "potter_knobs",
-]
 
-PromptBlockCatalogue = Literal["guidance", "restrict", "off"]
 CellStrata = Literal["none", "dataset"]
 
 
@@ -52,7 +38,7 @@ class AdaptiveQueueKnobs(StrictModel):
     sp_budget_round: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         ge=1,
         description="Per-round eval budget — how many cells each candidate is scored on per "
-        "round. The search pool is the bank; each round `select_round_subset` picks this many "
+        "round. The search split is the bank; each round `select_round_subset` picks this many "
         "informative cells from it. Not the pool's size.",
     )
 
@@ -60,7 +46,7 @@ class AdaptiveQueueKnobs(StrictModel):
         Field(
             description=(
                 "Re-pick the most-informative scoring subset every round from the "
-                "search pool (adaptive Rasch selection). On — safe because "
+                "search split (adaptive Rasch selection). On — safe because "
                 "every cross-round comparator (election, PoBB, c0_ok, the stall ladder) "
                 "measures on one fixed θ ruler, so a shifting per-round subset stays "
                 "comparable — but it is warm-gated: while the δ ruler is still cold (a "
@@ -88,29 +74,22 @@ class L1GenerateKnobs(StrictModel):
     k_max: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         ge=0,
         description=(
-            "The most shots a variant may carry in ``shot_ids``, drawn from the campaign's demo "
-            "pool. ``0`` withdraws the shot slot and its panel, as does a campaign declaring no "
-            "demo pool."
+            "The most shots a variant may carry per prompt node in ``shots``, drawn by id from the "
+            "demo pool's active subset — its access to that pool. ``0`` is ``off``: it withdraws "
+            "the shot slot and its panel, as does a campaign declaring no demo pool."
         ),
     )
-    prompt_block_catalogue: Annotated[PromptBlockCatalogue, Knob(Scope.POLICY, Estimand.SEARCH)] = (
-        Field(
-            description=(
-                "How the prompt block library (``promptpotter/config/"
-                "prompt_variants.json`` — reusable ``persona`` / ``task_intent`` / "
-                "``thinking_style`` / ``answer_format`` values adopted from PromptWizard "
-                "and PromptPotter's own runs) is offered to ``l1_generate``. ``guidance`` "
-                "shows the blocks adopted from this project's own runs — the "
-                "value space stays open, so L1 may reuse one verbatim, adapt one, or write "
-                "its own, and the imported Self-Discover tail would only be menu. "
-                "``restrict`` narrows the field's value space to the *whole* library (which "
-                "it therefore renders in full) — an off-library value is a forbidden value, "
-                "rejected by "
-                "L1's reject posture exactly as a forbidden axis is (synthetic-0, no "
-                "backend spend, healed via the L2 wound). ``off`` renders nothing, so the "
-                "prompt is bit-for-bit identical to a no-library ablation run."
-            ),
-        )
+    block_access: Annotated[Access, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        description=(
+            "How ``l1_generate`` takes the ``block_pool`` node's pool — the entries of the prompt "
+            "block library (``promptpotter/config/prompt_variants.json``) the pool's ``active`` "
+            "paths keep, led by the blocks earlier runs on this answer space earned. ``open`` "
+            "shows a per-field window of them as material L1 may reuse verbatim, adapt or ignore. "
+            "``closed`` makes a pooled field's value one of the active subset's entry ids, an enum "
+            "on the wire listing them all, and withdraws every field the subset holds no entry "
+            "for; a subset keeping no library entry is refused before any spend. ``off`` shows "
+            "nothing, so the prompt is bit-for-bit a no-pool ablation run."
+        ),
     )
     schema_field_rename: Annotated[bool, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         description=(
@@ -185,10 +164,6 @@ class PoBBKnobs(StrictModel):
     )
 
 
-class ThetaElectionKnobs(StrictModel):
-    """The selector takes none: it crowns the strictly positive θ lift over the parent."""
-
-
 class EscalationKnobs(StrictModel):
     l1_patience: Annotated[int, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
         ge=0, description="Consecutive non-improving L1 rounds before L2 fires."
@@ -221,7 +196,7 @@ class EscalationKnobs(StrictModel):
             "identical across all three arms (the property "
             "``rebase_capability`` / ``terminate_capability`` also have), so the arms "
             "differ in what the loop DOES and in nothing it says: a stalled ``l1`` round "
-            "simply continues until ``max_rounds`` / ``lives`` / spend binds."
+            "simply continues until ``budget.rounds`` / ``lives`` / spend binds."
         ),
     )
     rebase_capability: Annotated[bool, Knob(Scope.POLICY, Estimand.CONTROLLER)] = Field(
@@ -254,22 +229,4 @@ class EscalationKnobs(StrictModel):
             "no-terminate baseline. The schema field is invariant (default "
             "None) so on-disk audit shape doesn't drift between modes."
         ),
-    )
-
-
-@dataclass(frozen=True)
-class PotterKnobs:
-    adaptive_queue: AdaptiveQueueKnobs
-    l1_generate: L1GenerateKnobs
-    pobb: PoBBKnobs
-    escalation: EscalationKnobs
-
-
-@shapes_optimizer_prompt
-def potter_knobs(selected: SelectedOptimizer) -> PotterKnobs:
-    return PotterKnobs(
-        adaptive_queue=cast("AdaptiveQueueKnobs", selected.knobs("adaptive_queue")),
-        l1_generate=cast("L1GenerateKnobs", selected.knobs("l1_generate")),
-        pobb=cast("PoBBKnobs", selected.knobs("pobb")),
-        escalation=cast("EscalationKnobs", selected.knobs("escalation")),
     )

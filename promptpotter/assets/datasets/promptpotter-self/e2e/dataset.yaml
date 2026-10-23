@@ -27,10 +27,9 @@ campaign:
     # Round 0 (the origin) plus ONE optimization round. The inner campaigns stay at
     # `max_inner_rounds: 1` — depth is what costs money here, since every outer cell is a whole
     # inner campaign, and one outer round is enough to exercise generate → score → elect.
-    max_rounds: 2
-    # The ceiling the browser walk runs under. It is a STOP, not a forecast: the fixture is
-    # built to come in far below it, and the run halting here means the geometry drifted.
-    ceiling: {usd: 0.05, tokens: null}
+    # The USD ceiling the browser walk runs under is a STOP, not a forecast: the fixture is
+    # built to come in far below it, and the run halting there means the geometry drifted.
+    budget: {usd: 0.05, rounds: 2}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
       # = the panel size in dataset.yaml::panel. One cell.
@@ -84,4 +83,4 @@ panel:
     # makes the machinery turn over.
     - kind: seat
       id: justlogic-d234/seed-0
-      inner_dataset_seed: 0
+      run_seed: 0

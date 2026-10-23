@@ -14,9 +14,9 @@ from promptpotter import connectors
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.store.io import read_json_optional, read_yaml_optional
+from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.layout import validate_dataset_name
-from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
+from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
@@ -27,18 +27,9 @@ DEFAULTS_FILE = "defaults.yaml"
 FRAMING_FILE = "task.md"
 ORIGIN_FILE = "origin.yaml"
 README_FILE = "README.md"
-ROWS_FILE = "rows.json"
 MATERIALIZED_PANEL_FILE = "panel.yaml"
 
 DatasetTier = Literal["yours", "install"]
-
-
-class DatasetAccessError(NotFoundError):
-    """A 404, never a 403: the existence-leak posture."""
-
-    def __init__(self, name: str) -> None:
-        super().__init__(f"Dataset '{name}' not found")
-        self.name = name
 
 
 @dataclass(frozen=True)
@@ -367,32 +358,6 @@ def dataset_panel_rows(
     return None if experiment is None else extract_panel_rows(connector, dataset.name, experiment)
 
 
-def readable_dataset_rows(stores: Stores, dataset: ResolvedDataset) -> dict[str, Any] | None:
-    """The definition's own bank — an upload's rows or a shipped one — else what its source
-    materialized. A connector-owned panel answers ``None`` here: ask :func:`dataset_panel_rows` first."""
-    for rows in (
-        read_json_optional(dataset.directory / ROWS_FILE),
-        stores.tenant_datasets.load_materialized_rows(dataset.name),
-    ):
-        if isinstance(rows, dict) and rows.get("items"):
-            return rows
-    return None
-
-
-def held_rows(stores: Stores, dataset: ResolvedDataset) -> list[dict[str, Any]] | None:
-    """The rows readable WITHOUT a fetch: the ladder's first rung (`loaders.resolve_dataset_items`).
-
-    A connector that owns a panel answers from it ALONE: rows cached under the same name describe
-    another instrument, so an absent panel holds nothing.
-    """
-    connector = dataset_connector(dataset)
-    if connector is not None and connector.owns_panel:
-        return dataset_panel_rows(stores, dataset)
-    raw = readable_dataset_rows(stores, dataset)
-    items = raw.get("items") if raw is not None else None
-    return items if isinstance(items, list) else None
-
-
 def readable_task_context(stores: Stores, dataset: ResolvedDataset) -> TaskDecomposition:
     """An upload's own framing wins; an install's yields to the one this tenant decomposed or
     edited, which the read-only tier cannot hold. A blank record is absent."""
@@ -459,38 +424,3 @@ def _read_heading(md: Path) -> tuple[str | None, str | None]:
     text = _MARKUP.sub(lambda m: m.group(1) or "", " ".join(paragraph))
     sentence = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0].strip()
     return title, sentence or None
-
-
-__all__ = [
-    "DEFINITION_FILE",
-    "FRAMING_FILE",
-    "MATERIALIZED_PANEL_FILE",
-    "ORIGIN_FILE",
-    "ROWS_FILE",
-    "DatasetAccessError",
-    "DatasetDefinition",
-    "DatasetFraming",
-    "DatasetTier",
-    "ResolvedDataset",
-    "backend_type_of_dataset",
-    "dataset_connector",
-    "dataset_experiment",
-    "dataset_panel_rows",
-    "declared_backend_type",
-    "declared_pipelines",
-    "definition_files",
-    "extract_panel_rows",
-    "held_rows",
-    "is_dataset_dir",
-    "list_readable_datasets",
-    "nearest_file",
-    "read_dataset_definition",
-    "read_dataset_framing",
-    "read_dataset_origin",
-    "read_dataset_pipeline",
-    "read_framing_file",
-    "readable_dataset_rows",
-    "readable_task_context",
-    "render_framing_file",
-    "resolve_dataset",
-]

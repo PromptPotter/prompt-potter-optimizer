@@ -14,7 +14,7 @@ const standsAt = (rate: number) =>
   runStanding(1, "C1.1", { vs_origin: pairedReading(rate - 0.5, [-1, 1], { rateA: 0.5 }) });
 
 const EMPTY = {
-  inflightByLabel: new Map<string, ArmReading>(),
+  inflightByKey: new Map<string, ArmReading>(),
   sampleSet: null,
   benchPass: null,
 };
@@ -28,7 +28,7 @@ const arm = (id: string, label: string, reading: ReadingOver = {}, over: Partial
     reading: armReading({
       election: { held: true },
       ...reading,
-      arm: { round: 1, label, candidate_id: id },
+      arm: { round: 1, label, key: id },
     }),
     ...over,
   });
@@ -37,12 +37,12 @@ const course = (kids: ArmNode[]) => courseNode({ id: "c0", label: "root", childr
 const runsUnder = (runs: CourseNode[]) => armNode({ id: "a", children: runs });
 
 describe("the half choice — the tree's, once its walk is decided", () => {
-  it("keeps the TREE's reading even while a live row for the same label exists", () => {
-    const tree = arm("a", "C1.1", { outcome: "measured", own: ownLevel(0.7) });
+  it("keeps the TREE's reading even while a live row for the same arm exists", () => {
+    const tree = arm("a", "C1.1", { state: "measured", own: ownLevel(0.7) });
     const bars = candidateBars({
       ...EMPTY,
       viewedNode: course([tree]),
-      inflightByLabel: new Map([["C1.1", armReading({ own: ownLevel(0.2) })]]),
+      inflightByKey: new Map([["a", armReading({ own: ownLevel(0.2) })]]),
     });
     expect(bars[0]?.reading).toBe(tree.reading);
     expect(bars[0]?.level).toBe(0.7);
@@ -54,7 +54,7 @@ describe("the half choice — the tree's, once its walk is decided", () => {
     const bars = candidateBars({
       ...EMPTY,
       viewedNode: course([arm("a", "C1.1")]),
-      inflightByLabel: new Map([["C1.1", live]]),
+      inflightByKey: new Map([["a", live]]),
     });
     // A bar and its whisker can never come from two different polling clocks.
     expect(bars[0]?.reading).toBe(live);
@@ -62,28 +62,28 @@ describe("the half choice — the tree's, once its walk is decided", () => {
   });
 
   it("keeps a decided arm's blank over a live row", () => {
-    const tree = arm("a", "C1.1", { outcome: "invalid" });
+    const tree = arm("a", "C1.1", { state: "cut", end: "invalid" });
     const bars = candidateBars({
       ...EMPTY,
       viewedNode: course([tree]),
-      inflightByLabel: new Map([["C1.1", armReading({ own: ownLevel(0.3) })]]),
+      inflightByKey: new Map([["a", armReading({ own: ownLevel(0.3) })]]),
     });
     expect(bars[0]?.reading).toBe(tree.reading);
     expect(bars[0]?.level).toBeNull();
     expect(bars[0]?.source).toBe("history");
   });
 
-  it("joins the live half on the arm's own label, not its timeline position", () => {
+  it("joins the live half on the arm's key, never a label", () => {
     const forked = armNode({
       id: "f",
       label: "C1.2",
-      reading: armReading({ arm: { round: 1, label: "C1.1", candidate_id: "f" } }),
+      reading: armReading({ arm: { round: 1, label: "C1.1", key: "f" } }),
     });
     const live = armReading({ own: ownLevel(0.4) });
     const bars = candidateBars({
       ...EMPTY,
       viewedNode: course([forked]),
-      inflightByLabel: new Map([["C1.1", live]]),
+      inflightByKey: new Map([["f", live]]),
     });
     expect(bars[0]).toMatchObject({ label: "C1.2", source: "inflight", level: 0.4 });
   });
@@ -130,7 +130,7 @@ describe("the overlap channel — drawn only on the WHOLE basis", () => {
         "C1.1",
         {
           own: ownLevel(0.7, 12),
-          on_origin_panel: { arm: { round: 1, label: "C1.1", candidate_id: "a" }, rate: 0.55, n },
+          on_origin_panel: { arm: { round: 1, label: "C1.1", key: "a" }, rate: 0.55, n },
         },
         { sample_set_accuracy: onSet, sample_set_n: 6 },
       ),
@@ -176,6 +176,7 @@ it("drops the tail a supersede cut retired — one round of three, never six", (
 it("marks the bench pass in flight on the arm it grades, and no other", () => {
   const pass: BenchPassProgress = {
     subject: "selected",
+    arm: "b",
     label: "C1.2",
     sp_hash: "",
     round: 1,

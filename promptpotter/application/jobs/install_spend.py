@@ -7,7 +7,7 @@ from typing import NamedTuple
 
 from promptpotter.application.jobs.quota import lifetime_ceilings
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.identity.migration import is_host_tenant_dir
 from promptpotter.infrastructure.store.account_spend import (
     UserSpend,
@@ -22,7 +22,7 @@ class AccountUsage(NamedTuple):
     user_id: str
     email: str | None
     spent: UserSpend
-    ceilings: SpendCeilings
+    ceilings: Budget
     campaigns: int
     cycles: int
     # Set means the row could not be summed and every other field is a placeholder.
@@ -50,7 +50,7 @@ def _unreadable_row(tenant_dir: WorkspaceDir, why: str) -> AccountUsage:
         user_id=tenant_dir.name,
         email=None,
         spent=UserSpend(0.0, 0, 0),
-        ceilings=SpendCeilings(),
+        ceilings=Budget(),
         campaigns=0,
         cycles=0,
         unreadable=why,
@@ -67,6 +67,3 @@ def _account_row(user: User, tenant_dir: WorkspaceDir) -> AccountUsage:
         campaigns=len(campaigns.iter_campaign_dirs()),
         cycles=len(campaigns.iter_cycle_ledgers()),
     )
-
-
-__all__ = ["AccountUsage", "read_install_spend"]

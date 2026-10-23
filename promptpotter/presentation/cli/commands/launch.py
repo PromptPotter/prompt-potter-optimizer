@@ -7,18 +7,15 @@ import logging
 import signal
 import sys
 import threading
-import uuid
 from collections.abc import Iterator
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
-
-from pydantic import ValidationError
 
 from promptpotter import connectors
 from promptpotter.application.bench.resume_and_fork.replayers import replayers
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
+from promptpotter.application.views.render.phase import render_completion
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.domain.command_kinds import (
@@ -28,11 +25,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.phases import GateDecision, stop_reason_outcome
-from promptpotter.infrastructure.store.io import write_text
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.parsers import launch_limits_from_args
-from promptpotter.presentation.terminal.completion import render_completion
 from promptpotter.shared.errors import PotterError
 
 if TYPE_CHECKING:
@@ -40,22 +33,16 @@ if TYPE_CHECKING:
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.launcher.run_job import HeldRun
-    from promptpotter.domain.launch_limits import RunMode
     from promptpotter.domain.results import CycleResult
+    from promptpotter.domain.run_mode import RunMode
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-def prepare_launch(args: argparse.Namespace) -> None:
+def prepare_launch() -> None:
     """Runs BEFORE the loop exists: a prompt or refusal here never meets a run's Ctrl+C handler."""
     # A CLI-only install has no periodic sweep: a launch is where a dead producer's cycle is recorded.
     sweep_dead_cycles(DEFAULT_PROJECTS_ROOT)
-    # argparse bounds none of these: refuse an out-of-range ceiling through the wire's own model.
-    try:
-        launch_limits_from_args(args)
-    except ValidationError as exc:
-        bad = ", ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
-        raise SystemExit(f"invalid run limit — {bad}") from None
     ensure_api_key()
 
 
@@ -106,16 +93,6 @@ def backend_unreachable_result(exc: BackendUnreachableError) -> CommandResult:
     )
 
 
-# The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
-_LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
-
-
-def _point_at_readout(session: Session) -> None:
-    readout = CycleLayout(session.store.campaigns.cycle_dir(session.hop).absolute()).readout
-    with contextlib.suppress(OSError):
-        write_text(_LATEST_READOUT_POINTER, f"{readout}\n")
-
-
 def inline_launch(args: argparse.Namespace) -> Inline:
     return Inline(no_wait=args.no_wait)
 
@@ -135,9 +112,7 @@ def _terminal_inputs(session: Session) -> Iterator[None]:
 
     async def send(payload: CyclePayload, *, then_cancel: bool) -> None:
         try:
-            await CommandDispatcher(stores).dispatch_cycle_command(
-                CommandCall(payload, uuid.uuid4().hex), expected_version=None
-            )
+            await CommandDispatcher(stores).dispatch(CommandCall(payload))
         except PotterError as exc:
             if not then_cancel:
                 print(f"  {exc}", flush=True)
@@ -192,7 +167,6 @@ def _terminal_inputs(session: Session) -> Iterator[None]:
 
 
 async def run_inline(held: HeldRun, *, mode: RunMode) -> CycleResult:
-    _point_at_readout(held.session)
     with _terminal_inputs(held.session):
         result, _observers = await held.run_inline(
             mode=mode, readout_sink=functools.partial(print, flush=True)
@@ -242,18 +216,3 @@ def confirm_tty(prompt: str, *, default_no: bool = True) -> bool | None:
     if not raw:
         return not default_no
     return raw in {"y", "yes"}
-
-
-__all__ = [
-    "backend_reach_line",
-    "backend_unreachable_result",
-    "confirm_tty",
-    "cycle_result_command",
-    "divergence_hint",
-    "held_run",
-    "inline_launch",
-    "log_startup_summary",
-    "pipeline_summary",
-    "prepare_launch",
-    "run_inline",
-]

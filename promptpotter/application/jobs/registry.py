@@ -8,7 +8,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal, assert_never, get_args
@@ -25,9 +25,9 @@ from promptpotter.application.jobs.interlock import (
 )
 from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import settings
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import LaunchStage, RunPhase
-from promptpotter.domain.spend import SpendCeilings
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, ServiceUnavailableError
@@ -72,7 +72,30 @@ class ScoringPass:
     kind: Literal["scoring_pass"] = "scoring_pass"
 
 
-JobHolder = Annotated[CampaignLaunch | ScoringPass, Field(discriminator="kind")]
+@dataclass(frozen=True)
+class EmbeddedRun:
+    """A host program's run: a share and a reservation, never a slot, since the host schedules itself."""
+
+    __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+
+    dataset_name: str
+    kind: Literal["embedded_run"] = "embedded_run"
+
+
+@dataclass(frozen=True)
+class InnerRun:
+    """An L4 inner campaign: a share of what its enclosing run's book has left, and nothing more."""
+
+    __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+
+    dataset_name: str
+    kind: Literal["inner_run"] = "inner_run"
+
+
+SlotHolder = Annotated[CampaignLaunch | ScoringPass, Field(discriminator="kind")]
+JobHolder = Annotated[
+    CampaignLaunch | ScoringPass | EmbeddedRun | InnerRun, Field(discriminator="kind")
+]
 
 
 @dataclass(frozen=False)
@@ -85,17 +108,21 @@ class Job:
     user_id: str
     # WHO launched it, never the account: a delegate shares its owner's `user_id`.
     principal_id: str
+    # The store its hop names a cycle in: an L4 sandbox repeats content-addressed campaign ids.
+    workspace: str
     campaign_id: str
     cycle_id: str
-    # WHAT holds (or waits for) the slot.
+    # WHAT holds (or waits for) the slot, or the spend alone.
     holder: JobHolder
     stage: JobStage
     created_at: str
     started_at: str | None
     # A release is its own act, never a fourth stage: `stage` stays where the launch got to.
     released_at: str | None
-    # What the account holds back for it (``HeldLimits.reserve``).
-    reserve: SpendCeilings = field(default_factory=SpendCeilings)
+    # Its hold's ONE store, which its run's book reads live: what the account holds back for it,
+    reserve: Budget = field(default_factory=Budget)
+    # and the most its cycle may have metered of the campaign's ceiling, in all.
+    allotment: Budget = field(default_factory=Budget)
     # Unset = never granted a run, so its failure is a refusal.
     admitted_at: str | None = None
     producer_id: str = ""
@@ -112,12 +139,27 @@ class Job:
                 return where if resolved else f"a new campaign on {dataset}"
             case ScoringPass(verb=verb):
                 return f"{verb} on {where if resolved else 'the workspace'}"
+            case EmbeddedRun(dataset_name=dataset):
+                return f"an embedded run on {where if resolved else dataset}"
+            case InnerRun(dataset_name=dataset):
+                return f"an inner run on {where if resolved else dataset}"
             case _:
                 assert_never(self.holder)
 
     @property
     def hop(self) -> CycleHop:
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
+
+    def holds(self, workspace: WorkspaceDir, hop: CycleHop) -> bool:
+        return self.workspace == str(workspace) and self.hop == hop
+
+    def on_campaign(self, workspace: WorkspaceDir, campaign_id: str) -> bool:
+        return self.workspace == str(workspace) and self.campaign_id == campaign_id
+
+    @property
+    def admitted(self) -> bool:
+        """Its reservation and allotment are stamped: before this, a failure is a refusal."""
+        return self.admitted_at is not None
 
     @property
     def released(self) -> bool:
@@ -128,8 +170,13 @@ class Job:
         return not self.released and self.stage is RunPhase.QUEUED
 
     @property
-    def holds_slot(self) -> bool:
+    def holds_spend(self) -> bool:
+        """Its reservation and its share bind the account and the campaign while this holds."""
         return not self.released and self.stage in SLOT_STAGES
+
+    @property
+    def holds_slot(self) -> bool:
+        return self.holds_spend and not isinstance(self.holder, EmbeddedRun | InnerRun)
 
 
 _JOB = TypeAdapter(Job)
@@ -157,6 +204,7 @@ class JobRegistry:
         *,
         user_id: str,
         principal_id: str,
+        workspace: WorkspaceDir,
         hop: CycleHop,
         holder: JobHolder,
         stage: JobStage = RunPhase.STARTING,
@@ -167,6 +215,7 @@ class JobRegistry:
             job_id=job_id,
             user_id=user_id,
             principal_id=principal_id,
+            workspace=str(workspace),
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
             holder=holder,
@@ -198,7 +247,8 @@ class JobRegistry:
         *,
         user_id: str,
         principal_id: str,
-        holder: JobHolder,
+        workspace: WorkspaceDir,
+        holder: SlotHolder,
         hop: CycleHop = UNRESOLVED_HOP,
     ) -> Job:
         """Count, capacity and write stay under the gate with no ``await`` between them."""
@@ -207,7 +257,12 @@ class JobRegistry:
             live = len(running)
             stage: JobStage = RunPhase.STARTING if live < self._capacity(live) else RunPhase.QUEUED
             return self.create(
-                user_id=user_id, principal_id=principal_id, hop=hop, holder=holder, stage=stage
+                user_id=user_id,
+                principal_id=principal_id,
+                workspace=workspace,
+                hop=hop,
+                holder=holder,
+                stage=stage,
             )
 
     async def await_claim(self, job_id: str) -> None:
@@ -256,19 +311,21 @@ class JobRegistry:
             self.release(job_id)
             return True
 
-    def mark_admitted(self, job_id: str, reserve: SpendCeilings) -> None:
+    def mark_admitted(self, job_id: str, reserve: Budget, allotment: Budget) -> None:
         job = self.get(job_id)
         if job is None:
             return
         job.admitted_at = utcnow_iso()
         job.reserve = reserve
+        job.allotment = allotment
         self._persist(job)
 
-    def set_reserve(self, job_id: str, reserve: SpendCeilings) -> None:
+    def set_held(self, job_id: str, reserve: Budget, allotment: Budget) -> None:
         job = self.get(job_id)
         if job is None:
             return
         job.reserve = reserve
+        job.allotment = allotment
         self._persist(job)
 
     def update_target(self, job_id: str, *, hop: CycleHop) -> None:
@@ -282,6 +339,10 @@ class JobRegistry:
     @property
     def jobs_dir(self) -> Path:
         return self._dir
+
+    def job_file(self, job_id: str) -> Path:
+        """What a live spend book reads its hold off: the job is the hold's one store."""
+        return self._path(job_id)
 
     def claimant_lock(self) -> Path:
         return this_producer_lock(self._dir)
@@ -361,9 +422,14 @@ class JobRegistry:
         return self.get(job.job_id) or job
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
-        """Oldest first. A reconciling READ, deliberately: a job whose producer is gone is released
-        here."""
+        """Oldest first, and a reconciling READ: a job whose producer is gone is released here."""
         out = self._reconciled(lambda j: j.holds_slot, user_id=user_id)
+        out.sort(key=lambda j: (j.created_at, j.job_id))
+        return out
+
+    def list_holding_spend(self, *, user_id: str | None = None) -> list[Job]:
+        """Oldest first: every slot holder, and every embedded and inner run beside them."""
+        out = self._reconciled(lambda j: j.holds_spend, user_id=user_id)
         out.sort(key=lambda j: (j.created_at, j.job_id))
         return out
 
@@ -382,21 +448,25 @@ class JobRegistry:
                 out.append(j)
         return out
 
-    def running_job_for(self, hop: CycleHop) -> Job | None:
-        """The RUN holding *hop*: a scoring pass on it bills no ceiling of the cycle's."""
+    def running_job_for(self, workspace: WorkspaceDir, hop: CycleHop) -> Job | None:
+        """The RUN holding *hop*, however started: a scoring pass on it bills no ceiling of the cycle's."""
         return next(
             (
                 j
-                for j in self.list_running()
-                if j.hop == hop and isinstance(j.holder, CampaignLaunch)
+                for j in self.list_holding_spend()
+                if j.holds(workspace, hop) and not isinstance(j.holder, ScoringPass)
             ),
             None,
         )
 
-    def pass_on(self, hop: CycleHop) -> Job | None:
+    def pass_on(self, workspace: WorkspaceDir, hop: CycleHop) -> Job | None:
         """A scoring pass billing *hop*: a run there would be a second biller its ceiling never sees."""
         return next(
-            (j for j in self.list_running() if j.hop == hop and isinstance(j.holder, ScoringPass)),
+            (
+                j
+                for j in self.list_running()
+                if j.holds(workspace, hop) and isinstance(j.holder, ScoringPass)
+            ),
             None,
         )
 
@@ -418,21 +488,9 @@ class JobRegistry:
         ]
 
     def _persist(self, job: Job) -> None:
-        write_json(self._path(job.job_id), asdict(job))
+        write_json(self._path(job.job_id), _JOB.dump_python(job, mode="json"))
 
     def _path(self, job_id: str) -> Path:
         if not job_id or "/" in job_id or "\\" in job_id or job_id.startswith("."):
             raise ValueError(f"invalid job_id: {job_id!r}")
         return self._dir / f"{job_id}.json"
-
-
-__all__ = [
-    "UNRESOLVED_HOP",
-    "CampaignLaunch",
-    "Job",
-    "JobHolder",
-    "JobRegistry",
-    "JobStage",
-    "ScoringPass",
-    "ScoringVerb",
-]

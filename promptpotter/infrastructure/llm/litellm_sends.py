@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
-from promptpotter.infrastructure.llm.openai_compat import reply_bill
+from promptpotter.infrastructure.llm.openai_compat import ReplyBilling
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.spend_book import (
     Admission,
@@ -106,7 +106,8 @@ async def _billed_acompletion(*args: Any, **kwargs: Any) -> Any:
             left = SendOutcome(sent=True, may_have_billed=True)
             block.settle(admission, failed_send(exc) if isinstance(exc, Exception) else left)
             raise
-        block.settle(admission, answered(reply_bill(reply, model=None)))
+        billing = ReplyBilling.model_validate(reply, from_attributes=True)
+        block.settle(admission, answered(billing.bill(model=None)))
         return reply
 
 
@@ -117,6 +118,3 @@ async def _refused_aresponses(*args: Any, **kwargs: Any) -> Any:
             "it would reach the provider unbilled — run the agent on chat completions"
         )
     return await _UNMETERED["aresponses"](*args, **kwargs)
-
-
-__all__ = ["ReportedCost", "litellm_sends_billed_as"]

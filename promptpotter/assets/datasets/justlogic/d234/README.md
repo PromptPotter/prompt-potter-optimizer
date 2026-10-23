@@ -25,7 +25,7 @@ Two things no other file carries:
 
 ## Pinning
 
-The model, provider and the `output_schema` that carries the answer enum live in `dataset.yaml::pipeline`;
+The model, provider and the `output_schema` that carries the answer enum live in `../family.yaml::pipeline`;
 the pin rationale in
 [`../../docs/operations/dataset-reasoning-matrix.md`](../../../../../docs/operations/dataset-reasoning-matrix.md).
 `provider` is operator-locked engine-wide (a cost lever, never any dataset's to open). `model`

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import File, Form, Header, Request, UploadFile
+from fastapi import File, Form, Request, UploadFile
 from pydantic import Field
 
 from promptpotter.application.commands.dispatcher import CommandCall
@@ -13,18 +13,14 @@ from promptpotter.application.datasets.draft_campaign import EditDraftPatch
 from promptpotter.application.datasets.draft_patch import candidate_library_from_column
 from promptpotter.application.datasets.ingest import (
     MAX_UPLOAD_BYTES,
-    SlugTakenError,
     draft_from_dataset_name,
     ingest_draft,
 )
 from promptpotter.application.datasets.tabular_ingest import parse_candidate_library
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.presentation.api.deps import (
-    StoresDep,
-)
-from promptpotter.presentation.api.routers.commands import ensure_idempotency_key
+from promptpotter.presentation.api.deps import IdempotencyKeyDep, StoresDep
 from promptpotter.presentation.api.routers.datasets._router import datasets_router
-from promptpotter.shared.errors import ConflictError, ContentTooLargeError
+from promptpotter.shared.errors import ContentTooLargeError
 
 
 def _candidate_library_call(
@@ -68,22 +64,10 @@ async def ingest_dataset(
     ],
     slug: Annotated[str | None, Form(description="Optional slug override.")] = None,
 ) -> DraftCampaignWire:
-    """Parse an uploaded tabular file, mint a durable check-in campaign and return its draft.
-
-    ``draft_id`` is the ``campaign_id``; nothing runs until ``/commands/start-checkin``.
-    """
+    """Parse an uploaded tabular file into a durable check-in draft; ``/commands/start-checkin`` mints its campaign."""
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
 
-    try:
-        draft = await ingest_draft(
-            stores=stores, blob=blob, filename=file.filename or "", slug=slug
-        )
-    except SlugTakenError as exc:
-        raise ConflictError(
-            f"A dataset named '{exc.slug}' already exists.",
-            code="slug_collision",
-            details={"slug": exc.slug, "suggested_slug": exc.suggested},
-        ) from None
+    draft = await ingest_draft(stores=stores, blob=blob, filename=file.filename or "", slug=slug)
     return draft_wire(stores, draft)
 
 
@@ -98,22 +82,18 @@ async def upload_candidate_library(
     draft_id: Annotated[
         str, Form(description="Draft to attach the library to.", min_length=8, max_length=128)
     ],
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    key: IdempotencyKeyDep,
 ) -> DraftCampaignWire:
-    """Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft.
-
-    ``draft_id`` is the check-in campaign id.
-    """
-    idemp = ensure_idempotency_key(idempotency_key)
+    """Attach an uploaded candidate library to a draft, as an ``edit-draft-campaign``, and return the updated draft."""
     blob = await _read_capped(request, file, MAX_UPLOAD_BYTES)
     terms = parse_candidate_library(blob, file.filename or "")
-    return await dispatch_draft_patch(stores, _candidate_library_call(draft_id, terms, idemp))
+    return await dispatch_draft_patch(stores, _candidate_library_call(draft_id, terms, key))
 
 
 class _BuildLibraryBody(StrictModel):
     """Body for building a candidate library from one of the draft's own columns."""
 
-    # `draft_id` is the owning `campaign_id`: bounded as `commands/payloads.py::_CheckinPayload` bounds it.
+    # Bounded as `domain/command_kinds.py::DraftAddressedPayload` bounds it.
     draft_id: str = Field(min_length=8, max_length=128)
     column: str = Field(min_length=1, max_length=256)
 
@@ -122,19 +102,15 @@ class _BuildLibraryBody(StrictModel):
 async def build_candidate_library_from_column(
     stores: StoresDep,
     body: _BuildLibraryBody,
-    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+    key: IdempotencyKeyDep,
 ) -> DraftCampaignWire:
     """Build a draft's candidate library from the distinct values of one of its own columns and return the updated draft."""
-    idemp = ensure_idempotency_key(idempotency_key)
     terms = candidate_library_from_column(stores, body.draft_id, body.column)
-    return await dispatch_draft_patch(stores, _candidate_library_call(body.draft_id, terms, idemp))
+    return await dispatch_draft_patch(stores, _candidate_library_call(body.draft_id, terms, key))
 
 
 @datasets_router.post("/{name:path}/draft", response_model=DraftCampaignWire)
 async def draft_from_existing_dataset(name: str, stores: StoresDep) -> DraftCampaignWire:
-    """Open an authored dataset's files as a prefilled, durable check-in campaign.
-
-    ``draft_id`` is the ``campaign_id``; nothing runs until ``/commands/start-checkin``.
-    """
+    """Open an authored dataset's files as a prefilled, durable check-in draft."""
     draft = await draft_from_dataset_name(stores=stores, dataset_name=name)
     return draft_wire(stores, draft)

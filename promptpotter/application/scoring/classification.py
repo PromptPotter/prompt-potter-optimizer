@@ -4,7 +4,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.results import ArmOutcome, degradation_reading
+from promptpotter.domain.results import degradation_reading
 from promptpotter.domain.results_health import classify_result, is_deprecated
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -54,7 +54,7 @@ class DegradationCheck:
                 n = len(results)
                 return BrokenSignal(
                     self.name,
-                    ArmOutcome.BROKEN,
+                    "broken",
                     degradation_reading(
                         source=self.name,
                         degraded_count=n,
@@ -79,7 +79,7 @@ class DegradationCheck:
         dominant = max(wtypes, key=wtypes.get) if wtypes else "unknown"  # type: ignore[arg-type]
         return BrokenSignal(
             self.name,
-            ArmOutcome.BROKEN,
+            "broken",
             degradation_reading(
                 source=self.name,
                 degraded_count=degraded,
@@ -114,13 +114,3 @@ def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:
             )
         )
     return checks
-
-
-__all__ = [
-    "DegradationCheck",
-    "build_degradation_checks",
-    "extract_warning_types",
-    "is_deprecated",
-    "scoreable_rows",
-    "terminal_ranking",
-]

@@ -5,7 +5,7 @@ import type {
   ModelCapability,
   NodeConfigParam,
 } from "@/lib/api";
-import type { ManifestNodeOverlay, ParamIntent } from "@/lib/api/types";
+import type { ParamIntent } from "@/lib/api/types";
 import { SCHEMA_DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
 
 export type ConfigMode = "search-space" | "values";
@@ -259,7 +259,7 @@ export function seedOverlayFromRows(
 ): Record<string, Record<string, unknown>> {
   const overlay: Record<string, Record<string, unknown>> = {};
   for (const r of rows) {
-    if (r.kind === "prompt") continue; // the fork's prompt rides `origin_prompt_fields`, never config
+    if (r.kind === "prompt") continue; // the fork's prompt rides `origin_prompts`, never config
     const edit = edits[flatConfigKey(r.node, r.key)];
     if (!r.inSeed && (edit === undefined || edit === r.value)) continue;
     const raw = edit ?? r.value;
@@ -269,15 +269,6 @@ export function seedOverlayFromRows(
     (overlay[r.node] ??= {})[r.key] = value;
   }
   return overlay;
-}
-
-export function knobValue(
-  nodes: Record<string, ManifestNodeOverlay> | null,
-  node: string,
-  knob: KnobRow,
-): unknown {
-  const set = nodes?.[node]?.config;
-  return set && knob.key in set ? set[knob.key] : knob.value;
 }
 
 export function knobText(value: unknown): string {

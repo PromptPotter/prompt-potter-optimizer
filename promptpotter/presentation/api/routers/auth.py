@@ -407,10 +407,3 @@ def activity(
     ``group_by`` is ``model`` (the exact model string) or ``api_key`` (who billed the call).
     """
     return account_activity(stores, window=window, group_by=group_by)
-
-
-__all__ = [
-    "ConnectedAccount",
-    "MeResponse",
-    "auth_router",
-]

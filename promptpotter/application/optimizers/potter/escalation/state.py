@@ -20,6 +20,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
+    from promptpotter.domain.ruler import AbilityReading, LevelSeries
 
 
 class PotterPhase(enum.StrEnum):
@@ -46,10 +47,26 @@ def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
 
 
 @dataclass(frozen=True)
+class HighWater:
+    """Banks a θ peak's ROUND, never its θ: the ruler clock a θ was read at moves."""
+
+    composite_fitness: float | None
+    series: LevelSeries
+    theta_round: int | None
+
+    def level(self, rnd: int | None) -> AbilityReading | None:
+        return None if rnd is None else self.series.level(rnd)
+
+    def theta(self, rnd: int | None) -> float | None:
+        level = self.level(rnd)
+        return None if level is None else level.theta
+
+
+@dataclass(frozen=True)
 class LayerReading:
     stall_count: int
     best_composite_fitness_at_entry: float | None
-    best_theta_at_entry: float | None
+    theta_peak_round_at_entry: int | None
     # ``None`` where the layer held no entry reading to compare.
     comparator: str | None
 
@@ -58,7 +75,7 @@ class LayerReading:
             fires=held.fires + fired,
             stall_count=self.stall_count,
             best_composite_fitness_at_entry=self.best_composite_fitness_at_entry,
-            best_theta_at_entry=self.best_theta_at_entry,
+            theta_peak_round_at_entry=self.theta_peak_round_at_entry,
         )
 
 
@@ -75,154 +92,112 @@ class LadderAsk:
         return NEXT_ACTION_STOP.get(self.next_action)
 
 
-class EscalationFSM:
-    """The ladder is replaced whole and never edited, so one banked on a round cannot move."""
+def bank_round(ladder: Ladder, advance: RoundAdvance) -> Ladder:
+    """Only an ADVANCE clears the stall: a crown is a point estimate, not separated from C0."""
+    match ROUND_ADVANCE_INFO[advance].stall:
+        case StallEffect.RESETS:
+            return ladder.model_copy(update={"l1_stall_count": 0})
+        case StallEffect.COUNTS:
+            return ladder.model_copy(update={"l1_stall_count": ladder.l1_stall_count + 1})
+        case StallEffect.STARTS | StallEffect.SKIPS:
+            return ladder
 
-    __slots__ = ("_ladder", "_matched_rule")
 
-    def __init__(self, ladder: Ladder | None = None) -> None:
-        self._ladder = ladder or Ladder()
-        # Not banked: a resume observes a round before anything reads it.
-        self._matched_rule: str | None = None
+def _improved(
+    current_comp: float,
+    entry_comp: float,
+    current: AbilityReading | None,
+    entry: AbilityReading | None,
+) -> tuple[bool, str]:
+    """The scale is NOT fixed per cycle: a layer entered before the ruler warmed compares composites."""
+    if current is not None and entry is not None:
+        return current.theta - entry.theta > (current.se or 0.0), "theta"
+    scale = "theta_appeared" if current is not None else "composite"
+    return current_comp > entry_comp, scale
 
-    @property
-    def ladder(self) -> Ladder:
-        return self._ladder
 
-    @property
-    def matched_rule(self) -> str:
-        if self._matched_rule is None:
-            raise RuntimeError("no round has been observed, so no rule has matched one")
-        return self._matched_rule
+def _read_layer(layer: LayerCounters, best: HighWater) -> LayerReading:
+    """Each scale's ratchet is seeded by its first reading: a ruler may warm late."""
+    stall_count = layer.stall_count
+    entry_comp = layer.best_composite_fitness_at_entry
+    entry = best.level(layer.theta_peak_round_at_entry)
+    comp = best.composite_fitness if entry_comp is None else entry_comp
+    peak = best.theta_round if entry is None else layer.theta_peak_round_at_entry
+    if entry_comp is None or best.composite_fitness is None:
+        return LayerReading(stall_count, comp, peak, None)
+    improved, comparator = _improved(
+        best.composite_fitness, entry_comp, best.level(best.theta_round), entry
+    )
+    if improved:
+        return LayerReading(0, best.composite_fitness, best.theta_round, comparator)
+    return LayerReading(stall_count + 1, entry_comp, peak, comparator)
 
-    def _bank_round(self, advance: RoundAdvance) -> None:
-        """Only an ADVANCE clears the stall: a crown is a point estimate, not separated from C0."""
-        match ROUND_ADVANCE_INFO[advance].stall:
-            case StallEffect.RESETS:
-                self._ladder = self._ladder.model_copy(update={"l1_stall_count": 0})
-            case StallEffect.COUNTS:
-                self._ladder = self._ladder.model_copy(
-                    update={"l1_stall_count": self._ladder.l1_stall_count + 1}
-                )
-            case StallEffect.STARTS | StallEffect.SKIPS:
-                pass
 
-    @staticmethod
-    def _improved(
-        current_comp: float,
-        entry_comp: float,
-        current_theta: float | None,
-        entry_theta: float | None,
-        current_theta_se: float | None = None,
-    ) -> tuple[bool, str]:
-        """The scale is NOT fixed per cycle: a layer entered before the ruler warmed compares composites."""
-        if current_theta is not None and entry_theta is not None:
-            return current_theta - entry_theta > (current_theta_se or 0.0), "theta"
-        scale = "theta_appeared" if current_theta is not None else "composite"
-        return current_comp > entry_comp, scale
-
-    def _read_layer(
-        self,
-        layer: LayerCounters,
-        current_comp: float | None,
-        current_theta: float | None,
-        current_theta_se: float | None,
-    ) -> LayerReading:
-        """Each scale's ratchet is seeded by its first reading: a ruler may warm late."""
-        stall_count = layer.stall_count
-        entry_comp = layer.best_composite_fitness_at_entry
-        entry_theta = layer.best_theta_at_entry
-        comp = current_comp if entry_comp is None else entry_comp
-        theta = current_theta if entry_theta is None else entry_theta
-        if entry_comp is None or current_comp is None:
-            return LayerReading(stall_count, comp, theta, None)
-        improved, comparator = self._improved(
-            current_comp, entry_comp, current_theta, entry_theta, current_theta_se
-        )
-        if improved:
-            return LayerReading(0, current_comp, current_theta, comparator)
-        return LayerReading(stall_count + 1, entry_comp, theta, comparator)
-
-    def ask_l2_escalation(
-        self,
-        *,
-        current_composite_fitness: float | None,
-        current_theta: float | None = None,
-        current_theta_se: float | None = None,
-        escalation_ladder: EscalationLadder,
-        l2_patience: int,
-        l3_patience: int | None,
-    ) -> LadderAsk:
-        """Mutates nothing: a fire that never parsed leaves the counters where the ledger has them."""
-        now = (current_composite_fitness, current_theta, current_theta_se)
-        l2 = self._read_layer(self._ladder.l2, *now)
-        l3 = self._read_layer(self._ladder.l3, *now)
-        climb = decide_climb(
-            LadderInputs(
-                escalation_ladder=escalation_ladder,
-                l2_stall_count=l2.stall_count,
-                l2_patience=l2_patience,
-                l3_stall_count=l3.stall_count,
-                l3_patience=l3_patience,
-            )
-        )
-        return LadderAsk(next_action=climb.next_action, l2=l2, l3=l3)
-
-    def as_read_by(self, ask: LadderAsk) -> EscalationFSM:
-        held = self._ladder
-        read = {"l2": ask.l2.onto(held.l2)}
-        if ask.next_action is not NextAction.FIRE_L2:
-            read["l3"] = ask.l3.onto(held.l3)
-        return EscalationFSM(held.model_copy(update=read))
-
-    def observe_round(
-        self,
-        *,
-        advance: RoundAdvance,
-        l1_patience: int,
-        escalation_ladder: EscalationLadder,
-        axes_with_positive_yield: int | None = None,
-        l1_mandatory_breach: bool = False,
-        l1_zero_candidates: bool = False,
-        evidence_starved: bool = False,
-    ) -> EscalationEvent:
-        self._bank_round(advance)
-
-        inputs = EscalationInputs(
-            l1_stall_count=self._ladder.l1_stall_count,
-            l1_patience=l1_patience,
+def ask_l2_escalation(
+    ladder: Ladder,
+    *,
+    best: HighWater,
+    escalation_ladder: EscalationLadder,
+    l2_patience: int,
+    l3_patience: int | None,
+) -> LadderAsk:
+    """A fire that never parsed leaves the counters where the ledger has them."""
+    l2 = _read_layer(ladder.l2, best)
+    l3 = _read_layer(ladder.l3, best)
+    climb = decide_climb(
+        LadderInputs(
             escalation_ladder=escalation_ladder,
-            axes_with_positive_yield=axes_with_positive_yield,
-            l1_mandatory_breach=l1_mandatory_breach,
-            l1_zero_candidates=l1_zero_candidates,
-            evidence_starved=evidence_starved,
+            l2_stall_count=l2.stall_count,
+            l2_patience=l2_patience,
+            l3_stall_count=l3.stall_count,
+            l3_patience=l3_patience,
         )
-        event = decide_escalation(inputs)
-        self._matched_rule = event.rule
-        return event
-
-    def record_l2_fired(self, reading: LayerReading) -> None:
-        held = self._ladder
-        self._ladder = held.model_copy(
-            update={"l1_stall_count": 0, "l2": reading.onto(held.l2, fired=True)}
-        )
-
-    def record_l3_fired(self, reading: LayerReading | None) -> None:
-        """``None`` is a heal: it answers a refused L2 edit, not a stall, and leaves L3's ratchet alone."""
-        held = self._ladder
-        l3 = (
-            held.l3.model_copy(update={"fires": held.l3.fires + 1})
-            if reading is None
-            else reading.onto(held.l3, fired=True)
-        )
-        self._ladder = Ladder(l3=l3)
+    )
+    return LadderAsk(next_action=climb.next_action, l2=l2, l3=l3)
 
 
-__all__ = [
-    "EscalationFSM",
-    "ExplorationBudget",
-    "LadderAsk",
-    "LayerReading",
-    "PotterPhase",
-    "exploration_budget",
-]
+def as_read_by(ladder: Ladder, ask: LadderAsk) -> Ladder:
+    read = {"l2": ask.l2.onto(ladder.l2)}
+    if ask.next_action is not NextAction.FIRE_L2:
+        read["l3"] = ask.l3.onto(ladder.l3)
+    return ladder.model_copy(update=read)
+
+
+def observe(
+    ladder: Ladder,
+    *,
+    advance: RoundAdvance,
+    l1_patience: int,
+    escalation_ladder: EscalationLadder,
+    axes_with_positive_yield: int | None = None,
+    l1_mandatory_breach: bool = False,
+    l1_zero_candidates: bool = False,
+    evidence_starved: bool = False,
+) -> tuple[Ladder, EscalationEvent]:
+    banked = bank_round(ladder, advance)
+    inputs = EscalationInputs(
+        l1_stall_count=banked.l1_stall_count,
+        l1_patience=l1_patience,
+        escalation_ladder=escalation_ladder,
+        axes_with_positive_yield=axes_with_positive_yield,
+        l1_mandatory_breach=l1_mandatory_breach,
+        l1_zero_candidates=l1_zero_candidates,
+        evidence_starved=evidence_starved,
+    )
+    return banked, decide_escalation(inputs)
+
+
+def l2_fired(ladder: Ladder, reading: LayerReading) -> Ladder:
+    return ladder.model_copy(
+        update={"l1_stall_count": 0, "l2": reading.onto(ladder.l2, fired=True)}
+    )
+
+
+def l3_fired(ladder: Ladder, reading: LayerReading | None) -> Ladder:
+    """``None`` is a heal: it answers a refused L2 edit, not a stall, and leaves L3's ratchet alone."""
+    l3 = (
+        ladder.l3.model_copy(update={"fires": ladder.l3.fires + 1})
+        if reading is None
+        else reading.onto(ladder.l3, fired=True)
+    )
+    return Ladder(l3=l3)

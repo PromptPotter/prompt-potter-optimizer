@@ -2,7 +2,6 @@
 import { useMemo } from "react";
 import { renderMarkdownSafe } from "@/lib/markdown";
 import { cycleFileRead, type FileContentResponse } from "@/lib/api";
-import type { RoundResult } from "@/lib/api/types";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { RoundFileView } from "./RoundFileView";
 
@@ -17,38 +16,25 @@ interface ViewerState {
   body: string;
   contentType: string;
   isMarkdown: boolean;
-  roundDoc: RoundResult | null;
-  rawJson: string;
 }
 
 const EMPTY: ViewerState = {
   meta: "",
-  body: "Select a file from the tree to preview its content. JSON renders with formatting; .md renders as Markdown; .log renders as plain text. Round files (rounds/round_NNNN.json) render as a scoreboard + per-sample table.",
+  body: "Select a file from the tree to preview its content. JSON renders with formatting; .md renders as Markdown; .log renders as plain text. Round files (rounds/round_NNNN.json) render as their served round: a scoreboard + its measured cells.",
   contentType: "",
   isMarkdown: false,
-  roundDoc: null,
-  rawJson: "",
 };
 
-const LOADING: ViewerState = {
-  meta: "loading file…",
-  body: "",
-  contentType: "",
-  isMarkdown: false,
-  roundDoc: null,
-  rawJson: "",
-};
+const LOADING: ViewerState = { meta: "loading file…", body: "", contentType: "", isMarkdown: false };
 
-const ROUND_FILE_RE = /^rounds\/round_\d+\.json$/;
+const ROUND_FILE_RE = /^rounds\/round_(\d+)\.json$/;
 
-function isRoundFile(selected: { scope: string; path: string } | null): boolean {
-  return !!selected && selected.scope === "cycle" && ROUND_FILE_RE.test(selected.path);
+function roundOfFile(selected: { scope: string; path: string } | null): number | null {
+  const n = selected?.scope === "cycle" ? ROUND_FILE_RE.exec(selected.path)?.[1] : undefined;
+  return n === undefined ? null : Number(n);
 }
 
-function viewerState(
-  r: FileContentResponse,
-  selected: { scope: string; path: string },
-): ViewerState {
+function viewerState(r: FileContentResponse): ViewerState {
   const ct = r.content_type;
   const meta = `${r.size} B • ${ct}`;
   if (r.content == null) {
@@ -60,37 +46,22 @@ function viewerState(
           : "(preview unavailable — binary)",
       contentType: ct,
       isMarkdown: false,
-      roundDoc: null,
-      rawJson: "",
     };
   }
   if (ct === "json") {
     let body = r.content;
-    let parsed: unknown = null;
     try {
-      parsed = JSON.parse(r.content);
-      body = JSON.stringify(parsed, null, 2);
+      body = JSON.stringify(JSON.parse(r.content), null, 2);
     } catch {
       /* keep raw */
     }
-    const roundDoc =
-      isRoundFile(selected) && parsed && typeof parsed === "object"
-        ? (parsed as RoundResult)
-        : null;
-    return { meta, body, contentType: ct, isMarkdown: false, roundDoc, rawJson: body };
+    return { meta, body, contentType: ct, isMarkdown: false };
   }
   if (ct === "markdown") {
     // `renderMarkdownSafe`, never `marked.parse`: tenant-supplied text reaches `dangerouslySetInnerHTML`.
-    return {
-      meta,
-      body: renderMarkdownSafe(r.content),
-      contentType: ct,
-      isMarkdown: true,
-      roundDoc: null,
-      rawJson: "",
-    };
+    return { meta, body: renderMarkdownSafe(r.content), contentType: ct, isMarkdown: true };
   }
-  return { meta, body: r.content, contentType: ct, isMarkdown: false, roundDoc: null, rawJson: "" };
+  return { meta, body: r.content, contentType: ct, isMarkdown: false };
 }
 
 export function FileViewer({ campaignId, cycleId, selected }: Props) {
@@ -106,12 +77,8 @@ export function FileViewer({ campaignId, cycleId, selected }: Props) {
       : null,
   );
   const file = readyData(read);
-  const scope = selected?.scope ?? null;
-  const path = selected?.path ?? null;
-  const shown = useMemo(
-    () => (file && scope !== null && path !== null ? viewerState(file, { scope, path }) : null),
-    [file, scope, path],
-  );
+  const shown = useMemo(() => (file ? viewerState(file) : null), [file]);
+  const round = ready ? roundOfFile(ready.selected) : null;
 
   const state: ViewerState = !ready
     ? EMPTY
@@ -128,9 +95,13 @@ export function FileViewer({ campaignId, cycleId, selected }: Props) {
         </span>
         <span style={{ color: "var(--color-text-secondary)" }}>{state.meta}</span>
       </div>
-      {state.roundDoc ? (
+      {ready && round !== null && shown ? (
         <div className="viewer-body viewer-structured">
-          <RoundFileView doc={state.roundDoc} raw={state.rawJson} />
+          <RoundFileView
+            path={[{ campaignId: ready.campaignId, cycleId: ready.cycleId }]}
+            round={round}
+            raw={shown.body}
+          />
         </div>
       ) : state.isMarkdown ? (
         <div className="viewer-body markdown" dangerouslySetInnerHTML={{ __html: state.body }} />

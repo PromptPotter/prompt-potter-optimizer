@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any, Literal, NamedTuple
 
 from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
+from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     DEFAULT_SCORER_ID,
@@ -122,12 +123,12 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
             or isinstance(node.value, int | float)
             or (isinstance(node.value, str) and id(node) in helper_arguments)
         ):
-            raise ValueError(
+            raise ScoringFormulaError(
                 f"Scoring formula rejected — the constant {node.value!r} in {source}. A formula "
                 "is numeric; a string is only an argument to a scoring helper."
             )
         if kind not in _ALLOWED_AST_NODES:
-            raise ValueError(
+            raise ScoringFormulaError(
                 f"Scoring formula rejected — disallowed syntax {kind.__name__!r} "
                 f"in {source}. Allowed: arithmetic, comparisons, calls to the "
                 "registered scoring helpers, namespace name lookups."
@@ -137,7 +138,7 @@ def validate_ast(tree: ast.AST, *, source: str) -> None:
             not isinstance(node.func, ast.Name) or node.func.id not in _CALLABLE_NAMES
         ):
             called = ast.unparse(node.func)
-            raise ValueError(
+            raise ScoringFormulaError(
                 f"Scoring formula rejected — {called!r} is not a scoring helper, in {source}. "
                 f"Callable: {sorted(_CALLABLE_NAMES)}."
             )
@@ -168,7 +169,12 @@ class CompiledExpression(NamedTuple):
 
 def compile_expression(formula: str, *, source: str) -> CompiledExpression:
     """A term the record lacks raises ``ScoringTermMissingError``, which a read side reports as *unscorable*."""
-    tree = ast.parse(formula, f"<{source}>", "eval")
+    try:
+        tree = ast.parse(formula, f"<{source}>", "eval")
+    except (SyntaxError, ValueError) as exc:  # ValueError: a null byte
+        raise ScoringFormulaError(
+            f"Scoring formula rejected — {formula!r} in {source} does not parse: {exc}."
+        ) from exc
     validate_ast(tree, source=source)
     names = frozenset(node.id for node in ast.walk(tree) if isinstance(node, ast.Name))
     code = compile(ast.fix_missing_locations(_NumericOperands().visit(tree)), f"<{source}>", "eval")
@@ -245,6 +251,11 @@ def _own_else_steps(own: float | None, steps: float | None) -> float | None:
     return own if own is not None else steps
 
 
+def _inner(facts: MeasuredCell, read: Callable[[InnerCellFacts], float | None]) -> float | None:
+    inner = facts.pipeline.inner
+    return None if inner is None else _number(read(inner))
+
+
 _CHANNEL_READERS: dict[str, Callable[[MeasuredCell, float | None], float | None]] = {
     "fitness": lambda _facts, fitness: _number(fitness),
     "ground_truth_rank": lambda facts, _fitness: _number(facts.ground_truth_rank),
@@ -252,19 +263,19 @@ _CHANNEL_READERS: dict[str, Callable[[MeasuredCell, float | None], float | None]
     "latency": lambda facts, _fitness: facts.cost_s,
     "unworked": lambda facts, _fitness: facts.pipeline.unworked_s,
     "bench_lift": lambda facts, _fitness: facts.pipeline.mean_bench_lift,
-    "bench_origin": lambda facts, _fitness: facts.pipeline.inner_bench_origin_level,
-    "bench_final_lift": lambda facts, _fitness: facts.pipeline.inner_bench_final_lift,
-    "lift": lambda facts, _fitness: facts.pipeline.mean_round_delta,
-    "origin": lambda facts, _fitness: facts.pipeline.inner_origin_level,
-    "final_lift": lambda facts, _fitness: facts.pipeline.inner_final_lift,
-    "peak_lift": lambda facts, _fitness: facts.pipeline.inner_peak_lift,
-    "rounds": lambda facts, _fitness: _number(facts.pipeline.inner_rounds_ran),
-    "round_budget": lambda facts, _fitness: _number(facts.pipeline.inner_round_budget),
+    "bench_origin": lambda facts, _fitness: _inner(facts, lambda i: i.bench_origin_level),
+    "bench_final_lift": lambda facts, _fitness: _inner(facts, lambda i: i.bench_final_lift),
+    "lift": lambda facts, _fitness: _inner(facts, lambda i: i.mean_round_delta),
+    "origin": lambda facts, _fitness: _inner(facts, lambda i: i.origin_level),
+    "final_lift": lambda facts, _fitness: _inner(facts, lambda i: i.final_lift),
+    "peak_lift": lambda facts, _fitness: _inner(facts, lambda i: i.peak_lift),
+    "rounds": lambda facts, _fitness: _inner(facts, lambda i: i.rounds_ran),
+    "round_budget": lambda facts, _fitness: _inner(facts, lambda i: i.round_budget),
     "cost": lambda facts, _fitness: _own_else_steps(
-        facts.pipeline.inner_sent_usd, _step_cost(facts.pipeline.step_tokens)
+        _inner(facts, lambda i: i.sent_usd), _step_cost(facts.pipeline.step_tokens)
     ),
     "tokens": lambda facts, _fitness: _own_else_steps(
-        _number(facts.pipeline.inner_tokens), _step_tokens(facts.pipeline.step_tokens)
+        _inner(facts, lambda i: i.tokens), _step_tokens(facts.pipeline.step_tokens)
     ),
     # Characters, not tokens: no tokenizer ships.
     "target_prompt_chars": lambda facts, _fitness: _number(facts.pipeline.target_prompt_chars),
@@ -378,7 +389,7 @@ CELL_INTRINSIC_NAMES: frozenset[str] = frozenset(
 
 _INTRINSIC_PROBE = MeasuredCell.from_wire(
     {
-        "sample_id": 0,
+        "sample_key": "_",
         # Maximal: a thinner probe would under-report and let a real collision through.
         "n_candidates": 0,
         "pipeline_data": {"step_tokens": {"_": {}}},
@@ -590,28 +601,3 @@ def split_scoring_block(
             block, None, auto_scorer_id(block, None, judge_instrument=judge_instrument)
         )
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)
-
-
-__all__ = [
-    "CELL_CHANNELS",
-    "CELL_TERMS",
-    "DIALS_KEY",
-    "SAFE_BUILTINS",
-    "CellTerm",
-    "CompiledExpression",
-    "ScoringFormulaError",
-    "ScoringTermMissingError",
-    "auto_scorer_id",
-    "cell_channels_of",
-    "cell_namespace",
-    "clamp_unit_score",
-    "compile_expression",
-    "compile_scorer",
-    "objective_namespace",
-    "origin_anchors",
-    "parse_dials",
-    "realize_dials",
-    "spell_dials",
-    "split_scoring_block",
-    "validate_ast",
-]

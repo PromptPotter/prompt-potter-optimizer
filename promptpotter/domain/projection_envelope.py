@@ -1,30 +1,19 @@
 from __future__ import annotations
 
-from typing import Any, Literal, get_args
+from typing import Annotated, Any, Literal, get_args
 
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
-from promptpotter.domain.activity import SILENT_RECORDS, ActivityState
-from promptpotter.domain.run_records import RECORD_ADAPTER, CycleRecord
-from promptpotter.domain.strict_model import StrictModel
-
-__all__ = [
-    "NON_ACTIVITY_KINDS",
-    "RECORD_KINDS",
-    "ProjectionEnvelope",
-    "ProjectionKind",
-    "bearing_record",
-]
-
+from promptpotter.domain.activity import ActivityRecord, ActivityState, SilentRecord
+from promptpotter.domain.run_records import CycleRecord
+from promptpotter.domain.strict_model import FrozenModel
 
 # A missing kind is a HOLE, not a filter: the tail still consumes its offset, and the client reconnects.
 ProjectionKind = Literal[
     "account_event",
+    "arm",
     "backend_warning",
-    "candidate_minted",
-    "candidate_scored",
-    "candidate_started",
-    "checkin_closed",
+    "bank_partition",
     "decision",
     "command",
     "command_ack",
@@ -38,33 +27,32 @@ ProjectionKind = Literal[
     "fork_graded",
     "intervention",
     "launch_claim",
+    "launch_clock",
     "launch_released",
     "llm_call_progress",
     "llm_call",
     "llm_call_start",
-    "optimizer_state",
     "phase",
     "priced_key",
     "provider_eased",
     "provider_hold",
     "race_catch_up",
     "race_standing",
+    "resolved_run",
     "round_closed",
     "round_entered",
     "round_proposed",
-    "round_standing",
+    "round_restated",
     "round_warning",
-    "ruler",
-    "run_limits",
     "run_phase",
     "run_wiring",
-    "sample_order",
     "sample_scored",
     "sample_started",
     "scoring_locked",
     "spawned",
     "spend_hold",
     "spend_tombstone",
+    "standing_budget",
     "token_usage",
     "trail_tombstone",
     # Synthesized by the ledger tail (``CycleLedgerTail``); on no ledger.
@@ -87,26 +75,29 @@ RECORD_KINDS: frozenset[str] = _record_types
 
 #: The licence not to validate the record at all; a kind outside it may still yield no item.
 NON_ACTIVITY_KINDS: frozenset[str] = frozenset(
-    arm.model_fields["record_type"].default for arm in SILENT_RECORDS
+    arm.model_fields["record_type"].default for arm in get_args(SilentRecord)
 )
 
 del _record_types, _declared
 
+_ACTIVITY_ADAPTER: TypeAdapter[ActivityRecord] = TypeAdapter(
+    Annotated[ActivityRecord, Field(discriminator="record_type")],
+    config=ConfigDict(defer_build=True),
+)
 
-def bearing_record(kind: str, rec: dict[str, Any]) -> CycleRecord | None:
+
+def bearing_record(kind: str, rec: dict[str, Any]) -> ActivityRecord | None:
     """``None`` for a kind that never renders, and for a line no arm accepts (``CycleEventLog.iter``'s skip)."""
     if kind in NON_ACTIVITY_KINDS:
         return None
     try:
-        return RECORD_ADAPTER.validate_python(rec)
+        return _ACTIVITY_ADAPTER.validate_python(rec)
     except ValidationError:
         return None
 
 
-class ProjectionEnvelope(StrictModel):
+class ProjectionEnvelope(FrozenModel):
     """One outbound SSE frame, whose receiver treats an unknown field as a drift signal."""
-
-    model_config = ConfigDict(frozen=True)
 
     kind: ProjectionKind = Field(
         description="Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot.",

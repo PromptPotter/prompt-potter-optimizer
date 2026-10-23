@@ -62,12 +62,3 @@ class ValueLeaf:
     def may_not_arrive(self) -> bool:
         """Delivered yet maybe never read: a lift across arms differing only here has no proof."""
         return self.visibility == "on_demand"
-
-
-__all__ = [
-    "Delivery",
-    "LeafKind",
-    "ValueLeaf",
-    "Visibility",
-    "visibility_of",
-]

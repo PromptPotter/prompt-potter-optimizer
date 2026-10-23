@@ -6,8 +6,6 @@ from typing import Any, Protocol
 
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 
-__all__ = ["ResumeCheckpointRecord", "record_decision"]
-
 
 class _DecisionSink(Protocol):
     def append(self, decision: ResumeCheckpointRecord, /) -> Any: ...

@@ -19,17 +19,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["CellEnvelope"]
-
-
-def _noop(_seconds: float) -> None:
-    return None
-
 
 class CellEnvelope:
     """Expiry raises ``CellHaltedError``: the cell was CUT, so no repair may re-buy a truncated trajectory."""
 
-    def __init__(self, budget_s: float | None, *, attempts: int, label: str) -> None:
+    def __init__(self, budget_s: float, *, attempts: int, label: str) -> None:
         self.budget_s = budget_s
         self.label = label
         self._budget = SendBudget(budget_s, attempts=attempts)
@@ -44,8 +38,6 @@ class CellEnvelope:
     @property
     def on_suspend(self) -> Callable[[float], None]:
         """Read BEFORE ``__aenter__`` so the heartbeat task outlives the timeout scope."""
-        if self._deadline is None:
-            return _noop
         return partial(self._give_back, cause="the machine suspended")
 
     def _give_back(self, seconds: float, *, cause: str) -> None:
@@ -53,7 +45,7 @@ class CellEnvelope:
         self._budget.give_back(seconds)
         if self.unworked == before:
             return
-        budget = self.budget_s or 0.0
+        budget = self.budget_s
         logger.debug(
             "cell %s: +%.1fs envelope (%s); %.0fs given back of a %.0fs budget",
             self.label,
@@ -75,8 +67,6 @@ class CellEnvelope:
     async def __aenter__(self) -> CellEnvelope:
         # Bound in the cell's own task, so its resends and stall never touch a sibling's.
         self._bound.enter_context(under_budget(self._budget))
-        if self._deadline is None:
-            return self
         set_throttle_stall_sink(
             partial(self._give_back, cause="queued behind the shared rate limiter")
         )
@@ -90,8 +80,6 @@ class CellEnvelope:
         tb: TracebackType | None,
     ) -> bool:
         self._bound.close()
-        if self._deadline is None:
-            return False
         timed_out = False
         try:
             await self._deadline.__aexit__(exc_type, exc, tb)

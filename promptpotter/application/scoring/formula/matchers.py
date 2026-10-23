@@ -329,10 +329,3 @@ EXTRACTION_NOTES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
 @shapes_optimizer_prompt
 def extraction_note_for_scoring(scoring: str) -> str:
     return " ".join(note for name, note in EXTRACTION_NOTES.items() if name in scoring)
-
-
-__all__ = [
-    "EXTRACTION_NOTES",
-    "SCORING_FUNCTIONS",
-    "extraction_note_for_scoring",
-]

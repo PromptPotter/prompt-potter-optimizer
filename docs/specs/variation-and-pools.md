@@ -12,12 +12,9 @@ differ in one knob.
 
 **Whatever one optimizer built, every other can use.** A member — a proposer, a sampler, an
 eliminator, a selector, an analysis step that feeds another — is registered once and named by any
-manifest, so optimizers are recombined as freely as the prompts they evolve. Three things follow,
+manifest, so optimizers are recombined as freely as the prompts they evolve. Two things follow,
 and each is a stage in the roadmap:
 
-- **A member reads a typed slice, never its runtime's whole payload.** Today a member raises under
-  any manifest but its own (`optimizers/nodes.py::state_as`); that is the one thing between
-  "every optimizer is a manifest" and "any manifest names any member".
 - **A capability is one mechanism mounted on a host.** Recombination is not written three times
   for three nodes: one typed spec, one materializer, and a knob saying which node emits the spec.
 - **The operator controls all of it from every entry point, at three moments** — configuring at
@@ -50,13 +47,13 @@ Each word is checked against what the repo already calls things; an existing nam
 
 | Term | Means | Reuses / collides |
 |---|---|---|
-| **arm** | an individual a round measures | existing (`optimizers/nodes.py::Population`). This is the "active pool" — never called a pool |
-| **pool** | a named set of entries of ONE kind that nodes draw from and declared writers add to | existing as `search pool`, `demo pool`, GEPA's `pool`; this page makes it one type. Never "sample pool": a sample is a dataset row |
+| **arm** | an individual a round measures | existing (`domain/optimizer_state.py::OptimizerState.population`). This is the "active pool" — never called a pool |
+| **pool** | a named set of entries of ONE kind that nodes draw from and declared writers add to | `domain/pool.py::Pool` (`BlockPool`, `DemoPool`). Never "sample pool": a sample is a dataset row |
 | **entry kind** | `individual` · `block` · `shot` | `block` = `domain/prompt_block.py::PromptBlock`, a whole-field value; "allele" is not used |
-| **locus** | one separately inheritable part of an individual: an open prompt field, `shot_ids`, an open `(node, param)` | `domain/opt_search_point.py::OptSearchPoint.loci`; an open locus IS an open axis |
+| **locus** | one separately inheritable part of an individual: a `Locus(node, key)` — an open prompt field or the shots of a prompt node, an open config param | `domain/opt_search_point.py::OptSearchPoint.loci`; an open locus IS an open axis |
 | **variation node** | a proposer node that turns parents and pool entries into arms | "proposer" + `IndividualLineage.variations`; never bare "operator" — the operator is the human |
 | **novelty** / **recombination** | a variation node's class: it can emit a value no pool held / it emits only values its inputs held | new |
-| **access** | how a node reads a pool: `off` · `open` · `closed` | replaces `prompt_block_catalogue`'s `off` / `guidance` / `restrict` |
+| **access** | how a node reads a pool: `off` · `open` · `closed` | `domain/pool.py::Access`; potter's `l1_generate.block_access` |
 | **host** | the node a capability is mounted on | new; the node whose access to a pool is not `off` |
 | **mix** | how many of a round's arms each variation node produces | new; replaces per-member counts where a manifest composes more than one |
 | **preset** | a manifest whose composition and knob values reproduce a paper | existing (`roadmap.md` § The optimizer plug point) |
@@ -77,8 +74,6 @@ Each word is checked against what the repo already calls things; an existing nam
 - **Loci**: which it may set. Under a controlled arm the open set is the prompt's own fields —
   owned by [`../architecture.md`](../architecture.md) § The controlled comparison; a variation node
   reads the open set and never widens it.
-- **State**: a typed slice it needs, never a runtime's whole payload, so it runs under any manifest
-  banking that slice.
 - **Lineage**: each node that shaped a child is on the child, in walk order; a later node never
   overwrites an earlier one.
 - **Treatment**: a deterministic member's code is in its optimizer's `Treatment` the way a prompt
@@ -107,38 +102,24 @@ the fitness is accuracy on a fixed panel — θ has no ratio scale.
 
 ## The pool contract
 
-- **Declared by the manifest**: name, entry kind, the field(s) a block pool serves, its starting
-  content, its writers. The demo pool is the existing instance — owned by
-  [`../architecture.md`](../architecture.md) § The bench score is not an optimizer's selection.
-- **The first two pools** are the block library (`config/prompt_variants.json`) and the
-  campaign's own measured individuals. Harvested templates enter later, each through a manifest
-  that states its source — § Out of scope.
-- **Entries are addressed by content id.** A block has `PromptBlock.id`; an individual its
-  content id; a shot its sample id. A text with no id is not an entry.
-- **Starting content is identity.** It is hashed into the treatment as data — the rule
-  `config/prompt_blocks.py::library_identity` already applies to the block library.
-- **The active subset is a knob on the pool.** A campaign names which entries are in play, by
-  group — prompt field, then source, then entry — and that selection is part of identity. A pool
-  is never all-on by necessity.
-- **A round banks the pool it was proposed under**, by entry id, on its `optimizer_state` — owned
-  by [`../../promptpotter/application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md)
-  § Conventions; no sidecar. A resume or a fork re-seats the pool from the round it continues.
-- **Access is per reader.** `closed`: the reply is constrained to entry ids. `open`: the entries
-  are shown and the value space stays free. `off`: nothing renders and the prompt is bit-identical
-  to a run without the pool.
+**A pool's shape, sources, access and banking** — owned by
+[`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Other surfaces;
+this section holds only what is still to build.
+
+- **The campaign's own measured individuals are the next pool**, each entry its content id.
+  Harvested templates enter later, each through a manifest that states its source — § Out of scope.
 - **Static or growing is a setting.** Under `open`, a knob bounds how many of a round's arms may
   carry a new value; each new value becomes an entry with its writer recorded. At zero the pool is
   static and every value an arm carries was predefined.
 - **Writers are declared and plural**: a variation node, a selector, run init (a miner), a command.
-  A writer not on the list cannot add an entry.
+  A writer not on the list cannot add an entry. The arm gate's seat draws what the
+  proposers it stands in for draw, so an authored shot is admitted against the demo pool only
+  where one of them draws it.
 - **A write during a run is a record, taken at a round boundary.** A node's own write is its
   decision record. A write from outside the loop is a Control-remote command — owned by
-  [`../architecture.md`](../architecture.md) § Control-remote; declared in
-  [`api-openapi.yaml`](api-openapi.yaml) before its handler. Editing `prompt_variants.json` or a
+  [`../architecture.md`](../architecture.md) § Control-remote; its payload model is declared
+  before its handler. Editing `prompt_variants.json` or a
   manifest is not a write to a running campaign: it is a treatment change for the next mint.
-- **Memory fence.** A pool fed by other campaigns is memory — owned by
-  [`../architecture.md`](../architecture.md) § The controlled comparison; a controlled arm reads
-  its own line's entries only.
 
 ## Knobs and the served shape
 
@@ -148,16 +129,8 @@ campaign-config field and no second overlay.
 
 - **On / off / how many** is `mix` on the opening node: `{variation node → arms}`. Zero is off. One
   knob, so a mode contrast is one edit.
-- **Access** is a knob with `options` on the reading node, one per pool it reads.
 - **Standing size, parent rule, survivor rule** are ordinary knobs on the opening node and the
   selector.
-- **Served** on the response `GET /optimizers/{name}/knobs` already answers
-  (`application/pipeline_resolve.py::OptimizerKnobsResponse`), extended: per node its class and
-  the pools it draws from and writes to; the manifest's pools (name, entry kind, fields, groups,
-  size, origin, writers); an object knob's own rows, so nesting is drawn from data. Declared in
-  [`api-openapi.yaml`](api-openapi.yaml) first; the TypeScript is generated.
-- **Refused in one place**: `optimizer_manifest.py::resolve_optimizer` — a mix naming a node the
-  manifest lacks, `closed` on an empty pool, a writer not declared.
 
 ## The three surfaces
 
@@ -188,7 +161,7 @@ browser — owned by [`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) 
 [`l4-outer-loop.md`](l4-outer-loop.md); this page adds one thing it must reach.
 
 - An outer arm reaches an inner knob only where the inner member declares it a lever
-  (`optimizers/nodes.py::LlmNode.outer_levers`), and only llm nodes are in the outer's graph. `mix`
+  (`application/optimizers/nodes.py::LlmNode.outer_levers`), and only llm nodes are in the outer's graph. `mix`
   and access become levers, so the lever declaration moves to every member and the outer graph
   carries any node declaring one.
 - A lever's value space is its knob's own options and bounds; it enters the inner cell's identity
@@ -221,9 +194,9 @@ browser — owned by [`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) 
 
 ## Out of scope, deliberately
 
-- **Field order as a locus.** `PromptTemplate.RENDER_ORDER` stays a class constant — owned by
+- **Field order as a locus.** A prompt node's field order is its declaration — owned by
   [`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Backbone
-  primitives. Inversion acts on `shot_ids`.
+  primitives. Inversion acts on a node's shots.
 - **Segments inside a field.** No sentence or section model; a splitter is a new concept and
   passes the pre-flight gate on its own.
 - **Lifting a population into the bench.** Individuals stay in the optimizer's payload — owned by

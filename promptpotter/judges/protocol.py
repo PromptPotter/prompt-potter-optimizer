@@ -1,22 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import MeasuredCell
-
-__all__ = [
-    "GradeFn",
-    "Judge",
-    "JudgeSpec",
-    "JudgeStage",
-    "JudgeVerdict",
-]
 
 
 class JudgeStage(StrictModel):
@@ -59,7 +51,7 @@ class JudgeVerdict(StrictModel):
     """Set when the judge FAILED: a provider hiccup must never bank as a wrong answer."""
 
 
-GradeFn = Callable[["JudgeSpec", "MeasuredCell"], Awaitable[JudgeVerdict]]
+GradeFn = Callable[["JudgeSpec", "MeasuredCell"], Coroutine[Any, Any, JudgeVerdict]]
 """One call or several: the arity is the judge's own, bounded by ``Judge.max_stages``."""
 
 

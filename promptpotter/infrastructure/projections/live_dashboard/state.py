@@ -7,27 +7,16 @@ from pydantic import ConfigDict, Field
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchScore, BenchSubject
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import LiveCandidate, RoundSummary, RunLimits
+from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.results import DisplayMetric, RunStanding
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
-from promptpotter.domain.run_records import RunWiringRecord
+from promptpotter.domain.ruler import LevelSeries
+from promptpotter.domain.run_records import DefaultsDrift, RunWiringRecord
 from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.clock import utcnow_iso
-
-__all__ = [
-    "BackendWarning",
-    "BenchPassProgress",
-    "CatchUpLogEntry",
-    "CurrentRound",
-    "DashboardError",
-    "DashboardFacts",
-    "LiveDashboardState",
-    "RacingBlock",
-]
 
 
 class CatchUpLogEntry(StrictModel):
@@ -35,10 +24,11 @@ class CatchUpLogEntry(StrictModel):
 
     member: str
     round: int
-    candidate_idx: int
-    candidate_total: int
-    sample_id: int
-    prior_ids: list[str]
+    arm: ArmKey
+    # The arm's label as the round names it.
+    label: str
+    position: int
+    prior_keys: list[ArmKey]
 
 
 class BackendWarning(StrictModel):
@@ -79,7 +69,8 @@ class BenchPassProgress(StrictModel):
     """The held-out pass in flight; its rows are no round's cells."""
 
     subject: BenchSubject
-    label: str = Field(description="The candidate the pass grades, as its row is labelled.")
+    arm: ArmKey = Field(description="The arm the pass grades — the join to its row.")
+    label: str = Field(description="That arm's label, to render.")
     sp_hash: str = Field(description="The searchpoint scored — the archive's `prompt_fields_id`.")
     round: int = Field(description="The round whose selection is graded; 0 is the origin.")
     rows: int = Field(description="Bench rows the pass sends.")
@@ -112,9 +103,6 @@ class CurrentRound(StrictModel):
 class DashboardFacts(StrictModel):
     model_config = ConfigDict(validate_assignment=False)
 
-    campaign_id: str
-    cycle_id: str
-
     # ``-1`` until the first record lands; the SSE snapshot parks its tail one past it.
     at_offset: int = -1
 
@@ -127,7 +115,8 @@ class DashboardFacts(StrictModel):
     stop_reason: StopReason | None = None
 
     round: int = 0
-    candidate: str = ""
+    # The arm the oldest open cell is walked for; ``None`` between walks and on a pass of no arm.
+    measuring_arm: ArmName | None = None
     run_standing: RunStanding | None = None
 
     rounds: list[RoundSummary] = Field(default_factory=list)
@@ -150,7 +139,7 @@ class DashboardFacts(StrictModel):
     total_backend_calls: int = 0
 
     current_query_payload: str | None = None
-    open_sample_ids: list[int] = Field(default_factory=list)
+    open_positions: list[int] = Field(default_factory=list)
 
     sample_lookahead_discards: int = 0
     in_flight: int = 0
@@ -167,13 +156,20 @@ class DashboardFacts(StrictModel):
 
     # ``None`` = no time recorded; a cached replay's 0.0 is a real reading.
     last_query_elapsed_s: float | None = None
-    wallclock_serialized_at: str | None = None
+    # The timestamp of the last record the state took, which `at_offset` may stand past.
+    at_time: str
 
     arms_per_round: int | None
     sp_budget_round: int
 
     # As DECLARED; what binds now is ``ServedDashboard.run_limits``.
     run_limits: RunLimits
+    defaults_drift: DefaultsDrift | None = Field(
+        default=None,
+        description="Set where the bench defaults or the treatment the campaign's declaration is a "
+        "delta over moved since it was declared, under an unchanged origin: this launch runs "
+        "today's values.",
+    )
 
     catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
 
@@ -186,7 +182,9 @@ class LiveDashboardState(DashboardFacts):
     # Says "running" forever after a kill: the answer is ``ServedDashboard.run_phase``.
     declared_phase: RunPhase = RunPhase.RUNNING
 
-    current_sample_id: int | None = None
+    current_position: int | None = None
+    # The last close's; served only as each `ServedRound`'s readings of it.
+    level_series: LevelSeries | None = None
     # A PLAN: an eliminator can stop a candidate before the tail is reached.
     declared_sample_order: list[int] = Field(default_factory=list)
 
@@ -201,16 +199,12 @@ class LiveDashboardState(DashboardFacts):
     spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
 
     @classmethod
-    def declared(cls, hop: CycleHop, wiring: RunWiringRecord) -> LiveDashboardState:
-        return cls(
-            campaign_id=hop.campaign_id,
-            cycle_id=hop.cycle_id,
-            state_since=utcnow_iso(),
-            **cls.wired(wiring),
-        )
+    def declared(cls, wiring: RunWiringRecord) -> LiveDashboardState:
+        return cls(at_time=wiring.timestamp, **cls.launched(wiring))
 
     @staticmethod
-    def wired(wiring: RunWiringRecord) -> dict[str, Any]:
+    def launched(wiring: RunWiringRecord) -> dict[str, Any]:
+        """What each launch's wiring declares, and clears of what the last launch left."""
         return {
             "arms_per_round": wiring.arms_per_round,
             "sp_budget_round": wiring.sp_budget_round,
@@ -220,25 +214,18 @@ class LiveDashboardState(DashboardFacts):
             "measured_unit": wiring.measured_unit,
             "langfuse_trace_url": wiring.langfuse_trace_url,
             "run_limits": wiring.run_limits,
-        }
-
-    @classmethod
-    def for_run(cls, prior: LiveDashboardState, *, hop: CycleHop) -> LiveDashboardState:
-        """``prior`` carried WHOLESALE: a hand-picked subset resets every field it omits."""
-        mine: dict[str, Any] = {
-            "campaign_id": hop.campaign_id,
-            "cycle_id": hop.cycle_id,
-            "state_since": utcnow_iso(),
-            "declared_phase": RunPhase.RUNNING,
+            "defaults_drift": wiring.defaults_drift,
+            "state": DashboardState.INIT,
+            "optimizer_step": None,
+            "measuring_arm": None,
+            "state_since": wiring.timestamp,
             "stop_reason": None,
             "error": None,
             # A resumed run grades its selection again; the prior pass graded a stale one.
             "bench_score": None,
             "bench_pass": None,
-            "current_round": CurrentRound.unentered(),
             "current_query_payload": None,
-            "current_sample_id": None,
-            "open_sample_ids": [],
+            "current_position": None,
+            "open_positions": [],
             "declared_sample_order": [],
         }
-        return prior.model_copy(update=mine)

@@ -12,13 +12,6 @@ from promptpotter.shared.plugin_registry import BUILT_IN, load_registry, lookup
 if typing.TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-__all__ = [
-    "DEFAULT_CONNECTOR",
-    "ENTRY_POINT_GROUP",
-    "connector_origins",
-    "get",
-    "registered",
-]
 
 ENTRY_POINT_GROUP = "promptpotter.connectors"
 """Published: renaming it un-registers every third-party plugin at once."""

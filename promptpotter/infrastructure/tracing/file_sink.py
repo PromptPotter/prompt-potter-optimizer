@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_text
+from promptpotter.infrastructure.store.io import append_jsonl, write_json
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.tracing.events import (
     CampaignStart,
@@ -18,8 +18,9 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.measurement_context import instrument_depth
 
 if TYPE_CHECKING:
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.results import Concluded, ScoreSummary
     from promptpotter.domain.run_records import (
-        CandidateScoredRecord,
         RoundClosedRecord,
         RoundEnteredRecord,
         RunPhaseRecord,
@@ -149,19 +150,21 @@ class FileSink(TraceSink):
             {"event": "campaign_start", "trace_id": trace["id"], "campaign_id": event.campaign_id}
         )
 
-    def on_candidate_scored(self, campaign_id: str, record: CandidateScoredRecord) -> None:
-        scores = record.scores
+    def on_arm_concluded(
+        self, campaign_id: str, round_num: int, arm: Concluded, fold: ScoreSummary | None
+    ) -> None:
         walked = {
-            "label": scores.label,
-            "candidate_id": scores.candidate_id,
-            "prompt_fields_id": scores.sp_hash,
+            "label": arm.label,
+            "individual_id": arm.individual.id,
+            "prompt_fields_id": arm.sp_hash,
         }
-        accuracy = scores.accuracy
+        accuracy = None if fold is None else fold.accuracy
+        total = 0 if fold is None else fold.total
         trace = self._write_trace(
             name="dataset_run",
             input_data=walked,
             tags=["dataset_run"],
-            output_data={"accuracy": accuracy, "total": scores.total},
+            output_data={"accuracy": accuracy, "total": total},
         )
         if accuracy is not None:
             self._write_score(trace["id"], "accuracy", accuracy)
@@ -169,10 +172,10 @@ class FileSink(TraceSink):
             {
                 "event": "dataset_run",
                 "trace_id": trace["id"],
-                "round": record.round,
+                "round": round_num,
                 **walked,
                 "accuracy": accuracy,
-                "total": scores.total,
+                "total": total,
             }
         )
 
@@ -241,25 +244,27 @@ class FileSink(TraceSink):
 
     def on_round_closed(self, campaign_id: str, record: RoundClosedRecord) -> None:
         trace_id = self._trace_id(campaign_id)
-        winner = record.opt_sp
-        winner_id = winner.id if winner is not None else ""
-        if winner is not None:
-            self._write_prompt_version(record)
+        head, fold = record.head, record.fold
+        winner_id = "" if head is None else head.individual.id
+        accuracy = None if fold is None else fold.accuracy
+        total = 0 if fold is None else fold.total
+        if head is not None:
+            self._write_prompt_version(head.individual)
         if trace_id:
             observation = self._round_observations.pop((campaign_id, record.round), None)
             if observation is not None:
                 self._finalize_observation(
                     observation,
                     {
-                        "accuracy": record.accuracy,
-                        "total": record.total,
+                        "accuracy": accuracy,
+                        "total": total,
                         "improved": record.improved,
                         "winner_lineage_id": winner_id,
                     },
-                    {"candidate_scores": [c.model_dump() for c in record.candidate_scores]},
+                    {"arms": [arm.model_dump() for arm in record.arms.values()]},
                 )
-            if record.accuracy is not None:
-                self._write_score(trace_id, "accuracy", record.accuracy)
+            if accuracy is not None:
+                self._write_score(trace_id, "accuracy", accuracy)
 
         self._log_event(
             {
@@ -267,27 +272,24 @@ class FileSink(TraceSink):
                 "trace_id": trace_id,
                 "campaign_id": campaign_id,
                 "round": record.round,
-                "accuracy": record.accuracy,
-                "total": record.total,
+                "accuracy": accuracy,
+                "total": total,
                 "improved": record.improved,
                 "winner_lineage_id": winner_id,
             }
         )
 
-    def _write_prompt_version(self, record: RoundClosedRecord) -> None:
-        winner = record.opt_sp
-        assert winner is not None
+    def _write_prompt_version(self, winner: OptSearchPoint) -> None:
         family = "target_prompt"
         version = winner.id[:8] if winner.id else "unknown"
         prompt_dir = self._scope / "prompts" / family / version
-        write_text(prompt_dir / "prompt.txt", winner.render())
         parent_ids = list(winner.lineage.parent_ids)
         metadata = {
             "family": family,
             "version": version,
             "lineage_id": winner.id,
             "parent_ids": parent_ids,
-            "layer1_fields": record.prompt_fields,
+            "prompts": winner.prompts_dump(),
             "created_at": utcnow_iso(),
         }
         write_json(prompt_dir / "metadata.json", metadata)
@@ -321,6 +323,3 @@ class FileSink(TraceSink):
                 **ending,
             }
         )
-
-
-__all__ = ["FileSink"]

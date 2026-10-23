@@ -9,17 +9,24 @@ from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import (
+    BankedSubject,
     SpendHoldRecord,
     SpendTombstoneRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.spend import bill_is_floor, calls_rate_priced
+from promptpotter.domain.spend import (
+    NOTHING_METERED,
+    Budget,
+    CeilingMeter,
+    bill_is_floor,
+    calls_rate_priced,
+)
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.layout import CycleLayout, draft_dirs
 from promptpotter.infrastructure.store.read_model import (
     HOLD_TRAIL,
     HeldSends,
@@ -35,8 +42,16 @@ if TYPE_CHECKING:
 
 
 def account_ledgers(campaigns: CampaignStore) -> list[Path]:
-    """The workspace path is resolved, not opened: a read must not mint the dir it reads."""
-    return [*campaigns.iter_cycle_ledgers(), CycleEventLog.workspace_path(campaigns.workspace)]
+    """Resolved, never opened, so a read mints no dir; a draft's calls are the account's."""
+    return [
+        *campaigns.iter_cycle_ledgers(),
+        *(
+            ledger
+            for draft_dir in draft_dirs(campaigns.workspace)
+            if (ledger := CycleLayout(draft_dir).ledger).is_file()
+        ),
+        CycleEventLog.workspace_path(campaigns.workspace),
+    ]
 
 
 class UsageRow(NamedTuple):
@@ -192,24 +207,41 @@ class _Tombstones:
 
     def __init__(self) -> None:
         self._by_campaign: dict[str, UserSpend] = {}
-        self._subjects: set[tuple[str, str]] = set()
+        self._drafts = ZERO_SPEND
+        self._metered: dict[tuple[str, CeilingMeter], Budget] = {}
+        self._subjects: set[BankedSubject] = set()
 
     def feed(self, offset: int, banked: SpendTombstoneRecord) -> None:
-        held = self._by_campaign.get(banked.campaign_id, ZERO_SPEND)
-        self._by_campaign[banked.campaign_id] = held.plus(
-            UserSpend(
-                banked.used_usd,
-                banked.used_tokens,
-                banked.unpriced_tokens,
-                banked.unreported_usd,
-                banked.unreported_tokens,
-                banked.rate_priced_usd,
-            )
+        self._subjects.add(banked.subject)
+        spent = UserSpend(
+            banked.used_usd,
+            banked.used_tokens,
+            banked.unpriced_tokens,
+            banked.unreported_usd,
+            banked.unreported_tokens,
+            banked.rate_priced_usd,
         )
-        self._subjects.add((banked.campaign_id, banked.cycle_id))
+        # A draft's check-in calls are the account's alone: no campaign's ceiling counted them.
+        if banked.draft_id:
+            self._drafts = self._drafts.plus(spent)
+            return
+        for meter, counted in banked.metered.items():
+            key = (banked.campaign_id, meter)
+            self._metered[key] = self._metered.get(key, NOTHING_METERED).plus(counted)
+        held = self._by_campaign.get(banked.campaign_id, ZERO_SPEND)
+        self._by_campaign[banked.campaign_id] = held.plus(spent)
 
-    def value(self) -> tuple[dict[str, UserSpend], frozenset[tuple[str, str]]]:
-        return dict(self._by_campaign), frozenset(self._subjects)
+    def value(self) -> _Banked:
+        return _Banked(
+            dict(self._by_campaign), self._drafts, dict(self._metered), frozenset(self._subjects)
+        )
+
+
+class _Banked(NamedTuple):
+    spent: dict[str, UserSpend]
+    drafts: UserSpend
+    metered: dict[tuple[str, CeilingMeter], Budget]
+    subjects: frozenset[BankedSubject]
 
 
 def _interned(value: object) -> str | None:
@@ -267,21 +299,20 @@ def billed_spend(ledgers: Iterable[Path]) -> UserSpend:
     return total
 
 
-def history_spend(cycle_dir: CycleDir) -> UserSpend:
-    """A hold in the prefix is its owner's: a bill past the cut may close it."""
-    *prefix, own = ledger_chain(cycle_dir, moment=None)
-    total = billed_spend([own.path])
-    for span in prefix:
-        billed, _ = LedgerIndex.of(span.path, _SPEND_FOLDS).view(_Billed, span.until)
-        total = total.plus(billed)
-    return total
-
-
 def campaign_spend(campaigns: CampaignStore, campaign_id: str) -> UserSpend:
     own = billed_spend(campaigns.campaign_cycle_ledgers(campaign_id))
-    workspace_ledger = CycleEventLog.workspace_path(campaigns.workspace)
-    banked, _ = LedgerIndex.of(workspace_ledger, _SPEND_FOLDS).view(_Tombstones)
+    banked = _banked(campaigns.workspace).spent
     return own.plus(banked.get(campaign_id, ZERO_SPEND))
+
+
+def banked_metered(workspace: WorkspaceDir, campaign_id: str, meter: CeilingMeter) -> Budget:
+    """What the campaign's deleted cycles had metered against its ceiling."""
+    return _banked(workspace).metered.get((campaign_id, meter), NOTHING_METERED)
+
+
+def _banked(workspace: WorkspaceDir) -> _Banked:
+    workspace_ledger = CycleEventLog.workspace_path(workspace)
+    return LedgerIndex.of(workspace_ledger, _SPEND_FOLDS).view(_Tombstones)
 
 
 def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
@@ -293,8 +324,9 @@ def sum_user_spend(*, ledgers: Iterable[Path]) -> UserSpend:
     paths = list(ledgers)
     total = billed_spend(paths)
     for ledger in paths:
-        banked, _ = LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Tombstones)
-        for spend in banked.values():
+        banked = LedgerIndex.of(ledger, _SPEND_FOLDS).view(_Tombstones)
+        total = total.plus(banked.drafts)
+        for spend in banked.spent.values():
             total = total.plus(spend)
     return total
 
@@ -303,48 +335,27 @@ def bank_spend(
     *,
     workspace: WorkspaceDir,
     cycle_dirs: list[Path],
-    campaign_id: str,
-    cycle_id: str = "",
+    subject: BankedSubject,
+    metered: dict[CeilingMeter, Budget],
 ) -> UserSpend:
     """Destroyers only (archiving keeps the rows); a tombstone already standing is a crashed delete's, kept for the retry."""
     spent = billed_spend(CycleLayout(d).ledger for d in cycle_dirs)
-    if spent == ZERO_SPEND:
+    # A replayed cell bills nothing and still meters, on a search-incurred ceiling.
+    if spent == ZERO_SPEND and all(m == NOTHING_METERED for m in metered.values()):
         return spent
     log = CycleEventLog.open_workspace(workspace)
-    if _already_banked(log.path, campaign_id=campaign_id, cycle_id=cycle_id):
+    if subject in LedgerIndex.of(log.path, _SPEND_FOLDS).view(_Tombstones).subjects:
         return spent
     log.append(
         SpendTombstoneRecord(
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
+            **subject._asdict(),
             used_usd=spent.used_usd,
             rate_priced_usd=spent.rate_priced_usd,
             used_tokens=spent.used_tokens,
             unpriced_tokens=spent.unpriced_tokens,
             unreported_usd=spent.unreported_usd,
             unreported_tokens=spent.unreported_tokens,
+            metered=metered,
         )
     )
     return spent
-
-
-def _already_banked(workspace_ledger: Path, *, campaign_id: str, cycle_id: str) -> bool:
-    _, subjects = LedgerIndex.of(workspace_ledger, _SPEND_FOLDS).view(_Tombstones)
-    return (campaign_id, cycle_id) in subjects
-
-
-__all__ = [
-    "ZERO_SPEND",
-    "LifetimeSpend",
-    "UsageRow",
-    "UserSpend",
-    "account_ledgers",
-    "bank_spend",
-    "billed_spend",
-    "campaign_spend",
-    "history_spend",
-    "iter_user_token_usage",
-    "row_figures",
-    "sandbox_cycle_dirs",
-    "sum_user_spend",
-]

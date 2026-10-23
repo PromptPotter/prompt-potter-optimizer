@@ -15,7 +15,7 @@ export function QuestionAnswer({
 }) {
   const [text, setText] = useState("");
   const options = questionOptions(question.field, question.options, draft.headers);
-  // "1" is a valid probe for every mapped field, max_rounds included; only unmapped ones yield null.
+  // "1" is a valid probe for every mapped field; only unmapped ones yield null.
   const answerable = questionPatch(question.field, "1") !== null;
 
   const submit = (answer: string) => {

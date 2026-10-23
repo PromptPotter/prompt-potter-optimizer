@@ -27,7 +27,6 @@ describe("fitnessTrend", () => {
     const { points } = fitnessTrend([round(0, 0.5, 0.4), round(1, 0.8, 0.6), blank]);
     expect(points.map((p) => p.composite)).toEqual([0.4, 0.6, null]);
   });
-
 });
 
 describe("primaryMetric", () => {

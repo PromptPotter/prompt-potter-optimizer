@@ -2,16 +2,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from promptpotter.domain.optimizer_state import RoundPayload
-from promptpotter.domain.strict_model import StrictModel
+from pydantic import Field
 
-__all__ = [
-    "LEVI_MANIFEST",
-    "DescriptorStats",
-    "LeviCalibration",
-    "LeviElite",
-    "LeviRoundState",
-]
+from promptpotter.domain.optimizer_state import StateSlice
+from promptpotter.domain.strict_model import StrictModel
 
 LeviManifest = Literal["levi"]
 LEVI_MANIFEST: LeviManifest = "levi"
@@ -42,7 +36,12 @@ class LeviElite(StrictModel):
     individual_id: str
 
 
-class LeviRoundState(RoundPayload, manifest=LEVI_MANIFEST):
+class DescriptorCalibration(StateSlice, kind="descriptor_calibration"):
     # ``None`` on the origin's document: round 1 is the calibration round that sets it.
-    calibration: LeviCalibration | None
-    elites: list[LeviElite]
+    calibration: LeviCalibration | None = None
+
+
+class EliteArchive(StateSlice, kind="elite_archive"):
+    """One elite per occupied descriptor cell."""
+
+    elites: list[LeviElite] = Field(default_factory=list)

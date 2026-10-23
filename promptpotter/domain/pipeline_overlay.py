@@ -18,23 +18,13 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 if TYPE_CHECKING:
     from collections.abc import Mapping, MutableMapping, Sequence
 
-    from promptpotter.domain.pipeline_schema import ParamSource, PipelineSchema
+    from promptpotter.domain.pipeline_schema import (
+        NodeSearchNarrowing,
+        ParamSource,
+        PipelineSchema,
+    )
 
 logger = logging.getLogger(__name__)
-
-__all__ = [
-    "RESERVED_PIPELINE_PARAM_KEYS",
-    "allowed_values_from_narrowing",
-    "apply_node_overlay",
-    "fold_output_contract",
-    "merge_pipeline_params",
-    "node_config_items",
-    "overlay_is_locked_axis_only",
-    "overlay_sets_model_outside_allowed",
-    "permitted_models_for_campaign",
-    "permitted_models_from_narrowing",
-    "steers_disallowed_model",
-]
 
 
 # The `pipeline_params` keys that are NOT node-config dicts: `steps` is the wire scaffold.
@@ -69,6 +59,11 @@ def apply_node_overlay(
         node_obj = schema.get_node(node) if schema else None
         param_types = node_obj.param_types if node_obj else {}
         node_cfg = {**existing, **cfg}
+        # A route names ONE model's hosts: a new model without one takes its own default.
+        if "route_order" not in cfg and cfg.get("model", existing.get("model")) != existing.get(
+            "model"
+        ):
+            node_cfg.pop("route_order", None)
         for param, incoming in cfg.items():
             prior = existing.get(param)
             if (
@@ -117,31 +112,13 @@ def overlay_is_locked_axis_only(overlay: dict[str, Any] | None) -> bool:
     return bool(keys) and all(k in WHO_ANSWERS_KEYS for k in keys)
 
 
-def allowed_values_from_narrowing(
-    narrowing: Mapping[str, object] | None,
-) -> dict[str, dict[str, list[str]]]:
-    """A block is a :class:`NodeSearchNarrowing` in memory and a plain dict off disk; this reads both."""
-    out: dict[str, dict[str, list[str]]] = {}
-    for node, block in (narrowing or {}).items():
-        values = getattr(block, "param_allowed_values", None)
-        if values is None and isinstance(block, dict):
-            values = block.get("param_allowed_values")
-        if isinstance(values, dict):
-            out[node] = {
-                param: [str(v) for v in vals]
-                for param, vals in values.items()
-                if isinstance(vals, list)
-            }
-    return out
-
-
 def permitted_models_from_narrowing(
-    narrowing: Mapping[str, object] | None,
+    narrowing: Mapping[str, NodeSearchNarrowing],
 ) -> dict[str, list[str]]:
     return {
-        node: values["model"]
-        for node, values in allowed_values_from_narrowing(narrowing).items()
-        if "model" in values
+        node: list(block.param_allowed_values["model"])
+        for node, block in narrowing.items()
+        if "model" in block.param_allowed_values
     }
 
 
@@ -158,19 +135,40 @@ def overlay_sets_model_outside_allowed(
     return False
 
 
-def permitted_models_for_campaign(
-    campaign_config: Mapping[str, Any] | None,
-) -> dict[str, list[str]]:
-    return permitted_models_from_narrowing((campaign_config or {}).get("optimizer_narrowing"))
-
-
 def steers_disallowed_model(
-    campaign_config: Mapping[str, Any] | None, overlay: dict[str, Any] | None
+    narrowing: Mapping[str, NodeSearchNarrowing], overlay: dict[str, Any] | None
 ) -> bool:
-    """A surface NAMING the permitted list serves :func:`permitted_models_for_campaign`, never its own."""
-    return overlay_sets_model_outside_allowed(
-        overlay, permitted_models_for_campaign(campaign_config)
-    )
+    """A surface NAMING the permitted list serves :func:`permitted_models_from_narrowing`, never its own."""
+    return overlay_sets_model_outside_allowed(overlay, permitted_models_from_narrowing(narrowing))
+
+
+def normalize_model_id(model: str) -> str:
+    """``:nitro`` picks a HOST, and every host of one model takes the same parameters."""
+    return model.split(":", 1)[0].strip().lower()
+
+
+def pinned_route(
+    cfg: Mapping[str, object],
+    provider: str | None,
+    routes: Mapping[str, Mapping[str, list[str]]],
+) -> list[str] | None:
+    """The host a node left to the gateway gets; an explicit ``route_order``, ``[]`` included, opts out."""
+    model = cfg.get("model")
+    if cfg.get("route_order") is not None or not isinstance(model, str):
+        return None
+    route = routes.get(str(provider), {}).get(normalize_model_id(model))
+    return None if route is None else list(route)
+
+
+def pin_default_routes(pp: dict[str, Any], schema: PipelineSchema) -> dict[str, Any]:
+    """Before the key: a node left to the gateway's choice of host is keyed as the host it gets."""
+    out = dict(pp)
+    for node, cfg in node_config_items(pp):
+        declared = schema.get_node(node)
+        provider = cfg.get("provider") or (declared.provider if declared else None)
+        if route := pinned_route(cfg, provider, schema.default_routes):
+            out[node] = {**cfg, "route_order": route}
+    return out
 
 
 def fold_output_contract(pp: dict[str, Any] | None, schema: PipelineSchema) -> dict[str, Any]:

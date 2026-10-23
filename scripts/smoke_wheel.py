@@ -68,7 +68,7 @@ def main() -> int:
 
     from promptpotter.application.optimizer_manifest import checkin_manifest, resolve_optimizer
 
-    potter = resolve_optimizer("potter", {})
+    potter = resolve_optimizer("potter", {}, gate="off")
     assert potter.llm_nodes, "the potter manifest declares no llm node"
     assert potter.resolved_schemas, "the potter schema registry is empty"
     assert checkin_manifest().schema.get_node("checkin"), "the check-in manifest has no checkin"

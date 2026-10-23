@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.node_context import Lineage, Ruler
 from promptpotter.application.optimizers.nodes import Selection
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.selection import (
@@ -12,14 +13,14 @@ from promptpotter.application.scoring.selection import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.intelligence.rasch import RoundAbilities
-    from promptpotter.application.optimizers.nodes import Measured, Proposals
-    from promptpotter.application.optimizers.potter.knobs import ThetaElectionKnobs
-
-__all__ = ["elect_on_theta"]
+    from promptpotter.application.optimizers.nodes import MeasuredRound, Proposals
+    from promptpotter.domain.paired_reading import ArmKey
+    from promptpotter.domain.scoring import CellSheet
+    from promptpotter.domain.strict_model import StrictModel
 
 
 def _theta(value: float | None, *, signed: bool = True) -> str:
@@ -41,91 +42,95 @@ def _lift(read: tuple[float, float]) -> str:
 
 def _verdict_reason(
     *,
-    winner_id: str,
-    leading_id: str,
-    reads: Mapping[str, tuple[float, float]],
-    n_electable: int,
+    winner: ArmKey | None,
+    leading: ArmKey | None,
+    reads: Mapping[ArmKey, tuple[float, float]],
+    electable: Sequence[ArmKey],
     abilities: RoundAbilities,
-    labels: Mapping[str, str],
+    labels: Mapping[ArmKey, str],
     coverage_floor: int,
     n_scored: int,
-    ruler_n: int,
+    cold: bool,
 ) -> str:
-    scale = "" if ruler_n else " (cold ruler — θ is logit-accuracy on each arm's own subset)"
-    parent = abilities.parent[0] if abilities.parent is not None else None
-    census = f"{n_electable} of {n_scored} electable, coverage floor {coverage_floor}"
-    if not leading_id:
-        return f"no arm could be read against the parent on the round's δ ruler; {census}{scale}"
-    read = reads[leading_id]
-    numbers = (
-        f"θ {_theta(abilities.theta.get(leading_id))} vs parent {_theta(parent)}",
-        f"se {_theta(abilities.theta_se.get(leading_id), signed=False)}",
+    scale = (
+        " (cold ruler — θ is logit-accuracy on the cells each arm shares with the parent)"
+        if cold
+        else ""
     )
-    if winner_id:
-        runner = closest_to_bar(reads, beside=winner_id)
+    census = f"{len(electable)} of {n_scored} electable, coverage floor {coverage_floor}"
+    if leading is None:
+        read_on = ", ".join(f"{labels[key]} {abilities.cells.get(key, 0)}" for key in electable)
         return (
-            f"{labels[winner_id]} won on θ lift {_lift(read)} ({numbers[0]}, {numbers[1]})"
-            + (f"; runner-up {labels[runner]} at {sum(reads[runner]):+.3f}" if runner else "")
+            f"no arm could be read against the parent; cells each θ was read on: "
+            f"{read_on or 'none'}; {census}{scale}"
+        )
+    read = reads[leading]
+    parent = abilities.bar[leading][0]
+    numbers = (
+        f"θ {_theta(abilities.theta.get(leading))} vs parent {_theta(parent)}",
+        f"se {_theta(abilities.theta_se.get(leading), signed=False)}",
+    )
+    if winner is not None:
+        runner = closest_to_bar(reads, beside=winner)
+        return (
+            f"{labels[winner]} won on θ lift {_lift(read)} ({numbers[0]}, {numbers[1]})"
+            + (
+                f"; runner-up {labels[runner]} at {sum(reads[runner]):+.3f}"
+                if runner is not None
+                else ""
+            )
             + scale
         )
     return (
-        f"no arm cleared the parent: best {labels[leading_id]} {numbers[0]} "
+        f"no arm cleared the parent: best {labels[leading]} {numbers[0]} "
         f"(lift {_lift(read)}, {numbers[1]}); {census}{scale}"
     )
 
 
 def elect_on_theta(
-    ctx: NodeContext[ThetaElectionKnobs], measured: Measured, proposals: Proposals
+    ctx: NodeContext[StrictModel], measured: MeasuredRound, proposals: Proposals
 ) -> Selection:
-    ruler = ctx.difficulty.ruler
-    scores = list(measured.scores)
-    electable = [ind.id for ind in measured.electable]
+    ruler = ctx.read(Ruler).difficulty.ruler
+    lineage = ctx.read(Lineage)
+    electable = measured.electable
+    rows: dict[ArmKey, CellSheet] = {key: measured.rows[key] for key in electable}
     # Persisted with the decision: it derives from the ROUND HISTORY, which a replay may not hold.
-    parent_bias = parent_selection_bias(ctx.rounds)
-    winner_id, abilities = elect_round_winner(
+    parent_bias = parent_selection_bias(lineage.rounds)
+    selected, abilities = elect_round_winner(
         electable,
-        measured.rows,
-        measured.parent_rows,
+        rows,
+        measured.parent.rows,
         measured.coverage_floor,
         ruler,
         parent_bias=parent_bias,
     )
-    reads = readable_lifts(
-        electable,
-        measured.rows,
-        measured.parent_rows,
-        measured.coverage_floor,
-        abilities,
-        parent_bias,
-    )
-    leading_id = winner_id or closest_to_bar(reads)
+    reads = readable_lifts(electable, measured.coverage_floor, abilities, parent_bias)
+    leading = selected or closest_to_bar(reads)
     ctx.decide(
         PotterCheckpointKind.ROUND_WINNER,
         {
-            "candidate_ids": electable,
+            "arms": electable,
             "round_num": ctx.round_num,
             "coverage_floor": measured.coverage_floor,
             "parent_bias": parent_bias,
             # Names which of the round's banked references the bar was; its rows are the close's.
-            "parent_id": measured.parent.opt_sp.id,
+            "parent": measured.parent.key,
         },
-        winner_id,
+        selected,
     )
-    crowned = next((ind for ind in measured.electable if ind.id == winner_id), ctx.parent)
-    ctx.keep([crowned])
+    ctx.keep([lineage.parent if selected is None else measured.arms[selected].individual])
     return Selection(
-        selected_id=winner_id,
-        leading_id=leading_id,
-        scores=scores,
+        selected=selected,
+        leading=leading,
         verdict_reason=_verdict_reason(
-            winner_id=winner_id,
-            leading_id=leading_id,
+            winner=selected,
+            leading=leading,
             reads=reads,
-            n_electable=len(electable),
+            electable=electable,
             abilities=abilities,
-            labels={cs.candidate_id: cs.label for cs in scores},
+            labels=measured.labels,
             coverage_floor=measured.coverage_floor,
-            n_scored=len(measured.scored),
-            ruler_n=len(ruler.delta) if ruler is not None else 0,
+            n_scored=len(measured.arms),
+            cold=ruler is None,
         ),
     )

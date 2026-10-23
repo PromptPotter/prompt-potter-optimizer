@@ -12,162 +12,101 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     resolve_layout_override,
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import inner_template
-from promptpotter.config.prompt_blocks import prompt_blocks
-from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
+from promptpotter.domain.opt_search_point import (
+    TEMPLATE_TOKEN_RE,
+    Locus,
+    OptimizerPromptTemplate,
+)
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.search_point import WHO_ANSWERS_KEYS, missing_template_vars
-from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
+from promptpotter.domain.search_point import SHOTS_KEY, WHO_ANSWERS_KEYS, missing_template_vars
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimizers.potter.knobs import PromptBlockCatalogue
     from promptpotter.application.runner.inner.tasks import InnerCells
 
-__all__ = [
-    "L1_CONFIG_NOT_IN_RUNTIME_FAILURES",
-    "L1_INNER_LAYOUT_APPLIES",
-    "L1_INNER_PLACEHOLDERS_INTACT",
-    "L1_INNER_STEER_IS_LEGAL",
-    "L1_PROMPT_BLOCKS_IN_LIBRARY",
-    "L1_PROMPT_FIELDS_OPEN",
-    "L1_PROMPT_FIELD_NOT_GUTTED",
-    "L1_SHOTS_IN_DEMO_POOL",
-]
 
-
-def _check_l1_prompt_blocks_in_library(
-    source_output: Mapping[str, Any],
-    *,
-    prompt_block_catalogue: PromptBlockCatalogue,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    """Reads the DELTA: the parent's fields are the authored origin, so the merge rejects every round-1 arm."""
-    if prompt_block_catalogue != "restrict" or not source_output:
-        return None
-    library = prompt_blocks()
-    failures = [
+def l1_blocks_in_pool(
+    updates: Mapping[str, Mapping[str, str]], *, offered: Mapping[str, Collection[str]]
+) -> list[ValidationFailure]:
+    """Under ``closed`` every value is an id of its field's active entries: free text, or a field the pool holds nothing for, is no entry."""
+    return [
         ValidationFailure(
-            axis=field,
-            value=str(value),
-            allowed=list(blocks),
-            reason="not_in_prompt_block_library",
+            axis=Locus(node, field).name,
+            value=value[:300],
+            allowed=list(offered.get(field, ())),
+            reason="not_in_block_pool",
         )
-        for field, value in source_output.items()
-        if (blocks := library.get(field))
-        and str(value).strip()
-        and str(value).strip() not in blocks
+        for node, fields in updates.items()
+        for field, value in fields.items()
+        if value not in offered.get(field, ())
     ]
-    if not failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_PROMPT_BLOCKS_IN_LIBRARY.id,
-        evidence={"failures": failures},
-    )
 
 
-L1_PROMPT_BLOCKS_IN_LIBRARY: LLMOutputValidator = LLMOutputValidator(
-    id="l1_prompt_blocks_in_library",
-    check=_check_l1_prompt_blocks_in_library,
-)
-
-
-def _check_l1_prompt_fields_open(
-    source_output: Mapping[str, Any],
-    *,
-    pipeline_schema: PipelineSchema,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    prompt_nodes = pipeline_schema.prompt_node_names()
-    if not source_output or not prompt_nodes:
-        return None
-    open_fields = pipeline_schema.open_prompt_fields()
-    failures = [
+def l1_prompt_fields_open(
+    prompt_edit: Mapping[Locus, str], *, pipeline_schema: PipelineSchema
+) -> list[ValidationFailure]:
+    """Per node, against ITS open fields: a node the roster bears no prompt on opens none."""
+    open_by_node = {n.name: n.open_prompt_fields for n in pipeline_schema.prompt_nodes()}
+    return [
         ValidationFailure(
-            axis=f"{prompt_nodes[0]}.{field}",
-            value=str(value)[:300],
-            allowed=open_fields,
+            axis=locus.name,
+            value=value[:300],
+            allowed=open_by_node.get(locus.node, []),
             reason="forbidden_axis",
         )
-        for field, value in source_output.items()
-        if field not in open_fields
+        for locus, value in prompt_edit.items()
+        if locus.key not in open_by_node.get(locus.node, [])
     ]
-    if not failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_PROMPT_FIELDS_OPEN.id,
-        evidence={"failures": failures},
-    )
 
 
-L1_PROMPT_FIELDS_OPEN: LLMOutputValidator = LLMOutputValidator(
-    id="l1_prompt_fields_open",
-    check=_check_l1_prompt_fields_open,
-)
-
-
-def _check_l1_shots_in_demo_pool(
-    source_output: Mapping[str, Any],
-    *,
-    demo_ids: frozenset[int],
-    k_max: int,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    """An id outside the demo pool is a SCORED row pasted into the prompt as a worked answer."""
-    shots: list[int] = source_output["shot_ids"]
-    failures = [
-        ValidationFailure(axis="shot_ids", value=str(i), allowed=[], reason="shot_not_in_demo_pool")
-        for i in shots
-        if i not in demo_ids
-    ]
-    if len(set(shots)) != len(shots):
-        failures.append(
-            ValidationFailure(axis="shot_ids", value=str(shots), allowed=[], reason="shot_repeated")
-        )
-    if len(shots) > k_max:
-        failures.append(
-            ValidationFailure(
-                axis="shot_ids",
-                value=str(len(shots)),
-                allowed=[str(k_max)],
-                reason="shots_over_k_max",
+def l1_shots_in_demo_pool(
+    shots_by_node: Mapping[str, Sequence[int]], *, demo_ids: Collection[int], k_max: int
+) -> list[ValidationFailure]:
+    """An id outside the demo pool is a SCORED row pasted into the prompt as a worked answer; a node bearing no prompt is the bench's admission."""
+    failures: list[ValidationFailure] = []
+    for node, shots in shots_by_node.items():
+        axis = Locus(node, SHOTS_KEY).name
+        failures += [
+            ValidationFailure(axis=axis, value=str(i), allowed=[], reason="shot_not_in_demo_pool")
+            for i in shots
+            if i not in demo_ids
+        ]
+        if len(set(shots)) != len(shots):
+            failures.append(
+                ValidationFailure(
+                    axis=axis, value=str(list(shots)), allowed=[], reason="shot_repeated"
+                )
             )
-        )
-    if not failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_SHOTS_IN_DEMO_POOL.id,
-        evidence={"failures": failures},
-    )
+        if len(shots) > k_max:
+            failures.append(
+                ValidationFailure(
+                    axis=axis,
+                    value=str(len(shots)),
+                    allowed=[str(k_max)],
+                    reason="shots_over_k_max",
+                )
+            )
+    return failures
 
 
-L1_SHOTS_IN_DEMO_POOL: LLMOutputValidator = LLMOutputValidator(
-    id="l1_shots_in_demo_pool",
-    check=_check_l1_shots_in_demo_pool,
-)
-
-
-def _check_l1_config_in_runtime_failures(
-    source_output: Mapping[str, Any],
+def l1_config_not_in_runtime_failures(
+    overlay: Mapping[str, Any],
     *,
     runtime_failures: Sequence[RuntimeFailure],
-    pipeline_params: Mapping[str, Any] | None = None,
-    **_: Any,
-) -> ValidatorOutcome | None:
+    pipeline_params: Mapping[str, Any] | None,
+) -> list[ValidationFailure]:
     """A wound convicts a ``(responder, param, value)``: one endpoint's 400 says nothing of the next model's."""
-    failures_list = list(runtime_failures)
-    if not source_output or not failures_list:
-        return None
     merged = pipeline_params or {}
     out_failures: list[ValidationFailure] = []
-    for node_name, node_params in source_output.items():
+    for node_name, node_params in overlay.items():
         if not isinstance(node_params, dict):
             continue
         inherited = merged.get(node_name)
         effective = dict(inherited) if isinstance(inherited, dict) else {}
         effective.update(node_params)
         for param, value in node_params.items():
-            for rf in failures_list:
+            for rf in runtime_failures:
                 obs_cfg = rf.observed_config or {}
                 if not all(
                     obs_cfg.get(k) == effective.get(k) for k in WHO_ANSWERS_KEYS if k in obs_cfg
@@ -183,37 +122,32 @@ def _check_l1_config_in_runtime_failures(
                         )
                     )
                     break
-    if not out_failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_CONFIG_NOT_IN_RUNTIME_FAILURES.id,
-        evidence={"failures": out_failures},
-    )
+    return out_failures
 
 
-L1_CONFIG_NOT_IN_RUNTIME_FAILURES: LLMOutputValidator = LLMOutputValidator(
-    id="l1_config_not_in_runtime_failures",
-    check=_check_l1_config_in_runtime_failures,
-)
-
-
-def _optimizer_template_failures(
-    pipeline_params: dict[str, Any], cells: InnerCells
+def l1_inner_placeholders_intact(
+    pipeline_params: dict[str, Any], *, inner_cells: InnerCells | None
 ) -> list[ValidationFailure]:
     """Checks the MERGED params: a child inherits token-less prose without re-proposing it."""
+    if inner_cells is None:
+        return []
     failures: list[ValidationFailure] = []
     for node_name, cfg in node_config_items(pipeline_params):
         prose = {
-            k: v for k, v in cfg.items() if k in PromptTemplate.model_fields and isinstance(v, str)
+            k: v
+            for k, v in cfg.items()
+            if k in OptimizerPromptTemplate.model_fields and isinstance(v, str)
         }
-        base = inner_template(cells, node_name) if prose else None
+        base = inner_template(inner_cells, node_name) if prose else None
         if base is None:
             continue
         declared = sorted(set(TEMPLATE_TOKEN_RE.findall(base.render())))
         if not declared:
             continue
         merged = base.model_copy(update=prose)
-        missing = missing_template_vars(merged.render(), declared)
+        missing = missing_template_vars(
+            merged.render(), declared, fields=OptimizerPromptTemplate.model_fields
+        )
         if missing:
             failures.append(
                 ValidationFailure(
@@ -224,29 +158,6 @@ def _optimizer_template_failures(
                 )
             )
     return failures
-
-
-def _check_l1_inner_placeholders_intact(
-    source_output: Mapping[str, Any],
-    *,
-    inner_cells: InnerCells | None,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    if not isinstance(source_output, dict) or inner_cells is None:
-        return None
-    failures = _optimizer_template_failures(source_output, inner_cells)
-    if not failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_INNER_PLACEHOLDERS_INTACT.id,
-        evidence={"failures": failures},
-    )
-
-
-L1_INNER_PLACEHOLDERS_INTACT: LLMOutputValidator = LLMOutputValidator(
-    id="l1_inner_placeholders_intact",
-    check=_check_l1_inner_placeholders_intact,
-)
 
 
 # PHRASES, never tokens: "stop proposing the same axis in consecutive rounds" is a legal steer.
@@ -293,20 +204,17 @@ _FORBIDDEN_INNER_STEERS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def _check_l1_inner_steer_is_legal(
-    source_output: Mapping[str, Any],
-    *,
-    inner_nodes: Collection[str],
-    **_: Any,
-) -> ValidatorOutcome | None:
+def l1_inner_steer_is_legal(
+    overlay: Mapping[str, Any], *, inner_nodes: Collection[str]
+) -> list[ValidationFailure]:
     """A prompt that stops the loop early edits the frame the measurand averages over, not the search
     it measures. Judged on the inner optimizer's nodes alone: elsewhere the phrase is target prose."""
     failures: list[ValidationFailure] = []
-    for node_name, node_params in source_output.items():
+    for node_name, node_params in overlay.items():
         if node_name not in inner_nodes or not isinstance(node_params, dict):
             continue
         for field, value in node_params.items():
-            if field not in PromptTemplate.model_fields or not isinstance(value, str):
+            if field not in OptimizerPromptTemplate.model_fields or not isinstance(value, str):
                 continue
             prose = " ".join(value.lower().split())
             for reason, phrases in _FORBIDDEN_INNER_STEERS:
@@ -320,18 +228,7 @@ def _check_l1_inner_steer_is_legal(
                             reason=reason,
                         )
                     )
-    if not failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_INNER_STEER_IS_LEGAL.id,
-        evidence={"failures": failures},
-    )
-
-
-L1_INNER_STEER_IS_LEGAL: LLMOutputValidator = LLMOutputValidator(
-    id="l1_inner_steer_is_legal",
-    check=_check_l1_inner_steer_is_legal,
-)
+    return failures
 
 
 _GUTTABLE_MIN_CHARS = 1000
@@ -351,22 +248,21 @@ def _parent_field_text(
     return current if isinstance(current, str) else ""
 
 
-def _check_l1_prompt_field_not_gutted(
-    source_output: Mapping[str, Any],
+def l1_prompt_field_not_gutted(
+    overlay: Mapping[str, Any],
     *,
     inner_cells: InnerCells | None,
-    pipeline_params: Mapping[str, Any] | None = None,
-    **_: Any,
-) -> ValidatorOutcome | None:
+    pipeline_params: Mapping[str, Any] | None,
+) -> list[ValidationFailure]:
     """An override REPLACES its field whole, so a short one deletes the contracts the parent's prose carried."""
-    if not source_output or inner_cells is None:
-        return None
+    if inner_cells is None:
+        return []
     failures: list[ValidationFailure] = []
-    for node_name, node_params in source_output.items():
+    for node_name, node_params in overlay.items():
         if not isinstance(node_params, dict):
             continue
         for field, value in node_params.items():
-            if field not in PromptTemplate.model_fields or not isinstance(value, str):
+            if field not in OptimizerPromptTemplate.model_fields or not isinstance(value, str):
                 continue
             parent = _parent_field_text(inner_cells, node_name, field, pipeline_params)
             if len(parent) < _GUTTABLE_MIN_CHARS:
@@ -381,29 +277,13 @@ def _check_l1_prompt_field_not_gutted(
                     reason="guts_inherited_contract",
                 )
             )
-    if not failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_PROMPT_FIELD_NOT_GUTTED.id,
-        evidence={"failures": failures},
-    )
+    return failures
 
 
-L1_PROMPT_FIELD_NOT_GUTTED: LLMOutputValidator = LLMOutputValidator(
-    id="l1_prompt_field_not_gutted",
-    check=_check_l1_prompt_field_not_gutted,
-)
-
-
-def _check_l1_inner_layout_applies(
-    source_output: Mapping[str, Any],
-    **_: Any,
-) -> ValidatorOutcome | None:
+def l1_inner_layout_applies(overlay: Mapping[str, Any]) -> list[ValidationFailure]:
     """Convicted on the PROPOSAL: the apply site sits inside the inner task, below every wound channel."""
-    if not source_output:
-        return None
     failures: list[ValidationFailure] = []
-    for node_name, node_params in source_output.items():
+    for node_name, node_params in overlay.items():
         spec = NODE_LAYOUTS.get(node_name)
         if spec is None or not isinstance(node_params, dict) or "layout" not in node_params:
             continue
@@ -430,15 +310,4 @@ def _check_l1_inner_layout_applies(
                     reason=outcome.validator_id,
                 )
             )
-    if not failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_INNER_LAYOUT_APPLIES.id,
-        evidence={"failures": failures},
-    )
-
-
-L1_INNER_LAYOUT_APPLIES: LLMOutputValidator = LLMOutputValidator(
-    id="l1_inner_layout_applies",
-    check=_check_l1_inner_layout_applies,
-)
+    return failures

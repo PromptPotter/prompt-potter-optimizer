@@ -4,17 +4,21 @@ import operator
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import reduce
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, get_args
+from typing import TYPE_CHECKING, Literal, get_args
 
 from pydantic import (
-    ConfigDict,
     Field,
+    GetJsonSchemaHandler,
     PrivateAttr,
+    SerializerFunctionWrapHandler,
     ValidationError,
     field_validator,
+    model_serializer,
 )
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
-from promptpotter.domain.strict_model import StrictModel, WireFloat, WireInt
+from promptpotter.domain.strict_model import FrozenModel, StrictModel, WireFloat, WireInt
 from promptpotter.domain.wire_record import ALWAYS, WireRecord
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -22,33 +26,6 @@ if TYPE_CHECKING:
     # Type-only: the record's module imports this one for `TokenUsageKind`.
     from promptpotter.domain.run_records import TokenUsageRecord
     from promptpotter.domain.scoring import MeasuredCell
-
-__all__ = [
-    "CEILING_METER_LABELS",
-    "NESTED_NODE_PREFIX",
-    "PREFIX_STATE_TITLES",
-    "RATE_PRICED_LABEL",
-    "ROLE_SPEND_KIND",
-    "SEARCH_KINDS",
-    "SPEND_KIND_LABELS",
-    "CeilingMeter",
-    "CloseSpend",
-    "KindSpend",
-    "MeteredSpend",
-    "PrefixReading",
-    "PrefixState",
-    "SpendBucket",
-    "SpendCeilings",
-    "SpendRollup",
-    "StepUsage",
-    "TokenAccount",
-    "TokenUsageKind",
-    "bill_is_floor",
-    "bill_or_rate_usd",
-    "calls_rate_priced",
-    "declare_ceiling",
-    "prefix_reading",
-]
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,14 +72,12 @@ _STEP_USAGE = WireRecord.of(
 )
 
 
-class TokenAccount(StrictModel):
+class TokenAccount(FrozenModel):
     """What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.
 
     ``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further
     totals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.
     """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
     input: int = 0
     output: int = 0
@@ -180,10 +155,8 @@ if set(PREFIX_STATE_TITLES) != set(get_args(PrefixState)):
     raise RuntimeError("PREFIX_STATE_TITLES is out of step with PrefixState (domain/spend.py)")
 
 
-class PrefixReading(StrictModel):
+class PrefixReading(FrozenModel):
     """A provider's prefix-cache discount as every surface reads it, served whole."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: PrefixState
     share: float | None = Field(description="Null on `unreported` and `replayed`.")
@@ -234,23 +207,124 @@ ROLE_SPEND_KIND: dict[str, TokenUsageKind] = {MeasurementRole.BENCH: "bench"}
 NESTED_NODE_PREFIX = "inner:"
 
 
-@dataclass(frozen=True, slots=True)
-class SpendCeilings:
-    """What a run may spend, in the two units spend is metered in; a null arm is unmetered."""
+class Budget(FrozenModel):
+    """What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits."""
 
-    __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+    usd: WireFloat | None = Field(
+        default=None,
+        ge=0.0,
+        description="The campaign's USD, in its ceiling meter: one book its live cycles share.",
+    )
+    tokens: WireInt | None = Field(
+        default=None,
+        ge=0,
+        description="The campaign's billed tokens, shared like `usd`; the axis that still binds "
+        "where a model has no rate on file.",
+    )
+    rounds: WireInt | None = Field(
+        default=None,
+        ge=0,
+        description="Closed rounds after the origin, per cycle, read at each round boundary; "
+        "0 measures the origin only.",
+    )
+    wall_clock_s: WireFloat | None = Field(
+        default=None,
+        gt=0.0,
+        description="Seconds ONE launch runs, its clock afresh at every launch; a remote cell "
+        "still open at the edge is cut and the run stops `wall_clock`.",
+    )
 
-    usd: Annotated[WireFloat, Field(ge=0.0)] | None = None
-    tokens: Annotated[WireInt, Field(ge=0)] | None = None
+    @model_serializer(mode="wrap")
+    def _named_only(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """An unnamed axis written as ``null`` would read back as a lift nobody asked for."""
+        data: dict[str, object] = handler(self)
+        return {axis: value for axis, value in data.items() if axis in self.model_fields_set}
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        """The wire omits what the input omits, so both directions are the fields' one schema."""
+        return handler({key: value for key, value in core.items() if key != "serialization"})
+
+    @property
+    def named(self) -> frozenset[str]:
+        return frozenset(self.model_fields_set)
+
+    def _axes(self) -> frozenset[tuple[str, object]]:
+        return frozenset((axis, getattr(self, axis)) for axis in self.model_fields_set)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Budget):
+            return NotImplemented
+        return self._axes() == other._axes()
+
+    def __hash__(self) -> int:
+        return hash(self._axes())
+
+    def over(self, *layers: Budget) -> Budget:
+        values = {axis: getattr(self, axis) for axis in self.model_fields_set}
+        for layer in layers:
+            values |= {axis: getattr(layer, axis) for axis in layer.model_fields_set}
+        return Budget(**values)
+
+    def only(self, axes: Iterable[str]) -> Budget:
+        return Budget(**{axis: getattr(self, axis) for axis in self.named.intersection(axes)})
+
+    # The two reads of a Budget carrying an AMOUNT (metered, spent), which names both money axes.
+    @property
+    def usd_amount(self) -> float:
+        if self.usd is None:
+            raise ValueError(f"{self!r} carries no USD amount")
+        return self.usd
+
+    @property
+    def token_amount(self) -> int:
+        if self.tokens is None:
+            raise ValueError(f"{self!r} carries no token amount")
+        return self.tokens
+
+    @classmethod
+    def amount(cls, usd: float, tokens: int) -> Budget:
+        return cls(usd=round(usd, 6), tokens=tokens)
+
+    def plus(self, other: Budget) -> Budget:
+        return Budget.amount(
+            self.usd_amount + other.usd_amount, self.token_amount + other.token_amount
+        )
 
 
-def declare_ceiling(base: SpendCeilings, *layers: SpendCeilings) -> SpendCeilings:
-    """Declaring is preference, never authority: admission applies the account bound to the result."""
-    usd, tokens = base.usd, base.tokens
-    for layer in layers:
-        usd = usd if layer.usd is None else layer.usd
-        tokens = tokens if layer.tokens is None else layer.tokens
-    return SpendCeilings(usd, tokens)
+NOTHING_METERED = Budget.amount(0.0, 0)
+
+# The campaign's: one book its live cycles share. The rest bind one cycle (`rounds`) or launch.
+MONEY_AXES = frozenset({"usd", "tokens"})
+CYCLE_AXES = frozenset({"rounds", "wall_clock_s"})
+
+
+def cycle_axes_only(budget: Budget) -> Budget:
+    if money := budget.named & MONEY_AXES:
+        raise ValueError(
+            f"{', '.join(sorted(money))} bound the whole campaign, never one cycle: set it with "
+            "`set-limits` or a launch's `--max-usd` / `--max-tokens`"
+        )
+    return budget
+
+
+def money_axes_only(budget: Budget) -> Budget:
+    if cycle := budget.named & CYCLE_AXES:
+        raise ValueError(f"{', '.join(sorted(cycle))} bound one cycle, never the campaign")
+    return budget
+
+
+class HeldBudget(FrozenModel):
+    """A launch past admission; ``standing`` is the axes an operator named, as asked: the account
+    bounds a run through its job's reservation, never through a ceiling it writes."""
+
+    admitted: Budget
+    standing: Budget
+    # The registry job holding its reservation and its share of the campaign's ceiling.
+    job_id: str
+    step_rounds: int | None
 
 
 def bill_is_floor(unpriced_tokens: int) -> bool:
@@ -296,7 +370,7 @@ class SpendBucket(StrictModel):
         return round(self.used_usd + self.rate_priced_usd, 6)
 
     def metered_usd(self, meter: CeilingMeter) -> float:
-        return self.incurred_usd if METER_PRICES_REPLAYS[meter] else self.sent_usd
+        return meter_usd(meter, sent=self.sent_usd, incurred=self.incurred_usd)
 
     @property
     def cache_share(self) -> float | None:
@@ -445,11 +519,10 @@ class SpendRollup(StrictModel):
     def sent_usd(self) -> float:
         return round(self.total_used_usd + self.total_rate_priced_usd, 6)
 
-    def metered(self, meters: CeilingMeter) -> tuple[float, int]:
-        """USD, then billed tokens."""
+    def metered(self, meters: CeilingMeter) -> Budget:
         counted = [self.by_kind[k] for k in METER_KINDS[meters]]
-        return (
-            round(sum(b.metered_usd(meters) for b in counted), 6),
+        return Budget.amount(
+            sum(b.metered_usd(meters) for b in counted),
             sum(b.input_tokens + b.output_tokens for b in counted),
         )
 
@@ -530,12 +603,12 @@ class MeteredSpend(StrictModel):
 
     @classmethod
     def of(cls, spend: SpendRollup, meter: CeilingMeter) -> MeteredSpend:
-        usd, tokens = spend.metered(meter)
+        metered = spend.metered(meter)
         counted = METER_KINDS[meter]
         return cls(
             meter=meter,
-            metered_usd=usd,
-            metered_tokens=tokens,
+            metered_usd=metered.usd_amount,
+            metered_tokens=metered.token_amount,
             billed_usd=spend.total_used_usd,
             rate_priced_usd=spend.total_rate_priced_usd,
             calls_rate_priced=calls_rate_priced(spend.total_rate_priced_usd),
@@ -553,27 +626,6 @@ class MeteredSpend(StrictModel):
         )
 
 
-class CloseSpend(StrictModel):
-    """What a cycle's history had cost when a round closed, a fork's inherited prefix included."""
-
-    model_config = ConfigDict(frozen=True)
-
-    search_usd: float | None = Field(
-        description="What the search incurred, replays priced (`SpendRollup.search_incurred_usd`). "
-        "Null where a search call carries tokens no rate priced."
-    )
-    billed_usd: float = Field(description="What providers reported they billed.")
-    rate_priced_usd: float = Field(
-        description="What our rate table prices the calls no provider billed. Never spent."
-    )
-    calls: int = Field(description="Calls that reached a provider.")
-    tokens: int = Field(description="Billed tokens.")
-    worked_s: float = Field(
-        description="Summed seconds of those calls — work, never clock: it exceeds the clock "
-        "where cells ran concurrently."
-    )
-
-
 # The spend that FINDS a result, which a lift is priced in; a bench pass and a diagnostic grade it.
 SEARCH_KINDS: tuple[TokenUsageKind, ...] = ("optimizer", "backend", "judge")
 
@@ -583,3 +635,20 @@ METER_KINDS: dict[CeilingMeter, tuple[TokenUsageKind, ...]] = {
 }
 
 METER_PRICES_REPLAYS: dict[CeilingMeter, bool] = {"bill": False, "search_incurred": True}
+
+
+def meter_usd[T: (float, float | None)](meter: CeilingMeter, *, sent: T, incurred: T) -> T:
+    """THE meter rule: a ceiling counts what was sent, or under a replay-pricing meter all incurred."""
+    return incurred if METER_PRICES_REPLAYS[meter] else sent
+
+
+def metered(record: TokenUsageRecord, meter: CeilingMeter) -> tuple[float | None, int]:
+    """ONE call as a ceiling of *meter* counts it: USD ``None`` where nothing prices it."""
+    if record.kind not in METER_KINDS[meter]:
+        return 0.0, 0
+    usd = meter_usd(
+        meter,
+        sent=0.0 if record.cached else record.bill_or_rate_usd,
+        incurred=record.bill_or_rate_usd,
+    )
+    return usd, 0 if record.cached else record.input_tokens + record.output_tokens

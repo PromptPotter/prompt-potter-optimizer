@@ -1,6 +1,5 @@
 import type { ArmReading, ServedDashboard, ServedRound } from "@/lib/api/types";
 import { DISPLAY_METRICS } from "@/lib/api/types.generated";
-import { fmtPct0, fmtTheta } from "@/lib/format";
 
 // DISPLAY only: the selector decides on its own objective (the served `elects_on`), whatever is read.
 export type DisplayMetric = ServedDashboard["display_metric"];
@@ -24,13 +23,6 @@ export function metricLevel(
     : (reading.own?.[metric]?.value ?? null);
 }
 
-export function fmtDisplayValue(metric: DisplayMetric, level: number | null): string {
-  if (metric === "ability") {
-    return typeof level === "number" && Number.isFinite(level) ? `θ ${fmtTheta(level)}` : "—";
-  }
-  return fmtPct0(level);
-}
-
 export interface FitnessTrend {
   // `null` draws a GAP: a point at 0 would claim the prompt scored nothing.
   points: {
@@ -50,8 +42,7 @@ export function fitnessTrend(rounds: readonly ServedRound[] | undefined): Fitnes
     round: r.round,
     accuracy: r.accuracy,
     composite: r.composite_fitness,
-    // θ on another δ ruler than the series' is a different quantity: dropped, not plotted.
-    theta: r.ability != null && r.ability_on_series_ruler ? r.ability.theta : null,
+    theta: r.level?.theta ?? null,
     bench: r.bench?.level?.value ?? null,
     n: r.total,
   }));

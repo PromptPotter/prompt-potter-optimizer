@@ -1,53 +1,50 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.loaders import sample_dataset
-from promptpotter.application.datasets.prompts import has_dataset_prompts, load_node_prompt
+from promptpotter.application.datasets.prompts import declared_origin_prompts
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.scoring.candidate_report import (
-    build_score_report,
+from promptpotter.application.optimizers.nodes import ReadArm
+from promptpotter.application.scoring.arm_states import (
+    conclude,
     is_transient_scoring_abort,
-    walk_outcome,
+    measuring,
 )
 from promptpotter.application.scoring.closed_rounds import closed_round
-from promptpotter.application.scoring.formula import (
+from promptpotter.application.scoring.formula.compiler import (
     DIALS_KEY,
     origin_anchors,
     parse_dials,
     realize_dials,
 )
-from promptpotter.application.scoring.metrics import INVALID_SCORES, compute_composite_fitness
-from promptpotter.application.scoring.query_loop import ArmSlot
-from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.application.scoring.metrics import compute_composite_fitness
+from promptpotter.application.scoring.search_point_scorer import ScoredWalk, score_search_point
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
-from promptpotter.domain.results import (
-    ArmOutcome,
-    ScoredCandidate,
-    candidate_label,
-)
+from promptpotter.domain.results import ArmSlot, Concluded, Proposed
 from promptpotter.domain.run_records import (
     OPERATOR_ORIGIN_SOURCES,
-    CandidateMintedRecord,
     CycleSeed,
     OriginSource,
     ScoringLockedRecord,
 )
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.run_callbacks import RunCallbacks
@@ -57,18 +54,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "CampaignOrigin",
-    "establish_campaign_origin",
-    "resolve_origin_opt_search_point",
-    "try_inherit_fork_origin",
-]
+
+ORIGIN_SLOT = ArmSlot(round=0, idx=0, total=1)
 
 
 class CampaignOrigin(NamedTuple):
-    resolved_origin: OptSearchPoint | None
-    report: ScoredCandidate
-    origin_results: CellSheet | None
+    origin: ReadArm
     framing: TaskDecomposition
     # ``None`` where the campaign declared no dials to lock.
     locked_scoring: dict[str, str] | None = None
@@ -117,50 +108,45 @@ def try_inherit_fork_origin(
         session.store,
         session.hop,
         from_round,
-        session.scoring.require_scorer(),
+        session.state.scoring.require_scorer(),
         # The fork's chain at its mint, its first record: the parent as cut, before any own close.
-        moment=Moment(CycleLayout(store.cycle_dir(session.hop)).ledger, 0),
+        moment=Moment(store.ledger(session.hop), 0),
     )
     if parent_round is None:
         return None
-    cand = next(
-        (c for c in parent_round.candidate_scores if c.candidate_id == from_candidate_id),
-        None,
-    )
-    if cand is None:
+    key = ArmKey(from_candidate_id)
+    cand = parent_round.arms.get(key)
+    fold = parent_round.folds.get(key)
+    if not isinstance(cand, Concluded) or fold is None:
         return None
 
     # An operator edit changes the render or the shots → re-score.
-    if resolved_origin.prompt_field_dict() != cand.prompt_fields:
+    if resolved_origin.prompts != cand.individual.prompts:
         return None
 
-    origin_acc = cand.accuracy
-    inherited_results = (
-        parent_round.all_candidate_results.get(from_candidate_id) or parent_round.results
-    )
+    inherited_results = parent_round.rows(key)
     logger.info(
         "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
-        "acc=%.4f, %d per-sample rows — skipping origin re-score, straight to L1",
-        session.state.cycle_id,
+        "acc=%s, %d per-sample rows — skipping origin re-score, straight to L1",
+        session.cycle_id,
         from_candidate_id,
         parent,
         from_round,
-        origin_acc,
+        fold.accuracy,
         len(inherited_results),
     )
     # The OSP object, not a prompt-field dict, so the inherited C0 keeps the seed's lineage.
+    inherited = cand.model_copy(
+        update={
+            "role": MeasurementRole.ORIGIN,
+            "slot": ORIGIN_SLOT,
+            "individual": resolved_origin,
+            "sp_hash": sp.sp_hash(session.pipeline_schema),
+            "resolved_params": sp.config_params or {},
+        }
+    )
     return CampaignOrigin(
-        resolved_origin=resolved_origin,
-        report=cand.model_copy(
-            update={
-                "candidate_id": resolved_origin.id,
-                "label": candidate_label(0, 0),
-                "sp_hash": sp.sp_hash(session.pipeline_schema),
-                "resolved_pipeline_params": sp.config_params,
-                "node_prompt_fields": resolved_origin.node_prompt_fields(sp),
-            }
-        ),
-        origin_results=inherited_results,
+        origin=ReadArm(ArmKey(resolved_origin.id), inherited, inherited_results),
         framing=framing,
     )
 
@@ -173,36 +159,31 @@ assert set(_SEED_ORIGIN_LINEAGE) == OPERATOR_ORIGIN_SOURCES
 
 
 def resolve_origin_opt_search_point(
-    prompt_node_names: list[str] | None = None,
     dataset_dir: Path | None = None,
     *,
     seed: CycleSeed | None = None,
     pipeline_params: dict[str, Any] | None,
     schema: PipelineSchema,
 ) -> OptSearchPoint:
-    names = prompt_node_names or []
+    """Seed → every prompt node's starting prompt in ``origin.yaml`` → empty."""
     origin: OptSearchPoint | None = None
-
-    if seed is not None and seed.origin_prompt_fields:
-        origin = OptSearchPoint.from_prompt_fields(seed.origin_prompt_fields).as_origin(
+    if seed is not None and seed.origin_prompts:
+        # A step bearing no prompt reads none: a check-in seeds every active step alike.
+        borne = {node.name for node in schema.prompt_nodes()}
+        prompts = {n: p for n, p in seed.origin_prompts.items() if n in borne}
+        origin = OptSearchPoint(prompts=prompts).as_origin(
             changes_description=_SEED_ORIGIN_LINEAGE[seed.origin_source]
         )
-    elif dataset_dir is not None and names and has_dataset_prompts(dataset_dir):
-        for node_name in names:
-            try:
-                template = load_node_prompt(dataset_dir, node_name)
-            except FileNotFoundError:
-                continue
-            origin = OptSearchPoint.from_prompt_fields(template.prompt_fields()).as_origin(
-                changes_description=f"Origin from {dataset_dir}/{ORIGIN_FILE} ({node_name})"
-            )
-            break
-
+    elif dataset_dir is not None and (
+        authored := declared_origin_prompts(dataset_dir, schema.prompt_nodes())
+    ):
+        origin = OptSearchPoint(prompts=authored).as_origin(
+            changes_description=f"Origin from {dataset_dir}/{ORIGIN_FILE} ({', '.join(authored)})"
+        )
     if origin is None:
         origin = OptSearchPoint().as_origin(
-            changes_description="Origin (no prompt node active — param-only optimization)"
+            changes_description="Origin (no starting prompt — param-only optimization)"
         )
-
     return origin.configured(pipeline_params, schema)
 
 
@@ -215,7 +196,6 @@ async def establish_campaign_origin(
     listener: RunCallbacks,
 ) -> CampaignOrigin:
     resolved_origin = resolve_origin_opt_search_point(
-        prompt_node_names=session.pipeline_schema.prompt_node_names(),
         dataset_dir=None if session.dataset is None else session.dataset.directory,
         seed=seed,
         pipeline_params=session.pipeline_params,
@@ -224,14 +204,14 @@ async def establish_campaign_origin(
     # The SAME read identity uses; handed in, it could be a value the cycle id never saw.
     framing = campaign_framing(session.store, campaign_config, session.dataset)
     pipeline_schema = session.pipeline_schema
-    sp = resolved_origin.to_job_search_point(
-        schema=pipeline_schema, framing=framing, demo=session.scoring.require_partition().demo
-    )
+    sp = session.points(framing).job(resolved_origin)
     inherited = try_inherit_fork_origin(
         session, seed, resolved_origin=resolved_origin, sp=sp, framing=framing
     )
     if inherited is not None:
         return inherited
+    proposed = Proposed(role=MeasurementRole.ORIGIN, slot=ORIGIN_SLOT, individual=resolved_origin)
+    key = ArmKey(resolved_origin.id)
 
     # Never infer "no program" from an empty searchpoint: the L4 outer origin's is empty too.
     if not dataset:
@@ -241,23 +221,16 @@ async def establish_campaign_origin(
                 "measured cells — this origin measures none. Declare 'per_cell' instead.",
                 code="pipeline_config_invalid",
             )
+        # The fold of no cell: `total=0`, never a bare 0.0 that reads as a real floor of zero.
+        unmeasured = measuring(proposed, sp, pipeline_schema, expected=0)
+        nothing = ScoredWalk(
+            NO_CELLS,
+            compute_composite_fitness(NO_CELLS, pipeline_schema),
+            signal=None,
+            stopped=None,
+        )
         return CampaignOrigin(
-            resolved_origin=resolved_origin,
-            # `total=0` is the no-evidence marker; a bare 0.0 reads as a real floor of zero.
-            report=build_score_report(
-                resolved_origin,
-                (),
-                None,
-                INVALID_SCORES,
-                [],
-                [],
-                label=candidate_label(0, 0),
-                sp=sp,
-                sp_hash=sp.sp_hash(pipeline_schema),
-                outcome=ArmOutcome.MEASURED,
-            ),
-            origin_results=None,
-            framing=framing,
+            origin=ReadArm(key, conclude(unmeasured, nothing), NO_CELLS), framing=framing
         )
 
     scoring_set = sample_dataset(dataset, campaign_config.sp_budget_origin)
@@ -269,25 +242,15 @@ async def establish_campaign_origin(
 
     listener.on_phase(CampaignPhase.ORIGIN, "enter", round=0)
 
-    if (ledger := session.state.ledger) is not None:
-        ledger.append(
-            CandidateMintedRecord(
-                round=0,
-                idx=0,
-                candidate_id=resolved_origin.id,
-                label=candidate_label(0, 0),
-                lineage=resolved_origin.lineage,
-            )
-        )
-
-    listener.announce_candidate(
-        0,
-        0,
-        1,
-        opt_sp=resolved_origin,
-        sp=sp,
+    arm = measuring(
+        proposed,
+        sp,
+        pipeline_schema,
+        expected=len(scoring_set),
         sample_order=[s.id for s in scoring_set],
     )
+    listener.on_arm(0, key, proposed)
+    listener.on_arm(0, key, arm)
 
     try:
         # A transient abort must not bank a corrupted floor: re-score once fresh. A pass that stays
@@ -298,9 +261,8 @@ async def establish_campaign_origin(
                 scoring_set,
                 session,
                 label=MeasurementRole.ORIGIN,
-                measured=None,
+                measured=MeasuredPass(resolved_origin.id, MeasurementRole.ORIGIN),
                 force_fresh=attempt > 0,
-                slot=ArmSlot(0, 1, resolved_origin.id),
             )
             if not is_transient_scoring_abort(scored.signal):
                 break
@@ -315,30 +277,16 @@ async def establish_campaign_origin(
                 session,
                 campaign_config.model_copy(update={"scoring": locked_scoring}),
                 source=RunSource.ORIGIN,
+                partition=session.state.scoring.require_partition(),
             )
-            sheet = session.scoring.require_scorer().sheet(cell.facts for cell in sheet)
+            sheet = session.state.scoring.require_scorer().sheet(cell.facts for cell in sheet)
             scores = compute_composite_fitness(sheet, pipeline_schema)
-        # Both what the ledger receives and round 0's row — never re-derive either from these rows.
-        report = build_score_report(
-            resolved_origin,
-            (),
-            None,
-            scores,
-            sheet.cells,
-            scoring_set,
-            label=candidate_label(0, 0),
-            sp=sp,
-            sp_hash=sp.sp_hash(pipeline_schema),
-            outcome=walk_outcome(scored),
-        )
-        listener.on_candidate_scored(0, 1, report)
+        # Both what the ledger receives and round 0's arm — never re-derive either from these rows.
+        state = conclude(arm, replace(scored, sheet=sheet, scores=scores))
+        listener.on_arm(0, key, state)
     finally:
         listener.on_phase(CampaignPhase.ORIGIN, "exit", round=0)
 
     return CampaignOrigin(
-        resolved_origin=resolved_origin,
-        report=report,
-        origin_results=sheet,
-        framing=framing,
-        locked_scoring=locked_scoring,
+        origin=ReadArm(key, state, sheet), framing=framing, locked_scoring=locked_scoring
     )

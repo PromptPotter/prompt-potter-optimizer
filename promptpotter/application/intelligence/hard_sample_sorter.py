@@ -1,14 +1,12 @@
-"""It fits nothing: a δ here is the ruler's, a θ the round's own stamp."""
+"""It fits nothing: a δ here is the ruler's, a θ an election's or the frontier's, read on it."""
 
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from promptpotter.application.intelligence.adaptive_queue_mechanism import (
-    build_round_order,
-    pick_value,
-)
+from promptpotter.application.intelligence.adaptive_queue_mechanism import pick_value
+from promptpotter.application.intelligence.rasch import build_round_order
 from promptpotter.domain.cells import (
     HARD_SAMPLES_VERSION,
     HardSampleCell,
@@ -26,32 +24,15 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import HardSampleOrder, RoundResult
     from promptpotter.domain.ruler import DeltaRuler
 
-__all__ = [
-    "build_hard_samples",
-    "rank_hard_samples",
-    "read_hard_samples",
-    "stamped_abilities",
-]
 
-
-def stamped_abilities(
-    rounds: Sequence[RoundResult], ruler: DeltaRuler | None
-) -> tuple[tuple[float, float] | None, dict[str, float]]:
-    frontier = next(
-        (
-            (rr.ability.theta, rr.ability.se)
-            for rr in reversed(rounds)
-            if ruler is not None
-            and rr.ability is not None
-            and rr.ability.se is not None
-            and rr.ability.ruler_id == ruler.anchor_id
-        ),
-        None,
-    )
-    theta = {
-        c.candidate_id: c.theta for rr in rounds for c in rr.candidate_scores if c.theta is not None
+def arm_thetas(rounds: Sequence[RoundResult]) -> dict[str, float]:
+    return {
+        key: fit.theta
+        for rr in rounds
+        if rr.election is not None
+        for key, fit in rr.election.fit.items()
+        if fit.theta is not None
     }
-    return frontier, theta
 
 
 def build_hard_samples(
@@ -62,6 +43,7 @@ def build_hard_samples(
     arm_theta: Mapping[str, float],
     parent_grades: Mapping[str, float],
     slots: Mapping[str, int],
+    n_min: int,
     cycle_id: str | None,
 ) -> HardSamples:
     """*slots* places each ``Sample.key`` at its row in the dataset served: a cell no row holds is not drawn."""
@@ -100,10 +82,12 @@ def build_hard_samples(
         ruler=standing,
         candidate_order=candidate_order,
         theta={cid: arm_theta[cid] for cid in candidate_order if cid in arm_theta},
-        sample_ids={key: slots[key] for key in held},
+        positions={key: slots[key] for key in held},
         sample_order=sorted(measured, key=rank),
         samples={key: difficulty(key) for key in held},
-        round_order=[key_at[sid] for sid in build_round_order(parent_grades, ruler, key_at)],
+        round_order=[
+            key_at[sid] for sid in build_round_order(parent_grades, ruler, key_at, n_min=n_min)
+        ],
         cells=[
             HardSampleCell(candidate=o.candidate_id, sample_key=o.key, fitness=o.response)
             for o in observations

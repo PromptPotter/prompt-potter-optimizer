@@ -3,52 +3,28 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import json
 import os
 import sys
-from collections.abc import Iterable, Iterator
+import tomllib
+from collections.abc import Iterator
 from functools import cache
 from pathlib import Path
 from typing import Any
 
-REPO = Path(__file__).resolve().parents[1]
+from last_green import file_digest
+from processes import REPO, git, peak_mb
+
 PACKAGE = "promptpotter"
 TESTS = "tests"
 EVERY_TEST = f"{TESTS}/"
 RECORD = REPO / ".pytest_cache" / "tests_owning.json"
-# A fifth above the whole suite's measured peak: drift passes, a growth of one fifth does not.
-CEILING_MB = 197
-
-
-def _peak_mb() -> int:
-    """This process's peak resident memory."""
-    if sys.platform == "win32":
-        import ctypes
-
-        class Counters(ctypes.Structure):  # PROCESS_MEMORY_COUNTERS
-            _fields_ = (
-                ("cb", ctypes.c_ulong),
-                ("page_faults", ctypes.c_ulong),
-                ("peak_working_set", ctypes.c_size_t),
-                *((f"field{i}", ctypes.c_size_t) for i in range(7)),
-            )
-
-        counters = Counters(cb=ctypes.sizeof(Counters))
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.K32GetProcessMemoryInfo.argtypes = (
-            ctypes.c_void_p,
-            ctypes.c_void_p,
-            ctypes.c_ulong,
-        )
-        current = ctypes.c_void_p(-1)  # GetCurrentProcess's pseudo-handle
-        if not kernel32.K32GetProcessMemoryInfo(current, ctypes.byref(counters), counters.cb):
-            raise ctypes.WinError(ctypes.get_last_error())
-        return int(counters.peak_working_set) >> 20
-    import resource
-
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS, KiB elsewhere
-    return peak >> 20 if sys.platform == "darwin" else peak >> 10
+# Over the suite's peak in each platform's own `peak_mb` metric: win32 a fifth above a measured
+# 172 MB peak commit; linux 197 over a measured 193 MB peak RSS, never loosened past it.
+CEILING_MB = {"win32": 206, "linux": 197}
+# Package modules the widest journey RAN: one that wires the whole engine to reach one decision
+# is the churn every reshape pays. Equality, like the ledger: a move is re-pinned with its reason.
+WIDEST_JOURNEY_MODULES = 136
 
 
 def _rel(path: str | Path) -> str | None:
@@ -60,8 +36,17 @@ def _rel(path: str | Path) -> str | None:
 
 
 def _hashed() -> dict[str, str]:
-    files = [*(REPO / PACKAGE).rglob("*.py"), *(REPO / TESTS).glob("*.py")]
-    return {p.relative_to(REPO).as_posix(): hashlib.sha1(p.read_bytes()).hexdigest() for p in files}
+    """Every file git does not ignore: a moved manifest, bank or bare-imported script is a move too."""
+    code, listed = git("ls-files", "-co", "--exclude-standard", "-z")
+    if code:
+        raise RuntimeError(listed)
+    return {rel: file_digest(REPO / rel).hex() for rel in filter(None, listed.split("\0"))}
+
+
+def _is_code(rel: str) -> bool:
+    return rel.endswith(".py") and (
+        rel.startswith(f"{PACKAGE}/") or Path(rel).parent.as_posix() == TESTS
+    )
 
 
 def _module_name(rel: str) -> str:
@@ -71,7 +56,29 @@ def _module_name(rel: str) -> str:
 
 @cache
 def _modules() -> dict[str, str]:
-    return {_module_name(rel): rel for rel in _hashed() if rel.startswith(f"{PACKAGE}/")}
+    rels = (p.relative_to(REPO).as_posix() for p in (REPO / PACKAGE).rglob("*.py"))
+    return {_module_name(rel): rel for rel in rels}
+
+
+@cache
+def bare_imports() -> frozenset[str]:
+    """What the suite imports bare off pytest's `pythonpath`, outside the suite itself."""
+    config = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    path = config["tool"]["pytest"]["ini_options"]["pythonpath"]
+    todo = sorted((REPO / TESTS).glob("*.py"))
+    seen: set[Path] = set()
+    while todo:
+        module = todo.pop()
+        if module in seen:
+            continue
+        seen.add(module)
+        rel = module.relative_to(REPO).as_posix()
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        for name in _import_names(tree, _module_name(rel), False, deferred=True):
+            todo.extend(p for d in path if (p := REPO / d / f"{name}.py").is_file())
+    return frozenset(
+        rel for p in seen if not (rel := p.relative_to(REPO).as_posix()).startswith(EVERY_TEST)
+    )
 
 
 def _is_type_checking(test: ast.expr) -> bool:
@@ -217,8 +224,8 @@ def _suite() -> dict[str, set[str]] | None:
     return out
 
 
-def tests_owning(paths: Iterable[str | Path] = ()) -> list[str] | None:
-    """``[]`` = no test is owed; ``None`` = every test must run."""
+def tests_owning() -> list[str] | None:
+    """What moved since the recorded tree. ``[]`` = no test is owed; ``None`` = every test must run."""
     try:
         record: dict[str, Any] = json.loads(RECORD.read_text("utf-8"))
     except (OSError, ValueError):
@@ -228,21 +235,18 @@ def tests_owning(paths: Iterable[str | Path] = ()) -> list[str] | None:
         return None
     then, now = record["files"], _hashed()
     moved = {rel for rel in then.keys() | now.keys() if then.get(rel) != now.get(rel)}
-    named = {_rel(p) for p in paths}
-    if None in named:
-        return None
     ran: dict[str, set[str]] = {node: set(files) for node, files in record["ran"].items()}
     # A test the record never ran is owed whatever moved.
     picked = set(suite.keys() - ran.keys())
-    for rel in moved | {r for r in named if r is not None}:
+    for rel in moved:
         if rel.startswith(f"{TESTS}/test_") and rel in now:
             picked.update(node for node in suite if node.startswith(f"{rel}::"))
-        elif rel.startswith(f"{PACKAGE}/") and rel in now and rel in then:
+        elif _is_code(rel) and rel.startswith(f"{PACKAGE}/") and rel in now and rel in then:
             reach = {rel, *_importers().get(rel, ())}
             picked.update(
                 node for node in suite if reach & ran.get(node, set()) or rel in suite[node]
             )
-        elif rel in now or rel in then or rel.endswith(".py"):
+        elif _is_code(rel) or rel in bare_imports():
             # Code the record does not follow: an import of a cached module opens nothing.
             return None
         elif rel in record["opened"] or Path(rel).parent.as_posix() in record["listed"]:
@@ -300,7 +304,7 @@ def _record(pytest_args: list[str]) -> int:
     monitoring.register_callback(tool, monitoring.events.PY_START, started)
     monitoring.set_events(tool, monitoring.events.PY_START)
     try:
-        code = int(pytest.main(["-p", "no:xdist", *pytest_args], plugins=[plugin]))
+        code = int(pytest.main(pytest_args, plugins=[plugin]))
     finally:
         monitoring.set_events(tool, 0)
         monitoring.free_tool_id(tool)
@@ -312,16 +316,17 @@ def _record(pytest_args: list[str]) -> int:
         {rel for p in paths if (rel := _rel(p)) is not None and "__pycache__" not in rel}
         for paths in (opened, listed)
     )
-    package = set(before)
+    package = {rel for rel in before if _is_code(rel)}
+    reached = {
+        node: sorted(rel for f in files if (rel := _rel(f)) in package)
+        for node, files in sorted(ran.items())
+    }
     RECORD.parent.mkdir(exist_ok=True)
     RECORD.write_text(
         json.dumps(
             {
                 "files": before,
-                "ran": {
-                    node: sorted(rel for f in files if (rel := _rel(f)) in package)
-                    for node, files in sorted(ran.items())
-                },
+                "ran": reached,
                 "opened": sorted(inside - package),
                 "listed": sorted(scanned),
             },
@@ -329,10 +334,21 @@ def _record(pytest_args: list[str]) -> int:
         ),
         "utf-8",
     )
-    if (peak := _peak_mb()) > CEILING_MB:
-        print(f"tests_owning: the suite peaked at {peak} MB, over its {CEILING_MB} MB ceiling.")
-        return 1
-    return code
+    failed = []
+    if (ceiling := CEILING_MB.get(sys.platform)) is None:
+        failed.append(f"no suite peak is measured on {sys.platform}: pin one in CEILING_MB")
+    elif (peak := peak_mb()) > ceiling:
+        failed.append(f"the suite peaked at {peak} MB, over its {ceiling} MB ceiling")
+    widest = max(sum(rel.startswith(f"{PACKAGE}/") for rel in rels) for rels in reached.values())
+    if widest != WIDEST_JOURNEY_MODULES:
+        failed.append(
+            f"the widest journey ran {widest} package modules, not WIDEST_JOURNEY_MODULES = "
+            f"{WIDEST_JOURNEY_MODULES}: split a sprawl along a production seam, or re-pin it "
+            "with its reason in the commit body"
+        )
+    for line in failed:
+        print(f"tests_owning: {line}.")
+    return int(bool(failed))
 
 
 def main(argv: list[str]) -> int:
@@ -340,8 +356,11 @@ def main(argv: list[str]) -> int:
     own, pytest_args = argv[:split], argv[split + 1 :]
     if own[:1] == ["--record"]:
         return _record(pytest_args)
-    run = own[:1] == ["--run"]
-    nodes = tests_owning(own[run:])
+    run = own == ["--run"]
+    if own and not run:
+        print("usage: tests_owning.py [--run | --record] [-- PYTEST_ARGS]")
+        return 2
+    nodes = tests_owning()
     if not run:
         print("\n".join([EVERY_TEST] if nodes is None else nodes))
         return 0
@@ -352,7 +371,7 @@ def main(argv: list[str]) -> int:
         return 0
     import pytest
 
-    return int(pytest.main(["-p", "no:xdist", *nodes, *pytest_args]))
+    return int(pytest.main([*nodes, *pytest_args]))
 
 
 if __name__ == "__main__":

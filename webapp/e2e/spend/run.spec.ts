@@ -9,13 +9,17 @@ import {
   campaigns,
   command,
   dashboard,
+  drafts,
   passConsent,
   reportTape,
   roundsOf,
   tapeOf,
   assertThrowawayWorld,
   type Campaign,
+  type Draft,
 } from "../harness";
+import type { Page } from "@playwright/test";
+import type { RunLimits } from "@/lib/api/types.generated";
 
 const DATASET = process.env.PP_E2E_DATASET || "email-tagging";
 const BUDGET_USD = Number(process.env.PP_E2E_BUDGET_USD || "0.05");
@@ -26,8 +30,30 @@ test.describe.configure({ mode: "serial" });
 test.skip(!process.env.PP_E2E_SPEND, "real spend — set PP_E2E_SPEND=1 to run this tier");
 
 let made: Campaign | null = null;
+let draft: Draft | null = null;
+
+// With a campaign present the app follows the active run, so `/` shows no entry list.
+async function showEntryList(page: Page) {
+  if ((await page.getByText(/Start a campaign/).count()) > 0) return;
+  await page.getByRole("button", { name: "+ New campaign" }).click();
+  await expect(page.getByText(/Start a campaign/)).toBeVisible({ timeout: 60_000 });
+}
+
+async function reopen(page: Page, d: Draft) {
+  await showEntryList(page);
+  await page
+    .locator(".ingest-picklist-group", { hasText: "Open check-ins" })
+    .getByRole("button", { name: new RegExp(`^${d.slug}\\b`) })
+    .click({ timeout: 60_000 });
+}
 
 test.afterAll(async ({ request }) => {
+  // A Start that minted closed the draft; one still open is this run's to discard, however it ended.
+  const unstarted = draft && (await drafts(request).catch(() => [])).some((d) => d.draftId === draft!.draftId);
+  if (unstarted) {
+    const { status, body } = await command(request, "discard-draft", { draft_id: draft!.draftId });
+    console.log(status < 300 ? `[e2e] discarded ${draft!.draftId}` : `[e2e] discard REFUSED (${status}): ${body}`);
+  }
   // Re-resolved: a timeout in the Start test leaves `made` naming the pre-Start cycle.
   made = (await campaigns(request).catch(() => []))[0] ?? made;
   if (!made) return;
@@ -53,37 +79,36 @@ test.describe("a campaign, end to end", () => {
     await assertBackendUp(request);
   });
 
-  test("picking a dataset mints a campaign and runs the check-in", async ({ page, request }) => {
+  test("picking a dataset opens a check-in draft and mints nothing", async ({ page, request }) => {
     test.setTimeout(600_000);
     await open(page);
     await passConsent(page);
 
-    const before = (await campaigns(request)).length;
+    const minted = (await campaigns(request)).length;
+    const known = new Set((await drafts(request)).map((d) => d.draftId));
 
-    // With a campaign present the app follows the active run, so `/` shows no dataset list.
-    const picker = page.getByRole("button", { name: new RegExp(`^${DATASET}\\b`) });
-    if ((await picker.count()) === 0) {
-      await page.getByRole("button", { name: "+ New campaign" }).click();
-      await expect(page.getByText(/Start a campaign/)).toBeVisible({ timeout: 60_000 });
-    }
-    await picker.first().click({ timeout: 60_000 });
+    await showEntryList(page);
+    await page
+      .locator(".ingest-picklist-group", { hasText: "Datasets" })
+      .getByRole("button", { name: new RegExp(`^${DATASET}\\b`) })
+      .click({ timeout: 60_000 });
 
-    // The check-in agent is an LLM call, so the MINT is the first observable, not the draft.
     await expect
-      .poll(async () => (await campaigns(request)).length, {
-        message: "picking a dataset minted no campaign",
+      .poll(async () => (await drafts(request)).some((d) => !known.has(d.draftId)), {
+        message: "picking a dataset opened no draft",
         timeout: 180_000,
       })
-      .toBeGreaterThan(before);
-
-    made = (await campaigns(request))[0]!;
-    console.log(`[e2e] minted ${made.id} — watch it at ${new URL(page.url()).origin}/${made.addr}`);
+      .toBeTruthy();
+    draft = (await drafts(request)).find((d) => !known.has(d.draftId))!;
+    expect((await campaigns(request)).length, "a draft minted a campaign before Start").toBe(minted);
+    console.log(`[e2e] drafted ${draft.draftId} (${draft.slug})`);
   });
 
   test("the check-in surface carries the operator's own rows", async ({ page }) => {
     test.setTimeout(600_000);
-    await open(page, made!.addr);
+    await open(page);
     await passConsent(page);
+    await reopen(page, draft!);
 
     await expect(page.getByText(/finish the setup below/i)).toBeVisible({ timeout: 300_000 });
     await expect(page.locator("main").getByRole("table")).toBeVisible();
@@ -92,17 +117,18 @@ test.describe("a campaign, end to end", () => {
 
   test("Start launches a run, and the browser follows it", async ({ page, request }) => {
     test.setTimeout(900_000);
-    await open(page, made!.addr);
-    await passConsent(page);
+    const minted = (await campaigns(request)).length;
 
     // Candidate WIDTH is not set here: it rides the dataset definition's `campaign` section.
     const capped = await command(request, "edit-draft-campaign", {
-      draft_id: made!.id,
-      patch: { optimization_overrides: { max_rounds: WANT_ROUNDS - 1 } },
+      draft_id: draft!.draftId,
+      patch: { optimization_overrides: { budget: { rounds: WANT_ROUNDS - 1 } } },
     });
     expect(capped.status, `capping the draft to ${WANT_ROUNDS - 1} search round(s): ${capped.body}`).toBeLessThan(300);
 
-    await open(page, made!.addr);
+    await open(page);
+    await passConsent(page);
+    await reopen(page, draft!);
 
     const start = page.getByRole("button", { name: /Start campaign/ });
     await expect(start).toBeEnabled({ timeout: 120_000 });
@@ -114,9 +140,13 @@ test.describe("a campaign, end to end", () => {
     await start.click();
 
     await expect
-      .poll(async () => (await campaigns(request))[0]?.cycleId ?? "", { timeout: 300_000 })
-      .toBeTruthy();
+      .poll(async () => (await campaigns(request)).length, {
+        message: "Start minted no campaign",
+        timeout: 300_000,
+      })
+      .toBeGreaterThan(minted);
     made = (await campaigns(request))[0]!;
+    console.log(`[e2e] minted ${made.id} — watch it at ${new URL(page.url()).origin}/${made.addr}`);
 
     await expect
       .poll(async () => (await dashboard(request, made!))?.run_phase ?? "", {
@@ -193,11 +223,11 @@ test.describe("a campaign, end to end", () => {
 
   test("it is running under a cap, and the browser renders one", async ({ page, request }) => {
     // `<=`, never `==`: the launch composes against the account allowance first, which may be tighter.
-    const limits = (await dashboard(request, made!))?.run_limits as
-      | { ceiling?: { usd?: number | null } }
-      | undefined;
-    expect(limits?.ceiling?.usd, "the run has no USD cap at all").not.toBeNull();
-    expect(limits?.ceiling?.usd).toBeLessThanOrEqual(BUDGET_USD);
+    // An axis the served budget does not name is unbounded, exactly as a named null is.
+    const limits = (await dashboard(request, made!))?.run_limits as RunLimits | undefined;
+    const usd = limits?.budget.usd;
+    expect(typeof usd, "the run has no USD cap at all").toBe("number");
+    expect(usd).toBeLessThanOrEqual(BUDGET_USD);
 
     await open(page, `${made!.addr}/dashboard`);
     await passConsent(page);

@@ -128,6 +128,3 @@ def unblock_email(path: Path, email: str, *, actor: str, audit_path: Path) -> li
         after=len(current),
     )
     return current
-
-
-__all__ = ["block_email", "check_blocklist", "list_blocked", "unblock_email"]

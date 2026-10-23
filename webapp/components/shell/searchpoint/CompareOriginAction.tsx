@@ -11,7 +11,7 @@ export function CompareOriginAction({
   candidate: SelectedCandidate;
   path: CyclePath | null;
 }) {
-  const { run, originLabel } = useCompareWithOrigin(path, candidate.candidate_id);
+  const { run, originLabel } = useCompareWithOrigin(path, candidate.arm);
   return (
     <button
       type="button"
@@ -20,7 +20,7 @@ export function CompareOriginAction({
       disabled={run === null}
       title={
         run === null
-          ? "Not placed on the lineage yet: a candidate still scoring has no address to compare."
+          ? "Nothing to compare: a candidate still scoring is not placed on the lineage yet, and a refused proposal measured no individual."
           : "Open Compare on the origin and this searchpoint, replacing what is on the board."
       }
     >

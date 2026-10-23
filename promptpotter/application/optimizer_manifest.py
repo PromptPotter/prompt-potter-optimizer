@@ -1,23 +1,35 @@
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import functools
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
+
+from pydantic import Field
 
 from promptpotter.application import optimizers
-from promptpotter.application.campaign_config import DeterminismClamp, OptimizationConfig
+from promptpotter.application.campaign_config import OptimizationConfig
+from promptpotter.application.optimizers.nodes import (
+    INITIAL_POPULATION,
+    RUN_INIT,
+    Initializer,
+    OperatorSeat,
+    RoundWalk,
+    member_package,
+)
 from promptpotter.config.paths import (
     checkin_assets_root,
     checkin_manifest_path,
     optimizer_manifest_path,
 )
-from promptpotter.domain.campaign import Treatment
+from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.l4 import proxies
-from promptpotter.domain.opt_search_point import OptimizerPromptTemplate, PromptTemplate
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     MEMBER_KINDS,
@@ -26,42 +38,35 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
+from promptpotter.domain.pool import Pool
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from promptpotter.application.campaign_config import ArmGateMode
     from promptpotter.application.optimizers.nodes import (
+        Adapter,
+        Controller,
+        Eliminator,
+        NodeMember,
         OptimizerRuntime,
+        Proposer,
         Sampler,
         Selector,
     )
     from promptpotter.domain.dashboard_rows import OptimizerLimit
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.pool import Access
     from promptpotter.domain.results import DisplayMetric
+    from promptpotter.domain.sample import Sample
 
 shapes_optimizer_prompt(__name__)
-
-__all__ = [
-    "SelectedOptimizer",
-    "bind_optimizer",
-    "bound_optimizer",
-    "checkin_manifest",
-    "declared_node_override",
-    "get_optimizer_config_overrides",
-    "llm_node_config",
-    "llm_node_document",
-    "optimizer_prompt",
-    "prompt_body",
-    "resolve_node_override",
-    "resolve_optimizer",
-    "resolved_overrides",
-    "running_prompt",
-    "select_optimizer",
-    "set_determinism_clamp",
-    "set_optimizer_prompt_overrides",
-]
 
 
 def _stamp(path: Path) -> int:
@@ -72,13 +77,43 @@ def _stamp(path: Path) -> int:
         return -1
 
 
+class ManifestNode(FrozenModel):
+    type: NodeKind
+    description: str | None = None
+    # The backend-shaped menu of the node's searchable params (`pipeline_parsing.py`).
+    optimizer: dict[str, Any] | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class PipelineManifest(FrozenModel):
+    """A `pipeline.yaml` typed at load — an optimizer's, or the bench's check-in."""
+
+    name: str
+    version: str
+    paper: str | None = None
+    available_models: list[str]
+    nodes: dict[str, ManifestNode]
+    pipelines: dict[str, list[str]]
+    # Whether `initial_population` is a round of its own or heads round 1 (`RoundPlan.walk`).
+    initial_population_walks: Literal["alone", "before_default"] | None = None
+    resolved_prompts: dict[str, OptimizerPromptTemplate] = Field(default_factory=dict)
+
+    def laid_over(self, overlay: Mapping[str, Mapping[str, Any]]) -> PipelineManifest:
+        nodes = {
+            name: node.model_copy(update={"config": {**node.config, **overlay[name]}})
+            if name in overlay
+            else node
+            for name, node in self.nodes.items()
+        }
+        return self.model_copy(update={"nodes": nodes})
+
+
 @functools.lru_cache(maxsize=8)
-def _read_manifest(path: Path, _mtime_ns: int) -> dict[str, Any]:
+def _read_manifest(path: Path, _mtime_ns: int) -> PipelineManifest:
     # Keyed on path AND mtime: an operator's edit or tenant shadow takes effect without a restart.
     if not path.is_file():
         raise FileNotFoundError(f"no optimizer manifest at {path}")
-    manifest: dict[str, Any] = read_yaml(path)
-    return manifest
+    return PipelineManifest.model_validate(read_yaml(path))
 
 
 @functools.lru_cache(maxsize=8)
@@ -87,28 +122,172 @@ def _read_schemas(path: Path) -> dict[str, Any]:
     return schemas
 
 
-def _parse(document: Mapping[str, Any], schemas: Mapping[str, Any]) -> PipelineSchema:
-    return parse_pipeline_response({**document, "resolved_schemas": dict(schemas)})
+def _parse(manifest: PipelineManifest, schemas: Mapping[str, Any]) -> PipelineSchema:
+    authored = manifest.model_dump(mode="json", exclude_unset=True)
+    # Every prompt a manifest resolves is an `OptimizerPromptTemplate`, so its loci are that class's.
+    fields = list(OptimizerPromptTemplate.RENDER_ORDER)
+    prompts = {key: {"fields": fields} for key in manifest.resolved_prompts}
+    return parse_pipeline_response(
+        {**authored, "resolved_prompts": prompts, "resolved_schemas": dict(schemas)}
+    )
+
+
+@dataclass(frozen=True)
+class RoundPlan:
+    """What the bench walks, by role: built once, at load, so a walk the bench cannot run is refused before a mint."""
+
+    initializers: tuple[Initializer, ...]
+    # Walked in the proposers' place by an `author` gate, and beside them by `review`.
+    seat: OperatorSeat
+    measurement: str
+    sampler: Sampler
+    initial_population: tuple[Proposer, ...]
+    # Its own round, read against C0 (LEVI's calibration); else the seeds race round 1's offspring (CAPO).
+    seeds_alone: bool
+    proposers: tuple[Proposer, ...]
+    eliminator: Eliminator | None
+    selector: Selector
+    adapters: tuple[Adapter, ...]
+    controller: Controller | None
+
+    def walk(self, population: Sequence[OptSearchPoint]) -> RoundWalk:
+        """A round seeds only where no population stands: a resumed one restores its own."""
+        if not self.initial_population or population:
+            return RoundWalk("default", (), self.proposers)
+        if self.seeds_alone:
+            return RoundWalk(INITIAL_POPULATION, (), self.initial_population)
+        return RoundWalk("default", self.initial_population, self.proposers)
+
+
+def _walk_refused(name: str, why: str) -> PayloadInvalidError:
+    return PayloadInvalidError(f"optimizer {name!r}: {why}", code="optimizer_roster_open")
+
+
+def _round_plan(
+    name: str, schema: PipelineSchema, seeds_walk: Literal["alone", "before_default"] | None
+) -> RoundPlan:
+    walk = schema.pipelines["default"]
+    declared = {n.name: n.kind for n in schema.declared_nodes}
+    if undeclared := [n for n in walk if n not in declared]:
+        raise _walk_refused(name, f"`default` walks {undeclared}, which it does not declare.")
+    kinds = [declared[n] for n in walk]
+    if NodeKind.GATEWAY not in kinds:
+        raise _walk_refused(name, f"`default` walks no {NodeKind.GATEWAY} node — it walks {walk}.")
+    measured_at = kinds.index(NodeKind.GATEWAY)
+    selected_at = next((i for i, kind in enumerate(kinds) if kind is NodeKind.SELECTOR), len(kinds))
+    samplers: list[Sampler] = []
+    proposers: list[Proposer] = []
+    eliminators: list[Eliminator] = []
+    selectors: list[Selector] = []
+    adapters: list[Adapter] = []
+    controllers: list[Controller] = []
+    for at, (node, kind) in enumerate(zip(walk, kinds, strict=True)):
+        if kind is NodeKind.GATEWAY:
+            continue
+        member = optimizers.member(node)
+        if kind is NodeKind.SAMPLER and at < measured_at:
+            samplers.append(cast("Sampler", member))
+        elif kind in (NodeKind.LLM, NodeKind.ALGORITHM) and at < measured_at:
+            proposers.append(cast("Proposer", member))
+        elif kind is NodeKind.ELIMINATOR and at < measured_at:
+            eliminators.append(cast("Eliminator", member))
+        elif kind is NodeKind.SELECTOR and at > measured_at:
+            selectors.append(cast("Selector", member))
+        elif kind is NodeKind.LLM and at > selected_at:
+            adapters.append(cast("Adapter", member))
+        elif kind is NodeKind.CONTROLLER and at > measured_at:
+            controllers.append(cast("Controller", member))
+        else:
+            raise _walk_refused(
+                name,
+                f"`default` walks {kind} node {node!r} where the bench has no role for it "
+                f"(the {NodeKind.GATEWAY} node is at {measured_at}).",
+            )
+    if len(samplers) != 1 or len(selectors) != 1 or not proposers or len(eliminators) > 1:
+        raise _walk_refused(
+            name,
+            "`default` must walk one sampler, at least one proposer and at most one eliminator "
+            f"before its measurement, and one selector after it — it walks {walk}.",
+        )
+    initial = [
+        cast("Proposer", optimizers.member(n)) for n in schema.pipelines.get(INITIAL_POPULATION, ())
+    ]
+    for pipeline, walked in (("default", proposers), (INITIAL_POPULATION, initial)):
+        if misplaced := [p.name for at, p in enumerate(walked) if p.opens is not (at == 0)]:
+            raise _walk_refused(
+                name,
+                f"`{pipeline}` must walk a proposer that makes the round's arms first and only "
+                f"ones editing them after — {misplaced} of {[p.name for p in walked]} are out of "
+                "place.",
+            )
+    if bool(initial) != (seeds_walk is not None):
+        raise _walk_refused(
+            name,
+            f"a manifest walking `{INITIAL_POPULATION}` declares `initial_population_walks`, and "
+            f"only such a manifest does — it walks {[p.name for p in initial]} and declares "
+            f"{seeds_walk!r}.",
+        )
+    initializers = [optimizers.member(n) for n in schema.pipelines.get(RUN_INIT, ())]
+    if strays := [m.name for m in initializers if not isinstance(m, Initializer)]:
+        raise _walk_refused(
+            name,
+            f"`{RUN_INIT}` walks {strays}, which are no pool initializer: it seeds pools alone.",
+        )
+    return RoundPlan(
+        initializers=tuple(cast("Initializer", m) for m in initializers),
+        seat=OperatorSeat((*initial, *proposers)),
+        measurement=walk[measured_at],
+        sampler=samplers[0],
+        initial_population=tuple(initial),
+        seeds_alone=seeds_walk == "alone",
+        proposers=tuple(proposers),
+        eliminator=eliminators[0] if eliminators else None,
+        selector=selectors[0],
+        adapters=tuple(adapters),
+        controller=controllers[0] if controllers else None,
+    )
 
 
 @dataclass(frozen=True)
 class SelectedOptimizer:
-    """``document`` is the manifest as authored; ``schema`` is it parsed with the overlay applied."""
+    """``manifest`` is as authored; ``schema`` is it parsed with the overlay applied."""
 
     name: str
-    document: Mapping[str, Any]
+    manifest: PipelineManifest
     overlay: Mapping[str, Mapping[str, Any]]
     schema: PipelineSchema
     resolved_schemas: Mapping[str, Any]
+    plan: RoundPlan
+    # The members `plan` walks, closed under what each consults or fires, in declared order.
+    member_nodes: tuple[str, ...]
 
     @property
     def version(self) -> str:
-        return str(self.document.get("version") or "")
+        return self.manifest.version
 
     @property
     def paper(self) -> str | None:
-        cited = self.document.get("paper")
-        return str(cited) if cited else None
+        return self.manifest.paper
+
+    def _carried(self) -> frozenset[type[StatePart]]:
+        return frozenset(
+            kind
+            for node in self.member_nodes
+            for kind in optimizers.member(node).reads | optimizers.member(node).writes
+        )
+
+    @property
+    def slices(self) -> tuple[type[StateSlice], ...]:
+        """Every kind a member it names reads or writes, which its rounds bank."""
+        return tuple(
+            sorted((k for k in self._carried() if issubclass(k, StateSlice)), key=lambda k: k.kind)
+        )
+
+    @property
+    def outputs(self) -> tuple[type[RoundOutput], ...]:
+        return tuple(
+            sorted((k for k in self._carried() if issubclass(k, RoundOutput)), key=lambda k: k.kind)
+        )
 
     def node(self, name: str) -> PipelineNode:
         node = self.schema.get_node(name)
@@ -118,21 +297,17 @@ class SelectedOptimizer:
 
     @property
     def elects_on(self) -> DisplayMetric:
-        walk = self.schema.pipelines["default"]
-        name = next(n for n in walk if self.node(n).kind is NodeKind.SELECTOR)
-        return cast("Selector", optimizers.member(name)).elects_on
+        return self.plan.selector.elects_on
 
     @property
     def sampler(self) -> Sampler:
-        walk = self.schema.pipelines["default"]
-        name = next(n for n in walk if self.node(n).kind is NodeKind.SAMPLER)
-        return cast("Sampler", optimizers.member(name))
+        return self.plan.sampler
 
-    def round_cells(self, pool: int) -> int:
-        return self.sampler.draws(self, pool)
+    def round_cells(self, search: int) -> int:
+        return self.sampler.round_cells(self.knobs(self.sampler.name), search)
 
-    def round_cells_ceiling(self, pool: int) -> int:
-        return self.runtime.round_cells_ceiling(self, pool)
+    def round_cells_ceiling(self, search: int) -> int:
+        return self.runtime.round_cells_ceiling(self, search)
 
     def node_config(self, name: str) -> dict[str, Any]:
         return dict(self.node(name).current_config)
@@ -145,7 +320,7 @@ class SelectedOptimizer:
 
     def file_config(self, name: str) -> dict[str, Any]:
         self.node(name)
-        return dict(self.document["nodes"][name].get("config") or {})
+        return dict(self.manifest.nodes[name].config)
 
     def knobs(self, name: str) -> StrictModel:
         return _knobs(name, self.node(name).kind, self.node_config(name))
@@ -155,6 +330,54 @@ class SelectedOptimizer:
         if not isinstance(knobs, kind):
             raise TypeError(f"{name}'s knobs are {type(knobs).__name__}, not {kind.__name__}")
         return knobs
+
+    def roster_one(self, member: type) -> str:
+        """The load held every consulted edge to one roster member."""
+        (name,) = (n for n in self.member_nodes if isinstance(optimizers.member(n), member))
+        return name
+
+    def knob_owner(self, member: NodeMember, kind: type[StrictModel]) -> str:
+        """It or the consulted member whose declared knobs are a *kind* — ONE of them."""
+        held = [
+            name
+            for name, knobs in (
+                (member.name, member.knobs),
+                *(
+                    (n, optimizers.member(n).knobs)
+                    for n in (self.roster_one(c) for c in member.consults)
+                ),
+            )
+            if issubclass(knobs, kind)
+        ]
+        if len(held) != 1:
+            raise TypeError(
+                f"{member.name!r} reaches {len(held)} {kind.__name__} knob sets, not one"
+            )
+        return held[0]
+
+    def reached_knobs[T: StrictModel](self, member: NodeMember, kind: type[T]) -> T:
+        return self.knobs_of(self.knob_owner(member, kind), kind)
+
+    def access(self, member: NodeMember, pool: type[Pool]) -> Access:
+        if (draw := member.draws.get(pool)) is None:
+            raise KeyError(
+                f"{member.name!r} draws from the {pool.kind!r} pool and does not declare it"
+            )
+        return draw.access(self.reached_knobs(member, draw.knobs))
+
+    def pool_refusals(self, *, demo: Sequence[Sample] | None) -> list[str]:
+        """Why a pool seeds nothing its readers may draw: at load with no *demo*, before a mint with the partition."""
+        refused: list[str] = []
+        for initializer in self.plan.initializers:
+            closed = any(
+                self.access(member, pool) == "closed"
+                for member in map(optimizers.member, self.member_nodes)
+                for pool in member.draws
+                if pool in initializer.writes
+            )
+            if why := initializer.refusal(self, closed=closed, demo=demo):
+                refused.append(why)
+        return refused
 
     def declared_knobs(self, name: str) -> StrictModel:
         return _knobs(name, self.node(name).kind, self.file_config(name))
@@ -198,11 +421,6 @@ class SelectedOptimizer:
         return {node: self._node_digest(node) for node in self.llm_nodes}
 
     @property
-    def member_nodes(self) -> tuple[str, ...]:
-        table = optimizers.registered()
-        return tuple(n.name for n in self.schema.declared_nodes if n.name in table)
-
-    @property
     def llm_nodes(self) -> tuple[str, ...]:
         return tuple(n.name for n in self.schema.declared_nodes if n.kind is NodeKind.LLM)
 
@@ -222,7 +440,7 @@ class SelectedOptimizer:
             cfg = {**cfg, "model": override.model}
             if override.provider:
                 cfg["provider"] = override.provider
-        body = prompt_body(self.document, cfg)
+        body = prompt_body(self.manifest, cfg)
         fields = override.prompt_fields
         schema_key = _resolved_key(cfg.get("schema_family"), cfg.get("schema_version"))
         return stable_hash(
@@ -237,12 +455,37 @@ class SelectedOptimizer:
 
     def treatment(self) -> Treatment:
         """Under the bound L4 edit too: two inner cells under two arms are two treatments."""
+        roster = frozenset(
+            package
+            for n in self.member_nodes
+            if (package := member_package(optimizers.member(n))) is not None
+        )
         return Treatment(
             optimizer=self.name,
             version=self.version,
             prompt_hashes=self.prompt_hashes(),
-            knobs={node: self.knobs(node).model_dump(mode="json") for node in self.member_nodes},
-            source=self.runtime.source_digest(proxies),
+            # Less its prose and `version`, which `Treatment` carries on its own.
+            manifest=stable_hash(
+                [
+                    self.manifest.laid_over(self.overlay).model_dump(
+                        mode="json",
+                        exclude={
+                            "resolved_prompts": True,
+                            "version": True,
+                            "paper": True,
+                            "nodes": {"__all__": {"description"}},
+                        },
+                    ),
+                    {n: self.knobs(n).model_dump(mode="json") for n in self.member_nodes},
+                ]
+            ),
+            # What an initializer seeds its pool from is prompt MATERIAL stored as data, which no module digest reads.
+            source=stable_hash(
+                [
+                    self.runtime.source_digest(roster, proxies),
+                    {i.name: i.starting_content() for i in self.plan.initializers},
+                ]
+            ),
         )
 
 
@@ -257,28 +500,35 @@ def _resolved_key(family: object, version: object) -> str | None:
     return f"{family}/{version}" if version is not None else str(family)
 
 
-def prompt_body(document: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any] | None:
+def _resolved_prompt(
+    manifest: PipelineManifest, config: Mapping[str, Any]
+) -> OptimizerPromptTemplate | None:
     key = _resolved_key(config.get("prompt_family"), config.get("prompt_version"))
-    body = (document.get("resolved_prompts") or {}).get(key) if key else None
-    return dict(body) if isinstance(body, dict) else None
+    return manifest.resolved_prompts.get(key) if key else None
+
+
+def prompt_body(manifest: PipelineManifest, config: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The fields as authored, never their defaults: a prompt hash reads only what the file says."""
+    held = _resolved_prompt(manifest, config)
+    return None if held is None else held.model_dump(exclude_unset=True)
 
 
 def optimizer_prompt(
-    node: str, config: Mapping[str, Any], document: Mapping[str, Any]
+    node: str, config: Mapping[str, Any], manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
-    body = prompt_body(document, config)
-    if body is None:
+    template = _resolved_prompt(manifest, config)
+    if template is None:
         raise KeyError(
             f"Optimizer prompt for node {node!r} not found in resolved_prompts "
             f"(check nodes.{node}.config.prompt_family/version)."
         )
-    return OptimizerPromptTemplate(**body)
+    return template
 
 
 def running_prompt(
-    node: str, config: Mapping[str, Any], document: Mapping[str, Any]
+    node: str, config: Mapping[str, Any], manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
-    template = optimizer_prompt(node, config, document)
+    template = optimizer_prompt(node, config, manifest)
     if fields := resolve_node_override(node).prompt_fields:
         template = template.model_copy(update=fields)
     return template
@@ -301,6 +551,12 @@ def _refuse_unknown_llm_keys(selected: SelectedOptimizer) -> None:
                 f"is neither a call setting ({sorted(_CALL_CONFIG_KEYS)}) nor one of its knobs "
                 f"({sorted(knobs)})."
             )
+    for target, keys in selected.steered_axes.items():
+        if unheld := sorted(keys - set(selected.node_config(target))):
+            raise ValueError(
+                f"optimizer {selected.name!r} steers {unheld} on node {target!r}, whose config "
+                "holds no such key."
+            )
 
 
 def _knobs(name: str, kind: NodeKind | None, config: Mapping[str, Any]) -> StrictModel:
@@ -312,44 +568,132 @@ def _knobs(name: str, kind: NodeKind | None, config: Mapping[str, Any]) -> Stric
 
 @functools.lru_cache(maxsize=32)
 def _select(
-    name: str, shipped: Path, path: Path, stamp: int, overlay_json: str
+    name: str, shipped: Path, path: Path, stamp: int, overlay_json: str, gate: ArmGateMode
 ) -> SelectedOptimizer:
-    document = _read_manifest(path, stamp)
+    manifest = _read_manifest(path, stamp)
     overlay: dict[str, dict[str, Any]] = json.loads(overlay_json)
-    declared = document.get("nodes") or {}
-    if unknown := sorted(set(overlay) - set(declared)):
+    if unknown := sorted(set(overlay) - set(manifest.nodes)):
         raise ValueError(
             f"optimization.nodes names {unknown}, which optimizer {name!r} does not declare "
-            f"(it has {sorted(declared)})."
+            f"(it has {sorted(manifest.nodes)})."
         )
-    if taken := sorted(set(declared) & {n.name for n in checkin_manifest().schema.declared_nodes}):
+    checkin = {n.name for n in checkin_manifest().schema.declared_nodes}
+    if taken := sorted(set(manifest.nodes) & checkin):
         raise ValueError(f"optimizer {name!r} declares {taken}, which the bench's check-in owns.")
-    overlaid = {
-        **document,
-        "nodes": {
-            node: {**block, "config": {**(block.get("config") or {}), **overlay[node]}}
-            if node in overlay
-            else block
-            for node, block in declared.items()
-        },
-    }
     schemas = _read_schemas(shipped / "resolved_schemas.json")
+    schema = _parse(manifest.laid_over(overlay), schemas)
     selected = SelectedOptimizer(
         name=name,
-        document=document,
+        manifest=manifest,
         overlay=overlay,
-        schema=_parse(overlaid, schemas),
+        schema=schema,
         resolved_schemas=schemas,
+        plan=_round_plan(name, schema, manifest.initial_population_walks),
+        member_nodes=_roster(schema),
     )
+    # At load, never mid-round: an edge no roster member closes would raise inside round 1.
+    if open_ := _open_edges(selected, gate):
+        raise PayloadInvalidError(
+            f"optimizer {name!r} names a roster whose edges do not close: " + "; ".join(open_),
+            code="optimizer_roster_open",
+        )
     # Every member's knobs validate NOW, so a bad overlay stops the run before it spends.
     for declared_node in selected.schema.declared_nodes:
         if declared_node.kind in MEMBER_KINDS or declared_node.name in optimizers.registered():
             selected.knobs(declared_node.name)
     _refuse_unknown_llm_keys(selected)
+    if refused := selected.pool_refusals(demo=None):
+        raise ValueError("; ".join(refused))
     return selected
 
 
-def resolve_optimizer(name: str, nodes: Mapping[str, ManifestNodeOverlay]) -> SelectedOptimizer:
+_WALKS = (RUN_INIT, INITIAL_POPULATION, "default")
+
+
+def _edges_of(member: NodeMember) -> frozenset[type]:
+    """The members it reaches: those it consults, and a controller's those it fires."""
+    fires = cast("Controller", member).fires if member.kind is NodeKind.CONTROLLER else frozenset()
+    return member.consults | fires
+
+
+def _roster(schema: PipelineSchema) -> tuple[str, ...]:
+    table = optimizers.registered()
+    declared = [n.name for n in schema.declared_nodes if n.name in table]
+    reached = {n for walk in _WALKS for n in schema.pipelines.get(walk, ()) if n in table}
+    frontier = list(reached)
+    while frontier:
+        for edge in _edges_of(table[frontier.pop()]):
+            for n in declared:
+                if n not in reached and isinstance(table[n], edge):
+                    reached.add(n)
+                    frontier.append(n)
+    return tuple(n for n in declared if n in reached)
+
+
+def _walk(selected: SelectedOptimizer, gate: ArmGateMode) -> tuple[NodeMember, ...]:
+    """Every member in first-round order under *gate*, then the members only a walked one reaches."""
+    plan = selected.plan
+    pipelines = selected.schema.pipelines
+    default = [optimizers.member(n) for n in pipelines["default"] if n != plan.measurement]
+    seeds: list[NodeMember] = list(plan.initial_population)
+    match gate:
+        case "off" | "review":
+            # Review walks the seat after the proposers; it reads and writes nothing, so no edge moves.
+            pass
+        case "author":
+            opens = default.index(plan.proposers[0])
+            default = [m for m in default if m not in plan.proposers]
+            default.insert(opens, plan.seat)
+            seeds = [plan.seat] if seeds else []
+        case unreachable:
+            assert_never(unreachable)
+    named = {n for walk in _WALKS for n in pipelines.get(walk, ())}
+    reached = [optimizers.member(n) for n in selected.member_nodes if n not in named]
+    return (*plan.initializers, *seeds, *default, *reached)
+
+
+def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
+    members = {node: optimizers.member(node) for node in selected.member_nodes}
+    table = optimizers.registered()
+    open_ = [
+        f"{n!r} is declared and neither walked nor reached by a walked member"
+        for n in (d.name for d in selected.schema.declared_nodes)
+        if n in table and n not in members
+    ]
+    for kind in (*selected.slices, *selected.outputs):
+        writers = sorted(n for n, m in members.items() if kind in m.writes)
+        if not writers or (len(writers) > 1 and kind.writers == "one"):
+            readers = sorted(n for n, m in members.items() if kind in m.reads)
+            open_.append(
+                f"{kind.kind!r} is written by {writers or 'no member'} (read by {readers})"
+            )
+    for node, member in members.items():
+        for edge in _edges_of(member):
+            held = sorted(n for n, m in members.items() if isinstance(m, edge))
+            if len(held) != 1:
+                open_.append(f"{node!r} reaches {edge.__name__}, which the roster holds as {held}")
+    # One closure: a part that holds no value until written is written earlier in the walk than
+    # any member reading or drawing it, unless that member writes it itself.
+    written: set[type[StatePart]] = set()
+    for member in _walk(selected, gate):
+        early = sorted(
+            kind.kind
+            for kind in {*member.reads, *member.draws}
+            if kind.written_first() and kind not in written and kind not in member.writes
+        )
+        if early:
+            open_.append(
+                f"{member.name!r} reads {early} before any member writes it"
+                + (f" under `arm_gate: {gate}`" if gate == "author" else "")
+            )
+        written |= member.writes
+    return open_
+
+
+def resolve_optimizer(
+    name: str, nodes: Mapping[str, ManifestNodeOverlay], *, gate: ArmGateMode
+) -> SelectedOptimizer:
+    """The roster must close as *gate* walks it: under ``author``, the seat in its proposers' place."""
     try:
         shipped = optimizers.runtime(name).manifest_dir
     except KeyError as exc:
@@ -357,7 +701,7 @@ def resolve_optimizer(name: str, nodes: Mapping[str, ManifestNodeOverlay]) -> Se
     path = optimizer_manifest_path(shipped)
     overlay = {node: dict(o.config) for node, o in sorted(nodes.items())}
     try:
-        return _select(name, shipped, path, _stamp(path), json.dumps(overlay, sort_keys=True))
+        return _select(name, shipped, path, _stamp(path), json.dumps(overlay, sort_keys=True), gate)
     except ValueError as exc:
         raise PayloadInvalidError(
             f"optimization.nodes refused by optimizer {name!r}: {exc}", code="optimizer_overlay"
@@ -365,20 +709,20 @@ def resolve_optimizer(name: str, nodes: Mapping[str, ManifestNodeOverlay]) -> Se
 
 
 def select_optimizer(opt: OptimizationConfig) -> SelectedOptimizer:
-    return resolve_optimizer(opt.optimizer, opt.nodes)
+    return resolve_optimizer(opt.optimizer, opt.nodes, gate=opt.arm_gate)
 
 
 @dataclass(frozen=True)
 class CheckinManifest:
-    document: Mapping[str, Any]
+    manifest: PipelineManifest
     schema: PipelineSchema
 
 
 @functools.lru_cache(maxsize=2)
 def _checkin_at(path: Path, stamp: int) -> CheckinManifest:
-    document = _read_manifest(path, stamp)
+    manifest = _read_manifest(path, stamp)
     schemas = _read_schemas(checkin_assets_root() / "resolved_schemas.json")
-    return CheckinManifest(document=document, schema=_parse(document, schemas))
+    return CheckinManifest(manifest=manifest, schema=_parse(manifest, schemas))
 
 
 def checkin_manifest() -> CheckinManifest:
@@ -389,10 +733,20 @@ def checkin_manifest() -> CheckinManifest:
 _BOUND: contextvars.ContextVar[SelectedOptimizer | None] = contextvars.ContextVar(
     "selected_optimizer", default=None
 )
+_DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.ContextVar(
+    "determinism_clamp", default=None
+)
 
 
-def bind_optimizer(selected: SelectedOptimizer) -> None:
-    _BOUND.set(selected)
+@contextlib.contextmanager
+def binding_optimizer(optimization: OptimizationConfig) -> Iterator[None]:
+    token = _BOUND.set(select_optimizer(optimization))
+    clamp = _DETERMINISM.set(optimization.determinism)
+    try:
+        yield
+    finally:
+        _DETERMINISM.reset(clamp)
+        _BOUND.reset(token)
 
 
 def bound_optimizer() -> SelectedOptimizer:
@@ -405,16 +759,12 @@ def bound_optimizer() -> SelectedOptimizer:
     return selected
 
 
-def llm_node_document(node: str) -> tuple[PipelineNode, Mapping[str, Any], Mapping[str, Any]]:
+def llm_node_manifest(node: str) -> tuple[PipelineNode, Mapping[str, Any], PipelineManifest]:
     checkin = checkin_manifest()
     if (held := checkin.schema.get_node(node)) is not None:
-        return held, held.current_config, checkin.document
+        return held, held.current_config, checkin.manifest
     selected = bound_optimizer()
-    return selected.node(node), selected.node_config(node), selected.document
-
-
-def llm_node_config(node: str) -> dict[str, Any]:
-    return dict(llm_node_document(node)[1])
+    return selected.node(node), selected.node_config(node), selected.manifest
 
 
 # The OUTER's per-node mutations, bound inside the inner task so each recursion level carries its own.
@@ -423,17 +773,13 @@ _OPTIMIZER_PROMPT_OVERRIDES: contextvars.ContextVar[dict[str, dict[str, Any]] | 
 )
 
 
-def set_optimizer_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) -> None:
-    _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
-
-
-_DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.ContextVar(
-    "determinism_clamp", default=None
-)
-
-
-def set_determinism_clamp(clamp: DeterminismClamp | None) -> None:
-    _DETERMINISM.set(clamp)
+@contextlib.contextmanager
+def binding_prompt_overrides(overrides: dict[str, dict[str, Any]] | None) -> Iterator[None]:
+    token = _OPTIMIZER_PROMPT_OVERRIDES.set(overrides or None)
+    try:
+        yield
+    finally:
+        _OPTIMIZER_PROMPT_OVERRIDES.reset(token)
 
 
 def get_optimizer_config_overrides() -> dict[str, Any] | None:
@@ -469,7 +815,7 @@ def _single_model(overrides: dict[str, Any]) -> tuple[str | None, str | None]:
 
 def _resolved_prompt_parts(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
     """An unusable rename is DROPPED, never raised: a bad L4 mutation must score poorly, not break the run."""
-    prompt_fields = {k: v for k, v in raw.items() if k in PromptTemplate.model_fields}
+    prompt_fields = {k: v for k, v in raw.items() if k in OptimizerPromptTemplate.model_fields}
     names: dict[str, str] = {}
     rename_raw = raw.get("output_schema_field_names")
     if isinstance(rename_raw, dict):

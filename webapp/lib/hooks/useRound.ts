@@ -2,21 +2,20 @@
 
 import { useMemo } from "react";
 import { roundRead } from "../api";
-import { groupByRound, roundCandidates, samplesForRow } from "../derivations";
+import { groupByRound, roundCandidates } from "../derivations";
 import type { CyclePath } from "../ids";
 import { roundOf, useDashboardAt, type DashboardSnapshot } from "../poll";
-import type { ArmRow, RoundResult, SampleRow } from "../types";
+import type { ArmRow, RoundView } from "../types";
 import { useMomentAt } from "../workspace";
 import { readyData, useRead, type ReadFailure } from "./useRead";
 
 export interface RoundState {
   unfiled: boolean;
-  doc: RoundResult | null;
+  doc: RoundView | null;
   loading: boolean;
   failure: ReadFailure | null;
   rows: ArmRow[];
-  row: (label: string) => ArmRow | null;
-  samples: (row: ArmRow | null) => SampleRow[];
+  row: (key: string | null) => ArmRow | null;
 }
 
 // Not `round_axis.completed`: it drops the empty rounds that closed before measuring yet have a file.
@@ -48,9 +47,8 @@ export function useRound(path: CyclePath | null, round: number | null): RoundSta
       loading,
       failure,
       rows,
-      row: (label) => rows.find((r) => r.reading.arm.label === label) ?? null,
-      samples: (row) => (row ? samplesForRow(row, dash, doc) : []),
+      row: (key) => rows.find((r) => r.reading.arm.key === key) ?? null,
     }),
-    [unfiled, doc, loading, failure, rows, dash],
+    [unfiled, doc, loading, failure, rows],
   );
 }

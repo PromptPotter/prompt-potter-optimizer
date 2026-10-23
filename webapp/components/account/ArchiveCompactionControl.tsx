@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { postCompactArchive } from "@/lib/api";
+import { postCommand } from "@/lib/api";
 import type { ArchiveReport } from "@/lib/api/types";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { fmtBytes } from "@/lib/format";
@@ -55,7 +55,7 @@ export function ArchiveCompactionControl() {
 
   async function run(apply: boolean) {
     const slot = apply ? commit : dry;
-    const r = await slot.run(mode, () => postCompactArchive({ mode, apply }));
+    const r = await slot.run(mode, () => postCommand("compact-archive", { mode, apply }));
     if (!r.ok) {
       // Each run swaps atomically but the batch does not, so a failed apply voids its preview.
       if (apply) setPreview(null);

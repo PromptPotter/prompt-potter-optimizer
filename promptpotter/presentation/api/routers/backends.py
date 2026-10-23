@@ -65,10 +65,3 @@ async def get_backend_health(backend_id: str, _identity: IdentityDep) -> Backend
         checked_at=utcnow_iso(),
         detail=None if down is None else str(down),
     )
-
-
-__all__ = [
-    "BackendHealthResponse",
-    "BackendResponse",
-    "backends_router",
-]

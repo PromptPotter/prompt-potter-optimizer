@@ -28,7 +28,7 @@ PoBB (Russo 2016) assumes every arm is observed on an i.i.d. sample of one distr
 
 The fix is one design choice with several call-site consequences: **PoBB priors are sample-keyed, and the leader is backfilled onto the candidate's upcoming samples before each comparison.**
 
-- **Priors are stored sample-keyed**, not as flat vectors: `PoBBCheck.priors_by_sample: cid → sample_id → graded fitness`. `register_completed` ingests `GradedCell`s and keeps the scored ones alone. The stop rule holds grades and nothing else; the searchpoint a prior is caught up under rides the round's `race.py::CatchUpPool`.
+- **Priors are stored sample-keyed**, not as flat vectors: `PoBBCheck.priors_by_sample: cid → sample_key → graded fitness`. `register_completed` ingests `GradedCell`s and keeps the scored ones alone. The parent enters on its OWN rows (`NodeContext.parent_own_rows`), never the cycle's frontier: a cell only another individual answered is caught up like any prior's. The stop rule holds grades and nothing else; the searchpoint a prior is caught up under rides the round's `race.py::CatchUpPool`.
 - **Backfill is reactive, per sample.** `CatchUpPool` takes the bench's catch-up function, which starts one prior's call on one cell and returns the commit that writes it; the scoring phase commits a cell's catch-ups once the cell is taken, before the checks read prior coverage. Under look-ahead the call may START as the cell launches, in a slot of its own, but its row reaches `measurements/` only at that commit — a backfill for a cell no candidate takes is paid and never written. A (prior, cell) pair is measured once however many candidates reach it — priors already covering the id are skipped. A catch-up walk has no slot, so no sample record carries its cell: the scoring phase writes what each commit took as one `RaceCatchUpRecord` per sample, every prior's cell by its address, which is where a fenced task's memory finds them. Priors are caught up sample-by-sample as the candidate measures them, so paired comparison always sees current priors without a full-dataset upfront wall, and a candidate eliminated early never pays for coverage it won't reach. New pairs land in `measurements/` and are reusable by every future round.
 - **A backfill row is not a panel row.** It is stamped with the PRIOR's identity and `MeasurementRole.BACKFILL` (`shared/measurement_context.py`) — the closure receives the prior's id precisely so it cannot inherit the foreground candidate's. Reuse for a *paired comparison* is the point; reuse as some candidate's own **panel** evidence is not, because a backfill is measured outside the round's shared order — resume's hole repair refuses it and re-measures.
 - **What it costs.** Backfill runs per candidate over its sample order (~6–10 hard samples). The
@@ -39,7 +39,7 @@ The fix is one design choice with several call-site consequences: **PoBB priors 
 
 ## The θ rule
 
-Individuals are evaluated sequentially on **Q** in the shared round order. The first candidate runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once `elimination_n_min` is reached, after every query:
+Individuals are evaluated sequentially on **Q** in the shared round order. The first candidate runs to completion, establishing a reference. Each subsequent candidate is measured query by query; once it has been read on `elimination_n_min` cells — cells its θ is read on (`selection.py::cells_read` over `rasch.py::theta_cells`), never rows walked, which the round order walks first at the price of fewer off-ruler cells for the ruler to learn ([`verdict-resolution.md`](verdict-resolution.md) § The round order) — after every query:
 
 1. Build the paired comparison set — each prior mapped onto the candidate's exact sample ids. Priors that cannot be caught up are **excluded, never zero-filled**.
 2. Each arm's ability `θ` and its Laplace `se` are solved separately on the cycle's fixed δ ruler (`fit_theta_given_delta`) — fixed δ decouples the arms, and the ruler is 1PL or, where the dataset graduated, 2PL.
@@ -63,7 +63,7 @@ PoBB does not sample a joint posterior. `p_best` is a pairwise θ comparison aga
 ## Tunable knobs
 
 - potter's `pobb` node `epsilon` (`0.15` in its manifest) — smaller = more conservative. The one ε: "stop measuring a candidate whose probability of being the round's best is below ε". A stop ends measurement; it is **not** a verdict, and never removes the candidate from the election (`is_leader_eligible`).
-- potter's `pobb` node `epsilon_floor` — the ε applied at `elimination_n_min`, ramping linearly up to `epsilon` over the next `elimination_n_min` cells and holding it to the panel's last cell (`PoBBCheck.epsilon_at`). Equal to `epsilon` — as the manifest ships it — leaves the bar flat and elimination bit-identical, so grading exists only where ε was deliberately raised above it: a raised ε then bites as cells accumulate rather than on the thinnest reading. **The bar ramps IN only, and nothing guards the tail.** An arm clearly behind is cut however few cells remain, because a bar that sank again near the end — or a guard that stopped cutting there — would confine PoBB to an early band and let every late loser spend its whole budget. The price is the matched-parent reading: `PairedReading.reference_level` refuses an arm that stopped short of any cell the parent measured (`selected_by_stop`), so a late cut, like an early one, is ranked on θ alone. Aggression belongs here and never in `elimination_n_min`, which also gates ruler warmth. A floor set above `epsilon` would grade the bar downward; the ramp goes flat at `epsilon` instead and the `epsilon_floor_inverted` coupling reports it.
+- potter's `pobb` node `epsilon_floor` — the ε applied at `elimination_n_min`, ramping linearly up to `epsilon` over the next `elimination_n_min` cells and holding it to the panel's last cell (`PoBBCheck.epsilon_at`). The ramp and `lock_in_n_min` count cells read, as the entry gate does, so a reading clearing the gate late in the walk starts at the floor rather than at `epsilon`. Equal to `epsilon` — as the manifest ships it — leaves the bar flat and elimination bit-identical, so grading exists only where ε was deliberately raised above it: a raised ε then bites as cells accumulate rather than on the thinnest reading. **The bar ramps IN only, and nothing guards the tail.** An arm clearly behind is cut however few cells remain, because a bar that sank again near the end — or a guard that stopped cutting there — would confine PoBB to an early band and let every late loser spend its whole budget. The price is the matched-parent reading: `PairedReading.reference_level` refuses an arm that stopped short of any cell the parent measured (`selected_by_stop`), so a late cut, like an early one, is ranked on θ alone. Aggression belongs here and never in `elimination_n_min`, which also gates ruler warmth. A floor set above `epsilon` would grade the bar downward; the ramp goes flat at `epsilon` instead and the `epsilon_floor_inverted` coupling reports it.
 - `OptimizationConfig.elimination_n_min` (default `6`) — the single min-samples floor. It gates PoBB (below it a candidate has too few cells to act on — cells, which are not the width a cut needs; step 4 above is) **and** the difficulty-ruler warmth: the per-cycle δ ruler stays flat (δ≡0 ⇒ θ = logit-accuracy) until at least this many grade-A samples are banked. Difficulty and ability become trustworthy at the same evidence threshold — one knob, no separate ruler-only constant.
 
 ## The full elimination ladder
@@ -72,7 +72,7 @@ Five independent mechanisms can end a candidate's evaluation early or annotate a
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
-| 1 | **Validation skip** — `CandidateProposal.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `ScoredCandidate.validation_failures` → `l1_wounds` | `runner/measurement.py::_open_candidate` |
+| 1 | **Validation skip** — `Proposal.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `ArmState.validation_failures` → `l1_wounds` | `runner/measurement.py::_open_arm` |
 | 2 | **Stale-data protocol** — a cached result classifies infra or fatal (`is_deprecated`); a repaired, answered row replays | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
@@ -96,7 +96,7 @@ arms together. `DegradationCheck` still runs on each arm's own rows beside it, a
 reach the racing stream under `paired_t`.
 
 - **`blocks` (sampler)** — `block_size` (b), `max_blocks` (z_max). The panel is the first
-  `max_blocks` whole blocks of the search pool in the bank's order: the same cells every round,
+  `max_blocks` whole blocks of the search split in the bank's order: the same cells every round,
   never shuffled (App. C.4). `Panel.block_size` hands the boundaries to the eliminator; a pool
   short of one block refuses the round.
 - **`paired_t` (eliminator)** — `alpha`, `length_penalty` (γ), and μ, which is the `population`
@@ -108,8 +108,8 @@ reach the racing stream under `paired_t`.
   significantly beat are cut together, off the readings taken before any cut — App. B's
   `n_sig_better ≥ μ`, where §4's prose says "more than" — with no multiple-test correction, as
   CAPO races. Once μ or fewer arms are left the race is settled and stops them where they stand,
-  `locked_in`; an arm that took the whole panel completes instead. A cut stamps
-  `elimination_context.gate` `outscored`, a settled arm `settled`, each with the `block` of
+  `locked_in`; an arm that took the whole panel completes instead. A cut stamps its
+  `Elimination.context.gate` `outscored`, a settled arm its `locked_in` one `settled`, each with the `block` of
   `blocks` that decided it and the arms it `raced_against` there; the stream's `p_best` is the
   smallest `p_better`, the t fiducial P(arm beats that rival).
 - **Where it departs from the paper.** A race that starts with μ arms or fewer still walks its
@@ -119,7 +119,8 @@ reach the racing stream under `paired_t`.
   decides it: `strict` unwinds the round on the budget's own stop, and a `resume` under a raised
   ceiling re-runs it whole. Under `off` it is elected on the k of z_max blocks it paid for
   (`Selector.elects_partial`): the population is kept among the arms that reached the coverage
-  floor, its parent is read on the cells the archive already holds — round 1's origin on what
+  floor, counted on the column the selector elects on (`selection.py::cells_read`: CAPO's scored
+  cells, potter's θ-readable ones), its parent is read on the cells the archive already holds — round 1's origin on what
   run init scored — and the round is the run's last. Where no arm reached the floor, or the
   parent holds none of its cells, the round is unwound.
 - **Each cut is a ledger decision**, `paired_t_cut`, REPLAYED: its record names the arm, the rows
@@ -129,10 +130,10 @@ reach the racing stream under `paired_t`.
 **CAPO selects on its own objective; the bench scores it on the campaign's.** Per cell, CAPO's
 objective is `fitness − γ · target_prompt_chars / length_norm` (§4): the per-sample correctness,
 less γ times the scored prompt's length over the longest initial prompt's, unclamped. γ is
-`paired_t`'s `length_penalty` (0.05, App. C.4) — declared on that node once, and read by the
-`population` selector too, so the race and the population cannot rank on two objectives.
-`length_norm` is measured on `capo_init`'s population at round 1's race, and rides CAPO's
-`optimizer_state`, so every round and every replay divides by the same number. The campaign's
+`capo_init`'s `length_penalty` (0.05, App. C.4). `capo_init` fixes the whole objective as it draws
+the initial population — γ and `length_norm`, the longest initial prompt's length — into the
+`capo_objective` slice that `paired_t` and `population` both read, so the race and the population
+cannot rank on two objectives, and every round and every replay divides by the same number. The campaign's
 `scoring.per_cell` composite is not in it: that formula is the ONE evaluator every optimizer's
 arms, its election and its bench headline are scored under, and a campaign never writes CAPO's
 term into it.
@@ -169,7 +170,7 @@ incumbent. Where the bench runs CAPO differently from the paper:
   manifest's 1.0 is vLLM's sampling default.
 - **The length** is counted in characters of the scored prompt, the campaign's framing
   included, where the paper counts the prompt's tokens (§4) — no tokenizer ships.
-- **The 5M-input-token budget** (§5) is the campaign's `ceiling.tokens`, which counts output tokens
+- **The 5M-input-token budget** (§5) is the campaign's `budget.tokens`, which counts output tokens
   too.
 - **A reply without `<prompt>` markers** makes an invalid arm that costs no cell.
 - **The bench re-scores its incumbent** each round on the cells `population` names
@@ -198,9 +199,9 @@ value cited there) has no eliminator, and its selector is an archive. Round 1 is
 | f restricted to the proxy (Alg. 1 line 11) | `proxy_css` draws the proxy, in one order, every round after calibration |
 | Welford z-score + sigmoid, CVT with 50 centroids, TRYINSERT (§3, Alg. 1-2) | `map_elites`: `centroids: 50`; the statistics ride `LeviCalibration.stats` |
 | Behavioural descriptors, input- and output-side (§3.1) | `map_elites.descriptors`, read by `optimizers/descriptors.py` |
-| Refinement route: small model, ~90% of calls (§3.2) | `levi_refine`, Qwen3-8B (§4.2), `interval - 1` calls a round, `max_tokens` 16,384 |
+| Refinement route: small model, ~90% of calls (§3.2) | `levi_refine`, `interval - 1` calls a round, `max_tokens` 16,384; the bench's one model, not the paper's Qwen3-8B (§4.2) |
 | Parent ∝ exp(f / T), T ∈ {0.3, 0.7, 1.0, 1.2}; one inspiration, dropped 20% (App. B) | `levi_refine`: `sampler_temperatures`, `n_inspirations`, `inspiration_drop` |
-| Paradigm shift every 10 evaluations, k = 3 clusters, `max_tokens` 4,096 (App. F) | `levi_paradigm_shift`: `interval`, `n_clusters`; Gemini 3 Flash (App. A) |
+| Paradigm shift every 10 evaluations, k = 3 clusters, `max_tokens` 4,096 (App. F) | `levi_paradigm_shift`: `interval`, `n_clusters`; the bench's one model, not the paper's Gemini 3 Flash (App. A) |
 | Templates E.6 and E.7 | `resolved_prompts`, verbatim |
 | Budget B; the best elite returned | the campaign's budget; the round selects the best elite unless it is the incumbent |
 
@@ -244,9 +245,9 @@ Alg. 1 per round, and its eliminator is Alg. 1's acceptance test.
 
 | Paper | Node · config |
 |---|---|
-| Split D_train into D_feedback and D_pareto (Alg. 1 line 1) | `minibatch.pareto_size` 50, a row count as the paper states each benchmark's (App. E.1); the Pareto set rides `GepaRoundState.pareto_set` |
+| Split D_train into D_feedback and D_pareto (Alg. 1 line 1) | `minibatch.pareto_size` 50, a row count as the paper states each benchmark's (App. E.1); the Pareto set rides the `pareto_set` slice (`gepa/state.py::ParetoSet`) |
 | P ← [Φ], Φ scored on D_pareto (lines 2-5) | round 1 mutates the incumbent, the origin; `pareto` seats it with its Pareto-set scores off the bench's re-score, which reads the Pareto set alone (`Selector.parent_cells`) |
-| SELECTCANDIDATE (line 7, Alg. 2) | `pareto`, at each round's close: per-cell fronts, the dominated removed, the next parent drawn ∝ cells led — `GepaRoundState.parent_id` |
+| SELECTCANDIDATE (line 7, Alg. 2) | `pareto`, at each round's close: per-cell fronts, the dominated removed, the next parent drawn ∝ cells led — `ParetoScores.parent_id` |
 | SELECTMODULE, round-robin (line 8, §3) | an individual renders one prompt, so the module is its whole prompt every round |
 | A minibatch of b from D_feedback (line 9), b = 3 (App. E.4) | `minibatch.size` 3, the panel's first block |
 | Feedback, scores and traces on M through μ_f (line 10) | `gepa_reflect` runs the parent on the minibatch through the scoring gateway, filed as a parent's reading; μ_f's text is `row_diagnostics.py::cell_feedback` |
@@ -254,7 +255,7 @@ Alg. 1 per round, and its eliminator is Alg. 1's acceptance test.
 | σ′ improved on σ (lines 13-14) | `minibatch_gate`: a child not strictly above its parent's mean objective on the minibatch is cut — a `minibatch_gate` decision, REPLAYED off the parent's recorded scores |
 | Φ′ added to P, scored on D_pareto (lines 15-18) | an accepted child walks the rest of the panel, the Pareto set; `pareto` admits it with its per-cell scores |
 | Return the best average on D_pareto (line 21) | the round selects the best aggregate unless it is the incumbent; a tie holds |
-| The reflection on the system's own model: Qwen3 8B at 0.6, top-p 0.95, a 16,384-token window (App. E.2) | `gepa_reflect` on `qwen/qwen3-8b`, `temperature` 0.6, `top_p` 0.95, `max_tokens` 16,384 |
+| The reflection on the system's own model: Qwen3 8B at 0.6, top-p 0.95, a 16,384-token window (App. E.2) | `gepa_reflect`, `temperature` 0.6, `top_p` 0.95, `max_tokens` 16,384, on the bench's one model — Qwen3 8B is retired on OpenRouter |
 | Budget B in rollouts (Eq. 2), matched to MIPROv2's per benchmark (App. E.4) | the campaign's round, spend and token ceilings |
 
 Where the bench runs GEPA differently from the paper:
@@ -285,15 +286,15 @@ Where the bench runs GEPA differently from the paper:
   same minibatch included — its call seeded as § CAPO's population and operators states for CAPO.
 - **One model for reflection and target** is the campaign's choice, as it is CAPO's: matching
   `gepa_reflect`'s model to the target's is an overlay.
-- **A pool member carries a verdict on every Pareto-set cell**, the seat and a child alike, so no
+- **A scored member carries a verdict on every Pareto-set cell**, the seat and a child alike, so no
   aggregate averages fewer cells than another. One missing any — an errored or ungraded cell — is
-  refused, a `pool_refused` decision (ARCHIVAL) naming the cells; a round seating no one leaves the
-  pool empty, and the next reflects on the incumbent again.
+  refused, a `candidate_refused` decision (ARCHIVAL) naming the cells; a round seating no one leaves the
+  scores empty, and the next reflects on the incumbent again.
 - **The draw moves to the close.** Alg. 2 runs at an iteration's start; the bench draws the next
-  parent when the round closes and banks it, so a resume or a fork re-seats the front and the
+  parent when the round closes and banks it, so a resume or a fork re-seats the candidates and the
   draw together. A member's Pareto-set scores are banked at admission, and a scorer change
   re-grades none of them, as LEVI's elites.
-- **`max_rounds` counts rounds, and a GEPA round is one proposal**, so a campaign sizes its round
+- **`budget.rounds` counts rounds, and a GEPA round is one proposal**, so a campaign sizes its round
   cap as the child count it wants — LEVI's as `interval` evaluations a round. The bench's runaway
   guard (`runner/loop.py::HARD_CAP_ARMS`) counts arms raced, so it binds one-child GEPA no sooner
   than a five-arm optimizer.
@@ -304,7 +305,7 @@ Where the bench runs GEPA differently from the paper:
 
 ## On-disk shape and replay
 
-Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` decision record (in `rounds/round_NNNN.json`) carries the paired snapshot under `data`: `p_best`, `leader_id`, `candidate_cells` (the cells the posterior was fit on, each by its `Sample.key`, in walk order — the candidate's GRADED cells, so a cell that errored is not among them) and `prior_histories[cid]` (each paired prior's grades on exactly those cells, after backfill). A collapse cut fit no posterior and carries none of them. `inputs_ref` records the gate parameters in force **and which `EliminationGate` (`pobb/checks.py`) fired** — only ε computed a posterior, so a replayer re-deriving a collapse cut under the ε rule tests a real `p_best` against a bar nobody set.
+Each `ELIMINATION_CUT` / `LEADER_LOCK_IN` decision record (in `rounds/round_NNNN.json`) carries the paired snapshot under `data`: `p_best`, `leader` (its arm key), `candidate_cells` (the cells the posterior was fit on, each by its `Sample.key`, in walk order — the candidate's GRADED cells, so a cell that errored is not among them) and `prior_histories[cid]` (each paired prior's grades on exactly those cells, after backfill). A collapse cut fit no posterior and carries none of them. `inputs_ref` records the gate parameters in force **and which `EliminationGate` (`pobb/checks.py`) fired** — only ε computed a posterior, so a replayer re-deriving a collapse cut under the ε rule tests a real `p_best` against a bar nobody set.
 
 That makes the divergence replayer self-contained (`optimizers/potter/resume.py::_pobb_replay_snapshot`): it takes the rescored rows at `candidate_cells`, hands `prior_histories` over as the priors, and calls the same `paired_p_best` on the cycle's fixed δ ruler. **No cross-round "find R1_winner in prior rounds" logic and no backfill during replay** — the decision record is the entire input, and the θ rule is closed-form and deterministic, so replay is bit-for-bit when no scorer change moved the candidate's grades. When the active scorer differs the candidate side is rescored and the prior side stays at the recorded grades; a scorer change that materially shifts priors surfaces as divergence via the candidate side.
 
@@ -332,7 +333,7 @@ PromptPotter **is** AlphaZero-shaped MCTS over the lineage tree, and all four ph
 - **Selection.** When L2/L3 judges the current subtree exhausted it emits `fork_proposal: {reason}` — *whether* to rewind, a judgment no rule makes well. *Where* is then decided by UCB1 over the backpropagated tree (`application/mask/backprop.py::select_rewind_round`): each ancestor's mean ability plus an exploration bonus for how little it has been tried. The layer deliberately does *not* name the round, because no panel ever enumerated the ancestors and their fitness, so a free-form offset was an unanchored guess carrying the loop's most expensive decision.
 - **Expansion.** A round: L1 proposes a population from the selected node.
 - **Simulation.** A deterministic forward pass on the eval set rather than a random rollout — AlphaZero is the published precedent for exactly that swap, which is why the determinism does not make this not-MCTS. Within a round, PoBB prunes losers before they consume the budget, a sharper instrument than UCB1 for the *sibling* comparison because a round's arms are measured on shared samples.
-- **Backpropagation.** Each round's Rasch ability θ is rolled up to every ancestor as visit count + value (`accumulate_node_stats`), so an ancestor's statistics answer what re-expanding from there actually yielded, including in branches it never ran itself.
+- **Backpropagation.** Each round's Rasch ability θ is rolled up to every ancestor as visit count + value (`accumulate_node_stats`), so an ancestor's statistics answer what re-expanding from there actually yielded, including in branches it never ran itself. Every cycle of the campaign is read on ONE fit (`DifficultyView.level_series` over all of them), so values from two branches sum on one scale, and each cycle is caveated on its own cells, so one branch's caveat withholds no other's values; a round whose level does not difference stays a visit with no value, never a gap in the tree. A rewind that finds no valued ancestor is dropped as a `layer_rebase_dropped` round warning naming the caveat that withholds θ there.
 
 **Value is θ, never accuracy, and a fork's inherited prefix is not a fresh visit** (`application/mask/backprop.py`) — both naive forms fail silently, since the fold still returns a plausible number, so the fold keeps only each cycle's own new rounds and re-attaches its spine to the branch-point.
 

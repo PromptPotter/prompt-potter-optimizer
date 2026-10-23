@@ -18,15 +18,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.scoring import GradedCell, MeasuredCell
 
-__all__ = [
-    "cell_feedback",
-    "count_degraded_samples",
-    "extract_sample_diagnostics",
-    "find_rank",
-    "judge_readings",
-    "rank_ground_truth",
-]
-
 
 def rank_ground_truth(
     ranked: Sequence[Any], predicted: str, ground_truth: str
@@ -65,7 +56,7 @@ def cell_feedback(cell: GradedCell) -> str:
     if grade.unscored is not None:
         return f"Not graded: {grade.unscored}"
     if grade.fitness is None or grade.objective is None:
-        raise KeyError(f"cell_feedback: the cell at slot {facts.sample_id} carries no grade")
+        raise KeyError(f"cell_feedback: the cell of sample {facts.sample_key} carries no grade")
     lines = [f"Score: {grade.objective:.3f}"]
     if grade.fitness != grade.objective:
         lines.append(f"Correctness: {grade.fitness:.3f}")

@@ -24,6 +24,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     layout_json_schema,
 )
 from promptpotter.domain.candidate_diff import candidate_delta
+from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
@@ -51,6 +52,12 @@ def _drop_blank_values(value: object) -> object:
     return value
 
 
+def _drop_blank_node_values(value: object) -> object:
+    if isinstance(value, dict):
+        return {node: _drop_blank_values(fields) for node, fields in value.items()}
+    return value
+
+
 def _truncate_marked(max_len: int) -> Callable[[Any], Any]:
     """The marker is VISIBLE: a silent mid-quote cut reads downstream as a complete-but-wrong steer."""
 
@@ -66,19 +73,6 @@ CLUSTER_MECHANISM_MAX = 60
 CLUSTER_CLAIM_MAX = 240
 # A cluster is a MECHANISM, and one row shows no mechanism: the next generator rewrites around that row.
 CLUSTER_ROWS_MIN = 2
-
-__all__ = [
-    "CLUSTER_ROWS_MIN",
-    "FailureCluster",
-    "L1CritiqueOutput",
-    "L1GenerateOutput",
-    "L1Variant",
-    "L2ContextOutput",
-    "L3PlanOutput",
-    "VariantEvidenceGrounding",
-    "build_l1_response_model",
-    "build_l2_response_model",
-]
 
 
 class VariantEvidenceGrounding(OptimizerResponseModel):
@@ -112,14 +106,16 @@ class L1Variant(OptimizerResponseModel):
             "last resort: at most one, and only where a panel or a runtime failure points there."
         ),
     )
-    prompt_fields_updates: Annotated[dict[str, str], BeforeValidator(_drop_blank_values)] = Field(
+    prompt_fields_updates: Annotated[
+        dict[str, dict[str, str]], BeforeValidator(_drop_blank_node_values)
+    ] = Field(
         default_factory=dict,
-        description="Top-level prompt-template fields: {field: new full text}.",
+        description="Per prompt node, its prompt fields: {node: {field: new full text}}.",
     )
-    shot_ids: list[int] | None = Field(
-        None,
-        description="The shots this variant runs with: demo-pool ids from the DEMO POOL panel, "
-        "in order. Replaces the parent's list; omit to keep it.",
+    shots: dict[str, list[int]] = Field(
+        default_factory=dict,
+        description="Per prompt node, the shots it runs with: demo-pool ids from the DEMO POOL "
+        "panel, in order. Replaces that node's list; omit a node to keep it.",
     )
     # Capped: a response truncated at `max_tokens` is a ZERO-CANDIDATE ROUND, not a short answer.
     changes_description: Annotated[str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX))] = (
@@ -127,27 +123,41 @@ class L1Variant(OptimizerResponseModel):
     )
 
     # Bound per round on the SUBCLASS `build_l1_response_model` mints; empty here, convicting only a blank variant.
-    parent_prompt: ClassVar[Mapping[str, str]] = {}
+    parent_prompts: ClassVar[Mapping[str, Mapping[str, str]]] = {}
     parent_params: ClassVar[Mapping[str, Any]] = {}
-    parent_shot_ids: ClassVar[tuple[int, ...]] = ()
+    parent_shots: ClassVar[Mapping[str, tuple[int, ...]]] = {}
 
     @model_validator(mode="after")
     def _reject_empty_mutation(self) -> L1Variant:
         # Raised HERE so the message rides the schema-repair retry; `l1_invariants` can only drop the arm.
         cls = type(self)
-        written: dict[str, Any] = dict(self.prompt_fields_updates)
-        if self.shot_ids is not None:
-            written["shot_ids"] = self.shot_ids
-        parent = {**cls.parent_prompt, "shot_ids": cls.parent_shot_ids}
-        child = {**parent, **written}
+        fields = {
+            node: {**cls.parent_prompts.get(node, {}), **self.prompt_fields_updates.get(node, {})}
+            for node in cls.parent_prompts.keys() | self.prompt_fields_updates.keys()
+        }
+        shots = {**cls.parent_shots, **{node: tuple(ids) for node, ids in self.shots.items()}}
+        child = _wire_prompts(fields, shots)
+        parent = _wire_prompts(cls.parent_prompts, cls.parent_shots)
         if not candidate_delta(child, parent, self.pipeline_overlay, cls.parent_params):
             raise ValueError(
                 "this variant mutates nothing: pipeline_overlay, prompt_fields_updates or "
-                "shot_ids must carry a value that DIFFERS from the current one. Describing a "
+                "shots must carry a value that DIFFERS from the current one. Describing a "
                 "change in changes_description is not making one, and an empty string or the "
                 "field's current text is not an edit. Emit the new text."
             )
         return self
+
+
+def _wire_prompts(
+    fields: Mapping[str, Mapping[str, str]], shots: Mapping[str, Sequence[int]]
+) -> dict[str, NodePrompt]:
+    """Shots as their wire ids: the no-op test compares the ids it was shown, never a pool row."""
+    return {
+        node: NodePrompt(
+            fields=dict(fields.get(node, {})), shots=[f"#{i}" for i in shots.get(node, ())]
+        )
+        for node in fields.keys() | shots.keys()
+    }
 
 
 class L1GenerateOutput(OptimizerResponseModel):
@@ -157,9 +167,9 @@ class L1GenerateOutput(OptimizerResponseModel):
 def build_l1_response_model(
     field_names: Mapping[str, str],
     *,
-    parent_prompt: Mapping[str, str],
+    parent_prompts: Mapping[str, Mapping[str, str]],
     parent_params: Mapping[str, Any],
-    parent_shot_ids: Sequence[int],
+    parent_shots: Mapping[str, Sequence[int]],
 ) -> type[L1GenerateOutput]:
     """``populate_by_name`` stays OFF: the original key must fail, never half-apply a rename."""
     variant = cast(
@@ -167,9 +177,9 @@ def build_l1_response_model(
         create_model("L1Variant", __base__=_renamed_variant(tuple(sorted(field_names.items())))),
     )
     # ClassVars, so the parent's own text never becomes a field the wire schema advertises.
-    variant.parent_prompt = dict(parent_prompt)
+    variant.parent_prompts = {node: dict(fields) for node, fields in parent_prompts.items()}
     variant.parent_params = dict(parent_params)
-    variant.parent_shot_ids = tuple(parent_shot_ids)
+    variant.parent_shots = {node: tuple(ids) for node, ids in parent_shots.items()}
     # `__class_getitem__` builds `list[variant]` as a VALUE; the subscript form is a type expression mypy rejects.
     variants_field: Any = (list.__class_getitem__(variant), ...)
     return create_model("L1GenerateOutput", __base__=L1GenerateOutput, variants=variants_field)

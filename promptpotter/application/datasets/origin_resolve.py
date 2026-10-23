@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from promptpotter.application.bench.task_context import (
     CheckinOutput,
-    checkin_campaign_call_context,
+    draft_call_context,
     run_checkin,
 )
 from promptpotter.application.commands.payloads import EditDraftCampaignPayload
@@ -25,8 +25,8 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -125,7 +125,7 @@ async def resolve_origin_turn(
     user_content, consultation_instruction = build_origin_consultation(draft, message)
 
     # Bound here as well as in `CommandDispatcher`: the CLI path (`new <file>`) has no dispatcher.
-    context = checkin_campaign_call_context(stores, draft.draft_id)
+    context = draft_call_context(stores, draft.draft_id)
     token = set_cycle_ledger(context.ledger)
     try:
         # No launch admitted this call and no run's book watches it; a check-in has no producer.
@@ -221,14 +221,23 @@ def _apply_findings(
         provenance[proposal.field] = (
             Provenance.CONFIRMED if proposal.confidence == "high" else Provenance.PROPOSED
         )
-    prompt_fields = {
-        name: getattr(output, name)
-        for name in PROMPT_STRING_FIELDS
-        if str(getattr(output, name)).strip()
+    written = {
+        node.name: fields
+        for node in draft.prompt_nodes()
+        if (
+            fields := {
+                name: text
+                for name in node.prompt_fields
+                if name in PROMPT_FIELDS and (text := getattr(output, name)).strip()
+            }
+        )
     }
-    if prompt_fields:
-        values["origin_prompt_fields"] = {**draft.origin_prompt_fields, **prompt_fields}
-        provenance["origin_prompt_fields"] = Provenance.CONFIRMED
+    if written:
+        values["origin_prompts"] = {
+            **draft.origin_prompts,
+            **{step: {**draft.origin_prompts.get(step, {}), **f} for step, f in written.items()},
+        }
+        provenance["origin_prompts"] = Provenance.CONFIRMED
     decomposed = output.task_context.model_dump()
     if any(str(value).strip() for value in decomposed.values()):
         values["decomposed_task_context"] = decomposed
@@ -244,6 +253,3 @@ def _coerce(field_key: str, proposed: str, draft: DraftCampaign) -> Any | None:
     if field_key in ("column.query", "column.ground_truth"):
         return proposed if proposed in draft.headers else None
     return proposed
-
-
-__all__ = ["resolve_origin_turn"]

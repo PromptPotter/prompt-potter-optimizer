@@ -1,10 +1,7 @@
 "use client";
 import { useId, useState } from "react";
 import {
-  postArchiveCampaign,
-  postDeleteCampaign,
-  postSetCampaignLabel,
-  postUnarchiveCampaign,
+  postCommand,
   type CampaignSummary,
 } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -28,21 +25,31 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
   const { campaignId: viewedCampaignId, followActive } = useWorkspace();
 
   const runArchive = () =>
-    void cmd.run("archive", () => postArchiveCampaign(campaign.campaign_id));
+    void cmd.run("archive", () =>
+      postCommand("archive-campaign", { campaign_id: campaign.campaign_id }),
+    );
 
   const runUnarchive = () =>
-    void cmd.run("unarchive", () => postUnarchiveCampaign(campaign.campaign_id));
+    void cmd.run("unarchive", () =>
+      postCommand("unarchive-campaign", { campaign_id: campaign.campaign_id }),
+    );
 
   const runRename = () => {
     setRenaming(false);
-    void cmd.run("rename", () => postSetCampaignLabel(campaign.campaign_id, draft.trim()));
+    // `""` is a real value: it clears the label back to the dataset-name fallback.
+    void cmd.run("rename", () =>
+      postCommand("set-campaign-label", {
+        campaign_id: campaign.campaign_id,
+        label: draft.trim(),
+      }),
+    );
   };
 
   const runDelete = () => {
     setConfirmDelete(false);
     void cmd.run(
       "delete",
-      () => postDeleteCampaign(campaign.campaign_id),
+      () => postCommand("delete-campaign", { campaign_id: campaign.campaign_id }),
       // Lets go of the view BEFORE the re-poll rather than discovering it by 404.
       () => {
         if (viewedCampaignId === campaign.campaign_id) followActive();

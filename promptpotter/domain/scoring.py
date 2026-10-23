@@ -11,22 +11,18 @@ from typing import (
     Any,
     Literal,
     NamedTuple,
-    Required,
     TypedDict,
     get_args,
-    get_type_hints,
 )
 
 from pydantic import (
-    GetJsonSchemaHandler,
     PlainSerializer,
     PlainValidator,
-    TypeAdapter,
     WithJsonSchema,
 )
-from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
+from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.spend import StepUsage
 from promptpotter.domain.wire_record import (
@@ -36,13 +32,12 @@ from promptpotter.domain.wire_record import (
     WireRecord,
     always_as,
     real,
-    record_of,
     text,
-    typed_record,
     whole,
 )
 from promptpotter.shared.errors import (
     ERROR_IS_CHARGED,
+    BadRequestError,
     ErrorCategory,
     error_category,
     is_error_result,
@@ -170,12 +165,13 @@ class PipelineData:
     # The ONLY place a row's token counts live (`TokenAccount.from_step_tokens`): declare no twin.
     step_tokens: Mapping[str, StepUsage] = field(default_factory=dict)
     diagnostics: Diagnostics = field(default_factory=Diagnostics)
-    # Seconds BLOCKED, not working. ABSENT, never 0.0, where the backend declares no envelope.
+    # Seconds BLOCKED, not working. ABSENT, never 0.0, on a row no cell send measured.
     unworked_s: float | None = None
-    # L4: one outer sample IS a whole inner campaign, so its "answer" is a lift — on held-out rows
-    # (`mean_bench_lift`, the scored term) and on the search pool's θ (`mean_round_delta`).
+    # L4: one outer sample IS a whole inner campaign, so its "answer" is its held-out lift, the
+    # scored term; `mean_round_delta`, the search split's θ lift, is an `InnerCellFacts` fact.
     mean_bench_lift: float | None = None
-    mean_round_delta: float | None = None
+    # Written by the recursion alone, so a row carrying it IS an L4 outer row.
+    inner: InnerCellFacts | None = None
     # The BACKEND reporting a fault on a row PromptPotter classified clean.
     error: str | None = None
     result_ranking: tuple[Any, ...] | None = None
@@ -191,20 +187,6 @@ class PipelineData:
     target_prompt_chars: int | None = None
     # The bare question, where the dataset declared one distinct from `query` — what a judge reads.
     question: str | None = None
-    # This arm's OWN half of a paired difference: the shared origin level cancels (`l4/proxies.py`).
-    mean_parent_level_se: float | None = None
-    # `InnerCellFacts`; `inner_sent_usd` and `inner_tokens` are reporting figures and bill nothing.
-    inner_origin_level: float | None = None
-    inner_final_lift: float | None = None
-    inner_peak_lift: float | None = None
-    inner_rounds_ran: int | None = None
-    inner_round_budget: int | None = None
-    inner_stop_reason: str | None = None
-    inner_origin_headroom: float | None = None
-    inner_bench_origin_level: float | None = None
-    inner_bench_final_lift: float | None = None
-    inner_sent_usd: float | None = None
-    inner_tokens: int | None = None
     # What only the DATASET names: observation keys, turn scalars, banked evaluator and judge terms.
     observations: Mapping[str, Any] = field(default_factory=dict, metadata=REST)
 
@@ -240,7 +222,7 @@ LEDGER_PIPELINE_KEYS: frozenset[str] = frozenset(
         "diagnostics",
         "unworked_s",
         "mean_bench_lift",
-        "mean_round_delta",
+        "inner",
         "error",
     }
 )
@@ -258,10 +240,9 @@ class RerunComparison(TypedDict):
 
 @dataclass(frozen=True, slots=True)
 class MeasuredCell:
-    """``sample_id`` is the cell's POSITION; ``sample_key`` is what it IS: replay matches on it."""
+    """``sample_key`` is what the cell IS: replay matches on it. Its position is the bank's."""
 
-    sample_id: int = field(metadata=ALWAYS)
-    sample_key: str = field(default="", metadata=ALWAYS)
+    sample_key: str = field(metadata=ALWAYS)
     query: str = field(default="", metadata=ALWAYS)
     ground_truth: str = field(default="", metadata=ALWAYS)
     predicted: str = field(default="", metadata=ALWAYS)
@@ -289,14 +270,14 @@ class MeasuredCell:
 
     @classmethod
     def from_wire(cls, row: Mapping[str, object]) -> MeasuredCell:
-        """Tolerant of what a producer omits, deaf to undeclared keys, strict on the slot."""
-        slot = row.get("sample_id")
-        if not isinstance(slot, int | str) or isinstance(slot, bool):
-            raise KeyError(f"a measured cell names its slot; this record carries {slot!r}")
+        """Tolerant of what a producer omits, deaf to undeclared keys, strict on the sample key."""
+        key = row.get("sample_key")
+        if not isinstance(key, str) or not key:
+            raise KeyError(f"a measured cell names its sample; this record carries {key!r}")
         rank = row.get("ground_truth_rank")
         return _CELL.read(
             row,
-            sample_id=int(slot),
+            sample_key=key,
             error_category=(
                 (error_category(row) or ErrorCategory.UNKNOWN) if is_error_result(row) else None
             ),
@@ -372,11 +353,11 @@ UNREAD_PIPELINE_KEYS: frozenset[str] = frozenset(
 assert UNREAD_PIPELINE_KEYS <= PIPELINE_KEYS, "an unread key must be one PipelineData declares"
 
 
-# ``(sample_key, sample_id, answer, replayed)``: walks pair on the key; the id is THIS walk's slot.
-WalkedCell = tuple[str, int, str, bool]
+# ``(sample_key, answer, replayed)``: walks pair on the key.
+WalkedCell = tuple[str, str, bool]
 
 
-class ScoringFormulaError(Exception):
+class ScoringFormulaError(BadRequestError):
     """A formula↔trace contract bug every cell fails: it halts loud, never swallowed to ``0.0``."""
 
 
@@ -417,24 +398,6 @@ assert not (GRADE_KEYS & _CELL.keys), "a grade is a formula's reading, never a f
 SampleStatus = Literal["HIT", "MISS", "ERR", "UNSC"]
 
 
-SHEET_ROW: type = typed_record(
-    "SheetRow",
-    "One row of a :class:`CellSheet` on the wire, as :meth:`GradedCell.wire` writes it.\n\n"
-    "The cell's facts beside its grade — ``unscored``, or ``fitness`` and ``objective``, never\n"
-    "both. ``status`` is the served round's mark and ``ground_truth_text`` its label as shown\n"
-    "(``application/cycle_reads.py::served_round``), on every row it serves; a round file\n"
-    "carries neither.",
-    {
-        **get_type_hints(record_of(MeasuredCell), include_extras=True),
-        **get_type_hints(Grade),
-        "status": Required[SampleStatus],
-        "ground_truth_text": Required[str],
-    },
-    module=__name__,
-    open=False,
-)
-
-
 @dataclass(frozen=True, slots=True)
 class GradedCell:
     facts: MeasuredCell
@@ -457,20 +420,13 @@ class GradedCell:
     @property
     def key(self) -> str:
         """What the cell IS (``Sample.key``) — what two individuals pair on."""
-        if not self.facts.sample_key:
-            raise KeyError(f"cell at slot {self.facts.sample_id} carries no sample_key")
         return self.facts.sample_key
-
-    @property
-    def sample_id(self) -> int:
-        """The cell's POSITION in the dataset that measured it."""
-        return self.facts.sample_id
 
     @property
     def address(self) -> WalkedCell | None:
         """Where the archive holds it; ``None`` for a cell never filed."""
         answer = self.facts.answer
-        return None if answer is None else (self.key, self.sample_id, answer, self.facts.cached)
+        return None if answer is None else (self.key, answer, self.facts.cached)
 
     @property
     def hit(self) -> bool:
@@ -576,12 +532,6 @@ class CellSheet:
             ),
         )
 
-    @classmethod
-    def __get_pydantic_json_schema__(
-        cls, _schema: object, handler: GetJsonSchemaHandler
-    ) -> JsonSchemaValue:
-        return handler(core_schema.list_schema(TypeAdapter(SHEET_ROW).core_schema))
-
 
 NO_CELLS = CellSheet("")
 
@@ -657,13 +607,16 @@ class GradeColumn(NamedTuple):
     read: Callable[[GradedCell], float]
 
 
+class UngradedCellError(ValueError):
+    """A column read off a cell that carries no grade: a zero in its place is a miss nobody measured."""
+
+
 @shapes_optimizer_prompt
 def _stamped(cell: GradedCell, grade: CellGrade) -> float:
-    """Raises on an ungraded cell: a zero in its place is a miss nobody measured."""
     value: float | None = getattr(cell.grade, grade)
     if not cell.scored or value is None:
-        raise ValueError(
-            f"sample {cell.sample_id} carries no {grade}: an ungraded cell answers no column, "
+        raise UngradedCellError(
+            f"sample {cell.key} carries no {grade}: an ungraded cell answers no column, "
             "so ask `scored` before reading one"
         )
     return value
@@ -854,48 +807,3 @@ def is_answer_collapsed(cells: Sequence[GradedCell]) -> bool:
     return all_verifier_graded(c.facts.ground_truth for c in answered) and not all(
         c.hit for c in answered
     )
-
-
-__all__ = [
-    "DEFAULT_SCORER_ID",
-    "FITNESS_BANDS",
-    "GRADE_KEYS",
-    "HIT_THRESHOLD",
-    "LEDGER_PIPELINE_KEYS",
-    "NO_CELLS",
-    "PIPELINE_KEYS",
-    "ROW_GRADES",
-    "SHEET_ROW",
-    "UNREAD_PIPELINE_KEYS",
-    "CellGrade",
-    "CellSheet",
-    "Diagnostics",
-    "Dial",
-    "DialKind",
-    "Grade",
-    "GradeColumn",
-    "GradedCell",
-    "JudgeReading",
-    "LedgerCell",
-    "MeasuredCell",
-    "NodeWarning",
-    "PipelineData",
-    "RerunComparison",
-    "SampleStatus",
-    "Scorer",
-    "ScoringFormulaError",
-    "ScoringSpec",
-    "ScoringTermMissingError",
-    "TurnRecord",
-    "WalkedCell",
-    "all_verifier_graded",
-    "anchored_criterion",
-    "anchored_criterion_dials",
-    "enumerable_truth_labels",
-    "fitness_bands",
-    "ground_truth_text",
-    "is_answer_collapsed",
-    "is_hit",
-    "is_verifier_graded",
-    "modal_answer_share",
-]

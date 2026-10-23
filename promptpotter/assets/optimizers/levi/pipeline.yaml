@@ -18,16 +18,17 @@ version: v1.0
 # Served to the optimizer picker: every knob value below is this paper's configuration.
 paper: 'Tanveer, "LEVI: Stronger Search Architectures Can Substitute for Larger LLMs in Evolutionary Search", arXiv 2605.09764'
 available_models:
-  - qwen/qwen3-8b
-  - google/gemini-3-flash-preview
+  - qwen/qwen3.7-flash
   - openai/gpt-6-luna
+  - google/gemini-3-flash-preview
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
 nodes:
-  # The refinement route (§3.2): the small model, most of the calls. Qwen3-8B is the prompt runs'
-  # model (§4.2); max_tokens 16,384 (App. B, Table 5). The paper states no decoding temperature;
-  # 1.0 is OpenRouter's default, which it billed through (App. C).
+  # The refinement route (§3.2): most of the calls; max_tokens 16,384 (App. B, Table 5). The paper
+  # states no decoding temperature; 1.0 is OpenRouter's default, which it billed through (App. C).
+  # NOT the paper's: the model — its Qwen3-8B (§4.2) is retired on OpenRouter, and the bench runs
+  # every optimizer on one model, both routes included.
   levi_refine:
     type: llm
     config:
@@ -35,10 +36,12 @@ nodes:
       prompt_version: 1
       temperature: 1.0
       max_tokens: 16384
+      reasoning_effort: none
       provider: openrouter
-      model: qwen/qwen3-8b
+      model: qwen/qwen3.7-flash
       # The paper's prompt is one text: the reply replaces the whole prompt.
       rewrites: prompt
+      field: instruction
       # The parent's softmax temperatures, one drawn per call (App. A, App. B).
       sampler_temperatures: [0.3, 0.7, 1.0, 1.2]
       # One inspiration, dropped 20% of the time (App. B, Table 5).
@@ -47,8 +50,8 @@ nodes:
       # NOT the paper's: it passes per-instance failure traces without a count (App. E.6); 3 is
       # GEPA's reflection minibatch (arXiv 2507.19457), whose suite its prompt runs use (§4.2).
       feedback_failures: 3
-  # The paradigm-shift route (§3.2, App. F): the large model, one call per period. Gemini 3 Flash
-  # is the paper's paradigm-shift model (App. A); max_tokens 4,096 (App. F).
+  # The paradigm-shift route (§3.2, App. F): one call per period; max_tokens 4,096 (App. F). NOT
+  # the paper's: the model — its Gemini 3 Flash (App. A) costs over 20x the bench's one model.
   levi_paradigm_shift:
     type: llm
     config:
@@ -56,9 +59,11 @@ nodes:
       prompt_version: 1
       temperature: 1.0
       max_tokens: 4096
+      reasoning_effort: none
       provider: openrouter
-      model: google/gemini-3-flash-preview
+      model: qwen/qwen3.7-flash
       rewrites: prompt
+      field: instruction
       # Every 10 evaluations, over k = 3 clusters of the occupied cells (App. B, App. F).
       interval: 10
       n_clusters: 3
@@ -71,9 +76,11 @@ nodes:
       prompt_version: 1
       temperature: 1.0
       max_tokens: 4096
+      reasoning_effort: none
       provider: openrouter
-      model: google/gemini-3-flash-preview
+      model: qwen/qwen3.7-flash
       rewrites: prompt
+      field: instruction
       # n_diverse_seeds = 4 (App. B, Table 5): with the origin, the 5 calibration prompts (App. A).
       n_diverse_seeds: 4
   # A 150-problem discovery set (App. I); K_proxy = 30 of {30, 40}, weights (r, s, c) =

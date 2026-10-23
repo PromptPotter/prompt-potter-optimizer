@@ -6,6 +6,7 @@ from typing import Literal
 from promptpotter.application.evidence.metric_catalogue import MetricSpec, merge_cells
 from promptpotter.application.evidence.subjects import SubjectReading
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.shared.errors import BadRequestError
 
 _POOLABLE_UNITS: frozenset[str] = frozenset({"seconds", "usd", "tokens", "rounds"})
 """Metric units whose meaning does not depend on WHICH dataset produced the number.
@@ -219,14 +220,14 @@ def grid_reading(
 ) -> FactorGridReading:
     row_key, col_key = axes
     if row_key == col_key:
-        raise ValueError(
+        raise BadRequestError(
             f"{row_key!r} cannot be both axes of a grid — only its diagonal could hold a subject. "
             "Name two different factors."
         )
     keys = sorted({k for lv in levels.values() for k in lv})
     for key in axes:
         if key not in keys:
-            raise ValueError(
+            raise BadRequestError(
                 f"{key!r} is not a factor of this selection: every subject answers it the same "
                 "way, so it is a constant with one column and cannot be an axis. Varying here: "
                 f"{', '.join(keys) or 'nothing'}."
@@ -259,14 +260,3 @@ def grid_reading(
         marginalised=[k for k in keys if k not in axes],
         note=_pool_note(spec, poolable),
     )
-
-
-__all__ = [
-    "FactorCell",
-    "FactorGridReading",
-    "FactorLevel",
-    "FactorReading",
-    "factors",
-    "grid_reading",
-    "levels_by_subject",
-]

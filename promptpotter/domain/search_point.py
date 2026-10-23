@@ -1,26 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import asdict, dataclass, fields
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import content_hash, shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
-# The decomposition field SET; the render ORDER is per class (`PromptTemplate.RENDER_ORDER`).
-PROMPT_STRING_FIELDS: Annotated[list[str], shapes_optimizer_prompt] = [
-    "persona",
-    "task_intent",
-    "problem_description",
-    "instruction",
-    "thinking_style",
-    "answer_format",
-]
+# A prompt node's shots locus; no field may take its name, nor the render's (`prompt`).
+SHOTS_KEY: Annotated[str, shapes_optimizer_prompt] = "shots"
 
 
 # WHO ANSWERS the call: a steer touching only these inherits its done C0.
@@ -42,27 +36,26 @@ PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset
 )
 
 
-def missing_template_vars(rendered: str, declared: list[str]) -> list[str]:
-    """``PROMPT_STRING_FIELDS`` are excluded: ``render()`` assembles them, nothing substitutes them."""
-    return [
-        v for v in declared if v not in PROMPT_STRING_FIELDS and "{{" + v + "}}" not in rendered
-    ]
+def missing_template_vars(
+    rendered: str, declared: list[str], *, fields: Collection[str]
+) -> list[str]:
+    """*fields* are excluded: the render assembles them, nothing substitutes them."""
+    return [v for v in declared if v not in fields and "{{" + v + "}}" not in rendered]
 
 
 def strip_rendered_prompt(pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
-    """A node's ``prompt`` is the RENDER of ``prompt_fields``, never configuration: persisted, it goes stale."""
+    """A node's ``prompt`` is the RENDER of its prompt loci, never configuration: persisted, it goes stale."""
     return {
         node: ({k: v for k, v in cfg.items() if k != "prompt"} if isinstance(cfg, dict) else cfg)
         for node, cfg in (pipeline_params or {}).items()
     }
 
 
-class JobSearchPoint(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class JobSearchPoint(FrozenModel):
     # Empty is the ONE spelling of "carries none": `content_hash` omits a falsy `pipeline_params`.
     pipeline_params: dict[str, Any] = Field(default_factory=dict)
-    prompt_fields: dict[str, Any] = Field(default_factory=dict)
+    # Per prompt node, each field as SCORED (framing spliced, shots as `few_shot_block`), in render order.
+    prompt_fields: dict[str, dict[str, str]] = Field(default_factory=dict)
 
     @field_validator("pipeline_params")
     @classmethod
@@ -75,11 +68,12 @@ class JobSearchPoint(StrictModel):
             )
         return v
 
-    def render(self) -> str:
-        for node_config in self.pipeline_params.values():
-            if isinstance(node_config, dict) and "prompt" in node_config:
-                return str(node_config["prompt"])
-        return ""
+    def rendered_prompts(self) -> dict[str, str]:
+        return {
+            node: str(cfg["prompt"])
+            for node, cfg in self.pipeline_params.items()
+            if isinstance(cfg, dict) and "prompt" in cfg
+        }
 
     @property
     def config_params(self) -> dict[str, Any]:
@@ -91,11 +85,7 @@ class JobSearchPoint(StrictModel):
 
     def content_hash(self, dataset: list[Any]) -> str:
         """Names a campaign's root (``runner/campaign_ids.py``); no measurement is filed under it."""
-        return content_hash(
-            self.render(),
-            dataset,
-            self.pipeline_params,
-        )
+        return content_hash(dataset, self.pipeline_params)
 
 
 # Operator-authored, never measured, frozen for the run: `application/optimizers/potter/CLAUDE.md` § L2.
@@ -176,14 +166,3 @@ class TaskDecomposition:
 
     def __bool__(self) -> bool:
         return any(getattr(self, f.name) for f in fields(self))
-
-
-__all__ = [
-    "PARAM_FORBIDDEN_KEYS",
-    "PARAM_SCOPE_KEYS",
-    "WHO_ANSWERS_KEYS",
-    "JobSearchPoint",
-    "TaskDecomposition",
-    "missing_template_vars",
-    "strip_rendered_prompt",
-]

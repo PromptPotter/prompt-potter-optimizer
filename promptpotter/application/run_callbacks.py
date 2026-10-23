@@ -2,56 +2,48 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.views.view_models import ViewContext
-from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.phases import CampaignPhase
-from promptpotter.domain.results import RoundResult, RunStanding, ScoredCandidate
+from promptpotter.domain.results import ArmState, Election, RoundResult, RunStanding
 from promptpotter.domain.run_records import (
-    CandidateScoredRecord,
-    CandidateStartedRecord,
+    ArmRecord,
     CycleRecord,
     ElectionRecord,
     FlightRecord,
     FlightWaiting,
-    LedgerFit,
     PhaseRecord,
     RaceStandingRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
-    RoundStandingRecord,
-    SampleOrderRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.application.bench.difficulty import DifficultyView
+    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.application.optimizers.nodes import RaceSnapshot
     from promptpotter.application.run_phase_control import Flight
-    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.phase_views import PhaseView
-    from promptpotter.domain.search_point import JobSearchPoint
-
-__all__ = ["RunCallbacks"]
+    from promptpotter.domain.ruler import LevelSeries
 
 
-def _round_fit(round_result: RoundResult) -> dict[str, LedgerFit]:
-    """Keyed by LABEL, the arm's own key: an id names an individual several rounds can read."""
-    return {
-        cs.label: fit
-        for cs in round_result.candidate_scores
-        if (
-            fit := LedgerFit(
-                theta=cs.theta,
-                theta_se=cs.theta_se,
-                theta_caveat=cs.theta_caveat,
-                vs_reference=cs.vs_reference,
-            )
-        )
-        != LedgerFit()
-    }
+def stated_line(
+    closing: RoundResult,
+    prior: Sequence[RoundResult],
+    difficulty: DifficultyView,
+    *,
+    lives: LivesConfig | None,
+) -> tuple[list[RoundResult], LevelSeries, RunStanding]:
+    """The line a statement of *closing* reads, and the level and standing it reads it at."""
+    line = [*(rr for rr in prior if rr.round < closing.round), closing]
+    standing = RunStanding.after(line, lives=None if lives is None else lives.bank)
+    [series] = difficulty.level_series([line])
+    return line, series, standing
 
 
 @dataclass
@@ -80,98 +72,25 @@ class RunCallbacks:
     def on_round_entered(self, round_num: int) -> None:
         self._emit(RoundEnteredRecord(round=round_num))
 
-    def on_election(self, round_result: RoundResult) -> None:
-        self._emit(
-            ElectionRecord(
-                round=round_result.round,
-                fit=_round_fit(round_result),
-                selected_labels=list(round_result.selected_labels),
-                elects_on=round_result.elects_on,
-                verdict_reason=round_result.verdict_reason,
-            )
-        )
+    def on_election(self, round_num: int, election: Election) -> None:
+        self._emit(ElectionRecord(round=round_num, **dict(election)))
 
-    def on_round_close(self, round_result: RoundResult) -> int | None:
-        return self._emit(RoundClosedRecord.of(round_result))
-
-    def on_round_complete(
+    def on_round_close(
         self,
-        round_result: RoundResult,
-        standing: RunStanding,
-        panel_precision: PanelPrecision | None,
-    ) -> None:
-        self.view_context.run_standing = standing
-        self._emit(
-            RoundStandingRecord(
-                round=round_result.round,
-                run_standing=standing,
-                panel_precision=panel_precision,
-                anchors=self.view_context.anchors(),
-            )
-        )
-
-    def on_candidate_started(
-        self,
-        idx: int,
-        total: int,
-        changes_description: str,
-        pipeline_overlay: dict[str, Any] | None,
-        prompt_fields: dict[str, Any],
-        node_prompt_fields: dict[str, dict[str, Any]],
-        resolved_pipeline_params: dict[str, Any] | None,
-        block: Mapping[str, int] | None = None,
-    ) -> None:
-        self._emit(
-            CandidateStartedRecord(
-                round=bound_round(),
-                candidate_idx=idx,
-                candidate_total=total,
-                changes_description=changes_description,
-                pipeline_overlay=pipeline_overlay,
-                prompt_fields=prompt_fields,
-                node_prompt_fields=node_prompt_fields,
-                resolved_pipeline_params=resolved_pipeline_params,
-                block=None if block is None else dict(block),
-            )
-        )
-
-    def announce_candidate(
-        self,
-        round_num: int,
-        idx: int,
-        total: int,
+        closing: RoundResult,
+        prior: Sequence[RoundResult],
+        slot_of: Mapping[str, int],
+        difficulty: DifficultyView,
         *,
-        opt_sp: OptSearchPoint,
-        sp: JobSearchPoint,
-        sample_order: Sequence[int],
-        n_priors: int = 0,
-        pipeline_overlay: dict[str, Any] | None = None,
-        block: Mapping[str, int] | None = None,
-    ) -> None:
-        """Every site that scores an arm calls this, bar `rescore_parent`: the parent holds no slot."""
-        self.on_candidate_started(
-            idx,
-            total,
-            opt_sp.lineage.changes_description or "",
-            pipeline_overlay,
-            opt_sp.prompt_field_dict(),
-            opt_sp.node_prompt_fields(sp),
-            sp.config_params,
-            block,
-        )
-        self.on_sample_order(
-            round_num, idx, total, n_priors=n_priors, sample_order=list(sample_order)
-        )
+        lives: LivesConfig | None,
+    ) -> tuple[int | None, RunStanding]:
+        line, series, standing = stated_line(closing, prior, difficulty, lives=lives)
+        anchors = self.view_context.anchors()
+        return self._emit(RoundClosedRecord.of(line, slot_of, series, standing, anchors)), standing
 
-    def on_candidate_scored(self, idx: int, total: int, scores: ScoredCandidate) -> None:
+    def on_arm(self, round_num: int, key: ArmKey, state: ArmState) -> None:
         self._emit(
-            CandidateScoredRecord(
-                round=bound_round(),
-                candidate_idx=idx,
-                candidate_total=total,
-                scores=scores,
-                anchors=self.view_context.anchors(),
-            )
+            ArmRecord(round=round_num, arm=key, state=state, anchors=self.view_context.anchors())
         )
 
     def on_flight(self, flight: Flight) -> None:
@@ -185,45 +104,19 @@ class RunCallbacks:
                 cell_usd=None if flight.cell_usd is None else float(flight.cell_usd),
                 waiting=None
                 if flight.waiting is None
-                else FlightWaiting(
-                    sample_id=int(flight.waiting[0]), since=float(flight.waiting[1])
-                ),
+                else FlightWaiting(position=int(flight.waiting[0]), since=float(flight.waiting[1])),
             )
         )
 
-    def on_race_standing(
-        self, member: str, round_num: int, ci: int, ct: int, snapshot: RaceSnapshot
-    ) -> None:
+    def on_race_standing(self, member: str, round_num: int, snapshot: RaceSnapshot) -> None:
         self._emit(
             RaceStandingRecord(
                 round=round_num,
-                candidate_idx=ci,
-                candidate_total=ct,
                 member=member,
-                current_id=str(snapshot.current_id),
+                current=snapshot.current,
                 n_samples=int(snapshot.n_samples),
                 p_best=float(snapshot.p_best),
                 paired_breakdown=dict(snapshot.paired_breakdown),
                 decision_grade=snapshot.decision_grade,
-            )
-        )
-
-    def on_sample_order(
-        self,
-        round_num: int,
-        ci: int,
-        ct: int,
-        *,
-        n_priors: int,
-        sample_order: list[int],
-    ) -> None:
-        """Not the heatmap's ``sample_order``: absolute difficulty there, relevance here."""
-        self._emit(
-            SampleOrderRecord(
-                round=round_num,
-                candidate_idx=ci,
-                candidate_total=ct,
-                n_priors=int(n_priors),
-                sample_order=[int(sid) for sid in sample_order],
             )
         )

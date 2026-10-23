@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.commands.dispatcher import Applier, refused_on_an_arm
+from promptpotter.infrastructure.store.io import read_yaml
+from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from promptpotter.application.commands.dispatcher import CommandDispatcher
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.command_kinds import (
@@ -18,13 +22,13 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.cycle_paths import CycleHop
 
-__all__ = [
-    "origin_gate_decision",
-    "pause_cycle",
-    "set_sample_lookahead",
-    "skip_searchpoint",
-    "submit_arms",
-]
+
+def read_payload_file(path: Path) -> Any:
+    """A structured payload field the terminal names by a YAML file."""
+    try:
+        return read_yaml(path)
+    except (OSError, ValueError) as exc:
+        raise PayloadInvalidError(str(exc)) from exc
 
 
 def pause_cycle(

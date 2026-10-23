@@ -80,7 +80,7 @@ function ReadCandidatesCard({ dash }: { dash: DashboardSnapshot }) {
     >
       <div className="fitness-body">
         {!areCourses && wonOnTheta && (
-          <ThetaCaveatNotice caveat={m.ability?.caveat ?? null} ability={m.ability} />
+          <ThetaCaveatNotice caveat={m.ability?.caveat ?? null} ability={m.ability?.reading} />
         )}
         {!areCourses && wonOnTheta && m.floorPinned.length > 0 && (
           <>
@@ -135,8 +135,7 @@ function ReadCandidatesCard({ dash }: { dash: DashboardSnapshot }) {
         )}
         {maskOpen && !viewedCandidateId && (
           <ApplyScenarioPanel
-            campaignId={m.campaignId}
-            cycleId={m.cycleId}
+            path={m.viewedPath}
             isLive={m.isLive}
             criterion={m.lensCriterion}
             divergentRound={m.divergentRound}

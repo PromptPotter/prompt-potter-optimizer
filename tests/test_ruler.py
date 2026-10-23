@@ -7,60 +7,75 @@ arithmetic: each journey recovers a known answer from data built to have one.
 
 from __future__ import annotations
 
+from contextvars import copy_context
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
-from factories import cycle_result, measurement, round_result, scored_candidate, sheet
+from factories import (
+    PROMPT_INFO,
+    arm_state,
+    cycle_result,
+    election,
+    loop_session,
+    measurement,
+    pipeline_schema,
+    round_result,
+    sheet,
+    workspace,
+)
 
-from promptpotter.application.bench.difficulty import calibrate_delta_ruler
+from promptpotter.application.bench.difficulty import (
+    DifficultyView,
+    calibrate_delta_ruler,
+    judging_ruler,
+)
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
-from promptpotter.application.intelligence.adaptive_queue_mechanism import (
-    build_round_order,
-    stratum_shares,
-)
+from promptpotter.application.intelligence.adaptive_queue_mechanism import stratum_shares
 from promptpotter.application.intelligence.rasch import (
     Observation,
     RaschPosterior,
-    extend_ruler,
+    build_round_order,
     fit_rasch,
     fit_theta_given_delta,
     graduate_ruler_model,
-    parent_level_trajectory,
     select_round_subset,
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.runner.bench import pair_on_bench
-from promptpotter.application.runner.inner.ruler import anchor_or_extend
 from promptpotter.application.runner.inner.tasks import inner_instrument_config, parse_panel
-from promptpotter.application.scoring.candidate_report import arm_theta_caveat
 from promptpotter.application.scoring.paired import MemberRows
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.l4.proxies import compute_outer_proxies, mean_parent_level_se
+from promptpotter.domain.l4.proxies import (
+    compute_outer_proxies,
+    inner_cell_facts,
+    mean_parent_level_se,
+)
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
-from promptpotter.domain.paired_reading import MemberAddress
+from promptpotter.domain.paired_reading import ArmKey, MemberAddress
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.results import CycleResult, RoundResult, origin_panel
+from promptpotter.domain.pipeline_schema import PipelineNode
+from promptpotter.domain.results import ArmSlot, CycleResult, RoundResult, origin_panel
 from promptpotter.domain.ruler import (
-    AbilityReading,
     CellScopes,
     DeltaRuler,
+    RulerScope,
+    RulerStamp,
     ThetaCaveat,
     anchor_id_of,
     flat_ruler_id,
-    series_levels,
     theta_caveat,
-    theta_plateau,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS
+from promptpotter.domain.scoring import GradedCell, Scorer
+from promptpotter.infrastructure.store.archive_queries import CellOf, OpenAt, bind_memory_scope
 from promptpotter.infrastructure.store.dataset_access import read_dataset_definition
-from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.infrastructure.store.ruler_store import RulerStore
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.identity import default_identity
 from promptpotter.shared.measurement_context import RoleScope
@@ -212,35 +227,57 @@ def _anchored(delta: dict[str, float], *, mu: float = 0.0) -> DeltaRuler:
     return fit.anchored("1PL")
 
 
-def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler() -> None:
+def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: Path) -> None:
     # Calibrated: eight samples clear any sample floor, so the arm count is the binding condition.
     arm_a = [Observation("a", str(sid), 1.0 if sid % 3 else 0.0) for sid in range(8)]
     arm_b = [Observation("b", str(sid), 1.0 if sid < 5 else 0.0) for sid in range(8)]
-    flat, _ = calibrate_delta_ruler(None, 4, enable_2pl=False, archive_obs=arm_a)
+    flat = calibrate_delta_ruler(arm_a, 4, enable_2pl=False)
     assert flat is None, "one arm warmed the ruler: its δ would be read off the arm under test"
-    warm, _ = calibrate_delta_ruler(None, 4, enable_2pl=False, archive_obs=arm_a + arm_b)
+    warm = calibrate_delta_ruler(arm_a + arm_b, 4, enable_2pl=False)
     assert warm is not None and warm.calibration_model == "1PL", "a second arm left δ flat"
 
-    # Anchored per seat: a dataset joining after the anchor anchors its own scale.
-    def arms(prefix: str, keys: range) -> list[Observation]:
-        return [
-            Observation(f"{prefix}{arm}", f"{prefix}-{k}", float((k + arm) % 3 != 0))
-            for arm in range(3)
-            for k in keys
-        ]
+    # One tenant ruler, versioned by its folds. C0 hits a quarter of the bank; its child changed nothing.
+    pool40 = [Sample(id=i, query=f"r{i}", ground_truth="t") for i in range(40)]
+    c0_hits = {s.key for s in pool40 if s.id % 4 == 3}
+    race_rows = [
+        (cid, s.key, float(s.key in c0_hits)) for cid in ("c0-address", "child") for s in pool40
+    ]
+    foreign = [(f"f{arm}", s.key, float((s.id + arm) % 3 != 0)) for arm in range(3) for s in pool40]
+    race = [Observation(*row) for row in race_rows]
+    store, scope = RulerStore(tmp_path), RulerScope(scorer="acc", dataset="ds")
+    opened = store.version()
+    for folded in (foreign, foreign, race_rows):
+        store.fold(scope, folded)
+    assert store.version() == opened + 2, "a re-fold of rows already held ticked the version"
+    other = [(f"g{arm}", s.key, float(s.id % 2)) for arm in range(3) for s in pool40]
+    store.fold(RulerScope(scorer="acc", dataset="other"), other)
 
-    first = anchor_or_extend(None, arms("a", range(8)), n_min=4, enable_2pl=False)
-    assert first is not None
-    late = arms("b", range(8))
-    merged = anchor_or_extend(first, late, n_min=4, enable_2pl=False)
-    assert merged is not None and merged.unlinked(o.key for o in late) == 8, (
-        "on the first dataset's scale the late arms share no cell with an anchored one: no δ, ever"
+    def judging(version: int, judged: set[str]) -> Any:
+        return judging_ruler(
+            store, scope, version, judged, objective_id="acc", n_min=4, enable_2pl=False
+        )
+
+    outside = calibrate_delta_ruler([Observation(*row) for row in foreign], 4, enable_2pl=False)
+    optimizing = judging(store.version(), {"c0-address", "child", "never-measured"})
+    assert outside is not None and optimizing.ruler is not None
+    assert optimizing.ruler.anchor_id == outside.anchor_id, (
+        "the judged arms' rows, or another dataset's, entered the scale that judges them"
     )
-    own = anchor_or_extend(None, late, n_min=4, enable_2pl=False)
-    assert own is not None and own.unlinked(o.key for o in late) == 0, (
-        "its own scope must anchor it at the first boundary that sees it"
+    assert optimizing.stamp.excluded == ("c0-address", "child"), "one scale, two stamps"
+    compared = judging(opened, set())
+    assert compared.ruler is None and compared.stamp.cold, (
+        "an arm read rows folded after its head-to-head opened"
     )
-    assert own.anchor_id != first.anchor_id
+    share = len(c0_hits) / len(pool40)
+
+    def c0_share(ruler: DeltaRuler | None) -> float:
+        drawn = select_round_subset(pool40, race, 8, ruler=ruler, worth={})
+        return sum(s.key in c0_hits for s in drawn) / len(drawn)
+
+    assert c0_share(compared.ruler) <= share, "a parent's known hits were over-drawn on an arm"
+    assert c0_share(optimizing.ruler) <= share, "a parent's known hits were over-drawn"
+    on_race = calibrate_delta_ruler(race, 4, enable_2pl=False)
+    assert c0_share(on_race) > share, "guard: a scale fit on the race must over-draw its hits"
 
     # Drawn: every `easy` cell on the `small` model outprices the rest; rank alone buys only those.
     pool = [
@@ -262,25 +299,32 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler() -> None:
     parent_grades = {f"k{sid}": 1.0 if sid < 9 else 0.0 for sid in range(23)}
     ordering = _anchored({f"k{sid}": float(sid % 7) for sid in range(20)}, mu=2.85)
     on_slot = {sid: ordering.delta[key] for sid, key in cells.items() if key in ordering.delta}
-    order = build_round_order(parent_grades, ordering, cells)
+    order = build_round_order(parent_grades, ordering, cells, n_min=0)
     assert sorted(order) == ids
-    assert build_round_order(parent_grades, ordering, cells) == order, (
+    assert build_round_order(parent_grades, ordering, cells, n_min=0) == order, (
         "the order is not reproducible"
     )
-    hits = set(range(9))
+    hit_ids = set(range(9))
     for pos in (4, 8, 12, 16):
-        assert order[pos - 1] in hits, f"position {pos} should be a parent-hit probe"
-    assert not hits & {order[i] for i in range(16) if (i + 1) % 4}, "a hit took a miss's slot"
+        assert order[pos - 1] in hit_ids, f"position {pos} should be a parent-hit probe"
+    assert not hit_ids & {order[i] for i in range(16) if (i + 1) % 4}, "a hit took a miss's slot"
     # Computed, not spelled: a hardcoded default here would pass while disagreeing with the ruler.
     centre = ordering.mu_delta
     assert min(ordering.delta.values()) < centre < max(ordering.delta.values())
-    misses = [sid for sid in order if sid not in hits and sid != 23]
+    misses = [sid for sid in order if sid not in hit_ids and sid != 23]
     miss_keys = [(on_slot.get(sid, centre), sid) for sid in misses]
     assert miss_keys == sorted(miss_keys), "misses are not led by the easiest"
     assert order.index(23) > max(order.index(sid) for sid in misses), "an unknown cell led a miss"
-    hit_keys = [(-on_slot.get(sid, centre), sid) for sid in order if sid in hits]
+    hit_keys = [(-on_slot.get(sid, centre), sid) for sid in order if sid in hit_ids]
     assert hit_keys == sorted(hit_keys), "hit probes are not led by the hardest"
-    unknown = build_round_order({}, ordering, cells)
+    # Led: n_min cells θ is read on come first, so PoBB can cut at n_min, the probe kept.
+    led = build_round_order(parent_grades, ordering, cells, n_min=6)
+    assert all(cells[sid] in ordering.delta for sid in led[:6]), (
+        "an off-ruler cell was walked before n_min θ-readable ones: no arm can be cut that early"
+    )
+    assert order.index(20) < 6 <= led.index(20), "guard: the strata alone walk off the ruler early"
+    assert led[3] in hit_ids, "the lead dropped the regression probe"
+    unknown = build_round_order({}, ordering, cells, n_min=0)
     assert sorted(unknown) == ids
     spread = [abs(on_slot.get(sid, centre) - centre) for sid in unknown]
     assert spread == sorted(spread), (
@@ -289,43 +333,22 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler() -> None:
     easiest = min(on_slot, key=lambda sid: (on_slot[sid], sid))
     assert unknown.index(easiest) >= 6, "the panel's easiest cell must not lead the round"
 
-    # Read: a child on cells its parent skipped this round stays off the ruler.
+    # Read: a child on cells the judging scale does not carry stays off it until its round folds.
     fitted = _anchored({"1": 1.5, "2": -1.25, "3": 0.0})
     child = [Observation("child", sid, float(sid == "7")) for sid in ("7", "8", "9")]
-    parent_now = [Observation("parent", sid, 1.0) for sid in ("1", "2", "3")]
-    held = extend_ruler(fitted, child + parent_now, history=[])
-    assert held.delta == fitted.delta, "an unlinked child's cells entered the ruler"
-    assert held.unlinked(["7", "8", "9"]) == 3 and held.unlinked(["1", "2"]) == 0
-    assert fit_theta_given_delta(child, held) == {}, "a child read on unlinked cells carried a θ"
-    span = held.delta_span
-    for pinned, caveats in (
-        (None, (None, ThetaCaveat.UNMEASURED_DELTA)),
-        (0.5, (ThetaCaveat.PRIOR_PINNED,) * 2),
-    ):
-        served = tuple(
-            theta_caveat(
-                calibration_model="1PL",
-                round_span=span,
-                ruler_span=span,
-                unlinked=n,
-                scopes=1,
-                pinned_share=pinned,
-            )
-            for n in (0, 3)
-        )
-        assert served == caveats, "the pin cancels inside a lift, a skipped cell does not"
-    earlier = [Observation("parent", sid, float(sid != "8")) for sid in ("7", "8", "9")]
-    linked = extend_ruler(fitted, child + parent_now, history=earlier + parent_now)
-    assert set(linked.delta) == {"1", "2", "3", "7", "8", "9"}
-    assert linked.unlinked(["7", "8", "9"]) == 0
-    assert all(linked.delta[sid] == fitted.delta[sid] for sid in fitted.delta), "the anchor moved"
-    assert linked.anchor_id == fitted.anchor_id and linked.delta["8"] > linked.delta["7"]
-    chained = extend_ruler(
-        fitted, [*child, Observation("parent", "7", 1.0), *parent_now], history=[]
+    assert fit_theta_given_delta(child, fitted.entries()) == {}, (
+        "a child read on unlinked cells carried a θ"
     )
-    assert chained.unlinked(["7", "8", "9"]) == 0, "ONE shared cell this round must link the child"
-    assert all(chained.delta[sid] == fitted.delta[sid] for sid in fitted.delta), "the anchor moved"
-    # The id names the ANCHOR, never membership or key order; a cold cycle's names its OBJECTIVE.
+    tied = _anchored({"1": 0.0, "2": 0.0, "3": 3.0})
+    for scale, read_on, expected in (
+        (fitted, ["1", "2", "3"], None),
+        (fitted, ["1", "2", "3", "7"], ThetaCaveat.UNMEASURED_DELTA),
+        (tied, ["1", "2", "3"], ThetaCaveat.PRIOR_PINNED),
+        (None, ["1", "2"], ThetaCaveat.COLD_RULER),
+    ):
+        served = theta_caveat(scale, read_on, scopes=1, all_miss=False)
+        assert served is expected, "the pin cancels inside a lift, a skipped cell does not"
+    # The id names the δ, never key order; a cold cycle's names its OBJECTIVE.
     assert fitted.anchor_id == anchor_id_of({"3": 0.0, "2": -1.25, "1": 1.5}, 0.0, 2.0, "1PL")
     assert fitted.anchor_id != anchor_id_of({"1": 1.5, "2": -1.2500001, "3": 0.0}, 0.0, 2.0, "1PL")
     assert flat_ruler_id("acc") != flat_ruler_id("acc_minus_latency")
@@ -337,16 +360,11 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler() -> None:
     ]
     key = {s.id: s.key for s in seated}
     scopes = CellScopes.of(seated, "outer")
-    two = _anchored({key[0]: -1.0, key[1]: 0.0, key[2]: 0.5, key[3]: 1.0})
+    two = _anchored({key[0]: -2.0, key[1]: 0.0, key[2]: 0.5, key[3]: 2.0})
 
     def caveat(ids: list[int]) -> ThetaCaveat | None:
-        return theta_caveat(
-            calibration_model="1PL",
-            round_span=two.delta_span,
-            ruler_span=two.delta_span,
-            unlinked=0,
-            scopes=scopes.spanned(key[i] for i in ids),
-        )
+        cells = [key[i] for i in ids]
+        return theta_caveat(two, cells, scopes=scopes.spanned(cells), all_miss=False)
 
     assert caveat([0, 1]) is None and caveat([0, 2]) is ThetaCaveat.DISJOINT_SCOPES
 
@@ -354,8 +372,6 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler() -> None:
         return [measurement(i, h, sample_key=key[i]) for i, h in enumerate(hits)]
 
     c0_rows, pick = rows([0.0, 1.0, 0.0, 0.0]), rows([1.0, 1.0, 1.0, 0.0])
-    assert arm_theta_caveat(pick, two, scopes) is ThetaCaveat.DISJOINT_SCOPES
-    assert arm_theta_caveat(pick[:2], two, scopes) is None
     # C0 sat `a` alone; the line drew `b`, so C0 is topped up there rather than paired on `a` only.
     topped = origin_panel(
         [0, 1],
@@ -397,77 +413,138 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler() -> None:
     assert stratum_shares([1, 1], 5) == [1, 1]
     assert stratum_shares([30], 20) == [20]
 
-    # Traced: the parent level is one honest scale across rounds.
-    ruler = _anchored({"1": -1.0, "2": 0.0, "3": 1.0})
-    other = _anchored({"1": -0.5, "2": 0.25, "3": 2.0})
+    # Traced: every round's ended-on individual re-read on ONE scale, whatever its election read.
+    bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(12)]
+    scorer = Scorer(id="acc", per_cell=None, fitness=lambda _row: 0.0, objective=None)
 
-    def on(theta: float, se: float, *, scale: DeltaRuler | None = ruler) -> AbilityReading:
-        # `scale=None` is a COLD reading; read on the whole ruler, the round's band IS the ruler's.
-        cal = scale.calibration_model if scale is not None else None
-        band = scale.delta_span if scale is not None else None
-        return AbilityReading(
-            theta=theta,
-            se=se,
-            ruler_id=scale.anchor_id if scale is not None else flat_ruler_id("acc"),
-            ruler_n=len(scale.delta) if scale is not None else 0,
-            ruler_span=band,
-            round_span=band,
-            calibration_model=cal,
-            caveat=theta_caveat(
-                calibration_model=cal, round_span=band, ruler_span=band, unlinked=0, scopes=1
-            ),
+    solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False)], name="ds")
+
+    def series_of(
+        memory: Any, stores: Stores, lines: list[Any], drawn: list[Sample] = bank
+    ) -> list[Any]:
+        session = loop_session(stores, solve, drawn, scorer=scorer)
+        opened = judging_ruler(
+            stores.ruler, scope, 0, (), objective_id="acc", n_min=4, enable_2pl=False
+        )
+        view = DifficultyView(session, 4, False, frozenset(), opened)
+
+        def read() -> list[Any]:
+            bind_memory_scope(memory)
+            return view.level_series(lines)
+
+        return copy_context().run(read)
+
+    def graded(hits: list[float]) -> Any:
+        return sheet(
+            measurement(s.id, h, objective=h, sample_key=s.key)
+            for s, h in zip(bank, hits, strict=True)
         )
 
-    def trace(
-        origin: AbilityReading | None,
-        *rounds: AbilityReading | None,
-        scale: DeltaRuler | None = ruler,
-    ) -> Any:
-        return parent_level_trajectory(origin, list(rounds), scale)
+    def closed(n: int, walked: dict[str, list[float]], pick: str | None, ended_on: str) -> Any:
+        # Each election reads its own version; the series must read none of them.
+        stamp = RulerStamp(id=f"v{n}", version=n, scope=scope, excluded=())
+        return round_result(
+            n,
+            arms={ArmKey(k): arm_state(k) for k in walked},
+            cells={ArmKey(k): graded(h) for k, h in walked.items()},
+            election=election(pick, ended_on=ended_on, ruler=stamp),
+        )
 
-    origin = on(0.0, 0.30)
-    at_origin = (origin.theta, origin.se)
-    (low_o, _), [(low, _)] = trace(on(-1.0, 0.2), on(-0.5, 0.2))
-    (high_o, _), [(high, _)] = trace(on(1.5, 0.2), on(2.0, 0.2))
-    assert low - low_o == pytest.approx(high - high_o) == pytest.approx(0.5), (
-        "LOGITS, not expected accuracy: an identical Δθ is an identical gain wherever origin sits"
+    hits = {
+        "o": [float(i % 4 == 0) for i in range(12)],
+        "a": [float(i % 2 == 0) for i in range(12)],
+        "b": [float(i % 6 == 0) for i in range(12)],
+    }
+    # Graded, never binary: tied δ would pin most cells to the prior.
+    warmed = workspace(tmp_path / "series")
+    tenant = warmed.ruler
+    tenant.fold(scope, [(f"f{arm}", s.key, (s.id + 0.5) / 12) for arm in range(8) for s in bank])
+    frozen = tenant.version()
+    run = [
+        closed(0, {"o": hits["o"]}, "o", "o"),
+        closed(1, {"a": hits["a"], "b": hits["b"]}, "a", "a"),
+    ]
+    for rr in run:
+        # After its election, as `DifficultyView.fold` banks a round.
+        tenant.fold(
+            scope, [(k, c.key, c.grade.objective) for k, sh in rr.cells.items() for c in sh]
+        )
+    run += [
+        closed(2, {"b": hits["b"], "a": hits["a"]}, None, "a"),
+        round_result(3, election=None, arms={}, cells={}),
+    ]
+    [series] = series_of(OpenAt(), warmed, [run])
+    levels = {rnd: series.level(rnd) for rnd in series.rounds}
+    assert series.stamp.version == tenant.version() and series.stamp.excluded == ("a", "o"), (
+        "the series read a scale its own parent line moved, or not the run's clock"
     )
-    assert trace(origin, on(0.2702, 0.21)) == (
-        at_origin,
-        [(pytest.approx(0.2702), pytest.approx(0.21))],
-    ), "the level is the parent the round ADOPTED, never a statistic over its proposals"
-    _, spike = trace(origin, on(1.2, 0.2), on(-2.0, 0.2))
-    _, sustained = trace(origin, on(1.2, 0.2), on(1.2, 0.2))
-    assert spike[1][0] < spike[0][0] and sum(t for t, _ in spike) < sum(t for t, _ in sustained), (
-        "a peak then a collapse must read LOWER than a sustained peak"
+    assert all(lv is not None and lv.ruler == series.stamp for lv in levels.values()), (
+        "a round's level sat on the scale its own election read, not the series'"
     )
-    for rounds, levels, why in (
-        ((None,), [at_origin], "an unfit round carries the PRIOR level, θ and SE both"),
-        ((on(1.0, 0.11), None), [(1.0, 0.11)] * 2, "an unfit round carries the PRIOR level"),
-        ((on(9.0, 0.2, scale=None),), [at_origin], "a level on another scale was read"),
-        ((on(9.0, 0.2, scale=other),), [at_origin], "a DIFFERENT warm ruler is as incomparable"),
-    ):
-        assert trace(origin, *rounds)[1] == levels, why
-    below_o, below = trace(origin, on(-2.0, 0.2))
-    assert below[0][0] < below_o[0], "a parent below origin was floored at it"
-    # `(None, [])` makes the caller EXCLUDE the cycle (`no_evidence_reason`).
-    for excluded in (
-        trace(None, on(1.0, 0.2)),
-        trace(origin, on(1.0, 0.2), scale=None),
-        trace(on(0.0, 0.3, scale=None), on(1.0, 0.2)),
-    ):
-        assert excluded == (None, []), "a cycle with no comparable origin was not excluded"
-    plateau = [on(0.50, 0.2), on(0.51, 0.2), on(0.52, 0.2)]
-    assert theta_plateau(plateau) == pytest.approx(0.51)
-    for not_flat in (
-        [on(0.50, 0.2), on(0.51, 0.2, scale=other), on(0.52, 0.2)],
-        [*plateau[:2], None],
-        [on(0.1, 0.2), on(0.5, 0.2), on(0.9, 0.2)],
-        [on(0.5, 0.2, scale=None)] * 3,
-    ):
-        assert theta_plateau(not_flat) is None, "a run off the series scale read as a plateau"
-    assert series_levels([on(0.5, 0.2), on(9.0, 0.2, scale=other), None]) == [0.5, None, None]
-    assert on(0.5, 0.2, scale=None).caveat is not None, "a cold reading carried no caveat"
+    assert levels[1] is not None and levels[0] is not None and levels[1].theta > levels[0].theta
+    assert levels[1] == levels[2] == levels[3], (
+        "a held round, or one that elected nothing, read another individual than the parent "
+        "standing into it"
+    )
+    assert series.caveat is None and series.plateau() == pytest.approx(levels[3].theta), (
+        "three rounds of one standing parent on one scale is the plateau"
+    )
+    # A fork that picked `b`: both lines on one fit less both lines' parents, or UCB sums two scales.
+    fork = [run[0], closed(1, {"a": hits["a"], "b": hits["b"]}, "b", "b")]
+    line, forked = series_of(OpenAt(), warmed, [run, fork])
+    assert line.stamp == forked.stamp and line.stamp.excluded == ("a", "b", "o"), (
+        "two lines of one family read their levels on two scales"
+    )
+    [pinned] = series_of(CellOf(walks=None, ruler_version=frozen), warmed, [run])  # type: ignore[arg-type]
+    assert pinned.stamp.version == frozen and pinned.stamp.excluded == (), (
+        "an inner cell's series read past the version its outer round opened on"
+    )
+    lone = workspace(tmp_path / "lone")
+    lone.ruler.fold(scope, [("f0", s.key, (s.id + 1) / 16) for s in bank])
+    [cold] = series_of(OpenAt(), lone, [run])
+    assert cold.stamp.cold and cold.caveat is ThetaCaveat.COLD_RULER and cold.plateau() is None, (
+        "a series on no δ scale read as one that differences"
+    )
+    # Cold AND across two datasets: the caveat names the scopes, and still no level differences.
+    split = [s.model_copy(update={"measured_dataset": "other"}) if s.id % 2 else s for s in bank]
+    [both] = series_of(OpenAt(), lone, [run], split)
+    assert both.stamp.cold and both.caveat is ThetaCaveat.DISJOINT_SCOPES, (
+        "the series lost the caveat that outranks a cold scale"
+    )
+    assert all(
+        both.level(r) is None and (read := both.reading(r)) is not None and read.caveat is not None
+        for r in both.rounds
+    ), "a level its series' caveat withholds read as one two rounds may difference"
+    # Each line is caveated on its OWN cells: a line spanning two scopes withholds no other line.
+    evens = [
+        round_result(
+            n,
+            arms={ArmKey(k): arm_state(k)},
+            cells={
+                ArmKey(k): sheet(
+                    measurement(s.id, h, objective=h, sample_key=s.key)
+                    for s, h in zip(bank, hits[k], strict=True)
+                    if s.id % 2 == 0
+                )
+            },
+            election=election(
+                k, ended_on=k, ruler=RulerStamp(id=f"v{n}", version=n, scope=scope, excluded=())
+            ),
+        )
+        for n, k in ((0, "o"), (1, "a"))
+    ]
+    mixed, plain = series_of(OpenAt(), warmed, [run, evens], split)
+    assert mixed.caveat is not None and plain.caveat is None, (
+        "one line's caveat withheld the levels of a line whose own cells carry none"
+    )
+    two_scopes = cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)])
+    withheld = inner_cell_facts(two_scopes.model_copy(update={"level_series": both}))
+    assert both.plateau() is None and withheld.mean_round_delta is None, (
+        "a reader asked the stamp, not the series' caveat, and differenced a cold series"
+    )
+    assert withheld.series_reason is ThetaCaveat.DISJOINT_SCOPES, (
+        "the withheld θ lift lost the caveat that outranks a cold scale"
+    )
 
 
 # 3. The L4 outer proxy — what one finished inner cycle says
@@ -476,8 +553,9 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler() -> None:
 def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_path: Path) -> None:
     # The shipped panel measures in ONE unit: no inner cell may graduate its ruler to 2PL.
     d = install_datasets_root() / "promptpotter-self" / "panel"
-    declared = read_dataset_definition(d).panel
-    assert declared is not None
+    definition = read_dataset_definition(d)
+    assert definition is not None and definition.panel is not None
+    declared = definition.panel
     panel = parse_panel(declared)
     assert panel.tasks
     # The SHIPPED config, not a hand-built one — the question is what the panel runs under.
@@ -486,20 +564,22 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_pa
     graph = parse_pipeline_response(cells.pipeline())
     for task in panel.tasks:
         task_spec = cells.spec(task)
-        derived = inner_instrument_config(task_spec, base, llm_node="llm_only", n_search=40)
+        # The INNER backend's prompt nodes: what the recursion's cell pins and narrows.
+        solver = [PipelineNode(name="llm_only", tunes_llm=True, prompt_info=PROMPT_INFO)]
+        derived = inner_instrument_config(task_spec, base, solver=solver, n_search=40)
         assert derived.optimization.enable_2pl_graduation is False, (
             f"cell {task.id} may graduate its ruler to 2PL — its theta would then be in units of "
             "1/a while the rest of the panel is in logits, and the outer verdict pools them anyway"
         )
-        assert derived.optimizer_narrowing["llm_only"].param_keys == list(PROMPT_STRING_FIELDS), (
-            "the solver's spend axes are the instrument: the inner search writes prompt text alone"
-        )
+        assert [derived.optimizer_narrowing[n.name].param_keys for n in solver] == [
+            list(n.prompt_fields) for n in solver
+        ], "the solver's spend axes are the instrument: the inner search writes prompt text alone"
         assert derived.bench_trigger == "each_round" and derived.dataset_split is not None
         own = CampaignConfig.model_validate(
             dict(cells.by_dataset[task_spec.inner_dataset].campaign_config)
         )
         ran = select_optimizer(
-            inner_instrument_config(task_spec, own, llm_node="llm_only", n_search=40).optimization
+            inner_instrument_config(task_spec, own, solver=solver, n_search=40).optimization
         )
         shown = cells.held(task).optimizer
         assert shown.treatment() == ran.treatment(), (
@@ -509,7 +589,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_pa
         assert {n.name for n in graph.declared_nodes if n.tunes_llm} == set(ran.llm_nodes)
 
     def cyc(
-        levels: list[float],
+        levels: list[float | None],
         *,
         origin: float | None = 0.30,
         rounds: list[RoundResult] | None = None,
@@ -518,15 +598,15 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_pa
         ran = [round_result(i + 1) for i in range(len(levels))] if rounds is None else rounds
         return cycle_result(levels, origin, ran, **kw)
 
-    def delta(levels: list[float], **kw: Any) -> float:
-        return compute_outer_proxies(cyc(levels, **kw)).mean_round_delta
+    def delta(levels: list[float | None], **kw: Any) -> float | None:
+        return inner_cell_facts(cyc(levels, **kw)).mean_round_delta
 
-    def lift(levels: list[float], bench: list[float | None], **kw: Any) -> float:
+    def lift(levels: list[float | None], bench: list[float | None], **kw: Any) -> float:
         px = compute_outer_proxies(cyc(levels, bench_origin=0.40, bench_levels=bench, **kw))
         return px.mean_bench_lift
 
     # The parent levels held forward to the round budget, averaged, less the origin's 0.30.
-    for levels, budget, mean, why in (
+    walked: tuple[tuple[list[float | None], int | None, float, str], ...] = (
         ([0.40, 0.55], None, 0.175, "the mean read the endpoint (0.25)"),
         ([0.30], None, 0.0, "a flat cycle read a lift"),
         ([0.90, 0.35], None, 0.325, "WHEN the lift lands is part of the score"),
@@ -534,24 +614,26 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_pa
         ([0.30, 0.60, 0.60], 4, 0.225, "quitting early was paid over the rounds that ran"),
         ([0.30, 0.60, 0.60, 0.60], 4, 0.225, "the denominator is not the round budget"),
         ([0.30, 0.60, 0.60], None, 0.20, "an undeclared budget is the series length"),
-    ):
+    )
+    for levels, budget, mean, why in walked:
         kw = {} if budget is None else {"round_budget": budget}
         assert delta(levels, **kw) == pytest.approx(mean), why
     # `parent_level_series` pads a short series with its last value; padding carries no precision.
-    se_kw: dict[str, Any] = {"origin_level_se": 0.20, "round_level_ses": [0.30, 0.40]}
+    se_kw: dict[str, Any] = {"origin_se": 0.90, "ses": [0.30, 0.40]}
     padded = mean_parent_level_se(cyc([0.30, 0.60], round_budget=4, **se_kw))
     assert padded == pytest.approx(mean_parent_level_se(cyc([0.30, 0.60], round_budget=2, **se_kw)))
-    assert padded == pytest.approx(0.35), "nested frontier fits are correlated: never sigma/sqrt(n)"
-    no_origin_se = cyc([0.30, 0.60], round_budget=4, round_level_ses=[0.30, 0.40])
-    assert mean_parent_level_se(no_origin_se) == pytest.approx(0.35), (
-        "the origin's SE cancels inside `variant - origin` and stays out"
+    assert padded == pytest.approx(0.35), (
+        "nested frontier fits are correlated: never sigma/sqrt(n); and the origin's SE cancels "
+        "inside `variant - origin` and stays out"
     )
-    assert mean_parent_level_se(cyc([0.30])) is None, "a fabricated 0.0 SE reads infinitely sharp"
+    for unsharp in (cyc([0.30]), cyc([0.30, 0.60], ses=[0.30, None])):
+        assert mean_parent_level_se(unsharp) is None, "a fabricated 0.0 SE reads infinitely sharp"
 
     # The scored term is the held-out lift, the bench levels held forward the same way less the
-    # bench origin's 0.40: churn on the search pool's θ scores ZERO.
-    churn = compute_outer_proxies(cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.40, 0.40]))
-    assert (churn.mean_round_delta, churn.mean_bench_lift) == pytest.approx((0.25, 0.0))
+    # bench origin's 0.40: churn on the search split's θ scores ZERO.
+    churned = cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.40, 0.40])
+    churn = (inner_cell_facts(churned).mean_round_delta, compute_outer_proxies(churned))
+    assert (churn[0], churn[1].mean_bench_lift) == pytest.approx((0.25, 0.0))
     assert lift([0.55, 0.55], [0.50, 0.50], round_budget=4) == pytest.approx(0.10)
     assert lift([0.30, 0.55], [0.40, 0.50], round_budget=4) == pytest.approx(0.075)
 
@@ -561,23 +643,35 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_pa
         cyc([], stop_reason=StopReason.TARGET_HIT),
         cyc([0.40, 0.55], stop_reason=StopReason.TOKEN_BUDGET),
         cyc([0.40], rounds=tooling, stop_reason=StopReason.TOKEN_BUDGET),
-        cyc([], rounds=[round_result(1)]),
-        cyc([0.40, 0.55], origin=None),
         cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.50, None]),
         cyc([0.55], bench_origin=None),
     ):
         with pytest.raises(CellUnscoreableError):
             compute_outer_proxies(unscoreable)
+    # A series that differences nothing is a SERVED fact beside the scored term, never an exclusion.
+    for unread in (
+        cyc([0.40, 0.55], caveat=ThetaCaveat.COLD_RULER),
+        cyc([0.40, None]),
+        cyc([0.40, 0.55], origin=None),
+    ):
+        facts = inner_cell_facts(unread)
+        assert compute_outer_proxies(unread).mean_bench_lift == pytest.approx(0.0), (
+            "a cold or holed search series excluded a cell its held-out lift scores"
+        )
+        assert facts.mean_round_delta is None and facts.series_reason, (
+            "a θ lift read off a series that differences nothing, or withheld without its reason"
+        )
 
-    # Ending on its own terms, an all-tooling cycle is FLOORED on BOTH terms: the loss reproduces.
+    # Ending on its own terms, an all-tooling cycle is FLOORED: the loss reproduces.
     floored = compute_outer_proxies(cyc([0.40], rounds=tooling))
-    assert floored.mean_bench_lift == floored.mean_round_delta == -1.0
+    assert floored.mean_bench_lift == -1.0
 
     def lost(reason: str) -> RoundResult:
-        arm = scored_candidate("x", invalid_reason=reason)
-        return round_result(1, candidates_scored=0, candidate_scores=[arm])
+        arm = arm_state("x", slot=ArmSlot(round=1, idx=0, total=1), invalid_reason=reason)
+        return round_result(1, candidates_scored=0, arms={ArmKey("x"): arm})
 
-    assert delta([0.40], rounds=[lost(PARSE_FAILURE_TOOLING)]) == -1.0, "empty replies floor"
+    tooled = cyc([0.40], rounds=[lost(PARSE_FAILURE_TOOLING)])
+    assert compute_outer_proxies(tooled).mean_bench_lift == -1.0, "empty replies floor"
     assert delta([0.40, 0.55], rounds=[lost(PARSE_FAILURE_MALFORMED), round_result(2)]) == (
         pytest.approx(0.175)
     ), "a malformed reply is the prompt's verdict and scores"

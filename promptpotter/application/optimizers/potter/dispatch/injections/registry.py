@@ -18,7 +18,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.optimizers.potter.records import L1Layout
-from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, PromptTemplate
+from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 # The one citable name that is NOT a panel: the escape hatch a measured stall licenses.
@@ -73,7 +73,7 @@ def injection_table() -> Mapping[str, _Injection]:
 
 
 @shapes_optimizer_prompt
-def validate_template(name: str, template: PromptTemplate) -> None:
+def validate_template(name: str, template: OptimizerPromptTemplate) -> None:
     """A typo'd ``{{slot}}`` is otherwise a silent empty render."""
     spec = NODE_LAYOUTS.get(name)
     extras = spec.caller_extras if spec is not None else frozenset()

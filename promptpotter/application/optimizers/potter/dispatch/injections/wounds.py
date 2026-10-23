@@ -11,27 +11,25 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     signal,
 )
-from promptpotter.application.optimizers.potter.dispatch.layout import (
-    L1_LAYOUT_SLOTS,
-    L1_POSSIBLE,
-)
-from promptpotter.application.optimizers.potter.records import PotterRoundState
-from promptpotter.domain.search_point import PROMPT_STRING_FIELDS, WHO_ANSWERS_KEYS
+from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
+from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
+from promptpotter.domain.search_point import WHO_ANSWERS_KEYS
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure
 
 # Closed vocabularies, safe in an UNFENCED panel; any other LLM-authored value reports its size.
-_PLAIN_EVIDENCE_VALUES = L1_POSSIBLE | frozenset(L1_LAYOUT_SLOTS) | frozenset(PROMPT_STRING_FIELDS)
+_PLAIN_EVIDENCE_VALUES = NODE_LAYOUTS["l1_generate"].possible | frozenset(
+    OptimizerPromptTemplate.RENDER_ORDER
+)
 
 
 def _rf_matches_current_config(
     rf: RuntimeFailure, pipeline_params: dict[str, dict[str, Any]]
 ) -> bool:
     """A failure observed under a superseded provider/model is stale evidence that mis-steers L2."""
-    node = rf.dominant_warning.split(":", 1)[0]
-    if not node:
+    if not rf.node:
         return True
-    current = pipeline_params.get(node)
+    current = pipeline_params.get(rf.node)
     if not isinstance(current, dict):
         return False
     observed = rf.observed_config
@@ -44,13 +42,13 @@ def _validation_block(b: InjectionBundle) -> str:
         return ""
     last = b.measured_rounds[-1]
     lines: dict[str, None] = {}
-    for vf in (vf for sc in last.candidate_scores for vf in sc.validation_failures):
+    for vf in (vf for arm in last.arms.values() for vf in arm.validation_failures):
         allowed_str = ", ".join(vf.allowed[:5])
         lines[
             f"  axis={vf.axis} value={vf.value!r} reason={vf.reason}"
             + (f" allowed=[{allowed_str}]" if allowed_str else "")
         ] = None
-    if (parse := last.optimizer_state.payload_as(PotterRoundState).l1_parse_failure) is not None:
+    if (parse := b.digest.l1_parse_failure) is not None:
         lines[f"  axis=l1_generate.output reason={parse}"] = None
     if not lines:
         return ""
@@ -63,7 +61,7 @@ def _validation_block(b: InjectionBundle) -> str:
 
 def _runtime_block(b: InjectionBundle) -> str:
     """NEW entries skip the config match: they describe the failure being heard right now."""
-    runtime_failures = b.memory.wounds.runtime_failures
+    runtime_failures = b.runtime_failures
     if not runtime_failures:
         return ""
     round_num = b.cycle_slice.round_num
@@ -138,12 +136,11 @@ def _render_guard_breaches(outcomes: list[ValidatorOutcome], layer: str) -> str:
 )
 def _r_guard_breaches(b: InjectionBundle) -> list[Item]:
     """Prompt evidence only: no escalation rule reads the stream (``escalation/firing.py``)."""
-    wounds = b.memory.wounds
     blocks = [
         blk
         for blk in (
-            _render_guard_breaches(wounds.l2_guard_breaches, "L2"),
-            _render_guard_breaches(wounds.l3_guard_breaches, "L3"),
+            _render_guard_breaches(b.l2.guard_breaches, "L2"),
+            _render_guard_breaches(b.l3.guard_breaches, "L3"),
         )
         if blk
     ]
@@ -154,7 +151,7 @@ def _format_runtime_failure_lines(rf: RuntimeFailure) -> list[str]:
     rate_pct = round(float(rf.degraded_rate) * 100)
     cfg_parts = [f"{k}={v}" for k, v in rf.observed_config.items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
-    label = rf.candidate_label[:60]
+    label = rf.changes_description[:60]
     owner = rf.owner.value
     head = (
         f"    [owner={owner}] {label} — {rate_pct}% degraded on {rf.total_scored}, dom={rf.dominant_warning}"

@@ -51,10 +51,10 @@ export const TimeRay = memo(function TimeRay() {
     const elsewhere = step.pathKey !== rootKey;
     // Another course's ledger offset means nothing here, so that step returns this course to its head.
     setAt(elsewhere ? null : step.offset);
-    if (step.candidateLabel) {
+    if (step.arm) {
       const node = index
         .get(step.pathKey)
-        ?.candidates.find((c) => c.reading.arm.label === step.candidateLabel);
+        ?.candidates.find((c) => c.reading.arm.key === step.arm);
       if (node) {
         pick(node, step.path);
         return;

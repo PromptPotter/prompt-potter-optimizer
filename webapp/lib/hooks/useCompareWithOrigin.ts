@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { candidateSubject } from "@/lib/api/reads";
 import { useCompareSelection, type CompareChannel } from "@/lib/compare-selection";
-import { armOfId, originAt, originOf, pathOf } from "@/lib/derivations";
+import { armAt, individualOf, originAt, originOf, pathOf } from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
 import { useViewedLineage } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
@@ -19,8 +19,8 @@ const NO_SUBJECTS: readonly string[] = [];
 
 export function useCompareWithOrigin(
   path: CyclePath | null,
-  // `null` names no point and reads the origin alone.
-  candidateId: string | null,
+  // The served `reading.arm.key` at `path`; `null` names no point and reads the origin alone.
+  arm: string | null,
 ): CompareWithOrigin {
   const { show } = useCompareSelection();
   const { openView } = useWorkspace();
@@ -29,8 +29,9 @@ export function useCompareWithOrigin(
   const pair = useMemo(() => {
     const top = path?.[0];
     if (!top) return null;
-    const point = candidateId === null ? null : armOfId(index, candidateId);
-    if (candidateId !== null && !point) return null;
+    const placed = arm === null ? null : armAt(index, path, arm);
+    const point = placed ? individualOf(index, placed) : null;
+    if (arm !== null && !point) return null;
     const origin = point ? originOf(index, point) : originAt(index, path);
     const originKey = origin ? candidateSubject(pathOf(origin), origin.id) : "";
     if (!origin || !originKey) return null;
@@ -40,7 +41,7 @@ export function useCompareWithOrigin(
       channels.push({ rootCampaignId: top.campaignId, subject: pointKey });
     }
     return { channels, subjects: channels.map((c) => c.subject), originLabel: origin.label };
-  }, [index, path, candidateId]);
+  }, [index, path, arm]);
 
   const run = useCallback(() => {
     if (!pair) return;

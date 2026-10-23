@@ -3,35 +3,31 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.bench.resume_and_fork.fork_siblings import (
-    ForkResult,
-    mint_fork,
-)
+from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
-from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.scoring.candidate_report import build_score_report
-from promptpotter.application.scoring.row_diagnostics import count_degraded_samples
+from promptpotter.application.run_callbacks import stated_line
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
-from promptpotter.domain.results import is_leader_eligible, recall_at
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.results import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.run_records import (
-    CandidateMintedRecord,
-    CandidateScoredRecord,
     ForkDirection,
     ForkSpec,
     ForkTrigger,
-    LedgerCandidate,
-    SampleScoredRecord,
+    RoundRestatedRecord,
 )
-from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.shared.errors import ErrorCategory
-from promptpotter.shared.measurement_context import MeasuredCandidate, MeasurementRole
+from promptpotter.shared.identity import SYSTEM_PRINCIPAL
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.difficulty import DifficultyView
+    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import GradedCell
@@ -39,68 +35,47 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "RepairCut",
-    "apply_correction",
-    "repair_cut",
-    "repair_incomplete_rounds",
-]
-
-
-def _headline_disagrees(t: RoundResult) -> bool:
-    if t.opt_sp is None:
-        return False
-    winner_id = t.opt_sp.id
-    rows = t.all_candidate_results.get(winner_id)
-    cs = next((c for c in t.candidate_scores if c.candidate_id == winner_id), None)
-    if rows is None or cs is None:
-        return False  # a HELD round — `results` carry the retained parent, not a candidate
-    return t.results.cells != rows.cells or t.total != cs.total
-
 
 def _repairable_hole(cell: GradedCell) -> bool:
     """``HALTED`` is no hole: the declared bound cuts the next attempt at the same place."""
     return cell.facts.errored and cell.facts.error_category is not ErrorCategory.HALTED
 
 
-def _first_divergent_candidate(t: RoundResult) -> str | None:
-    for cs in t.candidate_scores:
-        if is_leader_eligible(cs) and any(
-            map(_repairable_hole, t.all_candidate_results.get(cs.candidate_id, NO_CELLS))
-        ):
-            return cs.candidate_id
-    if _headline_disagrees(t) and t.opt_sp is not None:
-        return t.opt_sp.id
-    return None
+def _holed(t: RoundResult, key: ArmKey, arm: ArmState) -> bool:
+    return is_leader_eligible(arm) and any(map(_repairable_hole, t.rows(key)))
+
+
+def _first_divergent_arm(t: RoundResult) -> ArmKey | None:
+    return next((key for key, arm in t.panel.items() if _holed(t, key, arm)), None)
 
 
 class RepairCut(NamedTuple):
-    """The cut is a CANDIDATE, not a round: earlier siblings are untouched and stay on the line."""
+    """The cut is an ARM, not a round: earlier siblings are untouched and stay on the line."""
 
     rounds: list[int]
     resume_at: int
     edge: str | None  # None ⇒ it leaves from the course root
     # Only what the BRANCH CARRIES (edge → end of the cut round); it regenerates the later ones.
-    retirements: list[tuple[int, int]]
+    retirements: list[tuple[int, ArmKey]]
 
 
 def repair_cut(prior: list[RoundResult]) -> RepairCut:
     rounds: list[int] = []
     resume_at, edge = 0, None
-    retirements: list[tuple[int, int]] = []
+    retirements: list[tuple[int, ArmKey]] = []
     cutting = carrying = False
     for t in prior:
-        diverged = _first_divergent_candidate(t)
+        diverged = _first_divergent_arm(t)
         if diverged is not None:
             rounds.append(t.round)
             if not cutting:
                 resume_at, carrying = t.round + 1, True
-        for i, cs in enumerate(t.candidate_scores):
-            cutting = cutting or cs.candidate_id == diverged
+        for key in t.panel:
+            cutting = cutting or key == diverged
             if not cutting:
-                edge = cs.candidate_id
+                edge = key
             elif carrying:
-                retirements.append((t.round, i))
+                retirements.append((t.round, key))
         carrying = False
     return RepairCut(rounds, resume_at, edge, retirements)
 
@@ -110,85 +85,33 @@ def _rebank_on_branch(
     parent: CycleHop,
     branch_cycle_id: str,
     rounds: list[RoundResult],
-    retirements: list[tuple[int, int]],
+    retirements: list[tuple[int, ArmKey]],
+    *,
+    slot_of: Mapping[str, int],
+    difficulty: DifficultyView,
+    lives: LivesConfig | None,
 ) -> list[RoundResult]:
     branch = CycleHop(campaign_id=parent.campaign_id, cycle_id=branch_cycle_id)
-    minted_at = {
-        (c.round, c.idx): c
-        for c in campaign_store.standing_rounds(parent, moment=None).candidates()
-    }
-    ledger = CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch)))
-    cb = RunCallbacks(ledger=ledger)
-    # `lineage` reaches a reader ONLY through the mint record.
-    identity = set(CandidateMintedRecord.model_fields) & set(LedgerCandidate.model_fields)
-    slots: dict[int, list[int]] = {}
-    for round_num, idx in retirements:
-        slots.setdefault(round_num, []).append(idx)
-    reclosed: dict[int, RoundResult] = {}
+    closes = campaign_store.standing_rounds(parent, moment=None).rounds
+    keys: dict[int, list[ArmKey]] = {}
+    for round_num, key in retirements:
+        keys.setdefault(round_num, []).append(key)
+    restated: dict[int, RoundResult] = {}
     for t in rounds:
-        if t.round not in slots:
+        if t.round not in keys:
             continue
-        for idx in slots[t.round]:
-            if (minted := minted_at.get((t.round, idx))) is not None:
-                ledger.append(CandidateMintedRecord(**minted.model_dump(include=identity)))
-            scores = t.candidate_scores[idx]
-            # The walk too: the mint above empties the slot.
-            for walked in t.all_candidate_results.get(scores.candidate_id, NO_CELLS):
-                ledger.append(
-                    SampleScoredRecord(
-                        round=t.round,
-                        candidate_idx=idx,
-                        candidate_total=len(t.candidate_scores),
-                        individual_id=scores.candidate_id,
-                        role=MeasurementRole.PANEL,
-                        sample_total=scores.expected_samples,
-                        result=walked,
-                    )
-                )
-            ledger.append(
-                CandidateScoredRecord(
-                    round=t.round,
-                    candidate_idx=idx,
-                    candidate_total=len(t.candidate_scores),
-                    scores=scores,
-                )
-            )
-        cb.on_election(t)
-        # The re-close MOVES the document's address; the retired one re-folds to the holed round.
-        reclosed[t.round] = t.model_copy(update={"at_offset": cb.on_round_close(t)})
-    return [reclosed.get(t.round, t) for t in rounds]
-
-
-def _resync_round_headline(t: RoundResult) -> RoundResult:
-    """A projection off the winner's own row, never a second election; *t* itself where they agree."""
-
-    if not _headline_disagrees(t):
-        return t
-    assert t.opt_sp is not None
-    winner_id = t.opt_sp.id
-    rows = t.all_candidate_results[winner_id]
-    cs = next(c for c in t.candidate_scores if c.candidate_id == winner_id)
-    logger.warning(
-        "Round %d headline disagreed with its own winner's rows (total %d→%d, "
-        "composite %.4f→%.4f); re-projected. `improved` is the election's verdict and is "
-        "left as recorded — ROUND_WINNER's replay is what re-asks it.",
-        t.round,
-        t.total,
-        cs.total,
-        t.composite_fitness,
-        cs.composite_fitness,
-    )
-    return t.model_copy(
-        update={
-            "results": rows,
-            "total": cs.total,
-            "accuracy": cs.accuracy,
-            "composite_fitness": cs.composite_fitness,
-            "evaluators": dict(cs.evaluators),
-            "degraded_samples": count_degraded_samples(rows),
-            "recall_at": recall_at(rows),
-        }
-    )
+        line, series, standing = stated_line(t, rounds, difficulty, lives=lives)
+        # Under its round's own anchors, never the resuming launch's.
+        anchors = closes[t.round].close.anchors
+        offset = campaign_store.restate_round(
+            branch,
+            RoundRestatedRecord.of(
+                line, slot_of, series, standing, anchors, remeasured=keys[t.round]
+            ),
+        )
+        # The restatement MOVES the document's address; the retired one re-folds to the holed round.
+        restated[t.round] = t.model_copy(update={"at_offset": offset})
+    return [restated.get(t.round, t) for t in rounds]
 
 
 async def repair_incomplete_rounds(
@@ -199,43 +122,27 @@ async def repair_incomplete_rounds(
 ) -> list[RoundResult]:
     """Writes nothing, to a ledger or to *prior*; an untouched round is the SAME object handed in."""
 
-    by_id = {str(s.id): s for s in dataset}
+    by_key = {s.key: s for s in dataset}
     corrected = list(prior)
     for slot, t in enumerate(prior):
-        arms = dict(t.all_candidate_results)
-        scores = list(t.candidate_scores)
-        head = t.results
-        plugged = False
-        for i, cs in enumerate(t.candidate_scores):
-            rows = t.all_candidate_results.get(cs.candidate_id, NO_CELLS)
-            if not is_leader_eligible(cs) or not any(map(_repairable_hole, rows)):
+        cells = dict(t.cells)
+        folds = dict(t.folds)
+        for key, arm in t.panel.items():
+            rows = t.rows(key)
+            if not isinstance(arm, Concluded) or not _holed(t, key, arm):
                 continue
-            attempted = [by_id[sid] for r in rows if (sid := str(r.sample_id)) in by_id]
+            attempted = [by_key[r.key] for r in rows if r.key in by_key]
             if not attempted:
                 logger.warning(
-                    "Round %d candidate %s has unmeasured cells but none in this dataset to "
+                    "Round %d arm %s has unmeasured cells but none in this dataset to "
                     "re-measure — leaving it holed rather than guessing.",
                     t.round,
-                    cs.label,
+                    arm.label,
                 )
                 continue
-            sp = cycle.searchpoint(cs.candidate_id, rounds=prior)
-            cand_osp = OptSearchPoint.from_prompt_fields(
-                cs.prompt_fields,
-                pipeline_params=cs.resolved_pipeline_params,
-                lineage=IndividualLineage(changes_description=cs.changes_description),
-            )
-            stamp = MeasuredCandidate(
-                idx=i,
-                candidate_id=cs.candidate_id,
-                label=cs.label,
-                role=MeasurementRole.REPAIR,
-            )
-            missing = [
-                by_id[sid]
-                for r in rows
-                if _repairable_hole(r) and (sid := str(r.sample_id)) in by_id
-            ]
+            sp = cycle.points.measured(arm)
+            stamp = MeasuredPass(individual_id=arm.individual.id, role=MeasurementRole.REPAIR)
+            missing = [by_key[r.key] for r in rows if _repairable_hole(r) and r.key in by_key]
             for hole in missing:
                 await score_search_point(
                     sp,
@@ -257,59 +164,35 @@ async def repair_incomplete_rounds(
             )
             if scored.stopped is not None:
                 logger.warning(
-                    "Round %d candidate %s: re-scoring its cells stopped after %d/%d (%s) — "
+                    "Round %d arm %s: re-scoring its cells stopped after %d/%d (%s) — "
                     "leaving it holed rather than reporting part of its panel as the whole.",
                     t.round,
-                    cs.label,
+                    arm.label,
                     len(scored.sheet),
                     len(attempted),
                     scored.stopped,
                 )
                 continue
-            results = scored.sheet
-            arms[cs.candidate_id] = results
-            scores[i] = build_score_report(
-                cand_osp,
-                cs.validation_failures,
-                cs.pipeline_overlay,
-                scored.scores,
-                results.cells,
-                attempted,
-                label=cs.label,
-                sp=sp,
-                sp_hash=sp.sp_hash(session.pipeline_schema),
-                outcome=cs.outcome,
-                elimination_context=cs.elimination_context,
-                elimination_reason=cs.elimination_reason,
-            )
-            # `RoundResult` holds the winner's rows twice; repairing one half leaves the headline holed.
-            if t.opt_sp is not None and cs.candidate_id == t.opt_sp.id:
-                head = results
-            plugged = True
+            cells[key] = scored.sheet
+            folds[key] = scored.scores
             logger.warning(
-                "Repaired round %d candidate %s: %d cell(s) had no measurement; "
-                "re-measured %d, composite %.4f → %.4f",
+                "Repaired round %d arm %s: %d cell(s) had no measurement; "
+                "re-measured %d, composite %s → %s",
                 t.round,
-                cs.label,
+                arm.label,
                 len(missing),
-                len(results),
-                cs.composite_fitness,
-                scores[i].composite_fitness,
+                len(scored.sheet),
+                None if (was := t.folds.get(key)) is None else was.composite_fitness,
+                scored.scores.composite_fitness,
             )
-        mended = (
-            t.model_copy(
-                update={"all_candidate_results": arms, "candidate_scores": scores, "results": head}
-            )
-            if plugged
-            else t
-        )
-        # AFTER the holes, never before: the headline projects the row the loop above moves.
-        mended = _resync_round_headline(mended)
+        # The headline is the head arm's own: re-keying its rows moves it, never a second write.
+        mended = t.model_copy(update={"cells": cells, "folds": folds}) if cells != t.cells else t
         if mended is not t:
             diagnostics = compute_round_diagnostics(
                 mended,
                 [*(p for p in corrected if p.round < t.round), mended],
                 session.pipeline_schema,
+                session.bank.slot_of,
             )
             corrected[slot] = mended.model_copy(update={"diagnostics": diagnostics})
     return corrected
@@ -356,7 +239,7 @@ async def apply_correction(
     session: Session,
     cycle: Cycle,
     dataset: list[Any],
-) -> ForkResult | None:
+) -> str | None:
     cut = repair_cut(prior)
     # Only what the branch carries: it REGENERATES a round above the cut rather than correct it.
     carried_rounds = prior[: cut.resume_at]
@@ -371,7 +254,7 @@ async def apply_correction(
     repair_spec = ForkSpec(
         trigger=ForkTrigger.SCORING_DIVERGENCE,
         reason=f"repair:round_{cut.rounds[0]}",
-        issued_by="system",
+        issued_by=SYSTEM_PRINCIPAL,
         from_round=cut.rounds[0],
         from_candidate_id=cut.edge,
     )
@@ -402,7 +285,16 @@ async def apply_correction(
         hop,
     )
     branch = CycleHop(campaign_id=hop.campaign_id, cycle_id=repair_target)
-    corrected = _rebank_on_branch(campaign_store, hop, repair_target, corrected, cut.retirements)
+    corrected = _rebank_on_branch(
+        campaign_store,
+        hop,
+        repair_target,
+        corrected,
+        cut.retirements,
+        slot_of=session.bank.slot_of,
+        difficulty=cycle.difficulty,
+        lives=cycle.config.optimization.lives,
+    )
     logger.warning(
         "Re-banked %d retired candidate(s) onto %s — the branch now names them itself, so "
         "what a reader sees at those positions is the corrected measurement rather than the "
@@ -424,9 +316,9 @@ async def apply_correction(
             CycleEventLog.open(CycleDir(campaign_store.cycle_dir(branch))).append(carried)
         logger.warning(
             "The correction reached nothing any node reads — cut %s marked EQUIVALENT "
-            "and carries round %d's candidates across unchanged. Both lines continue.",
+            "and carries round %d's candidates across unchanged; the line continues on it.",
             repair_target,
             cut.resume_at,
         )
     cycle.replay_priors(corrected[: cut.resume_at])
-    return ForkResult(new_cycle_id=repair_target, new_resumed_from_round=cut.resume_at)
+    return repair_target

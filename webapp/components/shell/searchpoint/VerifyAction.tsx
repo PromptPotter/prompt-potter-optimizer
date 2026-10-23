@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
-import { postVerifyCandidate, type VerifyStrategy } from "@/lib/api/commands";
+import { cycleAddress, postCommand, type VerifyStrategy } from "@/lib/api/commands";
 import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
@@ -13,10 +13,10 @@ import { VerifyReading } from "./VerifyReading";
 
 const PASS_POLL_MS = 5000;
 
-const STRATEGIES: readonly { value: VerifyStrategy; label: string }[] = [
-  { value: "random", label: "at random — reads the level" },
-  { value: "hard", label: "hardest first — a stress read" },
-];
+const STRATEGIES = (Object.keys(VERIFY_STRATEGY_LABELS) as VerifyStrategy[]).map((value) => ({
+  value,
+  label: VERIFY_STRATEGY_LABELS[value],
+}));
 
 export function VerifyAction({
   candidate,
@@ -33,16 +33,19 @@ export function VerifyAction({
 
   if (!path || !candidate.label) return null;
 
-  const reading = readings.get(candidate.label) ?? null;
-  const flying = pass !== null && pass.label === candidate.label ? pass : null;
+  const reading = readings.get(candidate.arm) ?? null;
+  const flying = pass !== null && pass.arm.key === candidate.arm ? pass : null;
   const busy = sending || flying !== null;
 
   function run() {
     if (!path) return;
     void cmd.run("verify-candidate", () =>
-      postVerifyCandidate(path, candidate.candidate_id, {
+      // `samples` omitted is the server's count (`verify.py::derive_verify_samples`).
+      postCommand("verify-candidate", {
+        ...cycleAddress(path),
+        candidate_id: candidate.arm,
         strategy,
-        samples: samples === "" ? null : Number(samples),
+        ...(samples === "" ? {} : { samples: Number(samples) }),
       }),
     );
   }
@@ -90,7 +93,7 @@ export function VerifyAction({
                   value={samples}
                   placeholder="derived"
                   aria-label="Fresh cells to measure; blank lets the round budget decide"
-                  validate={(d) => d === "" || /^[1-9]\d{0,3}$/.test(d)}
+                  validate={(d) => d === "" || /^[1-9]\d*$/.test(d)}
                   onCommit={setSamples}
                 />
               </label>
@@ -105,7 +108,7 @@ export function VerifyAction({
       {busy && (
         <p className="verify-action-note">
           {flying && unit
-            ? `Measuring ${flying.label} on ${unitCount(flying.rows, unit)} it has never seen, ${VERIFY_STRATEGY_LABELS[flying.strategy]}.`
+            ? `Measuring ${flying.arm.label} on ${unitCount(flying.rows, unit)} it has never seen, ${VERIFY_STRATEGY_LABELS[flying.strategy]}.`
             : `Measuring ${candidate.label} on cells it has never seen.`}{" "}
           This mints no round, so the cycle&rsquo;s own series does not move.
         </p>

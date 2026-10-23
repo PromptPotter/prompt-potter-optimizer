@@ -3,4 +3,4 @@ source:
 
 campaign:
   optimization:
-    ceiling: {usd: 0.15}
+    budget: {usd: 0.15}

@@ -1,3 +1,5 @@
+import type { ErrorEnvelope } from "./types.generated";
+
 export const API = "/api/v1";
 
 // Stamped by the build (`next.config.ts`); the server names the build it serves on every API answer.
@@ -25,13 +27,14 @@ export class ApiError extends Error {
     readonly code: string | null = null,
     readonly errorId: string | null = null,
     readonly details: Record<string, unknown> | null = null,
+    readonly serverMessage: string | null = null,
   ) {
-    super(`${status} ${url}`);
+    super(serverMessage ?? `${status} ${url}`);
     this.name = "ApiError";
   }
 }
 
-export type FailureKind = "transient" | "auth" | "gone" | "denied" | "invalid";
+export type FailureKind = "transient" | "auth" | "gone" | "denied" | "invalid" | "refused";
 
 export function failureKind(e: unknown): FailureKind {
   if (!(e instanceof ApiError)) return "transient";
@@ -39,34 +42,26 @@ export function failureKind(e: unknown): FailureKind {
   if (e.status === 403) return "denied";
   if (e.status === 404) return "gone";
   if (e.status === 400 || e.status === 422) return "invalid";
+  // The server answered and said no (a conflict, a spend cap): its sentence is the remedy.
+  if (e.status >= 400 && e.status < 500) return "refused";
   return "transient";
 }
 
-// Tolerant: a proxy 502 or a static-export 404 answers HTML, not an envelope.
-async function toApiError(r: Response, url: string): Promise<ApiError> {
-  try {
-    const body = (await r.json()) as {
-      error?: unknown;
-      error_id?: unknown;
-      details?: unknown;
-    };
-    return new ApiError(
-      r.status,
-      url,
-      typeof body.error === "string" ? body.error : null,
-      typeof body.error_id === "string" ? body.error_id : null,
-      body.details && typeof body.details === "object"
-        ? (body.details as Record<string, unknown>)
-        : null,
-    );
-  } catch {
-    return new ApiError(r.status, url);
+// The ONE envelope parser, reads and writes alike. A proxy 502 or a static-export 404 answers
+// something else, which carries no `error_id`.
+export async function toApiError(r: Response): Promise<ApiError> {
+  const body: unknown = await r.json().catch(() => null);
+  if (typeof body !== "object" || body === null || !("error_id" in body)) {
+    return new ApiError(r.status, r.url);
   }
+  const { error, error_id, details, message } = body as ErrorEnvelope;
+  // An empty sentence is no sentence: `operatorMessage` falls back to the kind's.
+  return new ApiError(r.status, r.url, error, error_id, details, message || null);
 }
 
 export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
   const r = await send(url, { signal: signal ?? null });
-  if (!r.ok) throw await toApiError(r, url);
+  if (!r.ok) throw await toApiError(r);
   return (await r.json()) as T;
 }
 
@@ -82,7 +77,7 @@ export async function jpost<T>(
     body: JSON.stringify(body),
     signal: signal ?? null,
   });
-  if (!r.ok) throw await toApiError(r, url);
+  if (!r.ok) throw await toApiError(r);
   return (await r.json()) as T;
 }
 
@@ -102,7 +97,7 @@ async function jgetWithValidator<T>(
   if (validator) headers[requestHeader] = validator;
   const r = await send(url, { headers, signal: signal ?? null });
   if (r.status === 304) return { kind: "not_modified" };
-  if (!r.ok) throw await toApiError(r, url);
+  if (!r.ok) throw await toApiError(r);
   return { kind: "ok", data: (await r.json()) as T, validator: r.headers.get(responseHeader) };
 }
 

@@ -6,12 +6,15 @@ from typing import Any
 import httpx
 
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import Connector
+from promptpotter.connectors.protocol import Connector, cell_envelope_of
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeRole
-from promptpotter.infrastructure.tls import tls_context
+from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
+
+# One match and its resends, a backend outage's wait included.
+_CELL_ENVELOPE_S = 600.0
 
 
 def termnorm_wire_adapter(
@@ -139,6 +142,7 @@ def _termnorm_auth_token() -> str | None:
 CONNECTOR = Connector(
     name="termnorm",
     wire_adapter=termnorm_wire_adapter,
+    cell_envelope_s=cell_envelope_of(_CELL_ENVELOPE_S),
     session_factory=TermNormSession,
     serves_uploads=True,
     expected_revision=_EXPECTED_REVISION,
@@ -173,6 +177,3 @@ CONNECTOR = Connector(
         },
     },
 )
-
-
-__all__ = ["CONNECTOR", "TermNormSession"]

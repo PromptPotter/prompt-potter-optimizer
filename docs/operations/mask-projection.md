@@ -65,7 +65,7 @@ is what `ab` does and what a polled tree read cannot. Ask the lens which rounds 
 replaying; ask `ab` whether the run would have moved.
 
 `?samples=<id,id,…>` composes with a `score:` lens: re-score over just those samples, on **both
-sides** — the arms off their own rows, the parent off the round's `reference_results` — or the bar
+sides** — the arms off their own rows, the parent off its own arm's rows (`RoundResult.reference_rows`) — or the bar
 stays at its full-set value while every challenger moves, and a round flips on nothing but that.
 A round that banked no parent panel is undecidable on a subset, never judged against a carried
 one. A lens read on a subset is exact there, since it grades cells rather than meaning a map.
@@ -79,9 +79,9 @@ what*, by carrying the same two segments on a subject address —
 same branch under another criterion pool as two channels of one read instead of two page loads.
 The mask is part of the subject KEY, which is what keeps them apart.
 
-Two folds, one round-level ranking. `verdicts.py::masked_election` decides one round against a
-stated parent floor; `find_divergences` asks it against the RECORDED parent one round at a time,
-while `scenario.py::scenario_spine` walks the chain — each round judged against the winner the
+Two folds, one round-level ranking, all in `application/mask/divergence.py`. `masked_election`
+decides one round against a stated parent floor; `find_divergences` asks it against the RECORDED
+parent one round at a time, while `scenario_spine` walks the chain — each round judged against the winner the
 scenario is standing on — and **ends on the round the two part**. Past that the run would have
 stood on a parent it never had, so no measurement describes it; that round is also where a fork
 applying the criterion is minted, which `resume_and_fork/resume.py` branches at on a scoring
@@ -151,7 +151,7 @@ summary fields instead and still serves such a cycle.
 2. **A mask is a verdict over the record, not a data-kind.** The value face is
    scoring-specific and stays out of the shared fold; a verdict reads whatever features it
    needs and the fold is indifferent. This is why a verdict lives beside the math it asks
-   rather than in one registry: scoring and abort in `application/mask/verdicts.py`, replay
+   rather than in one registry: scoring and abort beside the fold in `application/mask/divergence.py`, replay
    beside the replayers it wraps.
 3. **One-step counterfactual.** At a divergence, name the alternative option — it was
    measured, so it is real. Its descendants never existed; claim nothing deeper until a

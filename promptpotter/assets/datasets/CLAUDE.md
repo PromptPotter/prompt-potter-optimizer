@@ -19,8 +19,7 @@ assets/datasets/
     ├── dataset.yaml       # source: / pipeline: / campaign: / panel: — only what differs from above
     ├── task.md            # L1's framing input: front matter = committed framing, body = description
     ├── origin.yaml        # the starting prompts, per node (optional)
-    ├── README.md          # operator-facing: source, split, sample shape, model screens
-    └── rows.json          # a hand-authored item bank, where one ships (optional; see below)
+    └── README.md          # operator-facing: source, split, sample shape, model screens
 ```
 
 A dataset may also be a family: a directory with `dataset.yaml` and children is both. A leaf with no
@@ -30,8 +29,8 @@ values of its own carries a one-line `dataset.yaml` as its marker.
 
 **Every reader sees the definition chain laid together** (`infrastructure/store/dataset_access.py::definition_chain`):
 `defaults.yaml`, then each `family.yaml` / `dataset.yaml` from the root down, then the leaf. Each section
-merges by the kind it is: `campaign` depth-first (`campaign_config.py::merge_config_layers`); `pipeline`
-by top-level replacement with nodes through `pipeline_parsing.py::merge_node_blocks` — a default node is a
+merges by the kind it is: `campaign` depth-first (`application/campaign_config.py::merge_config_layers`); `pipeline`
+by top-level replacement with nodes through `domain/pipeline_parsing.py::merge_node_blocks` — a default node is a
 TEMPLATE, so only a node the dataset itself names receives it; `source` and `panel` key by key, a panel's local paths resolving against the deepest layer declaring a panel key.
 `task.md` and `README.md` are the nearest file; `origin.yaml` merges root-first. A value equal to what
 the chain already holds is deleted from the lower file, never restated; one that needs less than an upper
@@ -40,7 +39,7 @@ its reader derives: a knob at its schema default, a `pipelines.default` naming e
 the dataset's name, which is its path.
 
 **What a cell hashes is the merged document**, so moving a value between layers moves no key — and the
-campaign half validated, through `campaign_config.py::CampaignConfig.identity`, which drops every schema
+campaign half validated, through `application/campaign_config.py::CampaignConfig.identity`, which drops every schema
 default and the `optimizer`/`nodes` its optimizer's `Treatment` resolves against the manifest. Only
 install content has a chain: a tenant upload is whole.
 
@@ -52,7 +51,7 @@ tenant tier), and every other key is the cut — `hub:` / `github:` with its pin
 caps. A section with no `hub:`/`github:` is INLINE: its keys are the rows' inputs. A bank that is two
 columns of a hub split takes `recipe: columns`; code is only for a cut that builds text. A new cut is a
 new definition, never a recipe edit. **Every fetched source is pinned to a commit** — an
-unpinned one raises at parse; a moving ref re-cuts the bank under the name it already has.
+unpinned one raises at parse; a moving ref would move the name onto a bank nobody chose.
 
 ## A ceiling is DECLARED, or the clock that needs it reports nothing
 
@@ -60,11 +59,11 @@ unpinned one raises at parse; a moving ref re-cuts the bank under the name it al
 
 ## A demo pool is declared in the split, and every row in it needs an answer
 
-`campaign_config.dataset_split: {bench: N, demo: M}` holds `M` rows out as the **demo pool** — the only rows an individual's `shot_ids` may name, rendered into its prompt as query and ground truth. Run init partitions them away from the search pool and the bench set, so no demo row is ever scored. `partition_bank` refuses a demo row with no ground truth, so a verifier-graded bank declares none; `demo` omitted is a pool of zero, which silences every shot surface.
+`campaign_config.dataset_split: {bench: N, demo: M}` holds `M` rows out as the **demo pool** — the only rows a prompt node's `shots` may name (by sample key), rendered into that node's prompt as query and ground truth. Run init partitions them away from the search split and the bench set, so no demo row is ever scored. `partition_bank` refuses a demo row with no ground truth, so a verifier-graded bank declares none; `demo` omitted is a pool of zero, which silences every shot surface.
 
 ## Sole route for backend tunable changes
 
-**Backend overlay (`dataset.yaml::pipeline.nodes.{name}.config`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
+**Backend overlay (`dataset.yaml` `pipeline.nodes.{name}.config`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
 
 `load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`application/pipeline_resolve.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
 
@@ -78,9 +77,9 @@ The roster is the directory tree; each dataset's connector is read off its merge
 - **`justlogic/d234`** — the L4 inner benchmark, an iid mix of depths 2-4 ([§ L4 below](#l4--promptpotter-self)). **`promptpotter-self/`** ships two on the `promptpotter` connector: `panel` — the fixed calibration panel and the only one to read a result off; `e2e` — a degenerate one-cell twin the browser walk runs for cents, a fixture and never a second instrument. `pool`, which draws environments per round, is a tenant definition, since its seats name tenant benchmarks.
 - **The optimizer's own prompt homes are not in this directory.** One manifest per optimizer lives under `promptpotter/assets/optimizers/`, which a campaign picks with `optimization.optimizer` and adjusts with `optimization.nodes`. Still **operator-owned files** — nothing writes them. `application/evidence/read.py` ranks the measured edits; graduating a winner into `assets/optimizers/potter/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows one file via `config/paths.py::optimizer_manifest_path`.
 
-## Re-cutting a dataset needs a NEW name
+## A dataset is its content; its name is a label
 
-**A measurement replays by CONTENT; per-sample history is kept by POSITION.** Replay matches a cell on its `sample_key` — the sample's query, label, question and connector-resolved `source_pin` — under the same instrument configuration, in every dataset at once: a sample carried into a wider panel or under a new name replays every cell already measured on it (`infrastructure/store/measurement_archive.py::ReplayFeed.advance`). What a `sample_id` still keys is the history — δ, hit rates, hard samples — scoped `(dataset_name, sample_id)`. So a change that puts different content at an existing position (editing, replacing or reordering rows, or any `source:` cut parameter) needs a new definition, while one that leaves every existing sample in its slot, like appending tasks to a panel, does not. Re-running a measured configuration on a re-cut name refuses with `DatasetIdentityError` rather than pooling two questions in one slot (`application/scoring/search_point_scorer.py::_replayable_on`).
+**A bank's identity is the hash of its rows as stored** (`shared/hashing.py::dataset_hash` over `Sample.banked`) — each row's query, label, question, connector-resolved `source_pin` and placement, in order. A measurement is filed under that hash and carries no position: replay matches a cell on its `sample_key` under the same instrument configuration, whichever bank filed it, so a sample carried into a wider panel or under a new name replays every cell already measured on it (`application/scoring/search_point_scorer.py::replayable_on`). A row's position is derived from the bank a cycle drew (`domain/sample.py::Bank`) and is never stored on a measurement; a cycle keeps the bank it drew for life. So a re-cut — editing, replacing or reordering rows, any `source:` cut parameter — is a new hash and needs no new name: the next `new` moves the label (`TenantDatasetStore.relabel`), no measurement or campaign is rewritten, and every per-sample history (δ, hit rate, hard samples) carries over by `sample_key` for the rows the cuts share.
 
 ## L4 — `promptpotter-self`
 
@@ -97,14 +96,14 @@ The remaining work lives in ONE place — [`docs/specs/l4-outer-loop.md`](../../
 - **Adding a dataset, canonical splits, and why X is or isn't wired** → [`docs/operations/dataset-selection-rationale.md`](../../../docs/operations/dataset-selection-rationale.md) § Adding a dataset. Research the canonical split; never invent one; check here first for "why didn't we use Y?" and "have we trialed Z?".
 - **Per-dataset model + `reasoning_effort` + `max_tokens`, BBEH output-ceiling traps** → [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md). This — not self-optimizing campaign NOTES.md — is the canonical source for model recommendations.
 
-## `rows.json` is the item bank, not a score cache
+## A bank is the item bank, not a score cache
 
-**Don't reason about origin cost from it.** It holds `{name, created_at, source_file, row_count, items}`,
-read into `session.samples` at wiring. **A file *here* is a hand-authored SHIPPED bank; a fetched or built
-one is the operator's** — owned by [`infrastructure/store/CLAUDE.md`](../../infrastructure/store/CLAUDE.md)
-§ Dataset content has two tiers; nothing writes a bank into this directory. Measurements live in the
-tenant-global content-addressed `measurements/` archive (`infrastructure/store/archive_queries.py`), which
-is what replays origin rows across cycles, forks and resumes.
+**Don't reason about origin cost from it.** A shipped definition's rows are its `source:` recipe's —
+fetched, generated, or held inline under `recipe: rows` — and the bank it yields is the operator's — owned by
+[`infrastructure/store/CLAUDE.md`](../../infrastructure/store/CLAUDE.md) § Dataset content has two tiers;
+nothing writes a bank into this directory. Measurements live in the tenant-global content-addressed
+`measurements/` archive (`infrastructure/store/archive_queries.py`), which is what replays origin rows
+across cycles, forks and resumes.
 
 ## Conventions
 

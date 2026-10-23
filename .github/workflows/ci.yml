@@ -15,19 +15,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # `--frozen` is what makes CI reproducible: a dependency moves only when
       # uv.lock is deliberately regenerated, never silently at install time.
       - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
 
       # The extras are `scripts/gate.py::_PINNED_EXTRAS`, the env the verdict is taken in; one
       # missing here reads green at the desk and red on CI (litellm, reached through `harbor`).
+      # Bytecode is compiled here because the suite's peak ceiling (`scripts/tests_owning.py::CEILING_MB`)
+      # is measured warm, and a first run that compiles it as it imports peaks higher.
       - name: Install dependencies
-        run: uv sync --extra dev --extra api --extra harbor --extra dspy --extra excel --frozen
+        run: uv sync --extra dev --extra api --extra harbor --extra dspy --extra excel --frozen --compile-bytecode
 
       # One step, and deliberately: `scripts/gate.py` is the single declaration of
       # what this repo checks, so the desk and CI cannot drift apart. It also runs
@@ -45,12 +47,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # All three jobs sync the same lock into the same cache key, so only `check` saves it;
       # a second save loses the reservation race and warns on every push.
       - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
           save-cache: false
@@ -86,9 +88,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
@@ -116,7 +118,7 @@ jobs:
       # be walked. `--with-deps` because a bare runner has none of Chromium's
       # shared libraries.
       - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
           save-cache: false

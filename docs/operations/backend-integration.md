@@ -71,7 +71,7 @@ The client talks to each backend over HTTP(S) with optional bearer-token auth. F
 - **Transport** — `https://` verifies the server cert; `http://` is cleartext. Pick the scheme in `TERMNORM_URL`.
 - **Auth** — set `TERMNORM_TOKEN` and every request carries `Authorization: Bearer …`; empty token → no header.
 - **Backend gate** — the backend decides whether to *require* a token (`TERMNORM_REQUIRE_AUTH=1`). Mismatch → 401.
-- **Resilience** — the session handshake auto-recovers; a 429 is the run's backpressure's (`infrastructure/llm/send_pacing.py::Backpressure` — one cooldown every cell shares, fewer sent at once, a stop only once no wait clears it); a 5xx, or a connection broken before any reply, backs off 1→2→4→8 s unless its body declares a resend pointless (`detail.retryable: false`, TermNorm's deadline on a provider request), which halts the cell; a connection never made waits for `GET /status` to answer, up to the wait its connector declares (`Connector.cell_wait_s`), so a backend restart costs a campaign nothing; a read timeout is never sent again, because the backend is still working — and billing — the first request.
+- **Resilience** — the session handshake auto-recovers; a 429 is the run's backpressure's (`infrastructure/llm/send_pacing.py::Backpressure` — one cooldown every cell shares, fewer sent at once, a stop only once no wait clears it); a 5xx, or a connection broken before any reply, backs off 1→2→4→8 s unless its body declares a resend pointless (`detail.retryable: false`, TermNorm's deadline on a provider request), which halts the cell; a connection never made waits for `GET /status` to answer, up to a fixed outage wait (`infrastructure/backend.py::_OUTAGE_WAIT_S`), so a backend restart costs a campaign nothing; a cell still open past the smaller of its connector's `cell_envelope_s` and the launch's wall clock left is cut `HALTED`; a read timeout is never sent again, because the backend is still working — and billing — the first request.
 
 **Remote:** set `TERMNORM_REQUIRE_AUTH=1` + matching `TERMNORM_TOKEN` on both hosts, set `TERMNORM_URL` to the `https://` URL, verify `curl https://…/status` returns 200. **Local:** same machine → `http://127.0.0.1:8000`; token optional for bare dev. The Linux deploy (`deploy-linux/bootstrap.sh`) auto-provisions a shared `TERMNORM_TOKEN` and sets `TERMNORM_REQUIRE_AUTH=true` on both sides **even on loopback** — defense-in-depth against a co-located compromised process. Nothing leaves loopback either way.
 
@@ -79,7 +79,7 @@ The client talks to each backend over HTTP(S) with optional bearer-token auth. F
 
 ## Self-healing a node
 
-A node emits `diagnostics.warnings[]`; PromptPotter counts them and synthesizes a `RuntimeFailure` on the offending candidate (`scoring/candidate_report.py::read_breakage`), which the next round's generation is shown. To wire a new node: emit the warning; the trip rate is `optimization.degradation_threshold` (0 disables). Who heals which wound: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
+A node emits `diagnostics.warnings[]`; PromptPotter counts them and synthesizes a `RuntimeFailure` on the offending candidate (`application/scoring/arm_states.py::read_breakage`), which the next round's generation is shown. To wire a new node: emit the warning; the trip rate is `optimization.degradation_threshold` (0 disables). Who heals which wound: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
 ## Web-search strategy — a swept axis with a cost signal
 
@@ -104,7 +104,7 @@ existing display and self-healing keep working. Backend rationale:
 |----------|-------------|
 | `GET /api/v1/backends` | List registered backends |
 | `GET …/backends/{id}/health` | Backend health |
-| `GET …/campaigns` · `…/campaigns/{id}` | List / detail |
+| `GET …/campaigns` | List |
 | `GET …/health` | Service health |
 | `POST …/commands/{kind}` | Mutations — pause / step / fork a run, and the rest of the closed set `domain/command_kinds.py::CommandKind` (ADR-0001 command highway) |
 
@@ -121,7 +121,7 @@ python -X utf8 -m uvicorn promptpotter.main:app --port 8001   # API reference: /
 - **Diagnose from the code path, not by restarting.** When the backend "goes down" — `/status` itself times out, scoring stalls — the cause is almost always a **blocking call in an `async def` request path**, not a crash / SQLite lock / double-start. Grep the handler for sync I/O (`requests`, `ThreadPoolExecutor.map`, `time.sleep`, blocking DB) FIRST; a restart cannot distinguish the two. One sync call freezes the single uvicorn worker for its whole step, so every concurrent request stalls with it, `/status` included. Offload via `asyncio.to_thread` / `run_in_executor`. **Backend async hygiene is a standing check: no sync I/O on the event loop.**
 - **The highway IS a cross-repo contract — change one side, fix both.** PP consumes TermNorm response *shapes*, so a shape change on either side silently breaks the other. Coupling points: the error envelope is TermNorm's `{status, message, code}` (a global handler in `main.py`), **not** FastAPI's `{detail}` — PP must read `message`. Session-loss self-heal keys on a stable machine-readable `code: "no_session"` and nothing else (codes, never substring or shape guessing), and the resend policy on the typed `detail.retryable` — both read by `connectors/termnorm.py::TermNormSession`, never by the agnostic `BackendClient`. The web_search warning `stats` dict keys are read by PP's display. When you touch a response field, grep the *other* repo for its consumer.
 - **`--reload` wipes the in-memory session on every backend code edit.** TermNorm holds sessions in `user_sessions = {}` (process memory), so any backend edit reloads uvicorn and in-flight PP runs hit `400 no_session`. PP self-heals (re-`POST /sessions` + retry); keep it that way — a developer editing the backend mid-run must not abort the campaign.
-- **Provider latency is the recurring root, and the guards are bounds rather than a faster host.** Bound optimizer reasoning (`medium`) and keep request timeouts under the wait PP gives a cell (`Connector.cell_wait_s`); an unbounded optimizer node blows `OPTIMIZER_CALL_DEADLINE_S` and raises `OPTIMIZER_TIMEOUT` before round 1. Which provider a campaign runs on is the operator's daily-volume knob — don't flip it unprompted.
+- **Provider latency is the recurring root, and the guards are bounds rather than a faster host.** Bound optimizer reasoning (`medium`) and keep request timeouts under the envelope PP gives a cell (`Connector.cell_envelope_s`); an unbounded optimizer node blows `OPTIMIZER_CALL_DEADLINE_S` and raises `OPTIMIZER_TIMEOUT` before round 1. Which provider a campaign runs on is the operator's daily-volume knob — don't flip it unprompted.
 - **Evidence depth is a strategy axis, not a timeout.** `scrape` runs under a hard `scrape_budget` deadline, `snippets` cannot hang, `hybrid` (default) falls back per source — so a slow scrape costs depth rather than the run. Contract, `web_cost` fields, and how to sweep it → § Web-search strategy above.
 
 ## Troubleshooting

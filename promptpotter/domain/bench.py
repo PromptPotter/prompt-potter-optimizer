@@ -5,53 +5,26 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, NamedTuple, Self, get_args
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from promptpotter.domain.paired_reading import (
-    ArmPointer,
+    READING_STATE_INFO,
+    ArmName,
     CellSet,
     CellSetBasis,
     CellSetName,
     MeasuredLift,
     PairedReading,
     ReadingState,
+    ReadingStateKind,
 )
 from promptpotter.domain.phases import StopOutcome, StopReason, WalkEnd, stop_reason_outcome
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellGrade, WalkedCell
 from promptpotter.domain.spend import SpendRollup
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import stable_hash
-
-__all__ = [
-    "BENCH_HEADLINE",
-    "BENCH_STATE_INFO",
-    "COLUMN_GRADE",
-    "BandedValue",
-    "BankPartition",
-    "BenchColumn",
-    "BenchPass",
-    "BenchPasses",
-    "BenchReading",
-    "BenchScore",
-    "BenchStateInfo",
-    "BenchStatus",
-    "BenchSubject",
-    "BenchTrigger",
-    "CostAbsence",
-    "DatasetSplit",
-    "GradedBench",
-    "LiftCost",
-    "LineRun",
-    "OwnLevel",
-    "PartitionRecord",
-    "PassOutcome",
-    "PassStop",
-    "bench_split",
-    "bench_status",
-    "partition_bank",
-    "restored_partition",
-]
 
 
 class DatasetSplit(StrictModel):
@@ -64,12 +37,8 @@ class DatasetSplit(StrictModel):
         0,
         ge=0,
         description="Distinct samples reserved as the demo pool — the rows an individual's "
-        "`shot_ids` name, rendered into its prompt as query and ground truth, never scored.",
-    )
-    seed: int = Field(
-        0,
-        description="Seeds which rows fall where. Membership ranks each row by its content "
-        "(`Sample.key`), never its slot, so a reordered bank holds out the same rows.",
+        "`shots` name by `Sample.key`, rendered into its prompt as query and ground truth, never "
+        "scored.",
     )
     tolerance: int = Field(
         0,
@@ -111,10 +80,6 @@ class BankPartition:
     def bench_rows(self) -> CellSet:
         return bench_split(s.key for s in self.bench)
 
-    @property
-    def search_demo_id(self) -> str:
-        return stable_hash([[s.key for s in self.search], [s.key for s in self.demo]])
-
     def record(self, *, dataset_hash: str) -> PartitionRecord:
         return PartitionRecord(
             dataset_hash=dataset_hash,
@@ -123,49 +88,50 @@ class BankPartition:
             bench_ids=[s.id for s in self.bench],
             bench_rows=self.bench_rows,
             demo_ids=[s.id for s in self.demo],
-            search_demo_id=self.search_demo_id,
         )
 
 
-class PartitionRecord(StrictModel):
-    """``cycles/{id}/bank_partition.json``: the partition a run init drew, as row ids."""
+class PartitionRecord(FrozenModel):
+    """The partition a cycle's mint drew, as slots in its bank; a fork reads its parent's off the chain."""
 
-    model_config = ConfigDict(frozen=True)
-
+    record_type: Literal["bank_partition"] = "bank_partition"
     dataset_hash: str
     split: DatasetSplit | None
     search_ids: list[int]
     bench_ids: list[int]
-    # Row ids are slots; this is the held-out content two campaigns are compared on.
+    # The held-out content two campaigns are compared on.
     bench_rows: CellSet
     demo_ids: list[int]
-    # The other two pools' content. `None` only on a record drawn before 2026-10-16.
-    search_demo_id: str | None = None
+    timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
     def bank_ids(self) -> frozenset[int]:
         return frozenset([*self.search_ids, *self.bench_ids, *self.demo_ids])
 
 
-def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPartition:
-    """Ranks DISTINCT samples, so every copy lands on its sample's side; a ``bench_only`` row is never ranked."""
+def partition_bank(
+    bank: Sequence[Sample], split: DatasetSplit | None, *, seed: int
+) -> BankPartition:
+    """Ranks DISTINCT samples by *seed* and content, so every copy lands on its sample's side."""
     declared = {s.key for s in bank if s.bench_only}
+    rank = {k: stable_hash([seed, k]) for k in {s.key for s in bank}}
+
+    def ordered(rows: Iterable[Sample]) -> tuple[Sample, ...]:
+        return tuple(sorted(rows, key=lambda s: rank[s.key]))
+
     if split is None:
         if declared:
             raise ValueError(
                 f"{len(declared)} samples of this bank are bench-only and no dataset_split is "
                 "declared, so the search would draw rows the dataset holds out."
             )
-        return BankPartition(split=None, search=tuple(bank), bench=(), demo=())
+        return BankPartition(split=None, search=ordered(bank), bench=(), demo=())
     if repeats := sorted(s.id for s in bank if not s.bench_only and s.key in declared):
         raise ValueError(
             f"rows {repeats} repeat the content of a bench-only row, so one sample would sit on "
             "both sides of the split."
         )
-    keys = sorted(
-        {s.key for s in bank} - declared,
-        key=lambda k: stable_hash([split.seed, k]),
-    )
+    keys = sorted({s.key for s in bank} - declared, key=rank.__getitem__)
     held = split.bench + split.demo
     if held >= len(keys):
         raise ValueError(
@@ -182,29 +148,20 @@ def partition_bank(bank: Sequence[Sample], split: DatasetSplit | None) -> BankPa
         )
     return BankPartition(
         split=split,
-        search=tuple(s for s in bank if s.key not in bench_keys and s.key not in demo_keys),
+        search=ordered(s for s in bank if s.key not in bench_keys and s.key not in demo_keys),
         bench=tuple(s for s in bank if s.key in bench_keys),
         demo=tuple(s for s in bank if s.key in demo_keys),
     )
 
 
 def restored_partition(bank: Sequence[Sample], drawn: PartitionRecord) -> BankPartition:
-    """The partition a run init drew, back on *bank* by row id — refused where a row's content
-    moved, since an L4 cell's rows ride its bank and never its config."""
-    by_id = {s.id: s for s in bank}
-    if missing := sorted(drawn.bank_ids - by_id.keys()):
-        raise ValueError(f"rows {missing[:5]} the cycle drew are not in this bank")
-    partition = BankPartition(
+    """*bank* is the one ``drawn.dataset_hash`` names, so a slot is its position."""
+    return BankPartition(
         split=drawn.split,
-        search=tuple(by_id[i] for i in drawn.search_ids),
-        bench=tuple(by_id[i] for i in drawn.bench_ids),
-        demo=tuple(by_id[i] for i in drawn.demo_ids),
+        search=tuple(bank[i] for i in drawn.search_ids),
+        bench=tuple(bank[i] for i in drawn.bench_ids),
+        demo=tuple(bank[i] for i in drawn.demo_ids),
     )
-    if partition.bench_rows.id != drawn.bench_rows.id:
-        raise ValueError("its held-out rows hold other content than the cycle drew")
-    if drawn.search_demo_id not in (None, partition.search_demo_id):
-        raise ValueError("its search or demo rows hold other content than the cycle drew")
-    return partition
 
 
 BenchSubject = Literal["origin", "selected"]
@@ -213,10 +170,8 @@ BenchSubject = Literal["origin", "selected"]
 BenchTrigger = Literal["manual", "at_end", "each_round"]
 
 
-class PassStop(StrictModel):
+class PassStop(FrozenModel):
     """Why a bench pass holds fewer rows than it was sent on."""
-
-    model_config = ConfigDict(frozen=True)
 
     cause: StopReason | WalkEnd = Field(
         description="The walk's own end, or the run stop that cut the pass before it was sent."
@@ -226,10 +181,8 @@ class PassStop(StrictModel):
     )
 
 
-class BenchPass(StrictModel):
+class BenchPass(FrozenModel):
     """One individual's pass over the bench set, as the facts it banked — never a grade of them."""
-
-    model_config = ConfigDict(frozen=True)
 
     round: int
     candidate_id: str
@@ -247,6 +200,14 @@ class BenchPass(StrictModel):
     # By `Sample.key`, each row measuring another dataset than the one the cycle is filed under.
     measured_datasets: dict[str, str] = Field(default_factory=dict)
 
+    def answers(self, sp_hash: str, sample_keys: list[str], scorer_id: str) -> bool:
+        """Banked whole for this point, on these rows, under this grader: re-sending it buys nothing."""
+        return self.stop is None and (self.sp_hash, self.sample_keys, self.scorer_id) == (
+            sp_hash,
+            sample_keys,
+            scorer_id,
+        )
+
     def by_dataset(self) -> dict[str | None, list[str]]:
         """``None`` is the dataset the cycle is filed under."""
         out: dict[str | None, list[str]] = {}
@@ -255,10 +216,8 @@ class BenchPass(StrictModel):
         return out
 
 
-class BenchPasses(StrictModel):
+class BenchPasses(FrozenModel):
     """``runner/bench.py::read_bench`` is the one reading of these passes."""
-
-    model_config = ConfigDict(frozen=True)
 
     tolerance: int
     origin: BenchPass
@@ -282,9 +241,7 @@ BENCH_HEADLINE: BenchColumn = "accuracy"
 COLUMN_GRADE: dict[BenchColumn, CellGrade] = {"accuracy": "fitness", "composite": "objective"}
 
 
-class BandedValue(StrictModel):
-    model_config = ConfigDict(frozen=True)
-
+class BandedValue(FrozenModel):
     value: float
     ci_lo: float | None = Field(
         description="The 95% band on `value`, drawn from the same per-row values; both bounds are "
@@ -299,10 +256,8 @@ class BandedValue(StrictModel):
         return self
 
 
-class OwnLevel(StrictModel):
+class OwnLevel(FrozenModel):
     """One individual's own level on one set of rows, in both columns; never one side of a pair."""
-
-    model_config = ConfigDict(frozen=True)
 
     accuracy: BandedValue | None = Field(
         description="Mean per-row fitness — the hit rate under a scorer that grades each row 0 "
@@ -414,14 +369,12 @@ class LineRun(NamedTuple):
     selecting: bool
     ending: StopReason | None
     # ``RunStanding.selection``: the origin until a round selects, ``None`` until round 0 closes.
-    selection: ArmPointer | None
+    selection: ArmName | None
     rounds_closed: int
 
 
-class BenchStatus(StrictModel):
+class BenchStatus(FrozenModel):
     """Where a campaign's bench stands, and whether asking for its pass would be admitted."""
-
-    model_config = ConfigDict(frozen=True)
 
     state: ReadingState
     trigger: BenchTrigger
@@ -431,6 +384,10 @@ class BenchStatus(StrictModel):
         "this one answer."
     )
     refusal: str | None = Field(description="Why not, exactly where `can_grade` is false.")
+    offered: bool = Field(
+        description="Whether the grade control shows: admitted, or a pass still waited on. "
+        "Never on an inner run, whose line no command grades."
+    )
     subject: BenchSubject | None = Field(
         description="Whose pass `state` names, where one pass decides it."
     )
@@ -459,6 +416,7 @@ def bench_status(
     bench_size: int,
     tolerance: int,
     on_line: bool,
+    inner: bool,
     held_by: str | None,
     origin: PassOutcome | None,
     selected: PassOutcome | None,
@@ -506,7 +464,9 @@ def bench_status(
         )
 
     refusal: str | None = None
-    if not on_line:
+    if inner:
+        refusal = "An inner run is one cell of its outer campaign; no command grades its line."
+    elif not on_line:
         refusal = (
             "This campaign has no manifest on disk."
             if held_by is None
@@ -529,6 +489,8 @@ def bench_status(
         sentence=sentence,
         can_grade=refusal is None,
         refusal=refusal,
+        offered=refusal is None
+        or (not inner and READING_STATE_INFO[state].kind is ReadingStateKind.WAITING),
         subject=subject,
         held_by=held_by,
         stop=None if decided is None else decided.stop,
@@ -546,10 +508,8 @@ class CostAbsence(StrEnum):
     ZERO_SPEND = "zero_spend"
 
 
-class LiftCost(StrictModel):
+class LiftCost(FrozenModel):
     """The headline lift per USD its SEARCH incurred, or why there is none."""
-
-    model_config = ConfigDict(frozen=True)
 
     lift_per_usd: float | None = Field(
         description="Priced on INCURRED spend, never the bill — a replayed cell is billed "
@@ -580,11 +540,9 @@ class LiftCost(StrictModel):
         return cls(lift_per_usd=vs_origin.headline.estimate.value / usd, absent=None)
 
 
-class BenchScope(StrictModel):
+class BenchScope(FrozenModel):
     """One dataset's rows of a bench spanning several, read apart: a level is never averaged
     across datasets."""
-
-    model_config = ConfigDict(frozen=True)
 
     dataset: str | None = Field(
         description="The dataset these rows measure; `None` is the one the cycle is filed under."
@@ -630,10 +588,8 @@ def _bench_line(
     )
 
 
-class BenchScore(StrictModel):
+class BenchScore(FrozenModel):
     """The headline: the selection and the origin, scored on a bench set no optimizer node read."""
-
-    model_config = ConfigDict(frozen=True)
 
     bench_size: int
     scorer_id: str = Field(

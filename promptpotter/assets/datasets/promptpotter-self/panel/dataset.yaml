@@ -141,19 +141,19 @@ panel:
   tasks:
     - kind: seat
       id: justlogic-d234/seed-0
-      inner_dataset_seed: 0
+      run_seed: 0
     - kind: seat
       id: justlogic-d234/seed-2
-      inner_dataset_seed: 2
+      run_seed: 2
     - kind: seat
       id: justlogic-d234/seed-3
-      inner_dataset_seed: 3
+      run_seed: 3
     - kind: seat
       id: justlogic-d234/seed-6
-      inner_dataset_seed: 6
+      run_seed: 6
     - kind: seat
       id: justlogic-d234/seed-20
-      inner_dataset_seed: 20
+      run_seed: 20
     - kind: seat
       id: justlogic-d234/seed-25
-      inner_dataset_seed: 25
+      run_seed: 25

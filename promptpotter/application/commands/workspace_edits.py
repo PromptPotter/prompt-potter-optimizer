@@ -1,28 +1,19 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import TYPE_CHECKING, assert_never
 
 from promptpotter.application.commands.dispatcher import Applier
-from promptpotter.application.commands.payloads import (
+from promptpotter.domain.command_kinds import (
     ArchiveCampaignPayload,
-    DatasetReplaced,
     DeleteCampaignPayload,
     UnarchiveCampaignPayload,
 )
-from promptpotter.infrastructure.store import dataset_replace
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.application.commands.payloads import (
-        LifecyclePayload,
-        ReplaceDatasetPayload,
-        SetCampaignLabelPayload,
-    )
-
-__all__ = ["campaign_lifecycle", "replace_dataset", "set_campaign_label"]
+    from promptpotter.domain.command_kinds import LifecyclePayload, SetCampaignLabelPayload
 
 
 def campaign_lifecycle(dispatcher: CommandDispatcher, payload: LifecyclePayload) -> Applier[object]:
@@ -56,26 +47,7 @@ def set_campaign_label(
     """Identity-neutral: ``label`` is not in ``root_content_hash``, so a rename voids no banked origin."""
     campaign_id, label = payload.campaign_id, payload.label
 
-    def _apply() -> dict[str, Any]:
+    def _apply() -> None:
         dispatcher.stores.campaigns.update_campaign(campaign_id, label=label)
-        return {"campaign_id": campaign_id, "label": label}
 
     return Applier.silent(_apply)
-
-
-def replace_dataset(
-    dispatcher: CommandDispatcher, payload: ReplaceDatasetPayload
-) -> Applier[DatasetReplaced]:
-    slug = payload.slug
-
-    def _apply() -> DatasetReplaced:
-        try:
-            result = dataset_replace.replace_dataset(stores=dispatcher.stores, slug=slug)
-        except dataset_replace.NothingToReplaceError as exc:
-            raise ConflictError(
-                str(exc), code="nothing_to_replace", details={"slug": exc.slug}
-            ) from exc
-        return DatasetReplaced(slug=result.slug)
-
-    # A deduped retry must not re-run the migration: it would version the slug a second time.
-    return Applier(_apply, replay=lambda: DatasetReplaced(slug=slug))

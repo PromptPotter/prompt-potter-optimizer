@@ -7,20 +7,33 @@ import hashlib
 import json
 import pkgutil
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Protocol
+from types import MappingProxyType
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    ClassVar,
+    Literal,
+    Protocol,
+    cast,
+    runtime_checkable,
+)
 
-from promptpotter.application.campaign_config import CampaignConfig, Estimand
-from promptpotter.application.initialization.session import Session
-from promptpotter.domain.optimizer_state import OptimizerState, RoundPayload
+from pydantic import Field
+
+from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob, Scope
+from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import rounds_without_advance
+from promptpotter.domain.results import ArmSlot, Proposed, rounds_without_advance
+from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import CatchUps
 from promptpotter.infrastructure.store.source_scan import optimizer_prompt_shapers
 from promptpotter.shared.hashing import module_source_digest
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     import asyncio
@@ -37,63 +50,30 @@ if TYPE_CHECKING:
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
-    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
+    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.pool import Access, Pool
     from promptpotter.domain.results import (
-        CandidateProposal,
+        ArmFit,
+        Concluded,
         DisplayMetric,
+        Elimination,
         OptimizerFact,
-        ReferenceReading,
+        Proposal,
         RoundResult,
-        ScoredCandidate,
+        ScoreSummary,
     )
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet, GradedCell
+    from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule, StopSignal
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
     # (the call already started, the commit writing its row once a walk takes the cell, the discard).
     CatchUp = tuple[asyncio.Future[Any], Callable[[], Sequence[GradedCell]], Callable[[], None]]
-    CatchUpFn = Callable[[JobSearchPoint, Sample, str], CatchUp]
-
-__all__ = [
-    "BUILTIN_PACKAGES",
-    "INITIAL_POPULATION",
-    "Adapter",
-    "BankedState",
-    "CheckResult",
-    "Controller",
-    "EliminationReading",
-    "Eliminator",
-    "LlmNode",
-    "Measured",
-    "MemberCoupling",
-    "NoCatchUps",
-    "NodeMember",
-    "OptimizerPhase",
-    "OptimizerRuntime",
-    "Panel",
-    "Proposals",
-    "Proposer",
-    "Race",
-    "RaceSnapshot",
-    "ReviewReading",
-    "ReviewStat",
-    "RoundContext",
-    "RoundOpening",
-    "RoundWalk",
-    "Sampler",
-    "Selection",
-    "Selector",
-    "WorkingState",
-    "proposals_as",
-    "round_state",
-    "rows_read_packages",
-    "standing_opening",
-    "state_as",
-]
+    CatchUpFn = Callable[[JobSearchPoint, Sample, ArmKey], CatchUp]
 
 
 @dataclass(frozen=True)
@@ -110,13 +90,101 @@ class MemberCoupling:
     predicate: Callable[[CampaignConfig, Any, Any], bool]
 
 
+# How many of the pipeline's prompt nodes a member writes: a `one` refuses any other roster before the mint.
+PromptArity = Literal["none", "one", "each"]
+
+Rewrites = Literal["prompt", "field"]
+
+
+class RewriteKnobs(StrictModel):
+    rewrites: Annotated[Rewrites, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        description="Which loci of a prompt node the reply replaces. `prompt`: the whole prompt "
+        "as one text — the model is shown every field rendered together, its reply rides `field` "
+        "and the node's other fields empty, as the papers' one-text prompts do. `field`: that "
+        "field alone — the model is shown it alone, and the child inherits every other locus "
+        "from its first parent."
+    )
+    field: Annotated[str, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        min_length=1,
+        description="The prompt field the reply is written into; every prompt node the member "
+        "rewrites declares it, or the campaign is refused before it mints.",
+    )
+
+
+@dataclass(frozen=True)
+class AccessKnob:
+    """A reader's access to a pool is the value of one ``Access`` knob, its own or a consulted member's."""
+
+    knobs: type[StrictModel]
+    knob: str
+
+    def access(self, values: StrictModel) -> Access:
+        return cast("Access", getattr(values, self.knob))
+
+
+@dataclass(frozen=True)
+class CountKnob:
+    """Shots are taken by id or not at all: a count above zero is ``closed``, zero is ``off``."""
+
+    knobs: type[StrictModel]
+    knob: str
+
+    def access(self, values: StrictModel) -> Access:
+        return "closed" if getattr(values, self.knob) > 0 else "off"
+
+
+Draw = AccessKnob | CountKnob
+
+
+class CycleRead:
+    """A typed read of the cycle a member names in ``sees``; ``NodeContext.read`` hands it over."""
+
+    def __init__(self, round_: RoundContext) -> None:
+        self._round = round_
+        self._cycle = round_.cycle
+
+
 class NodeMember(Protocol):
+    """Every edge to another member is declared here, and ``optimizer_manifest.py::_open_edges`` closes them before a mint."""
+
     @property
     def name(self) -> str: ...
     @property
     def kind(self) -> NodeKind: ...
     @property
     def knobs(self) -> type[StrictModel]: ...
+    @property
+    def prompt_arity(self) -> PromptArity: ...
+    @property
+    def reads(self) -> frozenset[type[StatePart]]: ...
+    @property
+    def writes(self) -> frozenset[type[StatePart]]: ...
+    # The cycle reads beyond its own state it is handed (`NodeContext.read`).
+    @property
+    def sees(self) -> frozenset[type[CycleRead]]: ...
+    # The pools it draws from, each under the knob that sets its access; read only through `NodeContext.drawn`.
+    @property
+    def draws(self) -> Mapping[type[Pool], Draw]: ...
+    # The members whose knobs it reads (`NodeContext.knobs_of`), and nothing else of theirs.
+    @property
+    def consults(self) -> frozenset[type]: ...
+
+
+class Member:
+    """What a member declares where it states nothing: no prompt, no state, no cycle read, no pool, no other member."""
+
+    name: ClassVar[str]
+    kind: ClassVar[NodeKind]
+    knobs: ClassVar[type[StrictModel]] = StrictModel
+    prompt_arity: ClassVar[PromptArity] = "none"
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
+    draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType({})
+
+    @property
+    def consults(self) -> frozenset[type]:
+        return frozenset()
 
 
 @dataclass(frozen=True)
@@ -145,59 +213,46 @@ class ReviewReading:
     check_ids: tuple[str, ...]
     verdict: ReviewStat | None
     stats: tuple[ReviewStat, ...]
-    variants: list[list[dict[str, Any]]]
     feedback: list[str]
 
 
-class WorkingState(Protocol):
-    """The bench carries it on ``Cycle.working_state``, asks it only these, and reads nothing inside it."""
+class SliceMap:
+    """The state slices a cycle holds, one per kind its manifest carries, a written-first kind once its writer ran; the close banks them."""
 
-    def round_payload(self) -> RoundPayload:
-        """Asked at the election and again at the close, which banks the answer — round 0's included."""
-        ...
+    def __init__(self, kinds: Iterable[type[StateSlice]]) -> None:
+        self._carried = {kind.kind: kind for kind in kinds}
+        self._held: dict[str, StateSlice] = {
+            name: kind() for name, kind in self._carried.items() if not kind.written_first()
+        }
 
-    def replay(self, last: RoundResult) -> None:
-        """Take up the state ``last`` banked: a resume, a fork or a repair re-seats the cycle there."""
-        ...
+    def carries(self, kind: type[StateSlice]) -> bool:
+        return self._carried.get(kind.kind) is kind
 
-    def absorb(self, round_result: RoundResult) -> None:
-        """Fold an elected round in; the round is a value this never writes."""
-        ...
+    def get[S: StateSlice](self, kind: type[S]) -> S:
+        if not self.carries(kind):
+            raise KeyError(f"the manifest carries no {kind.kind!r} slice")
+        found = self._held.get(kind.kind)
+        if not isinstance(found, kind):
+            raise ValueError(f"the {kind.kind!r} slice is read before its writer ran")
+        return found
 
+    def put(self, value: StateSlice) -> None:
+        if self._carried.get(value.kind) is not type(value):
+            raise KeyError(f"the manifest carries no {value.kind!r} slice")
+        self._held[value.kind] = value
 
-class BankedState[P: RoundPayload]:
-    """For an optimizer whose state IS its payload: a FROZEN model a member replaces by assignment."""
+    def held(self) -> dict[str, StateSlice]:
+        return dict(self._held)
 
-    def __init__(self, payload: P) -> None:
-        self.payload = payload
-
-    def round_payload(self) -> P:
-        return self.payload
-
-    def replay(self, last: RoundResult) -> None:
-        self.absorb(last)
-
-    def absorb(self, round_result: RoundResult) -> None:
-        self.payload = round_result.optimizer_state.payload_as(type(self.payload))
-
-
-def state_as[P: RoundPayload](ctx: NodeContext[Any], kind: type[P]) -> BankedState[P]:
-    state = ctx.state
-    if not isinstance(state, BankedState) or not isinstance(state.payload, kind):
-        raise TypeError(f"a member banking {kind.__name__} was handed {type(state).__name__}")
-    return state
-
-
-def round_state(
-    selected: SelectedOptimizer, payload: RoundPayload, population: Sequence[OptSearchPoint]
-) -> OptimizerState:
-    """Prompt hashes are stamped as the round is BUILT, never at a re-save."""
-    return OptimizerState(
-        manifest=selected.name,
-        population=list(population),
-        prompt_hashes=selected.prompt_hashes(),
-        payload=payload,
-    )
+    def seat(self, banked: OptimizerState) -> None:
+        """Take up what *banked* holds: a resume, a fork or a repair re-seats the cycle there."""
+        unwritten = {k for k, kind in self._carried.items() if kind.written_first()}
+        if not set(self._carried) - unwritten <= set(banked.slices) <= set(self._carried):
+            raise ValueError(
+                f"{banked.manifest!r} banked slices {sorted(banked.slices)}, "
+                f"but its manifest carries {sorted(self._carried)}"
+            )
+        self._held = dict(banked.slices)
 
 
 @dataclass(frozen=True)
@@ -207,7 +262,7 @@ class OptimizerPhase:
     activity: str
 
 
-class LlmNode:
+class LlmNode(Member):
     kind: ClassVar[NodeKind] = NodeKind.LLM
     # ``None`` where the node answers in free text; else ``build_optimizer_schemas.py`` writes its schema.
     response_model: ClassVar[type[BaseModel] | None] = None
@@ -233,6 +288,7 @@ class RoundOpening:
 
 
 INITIAL_POPULATION = "initial_population"
+RUN_INIT = "run_init"
 
 
 @dataclass(frozen=True)
@@ -257,28 +313,24 @@ class RoundWalk:
         return next(m.name for m in self.members if m.kind is NodeKind.LLM)
 
 
-def standing_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
-    selected = ctx.cycle.optimizer
-    alone = walk.pipeline == INITIAL_POPULATION
-    return RoundOpening(
-        standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
-        note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
-        arms=None if alone else selected.arms_per_round,
-        proposer=walk.proposer,
-        replayed=False,
-    )
-
-
 _PACKAGE = __name__.rpartition(".")[0]
 BUILTIN_PACKAGES = frozenset(
     pkg.name for pkg in pkgutil.iter_modules([str(Path(__file__).parent)]) if pkg.ispkg
 )
 
 
+def member_package(member: object) -> str | None:
+    """The built-in optimizer package declaring *member*; ``None`` for a plugin's."""
+    package = type(member).__module__.removeprefix(f"{_PACKAGE}.").split(".")[0]
+    return package if package in BUILTIN_PACKAGES else None
+
+
 @functools.cache
-def _source_digest(sources: tuple[ModuleType, ...], covered: tuple[ModuleType, ...]) -> str:
+def _source_digest(
+    sources: tuple[ModuleType, ...], covered: tuple[ModuleType, ...], roster: frozenset[str]
+) -> str:
     own = sources[-1].__name__.removeprefix(f"{_PACKAGE}.").split(".")[0]
-    foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - {own})
+    foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - {own} - roster)
     return module_source_digest(
         *sources, *optimizer_prompt_shapers(sources, covered=covered, foreign=foreign)
     )
@@ -297,33 +349,39 @@ class OptimizerRuntime(ABC):
     replayers: ClassVar[Mapping[str, Replayer]] = {}
     couplings: ClassVar[Mapping[str, tuple[MemberCoupling, ...]]] = {}
 
-    @abstractmethod
-    def start(
-        self, session: Session, config: CampaignConfig, origin_results: CellSheet
-    ) -> WorkingState:
-        """Mint the working state the bench carries on ``Cycle.working_state``."""
+    def refuse_origin(self, origin_results: CellSheet) -> None:
+        """Raise where the origin's measurement holds what this optimizer cannot start from."""
+        return None
 
     @abstractmethod
     def arms(self, selected: SelectedOptimizer) -> int:
         """The most arms one round races."""
 
-    def round_cells_ceiling(self, selected: SelectedOptimizer, pool: int) -> int:
+    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
         """Overridden only where a round's walks are not every arm plus the parent on the sampler's draw."""
-        return (self.arms(selected) + 1) * selected.round_cells(pool)
+        return (self.arms(selected) + 1) * selected.round_cells(search)
 
     def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
         return ()
 
     def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
-        return standing_opening(ctx, walk)
+        return RoundOpening(
+            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
+            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
+            arms=None
+            if walk.pipeline == INITIAL_POPULATION
+            else ctx.cycle.optimizer.arms_per_round,
+            proposer=walk.proposer,
+            replayed=False,
+        )
 
     def complete(self) -> None:
         """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
         return None
 
-    def source_digest(self, *covered: ModuleType) -> str:
-        """``covered`` are modules another digest already hashes."""
-        return _source_digest(self.prompt_sources, covered)
+    def source_digest(self, roster: frozenset[str], *covered: ModuleType) -> str:
+        """``roster`` are the built-in packages its manifest's members come from; ``covered`` modules another digest already hashes."""
+        return _source_digest(self.prompt_sources, covered, roster)
 
     def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
         """``{round: {node: fingerprint}}`` of what its nodes were handed; a repair moving one forks the rounds after it."""
@@ -370,7 +428,7 @@ def rows_read_packages(
     digest = hashlib.sha256()
     for rr in sorted(rounds, key=lambda r: r.round):
         out[rr.round] = dict.fromkeys(proposers, digest.hexdigest()[:16])
-        for sheet in (*rr.reference_results.values(), *rr.all_candidate_results.values()):
+        for sheet in rr.cells.values():
             seen = [
                 [
                     cell.facts.sample_key,
@@ -392,8 +450,21 @@ class RoundContext:
     round_num: int
     callbacks: RunCallbacks
     is_final_round: bool = False
-    # A fresh proposal of a round the cycle already ran: a proposer replays nothing and banks nothing.
-    detached: bool = False
+    # Each arm the round walked, its panel walk and every read of it as a reference, whoever asked.
+    walks: dict[ArmKey, ArmWalk] = field(default_factory=dict, init=False)
+
+    def asked(self, key: ArmKey, cells: Iterable[Sample]) -> frozenset[str]:
+        """What a walk of *key* on *cells* is asked: those, and every cell its walk was asked before."""
+        held = self.walks.get(key)
+        return frozenset(s.key for s in cells) | (frozenset() if held is None else held.asked)
+
+    def held(self, key: ArmKey) -> CellSheet:
+        held = self.walks.get(key)
+        return NO_CELLS if held is None else held.arm.rows
+
+    def walked(self, read: ReadArm, asked: frozenset[str]) -> None:
+        held = self.walks.get(read.key)
+        self.walks[read.key] = ArmWalk(read, asked) if held is None else held.continued(read, asked)
 
 
 @dataclass(frozen=True)
@@ -409,41 +480,89 @@ class Panel:
 class Proposals:
     """The round's ARMS; the population carried between rounds is ``NodeContext.population``."""
 
-    proposals: list[CandidateProposal]
+    proposals: list[Proposal]
 
     @property
     def individuals(self) -> list[OptSearchPoint]:
-        return [p.opt_sp for p in self.proposals]
+        return [p.individual for p in self.proposals]
 
-
-def proposals_as[T: Proposals](proposals: Proposals, kind: type[T]) -> T:
-    if not isinstance(proposals, kind):
-        raise TypeError(f"a member reading {kind.__name__} was handed {type(proposals).__name__}")
-    return proposals
+    def arms(self, round_num: int) -> dict[ArmKey, Proposed]:
+        """An individual proposed twice is one arm, at its first slot."""
+        arms: dict[ArmKey, Proposed] = {}
+        for idx, p in enumerate(self.proposals):
+            arms.setdefault(
+                p.key(round_num, idx),
+                Proposed(
+                    role=MeasurementRole.PANEL,
+                    slot=ArmSlot(round=round_num, idx=idx, total=len(self.proposals)),
+                    individual=p.individual,
+                    overlay=p.overlay,
+                    validation_failures=p.validation_failures,
+                ),
+            )
+        return arms
 
 
 @dataclass(frozen=True)
-class Measured:
+class ReadArm:
+    """An individual read on a round's cells as a reference: an arm of that round, with its rows."""
+
+    key: ArmKey
+    state: Concluded
+    rows: CellSheet
+
+    @property
+    def individual(self) -> OptSearchPoint:
+        return self.state.individual
+
+
+@dataclass(frozen=True)
+class ArmWalk:
+    """One arm's walk of its round, which every later read of it continues: ``arm`` holds its rows,
+    each read adding the cells they lack, and a panel arm's state; ``asked`` every cell asked of it."""
+
+    arm: ReadArm
+    asked: frozenset[str]
+
+    def continued(self, read: ReadArm, asked: frozenset[str]) -> ArmWalk:
+        held = frozenset(cell.key for cell in self.arm.rows)
+        rows = self.arm.rows.merged(read.rows.where(functools.partial(_unheld, held)))
+        state = read.state if self.arm.state.role == MeasurementRole.PARENT else self.arm.state
+        return ArmWalk(ReadArm(read.key, state, rows), asked)
+
+
+def _unheld(held: frozenset[str], cell: GradedCell) -> bool:
+    return cell.key not in held
+
+
+@dataclass(frozen=True)
+class MeasuredRound:
     """A selector keeps from ``electable`` alone; ``cut`` is a budget stop on whose short panels the round still elects."""
 
-    rows: dict[str, CellSheet]
-    scores: list[ScoredCandidate]
-    scored: list[OptSearchPoint]
-    parent: ReferenceReading
-    parent_rows: CellSheet
-    references: dict[str, CellSheet]
-    electable: list[OptSearchPoint]
+    # The panel, in slot order.
+    arms: dict[ArmKey, Concluded]
+    rows: dict[ArmKey, CellSheet]
+    parent: ReadArm
+    # Every arm as the round files it, its walk's rows whole: the panel in slot order, then each reference.
+    filed: dict[ArmKey, ReadArm]
+    # Each filed arm's fold of those rows (`scoring/metrics.py::arm_folds`); none for an arm refused before a cell.
+    folds: dict[ArmKey, ScoreSummary]
+    fit: dict[ArmKey, ArmFit]
+    electable: list[ArmKey]
     coverage_floor: int
     cut: StopReason | None
+
+    @property
+    def labels(self) -> dict[ArmKey, str]:
+        return {key: arm.label for key, arm in self.arms.items()}
 
 
 @dataclass(frozen=True)
 class Selection:
-    """``selected_id`` is empty when the round holds its parent; ``leading_id`` is the selector's own, never re-ranked downstream."""
+    """``selected`` is ``None`` when the round holds its parent; ``leading`` is the selector's own, never re-ranked downstream."""
 
-    selected_id: str
-    leading_id: str
-    scores: list[ScoredCandidate]
+    selected: ArmKey | None
+    leading: ArmKey | None
     verdict_reason: str
 
 
@@ -453,8 +572,8 @@ class Sampler(NodeMember, Protocol):
         """What a caller sizing the panel from outside (an L4 per-round count) writes; ``None`` where no one knob does."""
         ...
 
-    def draws(self, selected: SelectedOptimizer, pool: int) -> int:
-        """Cells a round after the first asks for, read BEFORE any round runs; 0 where the pool holds no panel."""
+    def round_cells(self, knobs: Any, search: int) -> int:
+        """Cells a round after the first asks for under its own *knobs*, read BEFORE any round runs; 0 where the search split holds no panel."""
         ...
 
     def draw(self, ctx: NodeContext[Any], pool: list[Sample]) -> Panel: ...
@@ -465,7 +584,12 @@ class Proposer(NodeMember, Protocol):
 
     @property
     def opens(self) -> bool:
-        """True of a walk's first proposer and of no other, which ``round_plan`` refuses a manifest on."""
+        """True of a walk's first proposer and of no other, which a manifest is refused on at load."""
+        ...
+
+    @property
+    def variation_mode(self) -> VariationMode:
+        """How it makes a child, which every child it writes records."""
         ...
 
     async def propose(
@@ -475,22 +599,14 @@ class Proposer(NodeMember, Protocol):
 
 @dataclass(frozen=True)
 class RaceSnapshot:
-    """``p_best`` is a scalar about ``current_id`` ALONE: a snapshot answers no round-wide question."""
+    """``p_best`` is a scalar about ``current`` ALONE: a snapshot answers no round-wide question."""
 
     p_best: float
-    current_id: str
+    current: ArmKey
     n_samples: int
-    paired_breakdown: dict[str, dict[str, float]]
-    # Whether `n_samples` reached the depth this race lets a standing decide at.
+    paired_breakdown: dict[ArmKey, dict[str, float]]
+    # Whether the cells read reached the depth this race lets a standing decide at.
     decision_grade: bool
-
-
-@dataclass(frozen=True)
-class EliminationReading:
-    """``reason`` is printed as served by every surface; ``context`` only the optimizer reads."""
-
-    reason: str
-    context: Mapping[str, Any]
 
 
 class Race(CatchUps, Protocol):
@@ -500,24 +616,22 @@ class Race(CatchUps, Protocol):
     def n_priors(self) -> int: ...
 
     @property
-    def blocks(self) -> BlockRace | None: ...
+    def blocks(self) -> BlockRace[ArmKey] | None: ...
 
-    def rule(self, ahead: Sequence[tuple[str, Walk | None]]) -> StopRule | None: ...
+    def rule(self, ahead: Sequence[tuple[ArmKey, Walk | None]]) -> StopRule | None: ...
 
-    def open_turn(self, candidate_id: str, idx: int, n: int) -> None: ...
+    def open_turn(self, key: ArmKey) -> None: ...
 
     def judge(
         self,
         signal: StopSignal | None,
         *,
-        candidate_id: str,
+        key: ArmKey,
         results: Sequence[GradedCell],
-        labels: dict[str, str],
-    ) -> EliminationReading | None: ...
+        labels: Mapping[ArmKey, str],
+    ) -> Elimination | None: ...
 
-    def admit(
-        self, candidate_id: str, results: Sequence[GradedCell], sp: JobSearchPoint
-    ) -> None: ...
+    def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None: ...
 
 
 class NoCatchUps:
@@ -548,12 +662,12 @@ class NoCatchUps:
 class Eliminator(NodeMember, Protocol):
     @property
     def abort_lenses(self) -> Mapping[str, frozenset[str]]:
-        """Each ``abort:<variant>`` the mask's lens offers, by the ``elimination_context["gate"]`` values it switches off."""
+        """Each ``abort:<variant>`` the mask's lens offers, by the ``Elimination.context["gate"]`` values it switches off."""
         ...
 
     @property
     def stop_disqualifies(self) -> bool:
-        """False where a stop only ends the buying of an arm the selector still reads; True takes it out of ``Measured.electable``."""
+        """False where a stop only ends the buying of an arm the selector still reads; True takes it out of ``MeasuredRound.electable``."""
         ...
 
     def race(
@@ -573,18 +687,60 @@ class Selector(NodeMember, Protocol):
         ...
 
     def parent_cells(
-        self, ctx: NodeContext[Any], panel: Panel, rows: Mapping[str, CellSheet]
+        self, ctx: NodeContext[Any], panel: Panel, rows: Mapping[ArmKey, CellSheet]
     ) -> list[Sample]:
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
         ...
 
     def select(
-        self, ctx: NodeContext[Any], measured: Measured, proposals: Proposals
+        self, ctx: NodeContext[Any], measured: MeasuredRound, proposals: Proposals
     ) -> Selection: ...
 
 
+class OperatorSeat:
+    """The arm gate's seat, declared as a member is: it writes the round's arms and no state, and draws what the proposers it stands in for draw, under their knobs."""
+
+    name: ClassVar[str] = "operator_seat"
+    kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
+    prompt_arity: ClassVar[PromptArity] = "none"
+    knobs: ClassVar[type[StrictModel]] = StrictModel
+    reads: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
+    variation_mode: ClassVar[VariationMode] = "operator"
+
+    def __init__(self, proposers: Sequence[Proposer]) -> None:
+        # The opening proposer's draw wins where two draw one pool.
+        self.draws: Mapping[type[Pool], Draw] = MappingProxyType(
+            {pool: draw for p in reversed(proposers) for pool, draw in p.draws.items()}
+        )
+        self.consults: frozenset[type] = frozenset(type(p) for p in proposers)
+
+
+@runtime_checkable
+class Initializer(NodeMember, Protocol):
+    """A manifest's `run_init` walk: each writes its pool once, before round 0's adapters read it."""
+
+    @property
+    def pool(self) -> type[Pool]: ...
+
+    def starting_content(self) -> object:
+        """What it seeds from beside the run's own data, which ``Treatment.source`` hashes."""
+        ...
+
+    def active(self, selected: SelectedOptimizer) -> list[str]: ...
+
+    def refusal(
+        self, selected: SelectedOptimizer, *, closed: bool, demo: Sequence[Sample] | None
+    ) -> str | None:
+        """At load with ``demo`` ``None``, again before the mint with the partition."""
+        ...
+
+    def initialize(self, ctx: NodeContext[Any]) -> None: ...
+
+
 class Adapter(NodeMember, Protocol):
-    """Reads the round the cycle just absorbed and writes its working state, which the round's close banks."""
+    """Writes off the round just absorbed; raises where it lands nothing, which the round survives and the next walk re-runs first."""
 
     async def adapt(self, ctx: NodeContext[Any], round_result: RoundResult) -> None: ...
 
@@ -592,11 +748,16 @@ class Adapter(NodeMember, Protocol):
 class Controller(NodeMember, Protocol):
     """Whether the run STOPS is the bench's (``runner/termination.py::standing_tripped``); ``act`` may still raise ``StopLoop``."""
 
-    def observe(self, ctx: NodeContext[Any], round_result: RoundResult) -> bool:
-        """Read the closed round into its own state; whether it acts at this boundary."""
+    @property
+    def fires(self) -> frozenset[type]:
+        """The members it runs, each under its own context (``NodeContext.fire``)."""
         ...
 
-    async def act(self, ctx: NodeContext[Any]) -> None: ...
+    def observe(self, ctx: NodeContext[Any], round_result: RoundResult) -> str | None:
+        """Read the closed round into its own state; the rule that makes it act at this boundary, ``None`` where none does."""
+        ...
+
+    async def act(self, ctx: NodeContext[Any], cause: str) -> None: ...
 
     async def diagnose(self, ctx: NodeContext[Any]) -> None:
         """``--diag``: act on the round just closed, then show the next round's proposals unmeasured."""

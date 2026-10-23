@@ -6,12 +6,10 @@ import re
 from typing import TYPE_CHECKING
 
 from promptpotter.judges.call import absent, graded, judge_answer, judge_question
-from promptpotter.judges.protocol import Judge, JudgeSpec, JudgeVerdict
+from promptpotter.judges.protocol import GradeFn, Judge, JudgeSpec, JudgeVerdict
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import MeasuredCell
-
-__all__ = ["SEALQA", "SIMPLEQA"]
 
 
 # Verbatim `openai/simple-evals/simpleqa_eval.py::GRADER_TEMPLATE`, quirks included: never fix it.
@@ -124,7 +122,7 @@ def _parse(reply: str) -> str | None:
     return _LETTER_TO_LABEL[match.group(1)] if match else None
 
 
-def _build_grade_fn(rubric: str, judge_name: str) -> object:
+def _build_grade_fn(rubric: str, judge_name: str) -> GradeFn:
     async def grade(spec: JudgeSpec, result: MeasuredCell) -> JudgeVerdict:
 
         answer = judge_answer(result)
@@ -150,7 +148,7 @@ SIMPLEQA = Judge(
         "gold target as CORRECT / INCORRECT / NOT_ATTEMPTED."
     ),
     rubric=_SIMPLEQA_RUBRIC.replace("{extra_rules}", _SIMPLEQA_RULES),
-    grade=_build_grade_fn(_SIMPLEQA_RUBRIC.replace("{extra_rules}", _SIMPLEQA_RULES), "simpleqa"),  # type: ignore[arg-type]
+    grade=_build_grade_fn(_SIMPLEQA_RUBRIC.replace("{extra_rules}", _SIMPLEQA_RULES), "simpleqa"),
     labels=tuple(_LABEL_TO_SCORE),
     to_score=_LABEL_TO_SCORE,
 )
@@ -163,7 +161,7 @@ SEALQA = Judge(
         "rule that marks an internally contradictory answer INCORRECT rather than NOT_ATTEMPTED."
     ),
     rubric=_SIMPLEQA_RUBRIC.replace("{extra_rules}", _SEALQA_RULES),
-    grade=_build_grade_fn(_SIMPLEQA_RUBRIC.replace("{extra_rules}", _SEALQA_RULES), "sealqa"),  # type: ignore[arg-type]
+    grade=_build_grade_fn(_SIMPLEQA_RUBRIC.replace("{extra_rules}", _SEALQA_RULES), "sealqa"),
     labels=tuple(_LABEL_TO_SCORE),
     to_score=_LABEL_TO_SCORE,
 )

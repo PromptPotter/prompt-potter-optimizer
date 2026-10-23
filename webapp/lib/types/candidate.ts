@@ -11,8 +11,10 @@ export type CandidateSource = "history" | "inflight";
 export type ThetaCaveat = NonNullable<ArmAbility["caveat"]>;
 
 export interface ArmRow {
-  // `R{round}.{idx}` — a row key, never a join key: joins ride `reading.arm`.
+  // `R{round}.{idx}` — a row key, never a join key: joins ride `reading.arm.key`.
   key: string;
+  // The round whose panel holds the row; `reading.arm.round` is where the arm was first walked.
+  round: number;
   source: CandidateSource;
   reading: ArmReading;
 }

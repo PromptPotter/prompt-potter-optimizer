@@ -24,7 +24,7 @@ if (AUTH !== "on" && AUTH !== "off") {
 }
 
 for (const [what, where, remedy] of [
-  ["venv interpreter", PYTHON, 'pip install -e ".[all,dev]"'],
+  ["venv interpreter", PYTHON, "python scripts/gate.py"],
   ["static export", path.join(WEBAPP, "out", "index.html"), "npm run build"],
 ]) {
   if (!existsSync(where)) {

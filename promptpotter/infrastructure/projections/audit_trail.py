@@ -34,12 +34,6 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "AuditTrailProjection",
-    "build_node_block",
-    "load_round_audits",
-]
-
 
 _ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
 

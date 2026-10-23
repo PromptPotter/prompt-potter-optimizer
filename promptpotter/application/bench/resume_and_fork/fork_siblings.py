@@ -6,17 +6,16 @@ import logging
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
+from promptpotter.application.campaign_config import effective_config
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.pipeline_overlay import (
-    allowed_values_from_narrowing,
-    node_config_items,
-)
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
     BenchCheckpointKind,
@@ -27,10 +26,11 @@ from promptpotter.domain.run_records import (
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
+from promptpotter.infrastructure.store.stores import owned_campaign
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import PayloadInvalidError, graceful
+from promptpotter.shared.errors import ConflictError, PayloadInvalidError, graceful
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.identity import acting_principal_id
+from promptpotter.shared.identity import acting_principal
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import CycleSeed
@@ -38,19 +38,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
-
-__all__ = [
-    "ForkResult",
-    "declare_steered_values",
-    "mint_diag_sibling",
-    "mint_fork",
-    "mint_operator_fork",
-]
-
-
-class ForkResult(NamedTuple):
-    new_cycle_id: str
-    new_resumed_from_round: int
 
 
 def _fork_sibling_setup(
@@ -93,11 +80,6 @@ def _fork_sibling_setup(
         cut=CycleEventLog.open(CycleDir(parent_dir)).next_offset,
         from_round=from_round,
     )
-    # No override reaches `dataset_split`, so the parent's draw is the fork's.
-    drawn = campaign_store.read_bank_partition(parent)
-    if drawn is None:
-        raise FileNotFoundError(f"fork parent {parent.cycle_id} holds no bank partition")
-    campaign_store.write_bank_partition(child, drawn)
     if payload.seed is not None:
         # Without its own record a rebase's config unlock silently re-locks on the fork's first `resume`.
         campaign_store.write_cycle_seed(child, payload.seed)
@@ -158,6 +140,11 @@ def mint_fork(
             f"mint_fork({payload.trigger.value}) branches from the origin and lifts no parent "
             f"round, so fork_from_round must be 0; got {fork_from_round}"
         )
+    if campaign_store.read_bank_partition(parent) is None:
+        raise ConflictError(
+            f"cycle {parent.cycle_id} holds no drawn partition over its chain, "
+            "so no fork can stand on it"
+        )
     child = parent.model_copy(update={"cycle_id": _sibling_id(campaign_store, parent, payload)})
     _fork_sibling_setup(
         campaign_store,
@@ -172,13 +159,14 @@ def mint_fork(
     return child.cycle_id
 
 
-def declare_steered_values(seed: CycleSeed, narrowing: Mapping[str, Any] | None) -> CycleSeed:
+def declare_steered_values(
+    seed: CycleSeed, narrowing: Mapping[str, NodeSearchNarrowing]
+) -> CycleSeed:
     """Without it the fork runs ``model=X`` beside a permitted set that excludes X."""
-
-    origin = allowed_values_from_narrowing(narrowing)
     declared = dict(seed.optimizer_narrowing)
     for node, cfg in node_config_items(seed.pipeline_overlay):
-        listed = origin.get(node, {})
+        origin = narrowing.get(node)
+        listed = origin.param_allowed_values if origin else {}
         own = declared.get(node)
         values = dict(own.param_allowed_values) if own else {}
         for param, value in cfg.items():
@@ -201,7 +189,7 @@ def mint_diag_sibling(*, stores: Stores, hop: CycleHop) -> str:
         ForkSpec(
             trigger=ForkTrigger.OPERATOR_DIAG,
             reason="diag-sibling BFS exploration",
-            issued_by=acting_principal_id(stores.identity),
+            issued_by=acting_principal(stores.identity),
         ),
     )
 
@@ -216,23 +204,24 @@ def mint_operator_fork(
     keep_rounds: bool = False,
     reason: str = "",
 ) -> str:
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    seed = declare_steered_values(
-        seed, campaign.config.get("optimizer_narrowing") if campaign else None
-    )
-    if keep_rounds and seed.origin_prompt_fields:
-        raise PayloadInvalidError(
-            "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "
-            "declare origin_prompt_fields; fork without keep_rounds to start from an edited origin"
-        )
+    campaign = owned_campaign(stores, hop.campaign_id)
+    seed = declare_steered_values(seed, effective_config(campaign.declaration).optimizer_narrowing)
     if not keep_rounds:
         # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
         caps = fork_remainder(stores, hop).under(seed.config_overrides)
         seed = seed.model_copy(update={"config_overrides": caps})
-    if not from_candidate_id and not keep_rounds:
-        origin_round = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(0)
-        if origin_round is not None and origin_round.close.candidate_scores:
-            from_candidate_id = origin_round.close.candidate_scores[0].candidate_id
+    standing = stores.campaigns.standing_rounds(hop, moment=None)
+    if from_candidate_id:
+        named = standing.arms.get((from_round, ArmKey(from_candidate_id)))
+        if named is not None and named.state.refused:
+            raise PayloadInvalidError(
+                f"{named.state.label} of round {from_round} is a refused proposal, keyed by its "
+                "slot: it measured no individual to fork from"
+            )
+    elif not keep_rounds:
+        origin_round = standing.rounds.get(0)
+        if origin_round is not None and origin_round.close.head is not None:
+            from_candidate_id = origin_round.close.origin.individual.id
     spec = ForkSpec(
         trigger=ForkTrigger.OPERATOR_REWIND if keep_rounds else ForkTrigger.OPERATOR_STEERED,
         reason=reason
@@ -241,7 +230,7 @@ def mint_operator_fork(
             if keep_rounds
             else f"operator-steered fork from {hop.cycle_id}"
         ),
-        issued_by=acting_principal_id(stores.identity),
+        issued_by=acting_principal(stores.identity),
         from_round=from_round,
         from_candidate_id=from_candidate_id or None,
         seed=seed,

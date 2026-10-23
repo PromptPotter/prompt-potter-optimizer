@@ -24,7 +24,7 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
         return ""
 
     candidate_order, sample_order = view.candidate_order, view.sample_order
-    row = view.sample_ids
+    row = view.positions
     cells = {(c.candidate, c.sample_key): c.fitness for c in view.cells}
     fitted = view.ruler.state == "fitted"
 
@@ -39,7 +39,7 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
     ]
 
     header_pad = " " * (label_w + 3)
-    axis = "hardest ──── sample_id ────→ easiest" if fitted else f"sample_id ({view.ruler.label})"
+    axis = "hardest ──── position ────→ easiest" if fitted else f"position ({view.ruler.label})"
     lines.append("")
     lines.append(header_pad + axis)
     lines.append(header_pad + "".join(f"{(row[k] // 10) % 10:>{cell_w}d}" for k in sample_order))
@@ -75,7 +75,7 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
     ][:10]
     if top:
         lines.append(f"  {title} (top {len(top)})")
-        lines.append(f"    {'sample_id':>10s} {key_label:>10s} {'delta_se':>10s}  query")
+        lines.append(f"    {'position':>10s} {key_label:>10s} {'delta_se':>10s}  query")
         lines.append(f"    {'-' * 10} {'-' * 10} {'-' * 10}  {'-' * 40}")
         for key, value, delta_se in top:
             query = shown.sample_query_lookup.get(key, "")[:40]
@@ -86,6 +86,3 @@ def render_hard_sample_heatmap(shown: HardSamplesView) -> str:
         lines.append(f"  {view.samples[off[0]].label}: {', '.join(str(row[k]) for k in off)}")
 
     return "\n".join(lines)
-
-
-__all__ = ["render_hard_sample_heatmap"]
