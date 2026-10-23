@@ -11,7 +11,7 @@ that turns it into evidence. The rules it rests on are [`benchmarks.md`](benchma
 |---|---|---|
 | 1 | `justlogic/d234-held`, potter alone. First `noise-floor --k 3` on the origin, then one full campaign, then `bench`. | **The sceptic.** Synthetic, so no contamination. Balanced labels, so no shortcut. The score is read on rows the search never saw, and the noise floor is printed beside the gain. Cheapest model, so anyone can repeat it. |
 | 2 | The same dataset as a head-to-head: `new --arm` for potter and capo, then gepa and levi. One model, one held-out set, one budget. | **The researcher comparing optimizers.** This is the first table where only the optimizer differs. CAPO first, as the roadmap already says. |
-| 3 | `gsm8k`: one measured origin pass at the pinned model, then a campaign scored on 200 or more test rows. | **The researcher and the buyer.** Everyone knows GSM8K, and CAPO's published 78.1 to 93.7 is the number people will hold ours against. It also closes the "verdict withdrawn" row. |
+| 3 | `gsm8k`: one measured origin pass at the pinned model, then a campaign scored on 200 or more test rows. | **The researcher and the buyer.** Everyone knows GSM8K, and CAPO's published 78.1 to 93.7 is the number people will hold ours against. Its origin has since been measured saturated at the bar, so the solver this run needs is [`benchmarks.md`](benchmarks.md) § Order of use's GSM8K row. |
 | 4 | `sealqa/longseal-12`, all 254 tasks, skill opened, judge-graded. | **The practitioner building agents.** The paper gives a no-skill figure and a ceiling, so the result lands between two numbers we did not choose. |
 | 5 | `lca-termnorm`, one campaign on the multi-step pipeline. | **The practitioner with a real pipeline, and the buyer.** It is the only run where settings move beside wording, on a business task. Publish only if the rows may be shown; record the row count, which `README.md` does not. |
 
@@ -53,9 +53,10 @@ differences per row with an interval. Rows where we lose stay in the table.
 
 ## What not to publish
 
-- Any figure from fewer than 200 rows as a result, and any tuning reading at all.
+- Any figure from fewer than 200 rows as a result, and any tuning reading at all
+  ([`benchmarks.md`](benchmarks.md) § Protocol).
 - In-campaign fitness, the round banner or the dashboard headline: they are read on the rows that
-  picked the winner.
+  picked the winner ([`benchmarks.md`](benchmarks.md) § The winner's own number).
 - A BBEH comparison before the model and the grader are the same on both sides.
 - Numbers from two cuts or two models in one row, or beside a figure from someone else's paper
   without saying so.

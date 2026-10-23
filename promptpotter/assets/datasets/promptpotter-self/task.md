@@ -86,7 +86,7 @@ not seen.
 - ``problem_description`` and ``answer_format`` carry the injection slots and
   output contract, so they are not levers
 - Out of scope (belongs to inner cycle): inner ``pipeline_params``,
-  inner ``optimizer_llm``
+  the inner optimizer's node models
 
 ## Intuition (don't bake in — algo should rediscover)
 

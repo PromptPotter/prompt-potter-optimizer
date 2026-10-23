@@ -50,7 +50,11 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   against $0.026 pinned to `xiaomi`. So any design that counts on the cache — a cost term in
   fitness, a spend estimate, a search front on cached price — holds only under a pin. Action: a
   default host pin per model that no node has to author, or a refusal to price on the cache
-  without one. **Rides with:** any change to the request builder in `openai_compat.py`, a
+  without one. **Decided: the pin is a trial, never an assumption** — a model is pinned by
+  default to try the cache, its realized cache share and effective $/M are read off the spend
+  ledger, and the pin and any cache-shaped prompting stay only where that reading is cheaper than
+  running uncached; otherwise the model drops caching. Per model, decided by data, not yet decided
+  for any. **Rides with:** any change to the request builder in `openai_compat.py`, a
   connector's route handling, or the caching arc (`.scratch/caching-arc-state.md`). **Re-test:**
   the per-node table in an unpinned campaign's `review.md` (`domain/spend.py::SpendRollup.by_node`)
   beside a pinned one on the same model — a prefix-cache share well below the pinned one means the
@@ -68,6 +72,14 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   a campaign of the right shape to hand (the spend tier mints one). **Re-test:** `grep -n candidate
   webapp/e2e/walk/responsive.spec.ts` — empty means the card is still unswept; the Lighthouse half
   has nothing on disk to grep for a number that was never taken.
+
+- **The compare view's candidate cards are laid out for a few wide columns, not many narrow ones.**
+  Each `components/compare/ChannelCard.tsx` card stretches across the page. Its config rows put the
+  label and the value side by side, and its prompt rows do the same for field and text. The layout
+  should suit thin vertical stripes instead: five cards side by side on a 16:9 display, each one
+  readable at that width. Operator-raised 2026-10-20, for later. **Rides with:** the next pass on
+  the compare pane, through `/design`. **Re-test:** open compare with five candidates at 1920×1080
+  and see whether all five fit without horizontal scroll.
 
 - **Optimizer model repair-rate on heavy L2/L3 structured output — unmeasured.** What is owed is the
   measurement: a live cycle reaching L3, read under the model
@@ -139,9 +151,10 @@ and delete the entry if the answer is no.
 - **The bench pass runs at look-ahead depth 1 because the depth is a press a ROUND spends.** Both
   passes go through `run_walks` and read `_armed_cells` like a round, but `runner/bench.py` runs
   them outside any round — before the loop and after it — where no press stands unless the
-  operator makes one during the pass, or `campaign.lookahead` is `auto`. **Blocker:** the
-  operator's call on whether a pass takes a depth of its own; look-ahead is browser-only, so no
-  config key may carry it. **Re-test:** time one bench pass against its cell count.
+  operator makes one during the pass, or `campaign.lookahead` is `auto`. **Decided: the pass
+  takes a depth of its own** — look-ahead is browser-only, so no config key
+  carries it; the pass's cell set is fixed and known before it starts. **Rides with:** any change to
+  `runner/bench.py`'s walk. **Re-test:** time one bench pass against its cell count.
 
 **Run state and the tree**
 
@@ -170,8 +183,9 @@ Each needs a served field declared in `api-openapi.yaml` first, then the browser
 `file::symbol` still holding the arithmetic.
 
 - **The "waiting" line has two predicates** — `components/shell/remote/useRemoteModel.ts` and
-  `lib/derivations/time-ray.ts`. Serve `dash.wait_line` once. **Blocker:** which predicate is
-  right is the operator's call. **Re-test:** ask; both still present means it stands.
+  `lib/derivations/time-ray.ts`. Serve `dash.wait_line` once. **Decided: a call is open
+  AND its wait target is known** (`useRemoteModel.ts::waitNote`'s rule); the
+  recency rule goes. **Re-test:** both predicates still present means it stands.
 
 **Unbound context that still does not raise**
 
@@ -219,12 +233,12 @@ runs on its own budget and reports its attempts as a count.
   count beside `attempts` closes it, and `_uncounted_attempts` then reads that count instead.
 - A unit of work's one budget (`send_pacing.py::SendBudget`) stops at the relay's door: TermNorm's
   `_MAX_ATTEMPTS` and terminus-2 × litellm each still count under one of our attempts, and a
-  remote cell waits out `Connector.cell_wait_s` rather than the budget's clock. **Blocker:** each
-  loop is the relay's own code, and handing a remote cell the budget's clock turns a timed-out
-  cell from an unreported send into a `HALTED` cut — a decision change that wants the operator.
-  **Re-test:** `grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py` — a
-  literal means that budget is still its own; and ask the operator whether a remote cell ends on
-  the budget's clock.
+  remote cell waits out `Connector.cell_wait_s` rather than the budget's clock. **Decided: a
+  remote cell ends on the budget's clock** — a timed-out cell becomes a
+  `HALTED` cut, not an unreported send. Still the relay's own code: the retry loops inside
+  TermNorm and terminus-2 × litellm. **Re-test:** `grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
+  — a literal means that budget is still its own; `Connector.cell_wait_s` still bounding a remote
+  cell means our side stands too.
 
 **Shape 2 — an act or a reading lives in ONE adapter, so the entry points disagree.** The
 canonical mechanisms are ones an adapter may call, not the only path an act can take. Remedy:
@@ -244,10 +258,10 @@ an untyped dict.
 ## Blocked — named blocker
 
 - **The stored-shape batch — every item below changes what a round file, ledger record or cache
-  holds, and lands as ONE pass with the workspace wipe.** **Blocker:** the workspace must stay
-  loadable for the demo. **Re-test:** `ls .promptpotter/projects/*/campaigns` is empty — it was on
-  2026-10-11, so this is UNBLOCKED until a campaign is minted; re-run it, and re-check each item
-  below against the code, since the structure pass took several.
+  holds, and lands as ONE pass with the workspace wipe.** **Unblocked: every campaign on disk is
+  disposable** except `c794fd` and the seed-screen records. **Re-test:**
+  re-check each item below against the code, since the structure pass took several (the crown and
+  `BenchScore.headline` are served now; `electable_count` / `overlap` sit on `RoundClosedRecord`).
   - *Authorship.* The author's display name is stored beside `issued_by`, so "Steered by" stops
     serving the issuer id; the authoring act and issuer ride the candidate's ledger record
     (`authorship_of` reads every C0 as `origin`).
@@ -279,18 +293,19 @@ an untyped dict.
 - **Concurrent sibling cycles of one campaign each spend up to the whole ceiling.**
   `optimization.ceiling` binds a CYCLE (`runner/entry.py::_arm_spend_book` seeds its book off that
   cycle's folded history), so two forks launched side by side are each admitted the full ceiling
-  and the campaign can spend twice it. **Blocker:** a decision only the operator can make — whether
-  the ceiling is the campaign's or the cycle's. The campaign's answer is one book per campaign,
-  shared by its live cycles through the job registry the account wallet already reads.
-  **Re-test:** ask the operator which the ceiling is; while unanswered, this stands.
+  and the campaign can spend twice it. **Decided: the ceiling is the campaign's** — one book per campaign, shared by its live cycles through the job registry the
+  account wallet already reads; a per-cycle bound is a possible future knob, not this one.
+  **Rides with:** the stored-shape batch's wipe. **Re-test:** `grep -n "ceiling" promptpotter/application/runner/entry.py`
+  — a book seeded off one cycle's history means it stands.
 
 - **A head-to-head's arms do not share one optimizer model**, so "the only difference is the
   optimizer" is false at the proposer: each preset under `promptpotter/assets/optimizers/` pins its
-  own, and an arm's lift and its dollars both carry the model as well as the method. **Blocker:** a
-  decision only the operator can make — each peer on its paper's model class (faithful, confounded)
-  or every arm on one model (controlled, a declared deviation per peer). **Re-test:**
+  own, and an arm's lift and its dollars both carry the model as well as the method. **Decided: every
+  arm on one model** — the controlled reading is the headline, each
+  peer's model swap a declared deviation; its paper's model class is a side reading only.
+  **Rides with:** the next head-to-head mint. **Re-test:**
   `grep -n "model:" promptpotter/assets/optimizers/*/pipeline.yaml` — more than one distinct model
-  across presets means the arms still differ, and ask the operator which reading the bench reports.
+  across presets, with nothing in the head-to-head pinning one, means the arms still differ.
 
 
 **Archive hygiene — the reclaim, its attribution, and the map over both:**

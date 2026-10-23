@@ -26,7 +26,7 @@ Every key is ABSENT when the backend reported nothing, and PromptPotter reads ab
 |---|---|
 | `cost_usd` | the node bills nothing: its tokens are priced at our rate table for the node's `(provider, model)` pair, filed as `rate_priced_usd` — counted by every ceiling, shown beside the bill, never called spent |
 | `model` | spend buckets by the provider slug instead |
-| `served_by` | host attribution unavailable; nothing else changes. **This is the one key no in-repo connector writes** — the read side is now pinned by a test, but whether a `backend` row names its upstream host is entirely the remote backend's to answer |
+| `served_by` | host attribution unavailable; nothing else changes. **This is the one key no in-repo connector writes** — the read side is pinned by a test, but whether a `backend` row names its upstream host is entirely the remote backend's to answer |
 | `finish_reason` | a truncation cannot be told from an empty response, and every empty terminal grades as the fatal `empty_response` |
 | `reasoning` | the share of output spent thinking is unreadable, so a slow node reads as a slow provider |
 | `cache_read` | the prefix-cache reading is `unreported` — every surface renders `c?`, distinct from a reported `c0%` (`domain/spend.py::prefix_reading`) |
@@ -57,28 +57,29 @@ send it serves nothing — its connector derives the bound from what it sends
   a connection broken after the request went). Until it says, every attempt beyond the one the
   node's sum accounts for is held as unreported.
 - **A 4xx says the request was refused before any model generated, and its bound is released** —
-  except a 408, and the 422 a relay answers a model whose reply failed validation with: that
-  model generated, so an unreported one stays held (`infrastructure/backend.py::_ANSWERED_STATUSES`).
+  except a 408 (`infrastructure/llm/spend_book.py::replied`), and the 422 a relay answers a model
+  whose reply failed validation with: that model generated, so an unreported one stays held
+  (`infrastructure/backend.py::_ANSWERED_STATUSES`).
 - **Search spend is reported in dollars**, as `data.web_cost.usd`.
 
 **Deploying the pair.** The Linux box co-hosts both — `deploy.config::BACKEND_DIR` / `BACKEND_SERVICE` — and `deploy-linux/update.sh` already syncs the backend checkout, reinstalls its requirements and restarts its unit alongside the optimizer. A backend-side change therefore reaches production through the ordinary update, provided it is pushed first; there is no separate download step to add.
 
 ## Connection security
 
-The client talks to each backend over HTTP(S) with optional bearer-token auth. Four layers, all set at registration time:
+The client talks to each backend over HTTP(S) with optional bearer-token auth. Four layers, all operator config — the endpoint and the token reach the wire only through the connector (`Connector.endpoint` / `Connector.auth_token`; TermNorm's read `TERMNORM_URL` / `TERMNORM_TOKEN`):
 
-- **Transport** — `https://` verifies the server cert; `http://` is cleartext. Pick the scheme in the registered `base_url`.
+- **Transport** — `https://` verifies the server cert; `http://` is cleartext. Pick the scheme in `TERMNORM_URL`.
 - **Auth** — set `TERMNORM_TOKEN` and every request carries `Authorization: Bearer …`; empty token → no header.
 - **Backend gate** — the backend decides whether to *require* a token (`TERMNORM_REQUIRE_AUTH=1`). Mismatch → 401.
 - **Resilience** — the session handshake auto-recovers; a 429 is the run's backpressure's (`infrastructure/llm/send_pacing.py::Backpressure` — one cooldown every cell shares, fewer sent at once, a stop only once no wait clears it); a 5xx, or a connection broken before any reply, backs off 1→2→4→8 s unless its body declares a resend pointless (`detail.retryable: false`, TermNorm's deadline on a provider request), which halts the cell; a connection never made waits for `GET /status` to answer, up to the wait its connector declares (`Connector.cell_wait_s`), so a backend restart costs a campaign nothing; a read timeout is never sent again, because the backend is still working — and billing — the first request.
 
-**Remote:** set `TERMNORM_REQUIRE_AUTH=1` + matching `TERMNORM_TOKEN` on both hosts, register with the `https://` URL, verify `curl https://…/status` returns 200. **Local:** same machine → `http://127.0.0.1:8000`; token optional for bare dev. The Linux deploy (`deploy-linux/bootstrap.sh`) auto-provisions a shared `TERMNORM_TOKEN` and sets `TERMNORM_REQUIRE_AUTH=true` on both sides **even on loopback** — defense-in-depth against a co-located compromised process. Nothing leaves loopback either way.
+**Remote:** set `TERMNORM_REQUIRE_AUTH=1` + matching `TERMNORM_TOKEN` on both hosts, set `TERMNORM_URL` to the `https://` URL, verify `curl https://…/status` returns 200. **Local:** same machine → `http://127.0.0.1:8000`; token optional for bare dev. The Linux deploy (`deploy-linux/bootstrap.sh`) auto-provisions a shared `TERMNORM_TOKEN` and sets `TERMNORM_REQUIRE_AUTH=true` on both sides **even on loopback** — defense-in-depth against a co-located compromised process. Nothing leaves loopback either way.
 
 **Not yet secured** (M12 control-plane, [ADR-0001](../adr/0001-m12-control-plane.md)): mutual-TLS, hot token rotation, per-tenant token isolation — one `TERMNORM_TOKEN` per install today.
 
 ## Self-healing a node
 
-A node emits `diagnostics.warnings[]`; PromptPotter counts them, synthesizes a `RuntimeFailure` on the offending candidate, and L2 steers L1 away next round (persistent pattern → L3 replans). To wire a new node: emit the warning and set `degradation_threshold` in campaign config (0 disables). Routing strategy + anomaly detector are optional (default routes to L2). Mechanics: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
+A node emits `diagnostics.warnings[]`; PromptPotter counts them and synthesizes a `RuntimeFailure` on the offending candidate (`scoring/candidate_report.py::read_breakage`), which the next round's generation is shown. To wire a new node: emit the warning; the trip rate is `optimization.degradation_threshold` (0 disables). Who heals which wound: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
 ## Web-search strategy — a swept axis with a cost signal
 
@@ -105,15 +106,15 @@ existing display and self-healing keep working. Backend rationale:
 | `GET …/backends/{id}/health` | Backend health |
 | `GET …/campaigns` · `…/campaigns/{id}` | List / detail |
 | `GET …/health` | Service health |
-| `POST …/commands/{kind}` | Mutations — register a backend, pause / fork / steer a run (ADR-0001 command highway) |
+| `POST …/commands/{kind}` | Mutations — pause / step / fork a run, and the rest of the closed set `domain/command_kinds.py::CommandKind` (ADR-0001 command highway) |
 
 ```bash
-uvicorn promptpotter.main:app --port 8001 --reload   # Swagger: /docs
+python -X utf8 -m uvicorn promptpotter.main:app --port 8001   # API reference: /docs
 ```
 
 ## Currently tested with
 
-[TermNorm](https://github.com/runfish5/TermNorm-excel) — terminology normalization, 6-node pipeline (cache · fuzzy · web search · entity profiling · token matching · llm ranking).
+[TermNorm](https://github.com/runfish5/TermNorm-excel) — terminology normalization; its node roster is what its `GET /pipeline` serves.
 
 ## Debugging the highway
 
@@ -121,15 +122,12 @@ uvicorn promptpotter.main:app --port 8001 --reload   # Swagger: /docs
 - **The highway IS a cross-repo contract — change one side, fix both.** PP consumes TermNorm response *shapes*, so a shape change on either side silently breaks the other. Coupling points: the error envelope is TermNorm's `{status, message, code}` (a global handler in `main.py`), **not** FastAPI's `{detail}` — PP must read `message`. Session-loss self-heal keys on a stable machine-readable `code: "no_session"` and nothing else (codes, never substring or shape guessing), and the resend policy on the typed `detail.retryable` — both read by `connectors/termnorm.py::TermNormSession`, never by the agnostic `BackendClient`. The web_search warning `stats` dict keys are read by PP's display. When you touch a response field, grep the *other* repo for its consumer.
 - **`--reload` wipes the in-memory session on every backend code edit.** TermNorm holds sessions in `user_sessions = {}` (process memory), so any backend edit reloads uvicorn and in-flight PP runs hit `400 no_session`. PP self-heals (re-`POST /sessions` + retry); keep it that way — a developer editing the backend mid-run must not abort the campaign.
 - **Provider latency is the recurring root, and the guards are bounds rather than a faster host.** Bound optimizer reasoning (`medium`) and keep request timeouts under the wait PP gives a cell (`Connector.cell_wait_s`); an unbounded optimizer node blows `OPTIMIZER_CALL_DEADLINE_S` and raises `OPTIMIZER_TIMEOUT` before round 1. Which provider a campaign runs on is the operator's daily-volume knob — don't flip it unprompted.
-- **Evidence depth is a strategy axis, not a timeout.** `scrape` runs under a hard `scrape_budget` deadline, `snippets` cannot hang, `hybrid` (default) falls back per source — so a slow scrape costs depth rather than the run. Contract, `web_cost` fields, and how to sweep it → § Web-search strategy above. PP-side overlay wiring in `lca-termnorm/dataset.yaml::pipeline` still pending.
+- **Evidence depth is a strategy axis, not a timeout.** `scrape` runs under a hard `scrape_budget` deadline, `snippets` cannot hang, `hybrid` (default) falls back per source — so a slow scrape costs depth rather than the run. Contract, `web_cost` fields, and how to sweep it → § Web-search strategy above.
 
 ## Troubleshooting
 
 | Symptom | Action |
 |---------|--------|
-| "No synced experiment data" | sync experiments for the backend |
-| "No llm_ranking prompt found" | init the prompt registry before syncing |
-| "No queries have entity_profile" | re-run replay with `entity_profiling` in the pipeline |
 | Connection refused | backend down/unreachable — check `curl http://127.0.0.1:8000/status` |
 
 User-level: [`../manual/05-troubleshooting.md`](../manual/05-troubleshooting.md).

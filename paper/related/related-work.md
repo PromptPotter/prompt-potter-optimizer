@@ -177,6 +177,7 @@ than from a transcription here, which cannot be re-verified and goes stale again
 | Matchup | Source | What it reports |
 |---|---|---|
 | GEPA vs MIPROv2 | [arXiv:2507.19457](https://arxiv.org/abs/2507.19457) (Qwen3-8B) | GEPA ahead on HotPotQA / HoVer / PUPA, and on AIME-2025 with GPT-4.1 Mini |
+| GEPA `optimize_anything` vs its own seed | [GEPA blog 2026-02-18](https://gepa-ai.github.io/gepa/blog/2026/02/18/introducing-optimize-anything/) (Gemini 3 Flash) | ARC-AGI-1 public evaluation set 32.5% → 89.5% by evolving the agent harness; no external baseline, and the same model reaches 84.7% on ARC Prize's semi-private set at High reasoning — [`../notes/gepa-optimize-anything-aie-2026.md`](../notes/gepa-optimize-anything-aie-2026.md) |
 | CAPO vs field | [arXiv:2512.02840](https://arxiv.org/abs/2512.02840) (Gemma-3-27B, 1M-token budget) | CAPO ahead of OPRO / EvoPromptGA / AdalFlow / DSPy-GEPA on GSM8K + SST-5 |
 | AdalFlow vs TextGrad vs DSPy | [arXiv:2501.16673](https://arxiv.org/abs/2501.16673) (GPT-3.5-turbo) | AdalFlow ahead on ObjectCount / TREC-10 / three HotPotQA settings |
 | Trace vs DSPy | [arXiv:2406.16218](https://arxiv.org/abs/2406.16218) (GPT-3.5-turbo) | Trace+CoT ahead on BBH, at 3× TextGrad's wall-clock |

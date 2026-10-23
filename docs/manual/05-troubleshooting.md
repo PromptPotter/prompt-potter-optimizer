@@ -6,14 +6,14 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ## A provider returns 429 "rate limit"
 
-**What you see:** Campaign crawls — the log says `the provider is throttling`, and the run controls' *Samples in flight* panel shows a `Provider` row. Or it stops as **Provider rate-limited**.
+**What you see:** Campaign crawls — the readout prints `⚠ RATE-LIMITED · <provider> …` and the time the run gives up, and the run controls' *Samples in flight* panel shows a `Provider` row. Or it stops as **Provider rate-limited**.
 
 **Why:** The model provider is refusing sends — your key's tier (Groq's free tier), or an upstream host's shared pool on OpenRouter (`… is temporarily rate-limited upstream`). PromptPotter holds every send for one shared cooldown, sends fewer at once, and probes with one; it stops only on a per-hour or per-day quota, or once the provider has refused everything for half an hour.
 
 **What to try:**
 - Use your own key for that provider (OpenRouter BYOK), which gets its own rate limit, or route to another host (`route_order` in the node's config), then `python -m promptpotter resume`. No re-mint needed.
 - On a shared upstream pool, waiting is the only other cure: resume later.
-- Switch the optimizer to a smaller model in `promptpotter/assets/optimizers/potter/pipeline.yaml` (each optimizer node's `config.model`), e.g. `"meta-llama/llama-4-scout-17b-16e-instruct"` — every campaign that does not override it; one campaign's `optimization.nodes.{node}.config.model` moves only that one.
+- Switch the optimizer to a smaller model off the manifest's `available_models` menu in `promptpotter/assets/optimizers/potter/pipeline.yaml` (each optimizer node's `config.model`) — every campaign that does not override it; one campaign's `optimization.nodes.{node}.config.model` moves only that one.
 - Upgrade to a paid tier.
 
 ---
@@ -26,7 +26,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What to try:**
 - Swap the `model` field in your definition's `dataset.yaml::pipeline` (`.promptpotter/projects/{tenant}/datasets/<name>/`) to `openai/gpt-oss-20b` and keep iterating. Flip back to `120b` for benchmarks.
-- Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` pins `reasoning_effort: low` so `20b` doesn't burn its reasoning budget.
+- **Which `reasoning_effort` keeps a model clear of Groq's output ceiling** — owned by [`dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md) § The Groq output ceiling; check the dataset's pin before swapping its model.
 - Where `max_tokens` is and is not pinned by a dataset — owned by the matrix below. Raise it per-cycle via `dataset.yaml::campaign.pipeline_overlay`.
 - Target-layer model lives in `dataset.yaml::pipeline.nodes.llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is declared apart from it ([Install § 3](02-install.md#3-create-env)). They're independent.
 - Full per-dataset matrix: [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md).
@@ -35,20 +35,21 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ## Backend connection refused
 
-**What you see:** `[CONNECTION]` errors, or init fails with "could not connect to backend."
+**What you see:** The launch is refused with `Backend '<name>' at <url> is not reachable` (or `is not ready: connection refused at <url>`), or a running campaign stops as **Backend unreachable**.
 
 **Why:** The backend service isn't running, or isn't reachable at the URL you configured.
 
 **What to try:**
 - Check the backend is up: `curl http://127.0.0.1:8000/status` (substitute your URL).
 - If running a local TermNorm backend, start it in its own terminal first.
-- Check `campaign.json` or whatever config you're loading has the right URL.
+- Check `.env`'s `TERMNORM_URL` points at it — the connector's endpoint is operator config, never a campaign field.
+- Then `python -m promptpotter resume`: an unreached cell is a hole, not a score, and the resume measures it.
 
 ---
 
 ## Validation failures on many candidates every round
 
-**What you see:** Many candidates receive synthetic score zero. Logs mention "validation failure" or "invalid proposal."
+**What you see:** Many candidates receive synthetic score zero, each under a `⚠ <node>.<param> = <value>  ∉ [<allowed>]` line ([Reading the output](04-reading-the-output.md) § Annotation lines).
 
 **Why:** L1 proposed a parameter value outside the allowed set for a pipeline node. PromptPotter catches this before any backend call (the *schema-compliance check*; Wound 1 in [self-healing](../developer/self-healing-internals.md)).
 
@@ -58,12 +59,12 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ## Degradation warnings on many candidates
 
-**What you see:** The `⚠` degradation lines appear frequently. Candidates are being eliminated. The campaign is advancing slowly.
+**What you see:** `✂ broken (degradation)` lines appear frequently. Candidates are being eliminated. The campaign is advancing slowly.
 
 **Why:** The backend pipeline is returning low-quality results for a consistent configuration region — not an optimizer issue.
 
 **What to try:**
-- Look at which `{step}:{code}` is firing. This is shown in the warning lines.
+- Look at which `{step}:{code}` is firing — the last field of each `✂ broken` line.
 - If the step is `llm_only` with `reasoning_budget_exhausted`: the reasoning model spent its entire output budget on the hidden reasoning trace before emitting visible content. Raise `pipeline_params.llm_only.max_tokens` (look at `step_tokens.llm_only.output` and `reasoning` to size it). L1's wound channel should already name `max_tokens` directly.
 - If the code is `output_truncated`: the provider cut the response short. Same `max_tokens` lever; it is provider-fault, so it deprecates the sample without eliminating the candidate.
 - If the code is `reasoning_only_response`: the model spent its output on the hidden reasoning trace and then stopped on its own, without hitting the cap — so raising `max_tokens` will not help. That is the route, not the prompt: pick a different model or provider for the node. Also provider-fault, so the candidate survives.
@@ -79,7 +80,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 **Why:** L1 is over-exploiting a small region of the search space. This can happen when the candidate budget is too small to explore. (There is no improvement-threshold knob: a round is elected on θ against its parent.)
 
 **What to try:**
-- Increase `n_variants` to widen the search per round.
+- Increase `l1_generate`'s `n_variants` to widen the search per round.
 - Let L2 fire — it can raise `n_variants` and `temperature` via `l1_overrides`.
 - If prompt fields are the only axis: confirm the pipeline's LLM node has a prompt template exposed. If it doesn't, the optimizer has no prompt space to explore.
 

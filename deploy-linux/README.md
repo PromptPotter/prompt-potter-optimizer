@@ -9,7 +9,7 @@ End state:
 
 ## Adopter config (do this first)
 
-All four scripts read their values from `deploy.config` (gitignored), falling back
+Every script reads its values from `deploy.config` (gitignored), falling back
 to generic placeholders if it's absent. Copy the example and fill in your own app:
 
 ```bash
@@ -50,9 +50,10 @@ upstream; and **`TERMS_URL` / `PRIVACY_URL` / `IMPRINT_URL` are separate overrid
 clearing the marketing URL must not take the consent links down with it. The webapp inlines its half
 at build time, so **the rebuild IS the rename** — there is no runtime brand config to drift.
 
-**Swapping the mark is a file swap, not a config key.** Three files under `webapp/public/brand/`, and
-nothing else refers to them: `mark-pot.png` (login eyebrow, running-jobs button, About-this-unit), the
-`tab-icon-pot-32` ink/bone pair, and `app-icon-pot-512.png`. Three constraints they carry: **the alpha
+**Swapping the mark is a file swap, not a config key.** The files under `webapp/public/brand/`, and
+nothing else refers to them: `mark-pot.png` (login eyebrow, sidebar, running-jobs button,
+About-this-unit, the per-surface tab mark) with its large twin `mark-pot-512.png` (the login panel's
+background vessel), the `tab-icon-pot-32` ink/bone pair, and `app-icon-pot-512.png`. Three constraints they carry: **the alpha
 channel is the mark** — it is masked and painted with `currentColor`, so artwork with the ink baked in
 cannot tint; the tab icon is **two files**, because a raster cannot carry the light/dark media query
 internally; and the app icon must stay **opaque**, because a launcher composites it onto a ground you do
@@ -62,7 +63,7 @@ still says *which install* this is in our colours. Why each constraint exists �
 [`promptpotter-web/BRAND.md`](../../promptpotter-web/BRAND.md) § Replacing the mark.
 
 **Tier 2** is the rest of `deploy.config` — systemd unit, cloudflared tunnel, install dir, public
-hostname — which the four `deploy-linux/*.sh` scripts read and nothing else. **Two files the scripts
+hostname — which the `deploy-linux/*.sh` scripts read and nothing else. **Two files the scripts
 do not write, and sign-in stays broken until both move:** `.env`'s `ALLOWED_ORIGINS` and
 `.promptpotter/identity/oidc.json`'s `redirect_uri`, plus the matching redirect URI in the OAuth
 provider's console. The failure is silent from the app's side — the provider rejects the callback, so
@@ -99,7 +100,8 @@ cp deploy.config.example deploy.config && $EDITOR deploy.config   # if not done 
 
 # 1. clone repo, install deps, build webapp:
 ./bootstrap.sh
-# → edits .env interactively, prompts for the Groq/OpenAI key
+# → seeds .env from .env.example, offers to set GROQ_API_KEY (any other provider key: edit .env),
+#   provisions the shared TERMNORM_TOKEN
 
 # 2. install uvicorn as a systemd service (will start on boot)
 ./install-service.sh
@@ -118,24 +120,30 @@ The optimizer drives a separate backend over `/matches` — clone it as a **git 
 git clone <backend>.git ~/potter/<backend>; cd ~/potter/<backend>/backend-api
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cp .env.example .env && $EDITOR .env
 ```
-Wrap it in a systemd unit like `install-service.sh` (`ExecStart … uvicorn main:app --port 8000`); register it via PromptPotter's `POST /backends`.
+Wrap it in a systemd unit like `install-service.sh` (`ExecStart … uvicorn main:app --port 8000`). PromptPotter reaches it at `.env`'s `TERMNORM_URL` (default `http://127.0.0.1:8000`). Set `BACKEND_DIR` / `BACKEND_SERVICE` in `deploy.config` **before** `./bootstrap.sh`, so bootstrap writes the shared `TERMNORM_TOKEN` into both `.env` files and `update.sh` keeps the backend in lockstep; otherwise copy the token into the backend's `.env` by hand, with `TERMNORM_REQUIRE_AUTH=true`.
 
 ## Defaults you can override
 
-Set these in `deploy.config` (or pass on the command line):
+Set these in `deploy.config` (or pass on the command line). `deploy.config.example` declares every
+key with why it exists — the brand block included; this is the map:
 
 | var | default | meaning |
 |---|---|---|
 | `APP_NAME` | `myapp` | slug → systemd unit, tunnel name, install-dir, Description |
 | `APP_MODULE` | `myapp.main:app` | uvicorn ASGI target |
+| `ENV_FILE` | `$INSTALL_DIR/.env` | the env file both units load — under SELinux it must move to `/etc` |
 | `ADMIN_BOT_MODULE` | `myapp.presentation.admin_bot` | admin-bot module (optional) |
+| `BOT_ENV_FILE` | the app's `ENV_FILE` | the admin bot's own env file, once split |
 | `REPO_URL` | `…/CHANGE-ME/your-repo.git` | git clone source — **edit before bootstrap** |
 | `INSTALL_DIR` | `$HOME/$APP_NAME/your-repo` | where the repo lands |
 | `RUN_USER` | `$USER` | systemd `User=` |
+| `DATA_DIR` | unset (`$INSTALL_DIR`) | the one directory the service may write |
 | `BIND_HOST` | `127.0.0.1` | uvicorn host (don't change unless you also expose LAN) |
 | `BIND_PORT` | `8001` | uvicorn port |
 | `WEBAPP_DIR` | `webapp` | static frontend dir built by `npm run build` |
 | `HEALTH_PATH` | `/api/v1/health` | liveness endpoint the scripts curl |
+| `MEMORY_MAX` | empty (no limit) | cgroup `MemoryMax` for the app unit |
+| `BACKEND_DIR` / `BACKEND_SERVICE` / `BACKEND_PORT` | empty / empty / `8000` | the co-managed backend; empty skips it |
 | `TUNNEL_NAME` | `$APP_NAME` | cloudflared tunnel name |
 | `PUBLIC_HOSTNAME` | `app.example.com` | public hostname to route |
 | `ALLOWED_ORIGINS` | `https://app.example.com` | CORS origin written into `.env` |
@@ -179,8 +187,8 @@ cd "$INSTALL_DIR/deploy-linux" && ./update.sh v0.8.17    # a release: name its t
 It mirrors origin — the tracked branch's tip, or the tag, branch or commit you name, printed as
 `git describe` before anything else moves — refreshes deps, rebuilds the webapp and restarts the
 app, plus the backend when `BACKEND_DIR` is set. Re-runnable, and it never stalls on a diverged
-box: tracked files are force-matched to that commit while `.env` and runtime survive. Five things
-worth knowing:
+box: tracked files are force-matched to that commit while `.env` and runtime survive. Worth
+knowing:
 
 - **The sync can replace the script mid-run**, so it re-execs the new copy once and says so — a fix
   to `update.sh` itself takes effect on the deploy that ships it.

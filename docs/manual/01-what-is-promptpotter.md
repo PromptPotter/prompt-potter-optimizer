@@ -31,7 +31,7 @@ Internals: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
 **Round** — one generate-evaluate-critique cycle inside a campaign. Each round, the optimizer proposes several candidate configurations, scores all of them against the dataset, and runs a critique to decide what to try next. A campaign is a sequence of rounds.
 
-**Candidate** — one proposed configuration scored during a round. A candidate is a specific combination of prompt fields and pipeline parameters. The candidate that beats its parent (the configuration it was mutated from) on θ — ability, read with how hard each sample is taken into account — becomes the next parent; the others are discarded. Raw accuracy is reported beside it but does not decide.
+**Candidate** — one proposed configuration scored during a round. A candidate is a specific combination of prompt fields and pipeline parameters. Under PromptPotter's own optimizer, the candidate that beats its parent (the configuration it was mutated from) on θ — ability, read with how hard each sample is taken into account — becomes the next parent; the others are discarded. Raw accuracy is reported beside it but does not decide.
 
 ---
 
