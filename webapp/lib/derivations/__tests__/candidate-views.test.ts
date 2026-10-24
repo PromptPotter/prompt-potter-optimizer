@@ -47,7 +47,7 @@ const runsUnder = (runs: CourseLineage[]) => armNode({ id: "a", children: runs }
 const run = (id: string, facts: Partial<CourseFacts>) =>
   courseLineage({
     id,
-    course: hierarchyCourse({ address: id, tags: courseTags("inner", "justlogic") }, facts),
+    course: hierarchyCourse({ address: id, tags: courseTags("inner", "justlogic") }, { mint: "inner", ...facts }),
   });
 
 describe("the half choice — the tree's, once its walk is decided", () => {

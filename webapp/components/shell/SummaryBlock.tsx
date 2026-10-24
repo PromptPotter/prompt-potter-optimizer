@@ -21,8 +21,8 @@ export function SummaryBlock({
       <header className="summary-block-head">
         <div className="summary-block-titleline">
           <span className="summary-block-title">{facts.label}</span>
-          {facts.tags?.map((t) => (
-            <span key={t.label} className="summary-block-tag">
+          {facts.tags?.map((t, i) => (
+            <span key={i} className="summary-block-tag">
               {t.label}
             </span>
           ))}

@@ -6,13 +6,11 @@ from pydantic import Field
 
 from promptpotter.domain.cycle_listing import RunStatus
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.hierarchy import HierarchyCourse
+from promptpotter.domain.hierarchy import CourseKind, HierarchyCourse
 from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.results import ArmReading, ArmVerdict, DisplayMetric
 from promptpotter.domain.run_records import ForkDirection
 from promptpotter.domain.strict_model import FrozenModel
-
-CourseKind = Literal["root", "fork", "diag", "inner"]
 
 
 class LineageDivergence(FrozenModel):

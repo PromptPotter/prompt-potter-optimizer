@@ -26,6 +26,7 @@ from promptpotter.domain.cycle_paths import (
 from promptpotter.domain.hierarchy import (
     CampaignFacts,
     CourseFacts,
+    CourseKind,
     CourseSpawn,
     HierarchyCampaign,
     HierarchyCourse,
@@ -36,7 +37,6 @@ from promptpotter.domain.hierarchy import (
     HierarchyTag,
     StatKey,
 )
-from promptpotter.domain.lineage_tree import CourseKind
 from promptpotter.domain.paired_reading import READING_STATE_INFO, MeasurandUnit
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import RunStanding
@@ -242,6 +242,7 @@ def course_entry(
         child_count=len(index.rounds) + len(index.open_rounds),
         children=[],
         facts=CourseFacts(
+            mint=mint,
             spawn=spawn,
             task=None if index.spawned_by is None else index.spawned_by.task or None,
             standing=index.standing,
@@ -372,6 +373,7 @@ def campaign_entry(
         child_count=len(held),
         children=list(courses.values()) if depth > 0 else [],
         facts=CampaignFacts(
+            label=campaign.label or None,
             root=hierarchy_address(inside, campaign.campaign_id, campaign.root_cycle_id),
             line=hierarchy_address(inside, campaign.campaign_id, holder.cycle_id),
             lifecycle=campaign.lifecycle_status,

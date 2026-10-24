@@ -21,21 +21,18 @@ import { tagValue } from "@/lib/hierarchy";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
 import { measuringArm, useCycleStream } from "@/lib/poll";
-import { useRegistry } from "@/lib/registry";
+import { useCampaign } from "@/lib/registry";
 import { statusTone } from "@/lib/run-phase";
 import { TERMS } from "@/lib/terms";
 import { useWorkspace } from "@/lib/workspace";
 
 export function RunMasthead() {
   const { campaignId, leafCycleId, viewedPath, following, followActive } = useWorkspace();
-  const { entries } = useRegistry();
+
   const { dash } = useCycleStream();
   const served = useServedCriterion();
 
-  const campaign = useMemo(
-    () => entries.find((c) => c.address === campaignId) ?? null,
-    [entries, campaignId],
-  );
+  const campaign = useCampaign(campaignId);
   const suffix = campaign && shortId(campaign.address);
   const runsWith = campaign?.facts.runs_with ?? null;
   const innerLeaf = viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
@@ -68,7 +65,7 @@ export function RunMasthead() {
       <div className="run-header-inner">
         <div className="run-title">
           {campaign && <Badge>{tagValue(campaign, "dataset")}</Badge>}
-          {campaign && <span className="run-name">{campaign.label}</span>}
+          {campaign?.facts.label && <span className="run-name">{campaign.facts.label}</span>}
           {suffix && suffix !== campaign.address && <span className="run-suffix">__{suffix}</span>}
           <CampaignSwitcher />
           {innerLeaf && (

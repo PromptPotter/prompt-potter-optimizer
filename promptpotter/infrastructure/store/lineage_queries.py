@@ -196,7 +196,8 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
     sandbox = inner_sandbox_store(stores, leaf.campaign_id, leaf.cycle_id)
     if sandbox is not None:
         for entry in reads.cycles(sandbox):
-            if entry.parent_cycle_id:
+            # A course whose campaign does not load has no entry, so it is no course of the tree.
+            if entry.parent_cycle_id or reads.campaign(sandbox, entry.campaign_id) is None:
                 continue
             hop = CycleHop(campaign_id=entry.campaign_id, cycle_id=entry.cycle_id)
             if (key := (sandbox.base_dir, hop.campaign_id, hop.cycle_id)) in reads.seen:
@@ -280,7 +281,7 @@ def _is_replay(node: ArmNode) -> bool:
 def _stamp(course: CourseLineage) -> ForkStamp:
     spawn = course.course.facts.spawn
     return ForkStamp(
-        kind=sibling_kind(course.id),
+        kind=course.course.facts.mint,
         trigger="" if spawn is None else spawn.trigger.value,
         direction=None if spawn is None else spawn.direction,
         steered_by=None if spawn is None else spawn.issued_by,

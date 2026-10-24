@@ -2267,6 +2267,18 @@
         "additionalProperties": false,
         "description": "A campaign's typed facts, for a pane or a route argument; its rows read the envelope.",
         "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The operator's own name for it; null where none was given, and the envelope's `label` falls back to the dataset.",
+            "title": "Label"
+          },
           "lifecycle": {
             "$ref": "#/components/schemas/LifecycleStatus"
           },
@@ -2297,6 +2309,7 @@
           }
         },
         "required": [
+          "label",
           "root",
           "line",
           "lifecycle",
@@ -3898,6 +3911,10 @@
         "additionalProperties": false,
         "description": "A course's typed facts, for a pane or a route argument; its rows read the envelope.",
         "properties": {
+          "mint": {
+            "$ref": "#/components/schemas/CourseKind",
+            "description": "How the course was minted; the `mint` tag renders it."
+          },
           "rounds_closed": {
             "description": "Rounds closed AFTER the origin.",
             "title": "Rounds Closed",
@@ -3939,6 +3956,7 @@
           }
         },
         "required": [
+          "mint",
           "spawn",
           "task",
           "standing",
@@ -3946,6 +3964,15 @@
         ],
         "title": "CourseFacts",
         "type": "object"
+      },
+      "CourseKind": {
+        "enum": [
+          "root",
+          "fork",
+          "diag",
+          "inner"
+        ],
+        "type": "string"
       },
       "CourseLineage": {
         "additionalProperties": false,
@@ -7234,14 +7261,7 @@
             "description": "Which side of the cut the run CONTINUES on (`FORK_TRAITS`): `offshoot` hangs off a line that keeps running, `supersede` IS the line."
           },
           "kind": {
-            "enum": [
-              "root",
-              "fork",
-              "diag",
-              "inner"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/CourseKind"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus",

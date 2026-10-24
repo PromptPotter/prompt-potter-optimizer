@@ -23,16 +23,16 @@ function byDataset(entries: readonly HierarchyCampaign[]): [string, HierarchyCam
 
 export function CampaignSwitcher() {
   const { campaignId, cycleId, navigate } = useWorkspace();
-  const { entries, byAddress, loaded, failure } = useRegistry();
+  const { listed, byAddress, loaded, failure } = useRegistry();
   const { status } = useAuth();
-  const groups = useMemo(() => byDataset(entries), [entries]);
+  const groups = useMemo(() => byDataset(listed), [listed]);
   const go = (address: string, close: () => void) => {
     const path: CyclePath | null = decodeCyclePath(address);
     if (path) navigate(path);
     close();
   };
 
-  if (failure && entries.length === 0) {
+  if (failure && listed.length === 0) {
     return <span className="run-switch-err">campaigns: {failure.message}</span>;
   }
   if (!loaded) {
@@ -41,7 +41,7 @@ export function CampaignSwitcher() {
       <span className="run-switch-note">{status === "unauthed" ? "No campaign" : "loading…"}</span>
     );
   }
-  if (entries.length === 0) return <span className="run-switch-note">No campaigns yet</span>;
+  if (listed.length === 0) return <span className="run-switch-note">No campaigns yet</span>;
 
   const selectedKnown =
     !!campaignId && !!cycleId && byAddress.has(encodeCyclePath([{ campaignId, cycleId }]));

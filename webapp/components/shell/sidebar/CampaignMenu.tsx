@@ -92,7 +92,7 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
               onClick={() => {
                 close();
                 cmd.clear();
-                setDraft(campaign.label);
+                setDraft(campaign.facts.label ?? "");
                 setRenaming(true);
               }}
             >

@@ -107,29 +107,29 @@ class HierarchyCourse(_HierarchyEntry):
 HierarchyEntry = Annotated[HierarchyCampaign | HierarchyCourse, Field(discriminator="level")]
 
 class CampaignFacts(FrozenModel):
+    label: str | None               # the operator's own name; the envelope's `label` falls back to the dataset
     root: str                       # the root course's address
     line: str                       # the course holding the line — `CampaignStore.line_holder`, followed here and nowhere else
     lifecycle: LifecycleStatus
     spend_lifetime: LifetimeSpend
-    spend_metered: MeteredSpend
-    bench: BenchScore | None
     runs_with: CampaignRunsWith | None
 
 class CourseSpawn(FrozenModel):     # a fork is an EVENT on its parent's time line
     parent: str                     # the course it branched from
     at_round: int | None            # `ForkSpec.from_round`, which a fork may leave unnamed
     at_offset: int                  # `CycleIndex.forked_at_offset`
-    from_candidate: str | None      # arm key
+    from_candidate: str | None      # arm key — `at_round`, `at_offset` and this have no reader until
+                                    # stages 2 and 3 hang a fork off its round, candidate and offset
     trigger: ForkTrigger
     direction: ForkDirection        # `ForkSpec.resolved_direction`: measured, or implied by the trigger
     reason: str
     issued_by: str                  # `ForkSpec.issued_by.display`
 
 class CourseFacts(FrozenModel):
+    mint: CourseKind                # root · fork · diag · inner — typed; the `mint` tag renders it
     spawn: CourseSpawn | None       # null on a root, and on a cycle cut from another tree
     task: str | None                # the inner cell this course answers (L4)
     standing: RunStanding | None
-    spend_metered: MeteredSpend     # the course's OWN ledger, in its campaign's ceiling meter
     rounds_closed: int
 
 class HierarchyResponse(StrictModel):
@@ -303,7 +303,9 @@ tenant fact, not an entry, and its 2 s poll is its own.
 **Reshaped.** `GET /campaigns/{c}/cycles/{cy}/tree` answers `CourseLineage` (§ 3); its version tuple
 (`application/cycle_reads.py::tree_version`), lens and moment parameters are unchanged.
 
-**Polling.** The registry's two 10 s reads become ONE `hierarchyRead(lifecycle)` on `byEtag`; the tree
+**Polling.** The registry's two 10 s reads become ONE `hierarchyRead()` on `byEtag`, every lifecycle,
+so an address resolves whatever the sidebar's filter lists — the filter is layout over
+`facts.lifecycle`, and the sidebar and the switcher read the filtered `listed`; the tree
 poll and the active-pointer poll are untouched. Per-address ETags and `GET /hierarchy/{address}` are
 stage 2's, when a course's subtree first carries rounds; stage 1's body is the campaign count.
 <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/registry.tsx == 1 -->
@@ -328,16 +330,16 @@ Webapp, component by component — each reads a served entry and nothing it comp
 
 | Surface | Reads after stage 1 |
 |---|---|
-| `lib/registry.tsx` | `entries: HierarchyCampaign[]`, `byAddress: Map<string, HierarchyEntry>` over campaigns and their courses, `running: HierarchyCourse[]` (`state.producer.attached`, ordered by `webapp/lib/run-phase.ts::dockPriority`), `useEntry(address)`. `useCampaign`, `useCycleEntry`, `forest`, `runningCycles` die. |
-| `lib/api/reads.ts` | `hierarchyRead(lifecycle)`; `campaignsRead`, `cyclesRead` die. |
+| `lib/registry.tsx` | `entries: HierarchyCampaign[]` (every lifecycle), `listed` (those the lifecycle filter shows), `byAddress: Map<string, HierarchyEntry>` over campaigns and their courses, `running: HierarchyCourse[]` (`state.producer.attached`, ordered by `webapp/lib/run-phase.ts::dockPriority`), `useEntry(address)` and `useCampaign(address)`, its campaign-level narrowing (`derivations/hierarchy.ts::campaignAt`). `useCycleEntry`, `forest`, `runningCycles` die. |
+| `lib/api/reads.ts` | `hierarchyRead()`; `campaignsRead`, `cyclesRead` die. |
 | `sidebar/ForestRows.tsx` | `OriginRow` groups consecutive campaigns sharing a root cycle, decoded from `facts.root` (above); `RunRow` renders a `HierarchyCampaign`; branch rows are `children` other than `facts.root` — the one filter, deleted in stage 2 when candidates move under rounds under courses and the root course becomes a row; the layout stays today's for the 10-25 demo. `CourseRow` renders a `HierarchyCourse` whether from `children` or from `CourseLineage.course` under a candidate — `innerStats` / `innerFacts` die. `CandidateRow` is unchanged (stage 2). The open set is keyed by `address` for hierarchy entries and by `nodeKeyOf` for arms. |
 | `sidebar/RowHoverCard.tsx` | `SummaryBlock` takes the entry (`label`, `state.status`, `tags`, `stats`, `lede`, `caveat`); "Runs with" reads `facts.runs_with`; "Declared config" and "On disk" keep their own reads; the copy button's payload is the entry's JSON. |
 | `sidebar/CampaignRowLabel.tsx` | `state.status.mark`, `tags` of kind `vendor` → `VendorLogo(value)`, `label`, headline `stats[0].value`, sub line `stats` `rounds` + `fmtAgo(span.last_at)`. |
-| `sidebar/SidebarContent.tsx`, `CampaignMenu.tsx`, `AccountSpend.tsx`, `MobileAppBar.tsx`, `JobsDock.tsx` | dataset filter and dataset list from `tagValue(…, "dataset")`; auto-expand keys on `address`; the menu reads `address`, `label`, `facts.lifecycle`; the spend signature is `facts.spend_lifetime.billed_usd`; the app bar reads `byAddress.get(campaignId)?.label` and `running.length`; the dock lists `running` with each course's `label` and its campaign's via `byAddress.get(parent)`. |
-| `masthead/RunMasthead.tsx`, `CampaignSwitcher.tsx` | the badge is the `dataset` tag's label, the title `label`, the id `shortId(address)` (served `id_suffix` dies — `shortId` already renders ids in Compare); the setup line is `facts.runs_with` + vendor tags + the `rounds` stat + `fmtAgo(span.last_at)`; the switcher groups `entries` by the dataset tag, each a campaign and its `children` with `state.status.mark`. The chip row keeps reading `dashboard.json` until stage 4. |
+| `sidebar/SidebarContent.tsx`, `CampaignMenu.tsx`, `AccountSpend.tsx`, `MobileAppBar.tsx`, `JobsDock.tsx` | dataset filter and dataset list from `tagValue(…, "dataset")`; auto-expand keys on `address`; the menu reads `address`, `label`, `facts.lifecycle` and seeds a rename with `facts.label`; the spend signature is `facts.spend_lifetime.billed_usd`; the app bar reads `useCampaign(campaignId)?.label` and `running.length`; the dock lists `running` with each course's `label` and its campaign's via `byAddress.get(parent)`. |
+| `masthead/RunMasthead.tsx`, `CampaignSwitcher.tsx` | the badge is the `dataset` tag's label, the title `facts.label` where the operator named it, the id `shortId(address)` (served `id_suffix` dies — `shortId` already renders ids in Compare); the setup line is `facts.runs_with` + vendor tags + the `rounds` stat + `fmtAgo(span.last_at)`; the switcher groups `entries` by the dataset tag, each a campaign and its `children` with `state.status.mark`. The chip row keeps reading `dashboard.json` until stage 4. |
 | `lib/workspace.tsx`, `DashboardTab.tsx`, `SteerForkPanel.tsx`, `remote/useRemoteModel.ts` | `useLeafIsL4` = `hasTag(useEntry(leaf campaign), "self_optimization")`; the viewed dataset = `tagValue(useEntry(encodeCyclePath(path)), "dataset")`; `webapp/lib/run-phase.ts::phaseWalks` over `useEntry(…)?.state.run_phase`; `state.intervened`. An inner leaf is absent from the root listing, as it is today. |
 | `compare/*`, `lib/compare-selection.tsx` | `RunGroup` → `HierarchyCampaign`; the evidence re-tick key is the line entry's `address:facts.rounds_closed:state.run_phase`; `ChannelColumn` hands `SummaryBlock` the entry with `shortId(address)` prepended to its tags; `campaignCard`, `courseStats` die. |
-| `lib/derivations/run-summary.ts` | keeps wording the chat's frozen run item from `dashboard.json`, typed as `HierarchyStat[]`, until stage 4 reads a course entry at a moment. |
+| `lib/derivations/run-summary.ts` | keeps wording the chat's frozen run item from `dashboard.json` as `SummaryFacts` (`derivations/summary-facts.ts`, the shape `SummaryBlock` takes from an entry too), whose champion is the entry's `lede` rather than a served stat, until stage 4 reads a course entry at a moment. |
 | `lib/test-fixtures.ts`, `e2e/harness.ts`, `e2e/spend/l4.spec.ts` | `hierarchyCampaign`, `hierarchyCourse`, `courseLineage` builders from the generated types; the harness reads `/hierarchy` entries (`address`, `facts.root`, the dataset tag). |
 
 Grouping served rows for a menu or a header, filtering by a served tag and formatting a served time are
@@ -393,7 +395,8 @@ the fixtures and one Vitest (§ 8). Net ≈ −800 lines, reported not pursued.
 in group 1a (the hierarchy models, the envelope listed under both level variants) and down by the
 deleted models' in group 3; `p_served` 180 → 197 in group 1a — the new entry fields have no webapp
 reader until group 2, which brings it back down, and a `facts` field still unread after group 2 is
-deleted there; `test_reach` 360 → 362 in group 1a (the § 3 journey imports `application/hierarchy.py`);
+deleted there — group 2 ends at 201 (three `RunStanding` fields wait on stage 4's chip row, the
+draft's two `updated_at` on group 3) and group 3 lands at or below 192; `test_reach` 360 → 362 in group 1a (the § 3 journey imports `application/hierarchy.py`);
 `test_files` 6, `test_functions` 25, `claude_md` 21, `deferred_imports` 7 unchanged.
 
 ## 8. Tests

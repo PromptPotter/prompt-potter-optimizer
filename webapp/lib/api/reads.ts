@@ -7,7 +7,6 @@ import type {
   ActivityResponse,
   BackendHealthResponse,
   HealthResponse,
-  LifecycleFilter,
   BackendResponse,
   CampaignPipelineResponse,
   CampaignStorageResponse,
@@ -236,9 +235,9 @@ export function dashboardRead(path: CyclePath, at: number | null): ReadDescripto
   };
 }
 
-export function hierarchyRead(lifecycle: LifecycleFilter): ReadDescriptor<HierarchyResponse> {
-  const qs = lifecycle !== "active" ? `&lifecycle=${enc(lifecycle)}` : "";
-  return byEtag("hierarchy", `${API}/hierarchy?depth=1${qs}`);
+// Every lifecycle: an address resolves whether or not the sidebar's filter lists it.
+export function hierarchyRead(): ReadDescriptor<HierarchyResponse> {
+  return byEtag("hierarchy", `${API}/hierarchy?depth=1&lifecycle=all`);
 }
 
 export function campaignStorageRead(campaignId: string): ReadDescriptor<CampaignStorageResponse> {

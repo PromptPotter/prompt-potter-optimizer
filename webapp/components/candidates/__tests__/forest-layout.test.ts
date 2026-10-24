@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ArmNode, CourseLineage } from "@/lib/api";
+import type { ArmNode, CourseKind, CourseLineage } from "@/lib/api";
 import {
   ROOMY,
   LANE_H,
@@ -45,12 +45,12 @@ function course(
   id: string,
   children: ArmNode[],
   over: Partial<CourseLineage> = {},
-  mint = id.includes("_fork_") ? "fork" : "root",
+  mint: CourseKind = id.includes("_fork_") ? "fork" : "root",
 ): CourseLineage {
   const path = over.path ?? [{ campaign_id: "camp", cycle_id: id }];
   return courseLineage({
     id,
-    course: hierarchyCourse({ address: id, tags: courseTags(mint, "ds") }),
+    course: hierarchyCourse({ address: id, tags: courseTags(mint, "ds") }, { mint }),
     ...over,
     path,
     // Without its course's path, two seeds' identically-labelled arms share one `nodeKeyOf`.

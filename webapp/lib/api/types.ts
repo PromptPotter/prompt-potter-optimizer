@@ -191,6 +191,7 @@ import type {
   ArmNode,
   CampaignPipelineResponse,
   CellsResponse,
+  CourseFacts,
   CourseLineage,
   DraftCampaignWire,
   EditDraftPatch,
@@ -202,6 +203,7 @@ import type {
 export type LineageNode = CourseLineage | ArmNode;
 
 export type HierarchyEntry = HierarchyCampaign["children"][number];
+export type CourseKind = CourseFacts["mint"];
 
 export type DraftPatch = Partial<EditDraftPatch>;
 

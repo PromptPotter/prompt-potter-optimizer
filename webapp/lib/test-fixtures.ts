@@ -1,4 +1,5 @@
 import type {
+  CourseKind,
   ArmElection,
   ArmNode,
   ArmName,
@@ -290,7 +291,7 @@ export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchySta
   };
 }
 
-export function courseTags(mint: string, dataset?: string): HierarchyTag[] {
+export function courseTags(mint: CourseKind, dataset?: string): HierarchyTag[] {
   return [
     ...(dataset === undefined ? [] : [{ kind: "dataset" as const, value: dataset, label: dataset }]),
     { kind: "mint", value: mint, label: mint },
@@ -306,7 +307,7 @@ export function hierarchyCourse(
     label: over.address,
     lede: null,
     caveat: null,
-    tags: courseTags("root"),
+    tags: courseTags(facts.mint ?? "root"),
     state: hierarchyState(),
     stats: [],
     span: { opened_at: "", last_at: "", closed_at: null },
@@ -314,6 +315,7 @@ export function hierarchyCourse(
     children: [],
     level: "course",
     facts: {
+      mint: "root",
       spawn: null,
       task: null,
       standing: null,
@@ -341,6 +343,7 @@ export function hierarchyCampaign(
     children: [],
     level: "campaign",
     facts: {
+      label: null,
       root,
       line: root,
       lifecycle: "active",

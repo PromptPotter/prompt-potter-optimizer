@@ -13,10 +13,13 @@ export interface CompareChannel {
 }
 
 /** After a supersede the line is a fork's: the served `facts.line` names it. */
-export function defaultChannel(campaign: HierarchyCampaign): CompareChannel {
+export function defaultChannel(campaign: HierarchyCampaign): CompareChannel | null {
   const line = decodeCyclePath(campaign.facts.line)?.at(-1);
-  const ids = line ? [line.campaignId, line.cycleId] : [campaign.address];
-  return { rootCampaignId: campaign.address, subject: subjectKey("course", ids) };
+  if (!line) return null;
+  return {
+    rootCampaignId: campaign.address,
+    subject: subjectKey("course", [line.campaignId, line.cycleId]),
+  };
 }
 
 interface CompareSelection {

@@ -6,7 +6,7 @@ import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { fmtPaired } from "@/lib/derivations";
-import type { CourseLineage, CourseSpawn } from "@/lib/api";
+import type { CourseKind, CourseLineage, CourseSpawn } from "@/lib/api";
 import { tagValue } from "@/lib/hierarchy";
 import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
@@ -41,15 +41,15 @@ export interface CladogramCtx {
 }
 
 function courseName(course: CourseLineage): string {
-  return tagValue(course.course, "mint") === "root"
+  return course.course.facts.mint === "root"
     ? (tagValue(course.course, "dataset") ?? course.id)
     : shortFamilyTail(course.id);
 }
 
-function SpawnGlyph({ kind, spawn }: { kind: string | null; spawn: CourseSpawn | null }) {
+function SpawnGlyph({ kind, spawn }: { kind: CourseKind; spawn: CourseSpawn | null }) {
   return (
     <>
-      {kind === null ? "" : (KIND_GLYPH[kind] ?? "")}
+      {KIND_GLYPH[kind]}
       {spawn === null ? "" : `${TRIGGER_GLYPH[spawn.trigger] ?? ""}${DIRECTION_GLYPH[spawn.direction]}`}
     </>
   );
@@ -314,7 +314,7 @@ export function Forest({
               >
                 <title>
                   {course.id}
-                  {`\n${tagValue(course.course, "mint") ?? ""}`}
+                  {`\n${course.course.facts.mint}`}
                   {course.course.facts.task ? ` · ${course.course.facts.task}` : ""}
                   {spawn?.trigger === "operator_steered"
                     ? ` · steered${spawn.issued_by ? ` by ${spawn.issued_by}` : ""}`
@@ -449,7 +449,7 @@ export function Forest({
                   className="family-cladogram-cyclelabel"
                 >
                   <tspan className="family-cladogram-glyph">
-                    <SpawnGlyph kind={tagValue(course.course, "mint")} spawn={course.course.facts.spawn} />
+                    <SpawnGlyph kind={course.course.facts.mint} spawn={course.course.facts.spawn} />
                   </tspan>
                   <tspan dx="4">{courseName(course)}</tspan>
                 </text>

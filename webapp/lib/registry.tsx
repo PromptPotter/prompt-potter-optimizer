@@ -9,14 +9,16 @@ import {
   type HierarchyEntry,
   type LifecycleFilter,
 } from "./api";
-import { coursesOf, runningCourses } from "./derivations/hierarchy";
+import { campaignAt, coursesOf, runningCourses } from "./derivations/hierarchy";
 import { shownData, useRead, type ReadFailure } from "./hooks/useRead";
 
 interface Registry {
+  // Every lifecycle, so an address resolves whatever the filter lists.
   entries: HierarchyCampaign[];
+  // The sidebar's and the switcher's list: `entries` under the lifecycle filter.
+  listed: HierarchyCampaign[];
   byAddress: ReadonlyMap<string, HierarchyEntry>;
   running: HierarchyCourse[];
-  // False from a filter change until the read for the new filter lands.
   loaded: boolean;
   failure: ReadFailure | null;
   lifecycleFilter: LifecycleFilter;
@@ -33,7 +35,7 @@ const NO_ENTRIES: HierarchyCampaign[] = [];
 
 export function RegistryProvider({ children }: { children: ReactNode }) {
   const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("active");
-  const read = useRead(hierarchyRead(lifecycleFilter), {
+  const read = useRead(hierarchyRead(), {
     auth: true,
     intervalMs: REGISTRY_INTERVAL_MS,
   });
@@ -52,6 +54,10 @@ export function RegistryProvider({ children }: { children: ReactNode }) {
     return m;
   }, [entries]);
   const running = useMemo(() => runningCourses(entries), [entries]);
+  const listed = useMemo(
+    () => entries.filter((c) => c.facts.lifecycle === lifecycleFilter),
+    [entries, lifecycleFilter],
+  );
 
   const failure = read.status === "failed" ? read.failure : null;
   const loaded = landed !== null;
@@ -59,6 +65,7 @@ export function RegistryProvider({ children }: { children: ReactNode }) {
   const value = useMemo<Registry>(
     () => ({
       entries,
+      listed,
       byAddress,
       running,
       loaded,
@@ -66,7 +73,7 @@ export function RegistryProvider({ children }: { children: ReactNode }) {
       lifecycleFilter,
       setLifecycleFilter,
     }),
-    [entries, byAddress, running, loaded, failure, lifecycleFilter],
+    [entries, listed, byAddress, running, loaded, failure, lifecycleFilter],
   );
   return <RegistryContext.Provider value={value}>{children}</RegistryContext.Provider>;
 }
@@ -80,6 +87,11 @@ export function useRegistry(): Registry {
 export function useEntry(address: string | null): HierarchyEntry | null {
   const { byAddress } = useRegistry();
   return address === null ? null : (byAddress.get(address) ?? null);
+}
+
+export function useCampaign(address: string | null): HierarchyCampaign | null {
+  const { byAddress } = useRegistry();
+  return address === null ? null : campaignAt(byAddress, address);
 }
 
 export interface ActivePointer {

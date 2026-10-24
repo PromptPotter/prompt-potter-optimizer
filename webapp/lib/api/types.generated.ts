@@ -1790,6 +1790,9 @@ export interface HierarchyCampaign {
 
 /** A campaign's typed facts, for a pane or a route argument; its rows read the envelope. */
 export interface CampaignFacts {
+  /** The operator's own name for it; null where none was given, and the envelope's
+   * `label` falls back to the dataset. */
+  label: string | null;
   /** The root course's address. */
   root: string;
   /** The address of the course holding the line now: the root, or the fork a
@@ -1864,6 +1867,8 @@ export interface VendorModels {
 
 /** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
 export interface CourseFacts {
+  /** How the course was minted; the `mint` tag renders it. */
+  mint: 'root' | 'fork' | 'diag' | 'inner';
   /** Null on a root, and on a cycle cut from another tree. */
   spawn: CourseSpawn | null;
   /** The outer panel cell an L4 inner course measures. */

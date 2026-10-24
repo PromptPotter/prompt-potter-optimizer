@@ -22,6 +22,7 @@ from promptpotter.domain.spend import LifetimeSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 type Level = Literal["campaign", "course"]
+type CourseKind = Literal["root", "fork", "diag", "inner"]
 type TagKind = Literal[
     "dataset", "optimizer", "vendor", "mint", "lifecycle", "self_optimization", "arm", "superseded"
 ]
@@ -114,6 +115,10 @@ class HierarchyState(FrozenModel):
 class CampaignFacts(FrozenModel):
     """A campaign's typed facts, for a pane or a route argument; its rows read the envelope."""
 
+    label: str | None = Field(
+        description="The operator's own name for it; null where none was given, and the envelope's "
+        "`label` falls back to the dataset."
+    )
     root: str = Field(description="The root course's address.")
     line: str = Field(
         description="The address of the course holding the line now: the root, or the fork a "
@@ -146,6 +151,7 @@ class CourseSpawn(FrozenModel):
 class CourseFacts(FrozenModel):
     """A course's typed facts, for a pane or a route argument; its rows read the envelope."""
 
+    mint: CourseKind = Field(description="How the course was minted; the `mint` tag renders it.")
     spawn: CourseSpawn | None = Field(
         description="Null on a root, and on a cycle cut from another tree."
     )

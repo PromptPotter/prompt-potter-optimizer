@@ -14,7 +14,7 @@ import { SidebarFilterPopover } from "./SidebarFilterPopover";
 export function SidebarContent() {
   const { status } = useAuth();
   const { viewedPath, viewedCandidateId } = useWorkspace();
-  const { entries, loaded, failure, lifecycleFilter, setLifecycleFilter } = useRegistry();
+  const { listed, loaded, failure, lifecycleFilter, setLifecycleFilter } = useRegistry();
   const { campaignId: activeCampaignId, cycleId: activeCycleId } = useActivePointer();
   const nodes = useNodeToggle();
   const [showCandidates] = useShowCandidates();
@@ -23,16 +23,16 @@ export function SidebarContent() {
   const shown = useMemo(
     () =>
       datasetFilter == null
-        ? entries
-        : entries.filter((c) => (tagValue(c, "dataset") || "(unknown)") === datasetFilter),
-    [entries, datasetFilter],
+        ? listed
+        : listed.filter((c) => (tagValue(c, "dataset") || "(unknown)") === datasetFilter),
+    [listed, datasetFilter],
   );
 
   const datasetNames = useMemo(() => {
     const s = new Set<string>();
-    for (const c of entries) s.add(tagValue(c, "dataset") || "(unknown)");
+    for (const c of listed) s.add(tagValue(c, "dataset") || "(unknown)");
     return [...s].sort();
-  }, [entries]);
+  }, [listed]);
 
   // The ACTIVE cycle, never the viewed one: a manual selection must not pop a course open.
   const focusKey = useMemo(() => {

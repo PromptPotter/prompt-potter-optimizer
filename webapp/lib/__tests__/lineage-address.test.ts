@@ -19,7 +19,7 @@ const hops = (path: CyclePath) =>
 const innerRun = (id: string, task: string | null) =>
   courseLineage({
     id,
-    course: hierarchyCourse({ address: id, tags: courseTags("inner") }, { task }),
+    course: hierarchyCourse({ address: id, tags: courseTags("inner") }, { mint: "inner", task }),
     path: hops([...ROOT, { campaignId: "inner__1", cycleId: id }]),
   });
 

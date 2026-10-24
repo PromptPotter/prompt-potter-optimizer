@@ -5,7 +5,7 @@ import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api";
 import { CardFrame, SegmentedControl, Toolbar, ToolbarSep } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useCompareSelection } from "@/lib/compare-selection";
-import { readPaired } from "@/lib/derivations";
+import { campaignAt, readPaired } from "@/lib/derivations";
 import { invalidateReads } from "@/lib/read-cache";
 import { useRegistry } from "@/lib/registry";
 import { useEvidence } from "@/lib/hooks/useEvidence";
@@ -61,10 +61,9 @@ export function ComparePane() {
   // "" omits the query param, so the server picks its own default.
   const [metric, setMetric] = useState("");
   const [grid, setGrid] = useState("");
-  const { entries, byAddress } = useRegistry();
-  const runs = useMemo(() => new Map(entries.map((c) => [c.address, c])), [entries]);
+  const { byAddress } = useRegistry();
   const compared = channels.flatMap((c): HierarchyCourse[] => {
-    const line = byAddress.get(runs.get(c.rootCampaignId)?.facts.line ?? "");
+    const line = byAddress.get(campaignAt(byAddress, c.rootCampaignId)?.facts.line ?? "");
     return line?.level === "course" ? [line] : [];
   });
   const moved = compared
@@ -124,7 +123,7 @@ export function ComparePane() {
             </CardFrame>
           ) : (
             <ScenarioEditsProvider value={editing}>
-              <ChannelCards evidence={evidence} runs={runs} />
+              <ChannelCards evidence={evidence} byAddress={byAddress} />
 
               {config ? (
                 <SearchpointCards evidence={evidence} loading={loading} />
