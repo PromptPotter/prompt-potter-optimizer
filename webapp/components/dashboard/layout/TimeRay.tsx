@@ -116,7 +116,7 @@ function Gap({ seconds }: { seconds: number }) {
   return (
     <span
       className="dash-time-ray-gap"
-      title={`Nothing was recorded anywhere in this family for ${label}. The 15 s heartbeat rides the ray as proof-of-life, so this is real silence, not a long call.`}
+      title={`No step anywhere in this family, and no heartbeat on this step's run, for ${label}. An open call beats every 15 s, so this is real silence, not a long call.`}
     >
       ── {label} ──
     </span>

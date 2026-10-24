@@ -71,6 +71,12 @@ def _campaign_of(address: str) -> tuple[CyclePath, str]:
     return inside, campaign_id if sep else last
 
 
+def _top_campaign(address: str) -> str:
+    """The top-level campaign an address sits under: what a subtree is built and versioned from."""
+    inside, campaign_id = _campaign_of(address)
+    return inside[0].campaign_id if inside else campaign_id
+
+
 @dataclass
 class _Candidate:
     address: str
@@ -510,8 +516,7 @@ def hierarchy_subtree(
     Built from the top-level campaign down, so an inner entry's ``parent`` is the candidate that
     spawned it on every read, never re-derived for a direct one.
     """
-    top = address.partition("/")[0].split(HOP_SEP)[0].partition(UNIT_SEP)[0]
-    campaign = owned_campaign(stores, top)
+    campaign = owned_campaign(stores, _top_campaign(address))
     root = _answering(_Build(moment).campaign(stores, (), campaign, depth=MAX_COURSE_DEPTH))
     if lens is not None or samples:
         root = lensed(stores, root, lens, samples)
@@ -541,10 +546,10 @@ def subtree_moment(
 
 
 def subtree_version(stores: Stores, address: str, *, masked: bool) -> tuple[object, ...]:
-    """Stats only: every store the campaign's family spans and, under a mask, what it grades from."""
-    family = {
-        c.store.base_dir: c.store for c in iter_family_courses(stores, _root_path(stores, address))
-    }.values()
+    """Stats only: every store the TOP campaign's family spans — what the body is built from —
+    and, under a mask, what it grades from."""
+    top = (owned_campaign(stores, _top_campaign(address)).root_hop,)
+    family = {c.store.base_dir: c.store for c in iter_family_courses(stores, top)}.values()
     if not masked:
         return tuple(held.campaigns.version() for held in family)
     names = {

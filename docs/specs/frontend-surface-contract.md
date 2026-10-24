@@ -244,8 +244,11 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
   newest-first windows served oldest-first, paged back by `cursor_prev`. A course's `children` stay its
   rounds: thousands of records would ride every subtree poll. A step's `parent` is its own course, not
   a round, because one ledger interleaves a round's walk with its neighbours' open and close. A bare
-  heartbeat is no step — it is the gap it shortens, which the next step's `gap_before_s` carries. There
-  is no second chronology shape.
+  heartbeat is no step and takes no slot of a window — it is the gap it shortens, which the next
+  step's `gap_before_s` carries — so a long open call never serves an empty window. There is no second
+  chronology shape, and no span carries offsets: a step's `facts.offset` is the moment a surface picks,
+  and a fork's birth is its course's `spawn.at_offset`, so offsets on `HierarchySpan` would be a served
+  field with no reader.
   <!-- probe: git grep -cE "class (RayItem|RayResponse)\b" -- promptpotter == 0 -->
 
 ## The two blocking gates

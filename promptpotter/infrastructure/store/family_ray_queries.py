@@ -7,7 +7,6 @@ import hashlib
 import json
 from collections import deque
 from functools import partial
-from itertools import pairwise
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -46,7 +45,9 @@ class _Raw(NamedTuple):
     offset: int
     epoch: float
     ts: str
-    activity: ActivityItem | None
+    activity: ActivityItem
+    # This ledger's previous step or heartbeat: what ends the silence before it.
+    heard: float | None
 
 
 class _Tail(NamedTuple):
@@ -67,6 +68,7 @@ class _RayTail:
         self._inner_total = 0
         self._last_epoch: float | None = None
         self._last_ts = ""
+        self._heard: float | None = None
 
     def feed(self, offset: int, line: dict[str, Any]) -> None:
         kind = line.get("record_type")
@@ -81,13 +83,16 @@ class _RayTail:
                 return
         else:
             self._last_epoch, self._last_ts = own, str(line.get("timestamp"))
-        # A bare heartbeat is kept to end a silence, then served as no step.
-        if item is None and not isinstance(record, LLMCallProgressRecord):
+        if item is None:
+            # A bare heartbeat takes no slot of a window; it only ends a silence.
+            if isinstance(record, LLMCallProgressRecord):
+                self._heard = self._last_epoch
             return
         assert self._last_epoch is not None
         if self._below and (self._last_epoch, self._below[0], offset) >= self._below[1]:
             return
-        row = _Raw(offset, self._last_epoch, self._last_ts, item)
+        row = _Raw(offset, self._last_epoch, self._last_ts, item, self._heard)
+        self._heard = self._last_epoch
         self._own.append(row)
         self._own_total += 1
         if kind in _INNER_KINDS:
@@ -157,6 +162,11 @@ def ray_validator_parts(
     return tuple(parts)
 
 
+def _silence(row: _Raw, before: float | None) -> float:
+    heard = [epoch for epoch in (before, row.heard) if epoch is not None]
+    return row.epoch - max(heard) if heard else 0.0
+
+
 def build_family_ray(
     courses: list[FamilyCourse], *, limit: int, before: RayCursor | None
 ) -> HierarchySteps:
@@ -178,7 +188,7 @@ def build_family_ray(
         pool = pool[-limit:]
         truncated = True
 
-    epochs = [row.epoch for _key, _path, row in pool]
+    prior: list[float | None] = [None, *(row.epoch for _key, _path, row in pool[:-1])]
     steps = [
         HierarchyStep(
             address=step_address(key, row.offset),
@@ -189,12 +199,14 @@ def build_family_ray(
             tags=[],
             stats=[],
             children=[],
-            facts=StepFacts(offset=row.offset, ts=row.ts, gap_before_s=gap, activity=row.activity),
+            facts=StepFacts(
+                offset=row.offset,
+                ts=row.ts,
+                gap_before_s=_silence(row, before),
+                activity=row.activity,
+            ),
         )
-        for ((_epoch, key, _offset), _path, row), gap in zip(
-            pool, [0.0, *(b - a for a, b in pairwise(epochs))], strict=True
-        )
-        if row.activity is not None
+        for ((_epoch, key, _offset), _path, row), before in zip(pool, prior, strict=True)
     ]
     return HierarchySteps(
         steps=steps,
