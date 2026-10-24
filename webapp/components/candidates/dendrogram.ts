@@ -9,7 +9,7 @@ export const BOTTOM_PAD = 4;
 
 export interface DendroNode {
   key: string;
-  candidateId: string;
+  address: string;
   round: number;
   label: string;
   isWinner: boolean;
@@ -45,7 +45,7 @@ export interface DendroRow {
   key: string;
   round: number;
   label: string;
-  candidate_id: string;
+  address: string;
   is_selected: boolean;
   crown: ArmElection["crown"];
 }
@@ -59,7 +59,7 @@ export function dendroRow(bar: CandidateBar): DendroRow {
     key: bar.key,
     round: roundOf(bar),
     label: bar.label,
-    candidate_id: bar.reading ? bar.node.facts.individual : bar.node.address,
+    address: bar.node.address,
     is_selected: bar.reading?.election.selected ?? false,
     crown: bar.reading?.election.crown ?? null,
   };
@@ -83,7 +83,7 @@ export function dendrogram(
   rows.forEach((r, i) => {
     nodes.push({
       key: r.key,
-      candidateId: r.candidate_id,
+      address: r.address,
       round: r.round,
       label: r.label,
       isWinner: r.is_selected,

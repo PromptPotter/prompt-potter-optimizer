@@ -41,7 +41,7 @@ Three bounds — get them wrong and the tree lies without erroring:
   of the course that took its place, and loses its crown.
 - **Identity outranks position.** A repair re-measures without re-minting, so two candidates on
   two courses can share an `individual`; `answers_for_id` marks the ONE a remembered id resolves
-  to — the first live one, else the first.
+  to — the first live, measured one, else the first.
 - **An inner run hangs under the candidate that SPAWNED it** (`spawned_by`'s round and
   individual), searched on its own course first, then its campaign's other courses: a fork's
   inner runs land in the parent's sandbox.

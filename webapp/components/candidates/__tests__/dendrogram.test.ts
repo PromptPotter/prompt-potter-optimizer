@@ -19,7 +19,7 @@ function spine(
         key: `R${r.round}.${i}`,
         round: r.round,
         label: r.round === 0 ? "C0" : `C${r.round}.${i + 1}`,
-        candidate_id: `r${r.round}_${i}`,
+        address: `r${r.round}_${i}`,
         is_selected: r.winner === i,
         crown: r.winner !== i ? null : r.n > 1 ? "elected" : "uncontested",
       });

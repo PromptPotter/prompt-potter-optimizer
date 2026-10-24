@@ -1189,14 +1189,20 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
     picked = line_course.facts.standing.selection
     assert picked is not None, "guard"
-    standing_rows = [
-        c
-        for c in entries_under(hierarchy_subtree(stores, listed.address, None, None, moment=None))
-        if isinstance(c, HierarchyCandidate)
-        and c.tag("superseded") is None
-        and (c.facts.reading.arm.round, c.facts.reading.arm.key) == (picked.round, picked.key)
+    [line_drawn] = [
+        e
+        for e in entries_under(hierarchy_subtree(stores, listed.address, None, None, moment=None))
+        if isinstance(e, HierarchyCourse) and e.address == listed.facts.line
     ]
-    assert standing_rows, "the subtree draws the line's standing selection retired or not at all"
+    line_stood = [
+        e
+        for rnd in line_drawn.children
+        for e in rnd.children
+        if isinstance(e, HierarchyCandidate) and e.facts.stands
+    ]
+    assert [(e.facts.reading.arm.round, e.facts.reading.arm.key) for e in line_stood] == [
+        (picked.round, picked.key)
+    ], "the subtree stands a candidate on the line other than the one its index selected"
 
     # The operator's `--from` rewinds the line's first cycle; a rebase's fork stands on its own cut.
     rewinds: list[int | None] = []

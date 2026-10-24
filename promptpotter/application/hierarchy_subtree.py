@@ -476,13 +476,17 @@ def entries_under(entry: HierarchyEntry) -> Iterator[HierarchyEntry]:
 
 
 def _answering(root: HierarchyCampaign) -> HierarchyCampaign:
-    """The ONE candidate a remembered id resolves to: the first live one, else the first."""
+    """The ONE candidate a remembered id resolves to: the first live measured one, else the first."""
+
+    def rank(c: HierarchyCandidate) -> tuple[bool, bool]:
+        return c.tag("superseded") is not None, c.facts.reading.end == "invalid"
+
     chosen: dict[str, HierarchyCandidate] = {}
     for entry in entries_under(root):
         if not isinstance(entry, HierarchyCandidate):
             continue
         held = chosen.get(entry.facts.individual)
-        if held is None or (held.tag("superseded") is not None and entry.tag("superseded") is None):
+        if held is None or rank(entry) < rank(held):
             chosen[entry.facts.individual] = entry
     answering = {c.address for c in chosen.values()}
 
@@ -512,11 +516,14 @@ def hierarchy_subtree(
     *,
     moment: Moment | None,
 ) -> HierarchyEntry:
-    """The entry at *address* with everything under it; *moment* replays the ledgers only."""
-    inside, campaign_id = _campaign_of(address)
-    leaf = descend_store(stores, inside)
-    campaign = owned_campaign(leaf, campaign_id)
-    root = _answering(_Build(moment).campaign(leaf, inside, campaign, depth=MAX_COURSE_DEPTH))
+    """The entry at *address* with everything under it; *moment* replays the ledgers only.
+
+    Built from the top-level campaign down, so an inner entry's ``parent`` is the candidate that
+    spawned it on every read, never re-derived for a direct one.
+    """
+    top = address.partition("/")[0].split(HOP_SEP)[0].partition(UNIT_SEP)[0]
+    campaign = owned_campaign(stores, top)
+    root = _answering(_Build(moment).campaign(stores, (), campaign, depth=MAX_COURSE_DEPTH))
     if lens is not None or samples:
         root = lensed(stores, root, lens, samples)
     found = next((entry for entry in entries_under(root) if entry.address == address), None)

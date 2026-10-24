@@ -290,17 +290,6 @@ def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> li
     return tags
 
 
-def _line_holder(campaign: Campaign, held: list[tuple[CycleHop, CycleIndex]]) -> CycleHop:
-    """The supersede chain from the root, over the indexes as read — at a moment, as they stood."""
-    by_id = {hop.cycle_id: index for hop, index in held}
-    holder = campaign.root_hop
-    while (index := by_id.get(holder.cycle_id)) is not None and (
-        successor := index.superseded_by
-    ) in by_id:
-        holder = CycleHop(campaign_id=campaign.campaign_id, cycle_id=successor)
-    return holder
-
-
 def campaign_entry(
     stores: Stores,
     inside: CyclePath,
@@ -323,7 +312,7 @@ def campaign_entry(
         ),
         key=lambda entry: (entry[0].cycle_id != campaign.root_cycle_id, entry[1].created_at),
     )
-    holder = _line_holder(campaign, held)
+    holder = stores.campaigns.line_holder(campaign.root_hop, moment=moment)
     runs_with = campaign_runs_with(stores, campaign)
     config = line_config(stores, campaign, holder)
     courses: dict[str, HierarchyCourse] = {}

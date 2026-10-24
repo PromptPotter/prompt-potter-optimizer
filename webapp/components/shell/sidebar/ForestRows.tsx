@@ -13,7 +13,7 @@ import {
   type RetiredGroup,
   type RootGroup,
 } from "@/lib/derivations";
-import { encodeCyclePath, pathLeaf, pathOfAddress, shortFamilyTail, type CyclePath } from "@/lib/ids";
+import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
 import type { HierarchyCampaign, HierarchyCandidate, HierarchyCourse } from "@/lib/api";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
@@ -56,7 +56,7 @@ function GroupRow({
   openByDefault: boolean;
   ctx: TreeCtx;
   className: string;
-  title: string;
+  title?: string;
   name: ReactNode;
   meta?: ReactNode;
   children: ReactNode;
@@ -287,17 +287,15 @@ function RetiredGroupRow({
   ctx: TreeCtx;
 }) {
   const n = group.candidates.length;
-  const attempts = `${n} attempt${n === 1 ? "" : "s"}`;
-  const branch = pathLeaf(pathOfAddress(group.branch)).cycleId;
+  const [first] = group.candidates;
   return (
     <GroupRow
       addr={`${course.address}/retired/${group.branch}`}
       openByDefault={false}
       ctx={ctx}
       className="retired"
-      title={`${attempts} the run left behind when it branched to ${branch} and continued there. They keep their labels and their numbers; the attempts that replaced them are on that course.`}
-      name={<span className="unit-library-kind">⑂ retired → {shortFamilyTail(branch)}</span>}
-      meta={<span className="unit-library-status">{attempts}</span>}
+      name={<span className="unit-library-kind">⑂ {tagLabel(first ?? null, "superseded")}</span>}
+      meta={<span className="unit-library-status">{`${n} attempt${n === 1 ? "" : "s"}`}</span>}
     >
       {group.candidates.map((cand) => (
         <li key={cand.address}>
@@ -315,7 +313,7 @@ function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx })
   const selected = isPicked(cand);
   const retired = tagValue(cand, "superseded") !== null;
   const elected = tagValue(cand, "verdict") === "elected";
-  const accuracy = cand.stats.find((s) => s.key === "accuracy")?.value ?? "—";
+  const [headline] = cand.stats;
   return (
     <>
       <RowHoverCard card={cand}>
@@ -334,7 +332,7 @@ function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx })
                 {cand.label}
                 {elected && <span className="unit-library-kind">{tagLabel(cand, "verdict")}</span>}
               </span>
-              <span className="unit-library-meta">{accuracy}</span>
+              {headline && <span className="unit-library-meta">{headline.value}</span>}
             </span>
           </button>
         </div>

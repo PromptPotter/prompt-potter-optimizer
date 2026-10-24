@@ -72,7 +72,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
         {geo.nodes.map((n, i) => {
           const view = byKey.get(n.key);
           const selected = n.key === selectedKey;
-          const forkCycle = forkedFrom.get(n.candidateId);
+          const forkCycle = forkedFrom.get(n.address);
           const value = view ? barValueLabel(metric, view) : "—";
           return (
             <g key={`${n.key}|${i}`} className="cand-dendro-node">

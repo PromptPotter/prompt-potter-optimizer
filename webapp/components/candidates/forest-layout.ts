@@ -148,7 +148,8 @@ export function extentKeys(
       const parent = spawn ? byAddress.get(spawn.parent) : undefined;
       if (!spawn || !parent) return;
       const from = candidatesOf(parent).find((c) => c.address === spawn.from_candidate);
-      keepThrough(parent, from ? roundOf(from) : (spawn.at_round ?? 0));
+      if (from) keepThrough(parent, roundOf(from));
+      else if (spawn.at_round !== null) keepThrough(parent, spawn.at_round);
       cutUpward(parent);
     };
     for (const course of courses) {

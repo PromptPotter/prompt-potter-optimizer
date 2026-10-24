@@ -57,7 +57,8 @@ function Facts({ facts }: { facts: [string, string][] }) {
 
 function EntryBody({ entry }: { entry: HierarchyEntry }) {
   const campaign = entry.level === "campaign" ? entry : null;
-  const campaignId = campaign?.address ?? null;
+  // Storage and config are routed by a top-level campaign id; an inner run's sandbox has neither.
+  const campaignId = campaign && campaign.parent === null ? campaign.address : null;
   const read = useRead(campaignId != null ? campaignStorageRead(campaignId) : null);
   const data = readyData(read);
   const error = read.status === "failed";

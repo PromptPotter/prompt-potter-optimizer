@@ -21,7 +21,8 @@ interface LineageCleanup {
   error: string | null;
   cleaning: boolean;
   acked: boolean;
-  stubCount: number;
+  // Null until the subtree is read: the listing does not count them.
+  stubCount: number | null;
   request: () => void;
   cancel: () => void;
   confirm: () => Promise<void>;
@@ -32,7 +33,7 @@ export interface Lineage {
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
-  // The forks cut from each of the viewed course's candidates, by individual id.
+  // The forks cut from each of the viewed course's candidates, by candidate address.
   forkedFrom: ReadonlyMap<string, HierarchyCourse>;
   expanded: ReadonlySet<string>;
   onLaneActivate: (courseKey: string) => void;
@@ -110,10 +111,10 @@ export function useLineage({
 
   const forkedFrom = useMemo<ReadonlyMap<string, HierarchyCourse>>(() => {
     const m = new Map<string, HierarchyCourse>();
-    const own = new Map(candidatesAtPath(index, path).map((c) => [c.address, c]));
+    const own = new Set(candidatesAtPath(index, path).map((c) => c.address));
     for (const course of index.courses) {
-      const from = own.get(course.facts.spawn?.from_candidate ?? "");
-      if (from) m.set(from.facts.individual, course);
+      const from = course.facts.spawn?.from_candidate;
+      if (from && own.has(from)) m.set(from, course);
     }
     return m;
   }, [index, path]);
@@ -133,7 +134,7 @@ export function useLineage({
     error: cmd.failure?.message ?? null,
     cleaning: cmd.pending !== null,
     acked: cleanupAcked,
-    stubCount: tree?.facts.deletable_stubs ?? 0,
+    stubCount: tree ? tree.facts.deletable_stubs : null,
     request: () => {
       cmd.clear();
       setCleanupOpen(true);
