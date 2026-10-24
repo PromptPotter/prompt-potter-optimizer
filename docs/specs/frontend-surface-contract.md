@@ -173,7 +173,7 @@ invariants:
 **Every surface that lists, switches, docks or heads a run renders ONE served entry shape** —
 `domain/hierarchy.py::HierarchyEntry`, minted by `application/hierarchy.py` alone and read by
 `GET /hierarchy` (the webapp's `lib/registry.tsx`, the `cycles` verb). An envelope every level
-shares (`address`, `parent`, `label`, `lede`, `caveat`, `tags`, `stats`, `child_count`, `children`)
+shares (`address`, `parent`, `label`, `lede`, `caveat`, `tags`, `stats`, `children`)
 plus `facts` per level, discriminated on `level`. A generic row, hover card, switcher entry or dock chip
 reads the envelope and never opens `facts`; `facts` are typed inputs for a level-specific pane or a
 route argument, and a `facts` field no reader names is deleted (`scripts/complexity_ledger.py::BASELINE`
@@ -238,6 +238,18 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
 - **`deletable_stubs` is counted on the subtree read alone** and null in the listing:
   `CampaignStore.deletable_stubs` scans every sibling's ledger, the cost the 10 s listing poll must not
   pay. Null says "not counted at this depth", never zero.
+- **A course's chronology is its STEPS, served in a window and never as `children`.**
+  `GET /hierarchy/{course}/@?limit=&before=` (`HierarchySteps`, built by
+  `family_ray_queries.py::build_family_ray`) merges the course, its forks and its inner runs by time,
+  newest-first windows served oldest-first, paged back by `cursor_prev`. A course's `children` stay its
+  rounds: thousands of records would ride every subtree poll. A step's `parent` is its own course, not
+  a round, because one ledger interleaves a round's walk with its neighbours' open and close. A bare
+  heartbeat is no step and takes no slot of a window — it is the gap it shortens, which the next
+  step's `gap_before_s` carries — so a long open call never serves an empty window. There is no second
+  chronology shape, and no span carries offsets: a step's `facts.offset` is the moment a surface picks,
+  and a fork's birth is its course's `spawn.at_offset`, so offsets on `HierarchySpan` would be a served
+  field with no reader.
+  <!-- probe: git grep -cE "class (RayItem|RayResponse)\b" -- promptpotter == 0 -->
 
 ## The two blocking gates
 

@@ -67,7 +67,7 @@ The word `legacy` is **never** sanctioned.
   most one `ActivityItem` and folds them into `ActivityState`. **The one reader of a record as a
   line** — the SSE tail and the time-ray both serve it, so a wording, a lifetime (`LIFETIME`) or
   a new record kind changes here and nowhere else. `SilentRecord` / `ActivityRecord` place every
-  `CycleRecord` arm on one side of that read. `ray.py` is the time-ray's window over those lines.
+  `CycleRecord` arm on one side of that read. `hierarchy.py::HierarchySteps` is the time-ray's window over those lines.
 - `optimizer_state.py` — an optimizer's own working state: the `OptimizerState` envelope
   (`{manifest, population, prompt_hashes, slices, outputs}`) every round banks — `population` the
   bench's, the individuals the run carries — and `StatePart`, the base each kind of state
