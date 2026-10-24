@@ -1,5 +1,5 @@
 import { liveCandidate, liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
-import type { ArmName, ArmNode, ArmReading, CellRow, NodePrompt } from "@/lib/api/types";
+import type { ArmName, ArmReading, CellRow, HierarchyCandidate, NodePrompt } from "@/lib/api/types";
 import type { ArmRow, RoundView, SelectedCandidate } from "@/lib/types";
 import { armSearchpoint, type ArmSearchpoint } from "./candidateSearchPoint";
 import { rowAt } from "./round-candidates";
@@ -151,10 +151,10 @@ function pointAt(dash: DashboardSnapshot | null, target: ObserveTarget, title: s
 
 export function originPoint(
   dash: DashboardSnapshot | null,
-  origin: Pick<ArmNode, "reading"> | null,
+  origin: HierarchyCandidate | null,
 ): ObservePoint | null {
   if (!origin) return null;
-  const { arm } = origin.reading;
+  const { arm } = origin.facts.reading;
   return pointAt(dash, arm, `origin · ${arm.label}`);
 }
 

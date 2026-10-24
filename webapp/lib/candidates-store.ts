@@ -16,7 +16,7 @@ interface CandidatesState {
 
   showCache: boolean;
 
-  // Lane keys (`nodeKeyOf`), not cycle ids: inner cycle ids repeat across sibling sandboxes.
+  // Course addresses, not cycle ids: inner cycle ids repeat across sibling sandboxes.
   expanded: ReadonlySet<string>;
   expandedForCampaign: string | null;
   // Latch: keeps a manual collapse from being undone on the next render.

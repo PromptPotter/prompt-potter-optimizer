@@ -131,9 +131,9 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     kind: "bar",
     axis: "y",
     gap: "floor-when-started",
-    valueOf: (v) => (v.reading ? v.node.lens_value : null),
+    valueOf: (v) => (v.reading ? v.node.facts.lens_value : null),
     applies: (c) => c.showMask,
-    tip: (v) => `masked: ${fmtNum(v.reading ? v.node.lens_value : null)}`,
+    tip: (v) => `masked: ${fmtNum(v.reading ? v.node.facts.lens_value : null)}`,
   },
   {
     key: "overlap",

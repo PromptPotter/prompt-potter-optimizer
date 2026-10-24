@@ -56,7 +56,7 @@ export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
   const { index } = useViewedLineage();
   const { dash, isLive } = useCycleStream();
   const placed = point ? armAt(index, viewedPath, point.key) : null;
-  const pair = useCompareWithOrigin(viewedPath, placed ? placed.reading.arm.key : null);
+  const pair = useCompareWithOrigin(viewedPath, placed ? placed.facts.reading.arm.key : null);
   const { evidence, error } = useEvidence(
     pair.subjects,
     isLive ? LIVE_EVIDENCE_MS : null,

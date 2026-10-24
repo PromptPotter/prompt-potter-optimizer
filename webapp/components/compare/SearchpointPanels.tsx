@@ -1,12 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { ArmNode, Evidence, SubjectReading } from "@/lib/api";
+import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api";
 import { CardFrame } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { indexLineage, pathOf } from "@/lib/derivations";
+import { indexLineage } from "@/lib/derivations";
+import { pathOfAddress } from "@/lib/ids";
 import { shortId } from "@/lib/format";
-import type { CyclePath } from "@/lib/ids";
 import { useLineageTree } from "@/lib/lineage";
 import { seriesVar } from "@/lib/theme";
 import { ChannelRestore, ConfigCell, pointKeyOf } from "./config-edit";
@@ -158,7 +158,7 @@ function Row({
 interface Spine {
   campaignId: string;
   cycleId: string;
-  chain: ArmNode[];
+  chain: HierarchyCandidate[];
   marked: Map<string, string[]>;
 }
 
@@ -195,12 +195,7 @@ function CampaignSpines({
   subjects: readonly SubjectReading[];
   evidence: Evidence;
 }) {
-  const rootCycleId = subjects[0]?.cycle_id ?? "";
-  const path = useMemo<CyclePath>(
-    () => [{ campaignId, cycleId: rootCycleId }],
-    [campaignId, rootCycleId],
-  );
-  const { root, loaded, failed } = useLineageTree(path, rootCycleId !== "");
+  const { root, loaded, failed } = useLineageTree(campaignId, true);
   const index = useMemo(() => indexLineage(root), [root]);
 
   const spines = useMemo(() => buildSpines(index, subjects), [index, subjects]);
@@ -227,10 +222,10 @@ function CampaignSpines({
           </span>
           <ol className="cmp-spine-chain">
             {spine.chain.map((node) => {
-              const marks = spine.marked.get(node.id) ?? [];
+              const marks = spine.marked.get(node.facts.individual) ?? [];
               return (
                 <li
-                  key={node.id}
+                  key={node.address}
                   className={cx("cmp-spine-node", marks.length > 0 && "is-marked")}
                   title={node.label}
                 >
@@ -262,28 +257,25 @@ function buildSpines(
   index: ReturnType<typeof indexLineage>,
   subjects: readonly SubjectReading[],
 ): Spine[] {
-  const nodes = new Map<string, ArmNode>();
-  const courseOf = new Map<string, string>();
-  for (const [addr, entry] of index) {
-    for (const cand of entry.candidates) {
-      nodes.set(cand.id, cand);
-      courseOf.set(cand.id, addr);
-    }
+  const nodes = new Map<string, HierarchyCandidate>();
+  for (const cand of index.candidates) {
+    if (cand.facts.answers_for_id) nodes.set(cand.facts.individual, cand);
   }
 
-  const chains = new Map<string, { chain: ArmNode[]; marked: Map<string, string[]> }>();
+  const chains = new Map<string, { chain: HierarchyCandidate[]; marked: Map<string, string[]> }>();
   for (const s of subjects) {
     const head = nodes.get(s.candidate_id);
     if (!head) continue;
-    const chain: ArmNode[] = [];
+    const chain: HierarchyCandidate[] = [];
     const seen = new Set<string>();
-    let cursor: ArmNode | undefined = head;
-    while (cursor && !seen.has(cursor.id)) {
-      seen.add(cursor.id);
+    let cursor: HierarchyCandidate | undefined = head;
+    while (cursor && !seen.has(cursor.facts.individual)) {
+      seen.add(cursor.facts.individual);
       chain.unshift(cursor);
-      cursor = cursor.parent_ids[0] ? nodes.get(cursor.parent_ids[0]) : undefined;
+      const parent: string | undefined = cursor.facts.parent_ids[0];
+      cursor = parent ? nodes.get(parent) : undefined;
     }
-    const rootId = chain[0]?.id ?? s.candidate_id;
+    const rootId = chain[0]?.facts.individual ?? s.candidate_id;
     const prior = chains.get(rootId);
     const merged = !prior || chain.length > prior.chain.length ? chain : prior.chain;
     const marked = prior?.marked ?? new Map<string, string[]>();
@@ -293,12 +285,10 @@ function buildSpines(
 
   return [...chains.values()].map(({ chain, marked }) => {
     const head = chain.at(-1);
-    const addr = head ? (courseOf.get(head.id) ?? "") : "";
-    const hops: CyclePath = head ? pathOf(head) : [];
-    const leaf = hops.at(-1);
+    const leaf = head ? pathOfAddress(head.address).at(-1) : undefined;
     return {
       campaignId: leaf?.campaignId ?? "",
-      cycleId: leaf?.cycleId ?? addr,
+      cycleId: leaf?.cycleId ?? "",
       chain,
       marked,
     };

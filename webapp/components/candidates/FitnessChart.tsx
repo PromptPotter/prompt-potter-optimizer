@@ -468,7 +468,7 @@ export const FitnessChart = memo(function FitnessChart({
   }, [views, selectedKey, themeVersion]);
 
   const parentIdx = useMemo(() => {
-    const idx = views.findIndex((v) => v.reading !== null && v.node.stands);
+    const idx = views.findIndex((v) => v.reading !== null && v.node.facts.stands);
     return idx >= 0 ? idx : null;
   }, [views]);
 

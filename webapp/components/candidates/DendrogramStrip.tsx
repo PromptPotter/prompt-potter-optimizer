@@ -4,7 +4,7 @@ import { cx } from "@/lib/cx";
 import { barValueLabel, type DisplayMetric } from "@/lib/derivations";
 import { useStableContent } from "@/lib/stable";
 import { pressable } from "@/components/ui";
-import type { CourseLineage } from "@/lib/api";
+import type { HierarchyCourse } from "@/lib/api";
 import type { CandidateBar } from "@/lib/types";
 import { dendroRow, dendrogram, type DendroRow } from "./dendrogram";
 import type { PlotGeometry } from "./FitnessChart";
@@ -15,8 +15,8 @@ interface Props {
   metric: DisplayMetric;
   selectedKey: string | null;
   onSelect: (view: CandidateBar | null) => void;
-  forkedFrom: ReadonlyMap<string, CourseLineage>;
-  onFreeHierarchy: (course: CourseLineage) => void;
+  forkedFrom: ReadonlyMap<string, HierarchyCourse>;
+  onFreeHierarchy: (course: HierarchyCourse) => void;
 }
 
 export const DendrogramStrip = memo(function DendrogramStrip({
@@ -79,29 +79,23 @@ export const DendrogramStrip = memo(function DendrogramStrip({
               <g
                 {...pressable(() => onSelect(selected ? null : (view ?? null)))}
                 aria-pressed={selected}
-                aria-label={
-                  n.isFork
-                    ? `Fork ${n.label} — a sibling course cut from this cycle; opens it — ${value}`
-                    : `Candidate ${n.label}${n.crown === "elected" ? ", round winner" : ""} — ${value}`
-                }
+                aria-label={`Candidate ${n.label}${n.crown === "elected" ? ", round winner" : ""} — ${value}`}
                 className={cx("cand-dendro-hit", selected && "selected")}
               >
                 <title>
                   {n.label}
-                  {n.isFork
-                    ? " · a fork — a sibling course cut from this cycle. Click to open it."
-                    : n.crown === "elected"
-                      ? " · round winner (the parent this round elected)"
-                      : n.crown === "uncontested"
-                        ? " · the round's only arm — it advances without an election"
-                        : n.isWinner
-                          ? " · selected — its round has not closed yet"
-                          : " · eliminated"}
+                  {n.crown === "elected"
+                    ? " · round winner (the parent this round elected)"
+                    : n.crown === "uncontested"
+                      ? " · the round's only arm — it advances without an election"
+                      : n.isWinner
+                        ? " · selected — its round has not closed yet"
+                        : " · eliminated"}
                 </title>
                 {/* Centred on the dot: a full-height stub would take the hit test off every node it crosses. */}
                 <circle cx={pct(n.xf)} cy={n.y} r={8} className="cand-dendro-hitarea" />
                 <circle
-                  className={cx("cand-dendro-dot", n.isFork ? "fork" : n.isWinner ? "winner" : "eliminated")}
+                  className={cx("cand-dendro-dot", n.isWinner ? "winner" : "eliminated")}
                   cx={pct(n.xf)}
                   cy={n.y}
                   r={3}

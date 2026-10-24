@@ -22,8 +22,8 @@ import type {
   FilesResponse,
   ForkPreviewResponse,
   HardSamplesScope,
+  HierarchyEntry,
   HierarchyResponse,
-  CourseLineage,
   MachineStatusResponse,
   OptimizerKnobsResponse,
   OptimizerRoster,
@@ -350,22 +350,23 @@ export function evidenceRead(
 }
 
 // `lens` is `score:<formula>` or `abort:<variant>`; `samples` is ignored under `abort:`.
-export interface TreeMask {
+export interface SubtreeMask {
   lens: string | null;
   samples: readonly number[] | null;
 }
 
-// `cycle` owns the ledger `at` is an offset into: the viewed leaf, not the tree's root.
-export interface TreeMoment {
+// `cycle` owns the ledger `at` is an offset into: the viewed leaf, not the campaign's root.
+export interface SubtreeMoment {
   at: number;
   cycle: CyclePath;
 }
 
-export function treeRead(
-  path: CyclePath,
-  mask: TreeMask | null,
-  moment: TreeMoment | null = null,
-): ReadDescriptor<CourseLineage> {
+// The entry at `address` with every level under it.
+export function subtreeRead(
+  address: string,
+  mask: SubtreeMask | null,
+  moment: SubtreeMoment | null = null,
+): ReadDescriptor<HierarchyEntry> {
   const params = new URLSearchParams();
   if (mask?.lens) params.set("lens", mask.lens);
   if (mask?.samples && mask.samples.length > 0) params.set("samples", mask.samples.join(","));
@@ -374,7 +375,7 @@ export function treeRead(
     params.set("at_cycle", encodeCyclePath(moment.cycle));
   }
   const q = params.toString();
-  return byEtag("tree", cyclePathUrl(path, `/tree${q ? `?${q}` : ""}`));
+  return byEtag("subtree", `${API}/hierarchy/${enc(address)}${q ? `?${q}` : ""}`);
 }
 
 // Windowed newest-first, delivered oldest-first; `before` is a prior `cursor_prev`.

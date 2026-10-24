@@ -1,41 +1,37 @@
 import type { APIRequestContext } from "@playwright/test";
+import type { HierarchyCourse, HierarchyEntry } from "@/lib/api";
 import { panelCellLabel } from "@/lib/derivations";
+import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { test, expect, open, campaigns } from "../harness";
 
 const API = "/api/v1";
 
-type Hop = { campaign_id: string; cycle_id: string };
-type Course = {
-  path: Hop[];
-  task?: string | null;
-  children?: Course[];
-};
-type Found = { outer: Hop; named: Course[] };
+type Found = { outer: CyclePath; named: HierarchyCourse[] };
 
-const hashOf = (hops: Hop[]) =>
-  `#/c/${hops.map((h) => `${h.campaign_id}/${h.cycle_id.replace(/^cycle_/, "")}`).join("/")}`;
+const hashOf = (path: CyclePath) =>
+  `#/c/${path.map((h) => `${h.campaignId}/${h.cycleId.replace(/^cycle_/, "")}`).join("/")}`;
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // The name the tree row draws for a cell (`ForestRows`), so the walk clicks what the operator reads.
-const rowName = (c: Course) => panelCellLabel(c.task ?? "");
+const rowName = (c: HierarchyCourse) => panelCellLabel(c.facts.task ?? "");
 
-function cellsOf(n: Course, out: Course[] = []): Course[] {
-  if (n.path.length === 2 && n.task) out.push(n);
-  for (const c of n.children ?? []) cellsOf(c, out);
+function cellsOf(n: HierarchyEntry, out: HierarchyCourse[] = []): HierarchyCourse[] {
+  if (n.level === "course" && n.facts.task && pathOfAddress(n.address).length === 2) out.push(n);
+  for (const c of n.children) cellsOf(c, out);
   return out;
 }
 
 // Discover, never name: the first outer campaign serving a cell.
 async function outerServing(request: APIRequestContext): Promise<Found | null> {
   for (const c of await campaigns(request)) {
-    const res = await request.get(`${API}/campaigns/${c.id}/cycles/${c.cycleId}/tree`);
+    const res = await request.get(`${API}/hierarchy/${encodeURIComponent(c.id)}`);
     if (!res.ok()) continue;
-    const cells = cellsOf((await res.json()) as Course);
+    const cells = cellsOf((await res.json()) as HierarchyEntry);
     // Two arms measure one task, so a name may draw several rows: any of them is a correct landing.
     const first = cells[0];
     if (first) {
       const named = cells.filter((y) => rowName(y) === rowName(first));
-      return { outer: { campaign_id: c.id, cycle_id: c.cycleId }, named };
+      return { outer: [{ campaignId: c.id, cycleId: c.cycleId }], named };
     }
   }
   return null;
@@ -45,7 +41,7 @@ test("a seat cell drills into the inner run that measured it", async ({ page, re
   const found = await outerServing(request);
   test.skip(!found, "no campaign in this workspace serves a seat cell");
   const { outer, named } = found!;
-  await open(page, `${hashOf([outer])}/dashboard`);
+  await open(page, `${hashOf(outer)}/dashboard`);
 
   const name = rowName(named[0]!);
   const row = page.getByRole("button", { name: new RegExp(`^${escape(name)}(\\s|$)`) }).first();
@@ -64,7 +60,7 @@ test("a seat cell drills into the inner run that measured it", async ({ page, re
 
   const landedOn = () => {
     const hash = new URL(page.url()).hash;
-    return named.find((c) => new RegExp(`^${escape(hashOf(c.path))}(/|$)`).test(hash)) ?? null;
+    return named.find((c) => new RegExp(`^${escape(hashOf(pathOfAddress(c.address)))}(/|$)`).test(hash)) ?? null;
   };
   await expect
     .poll(() => landedOn() !== null, { message: `${name} did not drill to a hop it names` })

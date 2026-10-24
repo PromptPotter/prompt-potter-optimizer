@@ -49,7 +49,7 @@ describe("failureKind", () => {
   });
 
   it("carries the server's envelope fields so a report can name the cause", () => {
-    const e = new ApiError(404, "/api/v1/campaigns/c/cycles/y/tree", "not_found", "abc123def456");
+    const e = new ApiError(404, "/api/v1/hierarchy/c", "not_found", "abc123def456");
     expect(e.code).toBe("not_found");
     expect(e.errorId).toBe("abc123def456");
   });
@@ -59,7 +59,7 @@ describe("incident ring", () => {
   beforeEach(() => clearIncidents());
 
   it("records the trace handle and classification, not the payload", () => {
-    reportIncident(new ApiError(404, "/api/v1/campaigns/c/cycles/y/tree?lens=x", "not_found", "id1"), {
+    reportIncident(new ApiError(404, "/api/v1/hierarchy/c?lens=x", "not_found", "id1"), {
       surface: "lineage",
       address: "c::y",
     });
@@ -68,7 +68,7 @@ describe("incident ring", () => {
     expect(only?.code).toBe("not_found");
     expect(only?.kind).toBe("gone");
     expect(only?.surface).toBe("lineage");
-    expect(only?.path).toBe("/api/v1/campaigns/c/cycles/y/tree");
+    expect(only?.path).toBe("/api/v1/hierarchy/c");
   });
 
   it("collapses a repeating signature instead of letting it flood the ring", () => {

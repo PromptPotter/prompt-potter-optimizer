@@ -12,10 +12,10 @@ import {
 import type { DashboardSnapshot } from "@/lib/poll";
 import type { ArmName, LiveCandidate, ServedRound } from "@/lib/api/types";
 import {
-  armNode,
   armReading,
   currentRound,
   dash,
+  hierarchyCandidate,
   liveRow,
   ownLevel,
   measuredArm,
@@ -365,7 +365,7 @@ describe("originPoint — the origin as the served tree names it", () => {
   const snap = dash({ rounds: [crowned(0, 0, 1), crowned(1, 0, 2)] });
 
   it("addresses the origin by the arm key its own course speaks", () => {
-    const p = originPoint(snap, armNode({ id: "r0c0", label: "C0" }));
+    const p = originPoint(snap, hierarchyCandidate("camp::cycle_a", { id: "r0c0", label: "C0" }));
     expect(p).toMatchObject({ round: 0, label: "C0", title: "origin · C0" });
     expect(p?.row?.reading.arm.key).toBe("r0c0");
   });

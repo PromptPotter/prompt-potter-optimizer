@@ -9,11 +9,8 @@ from promptpotter.application.cycle_reads import (
     export_cycle,
     round_audit,
     served_round,
-    tree_version,
     view_cycle,
 )
-from promptpotter.application.mask.record import parse_lens, parse_sample_ids
-from promptpotter.application.mask.tree_lens import lensed_tree
 from promptpotter.application.served_dashboard import (
     ServedDashboard,
     WarmingDashboard,
@@ -21,12 +18,10 @@ from promptpotter.application.served_dashboard import (
 )
 from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
 from promptpotter.domain.export import ExportTier
-from promptpotter.domain.lineage_tree import CourseLineage
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
     client_seen_at_or_after,
-    conditional_json,
     http_date,
     model_json,
 )
@@ -145,38 +140,3 @@ def get_cycle_export(
         media_type=_EXPORT_MEDIA[PurePosixPath(name).suffix],
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
-
-
-@campaigns_router.get(
-    "/campaigns/{campaign_id}/cycles/{cycle_id}/tree",
-    response_model=CourseLineage,
-)
-def get_lineage_tree(
-    request: Request,
-    stores: StoresDep,
-    campaign_id: str,
-    cycle_id: str,
-    descend: str | None = Query(None),
-    lens: str | None = Query(None),
-    samples: str | None = Query(None),
-    at: int | None = Query(None, ge=0),
-    at_cycle: str | None = Query(None),
-) -> Response:
-    """The lineage tree rooted at this cycle, its nodes alternating ``course -> candidate -> course`` at every depth.
-
-    ``at`` is a line of the ledger of ``at_cycle`` (a whole cycle path in the ``descend`` grammar, root hop included; absent, the tree's root): a course minted later is not in the tree, and run-state stays live.
-    ``lens`` is ``score:<formula>`` (rows re-graded under another ``per_cell`` composite), ``dials:<term=weight,…>`` (the same as weights) or ``abort:<variant>`` (``<gate>_off`` or ``all_off``).
-    ``samples`` is a comma-separated sample-id mask; with neither, the tree is the raw read.
-    """
-    path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
-    root = view_cycle(stores, path)
-
-    def build() -> CourseLineage:
-        selected = parse_lens(lens, allow_abort=True) if lens else None
-        replayed = view_cycle(stores, decode_cycle_path(at_cycle)) if at_cycle else root
-        return lensed_tree(
-            stores, path, selected, parse_sample_ids(samples), moment=replayed.moment(at)
-        )
-
-    version = tree_version(stores, path, masked=bool(lens or samples))
-    return conditional_json(request, (version, lens, samples, at, at_cycle), build)

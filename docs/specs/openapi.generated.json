@@ -825,248 +825,6 @@
         "title": "ArmName",
         "type": "object"
       },
-      "ArmNode": {
-        "additionalProperties": false,
-        "description": "One arm on a course's timeline; everything measured or decided about it is its `reading`.",
-        "properties": {
-          "answers_for_id": {
-            "default": false,
-            "description": "The ONE row tree-wide that answers for its `id` — what a remembered candidate id (a selection, a deep link) resolves to: the row still on a line where a supersede cut left the individual on two, the first where several stand.",
-            "title": "Answers For Id",
-            "type": "boolean"
-          },
-          "children": {
-            "description": "The runs that measured this arm's individual.",
-            "items": {
-              "$ref": "#/components/schemas/CourseLineage"
-            },
-            "title": "Children",
-            "type": "array"
-          },
-          "course_latest": {
-            "default": false,
-            "description": "The newest arm minted at this node's `path`, crowned or not.",
-            "title": "Course Latest",
-            "type": "boolean"
-          },
-          "course_winner": {
-            "default": false,
-            "description": "The last arm an election crowned among those sharing this node's `path` — a course's, or a fork's, which has no node of its own to say it.",
-            "title": "Course Winner",
-            "type": "boolean"
-          },
-          "divergence": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LineageDivergence"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Set when the request's lens would have FORKED the record at this node. Only ever set on a closed round's node."
-          },
-          "divergent": {
-            "default": false,
-            "description": "This node is inside the counterfactual subtree below a divergence — the client dims it.",
-            "title": "Divergent",
-            "type": "boolean"
-          },
-          "elects_on": {
-            "anyOf": [
-              {
-                "enum": [
-                  "accuracy",
-                  "composite",
-                  "ability"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The column the selector elects on: the declaration its round's election carried (`Election.elects_on`), null on a round that never elected. `ability`: the rounds are won on theta, not on accuracy.",
-            "title": "Elects On"
-          },
-          "fork": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ForkStamp"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Set on an attempt a fork contributed here; null on a course's own candidates and on a branch the run moved to, whose attempts ARE the line."
-          },
-          "id": {
-            "description": "Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin.",
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "const": "candidate",
-            "default": "candidate",
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "description": "`C{round}.{n}` on the campaign's ONE timeline: this course's own candidates keep their minted label; an attempt a fork contributed takes the next free index of its round, by mint time — UNLESS the cut superseded, where it keeps its own label because it replaced that position rather than joining it, and the candidate it replaced carries `superseded_by`. So one label can appear twice in a round: at most once LIVE, the other retired. A course's is its cycle_id.",
-            "title": "Label",
-            "type": "string"
-          },
-          "lens_rank_move": {
-            "anyOf": [
-              {
-                "enum": [
-                  "up",
-                  "down",
-                  "unchanged"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which way the lens moved this arm among its siblings — the bars one chart draws: its 1-based position by `lens_value` descending against its position by the reading's composite. An ordering is a score, so the move is served rather than sorted client-side. Null without a lens, or where either value is.",
-            "title": "Lens Rank Move"
-          },
-          "lens_value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "This candidate's composite fitness under the request's `score:` lens — its rows re-graded per cell under that `per_cell` formula and folded, the number a fresh run under it reports. Null without a lens, or where no row carries a verdict under it.",
-            "title": "Lens Value"
-          },
-          "main_line": {
-            "description": "The main line to THIS arm at its own address, origin first: each elected round before it with the arms it crowned, then this arm at its own round, then any later round that crowned nobody up to the next crown. Read off crowns, never `parent_ids`: a parent edge names an individual, not the arm that was crowned.",
-            "items": {
-              "$ref": "#/components/schemas/MainLineStep"
-            },
-            "title": "Main Line",
-            "type": "array"
-          },
-          "origin_row": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The `row` of the origin arm — C0 — of the timeline this node is on. A course names its own; a candidate names its course's, and an attempt a fork contributed names the origin of the timeline it was folded onto, never the fork's replayed C0. An inner course starts its own timeline, so its candidates name ITS C0. Where a repair left the origin's individual on two rows, the one still on a line. Null on a course that has minted nothing.",
-            "title": "Origin Row"
-          },
-          "parent_ids": {
-            "description": "Every candidate this node derives from — one for a mutation, several for a crossover; empty only at the true root. Lineage is a DAG; this tree hangs the node under `parent_ids[0]`. A course carries the same edge its own C0 carries.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Parent Ids",
-            "type": "array"
-          },
-          "path": {
-            "description": "THE address, root → leaf: the course this node belongs to. A candidate a fork contributed carries the FORK's path, so selecting it re-roots onto that fork.",
-            "items": {
-              "$ref": "#/components/schemas/CycleHop"
-            },
-            "title": "Path",
-            "type": "array"
-          },
-          "reading": {
-            "$ref": "#/components/schemas/ArmReading",
-            "description": "`reading.arm` is the arm in the course that MINTED it — the key every per-cycle document of that course speaks — while `label` above is its position on this timeline; the two differ only on an attempt a fork contributed and the fold renumbered. `reading.sp_hash` joins to the archive rows. On the retired side of a supersede cut the election wears no crown: the branch re-asks it."
-          },
-          "row": {
-            "description": "THE key of this row in this response: unique tree-wide, where `id` is not — a supersede cut leaves one individual on two rows, and a later round can read it again. Every pointer the tree serves at an arm (`origin_row`, `main_line`) names one. Minted per build, so it addresses nothing across two responses.",
-            "title": "Row",
-            "type": "integer"
-          },
-          "sample_set_accuracy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Scorer-faithful accuracy over the request's `samples=` subset, served only where this candidate carries a scoreable verdict for ALL of it — a rate over part of the subset sat a different exam, and these are read side by side. Null without a `samples=` mask, and short of the subset.",
-            "title": "Sample Set Accuracy"
-          },
-          "sample_set_n": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How many of the `samples=` subset this candidate carries a SCOREABLE verdict for. The denominator of `sample_set_accuracy` where that is served; below the subset size, how far short of it the candidate is.",
-            "title": "Sample Set N"
-          },
-          "stands": {
-            "default": false,
-            "description": "The newest crowned arm still on this timeline — the parent the next round mutates from. At most one child of a course.",
-            "title": "Stands",
-            "type": "boolean"
-          },
-          "superseded_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The cycle_id of the branch that took this candidate's place. Set on the LEFT-BEHIND side of a `supersede` cut (`ForkDirection`) — the tail its own course kept as the record of what ran, while the line continued elsewhere. Null on every candidate still on a line, including both sides of an `offshoot` or `equivalent` cut. Served because a fork is NOT a node: without a name the operator sees a retired attempt and a live one as peers of one round, which is the whole reason a cut records its direction.",
-            "title": "Superseded By"
-          },
-          "variations": {
-            "description": "The variation nodes that wrote this arm's individual, in the order they ran: each `{manifest}:{node}`, whether it computed its result or asked a model, and the loci it left different. Empty on an origin, and on the stand-in row of a branch.",
-            "items": {
-              "$ref": "#/components/schemas/Variation"
-            },
-            "title": "Variations",
-            "type": "array"
-          },
-          "verdict": {
-            "default": "awaiting",
-            "description": "Where this arm stands on its timeline, as one closed value (`domain/results.py::arm_verdict`); its words are `ARM_VERDICT_LABELS`. Stamped over the finished tree, like the heads below.",
-            "enum": [
-              "retired",
-              "invalid",
-              "origin",
-              "elected",
-              "uncontested",
-              "selected",
-              "not_elected",
-              "unmeasured",
-              "awaiting"
-            ],
-            "title": "Verdict",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "label",
-          "row",
-          "reading"
-        ],
-        "title": "ArmNode",
-        "type": "object"
-      },
       "ArmPanel": {
         "additionalProperties": false,
         "description": "The cells one arm's walk holds of the panel its round asked of it.",
@@ -2267,6 +2025,18 @@
         "additionalProperties": false,
         "description": "A campaign's typed facts, for a pane or a route argument; its rows read the envelope.",
         "properties": {
+          "deletable_stubs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many cycles `cleanup-empty-cycles` deletes here now (`CampaignStore.deletable_stubs`, the command's own list). Counted on the subtree read only — every sibling's ledger is scanned per fork — so null in the listing.",
+            "title": "Deletable Stubs"
+          },
           "label": {
             "anyOf": [
               {
@@ -2314,7 +2084,8 @@
           "line",
           "lifecycle",
           "spend_lifetime",
-          "runs_with"
+          "runs_with",
+          "deletable_stubs"
         ],
         "title": "CampaignFacts",
         "type": "object"
@@ -2597,6 +2368,141 @@
           "job_id"
         ],
         "title": "CancelQueuedRunPayload",
+        "type": "object"
+      },
+      "CandidateFacts": {
+        "additionalProperties": false,
+        "description": "One arm a round proposed; everything measured or decided about it is its `reading`.",
+        "properties": {
+          "answers_for_id": {
+            "description": "The ONE candidate across the subtree a remembered individual id resolves to: the live one where a supersede left the individual on two, the first where several stand.",
+            "title": "Answers For Id",
+            "type": "boolean"
+          },
+          "course_latest": {
+            "description": "The newest candidate its course proposed.",
+            "title": "Course Latest",
+            "type": "boolean"
+          },
+          "divergence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LineageDivergence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on a closed round's crowned candidate where the request's lens would have elected someone else."
+          },
+          "divergent": {
+            "description": "Inside the counterfactual below a divergence — the client dims it.",
+            "title": "Divergent",
+            "type": "boolean"
+          },
+          "individual": {
+            "description": "`OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one individual again.",
+            "title": "Individual",
+            "type": "string"
+          },
+          "lens_rank_move": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RankMove"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which way the lens moved this candidate among its course's: its position by `lens_value` against its position by the reading's composite. Null without a lens, or where either value is."
+          },
+          "lens_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This candidate's composite fitness under the request's `score:` lens. Null without a lens, or where no row carries a verdict under it.",
+            "title": "Lens Value"
+          },
+          "main_line": {
+            "description": "The main line to THIS candidate, origin first: the spawn anchor's line up to where its course branched, each elected round of its course before it with the candidates crowned, then this candidate, then any later round that crowned nobody up to the next crown. Read off crowns, never `parent_ids`.",
+            "items": {
+              "$ref": "#/components/schemas/MainLineStep"
+            },
+            "title": "Main Line",
+            "type": "array"
+          },
+          "parent_ids": {
+            "description": "Every individual this one derives from — one for a mutation, several for a crossover; empty only at an origin.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Ids",
+            "type": "array"
+          },
+          "reading": {
+            "$ref": "#/components/schemas/ArmReading",
+            "description": "`reading.arm` is the key every per-cycle document of this course speaks; `reading.sp_hash` joins to the archive rows. A retired candidate's election wears no crown: the course that took its place re-asks it."
+          },
+          "sample_set_accuracy": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accuracy over the request's `samples=` subset, served only where this candidate carries a scoreable verdict for ALL of it. Null without a `samples=` mask.",
+            "title": "Sample Set Accuracy"
+          },
+          "sample_set_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many of the `samples=` subset this candidate carries a scoreable verdict for. Null without a `samples=` mask.",
+            "title": "Sample Set N"
+          },
+          "stands": {
+            "description": "The newest crowned live candidate of its course — the parent the next round mutates from. At most one per course.",
+            "title": "Stands",
+            "type": "boolean"
+          },
+          "variations": {
+            "description": "The variation nodes that wrote this individual, in the order they ran. Empty on an origin.",
+            "items": {
+              "$ref": "#/components/schemas/Variation"
+            },
+            "title": "Variations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "individual",
+          "parent_ids",
+          "variations",
+          "reading",
+          "stands",
+          "course_latest",
+          "answers_for_id",
+          "main_line",
+          "lens_value",
+          "lens_rank_move",
+          "sample_set_accuracy",
+          "sample_set_n",
+          "divergence",
+          "divergent"
+        ],
+        "title": "CandidateFacts",
         "type": "object"
       },
       "CatchUpLogEntry": {
@@ -3754,9 +3660,44 @@
         "additionalProperties": false,
         "description": "A course's typed facts, for a pane or a route argument; its rows read the envelope.",
         "properties": {
+          "lens_criterion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `per_cell` formula this course was read under for the request's lens — a `dials:` lens realized against this campaign's anchors, a `score:` one as given. What a fork applying the lens carries as `scoring.per_cell`. Null without one.",
+            "title": "Lens Criterion"
+          },
+          "lens_shift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LensShift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the request's lens reorders this course's candidates. Null without a lens, and where it ranked none of them."
+          },
           "mint": {
             "$ref": "#/components/schemas/CourseKind",
             "description": "How the course was minted; the `mint` tag renders it."
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address of the arm the course's standing is paired against: its own round-0 candidate, else its spawn parent's origin. Served on the subtree read; null in the listing.",
+            "title": "Origin"
           },
           "rounds_closed": {
             "description": "Rounds closed AFTER the origin.",
@@ -3803,7 +3744,10 @@
           "spawn",
           "task",
           "standing",
-          "rounds_closed"
+          "rounds_closed",
+          "origin",
+          "lens_criterion",
+          "lens_shift"
         ],
         "title": "CourseFacts",
         "type": "object"
@@ -3816,103 +3760,6 @@
           "inner"
         ],
         "type": "string"
-      },
-      "CourseLineage": {
-        "additionalProperties": false,
-        "description": "One run, whose children are the arms on its ONE timeline, forks folded in.",
-        "properties": {
-          "children": {
-            "items": {
-              "$ref": "#/components/schemas/ArmNode"
-            },
-            "title": "Children",
-            "type": "array"
-          },
-          "course": {
-            "$ref": "#/components/schemas/HierarchyCourse",
-            "description": "The course as the hierarchy serves it, minted by the one course builder: a timeline a supersede folded onto its branch carries the branch's."
-          },
-          "deletable_stubs": {
-            "description": "How many cycles `cleanup-empty-cycles` addressed at this course deletes now: its forks that closed no round of their own, hold no producer and no descendant, and are not the active cycle (`CampaignStore.deletable_stubs`, the command's own list). A fork is no node of this tree, so no count over its nodes can stand in for it.",
-            "title": "Deletable Stubs",
-            "type": "integer"
-          },
-          "id": {
-            "description": "Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin.",
-            "title": "Id",
-            "type": "string"
-          },
-          "kind": {
-            "const": "course",
-            "default": "course",
-            "title": "Kind",
-            "type": "string"
-          },
-          "label": {
-            "description": "`C{round}.{n}` on the campaign's ONE timeline: this course's own candidates keep their minted label; an attempt a fork contributed takes the next free index of its round, by mint time — UNLESS the cut superseded, where it keeps its own label because it replaced that position rather than joining it, and the candidate it replaced carries `superseded_by`. So one label can appear twice in a round: at most once LIVE, the other retired. A course's is its cycle_id.",
-            "title": "Label",
-            "type": "string"
-          },
-          "lens_criterion": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The `per_cell` formula this course's record was read under for the request's lens — a `dials:` lens realized against this campaign's anchors, a `score:` one as given. What a fork applying the lens carries as `scoring.per_cell`. Null without one.",
-            "title": "Lens Criterion"
-          },
-          "lens_shift": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LensShift"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How the request's lens reorders this course's arms. Null without a lens, and where it ranked none of them."
-          },
-          "origin_row": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The `row` of the origin arm — C0 — of the timeline this node is on. A course names its own; a candidate names its course's, and an attempt a fork contributed names the origin of the timeline it was folded onto, never the fork's replayed C0. An inner course starts its own timeline, so its candidates name ITS C0. Where a repair left the origin's individual on two rows, the one still on a line. Null on a course that has minted nothing.",
-            "title": "Origin Row"
-          },
-          "parent_ids": {
-            "description": "Every candidate this node derives from — one for a mutation, several for a crossover; empty only at the true root. Lineage is a DAG; this tree hangs the node under `parent_ids[0]`. A course carries the same edge its own C0 carries.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Parent Ids",
-            "type": "array"
-          },
-          "path": {
-            "description": "THE address, root → leaf: the course this node belongs to. A candidate a fork contributed carries the FORK's path, so selecting it re-roots onto that fork.",
-            "items": {
-              "$ref": "#/components/schemas/CycleHop"
-            },
-            "title": "Path",
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "label",
-          "course",
-          "deletable_stubs"
-        ],
-        "title": "CourseLineage",
-        "type": "object"
       },
       "CourseSpawn": {
         "additionalProperties": false,
@@ -3948,7 +3795,7 @@
                 "type": "null"
               }
             ],
-            "description": "The arm key it branched from, where one.",
+            "description": "The address of the parent candidate it hangs from: the one its fork record names, else the reference its first round re-read, else the parent's origin. Served on the subtree read; null in the listing, which reads no candidate.",
             "title": "From Candidate"
           },
           "issued_by": {
@@ -6923,68 +6770,6 @@
         "title": "ForkSeed",
         "type": "object"
       },
-      "ForkStamp": {
-        "additionalProperties": false,
-        "description": "What marks an attempt the operator cut: a fork is NOT a node, so its identity rides them.",
-        "properties": {
-          "cut_from": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The timeline label of the attempt this fork was cut from — its first parent, as the course it sits on numbers it. Null where that parent is not on this timeline.",
-            "title": "Cut From"
-          },
-          "direction": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ForkDirection"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which side of the cut the run CONTINUES on (`FORK_TRAITS`): `offshoot` hangs off a line that keeps running, `supersede` IS the line."
-          },
-          "kind": {
-            "$ref": "#/components/schemas/CourseKind"
-          },
-          "status": {
-            "$ref": "#/components/schemas/RunStatus",
-            "description": "How the fork's own run reads — what the stand-in row of a branch that minted nothing shows in place of a level."
-          },
-          "steered_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Who cut the fork, as its fork record names them: an account or delegate id, `system`, or the layer and round that proposed it. An id, never a display name.",
-            "title": "Steered By"
-          },
-          "trigger": {
-            "title": "Trigger",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "trigger",
-          "direction",
-          "steered_by",
-          "status",
-          "cut_from"
-        ],
-        "title": "ForkStamp",
-        "type": "object"
-      },
       "ForkTrigger": {
         "description": "One value per caller of :func:`mint_fork`.",
         "enum": [
@@ -7389,17 +7174,19 @@
             "title": "Caveat"
           },
           "child_count": {
-            "description": "A campaign's courses; a course's rounds on its ledger, closed and open.",
+            "description": "A campaign's courses; a course's rounds on its own ledger, closed and open; a round's candidates; a candidate's inner campaigns.",
             "title": "Child Count",
             "type": "integer"
           },
           "children": {
-            "description": "Served to `?depth=`: a campaign's courses root first; empty under a course.",
+            "description": "A listing serves a campaign's courses to `?depth=` and nothing under them; the subtree read serves every level, courses root first, candidates in slot order.",
             "items": {
               "discriminator": {
                 "mapping": {
                   "campaign": "#/components/schemas/HierarchyCampaign",
-                  "course": "#/components/schemas/HierarchyCourse"
+                  "candidate": "#/components/schemas/HierarchyCandidate",
+                  "course": "#/components/schemas/HierarchyCourse",
+                  "round": "#/components/schemas/HierarchyRound"
                 },
                 "propertyName": "level"
               },
@@ -7409,6 +7196,12 @@
                 },
                 {
                   "$ref": "#/components/schemas/HierarchyCourse"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyRound"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCandidate"
                 }
               ]
             },
@@ -7482,14 +7275,139 @@
           "lede",
           "caveat",
           "tags",
-          "state",
           "stats",
+          "child_count",
+          "children",
+          "state",
           "span",
+          "facts"
+        ],
+        "title": "HierarchyCampaign",
+        "type": "object"
+      },
+      "HierarchyCandidate": {
+        "additionalProperties": false,
+        "description": "One candidate a round proposed; its children are the inner campaigns it spawned.",
+        "properties": {
+          "address": {
+            "description": "Server-minted and stable: the key of every row and every open set. A course's is its `CyclePath` on the wire (`encodeCyclePath`).",
+            "title": "Address",
+            "type": "string"
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What could not be read; null where all was.",
+            "title": "Caveat"
+          },
+          "child_count": {
+            "description": "A campaign's courses; a course's rounds on its own ledger, closed and open; a round's candidates; a candidate's inner campaigns.",
+            "title": "Child Count",
+            "type": "integer"
+          },
+          "children": {
+            "description": "A listing serves a campaign's courses to `?depth=` and nothing under them; the subtree read serves every level, courses root first, candidates in slot order.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "campaign": "#/components/schemas/HierarchyCampaign",
+                  "candidate": "#/components/schemas/HierarchyCandidate",
+                  "course": "#/components/schemas/HierarchyCourse",
+                  "round": "#/components/schemas/HierarchyRound"
+                },
+                "propertyName": "level"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HierarchyCampaign"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCourse"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyRound"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCandidate"
+                }
+              ]
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/CandidateFacts"
+          },
+          "label": {
+            "description": "The display name.",
+            "title": "Label",
+            "type": "string"
+          },
+          "lede": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one sentence under the title: the selection line.",
+            "title": "Lede"
+          },
+          "level": {
+            "const": "candidate",
+            "default": "candidate",
+            "title": "Level",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
+            "title": "Parent"
+          },
+          "stats": {
+            "description": "Server-ordered; `stats[0]` is the headline.",
+            "items": {
+              "$ref": "#/components/schemas/HierarchyStat"
+            },
+            "title": "Stats",
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyTag"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "parent",
+          "label",
+          "lede",
+          "caveat",
+          "tags",
+          "stats",
           "child_count",
           "children",
           "facts"
         ],
-        "title": "HierarchyCampaign",
+        "title": "HierarchyCandidate",
         "type": "object"
       },
       "HierarchyCourse": {
@@ -7514,17 +7432,19 @@
             "title": "Caveat"
           },
           "child_count": {
-            "description": "A campaign's courses; a course's rounds on its ledger, closed and open.",
+            "description": "A campaign's courses; a course's rounds on its own ledger, closed and open; a round's candidates; a candidate's inner campaigns.",
             "title": "Child Count",
             "type": "integer"
           },
           "children": {
-            "description": "Served to `?depth=`: a campaign's courses root first; empty under a course.",
+            "description": "A listing serves a campaign's courses to `?depth=` and nothing under them; the subtree read serves every level, courses root first, candidates in slot order.",
             "items": {
               "discriminator": {
                 "mapping": {
                   "campaign": "#/components/schemas/HierarchyCampaign",
-                  "course": "#/components/schemas/HierarchyCourse"
+                  "candidate": "#/components/schemas/HierarchyCandidate",
+                  "course": "#/components/schemas/HierarchyCourse",
+                  "round": "#/components/schemas/HierarchyRound"
                 },
                 "propertyName": "level"
               },
@@ -7534,6 +7454,12 @@
                 },
                 {
                   "$ref": "#/components/schemas/HierarchyCourse"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyRound"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCandidate"
                 }
               ]
             },
@@ -7607,11 +7533,11 @@
           "lede",
           "caveat",
           "tags",
-          "state",
           "stats",
-          "span",
           "child_count",
           "children",
+          "state",
+          "span",
           "facts"
         ],
         "title": "HierarchyCourse",
@@ -7678,6 +7604,131 @@
           "entries"
         ],
         "title": "HierarchyResponse",
+        "type": "object"
+      },
+      "HierarchyRound": {
+        "additionalProperties": false,
+        "description": "One round of a course's own ledger; its children are the candidates it proposed.",
+        "properties": {
+          "address": {
+            "description": "Server-minted and stable: the key of every row and every open set. A course's is its `CyclePath` on the wire (`encodeCyclePath`).",
+            "title": "Address",
+            "type": "string"
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What could not be read; null where all was.",
+            "title": "Caveat"
+          },
+          "child_count": {
+            "description": "A campaign's courses; a course's rounds on its own ledger, closed and open; a round's candidates; a candidate's inner campaigns.",
+            "title": "Child Count",
+            "type": "integer"
+          },
+          "children": {
+            "description": "A listing serves a campaign's courses to `?depth=` and nothing under them; the subtree read serves every level, courses root first, candidates in slot order.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "campaign": "#/components/schemas/HierarchyCampaign",
+                  "candidate": "#/components/schemas/HierarchyCandidate",
+                  "course": "#/components/schemas/HierarchyCourse",
+                  "round": "#/components/schemas/HierarchyRound"
+                },
+                "propertyName": "level"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HierarchyCampaign"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCourse"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyRound"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCandidate"
+                }
+              ]
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/RoundFacts"
+          },
+          "label": {
+            "description": "The display name.",
+            "title": "Label",
+            "type": "string"
+          },
+          "lede": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one sentence under the title: the selection line.",
+            "title": "Lede"
+          },
+          "level": {
+            "const": "round",
+            "default": "round",
+            "title": "Level",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
+            "title": "Parent"
+          },
+          "stats": {
+            "description": "Server-ordered; `stats[0]` is the headline.",
+            "items": {
+              "$ref": "#/components/schemas/HierarchyStat"
+            },
+            "title": "Stats",
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyTag"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "parent",
+          "label",
+          "lede",
+          "caveat",
+          "tags",
+          "stats",
+          "child_count",
+          "children",
+          "facts"
+        ],
+        "title": "HierarchyRound",
         "type": "object"
       },
       "HierarchySpan": {
@@ -8152,7 +8203,7 @@
       },
       "LensShift": {
         "additionalProperties": false,
-        "description": "What the request's lens did to one course's sibling ordering, over the arms on its timeline.",
+        "description": "What the request's lens did to one course's candidate ordering.",
         "properties": {
           "moved_down": {
             "title": "Moved Down",
@@ -8163,7 +8214,7 @@
             "type": "integer"
           },
           "top_changed": {
-            "description": "The lens ranks another arm first.",
+            "description": "The lens ranks another candidate first.",
             "title": "Top Changed",
             "type": "boolean"
           },
@@ -8176,7 +8227,7 @@
                 "type": "null"
               }
             ],
-            "description": "The timeline label of the arm ranked first by composite; null where that arm is on the retired side of a supersede cut.",
+            "description": "The address of the candidate ranked first by composite; null where that candidate is retired.",
             "title": "Top Composite"
           },
           "top_lens": {
@@ -8420,7 +8471,7 @@
       },
       "LineageDivergence": {
         "additionalProperties": false,
-        "description": "Where an alternative criterion would have elected someone else, on the node it describes.",
+        "description": "Where an alternative criterion would have elected someone else, on the candidate it names.",
         "properties": {
           "alternative_candidate_id": {
             "anyOf": [
@@ -8431,10 +8482,13 @@
                 "type": "null"
               }
             ],
-            "description": "The candidate the masked criterion would have elected instead (measured, so nameable); null when the round would simply have held on origin.",
+            "description": "The individual the masked criterion would have elected instead (measured, so nameable); null when the round would simply have held on origin.",
             "title": "Alternative Candidate Id"
           }
         },
+        "required": [
+          "alternative_candidate_id"
+        ],
         "title": "LineageDivergence",
         "type": "object"
       },
@@ -8864,24 +8918,24 @@
       },
       "MainLineStep": {
         "additionalProperties": false,
-        "description": "One round on the main line to an arm.",
+        "description": "One round on the main line to a candidate.",
         "properties": {
+          "candidates": {
+            "description": "The addresses of the candidates the round's election crowned; at the candidate's own round, the candidate. Empty: the election crowned nobody.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
           "round": {
             "title": "Round",
             "type": "integer"
-          },
-          "rows": {
-            "description": "The arms the round's election crowned, each by its `row`; at the head's round, the head. Empty: the election crowned nobody.",
-            "items": {
-              "type": "integer"
-            },
-            "title": "Rows",
-            "type": "array"
           }
         },
         "required": [
           "round",
-          "rows"
+          "candidates"
         ],
         "title": "MainLineStep",
         "type": "object"
@@ -12460,6 +12514,14 @@
         "title": "RankAgreement",
         "type": "object"
       },
+      "RankMove": {
+        "enum": [
+          "up",
+          "down",
+          "unchanged"
+        ],
+        "type": "string"
+      },
       "RankedEdit": {
         "additionalProperties": false,
         "description": "One SEARCHPOINT measured against its own campaign's origin — a prompt edit, a node-config\nedit, an optimizer-prompt edit on the recursion; the arithmetic does not care which.\n\n**The identity is ``sp_hash``**, the archive join already stamped on every candidate row, so a\nprose-only edit ranks like any other. Keying the sparse ``pipeline_overlay`` instead cannot see\none at all: that overlay is empty for a prompt-only candidate, which is the whole of what L1\nproposes on a campaign optimizing prompts.\n\n**Rows POOL WITHIN ONE CAMPAIGN and never across two.** A\nsearchpoint is read through a delta against its parent, and two campaigns share no parent to\ntake one against — so a cross-campaign pool is a number lined up on nothing, and that is a\nclaim withdrawn rather than a capability lost. Do not re-add it as an improvement. Within one\ncampaign the pool is real: individuals sharing a searchpoint share its cells, which are filed\nby content, so they are one member of the pair.",
@@ -12771,6 +12833,52 @@
           "position"
         ],
         "title": "RoundAxis",
+        "type": "object"
+      },
+      "RoundFacts": {
+        "additionalProperties": false,
+        "description": "A round's typed facts: what its election declared and what it measured against.",
+        "properties": {
+          "elects_on": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accuracy",
+                  "composite",
+                  "ability"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The column the round's election elected on (`Election.elects_on`); null on a round never elected. `ability`: the round is won on θ, not on accuracy.",
+            "title": "Elects On"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address of the candidate the round measured its arms against — the individual its `parent`-role arm re-read, in this course or up its spawn chain. Never a child of the round: a reference is not re-listed. Null at round 0 and where none was read.",
+            "title": "Reference"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "round",
+          "elects_on",
+          "reference"
+        ],
+        "title": "RoundFacts",
         "type": "object"
       },
       "RoundHealth": {
@@ -14962,7 +15070,9 @@
           "bench",
           "rounds",
           "accuracy",
-          "lives"
+          "lives",
+          "ability",
+          "lift"
         ],
         "type": "string"
       },
@@ -15567,7 +15677,8 @@
           "lifecycle",
           "self_optimization",
           "arm",
-          "superseded"
+          "superseded",
+          "verdict"
         ],
         "type": "string"
       },
@@ -17549,139 +17660,6 @@
           }
         },
         "summary": "Get Cycle Round Audit",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
-    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/tree": {
-      "get": {
-        "description": "The lineage tree rooted at this cycle, its nodes alternating ``course -> candidate -> course`` at every depth.\n\n``at`` is a line of the ledger of ``at_cycle`` (a whole cycle path in the ``descend`` grammar, root hop included; absent, the tree's root): a course minted later is not in the tree, and run-state stays live.\n``lens`` is ``score:<formula>`` (rows re-graded under another ``per_cell`` composite), ``dials:<term=weight,…>`` (the same as weights) or ``abort:<variant>`` (``<gate>_off`` or ``all_off``).\n``samples`` is a comma-separated sample-id mask; with neither, the tree is the raw read.",
-        "operationId": "get_lineage_tree_api_v1_campaigns__campaign_id__cycles__cycle_id__tree_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "campaign_id",
-            "required": true,
-            "schema": {
-              "title": "Campaign Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "cycle_id",
-            "required": true,
-            "schema": {
-              "title": "Cycle Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "descend",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Descend"
-            }
-          },
-          {
-            "in": "query",
-            "name": "lens",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Lens"
-            }
-          },
-          {
-            "in": "query",
-            "name": "samples",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Samples"
-            }
-          },
-          {
-            "in": "query",
-            "name": "at",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "At"
-            }
-          },
-          {
-            "in": "query",
-            "name": "at_cycle",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "At Cycle"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CourseLineage"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Get Lineage Tree",
         "tags": [
           "Campaigns"
         ]
@@ -20263,6 +20241,137 @@
           }
         },
         "summary": "Get Hierarchy",
+        "tags": [
+          "Hierarchy"
+        ]
+      }
+    },
+    "/api/v1/hierarchy/{address}": {
+      "get": {
+        "description": "The entry at ``address`` with every level under it: courses, rounds, candidates, inner campaigns.\n\n``at`` is a line of the ledger of ``at_cycle`` (a whole cycle path, root hop included; absent, the\ncampaign's root): a course minted later is not in the subtree, and run-state stays live.\n``lens`` is ``score:<formula>`` (rows re-graded under another ``per_cell`` composite),\n``dials:<term=weight,…>`` (the same as weights) or ``abort:<variant>`` (``<gate>_off`` or ``all_off``).\n``samples`` is a comma-separated sample-id mask; with neither, the subtree is the raw read. 404 where\nno entry stands at ``address``.",
+        "operationId": "get_hierarchy_subtree_api_v1_hierarchy__address__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "title": "Address",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "lens",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Lens"
+            }
+          },
+          {
+            "in": "query",
+            "name": "samples",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Samples"
+            }
+          },
+          {
+            "in": "query",
+            "name": "at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "At"
+            }
+          },
+          {
+            "in": "query",
+            "name": "at_cycle",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "At Cycle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "campaign": "#/components/schemas/HierarchyCampaign",
+                      "candidate": "#/components/schemas/HierarchyCandidate",
+                      "course": "#/components/schemas/HierarchyCourse",
+                      "round": "#/components/schemas/HierarchyRound"
+                    },
+                    "propertyName": "level"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/HierarchyCampaign"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HierarchyCourse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HierarchyRound"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HierarchyCandidate"
+                    }
+                  ],
+                  "title": "Response Get Hierarchy Subtree Api V1 Hierarchy  Address  Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Get Hierarchy Subtree",
         "tags": [
           "Hierarchy"
         ]

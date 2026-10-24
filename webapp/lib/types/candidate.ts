@@ -1,8 +1,8 @@
 import type {
   ArmAbility,
-  ArmNode,
   ArmReading,
-  CourseLineage,
+  HierarchyCandidate,
+  HierarchyCourse,
   VerificationMark,
 } from "@/lib/api/types";
 
@@ -20,7 +20,7 @@ export interface ArmRow {
 }
 
 interface BarBase {
-  // `nodeKeyOf(node)`
+  // `node.address`
   key: string;
   idx: number;
   label: string;
@@ -29,8 +29,8 @@ interface BarBase {
 // One bar of the candidates chart. `node` is the served tree row and the ONE reference to it;
 // everything an arm measured or decided is read off `reading`, the half chosen for this row.
 export interface ArmBar extends BarBase {
-  node: ArmNode;
-  // `node.reading` once its walk is decided, else the live row — WHOLE, never field by field.
+  node: HierarchyCandidate;
+  // `node.facts.reading` once its walk is decided, else the live row — WHOLE, never field by field.
   reading: ArmReading;
   source: CandidateSource;
   // Null unless this bar answered the WHOLE shared basis.
@@ -42,7 +42,7 @@ export interface ArmBar extends BarBase {
 
 // A run drawn as a bar: no arm, so no reading — its level is the served `run_standing`.
 export interface CourseBar extends BarBase {
-  node: CourseLineage;
+  node: HierarchyCourse;
   reading: null;
 }
 

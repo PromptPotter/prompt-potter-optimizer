@@ -1,12 +1,12 @@
 "use client";
 import { memo, useCallback, useMemo } from "react";
 import { fmtLevel } from "@/lib/format";
-import { nodeKeyOf, type DisplayMetric } from "@/lib/derivations";
+import type { DisplayMetric } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
-import { pathLeaf, shortFamilyTail } from "@/lib/ids";
+import { pathLeaf, pathOfAddress, shortFamilyTail } from "@/lib/ids";
 import { fmtPaired } from "@/lib/derivations";
-import type { CourseKind, CourseLineage, CourseSpawn } from "@/lib/api";
+import type { CourseKind, CourseSpawn, HierarchyCampaign, HierarchyCourse } from "@/lib/api";
 import { tagValue } from "@/lib/hierarchy";
 import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
@@ -40,10 +40,11 @@ export interface CladogramCtx {
   invalidated?: ReadonlySet<string>;
 }
 
-function courseName(course: CourseLineage): string {
-  return course.course.facts.mint === "root"
-    ? (tagValue(course.course, "dataset") ?? course.id)
-    : shortFamilyTail(course.id);
+function courseName(course: HierarchyCourse): string {
+  const cycleId = pathLeaf(pathOfAddress(course.address)).cycleId;
+  return course.facts.mint === "root"
+    ? (tagValue(course, "dataset") ?? cycleId)
+    : shortFamilyTail(cycleId);
 }
 
 function SpawnGlyph({ kind, spawn }: { kind: CourseKind; spawn: CourseSpawn | null }) {
@@ -83,7 +84,7 @@ const CandidateNode = memo(function CandidateNode({
   d: Density;
 }) {
   const retiredBy = n.retiredBy;
-  const wonOnTheta = n.node.elects_on === "ability";
+  const wonOnTheta = n.electsOn === "ability";
   return (
     <g
       className={cx(
@@ -109,7 +110,7 @@ const CandidateNode = memo(function CandidateNode({
         {!invalidated && metric !== "ability" && typeof theta === "number"
           ? ` · ${fmtLevel(DISPLAY_METRIC_UNITS.ability, theta)}`
           : ""}
-        {n.node.variations
+        {n.node.facts.variations
           .map((v) => `\n${v.node} (${v.mode}): ${v.loci.join(", ") || "nothing"}`)
           .join("")}
         {invalidated
@@ -179,7 +180,7 @@ export function Forest({
   ctx,
   d,
 }: {
-  tree: CourseLineage;
+  tree: HierarchyCampaign;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
@@ -283,7 +284,7 @@ export function Forest({
             if (l.coursePathKey !== viewedKey) return null;
             return (
               <rect
-                key={`hl-${l.course.id}`}
+                key={`hl-${l.coursePathKey}`}
                 x={0}
                 y={bandTop(l)}
                 width={width}
@@ -296,26 +297,26 @@ export function Forest({
           {/* Painted before the nodes so their clicks win. */}
           {laneList.map((l) => {
             const course = l.course;
-            const { spawn, standing } = course.course.facts;
+            const { spawn, standing } = course.facts;
             const isEmpty = l.candidates.length === 0;
-            const roundCount = new Set(l.candidates.map((c) => c.reading.arm.round)).size;
+            const roundCount = new Set(l.candidates.map((c) => c.facts.reading.arm.round)).size;
             const verb = l.expanded ? "Collapse" : "Expand";
             return (
               <rect
-                key={`lanehit-${course.id}`}
+                key={`lanehit-${l.coursePathKey}`}
                 x={0}
                 y={bandTop(l)}
                 width={width}
                 height={bandH(l)}
                 className="family-cladogram-lane-hit"
-                {...pressable(() => onLaneActivate(nodeKeyOf(course)))}
+                {...pressable(() => onLaneActivate(course.address))}
                 aria-label={`${verb} ${courseName(course)}`}
                 style={{ cursor: "pointer" }}
               >
                 <title>
-                  {course.id}
-                  {`\n${course.course.facts.mint}`}
-                  {course.course.facts.task ? ` · ${course.course.facts.task}` : ""}
+                  {pathLeaf(pathOfAddress(course.address)).cycleId}
+                  {`\n${course.facts.mint}`}
+                  {course.facts.task ? ` · ${course.facts.task}` : ""}
                   {spawn?.trigger === "operator_steered"
                     ? ` · steered${spawn.issued_by ? ` by ${spawn.issued_by}` : ""}`
                     : ""}
@@ -325,7 +326,7 @@ export function Forest({
                   {spawn?.direction === "equivalent"
                     ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
                     : ""}
-                  {` · ${course.course.state.status.label}`}
+                  {` · ${course.state.status.label}`}
                   {standing?.selection
                     ? ` · selection ${standing.selection.label} ${fmtPaired(standing.vs_origin, "rates")}`
                     : ""}
@@ -346,7 +347,7 @@ export function Forest({
               const cycName = layoutEntry ? courseName(layoutEntry.course) : nodeCycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
               // Inside an <svg>, so `<Hearts>` can't mount; the served bar is the same pips as text.
-              const laneHearts = layoutEntry?.course.course.facts.standing?.lives?.bar ?? "";
+              const laneHearts = layoutEntry?.course.facts.standing?.lives?.bar ?? "";
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
               const ink = inkOf(n);
@@ -449,7 +450,7 @@ export function Forest({
                   className="family-cladogram-cyclelabel"
                 >
                   <tspan className="family-cladogram-glyph">
-                    <SpawnGlyph kind={course.course.facts.mint} spawn={course.course.facts.spawn} />
+                    <SpawnGlyph kind={course.facts.mint} spawn={course.facts.spawn} />
                   </tspan>
                   <tspan dx="4">{courseName(course)}</tspan>
                 </text>

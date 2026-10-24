@@ -209,6 +209,35 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
 - **One poll.** The registry is one `hierarchyRead()` over every lifecycle; the sidebar's filter is
   layout over `facts.lifecycle`, so an address resolves whatever the filter lists.
   <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/registry.tsx == 1 -->
+- **The genealogy is the same entry, read deep.** `GET /hierarchy/{address}?lens=&samples=&at=&at_cycle=`
+  (`application/hierarchy_subtree.py::hierarchy_subtree`) serves the subtree at any address: a
+  course's children are its rounds, a round's its candidates in `ArmSlot` order, a candidate's the
+  inner campaigns it spawned, bounded at `lineage_queries.py::MAX_COURSE_DEPTH`. There is no second
+  genealogy route and no client fold.
+  <!-- probe: git grep -cE "\}/tree" -- promptpotter/presentation == 0 -->
+  <!-- probe: git grep -cE "def (build_lineage_tree|family_course_entries|lensed_tree|_fold_contributions)\(" -- promptpotter == 0 -->
+- **A fork is DRAWN at its spawn, never folded.** Every course serves its own rounds and candidates
+  under the labels its own counter minted; the forest hangs a fork's lane at `spawn.from_candidate`.
+  Folding was the one place the server rewrote another course's identity — labels renumbered, a replayed
+  C0 dropped, runs grafted — so a fork's replayed C0 is an honest candidate of its own lane: it measured
+  the origin individual again.
+  <!-- probe: git grep -cE "class (ArmNode|CourseLineage|ForkStamp)\b" -- promptpotter == 0 -->
+- **A retained individual is a REFERENCE, never re-listed.** A round names the candidate it measures
+  against by `RoundFacts.reference`, in its course or up the spawn chain. One individual, one row per
+  round that PROPOSED it: a re-listed copy would leave every pointer (`answers_for_id`, `main_line`, a
+  selection) choosing between copies of one measurement. Parallel candidates carry no order mark — a
+  round's arms walk concurrently, so any sequence among them is one the ledger interleaved; time order
+  is a step's offset.
+- **A retired candidate stays on its course**, tagged `superseded` with the address of the course that
+  took its place (`hierarchy_subtree.py::_retired`, reading back only as far as the branch got), with no
+  crown and the verdict `retired`. The webapp keys every row on `address`.
+  <!-- probe: git grep -cE "nodeKeyOf|nodeAddress|ownerOfNodeAddress" -- webapp == 0 -->
+- **The sidebar draws campaign → course → candidate → inner campaign**, rounds flattened (they are the
+  forest's columns), and a campaign with one course elides that course's row: a round row would add a
+  click per round to reach every candidate.
+- **`deletable_stubs` is counted on the subtree read alone** and null in the listing:
+  `CampaignStore.deletable_stubs` scans every sibling's ledger, the cost the 10 s listing poll must not
+  pay. Null says "not counted at this depth", never zero.
 
 ## The two blocking gates
 

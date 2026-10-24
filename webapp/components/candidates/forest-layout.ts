@@ -1,13 +1,17 @@
 import type {
   ArmElection,
-  ArmNode,
   CourseKind,
-  CourseLineage,
   CourseSpawn,
+  HierarchyCampaign,
+  HierarchyCandidate,
+  HierarchyCourse,
   LineageDivergence,
+  RoundFacts,
 } from "@/lib/api";
-import { nodeKeyOf, pathOf } from "@/lib/derivations";
-import { encodeCyclePath, type CyclePath } from "@/lib/ids";
+import { childNodes, coursesOf } from "@/lib/derivations";
+import { tagValue } from "@/lib/hierarchy";
+import type { CyclePath } from "@/lib/ids";
+import { pathOfAddress } from "@/lib/ids";
 
 export interface Density {
   colW: number;
@@ -61,10 +65,11 @@ export const DIRECTION_GLYPH: Record<CourseSpawn["direction"], string> = {
   equivalent: "≡",
 };
 
-const roundOf = (c: ArmNode): number => c.reading.arm.round;
+const roundOf = (c: HierarchyCandidate): number => c.facts.reading.arm.round;
+const retiredBy = (c: HierarchyCandidate): string | null => tagValue(c, "superseded");
 
-function groupRounds(cands: readonly ArmNode[]): Map<number, ArmNode[]> {
-  const byRound = new Map<number, ArmNode[]>();
+function groupRounds(cands: readonly HierarchyCandidate[]): Map<number, HierarchyCandidate[]> {
+  const byRound = new Map<number, HierarchyCandidate[]>();
   for (const c of cands) {
     const r = roundOf(c);
     const arr = byRound.get(r) ?? [];
@@ -74,11 +79,17 @@ function groupRounds(cands: readonly ArmNode[]): Map<number, ArmNode[]> {
   return byRound;
 }
 
-function pickWinner(cands: readonly ArmNode[]): ArmNode | null {
-  return cands.find((c) => c.reading.election.selected) ?? null;
+function pickWinner(cands: readonly HierarchyCandidate[]): HierarchyCandidate | null {
+  return cands.find((c) => c.facts.reading.election.selected) ?? null;
 }
 
-export function expandedLaneSpan(cands: readonly ArmNode[]): number {
+const candidatesOf = (course: HierarchyCourse): HierarchyCandidate[] =>
+  childNodes(course) as HierarchyCandidate[];
+
+const innerCourses = (cand: HierarchyCandidate): HierarchyCourse[] =>
+  childNodes(cand) as HierarchyCourse[];
+
+export function expandedLaneSpan(cands: readonly HierarchyCandidate[]): number {
   let max = 1;
   for (const n of groupRounds(cands).values()) {
     if (n.length > max) max = n.length;
@@ -87,65 +98,88 @@ export function expandedLaneSpan(cands: readonly ArmNode[]): number {
 }
 
 export interface LaneLayout {
-  course: CourseLineage;
+  course: HierarchyCourse;
+  // The course's address, which is its `CyclePath` on the wire.
   coursePathKey: string;
-  candidates: ArmNode[];
+  candidates: HierarchyCandidate[];
+  // Each round's reference — the candidate its arms were measured against.
+  references: ReadonlyMap<number, string>;
+  electsOn: ReadonlyMap<number, RoundFacts["elects_on"]>;
   expanded: boolean;
   // In LANE_H units.
   laneOffset: number;
   laneSpan: number;
   baseCol: number;
-  anchorCandidateId: string | null;
+  // The candidate address the lane hangs from: a fork's spawn candidate, an inner run's spawner.
+  anchor: string | null;
   parentKey: string | null;
 }
 
 export interface CladogramAnchor {
   coursePathKey: string;
+  // The individual id.
   candidateId: string;
 }
 
+// The chain that PRODUCED the anchor: its course to its round, each course above cut where the next
+// hangs off (a fork at its spawn candidate, an inner campaign at its spawner), the seed runs whole.
 export function extentKeys(
-  root: CourseLineage,
+  root: HierarchyCampaign,
   anchor: CladogramAnchor,
 ): ReadonlySet<string> | null {
   const keys = new Set<string>();
-  const addMeasurements = (cand: ArmNode): void => {
-    for (const child of cand.children) {
-      if (child.course.facts.mint !== "inner") continue;
-      for (const c of child.children) {
-        keys.add(nodeKeyOf(c));
+  const keepThrough = (course: HierarchyCourse, round: number): void => {
+    for (const c of candidatesOf(course)) if (roundOf(c) <= round) keys.add(c.address);
+  };
+  const addMeasurements = (cand: HierarchyCandidate): void => {
+    for (const course of innerCourses(cand)) {
+      if (course.facts.mint !== "inner") continue;
+      for (const c of candidatesOf(course)) {
+        keys.add(c.address);
         addMeasurements(c);
       }
     }
   };
-  const walk = (course: CourseLineage): boolean => {
-    const cands = course.children;
-    const keepThrough = (round: number): void => {
-      for (const c of cands) if (roundOf(c) <= round) keys.add(nodeKeyOf(c));
+  const walkCampaign = (campaign: HierarchyCampaign): boolean => {
+    const courses = coursesOf(campaign);
+    const byAddress = new Map(courses.map((c) => [c.address, c]));
+    const cutUpward = (course: HierarchyCourse): void => {
+      const spawn = course.facts.spawn;
+      const parent = spawn ? byAddress.get(spawn.parent) : undefined;
+      if (!spawn || !parent) return;
+      const from = candidatesOf(parent).find((c) => c.address === spawn.from_candidate);
+      keepThrough(parent, from ? roundOf(from) : (spawn.at_round ?? 0));
+      cutUpward(parent);
     };
-    const own =
-      encodeCyclePath(pathOf(course)) === anchor.coursePathKey
-        ? cands.find((c) => c.id === anchor.candidateId)
-        : undefined;
-    if (own) {
-      keepThrough(roundOf(own));
-      addMeasurements(own);
-      return true;
-    }
-    for (const cand of cands) {
-      if (cand.children.some(walk)) {
-        keepThrough(roundOf(cand));
+    for (const course of courses) {
+      const cands = candidatesOf(course);
+      const own =
+        course.address === anchor.coursePathKey
+          ? cands.find((c) => c.facts.individual === anchor.candidateId)
+          : undefined;
+      if (own) {
+        keepThrough(course, roundOf(own));
+        addMeasurements(own);
+        cutUpward(course);
         return true;
+      }
+      for (const cand of cands) {
+        const holds = cand.children.some((c) => c.level === "campaign" && walkCampaign(c));
+        if (holds) {
+          keepThrough(course, roundOf(cand));
+          cutUpward(course);
+          return true;
+        }
       }
     }
     return false;
   };
-  return walk(root) ? keys : null;
+  return walkCampaign(root) ? keys : null;
 }
 
-// Lanes key on `nodeKeyOf`, never `course.id`: inner cycle ids repeat across `.inner/` sandboxes.
+// Lanes key on the course address, never a cycle id: inner cycle ids repeat across `.inner/` sandboxes.
 export function layout(
-  root: CourseLineage,
+  root: HierarchyCampaign,
   expanded: ReadonlySet<string>,
   keep: ReadonlySet<string> | null = null,
 ): {
@@ -156,38 +190,63 @@ export function layout(
   const laneByKey = new Map<string, LaneLayout>();
   let nextRow = 0;
   let maxCol = 0;
-  const visit = (
-    course: CourseLineage,
+  const visitCourse = (
+    course: HierarchyCourse,
     baseCol: number,
-    anchorCandidateId: string | null,
+    anchor: string | null,
     parentKey: string | null,
   ): void => {
-    const key = nodeKeyOf(course);
-    const cands = course.children.filter((c) => keep === null || keep.has(nodeKeyOf(c)));
+    const key = course.address;
+    const cands = candidatesOf(course).filter((c) => keep === null || keep.has(c.address));
     if (keep !== null && cands.length === 0) return;
     const isExpanded = expanded.has(key);
     const laneSpan = isExpanded ? expandedLaneSpan(cands) : 1;
     const laneOffset = nextRow;
     nextRow += laneSpan;
-    const rightmost =
-      cands.length > 0 ? baseCol + Math.max(...cands.map(roundOf)) : baseCol;
+    const rightmost = cands.length > 0 ? baseCol + Math.max(...cands.map(roundOf)) : baseCol;
     if (rightmost > maxCol) maxCol = rightmost;
+    const references = new Map<number, string>();
+    const electsOn = new Map<number, RoundFacts["elects_on"]>();
+    for (const rnd of course.children) {
+      if (rnd.level !== "round") continue;
+      electsOn.set(rnd.facts.round, rnd.facts.elects_on);
+      if (rnd.facts.reference) references.set(rnd.facts.round, rnd.facts.reference);
+    }
     laneByKey.set(key, {
       course,
-      coursePathKey: encodeCyclePath(pathOf(course)),
+      coursePathKey: key,
       candidates: cands,
+      references,
+      electsOn,
       expanded: isExpanded,
       laneOffset,
       laneSpan,
       baseCol,
-      anchorCandidateId,
+      anchor,
       parentKey,
     });
     for (const cand of cands) {
-      for (const child of cand.children) visit(child, baseCol + roundOf(cand) + 1, cand.id, key);
+      for (const inner of cand.children) {
+        if (inner.level === "campaign") {
+          visitCampaign(inner, baseCol + roundOf(cand) + 1, cand.address, key);
+        }
+      }
     }
   };
-  visit(root, 0, null, null);
+  // A fork shares its parent's round axis and hangs at its spawn candidate.
+  const visitCampaign = (
+    campaign: HierarchyCampaign,
+    baseCol: number,
+    anchor: string | null,
+    parentKey: string | null,
+  ): void => {
+    for (const course of coursesOf(campaign)) {
+      const spawn = course.facts.spawn;
+      if (spawn) visitCourse(course, baseCol, spawn.from_candidate, spawn.parent);
+      else visitCourse(course, baseCol, anchor, parentKey);
+    }
+  };
+  visitCampaign(root, 0, null, null);
   return { laneByKey, totalLaneRows: nextRow, maxCol };
 }
 
@@ -200,8 +259,10 @@ export interface RoundNodePos {
   x: number;
   y: number;
   candidateLabel: string;
-  node: ArmNode;
+  node: HierarchyCandidate;
+  // The candidate's address.
   candKey: string;
+  // Its individual id.
   candidateId: string;
   isWinner: boolean;
   crown: ArmElection["crown"];
@@ -212,6 +273,8 @@ export interface RoundNodePos {
   divergence: LineageDivergence | null;
   divergent: boolean;
   retiredBy: string | null;
+  // The column the candidate's round elected on.
+  electsOn: RoundFacts["elects_on"];
 }
 interface BranchSeg {
   x1: number;
@@ -232,17 +295,17 @@ function bandLeftX(l: LaneLayout, d: Density): number {
 function placedNode(
   laneKey: string,
   l: LaneLayout,
-  cand: ArmNode,
+  cand: HierarchyCandidate,
   x: number,
   y: number,
   isExpanded: boolean,
   label: string,
 ): RoundNodePos {
-  const { round } = cand.reading.arm;
-  const { selected, crown } = cand.reading.election;
+  const { round } = cand.facts.reading.arm;
+  const { selected, crown } = cand.facts.reading.election;
   return {
     courseKey: laneKey,
-    coursePath: pathOf(l.course),
+    coursePath: pathOfAddress(l.course.address),
     coursePathKey: l.coursePathKey,
     round,
     col: l.baseCol + round,
@@ -250,17 +313,18 @@ function placedNode(
     y,
     candidateLabel: label,
     node: cand,
-    candKey: nodeKeyOf(cand),
-    candidateId: cand.id,
+    candKey: cand.address,
+    candidateId: cand.facts.individual,
     isWinner: selected,
     crown,
     isExpanded,
     isLastInLane: false,
-    courseKind: l.course.course.facts.mint,
-    spawn: l.course.course.facts.spawn,
-    divergence: cand.divergence,
-    divergent: cand.divergent,
-    retiredBy: cand.superseded_by,
+    courseKind: l.course.facts.mint,
+    spawn: l.course.facts.spawn,
+    divergence: cand.facts.divergence,
+    divergent: cand.facts.divergent,
+    retiredBy: retiredBy(cand),
+    electsOn: l.electsOn.get(round) ?? null,
   };
 }
 
@@ -284,12 +348,12 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
       let prev: RoundNodePos | null = null;
       for (const [round, cands] of rounds) {
         const winner = pickWinner(cands);
-        const stand = winner ?? cands.find((c) => !c.superseded_by) ?? cands[0];
+        const stand = winner ?? cands.find((c) => !retiredBy(c)) ?? cands[0];
         if (!stand) continue;
         const node = placedNode(laneKey, l, stand, colX(round), y, false, winner?.label ?? "");
         nodes.push(node);
         spineByKeyRound.set(`${laneKey}::r${round}`, node);
-        if (winner) nodeByCandidate.set(winner.id, node);
+        if (winner) nodeByCandidate.set(winner.address, node);
         if (round === lastRound) node.isLastInLane = true;
         if (prev) {
           segs.push({ x1: prev.x, y1: prev.y, x2: node.x - d.stub, y2: node.y, variant: "chain" });
@@ -300,7 +364,6 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
       continue;
     }
 
-    let parent: { x: number; y: number } | null = null;
     let lastWinnerNode: RoundNodePos | null = null;
 
     for (const [round, cands] of rounds) {
@@ -308,23 +371,25 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
       const topRow = (l.laneSpan - cands.length) / 2;
       const x = colX(round);
       const roundNodes: RoundNodePos[] = [];
+      // Chained from the round's reference where it is drawn, else the last winner.
+      const reference = l.references.get(round);
+      const parent = (reference ? nodeByCandidate.get(reference) : undefined) ?? lastWinnerNode;
       cands.forEach((cand, i) => {
         const y = TOP_PAD + (l.laneOffset + topRow + i) * LANE_H;
         const node = placedNode(laneKey, l, cand, x, y, true, cand.label);
         nodes.push(node);
         roundNodes.push(node);
-        if (!cand.superseded_by) nodeByCandidate.set(cand.id, node);
+        if (!retiredBy(cand)) nodeByCandidate.set(cand.address, node);
         // The stub itself is drawn by the node group, so emit only the slant.
         if (parent) {
           segs.push({ x1: parent.x, y1: parent.y, x2: x - d.candStub, y2: y, variant: "chain" });
         }
       });
       const winner = pickWinner(cands);
-      const winnerNode = winner ? roundNodes.find((n) => n.candidateId === winner.id) : undefined;
+      const winnerNode = winner ? roundNodes.find((n) => n.candKey === winner.address) : undefined;
       if (winnerNode) {
         spineByKeyRound.set(`${laneKey}::r${round}`, winnerNode);
         if (round === lastRound) winnerNode.isLastInLane = true;
-        parent = { x: winnerNode.x, y: winnerNode.y };
         lastWinnerNode = winnerNode;
       } else if (lastWinnerNode) {
         spineByKeyRound.set(`${laneKey}::r${round}`, lastWinnerNode);
@@ -337,14 +402,13 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
     if (!l.parentKey) continue;
     const parentLayout = layouts.get(l.parentKey);
     if (!parentLayout) continue;
-    const anchorNode = l.anchorCandidateId
-      ? nodeByCandidate.get(l.anchorCandidateId)
-      : undefined;
+    const anchorNode = l.anchor ? nodeByCandidate.get(l.anchor) : undefined;
     const anchorX = anchorNode?.x ?? bandLeftX(parentLayout, d);
     const anchorY = anchorNode?.y ?? bandCenterY(parentLayout);
 
     const childBandY = bandCenterY(l);
-    const minChildX = anchorX + d.colW;
+    // A fork shares its parent's round axis; an inner run starts a column right of its spawner.
+    const minChildX = l.course.facts.spawn ? anchorX : anchorX + d.colW;
     const firstRound = l.candidates.length > 0
       ? Math.min(...l.candidates.map(roundOf))
       : null;

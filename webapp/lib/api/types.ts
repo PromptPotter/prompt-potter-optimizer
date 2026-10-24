@@ -56,9 +56,6 @@ export type {
   ServedBackpressure,
   DashboardError,
   LineageDivergence,
-  ArmNode,
-  CourseLineage,
-  ForkStamp,
   LensShift,
   MainLineStep,
   ArmReading,
@@ -175,10 +172,14 @@ export type {
   ResolveOriginResponse,
   StartCheckinResponse,
   CampaignFacts,
+  CandidateFacts,
   CourseFacts,
   CourseSpawn,
+  RoundFacts,
   HierarchyCampaign,
+  HierarchyCandidate,
   HierarchyCourse,
+  HierarchyRound,
   HierarchyProducer,
   HierarchyResponse,
   HierarchySpan,
@@ -188,19 +189,19 @@ export type {
 } from "./types.generated";
 
 import type {
-  ArmNode,
   CampaignPipelineResponse,
   CellsResponse,
   CourseFacts,
-  CourseLineage,
   DraftCampaignWire,
   EditDraftPatch,
   HierarchyCampaign,
+  HierarchyCandidate,
+  HierarchyCourse,
   ServedDashboard,
 } from "./types.generated";
 
-// The two kinds strictly alternate, each typed to hold only the other: narrow on `kind` once.
-export type LineageNode = CourseLineage | ArmNode;
+// What the forest and a bar draw: a run, or one candidate of one. Narrow on `level` once.
+export type LineageNode = HierarchyCourse | HierarchyCandidate;
 
 export type HierarchyEntry = HierarchyCampaign["children"][number];
 export type CourseKind = CourseFacts["mint"];

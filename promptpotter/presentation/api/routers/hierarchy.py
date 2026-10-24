@@ -5,9 +5,15 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request, Response
 
 from promptpotter.application.hierarchy import hierarchy_version, list_hierarchy
+from promptpotter.application.hierarchy_subtree import (
+    hierarchy_subtree,
+    subtree_moment,
+    subtree_version,
+)
+from promptpotter.application.mask.record import parse_lens, parse_sample_ids
 from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.cycle_paths import decode_cycle_path
-from promptpotter.domain.hierarchy import HierarchyResponse
+from promptpotter.domain.hierarchy import HierarchyEntry, HierarchyResponse
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 
@@ -47,5 +53,40 @@ def get_hierarchy(
             campaign_id=campaign,
             attached_only=attached,
             depth=depth,
+        ),
+    )
+
+
+@hierarchy_router.get(
+    "/hierarchy/{address:path}", response_model=HierarchyEntry, tags=["Hierarchy"]
+)
+def get_hierarchy_subtree(
+    request: Request,
+    stores: StoresDep,
+    address: str,
+    lens: str | None = Query(None),
+    samples: str | None = Query(None),
+    at: int | None = Query(None, ge=0),
+    at_cycle: str | None = Query(None),
+) -> Response:
+    """The entry at ``address`` with every level under it: courses, rounds, candidates, inner campaigns.
+
+    ``at`` is a line of the ledger of ``at_cycle`` (a whole cycle path, root hop included; absent, the
+    campaign's root): a course minted later is not in the subtree, and run-state stays live.
+    ``lens`` is ``score:<formula>`` (rows re-graded under another ``per_cell`` composite),
+    ``dials:<term=weight,…>`` (the same as weights) or ``abort:<variant>`` (``<gate>_off`` or ``all_off``).
+    ``samples`` is a comma-separated sample-id mask; with neither, the subtree is the raw read. 404 where
+    no entry stands at ``address``.
+    """
+    masked = bool(lens or samples)
+    return conditional_json(
+        request,
+        (subtree_version(stores, address, masked=masked), address, lens, samples, at, at_cycle),
+        lambda: hierarchy_subtree(
+            stores,
+            address,
+            parse_lens(lens, allow_abort=True) if lens else None,
+            parse_sample_ids(samples),
+            moment=subtree_moment(stores, address, at, decode_cycle_path(at_cycle)),
         ),
     )

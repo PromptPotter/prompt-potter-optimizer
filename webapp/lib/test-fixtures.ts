@@ -1,16 +1,17 @@
 import type {
   CourseKind,
   ArmElection,
-  ArmNode,
   ArmName,
   ArmPanel,
   ArmReading,
+  CandidateFacts,
   CourseFacts,
-  CourseLineage,
   CurrentRound,
   DashboardCandidate,
   HierarchyCampaign,
+  HierarchyCandidate,
   HierarchyCourse,
+  HierarchyRound,
   HierarchyState,
   HierarchyTag,
   LifetimeSpend,
@@ -193,56 +194,82 @@ export function ownLevel(accuracy: number, n = 0): NonNullable<ArmReading["own"]
   return { accuracy: banded, composite: banded, n };
 }
 
-let mintedRows = 0;
-
-export function armNode(over: Partial<ArmNode> & Pick<ArmNode, "id">, round = 0): ArmNode {
-  mintedRows += 1;
+// A candidate as the subtree read serves it, at `{course}/r{round}/{key}`; its label is its arm's.
+export function hierarchyCandidate(
+  course: string,
+  {
+    id,
+    round = 0,
+    key = id,
+    label = id,
+    ...facts
+  }: Partial<CandidateFacts> & { id: string; round?: number; key?: string; label?: string },
+  over: Partial<HierarchyCandidate> = {},
+): HierarchyCandidate {
+  const reading =
+    facts.reading ?? armReading({ arm: { round, label, key }, election: { held: true } });
+  const { arm } = reading;
   return {
-    kind: "candidate",
-    row: mintedRows,
-    label: over.id,
-    parent_ids: [],
-    variations: [],
-    path: [],
+    address: `${course}/r${arm.round}/${arm.key}`,
+    parent: `${course}/r${arm.round}`,
+    label: arm.label,
+    lede: null,
+    caveat: null,
+    tags: [],
+    stats: [],
+    child_count: over.children?.length ?? 0,
     children: [],
-    origin_row: null,
-    answers_for_id: true,
-    elects_on: "ability",
-    reading: armReading({
-      arm: { round, label: over.label ?? over.id, key: over.id },
-      election: { held: true },
-    }),
-    superseded_by: null,
-    fork: null,
-    verdict: "awaiting",
-    stands: false,
-    course_winner: false,
-    course_latest: false,
-    main_line: [],
-    lens_value: null,
-    lens_rank_move: null,
-    sample_set_accuracy: null,
-    sample_set_n: null,
-    divergence: null,
-    divergent: false,
+    level: "candidate",
     ...over,
+    facts: {
+      individual: id,
+      parent_ids: [],
+      variations: [],
+      stands: false,
+      course_latest: false,
+      answers_for_id: true,
+      main_line: [],
+      lens_value: null,
+      lens_rank_move: null,
+      sample_set_accuracy: null,
+      sample_set_n: null,
+      divergence: null,
+      divergent: false,
+      ...facts,
+      reading,
+    },
   };
 }
 
-export function courseLineage(over: Partial<CourseLineage> & Pick<CourseLineage, "id">): CourseLineage {
-  return {
-    kind: "course",
-    label: over.id,
-    parent_ids: [],
-    path: [],
-    children: [],
-    origin_row: null,
-    course: hierarchyCourse({ address: over.id }),
-    deletable_stubs: 0,
-    lens_criterion: null,
-    lens_shift: null,
-    ...over,
-  };
+// A course's own ledger: its candidates grouped into rounds, rounds ascending, slot order kept.
+export function roundsOf(
+  course: string,
+  candidates: readonly HierarchyCandidate[],
+): HierarchyRound[] {
+  const byRound = new Map<number, HierarchyCandidate[]>();
+  for (const c of candidates) {
+    const r = c.facts.reading.arm.round;
+    byRound.set(r, [...(byRound.get(r) ?? []), c]);
+  }
+  return [...byRound]
+    .sort(([x], [y]) => x - y)
+    .map(([round, children]) => ({
+      address: `${course}/r${round}`,
+      parent: course,
+      label: `Round ${round}`,
+      lede: null,
+      caveat: null,
+      tags: [],
+      stats: [],
+      child_count: children.length,
+      children,
+      level: "round",
+      facts: { round, elects_on: "ability", reference: null },
+    }));
+}
+
+export function supersededTag(branch: string): HierarchyTag {
+  return { kind: "superseded", value: branch, label: "retired" };
 }
 
 export function meteredSpend(over: Partial<MeteredSpend> = {}): MeteredSpend {
@@ -320,6 +347,9 @@ export function hierarchyCourse(
       task: null,
       standing: null,
       rounds_closed: 0,
+      origin: null,
+      lens_criterion: null,
+      lens_shift: null,
       ...facts,
     },
     ...over,
@@ -349,6 +379,7 @@ export function hierarchyCampaign(
       lifecycle: "active",
       spend_lifetime: lifetimeSpend(),
       runs_with: null,
+      deletable_stubs: null,
     },
     ...over,
   };

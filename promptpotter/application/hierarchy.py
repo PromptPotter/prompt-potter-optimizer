@@ -37,7 +37,7 @@ from promptpotter.domain.hierarchy import (
     HierarchyTag,
     StatKey,
 )
-from promptpotter.domain.paired_reading import READING_STATE_INFO, MeasurandUnit
+from promptpotter.domain.paired_reading import READING_STATE_INFO, MeasurandUnit, PairedReading
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import RunStanding
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend
@@ -47,7 +47,7 @@ from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
 from promptpotter.infrastructure.store.layout import sibling_kind
-from promptpotter.infrastructure.store.lineage_queries import iter_family_courses
+from promptpotter.infrastructure.store.lineage_queries import own_round_count
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError
@@ -101,15 +101,17 @@ def _rounds_stat(closed: int, cap: int | None) -> HierarchyStat:
     return HierarchyStat(key="rounds", label="Rounds", value=value, sub=None, amount=closed)
 
 
-def _accuracy_stat(standing: RunStanding, *, on_theta: bool) -> HierarchyStat:
-    theta = [_THETA_CLAUSE] if on_theta else []
-    lift = standing.vs_origin.headline
+def lift_stat(
+    key: StatKey, label: str, pair: PairedReading, against: str, *, notes: list[str]
+) -> HierarchyStat:
+    """A paired reading as one stat: the lift with its interval, the two levels under it."""
+    lift = pair.headline
     if lift is None:
         return HierarchyStat(
-            key="accuracy",
-            label="Lift vs origin",
-            value=READING_STATE_INFO[standing.vs_origin.state].label,
-            sub=" · ".join(theta) or None,
+            key=key,
+            label=label,
+            value=READING_STATE_INFO[pair.state].label,
+            sub=" · ".join(notes) or None,
             amount=None,
         )
     est = lift.estimate
@@ -120,11 +122,21 @@ def _accuracy_stat(standing: RunStanding, *, on_theta: bool) -> HierarchyStat:
         value = f"{est.value:+.3f} [{est.ci_lo:.3f}, {est.ci_hi:.3f}]"
         levels = f"{lift.rate_a:.3f} → {lift.rate_b:.3f}"
     return HierarchyStat(
-        key="accuracy",
-        label="Lift vs origin",
+        key=key,
+        label=label,
         value=value,
-        sub=" · ".join([f"origin {levels}", *theta]),
+        sub=" · ".join([f"{against} {levels}", *notes]),
         amount=est.value,
+    )
+
+
+def _accuracy_stat(standing: RunStanding, *, on_theta: bool) -> HierarchyStat:
+    return lift_stat(
+        "accuracy",
+        "Lift vs origin",
+        standing.vs_origin,
+        "origin",
+        notes=[_THETA_CLAUSE] if on_theta else [],
     )
 
 
@@ -214,7 +226,7 @@ def course_entry(
             parent=hierarchy_address(inside, hop.campaign_id, parent_id),
             at_round=fork.from_round,
             at_offset=cut,
-            from_candidate=fork.from_candidate_id,
+            from_candidate=None,
             trigger=fork.trigger,
             direction=fork.resolved_direction,
             reason=fork.reason,
@@ -239,7 +251,7 @@ def course_entry(
             last_at=index.updated_at,
             closed_at=index.finished_at if run.run_phase is RunPhase.TERMINAL else None,
         ),
-        child_count=len(index.rounds) + len(index.open_rounds),
+        child_count=own_round_count(stores, hop, index),
         children=[],
         facts=CourseFacts(
             mint=mint,
@@ -247,38 +259,11 @@ def course_entry(
             task=None if index.spawned_by is None else index.spawned_by.task or None,
             standing=index.standing,
             rounds_closed=index.rounds_closed,
+            origin=None,
+            lens_criterion=None,
+            lens_shift=None,
         ),
     )
-
-
-def family_course_entries(
-    stores: Stores, path: CyclePath, *, moment: Moment | None
-) -> dict[str, HierarchyCourse]:
-    """Every course the tree at *path* folds, by address: the entries the listing serves for each."""
-    lines: dict[tuple[Path, str], tuple[Campaign, CampaignRunsWith | None]] = {}
-    out: dict[str, HierarchyCourse] = {}
-    for family in iter_family_courses(stores, path):
-        store, hop = family.store, family.path[-1]
-        if (key := (store.base_dir, hop.campaign_id)) not in lines:
-            campaign = store.campaigns.load_campaign(hop.campaign_id)
-            if campaign is None:
-                continue
-            lines[key] = (campaign, campaign_runs_with(store, campaign))
-        campaign, runs_with = lines[key]
-        cycle_dir = store.campaigns.cycle_dir(hop)
-        if (index := read_cycle_index(cycle_dir, moment=moment)) is None:
-            continue
-        out[encode_cycle_path(family.path)] = course_entry(
-            store,
-            family.path[:-1],
-            campaign,
-            cycle_dir,
-            index,
-            moment=moment,
-            runs_with=runs_with,
-            config=line_config(store, campaign, hop),
-        )
-    return out
 
 
 def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> list[HierarchyTag]:
@@ -305,14 +290,40 @@ def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> li
     return tags
 
 
+def _line_holder(campaign: Campaign, held: list[tuple[CycleHop, CycleIndex]]) -> CycleHop:
+    """The supersede chain from the root, over the indexes as read — at a moment, as they stood."""
+    by_id = {hop.cycle_id: index for hop, index in held}
+    holder = campaign.root_hop
+    while (index := by_id.get(holder.cycle_id)) is not None and (
+        successor := index.superseded_by
+    ) in by_id:
+        holder = CycleHop(campaign_id=campaign.campaign_id, cycle_id=successor)
+    return holder
+
+
 def campaign_entry(
-    stores: Stores, inside: CyclePath, campaign: Campaign, *, depth: int
+    stores: Stores,
+    inside: CyclePath,
+    campaign: Campaign,
+    *,
+    depth: int,
+    moment: Moment | None,
 ) -> HierarchyCampaign:
+    """*moment* replays the ledgers: a course minted after it is not in the entry."""
     held = sorted(
-        stores.campaigns.campaign_cycles(campaign.campaign_id),
+        (
+            (hop, index)
+            for hop, now in stores.campaigns.campaign_cycles(campaign.campaign_id)
+            if (
+                index := now
+                if moment is None
+                else read_cycle_index(stores.campaigns.cycle_dir(hop), moment=moment)
+            )
+            is not None
+        ),
         key=lambda entry: (entry[0].cycle_id != campaign.root_cycle_id, entry[1].created_at),
     )
-    holder = stores.campaigns.line_holder(campaign.root_hop)
+    holder = _line_holder(campaign, held)
     runs_with = campaign_runs_with(stores, campaign)
     config = line_config(stores, campaign, holder)
     courses: dict[str, HierarchyCourse] = {}
@@ -325,7 +336,7 @@ def campaign_entry(
             campaign,
             stores.campaigns.cycle_dir(hop),
             index,
-            moment=None,
+            moment=moment,
             runs_with=runs_with,
             config=config if hop == holder else line_config(stores, campaign, hop),
         )
@@ -374,6 +385,7 @@ def campaign_entry(
             lifecycle=campaign.lifecycle_status,
             spend_lifetime=spend_lifetime,
             runs_with=runs_with,
+            deletable_stubs=None,
         ),
     )
 
@@ -405,7 +417,7 @@ def list_hierarchy(
         raise BadRequestError("`attached` keeps the courses a producer holds; depth 0 serves none.")
     leaf = descend_store(stores, inside)
     built = [
-        (campaign.root_cycle_id, campaign_entry(leaf, inside, campaign, depth=depth))
+        (campaign.root_cycle_id, campaign_entry(leaf, inside, campaign, depth=depth, moment=None))
         for campaign in leaf.campaigns.list_campaigns(
             dataset, lifecycle=lifecycle, owner_user_id=str(leaf.identity.user_id)
         )
@@ -414,7 +426,11 @@ def list_hierarchy(
     rooted: dict[str, list[HierarchyCampaign]] = {}
     for root, entry in sorted(built, key=lambda pair: pair[1].span.last_at, reverse=True):
         if attached_only:
-            attached = [c for c in entry.children if c.state.producer.attached]
+            attached = [
+                c
+                for c in entry.children
+                if isinstance(c, HierarchyCourse) and c.state.producer.attached
+            ]
             if not attached:
                 continue
             entry = entry.model_copy(update={"children": attached})

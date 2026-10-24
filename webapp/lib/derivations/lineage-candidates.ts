@@ -1,136 +1,137 @@
-import type { ArmNode, CourseLineage, LineageNode } from "@/lib/api";
+import type {
+  HierarchyCampaign,
+  HierarchyCandidate,
+  HierarchyCourse,
+  HierarchyEntry,
+  LineageNode,
+} from "@/lib/api";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
-import { encodeCyclePath, nodeAddress, type CyclePath } from "@/lib/ids";
+import { tagValue } from "@/lib/hierarchy";
+import { courseAddressOf, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
-
-export function pathOf(node: LineageNode): CyclePath {
-  return node.path.map((h) => ({ campaignId: h.campaign_id, cycleId: h.cycle_id }));
-}
+import { coursesOf } from "./hierarchy";
 
 export interface RetiredGroup {
+  // The address of the course that took the tail's place.
   branch: string;
-  candidates: ArmNode[];
+  candidates: HierarchyCandidate[];
 }
 
 // Grouped by BRANCH: two cuts retire two different tails.
 export function splitRetired<N extends LineageNode>(
   rows: readonly N[],
 ): { live: N[]; retired: RetiredGroup[] } {
-  const byBranch = new Map<string, ArmNode[]>();
+  const byBranch = new Map<string, HierarchyCandidate[]>();
   const live: N[] = [];
   for (const node of rows) {
-    if (node.kind === "candidate" && node.superseded_by) {
-      byBranch.set(node.superseded_by, [...(byBranch.get(node.superseded_by) ?? []), node]);
+    const branch = node.level === "candidate" ? tagValue(node, "superseded") : null;
+    if (node.level === "candidate" && branch) {
+      byBranch.set(branch, [...(byBranch.get(branch) ?? []), node]);
     } else live.push(node);
   }
   return { live, retired: [...byBranch].map(([branch, candidates]) => ({ branch, candidates })) };
 }
 
-export function walkCourses(root: CourseLineage): CourseLineage[] {
-  const out: CourseLineage[] = [];
-  const visit = (course: CourseLineage): void => {
-    out.push(course);
-    for (const arm of course.children) arm.children.forEach(visit);
-  };
-  visit(root);
-  return out;
+// A course's own candidates, round by round in slot order; a candidate's inner courses.
+export function childNodes(node: LineageNode): LineageNode[] {
+  if (node.level === "course") {
+    return node.children.flatMap((rnd) =>
+      rnd.children.filter((c): c is HierarchyCandidate => c.level === "candidate"),
+    );
+  }
+  return node.children.flatMap((c) => (c.level === "campaign" ? coursesOf(c) : []));
 }
 
-export function countDescendants(root: CourseLineage): number {
-  return walkCourses(root).length - 1;
-}
-
-// Unique tree-wide (course ids collide across sandboxes); `ownerOfNodeAddress` reads it back.
-export function nodeKeyOf(node: LineageNode): string {
-  return nodeAddress(pathOf(node), node.id);
-}
-
-export function selectedNodeOf(node: ArmNode, cycleId: string): SelectedCandidate {
-  const { round, key, label } = node.reading.arm;
+export function selectedNodeOf(node: HierarchyCandidate, cycleId: string): SelectedCandidate {
+  const { round, key, label } = node.facts.reading.arm;
   return selectedCandidateOf(cycleId, round, key, label);
 }
 
-// `course` is null at a fork's address: a fork is not a node, and its arms are its only trace.
-export interface LineageAddress {
-  course: CourseLineage | null;
-  candidates: ArmNode[];
+export interface LineageIndex {
+  byAddress: ReadonlyMap<string, HierarchyEntry>;
+  // Every course at any depth, a campaign's root first.
+  courses: readonly HierarchyCourse[];
+  candidates: readonly HierarchyCandidate[];
 }
-export type LineageIndex = ReadonlyMap<string, LineageAddress>;
 
-// Keyed on `path`: a label or bare cycle_id repeats across courses and `.inner/` sandboxes.
-export function indexLineage(root: CourseLineage | null): LineageIndex {
-  const index = new Map<string, LineageAddress>();
-  if (!root) return index;
-  const at = (node: LineageNode): LineageAddress => {
-    const key = encodeCyclePath(pathOf(node));
-    let entry = index.get(key);
-    if (!entry) {
-      entry = { course: null, candidates: [] };
-      index.set(key, entry);
-    }
-    return entry;
-  };
-  const visit = (course: CourseLineage): void => {
-    at(course).course = course;
-    for (const arm of course.children) {
-      at(arm).candidates.push(arm);
-      arm.children.forEach(visit);
-    }
+export const EMPTY_LINEAGE: LineageIndex = { byAddress: new Map(), courses: [], candidates: [] };
+
+export function indexLineage(root: HierarchyCampaign | null): LineageIndex {
+  if (!root) return EMPTY_LINEAGE;
+  const byAddress = new Map<string, HierarchyEntry>();
+  const courses: HierarchyCourse[] = [];
+  const candidates: HierarchyCandidate[] = [];
+  const visit = (entry: HierarchyEntry): void => {
+    byAddress.set(entry.address, entry);
+    if (entry.level === "course") courses.push(entry);
+    if (entry.level === "candidate") candidates.push(entry);
+    entry.children.forEach(visit);
   };
   visit(root);
-  return index;
+  return { byAddress, courses, candidates };
 }
 
-export function candidatesAtPath(index: LineageIndex, path: CyclePath | null): ArmNode[] {
-  return (path && index.get(encodeCyclePath(path))?.candidates) || [];
+export function courseAt(index: LineageIndex, path: CyclePath | null): HierarchyCourse | null {
+  const entry = path ? index.byAddress.get(encodeCyclePath(path)) : undefined;
+  return entry?.level === "course" ? entry : null;
 }
 
-function findArm(index: LineageIndex, named: (arm: ArmNode) => boolean): ArmNode | null {
-  for (const { candidates } of index.values()) {
-    const arm = candidates.find(named);
-    if (arm) return arm;
-  }
-  return null;
+export function courseOf(index: LineageIndex, node: LineageNode): HierarchyCourse | null {
+  if (node.level === "course") return node;
+  const entry = index.byAddress.get(courseAddressOf(node.address));
+  return entry?.level === "course" ? entry : null;
 }
 
-export function armOfRow(index: LineageIndex, row: number | null): ArmNode | null {
-  return row === null ? null : findArm(index, (c) => c.row === row);
+export function candidateAt(index: LineageIndex, address: string | null): HierarchyCandidate | null {
+  const entry = address ? index.byAddress.get(address) : undefined;
+  return entry?.level === "candidate" ? entry : null;
 }
 
-export function armOfId(index: LineageIndex, id: string): ArmNode | null {
-  return findArm(index, (c) => c.id === id && c.answers_for_id);
+export function candidatesAtPath(index: LineageIndex, path: CyclePath | null): HierarchyCandidate[] {
+  const course = courseAt(index, path);
+  return course ? (childNodes(course) as HierarchyCandidate[]) : [];
 }
 
-export function armAt(index: LineageIndex, path: CyclePath | null, key: string): ArmNode | null {
-  return candidatesAtPath(index, path).find((c) => c.reading.arm.key === key) ?? null;
+export function armOfId(index: LineageIndex, id: string): HierarchyCandidate | null {
+  return index.candidates.find((c) => c.facts.individual === id && c.facts.answers_for_id) ?? null;
 }
 
-// The row answering for the arm's individual; null for a refused proposal, which measured none.
-export function individualOf(index: LineageIndex, node: ArmNode): ArmNode | null {
-  return node.reading.end === "invalid" ? null : armOfId(index, node.id);
+export function armAt(
+  index: LineageIndex,
+  path: CyclePath | null,
+  key: string,
+): HierarchyCandidate | null {
+  return candidatesAtPath(index, path).find((c) => c.facts.reading.arm.key === key) ?? null;
 }
 
-export type LineStep = { kind: "step"; node: ArmNode } | { kind: "held"; round: number };
+// The candidate answering for the arm's individual; null for a refused proposal, which measured none.
+export function individualOf(
+  index: LineageIndex,
+  node: HierarchyCandidate,
+): HierarchyCandidate | null {
+  return node.facts.reading.end === "invalid" ? null : armOfId(index, node.facts.individual);
+}
 
-export function mainLineOf(index: LineageIndex, head: ArmNode): LineStep[] {
-  return head.main_line.flatMap<LineStep>((step) => {
-    if (step.rows.length === 0) return [{ kind: "held", round: step.round }];
-    return step.rows.flatMap<LineStep>((row) => {
-      const node = armOfRow(index, row);
+export type LineStep = { kind: "step"; node: HierarchyCandidate } | { kind: "held"; round: number };
+
+export function mainLineOf(index: LineageIndex, head: HierarchyCandidate): LineStep[] {
+  return head.facts.main_line.flatMap<LineStep>((step) => {
+    if (step.candidates.length === 0) return [{ kind: "held", round: step.round }];
+    return step.candidates.flatMap<LineStep>((address) => {
+      const node = candidateAt(index, address);
       return node ? [{ kind: "step", node }] : [];
     });
   });
 }
 
-// As the tree names it (`origin_row`): never a walk up `parent_ids`, never a round-0 label.
-export function originOf(index: LineageIndex, node: LineageNode | undefined): ArmNode | null {
-  return node ? armOfRow(index, node.origin_row) : null;
+// As the course names it (`facts.origin`): never a walk up `parent_ids`, never a round-0 label.
+export function originOf(index: LineageIndex, node: LineageNode | null): HierarchyCandidate | null {
+  const course = node ? courseOf(index, node) : null;
+  return candidateAt(index, course?.facts.origin ?? null);
 }
 
-// At a fork's address there is no course, so the attempts it contributed answer for it.
-export function originAt(index: LineageIndex, path: CyclePath | null): ArmNode | null {
-  const here = path ? index.get(encodeCyclePath(path)) : undefined;
-  return originOf(index, here?.course ?? here?.candidates[0]);
+export function originAt(index: LineageIndex, path: CyclePath | null): HierarchyCandidate | null {
+  return originOf(index, courseAt(index, path));
 }
 
 export interface NodeOverlays {
@@ -138,15 +139,12 @@ export interface NodeOverlays {
   thetaByKey: ReadonlyMap<string, number | null>;
 }
 
-export function nodeOverlays(courses: readonly CourseLineage[], metric: DisplayMetric): NodeOverlays {
+export function nodeOverlays(index: LineageIndex, metric: DisplayMetric): NodeOverlays {
   const valueByKey = new Map<string, number | null>();
   const thetaByKey = new Map<string, number | null>();
-  for (const course of courses) {
-    for (const arm of course.children) {
-      const key = nodeKeyOf(arm);
-      valueByKey.set(key, metricLevel(metric, arm.reading));
-      thetaByKey.set(key, metricLevel("ability", arm.reading));
-    }
+  for (const arm of index.candidates) {
+    valueByKey.set(arm.address, metricLevel(metric, arm.facts.reading));
+    thetaByKey.set(arm.address, metricLevel("ability", arm.facts.reading));
   }
   return { valueByKey, thetaByKey };
 }

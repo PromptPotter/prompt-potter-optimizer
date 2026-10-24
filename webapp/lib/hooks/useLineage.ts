@@ -2,15 +2,15 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { postCommand } from "@/lib/api";
-import type { CourseLineage } from "@/lib/api";
+import type { HierarchyCampaign, HierarchyCourse } from "@/lib/api";
 import {
-  primaryMetric,
-  countDescendants,
-  nodeKeyOf,
+  candidatesAtPath,
+  courseAt,
   nodeOverlays,
+  primaryMetric,
   type DisplayMetric,
 } from "@/lib/derivations";
-import { encodeCyclePath, rootCycleId, type CyclePath } from "@/lib/ids";
+import { pathOfAddress, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/lineage";
 import { useViewMemory } from "@/lib/view-memory";
@@ -28,12 +28,12 @@ interface LineageCleanup {
 }
 
 export interface Lineage {
-  tree: CourseLineage | null;
+  tree: HierarchyCampaign | null;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
-  // The node, not its id: a bare cycle id cannot supply `pathOf` or `nodeKeyOf`.
-  forkedFrom: ReadonlyMap<string, CourseLineage>;
+  // The forks cut from each of the viewed course's candidates, by individual id.
+  forkedFrom: ReadonlyMap<string, HierarchyCourse>;
   expanded: ReadonlySet<string>;
   onLaneActivate: (courseKey: string) => void;
   // The only write path for `showForest`: store and view memory move together.
@@ -62,12 +62,7 @@ export function useLineage({
   const { metrics, expanded, expandedForCampaign, expandedForLane } = useCandidatesState();
   const metric = primaryMetric(metrics, electedMetric);
 
-  const viewedKey = path ? encodeCyclePath(path) : "";
-  // Null when the viewed course is a FORK: its candidates ride the parent's lane.
-  const viewedLaneKey = useMemo(() => {
-    const viewed = index.get(viewedKey)?.course;
-    return viewed ? nodeKeyOf(viewed) : null;
-  }, [index, viewedKey]);
+  const viewedLaneKey = useMemo(() => courseAt(index, path)?.address ?? null, [index, path]);
 
   if (campaignId !== expandedForCampaign) {
     const remembered = viewFor(campaignId).expandedLanes;
@@ -103,7 +98,7 @@ export function useLineage({
     [campaignId, recordView],
   );
 
-  // Takes a LANE KEY (`nodeKeyOf`); a raw cycle id silently never matches the layout.
+  // Takes a LANE KEY (a course address); a raw cycle id silently never matches the layout.
   const revealLane = useCallback(
     (courseKey: string) => {
       const next = new Set(expanded).add(courseKey);
@@ -113,26 +108,19 @@ export function useLineage({
     [expanded, campaignId, recordView],
   );
 
-  const courses = useMemo(
-    () => [...index.values()].flatMap((e) => (e.course ? [e.course] : [])),
-    [index],
-  );
-
-  const forkedFrom = useMemo<ReadonlyMap<string, CourseLineage>>(() => {
-    const m = new Map<string, CourseLineage>();
-    // Own-path `candidates`, never `course`: the server dissolves a FORK onto its parent's timeline.
-    for (const cand of index.get(viewedKey)?.candidates ?? []) {
-      for (const child of cand.children) m.set(cand.id, child);
+  const forkedFrom = useMemo<ReadonlyMap<string, HierarchyCourse>>(() => {
+    const m = new Map<string, HierarchyCourse>();
+    const own = new Map(candidatesAtPath(index, path).map((c) => [c.address, c]));
+    for (const course of index.courses) {
+      const from = own.get(course.facts.spawn?.from_candidate ?? "");
+      if (from) m.set(from.facts.individual, course);
     }
     return m;
-  }, [index, viewedKey]);
+  }, [index, path]);
 
-  const { valueByKey, thetaByKey } = useMemo(
-    () => nodeOverlays(courses, metric),
-    [courses, metric],
-  );
+  const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(index, metric), [index, metric]);
 
-  const viewedHasRounds = (index.get(viewedKey)?.candidates.length ?? 0) > 0;
+  const viewedHasRounds = candidatesAtPath(index, path).length > 0;
   const parentId = cycleId ? rootCycleId(cycleId) : null;
   const isInheritedSibling = parentId != null && parentId !== cycleId;
 
@@ -145,7 +133,7 @@ export function useLineage({
     error: cmd.failure?.message ?? null,
     cleaning: cmd.pending !== null,
     acked: cleanupAcked,
-    stubCount: tree?.deletable_stubs ?? 0,
+    stubCount: tree?.facts.deletable_stubs ?? 0,
     request: () => {
       cmd.clear();
       setCleanupOpen(true);
@@ -155,7 +143,7 @@ export function useLineage({
       cmd.clear();
     },
     confirm: async () => {
-      const rootId = tree?.id;
+      const rootId = tree ? pathOfAddress(tree.facts.root).at(-1)?.cycleId : undefined;
       if (!campaignId || !rootId) return;
       await cmd.run("cleanup-empty-cycles", () => postCommand("cleanup-empty-cycles", { campaign_id: campaignId, cycle_id: rootId }), () => {
         setCleanupAcked(true);
@@ -174,7 +162,7 @@ export function useLineage({
     onLaneActivate,
     setShowForest,
     revealLane,
-    totalDescendants: tree ? countDescendants(tree) : 0,
+    totalDescendants: Math.max(index.courses.length - 1, 0),
     viewedHasRounds,
     isInheritedSibling,
     parentId,

@@ -3,8 +3,13 @@ import { useMemo } from "react";
 import { liveCandidates, useCycleStream } from "@/lib/poll";
 import type { ServedRound } from "@/lib/api/types";
 import { useSelection } from "@/lib/SelectionContext";
-import { barsAreCourses, candidateBars, type LineageIndex } from "@/lib/derivations";
-import { encodeCyclePath } from "@/lib/ids";
+import {
+  barsAreCourses,
+  candidateBars,
+  candidatesAtPath,
+  courseAt,
+  type LineageIndex,
+} from "@/lib/derivations";
 import { useWorkspace } from "@/lib/workspace";
 import { measuredUniverse } from "@/lib/sample-set";
 import type { CandidateBar } from "@/lib/types";
@@ -26,11 +31,10 @@ export function useCandidateBars(index: LineageIndex) {
 
   const viewedNode = useMemo(() => {
     if (!viewedPath) return undefined;
-    const entry = index.get(encodeCyclePath(viewedPath));
-    if (!entry) return undefined;
-    return viewedCandidateId
-      ? entry.candidates.find((c) => c.id === viewedCandidateId)
-      : (entry.course ?? undefined);
+    if (!viewedCandidateId) return courseAt(index, viewedPath) ?? undefined;
+    return candidatesAtPath(index, viewedPath).find(
+      (c) => c.facts.individual === viewedCandidateId,
+    );
   }, [index, viewedPath, viewedCandidateId]);
 
   const inflightByKey = useMemo(
