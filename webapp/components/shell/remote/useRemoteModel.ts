@@ -100,7 +100,6 @@ export function useRemoteModel() {
     autoArmed,
     inFlight,
     allowed,
-    // `null`: an optimizer declaring no `arms_per_round` has no next-round bound to quote.
     most: dash.lookahead_most,
     scoringNow: inFlight > 0 || allowed > 0,
     cellReserve: dash.cell_reserve_usd,

@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 
-from promptpotter.application.intelligence.adaptive_queue_mechanism import decision_order
 from promptpotter.domain.ruler import (
     CalibrationModel,
     DeltaRuler,
@@ -21,7 +20,6 @@ from promptpotter.shared.statistics import logistic
 
 if TYPE_CHECKING:
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
 
 
@@ -57,9 +55,6 @@ assert _EB_NU0 > 0 and _EB_S0_SQ > 0, "a zero prior lets a θ SE reach 0, and ev
 
 # Where p saturates, an unbounded step jumps into the opposite saturation, hardest on the arms furthest above centre.
 _MAX_NEWTON_STEP = 1.0
-
-# Panel slots held for the cells δ is least sure of; a first estimate off one ruler.
-_RULER_LEARNING_SLOTS = 4
 
 
 def _newton_step(
@@ -293,11 +288,17 @@ def _fit_one(
     p = logistic(a_arr * (theta - d_arr))
     info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
     # Never a pooled φ̄: that makes an arm's SE depend on which arms shared its round.
-    var = np.clip(p * (1.0 - p), 1e-6, None)
-    dof = max(len(rows) - 1, 1)
-    raw_phi = float(np.sum((h_arr - p) ** 2 / var)) / dof
-    phi = (dof * raw_phi + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
+    phi = _dispersion(h_arr, p, dof=max(len(rows) - 1, 1))
     return theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9)))
+
+
+def _dispersion(y: NDArray[np.floating[Any]], p: NDArray[np.floating[Any]], *, dof: int) -> float:
+    """Pearson φ, shrunk toward 1 — and exactly 1 where every response is 0/1: a Bernoulli's
+    variance IS p(1−p), and residuals against a δ fit on those same rows read as underdispersion."""
+    if np.all((y == 0.0) | (y == 1.0)):
+        return 1.0
+    misfit = float(np.sum((y - p) ** 2 / np.clip(p * (1.0 - p), 1e-6, None)))
+    return (misfit + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
 
 
 @shapes_optimizer_prompt
@@ -348,9 +349,7 @@ def theta_bounds_given_delta(
     dm, am = (np.array([params[s][k] for s in on], dtype=np.float64) for k in (0, 1))
     ends = logistic(am[:, None] * (np.array([low, high]) - dm[:, None]))
     pm = np.clip(y, ends.min(axis=1), ends.max(axis=1))
-    misfit = float(np.sum((y - pm) ** 2 / np.clip(pm * (1.0 - pm), 1e-6, None)))
-    dof = max(len(params) - 1, 1)
-    phi = (misfit + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
+    phi = _dispersion(y, pm, dof=max(len(params) - 1, 1))
     return low, high, float(np.sqrt(phi) / np.sqrt(info))
 
 
@@ -608,123 +607,6 @@ def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> floa
     if theta_c is None or bar is None:
         return None
     return theta_c - bar[0]
-
-
-def select_round_subset(
-    bank: list[Sample],
-    observations: list[Observation],
-    budget: int,
-    *,
-    ruler: DeltaRuler | None = None,
-    anchor_floor: int = 0,
-    worth: Mapping[int, float],
-) -> list[Sample]:
-    """Never ``fit_rasch`` here: the δ that CHOOSES the cells is the locked δ that SCORES them."""
-    # *observations* are the race's own: its best θ is the target, never another run's.
-    # `worth` is each cell's information per unit price; a cell it omits stands at the median.
-    if budget <= 0 or not bank:
-        return []
-    if budget >= len(bank):
-        return list(bank)
-    by_id = {int(s.id): s for s in bank}
-    strata = _shared_strata(bank)
-    if ruler is None or not ruler.delta:
-        # Stable, so an unpriced bank keeps its prefix and a cold subset stays frozen.
-        cold = sorted(by_id, key=lambda sid: -worth.get(sid, 1.0))
-        return [by_id[sid] for sid in _with_stratum_cover(cold, budget, strata)[:budget]]
-
-    # A cell the ruler has not absorbed stands at the ruler's own centre with the population SE.
-    delta_map = {sid: ruler.delta.get(s.key, ruler.mu_delta) for sid, s in by_id.items()}
-    delta_se_map = {sid: ruler.delta_se.get(s.key, ruler.sigma_delta) for sid, s in by_id.items()}
-    anchored = {sid for sid, s in by_id.items() if s.key in ruler.delta}
-    theta = fit_theta_given_delta(observations, ruler.entries())
-    if theta:
-        leader_theta, leader_se = max(theta.values(), key=lambda ts: ts[0])
-        leader_var = leader_se**2
-    else:
-        leader_theta, leader_var = 0.0, _INIT_SIGMA_THETA**2
-    decided = decision_order(
-        leader_theta,
-        _INIT_SIGMA_THETA**2,
-        leader_theta,
-        leader_var,
-        delta_map,
-        delta_se_map,
-        list(by_id),
-        worth,
-    )
-    ranked = _with_ruler_learning(decided, budget, delta_se_map, worth)
-    ranked = _with_stratum_cover(ranked, budget, strata)
-    return [by_id[sid] for sid in _with_anchor_block(ranked, budget, anchored, anchor_floor)]
-
-
-def _shared_strata(bank: Sequence[Sample]) -> dict[int, frozenset[str]]:
-    """A pin value some cells share and others lack is a stratum: an L4 pool's dataset, its model."""
-    levels: dict[str, set[int]] = {}
-    for s in bank:
-        for key, value in (s.source_pin or {}).items():
-            levels.setdefault(f"{key}={value!r}", set()).add(int(s.id))
-    return {
-        int(s.id): frozenset(
-            level
-            for level, held in levels.items()
-            if int(s.id) in held and 1 < len(held) < len(bank)
-        )
-        for s in bank
-    }
-
-
-def _with_stratum_cover(
-    ranked: list[int], budget: int, strata: Mapping[int, frozenset[str]]
-) -> list[int]:
-    """Rank alone buys the best-priced stratum whole, and a win on one dataset or one model generalizes to none."""
-    uncovered = set().union(*strata.values())
-    cover: list[int] = []
-    for sid in ranked:
-        if len(cover) >= budget or not uncovered:
-            break
-        if strata[sid] & uncovered:
-            cover.append(sid)
-            uncovered -= strata[sid]
-    held = set(cover)
-    return [*cover, *(sid for sid in ranked if sid not in held)]
-
-
-def _with_ruler_learning(
-    decided: list[int], budget: int, delta_se_map: dict[int, float], worth: Mapping[int, float]
-) -> list[int]:
-    """A pure-decision panel converges on one difficulty, where θ is logit-accuracy plus a constant."""
-    slots = min(_RULER_LEARNING_SLOTS, max(budget - 1, 0))
-    if slots <= 0 or budget >= len(decided):
-        return decided
-    keep = decided[: budget - slots]
-    held = set(keep)
-    explore = sorted(
-        (sid for sid in decided if sid not in held),
-        # Unseen cells tie on the population SE, and the cheapest sharp one learns the ruler first.
-        key=lambda sid: (-delta_se_map[sid], -worth.get(sid, 1.0), sid),
-    )
-    return [*keep, *explore[:slots], *(sid for sid in decided[budget - slots :] if sid not in held)]
-
-
-def _with_anchor_block(
-    ranked: list[int], budget: int, anchored: set[int], anchor_floor: int
-) -> list[int]:
-    """Unmeasured cells outrank anchored ones by construction, so a locked ruler's subset walks off it."""
-    picked = ranked[:budget]
-    floor = min(anchor_floor, len(anchored & set(ranked)), budget)
-    have = sum(1 for sid in picked if sid in anchored)
-    if have >= floor:
-        return picked
-    spare = [sid for sid in ranked[budget:] if sid in anchored]
-    out = list(picked)
-    for i in range(len(out) - 1, -1, -1):
-        if have >= floor or not spare:
-            break
-        if out[i] not in anchored:
-            out[i] = spare.pop(0)
-            have += 1
-    return out
 
 
 def build_round_order(

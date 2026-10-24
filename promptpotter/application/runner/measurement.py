@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.bench.node_context import NodeContext, measure_as_parent
 from promptpotter.application.intelligence.rasch import candidate_abilities
 from promptpotter.application.optimizers.nodes import MeasuredRound, ReadArm
+from promptpotter.application.runner.overlap import read_origin_panel, round_origin_panel
 from promptpotter.application.scoring.arm_states import (
     conclude,
     measuring,
@@ -29,7 +30,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     open_walk,
     reread_cells,
 )
-from promptpotter.application.scoring.selection import cells_read
+from promptpotter.application.scoring.selection import cells_read, crowning_cells
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
@@ -42,9 +43,12 @@ from promptpotter.domain.results import (
     ArmFit,
     Concluded,
     Cut,
+    LineStep,
     arm_name,
+    election_rows,
     is_electable,
     is_leader_eligible,
+    measured_cells,
     walked_short,
 )
 from promptpotter.domain.scoring import NO_CELLS
@@ -102,6 +106,7 @@ async def measure_population(
     ctx: RoundContext,
     population: Proposals,
     panel: Panel,
+    pool: list[Sample],
     eliminator: Eliminator | None,
     selector: Selector,
 ) -> MeasuredRound:
@@ -131,11 +136,39 @@ async def measure_population(
         if not cells or not any(readable(key, held) for key in rows):
             raise StopLoop(cut)
     parent = await rescore_parent(ctx, cells, role=MeasurementRole.PARENT)
+    origin_panel_slots = round_origin_panel(cycle, pool)
+    on_panel = await read_origin_panel(
+        cycle,
+        [
+            *(
+                (LineStep(arm_name(key, arm, ctx.round_num), arm.individual), rows[key])
+                for key, arm in arms.items()
+                # The floor's own count, so every arm the election can read sits the panel.
+                if len(measured_cells(rows[key])) >= coverage_floor
+            ),
+            (
+                LineStep(arm_name(parent.key, parent.state, ctx.round_num), parent.individual),
+                parent.rows,
+            ),
+        ],
+        origin_panel_slots,
+        pool,
+        buys=cut is None,
+    )
+    crowned = crowning_cells(cycle.rounds, parent.key)
+
+    def pooled(key: ArmKey, drawn: CellSheet) -> CellSheet:
+        return election_rows(drawn, on_panel.get(key, NO_CELLS), crowned)
+
     # Every cell the round bought joins the δ fit before a θ is read: a ruler carrying only cells
     # from earlier rounds reads each arm on the handful it shares with them.
     cycle.difficulty.link(
-        [(arm.sp_hash, rows[key]) for key, arm in arms.items() if arm.sp_hash]
-        + [(parent.state.sp_hash, parent.rows)]
+        [
+            (arm.sp_hash, rows[key].merged(on_panel.get(key, NO_CELLS)))
+            for key, arm in arms.items()
+            if arm.sp_hash
+        ]
+        + [(parent.state.sp_hash, parent.rows.merged(on_panel.get(parent.key, NO_CELLS)))]
     )
     ruler = cycle.difficulty.ruler
     # Never in a `finally`: an unwound round did not score. Round 0's is `round.py::emit_origin_round`.
@@ -164,12 +197,14 @@ async def measure_population(
         electable.append(key)
 
     # Fixed δ decouples the arms, so this is the fit `elect_round_winner` takes of the same rows.
-    abilities = candidate_abilities({key: rows[key] for key in electable}, parent.rows, ruler)
+    abilities = candidate_abilities(
+        {key: pooled(key, rows[key]) for key in electable}, pooled(parent.key, parent.rows), ruler
+    )
     fit = {
         key: ArmFit(
             theta=abilities.theta.get(key),
             theta_se=abilities.theta_se.get(key),
-            theta_caveat=cycle.difficulty.scale.caveat(rows[key].cells),
+            theta_caveat=cycle.difficulty.scale.caveat(pooled(key, rows[key]).cells),
             vs_reference=readings.get(key),
         )
         for key in arms
@@ -191,6 +226,9 @@ async def measure_population(
         electable=electable,
         coverage_floor=coverage_floor,
         cut=cut,
+        origin_panel_slots=origin_panel_slots,
+        on_panel=on_panel,
+        crowned=crowned,
     )
 
 

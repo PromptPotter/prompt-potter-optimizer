@@ -23,7 +23,7 @@ const SHOWN_ELSEWHERE = new Set([
 ]);
 
 const KNOWN_ORDER = [
-  "origin_acc", "arms_per_round", "sp_budget_round",
+  "origin_acc", "round_cells_ceiling",
   "total_backend_calls", "error_count", "degraded_count", "backend_retry_count",
   "state_since", "stop_reason",
 ];

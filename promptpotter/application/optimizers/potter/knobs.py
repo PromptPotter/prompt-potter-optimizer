@@ -40,21 +40,22 @@ class AdaptiveQueueKnobs(StrictModel):
         ge=1,
         le=MAX_PASS_ROWS,
         description="Per-round eval budget — how many cells each candidate is scored on per "
-        "round. The search split is the bank; each round `select_round_subset` picks this many "
-        "informative cells from it. Not the pool's size.",
+        "round. The search split is the bank; each round draws this many cells from it at "
+        "random. Not the pool's size.",
     )
 
     per_round_resubset: Annotated[bool, Knob(Scope.POLICY, Estimand.SELECTION, Estimand.GATE)] = (
         Field(
             description=(
-                "Re-pick the most-informative scoring subset every round from the "
-                "search split (adaptive Rasch selection). On — safe because "
+                "Draw a fresh seeded scoring subset every round from the search split, "
+                "blind to every outcome and ability, so the election reads cells the held-out "
+                "bench would. On — safe because "
                 "every cross-round comparator (election, PoBB, c0_ok, the stall ladder) "
                 "measures on one fixed θ ruler, so a shifting per-round subset stays "
                 "comparable — but it is warm-gated: while the δ ruler is still cold (a "
                 "fresh dataset's early rounds) the subset stays FROZEN to the campaign-start "
                 "selection, so those rounds are comparable AND concentrate measurements to "
-                "warm the ruler fastest; it thaws to adaptive once the ruler locks. Off → "
+                "warm the ruler fastest; it thaws once the ruler locks. Off → "
                 "the campaign-start selection (deterministic bank prefix) for every round, "
                 "the whole campaign."
             ),
@@ -116,11 +117,13 @@ class L1GenerateKnobs(StrictModel):
 class PoBBKnobs(StrictModel):
     """Its first decision point is the bench's ``elimination_n_min``, which the δ ruler's warmth shares: aggression lives HERE."""
 
-    epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
+    epsilon: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING, Estimand.GATE)] = Field(
         gt=0.0,
         lt=1.0,
         description="Stop a candidate when its posterior probability of being the "
-        "round's best drops below this threshold. Smaller → fewer stops.",
+        "round's best drops below this threshold. Smaller → fewer stops. Mirrored, it is the "
+        "election's admission bar: an arm is promoted only where its parent, read against it, "
+        "falls below it. Smaller → fewer promotions.",
     )
     epsilon_floor: Annotated[float, Knob(Scope.POLICY, Estimand.STOPPING)] = Field(
         gt=0.0,

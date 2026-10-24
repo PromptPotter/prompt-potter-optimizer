@@ -17,9 +17,11 @@ from promptpotter.application.scoring.closed_rounds import cycle_instrument
 from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, SpendRollup
+from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     LedgerSpend,
     scan_bench_passes,
@@ -147,8 +149,12 @@ def line_run(stores: Stores, hop: CycleHop) -> LineRun:
     named = bool(hop.cycle_id)
     index = stores.campaigns.load(hop, moment=None) if named else None
     standing = None if index is None else index.standing
+    # A pass holds the cycle too, and reads SCORING: only the loop's hold is a run still selecting.
+    run = derive_run_state(stores.campaigns.cycle_dir(hop)) if named else None
     return LineRun(
-        selecting=named and hop.cycle_id in stores.campaigns.attached_cycle_ids(hop.campaign_id),
+        selecting=run is not None
+        and run.producer.attached
+        and run.run_phase is not RunPhase.SCORING,
         ending=None if index is None else index.stop_reason,
         selection=None if standing is None else standing.selection,
         rounds_closed=0 if standing is None else standing.rounds_closed,

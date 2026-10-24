@@ -80,8 +80,8 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
         <span className="lbl">{m.scoringNow ? "Now" : "Next round"}</span>
         <span className="val">
           {m.scoringNow
-            ? `${m.inFlight} out · ${m.allowed} allowed · ${most ?? "—"} at most`
-            : `${most ?? "—"} at most`}
+            ? `${m.inFlight} out · ${m.allowed} allowed · ${most} at most`
+            : `${most} at most`}
         </span>
       </Term>
       {m.waitNote ? (

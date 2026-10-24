@@ -548,12 +548,11 @@ class LiveDashboardProjection(Projection):
     def composed(self) -> LiveDashboardState:
         """Shares the fold's own fields, so it is read before the next record lands."""
         s = self.state
-        most: int | None
         if any(self._flight):
             in_flight, allowed, most = self._flight
         else:
             in_flight = allowed = 0
-            most = None if s.arms_per_round is None else (s.arms_per_round + 1) * s.sp_budget_round
+            most = s.round_cells_ceiling
         opened = self._open_samples.get(self._waiting[0]) if self._waiting else None
         waiting_on: str | None = None
         waiting_since: float | None = None

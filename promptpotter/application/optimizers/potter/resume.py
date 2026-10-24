@@ -19,7 +19,8 @@ from promptpotter.application.scoring.selection import (
     paired_p_best,
 )
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.scoring import is_answer_collapsed
+from promptpotter.domain.results import election_rows
+from promptpotter.domain.scoring import NO_CELLS, is_answer_collapsed
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import graceful
 
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.scoring import CellSheet
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 logger = logging.getLogger(__name__)
@@ -43,12 +45,19 @@ def _replay_round_winner(
     round_data = ctx.round_data
     arms = [ArmKey(str(key)) for key in inputs_ref["arms"]]
     coverage_floor = int(inputs_ref["coverage_floor"])
+    crowned = frozenset(str(cell) for cell in inputs_ref["crowned"])
+
+    def pooled(key: ArmKey) -> CellSheet:
+        on_panel = round_data.overlap_results.get(key, NO_CELLS)
+        return election_rows(round_data.rows(key), on_panel, crowned)
+
     winner, _ = elect_round_winner(
         arms,
-        {key: round_data.rows(key) for key in arms},
-        round_data.rows(ArmKey(str(inputs_ref["parent"]))),
+        {key: pooled(key) for key in arms},
+        pooled(ArmKey(str(inputs_ref["parent"]))),
         coverage_floor,
         ctx.ruler,
+        epsilon=float(inputs_ref["epsilon"]),
     )
     return winner
 

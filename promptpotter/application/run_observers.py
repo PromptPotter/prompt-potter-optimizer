@@ -112,8 +112,7 @@ def declare_run_wiring(
     assert campaign is not None, "a run is wired on a campaign its session is bound to"
     ledger.append(
         RunWiringRecord(
-            arms_per_round=selected.arms_per_round,
-            sp_budget_round=selected.round_cells(len(session.bank.samples)),
+            round_cells_ceiling=selected.round_cells_ceiling(len(session.bank.samples)),
             display_metric=campaign_config.display_metric,
             elects_on=selected.elects_on,
             max_cells_in_flight=session.backend_client.max_cells_in_flight,

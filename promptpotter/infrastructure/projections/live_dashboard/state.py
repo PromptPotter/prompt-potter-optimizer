@@ -137,8 +137,8 @@ class DashboardFacts(StrictModel):
     sample_lookahead_discards: int = 0
     in_flight: int = 0
     lookahead_allowed: int = 0
-    # Between phases it is the NEXT round's; ``None`` under an optimizer declaring no `arms_per_round`.
-    lookahead_most: int | None = 0
+    # Between phases it is the NEXT round's.
+    lookahead_most: int = 0
     # ``None``: no book binds.
     cell_reserve_usd: float | None = None
     waiting_on: str | None = None
@@ -152,8 +152,7 @@ class DashboardFacts(StrictModel):
     # The timestamp of the last record the state took, which `at_offset` may stand past.
     at_time: str
 
-    arms_per_round: int | None
-    sp_budget_round: int
+    round_cells_ceiling: int
 
     # As DECLARED; what binds now is ``ServedDashboard.run_limits``.
     run_limits: RunLimits
@@ -199,8 +198,7 @@ class LiveDashboardState(DashboardFacts):
     def launched(wiring: RunWiringRecord) -> dict[str, Any]:
         """What each launch's wiring declares, and clears of what the last launch left."""
         return {
-            "arms_per_round": wiring.arms_per_round,
-            "sp_budget_round": wiring.sp_budget_round,
+            "round_cells_ceiling": wiring.round_cells_ceiling,
             "display_metric": wiring.display_metric,
             "elects_on": wiring.elects_on,
             "max_cells_in_flight": wiring.max_cells_in_flight,

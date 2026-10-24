@@ -374,21 +374,21 @@ def synthetic_rows(n: int) -> list[Sample]:
     return rows
 
 
-def campaign_config(
-    optimizer: str, rounds: int, *, bench_trigger: BenchTrigger, pinned: bool = False
-) -> CampaignConfig:
-    """*pinned* seeds every optimizer's draws alike, which arms of one head-to-head must share."""
+def campaign_config(optimizer: str, rounds: int, *, bench_trigger: BenchTrigger) -> CampaignConfig:
     raw = dict(dataset_campaign_block(install_datasets_root() / DATASET))
     raw.update(BENCH, bench_trigger=bench_trigger)
     opt = raw["optimization"]
     # The template's node overlay is written for the optimizer it selects, and only that one.
     templated = opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
-    opt.update(budget={"usd": 1000.0, "rounds": rounds}, origin_gate="off", optimizer=optimizer)
+    # Draws follow the campaign's id unless a clamp seeds them, and every run mints an id.
+    opt.update(
+        budget={"usd": 1000.0, "rounds": rounds},
+        origin_gate="off",
+        optimizer=optimizer,
+        determinism={"seed": 0},
+    )
     if optimizer != templated:
         opt["nodes"] = SCALED.get(optimizer, {})
-    if optimizer != templated or pinned:
-        # Its draws follow the campaign's id unless a clamp seeds them, and every run mints an id.
-        opt["determinism"] = {"seed": 0}
     sampler = select_optimizer(CampaignConfig.model_validate(raw).optimization).sampler
     if sampler.size_knob is not None:
         nodes = opt.setdefault("nodes", {})
@@ -459,7 +459,7 @@ async def run_one(
     out = workspace if out is None else out
     (out / "requests").mkdir(parents=True)
     arm = purpose.arm if isinstance(purpose, Compare) else None
-    config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger, pinned=arm is not None)
+    config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger)
     if not framing:
         config = config.model_copy(update={"task_framing": "off"})
     samples = synthetic_rows(rows)

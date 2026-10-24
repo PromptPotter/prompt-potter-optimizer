@@ -1,23 +1,18 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
-    CellReading,
-    information_per_price,
+    covered_prefix,
     parent_grades,
     stratum_shares,
 )
 from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
-from promptpotter.application.intelligence.rasch import (
-    build_observations,
-    build_round_order,
-    select_round_subset,
-)
+from promptpotter.application.intelligence.rasch import build_round_order
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, POBB
@@ -87,7 +82,6 @@ from promptpotter.application.optimizers.potter.records import (
     L2Memory,
     L3Memory,
     Ladder,
-    PotterCheckpointKind,
 )
 from promptpotter.application.optimizers.potter.resume import (
     POTTER_REPLAYERS,
@@ -95,7 +89,6 @@ from promptpotter.application.optimizers.potter.resume import (
     round_packages,
 )
 from promptpotter.application.optimizers.potter.validators.l3_output import l3_plan_breaches
-from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
 from promptpotter.config.paths import optimizers_root
@@ -148,32 +141,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _origin_readings(
-    rounds: Sequence[RoundResult], slot_of: Mapping[str, int]
-) -> dict[int, CellReading]:
-    """The ORIGIN's rows alone: the one arm every cell shares, so no edit under test moves a cell's rank."""
-    if not rounds:
-        return {}
-    out: dict[int, CellReading] = {}
-    for cell in rounds[0].results:
-        facts = cell.facts
-        inner = facts.pipeline.inner
-        usd, seconds = cell_channels_of(facts, cell.grade.fitness).get("cost"), facts.cost_s
-        slot = slot_of.get(cell.key)
-        if (
-            slot is None
-            or not cell.scored
-            or inner is None
-            or inner.mean_parent_level_se is None
-            or inner.origin_headroom is None
-            or usd is None
-            or seconds is None
-        ):
-            continue
-        out[slot] = CellReading(inner.mean_parent_level_se, inner.origin_headroom, usd, seconds)
-    return out
-
-
 def _strata(pool: list[Sample], by: CellStrata) -> list[list[Sample]]:
     """In first-seen order; `none` is the pool whole."""
     if by == "none":
@@ -198,57 +165,30 @@ class AdaptiveQueue(nodes.Member):
         return knobs.sp_budget_round
 
     def draw(self, ctx: NodeContext[AdaptiveQueueKnobs], pool: list[Sample]) -> Panel:
-        ruler = ctx.read(Ruler)
-        view = ruler.difficulty
+        view = ctx.read(Ruler).difficulty
         knobs = ctx.knobs
         lineage = ctx.read(Lineage)
-        rounds = lineage.rounds
         # A race read on cells that crowned its parent re-reads the parent's luck as its ability.
-        crowned = crowning_cells(rounds, lineage.parent.id)
+        crowned = crowning_cells(lineage.rounds, lineage.parent.id)
         pool = [s for s in pool if s.key not in crowned]
-        readings = _origin_readings(rounds, ruler.slot_of)
-        worth = information_per_price(readings)
-        own = build_observations(list(rounds))
         n_min = ctx.read(Bounds).elimination_n_min
+        # No outcome and no ability choose a cell: the election reads these rows as the pool's.
+        # A cold ruler keeps the campaign-start prefix, whose shared cells warm it fastest.
+        ruler = view.ruler if knobs.per_round_resubset else None
+        rng = ctx.rng()
 
         def pick(stratum: list[Sample], budget: int) -> list[Sample]:
-            # Purpose reaches the draw through the ruler alone: an arm of a head-to-head reads the
-            # version it froze at open plus its own campaign's lines, so a compare arm warms too.
-            if not knobs.per_round_resubset or view.ruler is None:
-                # On a COLD ruler a re-picked subset is difficulty-blind; freezing warms it fastest.
-                return select_round_subset(stratum, [], budget, worth=worth)
-            return select_round_subset(
-                stratum,
-                own,
-                budget,
-                ruler=view.ruler,
-                # Enough cells the ruler carries that θ is read on δ, not on the prior.
-                anchor_floor=n_min,
-                worth=worth,
-            )
+            if ruler is None:
+                return covered_prefix(stratum, budget)
+            shuffled = rng.sample(stratum, len(stratum))
+            # A warm θ reads ruler cells alone: `elimination_n_min` of them lead, as blindly drawn.
+            lead = [s for s in shuffled if s.key in ruler.delta][:n_min]
+            led = {s.key for s in lead}
+            return covered_prefix([*lead, *(s for s in shuffled if s.key not in led)], budget)
 
         strata = _strata(pool, knobs.strata)
         shares = stratum_shares([len(s) for s in strata], knobs.sp_budget_round)
         cells = [cell for s, n in zip(strata, shares, strict=True) if n for cell in pick(s, n)]
-        if worth and len(cells) < len(pool):
-            ctx.decide(
-                PotterCheckpointKind.PRICED_DRAW,
-                {
-                    "round_num": ctx.round_num,
-                    "ruler": view.stamp.id,
-                    # Per cell: what its origin row reported, then the rank value read off it.
-                    "cells": {
-                        str(s.id): {
-                            "query": s.query,
-                            **readings[sid]._asdict(),
-                            "worth": worth[sid],
-                        }
-                        for s in pool
-                        if (sid := int(s.id)) in worth
-                    },
-                },
-                [int(s.id) for s in cells],
-            )
         order = build_round_order(
             parent_grades(ctx.read(Frontier).parent_own_rows),
             view.ruler,
@@ -309,6 +249,8 @@ class ThetaElection(nodes.Member):
     name: ClassVar[str] = "theta_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler})
+    # Admission mirrors the stopping rule: one ε says when the parent is futile against an arm.
+    consults: ClassVar[frozenset[type]] = frozenset({PoBB})
     elects_on: ClassVar[DisplayMetric] = "ability"
     elects_partial: ClassVar[bool] = True
 

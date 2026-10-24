@@ -62,7 +62,6 @@ from promptpotter.application.datasets.loaders import archive_entry, samples_fro
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.intelligence.rasch import Observation, select_round_subset
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
 from promptpotter.application.jobs.mint import (
@@ -1604,9 +1603,6 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert resumed.bank == drawn_bank, (
         "a resume after a re-cut switched its cycle onto the new bank"
     )
-    contaminating = [Observation("bench_arm", s.key, 0.0) for s in (*part.bench, *part.demo)]
-    panel = select_round_subset(list(part.search), contaminating, 20, worth={})
-    assert held.isdisjoint(s.id for s in panel), "a held-out row reached a round panel"
     index = SampleIndex(bank=Bank.of(bank), sample_ids=part.admitted_ids)
     for n in range(12):
         index.replay_row(

@@ -115,7 +115,7 @@ async def run_round_loop(
                 is_final_round = cap is not None and clean_rounds + 1 >= cap
 
                 round_result, cut = await execute_round(
-                    cycle, round_num, dataset, cb, is_final_round=is_final_round
+                    cycle, round_num, cb, is_final_round=is_final_round
                 )
                 open_round = None
                 await post_round(

@@ -27,7 +27,7 @@ nodes:
     type: algorithm
     config:
       active: ['*']
-  # The round's panel: `select_round_subset` draws `sp_budget_round` cells off the search split
+  # The round's panel: `AdaptiveQueue.draw` draws `sp_budget_round` cells off the search split
   # and `build_round_order` orders them on the parent's grades (`methods/verdict-resolution.md`
   # § The round order).
   adaptive_queue:

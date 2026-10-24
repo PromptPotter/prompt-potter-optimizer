@@ -28,7 +28,7 @@ from pydantic import Field
 from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob, Scope
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import ArmSlot, Proposed, rounds_without_advance
+from promptpotter.domain.results import ArmSlot, Proposed, election_rows, rounds_without_advance
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import CatchUps
@@ -553,10 +553,18 @@ class MeasuredRound:
     electable: list[ArmKey]
     coverage_floor: int
     cut: StopReason | None
+    # The origin panel by sample slot; `on_panel` holds each member's rows there beside its draw.
+    origin_panel_slots: list[int]
+    on_panel: dict[str, CellSheet]
+    crowned: frozenset[str]
 
     @property
     def labels(self) -> dict[ArmKey, str]:
         return {key: arm.label for key, arm in self.arms.items()}
+
+    def pooled(self, key: ArmKey) -> CellSheet:
+        drawn = self.parent.rows if key == self.parent.key else self.rows[key]
+        return election_rows(drawn, self.on_panel.get(key, NO_CELLS), self.crowned)
 
 
 @dataclass(frozen=True)

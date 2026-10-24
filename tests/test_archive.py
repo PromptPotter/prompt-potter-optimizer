@@ -770,10 +770,11 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         )
         return scorer.sheet(a.cell for ref in refs if (a := stores.archive.answer(ref)) is not None)
 
-    # Level with the parent on nine cells; on the tenth only the parent's charged error separates them.
-    shared = {sid: "g" if sid < 5 else "x" for sid in range(9)}
+    # Two cells won outright; the third, which clears the bar, only the parent's charged error gives.
+    answered = {sid: "g" if sid < 5 else "x" for sid in range(9)}
     parent, child = prompted(instruction="parent"), prompted(instruction="child")
-    bar, arm = filed("P", {**shared, 9: None}), filed("C", {**shared, 9: "g"})
+    bar = filed("P", {**answered, 9: None})
+    arm = filed("C", {**answered, 5: "g", 6: "g", 9: "g"})
     assert bar.cells[9].scored and bar.cells[9].grade.fitness == 0.0, "guard"
     electing = seat(stores, population=[parent])
     set_line(electing.cycle, [_round(round=0, **on_parent)])
@@ -795,6 +796,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             electable=[walked_child],
             coverage_floor=1,
             cut=None,
+            origin_panel_slots=[],
+            on_panel={},
+            crowned=frozenset(),
         ),
         Proposals([]),
     )

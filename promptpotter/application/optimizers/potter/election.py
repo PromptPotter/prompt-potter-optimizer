@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.node_context import Lineage, Ruler
 from promptpotter.application.optimizers.nodes import Selection
+from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
 from promptpotter.application.scoring.selection import (
     closest_to_bar,
@@ -82,9 +83,15 @@ def elect_on_theta(
     ruler = ctx.read(Ruler).difficulty.ruler
     lineage = ctx.read(Lineage)
     electable = measured.electable
-    rows: dict[ArmKey, CellSheet] = {key: measured.rows[key] for key in electable}
+    rows: dict[ArmKey, CellSheet] = {key: measured.pooled(key) for key in electable}
+    epsilon = ctx.knobs_of(PoBBKnobs).epsilon
     selected, abilities = elect_round_winner(
-        electable, rows, measured.parent.rows, measured.coverage_floor, ruler
+        electable,
+        rows,
+        measured.pooled(measured.parent.key),
+        measured.coverage_floor,
+        ruler,
+        epsilon=epsilon,
     )
     reads = readable_lifts(electable, measured.coverage_floor, abilities)
     leading = selected or closest_to_bar(reads)
@@ -94,8 +101,10 @@ def elect_on_theta(
             "arms": electable,
             "round_num": ctx.round_num,
             "coverage_floor": measured.coverage_floor,
+            "epsilon": epsilon,
             # Names which of the round's banked references the bar was; its rows are the close's.
             "parent": measured.parent.key,
+            "crowned": sorted(measured.crowned),
         },
         selected,
     )

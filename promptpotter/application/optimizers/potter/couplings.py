@@ -15,23 +15,17 @@ ADAPTIVE_QUEUE = (
         bench_knobs=("optimization.elimination_n_min",),
         estimand=Estimand.SELECTION,
         relation=(
-            "per_round_resubset=ON re-picks the scored subset per candidate. Every "
+            "per_round_resubset=ON re-draws the scored subset per round. Every "
             "cross-round comparator reads ONE anchored δ ruler in θ — the stall replayer, "
             "c0_ok, the round-winner election and PoBB elimination all via "
             "fit_theta_given_delta on cycle.difficulty — and that ruler is EXTENDED to cover each "
             "round's new cells, so the accuracy-space collision is resolved."
         ),
         consequence=(
-            "Resubset is comparability-coherent in θ, with TWO residuals. WARMTH: below "
+            "Resubset is comparability-coherent in θ, with ONE residual, WARMTH: below "
             "elimination_n_min banked samples the ruler stays flat and θ is logit-accuracy "
             "on each arm's OWN subset, so those rounds are subset-relative until it warms. "
-            "BAND: the acquisition buys the cells whose δ sits nearest the leader's θ, which "
-            "against a wide bank collapses onto a narrow δ range — inside it every cell is "
-            "equally hard, so θ reduces to logit-accuracy plus a constant while the ruler is "
-            "warm and every id matches, which makes this the silent one. Turning resubset "
-            "OFF freezes the panel to the campaign-start prefix, which removes the band "
-            "residual by forcing the same cells into every panel. A cell missing from a WARM "
-            "ruler is neither residual — it raises."
+            "A cell missing from a WARM ruler is not that residual — it raises."
         ),
         severity="info",
         predicate=lambda c, k, d: bool(k.per_round_resubset),

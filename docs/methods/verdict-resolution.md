@@ -2,15 +2,16 @@
 
 The model every score in this repo is expressed in, and the two mechanisms that decide **which**
 samples get measured and **in what order**. The split between those two is the whole point — they
-answer different questions and only one of them is adaptive:
+answer different questions, and the one the election reads is blind to every outcome:
 
 | | Question | Function | When |
 |---|---|---|---|
-| **Acquisition score** | Which sample is worth measuring at all? | `pick_value = decision_information_gain + delta_learning_gain`; the between-round pick ranks on term 1 alone | the persisted hard-samples ranking (both terms) + **between** rounds (`select_round_subset`, term 1 + a reserved δ-learning tail) |
+| **Round draw** | Which samples does the round score? | `AdaptiveQueue.draw`: a seeded uniform draw, stratum-covered | **Between** rounds — reads no outcome and no ability (§ The between-round draw) |
+| **Acquisition score** | Which sample is hardest to call? | `pick_value = decision_information_gain + delta_learning_gain` | the persisted hard-samples ranking alone |
 | **Round order** | In what order do we score the round's samples? | `build_round_order` | **Within** a round — one deterministic order, shared by every candidate |
 
 The score lives in `application/intelligence/adaptive_queue_mechanism.py`, the order in
-`application/intelligence/rasch.py` beside the draw. **There is no online per-sample
+`application/intelligence/rasch.py`. **There is no online per-sample
 re-fit** — the round order is static by design (§ The round order for why adaptivity made it worse).
 
 Which *candidate* wins is the sibling question, owned by
@@ -62,9 +63,11 @@ variance OVERSTATES the uncertainty. Measured against the true sampling spread o
 on binary hit/miss, ×1.51 on reciprocal-rank-of-20, ×4.66 on the low-dispersion L4 outer composite —
 the inflation that left the outer election unable to crown and PoBB pinned at a tie.
 `fit_theta_given_delta` scales the SE by `√φ`, the Pearson dispersion estimated off the fit's own
-residuals (Wedderburn 1974). **An estimate, not a knob**, failing safe in both directions: `φ ≈ 1`
-leaves a dichotomous campaign unchanged, `φ < 1` returns a graded backend's real precision, `φ > 1`
-widens the SE on an overdispersed one. It is shrunk toward the nominal 1.0 by an inverse-gamma
+residuals (Wedderburn 1974). **An estimate, not a knob**, failing safe in both directions: `φ < 1`
+returns a graded backend's real precision, `φ > 1` widens the SE on an overdispersed one. **A sheet
+whose every response is 0/1 takes `φ = 1` exactly** (`rasch.py::_dispersion`): a Bernoulli's variance
+IS `p(1−p)`, and against a δ fit on those same rows its residuals read as underdispersion — measured,
+`φ = 0.10` on a hotpotqa arm, a θ_se of 0.28 where the information gives 0.89. It is shrunk toward the nominal 1.0 by an inverse-gamma
 prior rather than floored — a response with no residual variance carries no evidence about its own
 dispersion, and an unshrunk `φ→0` would report infinite confidence.
 
@@ -96,10 +99,7 @@ more power. It graduates **per-dataset**, behind the same θ interface, only whe
 so it is not comparable across rounds or across arms within a round:
 
 - **The subset moves.** `per_round_resubset` is ON by default, so consecutive rounds are scored on
-  different samples. Round N's accuracy and round N+1's are two different exams. It can also
-  FREEZE: the acquisition is a function of the ruler and a leader θ pinned by the archive, so once
-  both settle every round re-picks the same argmax — measured, two consecutive rounds drawing an
-  identical 28 ids. Neither state makes the two rounds' accuracies comparable.
+  different samples. Round N's accuracy and round N+1's are two different exams.
 - **Arms are truncated at different depths.** PoBB cuts a weak arm early, and `build_round_order`
   front-loads the parent's misses (a hit enters only every 4th slot), so a cut arm was graded on
   a harder prefix than a survivor. Its raw rate is penalised for where it stopped.
@@ -145,9 +145,8 @@ round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
   then reads each arm and its parent on the cells both answered, so the lift holds and the level
   does not. Check `calibration_model` (`None` = cold) and `ruler.id` — two θ readings are
   comparable only when their `ruler.id` matches.
-- **A collapsed band** (`collapsed_band`). Acquisition buys the cells whose δ sits nearest the leader's θ, and against
-  a wide bank that collapses onto a razor-thin range — measured, 28 cells spanning 0.63 logits on a
-  ruler spanning 11.4. Inside a band that narrow every cell is equally hard, so the 1PL fit reduces
+- **A collapsed band** (`collapsed_band`). The round's cells span a razor-thin slice of the ruler —
+  measured, 28 cells spanning 0.63 logits on a ruler spanning 11.4. Inside a band that narrow every cell is equally hard, so the 1PL fit reduces
   to `θ = logit(accuracy) + c` and the adjustment does no work: ranking on θ and ranking on accuracy
   are the same ranking, and the parent's floor moves with the band's centre rather than its ability
   (one origin read `-0.340` on round 0's spread and `-1.385` on the band). Unlike the two above this
@@ -185,10 +184,14 @@ round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
   line grew, so consecutive rounds' bars answered different questions and a winner that shared
   too little simply had no bar. It is a rate, not an ability, so it needs
   no ruler and no adjustment — which is the point: it is what remains readable when the scale
-  underneath θ has collapsed. It is REPORT-ONLY and deliberately so; fed to the election it would
-  identify the parent better than the arms it judges. Round files, `log.md`, `review.md`,
+  underneath θ has collapsed. The panel's rows also feed the election: before it, the parent and
+  every arm the coverage floor can read sit the panel cells their draw left, and θ, the verdict and
+  PoBB's final posterior read draw and panel pooled, less the parent's crowning cells
+  (`domain/results.py::election_rows`); mid-round cuts stay on the draw. So the panel is a REUSED
+  set: selecting on it round after round overfits it, and the overlap reading is optimistic for
+  every pick. The unbiased headline is the bench. Round files, `log.md`, `review.md`,
   the round-close terminal line and the candidates chart's `overlap` series all render the same
-  reading, under that one name. It does not repair the acquisition — it measures around it.
+  reading, under that one name. It does not repair the scale — it measures around it.
 - **A ruler HOLE is never graded.** δ=0 is a *position* on the scale rather than a neutral value:
   against a centre near +2.1 it scores an unmeasured cell as easier than anything ever measured and
   pulls θ down ~2 logits. So `fit_theta_given_delta` reads θ on the cells the ruler carries and no
@@ -234,16 +237,17 @@ BAR it reads that column against does not currently test anything, so a crowned 
 evidence than the word "winner" implies. Treat any claim that rests on "this round improved" as
 provisional, and say so rather than passing it on.
 
-- **The bar is a point estimate with a sign floor.** `selection.py::elect_round_winner` admits on
-  a raw θ lift over the parent above `rasch.py::FIT_SLACK` AND more of the cells the arm shares
-  with the parent won than lost on their VERDICTS — so a lift the fit's last digit or the δ
-  weighting made, on cells the arm did no better on, keeps the parent, while a cost term's
-  tie-break counts as neither (`candidate-elimination.md` § The θ rule, step 4). A pick's rows on the cells it won its race on are
+- **The bar is the stopping rule, mirrored.** `selection.py::elect_round_winner` admits on
+  a raw θ lift over the parent above `rasch.py::FIT_SLACK`, more of the cells the arm shares
+  with the parent won than lost on their VERDICTS, AND `P(θ_arm > θ_parent)` bounded by those
+  discordant cells (`candidate-elimination.md` § The θ rule, step 4) above `1 − ε`, PoBB's own ε:
+  promoted only where the parent would be cut against the arm. A lift the fit's last digit or the δ
+  weighting made keeps the parent, a cost term's tie-break counts as neither, and one discordant
+  cell — whose support is 0.75 whatever θ reads — never promotes. A pick's rows on the cells it won its race on are
   the max over its round's arms, and `rescore_parent` replays them, so the draw never puts those
   cells in a later race (`selection.py::crowning_cells`): the parent's bar is read on cells no
   election chose it by, and needs no credit for its own winner's curse. There is still no
-  interval and no multiplicity correction, and `RoundResult.improved` reads any selection past round 0 as a promotion: with
-  three arms identical to the parent, one still clears a one-cell net win most rounds.
+  interval and no multiplicity correction, and `RoundResult.improved` reads any selection past round 0 as a promotion.
 - **Separability is read against C0, not the parent.** One round's interval over its parent
   spans 0 for almost any real edit at panel width, so a round closes `advanced` (`domain/results.py::round_advance`) only where
   its pick leads C0 on the origin panel by an interval clear of 0 and tops every earlier pick
@@ -262,9 +266,9 @@ provisional, and say so rather than passing it on.
   reads below what any exact test on them can, so a round separates only where enough cells
   differ to carry it. `min_detectable_effect` and `panel_precision` serve
   the reads; none reaches anything the election calls. One member crossed over: `sign_posterior` bounds the ELIMINATION threshold
-  (`candidate-elimination.md` § The θ rule, step 4), because a bar is absolute and a rank is not.
-  The election still ranks on the unbounded posterior, and deliberately — bounding it moved a
-  banked crown across a 0.0007 gap.
+  and the election's ADMISSION (`candidate-elimination.md` § The θ rule, step 4), because a bar is
+  absolute and a rank is not. The election still RANKS on the unbounded posterior, and
+  deliberately — bounding it moved a banked crown across a 0.0007 gap.
 - **At the current width it could not pass anyway.** `exact_p_floor(6) = 0.031` on a 6-cell
   panel, which Holm across three arms takes to 0.094, so no Holm-corrected exact verdict is
   reachable at α=0.05 at ANY effect size.
@@ -369,30 +373,27 @@ Together they are a **Knowledge Gradient** acquisition — the one-step Bayesian
 would measuring `(c, s)` shift our point estimate of the best candidate?", closed-form for Bernoulli
 observations under Laplace.
 
-**The between-round pick spends the two terms separately, not summed** — no swap thresholds.
-`select_round_subset` (`intelligence/rasch.py`) ranks the whole bank on term 1 alone
-(`adaptive_queue_mechanism.py::decision_order`) against the best θ among the arms in this race, so
-*exploit* falls out of the ranking (samples on the contested band `δ_s ≈ leader θ` sort to the
-top). Where cells differ in price, term 1 is weighted by `information_per_price`, read off the
-ORIGIN's rows so no arm under test moves a cell's rank. *Explore* is a reserved tail rather than a
-term: `_with_ruler_learning` gives the last few slots to the cells δ is least sure of, which holds
-the band open; `_with_stratum_cover` then fronts one cell per shared `source_pin` level, so a
-priced draw cannot narrow to one dataset or one model; and `_with_anchor_block` swaps
-already-anchored cells into the tail until the next ruler extension has enough to equate against.
-Those `elimination_n_min` anchored cells are the cells a warm θ is read on (`rasch.py::theta_cells`),
-so they are what PoBB's gates and the election's coverage floor count, and the round order walks
-them first (§ The round order).
-Summed, `delta_learning_gain` dominated — an unmeasured sample carries the population `σ_δ`, so
-unmeasured samples outranked measured ones and tied with each other, draining the bank in stored
-order. Term 1 still overstates what a draw buys for ONE arm, because δ is fit across arms; weighting
-it by a cell's own separation history is the obvious repair and ranks at chance on banked rounds —
-the width a round can read is set by how far apart the arms are, not by which cells are drawn.
-Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
+## The between-round draw — blind, so the election reads the pool
 
-**On by default — but warm-gated.** `mechanisms.selection.per_round_resubset` (default `True`):
-while the δ ruler is still cold the subset stays frozen to the campaign-start prefix
-(`bank[:budget]`), thawing to adaptive once the ruler locks. Off → that frozen prefix for the whole
-campaign, so the sample set is fixed across rounds and accuracies are directly comparable.
+**No acquisition term chooses a round's cells.** The election reads the round's rows, so they must
+be the rows the held-out bench would read: a draw ranked on the leader's θ, or priced on the
+origin's headroom, buys the cells the parent misses, and a lift read there is a lift on that slice
+— measured, a θ-elected winner trailing its parent on the bench while the iid panel's best arm went
+unchosen. `AdaptiveQueue.draw` (`optimizers/potter/members.py`) takes the search split less the
+parent's crowning cells (`scoring/selection.py::crowning_cells`) and, once the ruler is warm,
+shuffles each stratum on the round's seeded `NodeContext.rng`, so a resume redraws the same cells.
+`elimination_n_min` ruler cells, drawn as blindly, lead the shuffle: they are the cells a warm θ
+is read on (`rasch.py::theta_cells`), so they are what PoBB's gates and the election's coverage
+floor count, and the round order walks them first (§ The round order).
+`adaptive_queue_mechanism.py::covered_prefix` then fronts one cell per shared `source_pin` level,
+so no draw narrows to one dataset or one model. Where the parent misses is the round ORDER's
+business, never the draw's.
+
+**On by default — but warm-gated.** `per_round_resubset` (default `True`): while the δ ruler is
+still cold the subset stays frozen to the campaign-start prefix (`bank[:budget]`), whose shared
+cells warm the ruler fastest, thawing to a fresh draw once the ruler locks. Off → that frozen
+prefix for the whole campaign, so the sample set is fixed across rounds and accuracies are
+directly comparable.
 
 ---
 
@@ -459,9 +460,8 @@ Both run at end of round, **zero-signal first**:
 1. **Zero-signal filter** — samples with no variance across observations are physically dropped from
    the active dataset, on disk. Pre-policy: they carry no signal to either exploit or explore. Answers
    *"is this sample dead across the campaign?"*
-2. **Round-subset selection** — `select_round_subset` picks the `budget` most-informative samples for
-   the active scoring set, in memory only. Answers *"given everything measured, which samples should
-   the next round score?"*
+2. **The round draw** — `AdaptiveQueue.draw` draws the `budget` samples of the active scoring set,
+   in memory only (§ The between-round draw). Answers *"which samples does the next round score?"*
 
 Beside them, deterministic triage reads each sample's failure streak: **zero-signal** (always-hit or
 always-miss) is naturally deprioritized by `p(1−p)→0` with no physical removal; **chronically
@@ -493,12 +493,10 @@ holds no stamped ability, so it serves δ and no pick score, and ranks on diffic
   `::decision_information_gain` + `::delta_learning_gain`).
 - Round order — `intelligence/rasch.py::build_round_order`, called once per round by potter's sampler
   (`optimizers/potter/members.py::AdaptiveQueue.draw`).
-- Between-round subset pick — `intelligence/rasch.py::select_round_subset`, off the LOCKED
-  ruler (still **1PL**: feeding graduated discrimination `aₛ` in here is open,
-  [`../specs/roadmap.md`](../specs/roadmap.md) § Fitness comparability).
+- Between-round draw — `optimizers/potter/members.py::AdaptiveQueue.draw`, its stratum cover
+  `intelligence/adaptive_queue_mechanism.py::covered_prefix`.
 - Persisted view — `intelligence/hard_sample_sorter.py::build_hard_samples`, the one caller of
-  the two-term `pick_value`; its ranking is `::rank_hard_samples`. The between-round pick deliberately does NOT use it
-  (§ The acquisition score — the two terms are spent separately).
+  `pick_value`; its ranking is `::rank_hard_samples`.
 
 ## Phase 2 sketch — origin-relative weighting (not shipped)
 

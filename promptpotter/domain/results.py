@@ -561,7 +561,7 @@ class TriggeredReading(FrozenModel):
 class OverlapReading(FrozenModel):
     """The best-so-far line on the ORIGIN PANEL: each pick paired with C0 on one set of cells."""
 
-    # Its rows reach no election, floor, lift, ruler or acquisition: OUTSIDE them is the point.
+    # Elections pool these cells and pick on them; the unbiased headline is the bench.
     # :func:`origin_panel`, by sample slot, ascending; empty where no pass was sent.
     positions: tuple[int, ...]
     lead: PairedReading = Field(
@@ -671,6 +671,13 @@ class LineStep(NamedTuple):
 @shapes_optimizer_prompt
 def measured_cells(rows: Iterable[GradedCell]) -> set[str]:
     return {cell.key for cell in rows if cell.scored}
+
+
+def election_rows(drawn: CellSheet, on_panel: CellSheet, crowned: Collection[str]) -> CellSheet:
+    """What a round elects on: an individual's draw, then the origin-panel cells it lacks, less
+    every cell that crowned the parent."""
+    skip = {cell.key for cell in drawn} | set(crowned)
+    return drawn.merged(on_panel.where(lambda cell: cell.key not in skip))
 
 
 def is_floor_pinned(rows: Iterable[GradedCell]) -> bool:
@@ -1093,7 +1100,7 @@ class RoundResult(RoundOutcome):
     at_offset: int | None = None
     # By arm: a reference re-read on the round's cells is an arm, so a held round's head is here.
     cells: dict[ArmKey, CellSheet] = Field(default_factory=dict)
-    # Keyed by the MEASURED individual; outside the arms — see `OverlapReading`.
+    # Keyed by the MEASURED individual, outside the arms: the election pools them (`election_rows`).
     overlap_results: dict[str, CellSheet] = Field(default_factory=dict)
 
     @computed_field  # type: ignore[prop-decorator]

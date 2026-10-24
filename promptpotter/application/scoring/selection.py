@@ -114,9 +114,12 @@ def elect_round_winner(
     parent_results: CellSheet,
     coverage_floor: int,
     ruler: DeltaRuler | None,
+    *,
+    epsilon: float,
 ) -> tuple[ArmKey | None, RoundAbilities]:
-    """ADMISSION is raw θ above the parent's by more than a fit resolves AND more cells won than
-    lost against it; the RANK is ``P(θ_cand > θ_parent)``, which PoBB cuts on."""
+    """ADMISSION is raw θ above the parent's by more than a fit resolves AND the posterior PoBB
+    cuts on, bounded by the discordant cells, past ``1 − ε``: promoted only where the PARENT would
+    be cut against the arm. The RANK is the unbounded ``P(θ_cand > θ_parent)``."""
 
     abilities = candidate_abilities(
         {key: rows[key] for key in keys if key in rows},
@@ -138,8 +141,11 @@ def elect_round_winner(
         wins, losses = discordance([own[k] for k in shared], [parent[k] for k in shared])
         if wins <= losses:
             continue
-        # The bar is read off no cell that crowned the parent: the draw leaves out `crowning_cells`.
+        # The bar is read off no cell that crowned the parent: `election_rows` leaves out `crowning_cells`.
         p_better = p_exceeds(abilities.theta[key], abilities.theta_se[key], *abilities.bar[key])
+        # One discordant cell supports 0.75 whatever θ reads: a lift the pairs cannot carry.
+        if _capped(p_better, sign_posterior(wins, losses)) <= 1.0 - epsilon:
+            continue
         rank = (p_better, abilities.cells[key])
         if rank > best_rank:
             best_rank = rank

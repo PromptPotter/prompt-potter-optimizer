@@ -72,7 +72,7 @@ export interface ServedDashboard {
   sample_lookahead_discards: number;
   in_flight: number;
   lookahead_allowed: number;
-  lookahead_most: number | null;
+  lookahead_most: number;
   cell_reserve_usd: number | null;
   waiting_on: string | null;
   backpressure: ServedBackpressure | null;
@@ -80,8 +80,7 @@ export interface ServedDashboard {
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
   at_time: string;
-  arms_per_round: number | null;
-  sp_budget_round: number;
+  round_cells_ceiling: number;
   run_limits: RunLimits;
   /** Set where the bench defaults or the treatment the campaign's declaration is a
    * delta over moved since it was declared, under an unchanged origin: this

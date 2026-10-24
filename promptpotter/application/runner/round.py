@@ -73,7 +73,6 @@ if TYPE_CHECKING:
         Selection,
     )
     from promptpotter.domain.results import DisplayMetric
-    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
@@ -199,6 +198,7 @@ def _round_result(
         arms=arms,
         folds=measured.folds,
         cells=cells,
+        overlap_results=measured.on_panel,
         election=Election(
             selected=winner,
             leading=leading,
@@ -414,12 +414,13 @@ async def _adapt(ctx: RoundContext, plan: RoundPlan, round_result: RoundResult) 
 async def execute_round(
     cycle: Cycle,
     round_num: int,
-    pool: list[Sample],
     callbacks: RunCallbacks,
     *,
     is_final_round: bool = False,
 ) -> tuple[RoundResult, StopReason | None]:
     plan = cycle.optimizer.plan
+    # The search split alone: a bench or demo row a round could draw would elect on held-out rows.
+    pool = list(cycle.session.state.scoring.require_partition().search)
     ctx = RoundContext(
         cycle=cycle, round_num=round_num, callbacks=callbacks, is_final_round=is_final_round
     )
@@ -443,7 +444,9 @@ async def execute_round(
             n_samples=len(panel.cells),
         ),
     )
-    measured = await measure_population(ctx, population, panel, plan.eliminator, plan.selector)
+    measured = await measure_population(
+        ctx, population, panel, pool, plan.eliminator, plan.selector
+    )
     callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=round_num)
     callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
     selection = plan.selector.select(NodeContext(ctx, plan.selector), measured, population)
@@ -460,7 +463,9 @@ async def execute_round(
     callbacks.on_election(round_num, round_result.election)
     cycle.absorb_round(round_result)
 
-    overlap = asyncio.create_task(measure_overlap(cycle, round_result, pool))
+    overlap = asyncio.create_task(
+        measure_overlap(cycle, round_result, pool, measured.origin_panel_slots)
+    )
     try:
         # An adapter writes for the NEXT round, so none runs when no round follows.
         lives = cycle.config.optimization.lives

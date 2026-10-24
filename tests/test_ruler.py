@@ -8,6 +8,7 @@ arithmetic: each journey recovers a known answer from data built to have one.
 from __future__ import annotations
 
 from contextvars import copy_context
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,9 @@ from factories import (
     loop_session,
     measurement,
     pipeline_schema,
+    prompted,
     round_result,
+    seat,
     sheet,
     workspace,
 )
@@ -30,10 +33,15 @@ from promptpotter.application.bench.difficulty import (
     DifficultyView,
     calibrate_delta_ruler,
     judging_ruler,
+    session_ruler_scope,
 )
+from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
-from promptpotter.application.intelligence.adaptive_queue_mechanism import stratum_shares
+from promptpotter.application.intelligence.adaptive_queue_mechanism import (
+    covered_prefix,
+    stratum_shares,
+)
 from promptpotter.application.intelligence.rasch import (
     Observation,
     RaschPosterior,
@@ -41,9 +49,9 @@ from promptpotter.application.intelligence.rasch import (
     fit_rasch,
     fit_theta_given_delta,
     graduate_ruler_model,
-    select_round_subset,
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizers.nodes import ReadArm
 from promptpotter.application.runner.bench import pair_on_bench
 from promptpotter.application.runner.inner.tasks import inner_instrument_config, parse_panel
 from promptpotter.application.scoring.paired import MemberRows
@@ -74,6 +82,7 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import GradedCell, Scorer
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
@@ -163,11 +172,13 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
     assert (
         fit_theta_given_delta(graded, ruler)["g"][1] < fit_theta_given_delta(spread, ruler)["b"][1]
     ), "a graded response was read as noisy as a coin flip"
-    binary, prior = measure("bin", 0.8, easy, n=60), 1.5
-    bin_theta, bin_se = fit_theta_given_delta(binary, ruler, sigma_theta=prior)["bin"]
-    p_hat = 1.0 / (1.0 + np.exp(-(bin_theta - ruler[easy[0]])))
-    bern_se = 1.0 / np.sqrt(len(binary) * p_hat * (1 - p_hat) + 1 / prior**2)
-    assert abs(bin_se - bern_se) < 0.15 * bern_se, "φ moved the SE of a dichotomous dataset"
+    # Hits far below θ and misses far above, as a δ fit on these rows reads them: φ would be ≪ 1.
+    separated = [Observation("bin", s, float(s in easy)) for s in [*easy, *hard] * 6]
+    for binary in (measure("bin", 0.8, easy, n=60), separated):
+        bin_theta, bin_se = fit_theta_given_delta(binary, ruler, sigma_theta=1.5)["bin"]
+        p_hat = 1.0 / (1.0 + np.exp(-(bin_theta - np.array([ruler[o.key] for o in binary]))))
+        bern_se = 1.0 / np.sqrt(float(np.sum(p_hat * (1 - p_hat))) + 1 / 1.5**2)
+        assert abs(bin_se - bern_se) < 0.15 * bern_se, "φ moved the SE of a dichotomous dataset"
     flat = [Observation("f", sid, 0.5) for sid in easy * 6]
     assert fit_theta_given_delta(flat, ruler)["f"][1] > 0.1, (
         "no residual spread read as infinite confidence: every gate would fire"
@@ -288,34 +299,74 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
         "an arm's own elections never reached its ruler, so it draws one frozen subset forever"
     )
     assert compared.ruler.anchor_id == on_race.anchor_id and compared.stamp.own == arm
-    share = len(c0_hits) / len(pool40)
-
-    def c0_share(ruler: DeltaRuler | None) -> float:
-        drawn = select_round_subset(pool40, race, 8, ruler=ruler, worth={})
-        return sum(s.key in c0_hits for s in drawn) / len(drawn)
-
-    assert c0_share(foreign_arm.ruler) <= share, "a parent's known hits were over-drawn on an arm"
-    assert c0_share(optimizing.ruler) <= share, "a parent's known hits were over-drawn"
-    assert c0_share(on_race) > share, "guard: a scale fit on the race must over-draw its hits"
     # Another campaign's identical rows past the freeze are not the arm's: its fold still lands.
     store.fold(scope, foreign, campaign="arm", own=arm)
     assert store.version() == opened + 4, (
         "an arm's rows were dropped as held by a line it never reads"
     )
 
-    # Drawn: every `easy` cell on the `small` model outprices the rest; rank alone buys only those.
+    # Drawn blind: the parent hits the easiest 16 of 40 cells on a graded ruler, and each round's
+    # cells must still be the pool's, or the election reads rows the held-out bench never would.
+    graded_pool = [Sample(id=i, query=f"d{i}", ground_truth="t") for i in range(40)]
+
+    def hits_easiest(session: Any) -> ReadArm:
+        origin = prompted(instruction="Answer.")
+        rows = sheet(
+            (measurement(s.id, float(s.id < 16), sample_key=s.key) for s in graded_pool),
+            session.state.scoring.require_scorer().id,
+        )
+        c0 = arm_state("C0", slot=ArmSlot(round=0, idx=0, total=1), individual=origin)
+        return ReadArm(ArmKey(origin.id), c0, rows)
+
+    drawing = seat(
+        workspace(tmp_path / "draw"),
+        bank=graded_pool,
+        origin=hits_easiest,
+        framing=TaskDecomposition(pipeline_purpose="Answer each query."),
+    )
+    session = drawing.cycle.session
+    session.store.ruler.fold(
+        session_ruler_scope(session),
+        [(f"f{arm}", s.key, 1.0 - (s.id + 0.5) / 40) for arm in range(8) for s in graded_pool],
+        campaign="else",
+        own=None,
+    )
+    drawing.cycle.difficulty.open_round(drawing.cycle.rounds)
+    assert drawing.cycle.difficulty.ruler is not None, "guard: the draw under test is the warm one"
+    sampler = drawing.cycle.optimizer.plan.sampler
+    search = list(session.state.scoring.require_partition().search)
+
+    def drawn_on(round_num: int) -> list[int]:
+        at = replace(drawing, round_num=round_num)
+        return [int(s.id) for s in sampler.draw(NodeContext(at, sampler), search).cells]
+
+    rounds_drawn = {n: drawn_on(n) for n in range(1, 11)}
+    assert drawn_on(3) == rounds_drawn[3], "a resumed round drew other cells"
+    assert len({tuple(sorted(ids)) for ids in rounds_drawn.values()}) == len(rounds_drawn), (
+        "a round re-read the cells an earlier round drew"
+    )
+    assert all(min(ids) < 10 and max(ids) >= 30 for ids in rounds_drawn.values()), (
+        "a round's draw narrowed onto one band of the ruler"
+    )
+    parent_rate = sum(sid < 16 for ids in rounds_drawn.values() for sid in ids) / sum(
+        len(ids) for ids in rounds_drawn.values()
+    )
+    assert parent_rate == pytest.approx(16 / 40, abs=0.08), (
+        "the parent reads one rate on its rounds' cells and another on the pool"
+    )
+
+    # Covered: a shuffle led by the `easy` cells on the `small` model still reaches every level.
     pool = [
         Sample(id=i, query=f"{d}/{m}/{seed}", ground_truth=None, source_pin={"d": d, "m": m})
         for i, (d, m, seed) in enumerate(
             (d, m, seed) for d in ("easy", "hard") for m in ("small", "large") for seed in (0, 1)
         )
     ]
-    worth = {int(s.id): 9.0 if s.query.startswith("easy/small") else 1.0 for s in pool}
-    drawn = select_round_subset(pool, [], 3, worth=worth)
+    drawn = covered_prefix(pool, 3)
     for axis in ("d", "m"):
         covered = {s.source_pin[axis] for s in drawn}  # type: ignore[index]
-        assert len(covered) == 2, "a priced draw dropped a dataset or model of its pool"
-    assert drawn[0].query == "easy/small/0", "the draw is not led by its best-priced cell"
+        assert len(covered) == 2, "a draw dropped a dataset or model of its pool"
+    assert drawn[0].query == "easy/small/0", "the cover reordered a draw it already covered"
 
     # Ordered: win opportunities first, a parent-hit probe every fourth slot.
     ids = list(range(24))

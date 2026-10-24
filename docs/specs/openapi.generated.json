@@ -13503,17 +13503,6 @@
             ],
             "description": "This cycle's share of the campaign's ceiling — the most it may have metered in all, and what its run's book binds; null where no run holds a share, and on a replay."
           },
-          "arms_per_round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Arms Per Round"
-          },
           "at_offset": {
             "default": -1,
             "title": "At Offset",
@@ -13763,16 +13752,9 @@
             "title": "Lookahead Money Hold"
           },
           "lookahead_most": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "default": 0,
-            "title": "Lookahead Most"
+            "title": "Lookahead Most",
+            "type": "integer"
           },
           "lookahead_pick_max": {
             "description": "The deepest press the next walk can take.",
@@ -13901,6 +13883,10 @@
           "round_axis": {
             "$ref": "#/components/schemas/RoundAxis"
           },
+          "round_cells_ceiling": {
+            "title": "Round Cells Ceiling",
+            "type": "integer"
+          },
           "rounds": {
             "items": {
               "$ref": "#/components/schemas/ServedRound"
@@ -13942,10 +13928,6 @@
           "sample_lookahead_discards": {
             "default": 0,
             "title": "Sample Lookahead Discards",
-            "type": "integer"
-          },
-          "sp_budget_round": {
-            "title": "Sp Budget Round",
             "type": "integer"
           },
           "spend_metered": {
@@ -14046,8 +14028,7 @@
           "max_cells_in_flight",
           "measured_unit",
           "at_time",
-          "arms_per_round",
-          "sp_budget_round",
+          "round_cells_ceiling",
           "run_limits",
           "campaign_id",
           "cycle_id",

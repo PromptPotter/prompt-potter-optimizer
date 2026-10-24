@@ -55,7 +55,7 @@ class MeasurementRole(enum.StrEnum):
     BACKFILL = "backfill"
     PARENT = "parent"
     REPAIR = "repair"
-    # Report-only: reaching a decision would leave one arm better-identified than its rivals.
+    # The origin panel beside a draw: the round's election pools it, no cross-round read does.
     OVERLAP = "overlap"
     VERIFY = "verify"
     BENCH = "bench"
@@ -69,11 +69,11 @@ class RoleScope(enum.StrEnum):
     BENCH = "bench"
 
 
-_QUARANTINED = frozenset({MeasurementRole.OVERLAP, MeasurementRole.VERIFY})
+_BESIDE_THE_DRAW = frozenset({MeasurementRole.OVERLAP, MeasurementRole.VERIFY})
 _HELD_OUT = frozenset({MeasurementRole.BENCH})
 
 SCOPE_ROLES: dict[RoleScope, frozenset[MeasurementRole]] = {
-    RoleScope.DECISION: frozenset(MeasurementRole) - _QUARANTINED - _HELD_OUT,
+    RoleScope.DECISION: frozenset(MeasurementRole) - _BESIDE_THE_DRAW - _HELD_OUT,
     RoleScope.REPORT: frozenset(MeasurementRole) - _HELD_OUT,
     RoleScope.BENCH: _HELD_OUT,
 }

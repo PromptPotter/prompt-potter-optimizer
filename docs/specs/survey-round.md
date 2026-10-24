@@ -86,8 +86,7 @@ Computed by the backend and served; no surface recomputes it.
   focus band and the L4 admission band are two settings of one predicate, not two documents.
 - **L4:** each environment's origin cell carries the floor and modal share beside
   `domain/l4/inner_facts.py::InnerCellFacts.origin_headroom`; the admitted set is banked as a decision
-  the way `PRICED_DRAW` is (`application/optimizers/potter/members.py::AdaptiveQueue.draw`), and later draws read
-  it. **A held-out seat is never admitted or rejected by a survey** — it is the bench, so the lift the
+  (`NodeContext.decide`), and later draws read it. **A held-out seat is never admitted or rejected by a survey** — it is the bench, so the lift the
   pool reports stays transfer.
 
 ## Three ways in

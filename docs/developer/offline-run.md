@@ -126,10 +126,9 @@ only the bank and the call-identity policy below.
 - **The knobs** are the dataset's `{dataset}/dataset.yaml::campaign` under the script's `BENCH` sizes. The template's
   node overlay rides only the optimizer it selects; any other takes its `SCALED` entry, which
   sizes it to the bank, or runs its manifest as declared when it has none. A sampler that
-  declares a size knob draws `ROUND_CELLS` whichever optimizer runs. Any optimizer but the
-  template's runs under a seeded determinism clamp, and `--controlled` seeds every arm alike:
-  unseeded, draws follow the campaign's id, which every run mints anew, so two runs of one tree
-  would differ.
+  declares a size knob draws `ROUND_CELLS` whichever optimizer runs. Every optimizer runs under
+  one seeded determinism clamp: unseeded, draws follow the campaign's id, which every run mints
+  anew, so two runs of one tree would differ.
 
 **Adding an optimizer** needs nothing here: it runs as its manifest declares, one installed through
 its entry points alone included — `examples/optimizer-plugin/` is that case.

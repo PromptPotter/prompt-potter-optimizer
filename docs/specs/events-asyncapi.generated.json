@@ -7286,17 +7286,6 @@
         "additionalProperties": false,
         "description": "LAST wins, over the whole chain: a fork stands on its parent's until its own lands.",
         "properties": {
-          "arms_per_round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Arms Per Round"
-          },
           "defaults_drift": {
             "anyOf": [
               {
@@ -7354,12 +7343,12 @@
             "title": "Record Type",
             "type": "string"
           },
+          "round_cells_ceiling": {
+            "title": "Round Cells Ceiling",
+            "type": "integer"
+          },
           "run_limits": {
             "$ref": "#/components/schemas/RunLimits"
-          },
-          "sp_budget_round": {
-            "title": "Sp Budget Round",
-            "type": "integer"
           },
           "timestamp": {
             "title": "Timestamp",
@@ -7367,8 +7356,7 @@
           }
         },
         "required": [
-          "arms_per_round",
-          "sp_budget_round",
+          "round_cells_ceiling",
           "display_metric",
           "elects_on",
           "max_cells_in_flight",

@@ -381,7 +381,7 @@ def _serve(
         and banked["in_flight"] + affordable < min(depth, banked["lookahead_allowed"])
         else None
     )
-    pick_max = max(1, min(ceiling, most)) if most is not None and most > 0 else ceiling
+    pick_max = max(1, min(ceiling, most)) if most > 0 else ceiling
     auto = standing is not None and standing.lookahead_auto
     unavailable = _ONE_AT_A_TIME if ceiling <= 1 else ""
     live = standing is not None and run.producer.appending

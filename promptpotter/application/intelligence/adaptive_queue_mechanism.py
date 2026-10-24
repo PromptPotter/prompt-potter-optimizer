@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import math
-import statistics
-from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, NamedTuple
+from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.scoring import ROW_GRADES
 from promptpotter.shared.statistics import logistic
 
 if TYPE_CHECKING:
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
 
 
@@ -103,16 +103,6 @@ def parent_grades(parent_rows: Iterable[GradedCell]) -> dict[str, float]:
     return {cell.key: ROW_GRADES["fitness"].read(cell) for cell in parent_rows if cell.scored}
 
 
-class CellReading(NamedTuple):
-    """What one arm's row says a cell reads and costs, before any other arm is bought on it."""
-
-    level_se: float
-    # The share of the cell still open to a lift; a saturated cell reads sharply and decides nothing.
-    headroom: float
-    usd: float
-    seconds: float
-
-
 def stratum_shares(sizes: list[int], budget: int) -> list[int]:
     """Equal shares of *budget*; a stratum short of its share hands the rest to the others."""
     shares = [0] * len(sizes)
@@ -128,42 +118,18 @@ def stratum_shares(sizes: list[int], budget: int) -> list[int]:
     return shares
 
 
-def information_per_price(readings: Mapping[int, CellReading]) -> dict[int, float]:
-    """headroom/(se²·price) over the MEDIAN, so an unreported cell stands at 1.0; price is dollars PLUS clock, each over the pool's median."""
-    priced = {
-        sid: r for sid, r in readings.items() if r.level_se > 0 and r.usd > 0 and r.seconds > 0
-    }
-    if not priced:
-        return {}
-    usd = statistics.median(r.usd for r in priced.values())
-    seconds = statistics.median(r.seconds for r in priced.values())
-    raw = {
-        sid: r.headroom / (r.level_se**2 * (r.usd / usd + r.seconds / seconds))
-        for sid, r in priced.items()
-    }
-    open_cells = [value for value in raw.values() if value > 0]
-    if not open_cells:
-        return {}
-    median = statistics.median(open_cells)
-    return {sid: value / median for sid, value in raw.items()}
-
-
-def decision_order(
-    mu_c: float,
-    var_c: float,
-    mu_s: float,
-    var_s: float,
-    delta_map: dict[int, float],
-    delta_se_map: dict[int, float],
-    sample_ids: Iterable[int],
-    worth: Mapping[int, float],
-) -> list[int]:
-    """On ``decision_information_gain`` ALONE: summed, ``delta_learning_gain`` dominates; it overstates ONE arm's draw."""
-    return sorted(
-        sample_ids,
-        key=lambda sid: (
-            -decision_information_gain(mu_c, var_c, mu_s, var_s, delta_map[sid], delta_se_map[sid])
-            * worth.get(sid, 1.0),
-            sid,
-        ),
-    )
+def covered_prefix(ranked: Sequence[Sample], budget: int) -> list[Sample]:
+    """*ranked* led by one cell per shared ``source_pin`` level, so no draw narrows to one dataset or one model."""
+    held: dict[str, set[str]] = {}
+    for s in ranked:
+        for key, value in (s.source_pin or {}).items():
+            held.setdefault(f"{key}={value!r}", set()).add(s.key)
+    shared = {level for level, keys in held.items() if 1 < len(keys) < len(ranked)}
+    cover: list[Sample] = []
+    for s in ranked:
+        levels = {level for level in shared if s.key in held[level]}
+        if len(cover) < budget and levels:
+            cover.append(s)
+            shared -= levels
+    taken = {s.key for s in cover}
+    return [*cover, *(s for s in ranked if s.key not in taken)][:budget]

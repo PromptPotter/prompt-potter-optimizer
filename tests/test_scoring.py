@@ -1036,6 +1036,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 ) -> None:
     # The election reads θ on one δ ruler: easy cells {0..19} sit low, hard {20..39} high.
     ruler = _ruler({i: (-1.5 if i < 20 else 1.5) for i in range(40)})
+    eps = pobb_knobs().epsilon
     weak_on_easy = [measurement(i, float(i < 16)) for i in range(20)]
     able_on_hard = [measurement(i, float(i < 34)) for i in range(20, 40)]
     by_id = {
@@ -1049,9 +1050,17 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         sheet(measurement(i, float(i < 20)) for i in range(40)),
         4,
         ruler,
+        epsilon=eps,
     )
     assert winner_id == "able_on_hard", "a round winner elects by ability, not subset accuracy"
     assert abilities.theta["able_on_hard"] > abilities.theta["weak_on_easy"]
+    # hotpotqa round 3: 6 hits far below θ, 13 misses far above, one miss near it the arm gained.
+    spread = _ruler({**dict.fromkeys(range(6), -2.8), 6: 1.0, **dict.fromkeys(range(7, 20), 4.0)})
+    one_cell = {ArmKey("one"): sheet(measurement(i, float(i < 7)) for i in range(20))}
+    parent_six = sheet(measurement(i, float(i < 6)) for i in range(20))
+    assert elect_round_winner(list(one_cell), one_cell, parent_six, 6, spread, epsilon=eps)[0] is (
+        None
+    ), "one discordant cell of 20 promoted: a lift its own paired evidence cannot carry"
 
     # A thin arm cannot win on a margin inside its own noise; `coverage_floor` IS PoBB's `n_min`.
     flat = _ruler(dict.fromkeys(range(28), 0.0))
@@ -1065,18 +1074,19 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     assert p["deep"] > p["shallow"], "so it demonstrated less"
     deep_key, shallow_key = ArmKey("deep"), ArmKey("shallow")
     thin_arms = {deep_key: deep, shallow_key: shallow}
-    assert elect_round_winner(list(thin_arms), thin_arms, half, 6, flat)[0] == "deep", (
-        "a thin arm won"
-    )
-    assert elect_round_winner([shallow_key], {shallow_key: shallow}, half, 6, flat)[0] == (
-        "shallow"
-    ), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
+    assert elect_round_winner(list(thin_arms), thin_arms, half, 6, flat, epsilon=eps)[0] == (
+        "deep"
+    ), "a thin arm won"
+    assert elect_round_winner([shallow_key], {shallow_key: shallow}, half, 6, flat, epsilon=eps)[
+        0
+    ] == ("shallow"), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
     behind = sheet(measurements([1.0] * 4 + [0.0] * 2))
     behind_lift = theta_lift_over_parent(candidate_abilities({"b": behind}, half, flat), "b")
     assert behind_lift is not None and behind_lift > 0.0
-    assert elect_round_winner([ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat)[0] is None, (
-        "a θ lift over the parent's whole panel never crowns an arm that LOST the cells it shares"
-    )
+    assert (
+        elect_round_winner([ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat, epsilon=eps)[0]
+        is None
+    ), "a θ lift over the parent's whole panel never crowns an arm that LOST the cells it shares"
     swapped = sheet(measurement(i, float(0 < i < 20 or i == 20)) for i in range(40))
     assert (
         elect_round_winner(
@@ -1085,14 +1095,15 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             sheet(measurement(i, float(i < 20)) for i in range(40)),
             4,
             ruler,
+            epsilon=eps,
         )[0]
         is None
     ), "one cell won and one lost is a tie, whatever the δ weighting or the fit's last digit"
     longer, terse_parent = _charged_by_length()
     level = _ruler(dict.fromkeys(range(34), 0.0))
-    assert elect_round_winner([ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level)[0] == (
-        "l"
-    ), "a cost term's tie-break was counted as a verdict lost"
+    assert elect_round_winner(
+        [ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level, epsilon=eps
+    )[0] == ("l"), "a cost term's tie-break was counted as a verdict lost"
 
     # The bar is what the parent can do, not the draw that crowned it: no later race reads those cells.
     crowned_on = sheet(measurements([1.0] * 4, range(30, 34)))
@@ -1119,7 +1130,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         deep_key: sheet(measurements([1.0] * 18 + [0.0] * 10)),  # further off, on the whole panel
         ArmKey("thin"): sheet(measurements([1.0] * 3)),  # the highest θ, under the floor
     }
-    held_id, held_abilities = elect_round_winner(list(arms), arms, twenty, 6, flat)
+    held_id, held_abilities = elect_round_winner(list(arms), arms, twenty, 6, flat, epsilon=eps)
     reads = readable_lifts(list(arms), 6, held_abilities)
     assert held_id is None, "no arm cleared the bar"
     assert held_abilities.theta["thin"] > held_abilities.bar["thin"][0], (
@@ -1222,12 +1233,12 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     )
                 )
             else:
-                _, uncut = asyncio.run(execute_round(cycle, 1, search, callbacks))
+                _, uncut = asyncio.run(execute_round(cycle, 1, callbacks))
                 assert uncut is None, f"{case}: round 1 ran inside its budget"
             paid.clear()
             parent = ArmKey(cycle.parent.id)
             cutting.append(True)
-            cut_walk = execute_round(cycle, cut_round, search, callbacks)
+            cut_walk = execute_round(cycle, cut_round, callbacks)
             if panel_gate == "strict":
                 with pytest.raises(StopLoop) as halted:
                     asyncio.run(cut_walk)
@@ -1395,8 +1406,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         offline.llm.says = crossover_says
         session = cycle.session
         assert not cycle.population
-        search = list(session.state.scoring.require_partition().search)
-        closed, cut = asyncio.run(execute_round(cycle, 1, search, callbacks))
+        closed, cut = asyncio.run(execute_round(cycle, 1, callbacks))
     assert cut is None
     assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
         "a crossover saw one parent"
@@ -1478,7 +1488,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         )
         theta_walking.append(True)
         with pytest.raises(StopLoop) as unwound:
-            asyncio.run(execute_round(cycle, 1, search, callbacks))
+            asyncio.run(execute_round(cycle, 1, callbacks))
     assert unwound.value.reason is StopReason.SPEND_BUDGET
     assert cycle.rounds[-1].round == 0, "a cut round stood with no arm its selector could read"
 
@@ -1508,8 +1518,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     ) as (cycle, callbacks):
         offline.llm.says = bench_says
         session = cycle.session
-        search = list(session.state.scoring.require_partition().search)
-        picked = asyncio.run(execute_round(cycle, 1, search, callbacks))[0]
+        picked = asyncio.run(execute_round(cycle, 1, callbacks))[0]
         head, fold = picked.head, picked.fold
         assert head is not None and fold is not None and fold.accuracy is not None
         assert picked.election is not None
@@ -1874,8 +1883,6 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             arm_gate="author",
         ) as (cycle, callbacks):
             offline.llm.says = lambda _body: "ok"
-            session = cycle.session
-            search = list(session.state.scoring.require_partition().search)
             at_origin = RoundContext(cycle=cycle, round_num=0, callbacks=callbacks)
             origin_read = build_bundle(
                 NodeContext(at_origin, optimizers.member("l1_critique")), Ladder()
@@ -1895,7 +1902,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                     await submit("arms-at-the-hold")
 
                 (held_round, held_cut), _ = await asyncio.gather(
-                    execute_round(cycle, 1, search, callbacks), answer()
+                    execute_round(cycle, 1, callbacks), answer()
                 )
                 assert held_cut is None
                 return held_round

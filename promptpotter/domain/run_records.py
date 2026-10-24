@@ -932,8 +932,7 @@ class RunWiringRecord(FrozenModel):
     """LAST wins, over the whole chain: a fork stands on its parent's until its own lands."""
 
     record_type: Literal["run_wiring"] = "run_wiring"
-    arms_per_round: int | None
-    sp_budget_round: int
+    round_cells_ceiling: int
     # DISPLAY only: seeds a surface's metric toggle; the selector decides on its own objective.
     display_metric: DisplayMetric
     elects_on: DisplayMetric
