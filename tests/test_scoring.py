@@ -873,7 +873,7 @@ def _ruler(
 
 
 def _charged_by_length() -> tuple[CellSheet, CellSheet]:
-    # justlogic's composite: 14 verdicts won and one lost; every tie is the longer answer's loss.
+    # A length-priced composite: 14 verdicts won and one lost; every tie is the longer answer's loss.
     scorer = compile_scorer(
         "label_match(predicted, ground_truth)",
         "fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))",
@@ -1066,7 +1066,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     )
     assert winner_id == "able_on_hard", "a round winner elects by ability, not subset accuracy"
     assert abilities.theta["able_on_hard"] > abilities.theta["weak_on_easy"]
-    # hotpotqa round 3: 6 hits far below θ, 13 misses far above, one miss near it the arm gained.
+    # 6 hits far below θ, 13 misses far above, one miss near it the arm gained.
     spread = _ruler({**dict.fromkeys(range(6), -2.8), 6: 1.0, **dict.fromkeys(range(7, 20), 4.0)})
     one_cell = {ArmKey("one"): sheet(measurement(i, float(i < 7)) for i in range(20))}
     parent_six = sheet(measurement(i, float(i < 6)) for i in range(20))

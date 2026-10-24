@@ -75,7 +75,6 @@ TRANSCRIPT_QUERY_CAP = 1200
 TRANSCRIPT_REASONING_CAP = 2200
 TRANSCRIPT_PREDICTED_CAP = 60
 # Compressed bytes per char a trace's second half adds to its first; below it the trace loops.
-# Archived traces of 600+ chars: each sampled below 0.05 repeats itself, a reasoned one adds ~0.19.
 LOOP_NOVELTY = 0.05
 DEGENERATE_TRACE_CAP = 600
 INNER_NARRATIVE_CAP = 1150

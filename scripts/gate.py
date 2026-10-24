@@ -48,7 +48,7 @@ _NEXT_WORKER_MB = 80
 # Each lane's heaviest check at full width (offline-run; a cold next-build): below their sum, in turn.
 _PY_LANE_MB = 1200
 _WEB_LANE_MB = 3700
-# Past these, free memory is no reason to widen: concurrent processes were killed for low memory.
+# Past these, free memory is no reason to widen: the OS kills concurrent processes on low memory.
 OFFLINE_RUN_CHILDREN_MAX = 8
 NEXT_WORKERS_MAX = 4
 

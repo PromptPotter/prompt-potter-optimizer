@@ -170,14 +170,6 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
     )
     arm = None if round_view is None or selection is None else round_view.arms.get(selection.key)
     course = build_lineage_tree(stores, path, moment=None)
-    # The ledger reader skips a close no model accepts: elections stand with no selection to state.
-    if arm is None and (
-        selection is not None or any(node.reading.election.held for node in course.children)
-    ):
-        raise ConflictError(
-            f"Cycle {hop.cycle_id}: its ledger holds round closes that do not load, so the header "
-            "has no model to state; `python -m promptpotter restamp` names the cause. Re-run it."
-        )
     models = (
         {}
         if arm is None
