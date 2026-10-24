@@ -1473,444 +1473,6 @@ export interface RoundAudit {
   interrupted: boolean;
 }
 
-/** One run, whose children are the arms on its ONE timeline, forks folded in. */
-export interface CourseLineage {
-  /** Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin. */
-  id: string;
-  /** Every candidate this node derives from — one for a mutation, several for a
-   * crossover; empty only at the true root. Lineage is a DAG; this tree hangs
-   * the node under `parent_ids[0]`. A course carries the same edge its own C0
-   * carries. */
-  parent_ids: string[];
-  /** `C{round}.{n}` on the campaign's ONE timeline: this course's own candidates
-   * keep their minted label; an attempt a fork contributed takes the next
-   * free index of its round, by mint time — UNLESS the cut superseded, where
-   * it keeps its own label because it replaced that position rather than
-   * joining it, and the candidate it replaced carries `superseded_by`. So one
-   * label can appear twice in a round: at most once LIVE, the other retired.
-   * A course's is its cycle_id. */
-  label: string;
-  /** THE address, root → leaf: the course this node belongs to. A candidate a fork
-   * contributed carries the FORK's path, so selecting it re-roots onto that
-   * fork. */
-  path: CycleHop[];
-  /** The `row` of the origin arm — C0 — of the timeline this node is on. A course
-   * names its own; a candidate names its course's, and an attempt a fork
-   * contributed names the origin of the timeline it was folded onto, never
-   * the fork's replayed C0. An inner course starts its own timeline, so its
-   * candidates name ITS C0. Where a repair left the origin's individual on
-   * two rows, the one still on a line. Null on a course that has minted
-   * nothing. */
-  origin_row: number | null;
-  kind: 'course';
-  children: ArmNode[];
-  /** The course as the hierarchy serves it, minted by the one course builder: a
-   * timeline a supersede folded onto its branch carries the branch's. */
-  course: HierarchyCourse;
-  /** How many cycles `cleanup-empty-cycles` addressed at this course deletes now:
-   * its forks that closed no round of their own, hold no producer and no
-   * descendant, and are not the active cycle
-   * (`CampaignStore.deletable_stubs`, the command's own list). A fork is no
-   * node of this tree, so no count over its nodes can stand in for it. */
-  deletable_stubs: number;
-  /** The `per_cell` formula this course's record was read under for the request's
-   * lens — a `dials:` lens realized against this campaign's anchors, a
-   * `score:` one as given. What a fork applying the lens carries as
-   * `scoring.per_cell`. Null without one. */
-  lens_criterion: string | null;
-  /** How the request's lens reorders this course's arms. Null without a lens, and
-   * where it ranked none of them. */
-  lens_shift: LensShift | null;
-}
-
-/** One arm on a course's timeline; everything measured or decided about it is its `reading`. */
-export interface ArmNode {
-  /** Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin. */
-  id: string;
-  /** Every candidate this node derives from — one for a mutation, several for a
-   * crossover; empty only at the true root. Lineage is a DAG; this tree hangs
-   * the node under `parent_ids[0]`. A course carries the same edge its own C0
-   * carries. */
-  parent_ids: string[];
-  /** `C{round}.{n}` on the campaign's ONE timeline: this course's own candidates
-   * keep their minted label; an attempt a fork contributed takes the next
-   * free index of its round, by mint time — UNLESS the cut superseded, where
-   * it keeps its own label because it replaced that position rather than
-   * joining it, and the candidate it replaced carries `superseded_by`. So one
-   * label can appear twice in a round: at most once LIVE, the other retired.
-   * A course's is its cycle_id. */
-  label: string;
-  /** THE address, root → leaf: the course this node belongs to. A candidate a fork
-   * contributed carries the FORK's path, so selecting it re-roots onto that
-   * fork. */
-  path: CycleHop[];
-  /** The `row` of the origin arm — C0 — of the timeline this node is on. A course
-   * names its own; a candidate names its course's, and an attempt a fork
-   * contributed names the origin of the timeline it was folded onto, never
-   * the fork's replayed C0. An inner course starts its own timeline, so its
-   * candidates name ITS C0. Where a repair left the origin's individual on
-   * two rows, the one still on a line. Null on a course that has minted
-   * nothing. */
-  origin_row: number | null;
-  kind: 'candidate';
-  /** The column the selector elects on: the declaration its round's election
-   * carried (`Election.elects_on`), null on a round that never elected.
-   * `ability`: the rounds are won on theta, not on accuracy. */
-  elects_on: 'accuracy' | 'composite' | 'ability' | null;
-  /** THE key of this row in this response: unique tree-wide, where `id` is not — a
-   * supersede cut leaves one individual on two rows, and a later round can
-   * read it again. Every pointer the tree serves at an arm (`origin_row`,
-   * `main_line`) names one. Minted per build, so it addresses nothing across
-   * two responses. */
-  row: number;
-  /** The variation nodes that wrote this arm's individual, in the order they ran:
-   * each `{manifest}:{node}`, whether it computed its result or asked a
-   * model, and the loci it left different. Empty on an origin, and on the
-   * stand-in row of a branch. */
-  variations: Variation[];
-  /** The runs that measured this arm's individual. */
-  children: CourseLineage[];
-  /** `reading.arm` is the arm in the course that MINTED it — the key every per-
-   * cycle document of that course speaks — while `label` above is its
-   * position on this timeline; the two differ only on an attempt a fork
-   * contributed and the fold renumbered. `reading.sp_hash` joins to the
-   * archive rows. On the retired side of a supersede cut the election wears
-   * no crown: the branch re-asks it. */
-  reading: ArmReading;
-  /** The cycle_id of the branch that took this candidate's place. Set on the LEFT-
-   * BEHIND side of a `supersede` cut (`ForkDirection`) — the tail its own
-   * course kept as the record of what ran, while the line continued
-   * elsewhere. Null on every candidate still on a line, including both sides
-   * of an `offshoot` or `equivalent` cut. Served because a fork is NOT a
-   * node: without a name the operator sees a retired attempt and a live one
-   * as peers of one round, which is the whole reason a cut records its
-   * direction. */
-  superseded_by: string | null;
-  /** Set on an attempt a fork contributed here; null on a course's own candidates
-   * and on a branch the run moved to, whose attempts ARE the line. */
-  fork: ForkStamp | null;
-  /** Where this arm stands on its timeline, as one closed value
-   * (`domain/results.py::arm_verdict`); its words are `ARM_VERDICT_LABELS`.
-   * Stamped over the finished tree, like the heads below. */
-  verdict: 'retired' | 'invalid' | 'origin' | 'elected' | 'uncontested' | 'selected' | 'not_elected' | 'unmeasured' | 'awaiting';
-  /** The newest crowned arm still on this timeline — the parent the next round
-   * mutates from. At most one child of a course. */
-  stands: boolean;
-  /** The last arm an election crowned among those sharing this node's `path` — a
-   * course's, or a fork's, which has no node of its own to say it. */
-  course_winner: boolean;
-  /** The newest arm minted at this node's `path`, crowned or not. */
-  course_latest: boolean;
-  /** The ONE row tree-wide that answers for its `id` — what a remembered candidate
-   * id (a selection, a deep link) resolves to: the row still on a line where
-   * a supersede cut left the individual on two, the first where several
-   * stand. */
-  answers_for_id: boolean;
-  /** The main line to THIS arm at its own address, origin first: each elected round
-   * before it with the arms it crowned, then this arm at its own round, then
-   * any later round that crowned nobody up to the next crown. Read off
-   * crowns, never `parent_ids`: a parent edge names an individual, not the
-   * arm that was crowned. */
-  main_line: MainLineStep[];
-  /** This candidate's composite fitness under the request's `score:` lens — its
-   * rows re-graded per cell under that `per_cell` formula and folded, the
-   * number a fresh run under it reports. Null without a lens, or where no row
-   * carries a verdict under it. */
-  lens_value: number | null;
-  /** Which way the lens moved this arm among its siblings — the bars one chart
-   * draws: its 1-based position by `lens_value` descending against its
-   * position by the reading's composite. An ordering is a score, so the move
-   * is served rather than sorted client-side. Null without a lens, or where
-   * either value is. */
-  lens_rank_move: 'up' | 'down' | 'unchanged' | null;
-  /** Scorer-faithful accuracy over the request's `samples=` subset, served only
-   * where this candidate carries a scoreable verdict for ALL of it — a rate
-   * over part of the subset sat a different exam, and these are read side by
-   * side. Null without a `samples=` mask, and short of the subset. */
-  sample_set_accuracy: number | null;
-  /** How many of the `samples=` subset this candidate carries a SCOREABLE verdict
-   * for. The denominator of `sample_set_accuracy` where that is served; below
-   * the subset size, how far short of it the candidate is. */
-  sample_set_n: number | null;
-  /** Set when the request's lens would have FORKED the record at this node. Only
-   * ever set on a closed round's node. */
-  divergence: LineageDivergence | null;
-  /** This node is inside the counterfactual subtree below a divergence — the client
-   * dims it. */
-  divergent: boolean;
-}
-
-/** What marks an attempt the operator cut: a fork is NOT a node, so its identity rides them. */
-export interface ForkStamp {
-  kind: 'root' | 'fork' | 'diag' | 'inner';
-  trigger: string;
-  /** Which side of the cut the run CONTINUES on (`FORK_TRAITS`): `offshoot` hangs
-   * off a line that keeps running, `supersede` IS the line. */
-  direction: 'offshoot' | 'supersede' | 'equivalent' | null;
-  /** Who cut the fork, as its fork record names them: an account or delegate id,
-   * `system`, or the layer and round that proposed it. An id, never a display
-   * name. */
-  steered_by: string | null;
-  /** How the fork's own run reads — what the stand-in row of a branch that minted
-   * nothing shows in place of a level. */
-  status: RunStatus;
-  /** The timeline label of the attempt this fork was cut from — its first parent,
-   * as the course it sits on numbers it. Null where that parent is not on
-   * this timeline. */
-  cut_from: string | null;
-}
-
-/** One round on the main line to an arm. */
-export interface MainLineStep {
-  round: number;
-  /** The arms the round's election crowned, each by its `row`; at the head's round,
-   * the head. Empty: the election crowned nobody. */
-  rows: number[];
-}
-
-/** Where an alternative criterion would have elected someone else, on the node it describes. */
-export interface LineageDivergence {
-  /** The candidate the masked criterion would have elected instead (measured, so
-   * nameable); null when the round would simply have held on origin. */
-  alternative_candidate_id: string | null;
-}
-
-/** A course — one cycle's run, root, fork, diag or inner — as one hierarchy entry. */
-export interface HierarchyCourse {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
-  /** What could not be read; null where all was. */
-  caveat: string | null;
-  tags: HierarchyTag[];
-  state: HierarchyState;
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
-  span: HierarchySpan;
-  /** A campaign's courses; a course's rounds on its ledger, closed and open. */
-  child_count: number;
-  /** Served to `?depth=`: a campaign's courses root first; empty under a course. */
-  children: (HierarchyCampaign | HierarchyCourse)[];
-  level: 'course';
-  facts: CourseFacts;
-}
-
-/** One chip an entry wears, worded by the server. */
-export interface HierarchyTag {
-  kind: 'dataset' | 'optimizer' | 'vendor' | 'mint' | 'lifecycle' | 'self_optimization' | 'arm' | 'superseded';
-  /** What a surface routes or branches on: the dataset slug, the vendor id, the
-   * mint word, the successor's address. */
-  value: string;
-  /** The chip as it reads. */
-  label: string;
-}
-
-/** A run's state as one value: the phase, its word and mark, the producer and the verbs. */
-export interface HierarchyState {
-  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
-  status: RunStatus;
-  producer: HierarchyProducer;
-  /** Why the run reads paused; null otherwise. */
-  pause: PauseReading | null;
-  admission: RunAdmission;
-  /** Why the run ended; null while it has not. */
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  /** An operator intervened by hand, so the run is no longer purely reproducible. */
-  intervened: boolean;
-}
-
-/** A cycle's producer as a listing serves it: what a write moves, never a clock. */
-export interface HierarchyProducer {
-  state: 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'claimed' | 'absent';
-  /** The state as a walking run's head reads it. */
-  label: string;
-  /** A process holds this cycle, running or launching it. */
-  attached: boolean;
-  /** That process is walking the loop. */
-  appending: boolean;
-  /** What this state raises on its own; how long it has, the dashboard says. */
-  alert: ProducerAlert | null;
-}
-
-/** One number an entry shows, worded by the server in the order it is served. */
-export interface HierarchyStat {
-  key: 'spend_lifetime' | 'spend' | 'bench' | 'rounds' | 'accuracy' | 'lives';
-  label: string;
-  /** The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`. */
-  value: string;
-  /** The second line under the value; null where none. */
-  sub: string | null;
-  /** The number `value` words, for a meter's geometry only: never re-worded and
-   * never re-ranked. Null where `value` words no number. */
-  amount: number | null;
-}
-
-/** When an entry opened, last moved and closed. */
-export interface HierarchySpan {
-  opened_at: string;
-  /** The newest activity under the entry. */
-  last_at: string;
-  /** Null while the entry's run has not ended. */
-  closed_at: string | null;
-}
-
-/** A campaign as one hierarchy entry: its state and line stats are its line course's. */
-export interface HierarchyCampaign {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
-  /** What could not be read; null where all was. */
-  caveat: string | null;
-  tags: HierarchyTag[];
-  state: HierarchyState;
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
-  span: HierarchySpan;
-  /** A campaign's courses; a course's rounds on its ledger, closed and open. */
-  child_count: number;
-  /** Served to `?depth=`: a campaign's courses root first; empty under a course. */
-  children: (HierarchyCampaign | HierarchyCourse)[];
-  level: 'campaign';
-  facts: CampaignFacts;
-}
-
-/** A campaign's typed facts, for a pane or a route argument; its rows read the envelope. */
-export interface CampaignFacts {
-  /** The operator's own name for it; null where none was given, and the envelope's
-   * `label` falls back to the dataset. */
-  label: string | null;
-  /** The root course's address. */
-  root: string;
-  /** The address of the course holding the line now: the root, or the fork a
-   * supersede handed it to. */
-  line: string;
-  lifecycle: 'active' | 'archived' | 'deleted';
-  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
-  spend_lifetime: LifetimeSpend;
-  /** What the root course runs with; null where its pipeline did not resolve. */
-  runs_with: CampaignRunsWith | null;
-}
-
-/** What an account, or one campaign's share of it, was billed over its whole life. */
-export interface LifetimeSpend {
-  /** What the providers REPORTED they billed, over every cycle, fork and forwarded
-   * inner run, plus what a deleted cycle banked. Never an estimate: a call
-   * priced off our rate table is `rate_priced_usd`, a send whose bill never
-   * came `unreported_usd`. */
-  billed_usd: number;
-  /** What our rate table prices the calls no provider reported a cost for. Not
-   * spent — an estimate, shown beside `billed_usd` and never added into it.
-   * It binds the ceiling beside `billed_usd`. */
-  rate_priced_usd: number;
-  /** Some call was priced at our rate, so there is a `rate_priced_usd` to show
-   * beside the bill. */
-  calls_rate_priced: boolean;
-  /** `billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` cost;
-   * the token ceiling is then the binding one. */
-  bill_is_floor: boolean;
-  /** Tokens no provider billed and no rate on file prices. */
-  unpriced_tokens: number;
-  /** Some send ended with no bill, so up to `unreported_usd` more may have left the
-   * account than `billed_usd` says. */
-  sends_unreported: boolean;
-  /** The most that sends which ended with no bill (cancelled, timed out, killed
-   * with a run) may have cost, at the bounds they were admitted on. Not spent
-   * — unknown. It binds the ceiling beside `billed_usd`. */
-  unreported_usd: number;
-}
-
-/** What a campaign's root course runs with — the root's pipeline resolution, cut to settings. */
-export interface CampaignRunsWith {
-  /** Scalar settings in active-step order, `model` included; no prompt text */
-  params: RunsWithParam[];
-  /** Every model in `params`, grouped under its vendor in first-seen order */
-  vendors: VendorModels[];
-  /** The optimizer manifest the root course runs */
-  optimizer: string;
-  /** The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = no
-   * rounds axis */
-  budget_rounds: number | null;
-}
-
-/** One setting a campaign's root course runs with, and the layer that chose it. */
-export interface RunsWithParam {
-  node: string;
-  /** The config grid's own param key (`NodeConfigParam.key`) */
-  key: string;
-  value: unknown;
-  source: 'backend' | 'dataset' | 'campaign' | 'model_floor' | 'seed' | 'evolved' | 'identity' | 'unset';
-}
-
-/** The models of one vendor that a campaign's root course runs. */
-export interface VendorModels {
-  /** Who TRAINED them: the namespace of the model id, or the bare id where it names
-   * none. Lowercased, routing suffix dropped. */
-  vendor: string;
-  /** Full ids, de-duplicated, routing suffix kept: it routes and bills, so it names
-   * a different run. */
-  models: string[];
-}
-
-/** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
-export interface CourseFacts {
-  /** How the course was minted; the `mint` tag renders it. */
-  mint: 'root' | 'fork' | 'diag' | 'inner';
-  /** Null on a root, and on a cycle cut from another tree. */
-  spawn: CourseSpawn | null;
-  /** The outer panel cell an L4 inner course measures. */
-  task: string | null;
-  /** Null before round 0 closes. */
-  standing: RunStanding | null;
-  /** Rounds closed AFTER the origin. */
-  rounds_closed: number;
-}
-
-/** Where a fork was born on its parent's time line: the cut, as an event. */
-export interface CourseSpawn {
-  /** The address of the course it branched from. */
-  parent: string;
-  /** The round it branched at; null where none was named. */
-  at_round: number | null;
-  /** The parent ledger's offset the cut was taken at. */
-  at_offset: number;
-  /** The arm key it branched from, where one. */
-  from_candidate: string | null;
-  trigger: 'operator_diag' | 'operator_rewind' | 'operator_steered' | 'optimizer_rebase' | 'scoring_divergence';
-  /** Which side of the cut the run continues on, measured or implied by `trigger`. */
-  direction: 'offshoot' | 'supersede' | 'equivalent';
-  reason: string;
-  /** Who cut it, as its fork record names them. */
-  issued_by: string;
-}
-
-/** What the request's lens did to one course's sibling ordering, over the arms on its timeline. */
-export interface LensShift {
-  /** The timeline label of the arm ranked first by composite; null where that arm
-   * is on the retired side of a supersede cut. */
-  top_composite: string | null;
-  /** The same, ranked by `lens_value`. */
-  top_lens: string | null;
-  /** The lens ranks another arm first. */
-  top_changed: boolean;
-  moved_up: number;
-  moved_down: number;
-  unchanged: number;
-}
-
 /** One outbound SSE frame, whose receiver treats an unknown field as a drift signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
@@ -3265,6 +2827,403 @@ export interface KnobRow {
 export interface HierarchyResponse {
   /** Campaigns sharing a root cycle sit together, the group of the newest first. */
   entries: HierarchyCampaign[];
+}
+
+/** A campaign as one hierarchy entry: its state and line stats are its line course's. */
+export interface HierarchyCampaign {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  /** A campaign's courses; a course's rounds on its own ledger, closed and open; a
+   * round's candidates; a candidate's inner campaigns. */
+  child_count: number;
+  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
+   * subtree read serves every level, courses root first, candidates in slot
+   * order. */
+  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'campaign';
+  facts: CampaignFacts;
+}
+
+/** One chip an entry wears, worded by the server. */
+export interface HierarchyTag {
+  kind: 'dataset' | 'optimizer' | 'vendor' | 'mint' | 'lifecycle' | 'self_optimization' | 'arm' | 'superseded' | 'verdict';
+  /** What a surface routes or branches on: the dataset slug, the vendor id, the
+   * mint word, the successor's address. */
+  value: string;
+  /** The chip as it reads. */
+  label: string;
+}
+
+/** One number an entry shows, worded by the server in the order it is served. */
+export interface HierarchyStat {
+  key: 'spend_lifetime' | 'spend' | 'bench' | 'rounds' | 'accuracy' | 'lives' | 'ability' | 'lift';
+  label: string;
+  /** The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`. */
+  value: string;
+  /** The second line under the value; null where none. */
+  sub: string | null;
+  /** The number `value` words, for a meter's geometry only: never re-worded and
+   * never re-ranked. Null where `value` words no number. */
+  amount: number | null;
+}
+
+/** A course — one cycle's run, root, fork, diag or inner — as one hierarchy entry. */
+export interface HierarchyCourse {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  /** A campaign's courses; a course's rounds on its own ledger, closed and open; a
+   * round's candidates; a candidate's inner campaigns. */
+  child_count: number;
+  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
+   * subtree read serves every level, courses root first, candidates in slot
+   * order. */
+  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'course';
+  facts: CourseFacts;
+}
+
+/** One round of a course's own ledger; its children are the candidates it proposed. */
+export interface HierarchyRound {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  /** A campaign's courses; a course's rounds on its own ledger, closed and open; a
+   * round's candidates; a candidate's inner campaigns. */
+  child_count: number;
+  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
+   * subtree read serves every level, courses root first, candidates in slot
+   * order. */
+  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
+  level: 'round';
+  facts: RoundFacts;
+}
+
+/** One candidate a round proposed; its children are the inner campaigns it spawned. */
+export interface HierarchyCandidate {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  /** A campaign's courses; a course's rounds on its own ledger, closed and open; a
+   * round's candidates; a candidate's inner campaigns. */
+  child_count: number;
+  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
+   * subtree read serves every level, courses root first, candidates in slot
+   * order. */
+  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
+  level: 'candidate';
+  facts: CandidateFacts;
+}
+
+/** One arm a round proposed; everything measured or decided about it is its `reading`. */
+export interface CandidateFacts {
+  /** `OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one
+   * individual again. */
+  individual: string;
+  /** Every individual this one derives from — one for a mutation, several for a
+   * crossover; empty only at an origin. */
+  parent_ids: string[];
+  /** The variation nodes that wrote this individual, in the order they ran. Empty
+   * on an origin. */
+  variations: Variation[];
+  /** `reading.arm` is the key every per-cycle document of this course speaks;
+   * `reading.sp_hash` joins to the archive rows. A retired candidate's
+   * election wears no crown: the course that took its place re-asks it. */
+  reading: ArmReading;
+  /** The newest crowned live candidate of its course — the parent the next round
+   * mutates from. At most one per course. */
+  stands: boolean;
+  /** The newest candidate its course proposed. */
+  course_latest: boolean;
+  /** The ONE candidate across the subtree a remembered individual id resolves to:
+   * the live one where a supersede left the individual on two, the first
+   * where several stand. */
+  answers_for_id: boolean;
+  /** The main line to THIS candidate, origin first: the spawn anchor's line up to
+   * where its course branched, each elected round of its course before it
+   * with the candidates crowned, then this candidate, then any later round
+   * that crowned nobody up to the next crown. Read off crowns, never
+   * `parent_ids`. */
+  main_line: MainLineStep[];
+  /** This candidate's composite fitness under the request's `score:` lens. Null
+   * without a lens, or where no row carries a verdict under it. */
+  lens_value: number | null;
+  /** Which way the lens moved this candidate among its course's: its position by
+   * `lens_value` against its position by the reading's composite. Null
+   * without a lens, or where either value is. */
+  lens_rank_move: 'up' | 'down' | 'unchanged' | null;
+  /** Accuracy over the request's `samples=` subset, served only where this
+   * candidate carries a scoreable verdict for ALL of it. Null without a
+   * `samples=` mask. */
+  sample_set_accuracy: number | null;
+  /** How many of the `samples=` subset this candidate carries a scoreable verdict
+   * for. Null without a `samples=` mask. */
+  sample_set_n: number | null;
+  /** Set on a closed round's crowned candidate where the request's lens would have
+   * elected someone else. */
+  divergence: LineageDivergence | null;
+  /** Inside the counterfactual below a divergence — the client dims it. */
+  divergent: boolean;
+}
+
+/** One round on the main line to a candidate. */
+export interface MainLineStep {
+  round: number;
+  /** The addresses of the candidates the round's election crowned; at the
+   * candidate's own round, the candidate. Empty: the election crowned nobody. */
+  candidates: string[];
+}
+
+/** Where an alternative criterion would have elected someone else, on the candidate it names. */
+export interface LineageDivergence {
+  /** The individual the masked criterion would have elected instead (measured, so
+   * nameable); null when the round would simply have held on origin. */
+  alternative_candidate_id: string | null;
+}
+
+/** A round's typed facts: what its election declared and what it measured against. */
+export interface RoundFacts {
+  round: number;
+  /** The column the round's election elected on (`Election.elects_on`); null on a
+   * round never elected. `ability`: the round is won on θ, not on accuracy. */
+  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+  /** The address of the candidate the round measured its arms against — the
+   * individual its `parent`-role arm re-read, in this course or up its spawn
+   * chain. Never a child of the round: a reference is not re-listed. Null at
+   * round 0 and where none was read. */
+  reference: string | null;
+}
+
+/** A run's state as one value: the phase, its word and mark, the producer and the verbs. */
+export interface HierarchyState {
+  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
+  status: RunStatus;
+  producer: HierarchyProducer;
+  /** Why the run reads paused; null otherwise. */
+  pause: PauseReading | null;
+  admission: RunAdmission;
+  /** Why the run ended; null while it has not. */
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  /** An operator intervened by hand, so the run is no longer purely reproducible. */
+  intervened: boolean;
+}
+
+/** A cycle's producer as a listing serves it: what a write moves, never a clock. */
+export interface HierarchyProducer {
+  state: 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'claimed' | 'absent';
+  /** The state as a walking run's head reads it. */
+  label: string;
+  /** A process holds this cycle, running or launching it. */
+  attached: boolean;
+  /** That process is walking the loop. */
+  appending: boolean;
+  /** What this state raises on its own; how long it has, the dashboard says. */
+  alert: ProducerAlert | null;
+}
+
+/** When an entry opened, last moved and closed. */
+export interface HierarchySpan {
+  opened_at: string;
+  /** The newest activity under the entry. */
+  last_at: string;
+  /** Null while the entry's run has not ended. */
+  closed_at: string | null;
+}
+
+/** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
+export interface CourseFacts {
+  /** How the course was minted; the `mint` tag renders it. */
+  mint: 'root' | 'fork' | 'diag' | 'inner';
+  /** Null on a root, and on a cycle cut from another tree. */
+  spawn: CourseSpawn | null;
+  /** The outer panel cell an L4 inner course measures. */
+  task: string | null;
+  /** Null before round 0 closes. */
+  standing: RunStanding | null;
+  /** Rounds closed AFTER the origin. */
+  rounds_closed: number;
+  /** The address of the arm the course's standing is paired against: its own
+   * round-0 candidate, else its spawn parent's origin. Served on the subtree
+   * read; null in the listing. */
+  origin: string | null;
+  /** The `per_cell` formula this course was read under for the request's lens — a
+   * `dials:` lens realized against this campaign's anchors, a `score:` one as
+   * given. What a fork applying the lens carries as `scoring.per_cell`. Null
+   * without one. */
+  lens_criterion: string | null;
+  /** How the request's lens reorders this course's candidates. Null without a lens,
+   * and where it ranked none of them. */
+  lens_shift: LensShift | null;
+}
+
+/** Where a fork was born on its parent's time line: the cut, as an event. */
+export interface CourseSpawn {
+  /** The address of the course it branched from. */
+  parent: string;
+  /** The round it branched at; null where none was named. */
+  at_round: number | null;
+  /** The parent ledger's offset the cut was taken at. */
+  at_offset: number;
+  /** The address of the parent candidate it hangs from: the one its fork record
+   * names, else the reference its first round re-read, else the parent's
+   * origin. Served on the subtree read; null in the listing, which reads no
+   * candidate. */
+  from_candidate: string | null;
+  trigger: 'operator_diag' | 'operator_rewind' | 'operator_steered' | 'optimizer_rebase' | 'scoring_divergence';
+  /** Which side of the cut the run continues on, measured or implied by `trigger`. */
+  direction: 'offshoot' | 'supersede' | 'equivalent';
+  reason: string;
+  /** Who cut it, as its fork record names them. */
+  issued_by: string;
+}
+
+/** What the request's lens did to one course's candidate ordering. */
+export interface LensShift {
+  /** The address of the candidate ranked first by composite; null where that
+   * candidate is retired. */
+  top_composite: string | null;
+  /** The same, ranked by `lens_value`. */
+  top_lens: string | null;
+  /** The lens ranks another candidate first. */
+  top_changed: boolean;
+  moved_up: number;
+  moved_down: number;
+  unchanged: number;
+}
+
+/** A campaign's typed facts, for a pane or a route argument; its rows read the envelope. */
+export interface CampaignFacts {
+  /** The operator's own name for it; null where none was given, and the envelope's
+   * `label` falls back to the dataset. */
+  label: string | null;
+  /** The root course's address. */
+  root: string;
+  /** The address of the course holding the line now: the root, or the fork a
+   * supersede handed it to. */
+  line: string;
+  lifecycle: 'active' | 'archived' | 'deleted';
+  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
+  spend_lifetime: LifetimeSpend;
+  /** What the root course runs with; null where its pipeline did not resolve. */
+  runs_with: CampaignRunsWith | null;
+  /** How many cycles `cleanup-empty-cycles` deletes here now
+   * (`CampaignStore.deletable_stubs`, the command's own list). Counted on the
+   * subtree read only — every sibling's ledger is scanned per fork — so null
+   * in the listing. */
+  deletable_stubs: number | null;
+}
+
+/** What an account, or one campaign's share of it, was billed over its whole life. */
+export interface LifetimeSpend {
+  /** What the providers REPORTED they billed, over every cycle, fork and forwarded
+   * inner run, plus what a deleted cycle banked. Never an estimate: a call
+   * priced off our rate table is `rate_priced_usd`, a send whose bill never
+   * came `unreported_usd`. */
+  billed_usd: number;
+  /** What our rate table prices the calls no provider reported a cost for. Not
+   * spent — an estimate, shown beside `billed_usd` and never added into it.
+   * It binds the ceiling beside `billed_usd`. */
+  rate_priced_usd: number;
+  /** Some call was priced at our rate, so there is a `rate_priced_usd` to show
+   * beside the bill. */
+  calls_rate_priced: boolean;
+  /** `billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` cost;
+   * the token ceiling is then the binding one. */
+  bill_is_floor: boolean;
+  /** Tokens no provider billed and no rate on file prices. */
+  unpriced_tokens: number;
+  /** Some send ended with no bill, so up to `unreported_usd` more may have left the
+   * account than `billed_usd` says. */
+  sends_unreported: boolean;
+  /** The most that sends which ended with no bill (cancelled, timed out, killed
+   * with a run) may have cost, at the bounds they were admitted on. Not spent
+   * — unknown. It binds the ceiling beside `billed_usd`. */
+  unreported_usd: number;
+}
+
+/** What a campaign's root course runs with — the root's pipeline resolution, cut to settings. */
+export interface CampaignRunsWith {
+  /** Scalar settings in active-step order, `model` included; no prompt text */
+  params: RunsWithParam[];
+  /** Every model in `params`, grouped under its vendor in first-seen order */
+  vendors: VendorModels[];
+  /** The optimizer manifest the root course runs */
+  optimizer: string;
+  /** The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = no
+   * rounds axis */
+  budget_rounds: number | null;
+}
+
+/** One setting a campaign's root course runs with, and the layer that chose it. */
+export interface RunsWithParam {
+  node: string;
+  /** The config grid's own param key (`NodeConfigParam.key`) */
+  key: string;
+  value: unknown;
+  source: 'backend' | 'dataset' | 'campaign' | 'model_floor' | 'seed' | 'evolved' | 'identity' | 'unset';
+}
+
+/** The models of one vendor that a campaign's root course runs. */
+export interface VendorModels {
+  /** Who TRAINED them: the namespace of the model id, or the bare id where it names
+   * none. Lowercased, routing suffix dropped. */
+  vendor: string;
+  /** Full ids, de-duplicated, routing suffix kept: it routes and bills, so it names
+   * a different run. */
+  models: string[];
 }
 
 export interface DatasetIndexResponse {

@@ -142,7 +142,7 @@ export function ChannelDetail({
           >
             <span>
               {selected
-                ? `${selected.label} · round ${selected.reading.arm.round}`
+                ? `${selected.label} · round ${selected.facts.reading.arm.round}`
                 : "This searchpoint"}
             </span>
             {!picked.isOwn && (

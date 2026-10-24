@@ -3,12 +3,12 @@ import { useMemo } from "react";
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { phaseIs } from "@/lib/run-phase";
-import { pathOf, readSpend, runningInnerRun } from "@/lib/derivations";
+import { indexLineage, readSpend, runningInnerRun } from "@/lib/derivations";
 import { fmtDuration } from "@/lib/format";
 import { useCycleStream } from "@/lib/poll";
 import { useLineageTree } from "@/lib/lineage";
 import { tagValue } from "@/lib/hierarchy";
-import { encodeCyclePath } from "@/lib/ids";
+import { encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import { useEntry } from "@/lib/registry";
 import { useLeafIsL4, useWorkspace } from "@/lib/workspace";
 
@@ -17,8 +17,6 @@ export type RemoteModel = NonNullable<ReturnType<typeof useRemoteModel>>;
 export function useRemoteModel() {
   const {
     cycleId,
-    leafCampaignId,
-    leafCycleId,
     viewedPath,
     drillInto,
     backToOuter,
@@ -28,11 +26,12 @@ export function useRemoteModel() {
   const { dash, status } = useCycleStream();
   const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");
   const isOuterView = (viewedPath?.length ?? 1) === 1;
+  const campaignAddress = viewedPath?.[0]?.campaignId ?? "";
   const { root: lineageRoot } = useLineageTree(
-    viewedPath ?? [],
-    Boolean(viewedPath) && isOuterView && leafIsL4,
+    campaignAddress,
+    campaignAddress !== "" && isOuterView && leafIsL4,
   );
-  const innerRun = useMemo(() => runningInnerRun(lineageRoot), [lineageRoot]);
+  const innerRun = useMemo(() => runningInnerRun(indexLineage(lineageRoot)), [lineageRoot]);
 
   if (!viewedPath || !cycleId) return null;
 
@@ -42,7 +41,7 @@ export function useRemoteModel() {
   const skipRefusal = dash.run_admission.skip_refusal;
   const armRefusal = dash.run_admission.lookahead_refusal;
 
-  const innerHop = innerRun ? pathOf(innerRun).at(-1) : undefined;
+  const innerHop = innerRun ? pathOfAddress(innerRun.address).at(-1) : undefined;
 
   const { metered, lines } = readSpend(dash);
 
@@ -86,7 +85,7 @@ export function useRemoteModel() {
     cycleId,
     datasetName: tagValue(leafEntry, "dataset") ?? undefined,
     updatedAt: dash.at_time,
-    babysat: Boolean(leafEntry?.state.intervened),
+    babysat: leafEntry?.level === "course" && leafEntry.state.intervened,
     offline: status === "offline",
     inner: !isOuterView,
     innerHop,

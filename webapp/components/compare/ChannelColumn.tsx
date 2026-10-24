@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { ArmNode, HeadToHeadRow, HierarchyCampaign } from "@/lib/api";
+import type { HeadToHeadRow, HierarchyCampaign, HierarchyCandidate } from "@/lib/api";
 import { useCompareSelection } from "@/lib/compare-selection";
 import { cx } from "@/lib/cx";
 import { fmtDuration, fmtSigned, shortId } from "@/lib/format";
@@ -180,8 +180,8 @@ function ColumnReads({
   setSelected,
 }: {
   head: ChannelModel["head"];
-  selected: ArmNode | null;
-  setSelected: (next: ArmNode | null) => void;
+  selected: HierarchyCandidate | null;
+  setSelected: (next: HierarchyCandidate | null) => void;
 }) {
   return (
     <div className="cmp-col-reads">
@@ -194,7 +194,7 @@ function ColumnReads({
         />
       )}
       <span className="cmp-metric-band">
-        {selected ? `${selected.label} · round ${selected.reading.arm.round}` : "—"}
+        {selected ? `${selected.label} · round ${selected.facts.reading.arm.round}` : "—"}
       </span>
     </div>
   );

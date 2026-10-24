@@ -9,18 +9,8 @@ import {
   type ConfigMapResponse,
   type HierarchyEntry,
 } from "@/lib/api";
-import type { SummaryFacts } from "@/lib/derivations";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
 import { fmtAgo, fmtBytes, fmtDateTime, fmtValue } from "@/lib/format";
-
-export interface CandidateCard extends SummaryFacts {
-  level: "candidate";
-  lede: string;
-  caveat?: ReactNode;
-  facts: [string, string][];
-}
-
-const snake = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
 // A knob moving several estimands is listed under each, so the path dedupes it.
 function declaredKnobs(map: ConfigMapResponse): ConfigKnob[] {
@@ -42,15 +32,11 @@ export function RowHoverCard({
   card,
   children,
 }: {
-  card: HierarchyEntry | CandidateCard;
+  card: HierarchyEntry;
   children: ReactNode;
 }) {
   return (
-    <HoverCard
-      block
-      className="rowhover-shell"
-      content={card.level === "candidate" ? <CandidateBody card={card} /> : <EntryBody entry={card} />}
-    >
+    <HoverCard block className="rowhover-shell" content={<EntryBody entry={card} />}>
       {children}
     </HoverCard>
   );
@@ -69,29 +55,10 @@ function Facts({ facts }: { facts: [string, string][] }) {
   );
 }
 
-function CandidateBody({ card }: { card: CandidateCard }) {
-  const payload = {
-    name: card.label,
-    ...(card.state ? { state: card.state.status.label } : {}),
-    ...Object.fromEntries(card.stats.map((s) => [snake(s.label), s.value])),
-    ...Object.fromEntries(card.facts.map(([k, v]) => [snake(k), v])),
-  };
-  return (
-    <div className="rowhover">
-      <SummaryBlock
-        facts={card}
-        lede={<p className="rowhover-lede">{card.lede}</p>}
-        actions={<CopyButton title="Copy these details as JSON" data={payload} />}
-      />
-      {card.caveat && <div className="rowhover-caveat">{card.caveat}</div>}
-      <Facts facts={card.facts} />
-    </div>
-  );
-}
-
 function EntryBody({ entry }: { entry: HierarchyEntry }) {
   const campaign = entry.level === "campaign" ? entry : null;
-  const campaignId = campaign?.address ?? null;
+  // Storage and config are routed by a top-level campaign id; an inner run's sandbox has neither.
+  const campaignId = campaign && campaign.parent === null ? campaign.address : null;
   const read = useRead(campaignId != null ? campaignStorageRead(campaignId) : null);
   const data = readyData(read);
   const error = read.status === "failed";
@@ -113,7 +80,18 @@ function EntryBody({ entry }: { entry: HierarchyEntry }) {
     ["Reports", data?.reports_bytes, true],
   ];
   const size = (n: number | undefined) => (error ? "—" : n === undefined ? "…" : fmtBytes(n));
-  const { opened_at, last_at } = entry.span;
+  // A round and a candidate have no run of their own, so no span.
+  const span = entry.level === "campaign" || entry.level === "course" ? entry.span : null;
+  const reading = entry.level === "candidate" ? entry.facts.reading : null;
+  const facts: [string, string][] = span
+    ? [
+        ["Last activity", fmtAgo(span.last_at) || fmtDateTime(span.last_at)],
+        ["Opened", fmtDateTime(span.opened_at)],
+      ]
+    : [];
+  if (reading) facts.push(["Round", String(reading.arm.round)]);
+  if (reading?.sp_hash) facts.push(["Searchpoint", reading.sp_hash]);
+  facts.push(["Address", entry.address]);
 
   return (
     <div className="rowhover">
@@ -123,13 +101,7 @@ function EntryBody({ entry }: { entry: HierarchyEntry }) {
         actions={<CopyButton title="Copy this entry as JSON" data={entry} />}
       />
       {entry.caveat && <div className="rowhover-caveat">{entry.caveat}</div>}
-      <Facts
-        facts={[
-          ["Last activity", fmtAgo(last_at) || fmtDateTime(last_at)],
-          ["Opened", fmtDateTime(opened_at)],
-          ["Address", entry.address],
-        ]}
-      />
+      <Facts facts={facts} />
 
       {campaign && (
         <section>

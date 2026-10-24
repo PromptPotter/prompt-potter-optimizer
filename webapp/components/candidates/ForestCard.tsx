@@ -93,7 +93,7 @@ function ReadForestCard({ dash }: { dash: DashboardSnapshot }) {
             {totalDescendants} {totalDescendants === 1 ? "descendant" : "descendants"}
           </Badge>
           <ToolbarSpacer />
-          {cleanup.stubCount > 0 && (
+          {cleanup.stubCount !== null && cleanup.stubCount > 0 && (
             <Chip
               icon
               on={false}
@@ -161,7 +161,7 @@ function ReadForestCard({ dash }: { dash: DashboardSnapshot }) {
               )}
             </div>
           )}
-          {cleanup.open && (
+          {cleanup.open && cleanup.stubCount !== null && (
             <CleanupConfirmModal
               stubCount={cleanup.stubCount}
               cleaning={cleanup.cleaning}

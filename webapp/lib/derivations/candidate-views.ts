@@ -1,6 +1,6 @@
 import type {
   ArmReading,
-  CourseLineage,
+  HierarchyCourse,
   LineageNode,
   VerificationMark,
 } from "@/lib/api/types";
@@ -11,11 +11,11 @@ import { tagValue } from "@/lib/hierarchy";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
 import { panelCellLabel } from "./inner-panel";
 import { readPaired } from "./paired-reading";
-import { nodeKeyOf, splitRetired } from "./lineage-candidates";
+import { childNodes, splitRetired } from "./lineage-candidates";
 
 // A run's served standing rate against its origin; `null` renders BLANK, never 0.
-export function courseLevel(node: CourseLineage): number | null {
-  const served = node.course.facts.standing;
+export function courseLevel(node: HierarchyCourse): number | null {
+  const served = node.facts.standing;
   const standing = served ? readPaired(served.vs_origin) : null;
   return standing?.read ? standing.lift.rate_b : null;
 }
@@ -35,7 +35,7 @@ export function barValueLabel(metric: DisplayMetric, bar: CandidateBar): string 
 }
 
 export function barsAreCourses(viewedNode: LineageNode | undefined): boolean {
-  return viewedNode?.kind === "candidate" && viewedNode.children.length > 0;
+  return viewedNode?.level === "candidate" && childNodes(viewedNode).length > 0;
 }
 
 export interface CandidateBarsInput {
@@ -54,29 +54,31 @@ export function candidateBars({
   const markOf = (kind: VerificationMark["kind"], key: string) =>
     marks.find((m) => m.kind === kind && m.arm.key === key) ?? null;
   // Live side of each supersede cut only — retired tails double a round.
-  const nodes: readonly LineageNode[] = viewedNode?.children ?? [];
+  const nodes: readonly LineageNode[] = viewedNode ? childNodes(viewedNode) : [];
   return splitRetired(nodes).live.map<CandidateBar>((node, idx) => {
-    const key = nodeKeyOf(node);
-    if (node.kind === "course") {
+    const key = node.address;
+    if (node.level === "course") {
       return {
         key,
         idx,
-        label: node.course.facts.task
-          ? panelCellLabel(node.course.facts.task)
-          : (tagValue(node.course, "dataset") ?? node.id),
+        label: node.facts.task
+          ? panelCellLabel(node.facts.task)
+          : (tagValue(node, "dataset") ?? node.label),
         node,
         reading: null,
       };
     }
-    // ONE half per bar: the tree serves `proposed`/`measuring` until the arm's walk is decided on the ledger.
-    const decided = node.reading.state === "cut" || node.reading.state === "measured";
-    const live = decided ? undefined : inflightByKey.get(node.reading.arm.key);
+    const { reading } = node.facts;
+    // ONE half per bar: the subtree serves `proposed`/`measuring` until the arm's walk is decided on the ledger.
+    const decided = reading.state === "cut" || reading.state === "measured";
+    const live = decided ? undefined : inflightByKey.get(reading.arm.key);
     // Both are served null short of the WHOLE basis: a rate over a shorter denominator sat another exam.
-    const onLine = node.reading.on_origin_panel;
+    const onLine = reading.on_origin_panel;
+    const { sample_set_accuracy: rate, sample_set_n: n } = node.facts;
     const overlap =
       sampleSet != null
-        ? node.sample_set_accuracy != null && node.sample_set_n != null
-          ? { rate: node.sample_set_accuracy, n: node.sample_set_n }
+        ? rate != null && n != null
+          ? { rate, n }
           : null
         : onLine && { rate: onLine.rate, n: onLine.n };
     return {
@@ -84,11 +86,11 @@ export function candidateBars({
       idx,
       label: node.label,
       node,
-      reading: live ?? node.reading,
+      reading: live ?? reading,
       source: live ? "inflight" : "history",
       overlap,
-      verify: markOf("verify", node.reading.arm.key),
-      bench: markOf("bench", node.reading.arm.key),
+      verify: markOf("verify", reading.arm.key),
+      bench: markOf("bench", reading.arm.key),
     };
   });
 }

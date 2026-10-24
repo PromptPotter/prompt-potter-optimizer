@@ -1,8 +1,9 @@
 "use client";
 
 import { phaseIs, phaseWalks } from "@/lib/run-phase";
-import { panelCellLabel, pathOf } from "@/lib/derivations";
-import type { CourseLineage } from "@/lib/api";
+import { panelCellLabel } from "@/lib/derivations";
+import { pathOfAddress } from "@/lib/ids";
+import type { HierarchyCourse } from "@/lib/api";
 import { PairedLift } from "@/components/shell/PairedLift";
 
 export function PanelCellRow({
@@ -12,9 +13,9 @@ export function PanelCellRow({
   onOpen,
 }: {
   cell: string;
-  run: CourseLineage | null;
+  run: HierarchyCourse | null;
   cached: boolean;
-  onOpen: (run: CourseLineage) => void;
+  onOpen: (run: HierarchyCourse) => void;
 }) {
   const name = panelCellLabel(cell);
 
@@ -47,9 +48,9 @@ export function PanelCellRow({
     );
   }
 
-  const { state, facts } = run.course;
+  const { state, facts } = run;
   const live = phaseWalks(state.run_phase);
-  const at = pathOf(run).at(-1);
+  const at = pathOfAddress(run.address).at(-1);
 
   return (
     <button

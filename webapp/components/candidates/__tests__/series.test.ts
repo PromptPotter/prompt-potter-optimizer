@@ -8,19 +8,19 @@ import {
 } from "../series";
 import type { VerificationMark } from "@/lib/api/types";
 import type { ArmBar, CandidateBar } from "@/lib/types";
-import { armNode, armReading, ownLevel } from "@/lib/test-fixtures";
+import { armReading, hierarchyCandidate, ownLevel } from "@/lib/test-fixtures";
 
 function bar(
   reading: Parameters<typeof armReading>[0] = {},
   over: Partial<ArmBar> = {},
 ): CandidateBar {
-  const node = armNode({ id: "a", label: "C1.1", reading: armReading(reading) }, 1);
+  const node = hierarchyCandidate("camp::cycle_a", { id: "a", reading: armReading(reading) });
   return {
     key: "k",
     idx: 0,
     label: node.label,
     node,
-    reading: node.reading,
+    reading: node.facts.reading,
     source: "history",
     overlap: null,
     verify: null,

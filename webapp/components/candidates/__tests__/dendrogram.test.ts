@@ -19,10 +19,9 @@ function spine(
         key: `R${r.round}.${i}`,
         round: r.round,
         label: r.round === 0 ? "C0" : `C${r.round}.${i + 1}`,
-        candidate_id: `r${r.round}_${i}`,
+        address: `r${r.round}_${i}`,
         is_selected: r.winner === i,
         crown: r.winner !== i ? null : r.n > 1 ? "elected" : "uncontested",
-        is_fork: false,
       });
     }
   }
@@ -149,31 +148,5 @@ describe("dendrogram", () => {
     expect(g.brackets.map((b) => b.round)).toEqual([1, 2]);
     const r1Winner = rows.find((r) => r.round === 1 && r.is_selected)!;
     expect(g.brackets.find((b) => b.round === 2)?.parentKey).toBe(r1Winner.key);
-  });
-
-  it("keeps a fork bar's slot but leaves it out of the round packing", () => {
-    const rows = [
-      ...spine([
-        { round: 0, n: 1, winner: 0 },
-        { round: 1, n: 2, winner: 0 },
-      ]),
-      {
-        key: "fork|cy_ab",
-        round: 1,
-        label: "f·ab",
-        candidate_id: "cy_ab",
-        is_selected: false,
-        crown: null,
-        is_fork: true,
-      },
-    ];
-    const g = dendrogram(rows, centers(rows.length));
-
-    expect(g.nodes).toHaveLength(4);
-    expect(g.nodes[3]!.isFork).toBe(true);
-    expect(g.nodes[3]!.xf).toBe(centers(4)[3]);
-    const r1 = g.brackets.find((b) => b.round === 1)!;
-    expect(r1.x2f).toBe(centers(4)[2]);
-    expect(g.stubs.every((s) => s.xf !== centers(4)[3])).toBe(true);
   });
 });

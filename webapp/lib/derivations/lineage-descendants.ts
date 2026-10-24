@@ -1,20 +1,14 @@
-import type { CourseLineage } from "@/lib/api";
-import { walkCourses } from "./lineage-candidates";
+import type { LineageIndex } from "./lineage-candidates";
 
-export function descendantsOf(
-  root: CourseLineage | null,
-  seeds: Iterable<string>,
-): ReadonlySet<string> {
+export function descendantsOf(index: LineageIndex, seeds: Iterable<string>): ReadonlySet<string> {
   const out = new Set(seeds);
-  if (!root || out.size === 0) return out;
+  if (out.size === 0) return out;
 
   // Whole family at once: a candidate's children may sit on another course.
   const kids = new Map<string, string[]>();
-  for (const course of walkCourses(root)) {
-    for (const arm of course.children) {
-      for (const parent of arm.parent_ids) {
-        kids.set(parent, [...(kids.get(parent) ?? []), arm.id]);
-      }
+  for (const arm of index.candidates) {
+    for (const parent of arm.facts.parent_ids) {
+      kids.set(parent, [...(kids.get(parent) ?? []), arm.facts.individual]);
     }
   }
 

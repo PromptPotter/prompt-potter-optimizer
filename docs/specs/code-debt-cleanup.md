@@ -331,7 +331,7 @@ runs on its own budget and reports its attempts as a count.
   content-addressed rows standing (correctly — a sibling may replay them), `compact-archive` reaches
   only the fields a row does not read, and `reindex`'s GC is positive-identification-only, so every
   orphan is kept.
-- **Attribution** — `ArmNode.reading.sp_hash` is stamped forward-only, which is right and is enough for
+- **Attribution** — `CandidateFacts.reading.sp_hash` is stamped forward-only, which is right and is enough for
   everything measured from here on. The DESIGN question outlives the data: an L4 outer cell should
   stamp the runs its inner campaign produced at the moment it spawns them, the only attribution that
   survives the sandbox being reclaimed. Decide it before the next L4 run banks rows nothing can name.

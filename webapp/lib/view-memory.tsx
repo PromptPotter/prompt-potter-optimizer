@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
-import { ownerOfNodeAddress } from "@/lib/ids";
+import { ownerOfAddress } from "@/lib/ids";
 
 export const VIEW_MEMORY_KEY = "promptpotter.view.byCampaign";
 
@@ -24,7 +24,7 @@ export interface CampaignView {
   viewedPath: string | null;
   viewedCandidateId: string | null;
   showForest: boolean;
-  // Lane keys (`nodeKeyOf`), the same space `forest-layout::layout` matches.
+  // Lane keys (course addresses), the same space `forest-layout::layout` matches.
   expandedLanes: string[];
 }
 
@@ -124,7 +124,7 @@ export function useViewMemory(): ViewMemory {
   return ctx;
 }
 
-// An ORIGIN spans campaigns, so it owns a record under its own `cycle_<hash>` id (`ownerOfNodeAddress`).
+// An ORIGIN spans campaigns, so it owns a record under its own `cycle_<hash>` id (`ownerOfAddress`).
 export interface NodeToggle {
   isOpen: (key: string, openByDefault: boolean) => boolean;
   toggle: (key: string) => void;
@@ -137,13 +137,13 @@ export function useNodeToggle(): NodeToggle {
 
   const isOpen = useCallback(
     (key: string, openByDefault: boolean) =>
-      toggledFor(ownerOfNodeAddress(key)).has(key) ? !openByDefault : openByDefault,
+      toggledFor(ownerOfAddress(key)).has(key) ? !openByDefault : openByDefault,
     [toggledFor],
   );
 
   const toggle = useCallback(
     (key: string) => {
-      const owner = ownerOfNodeAddress(key);
+      const owner = ownerOfAddress(key);
       if (!owner) return;
       const toggled = new Set(toggledFor(owner));
       if (toggled.has(key)) toggled.delete(key);

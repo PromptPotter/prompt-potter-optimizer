@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  courseAddressOf,
   decodeCyclePath,
   encodeCyclePath,
   encodeDescend,
-  nodeAddress,
-  ownerOfNodeAddress,
+  ownerOfAddress,
   pathLeaf,
+  pathOfAddress,
   pathRoot,
   type CyclePath,
 } from "@/lib/ids";
@@ -47,33 +48,36 @@ describe("CyclePath", () => {
     expect(encodeDescend(depth2)).toBe("justlogic__ff00aa::cycle_1122ab_s3");
   });
 
-  // A null owner silently makes `toggle` a no-op, so a suffixed address must still resolve.
-  describe("node addresses", () => {
-    it("owns a course address by its root-hop campaign, at any depth", () => {
-      expect(ownerOfNodeAddress(nodeAddress(depth1))).toBe("justlogic__ab12cd");
-      expect(ownerOfNodeAddress(nodeAddress(depth2))).toBe("justlogic__ab12cd");
+  // A null owner silently makes `toggle` a no-op, so an address below a course must still resolve.
+  describe("hierarchy addresses", () => {
+    const course = encodeCyclePath(depth2);
+    const candidate = `${course}/r3/0d3d5cd5adf74270b194d23cad09e022`;
+
+    it("heads an address below a course with the course's own", () => {
+      expect(courseAddressOf(candidate)).toBe(course);
+      expect(courseAddressOf(course)).toBe(course);
+      expect(pathOfAddress(candidate)).toEqual(depth2);
     });
 
-    it("owns a candidate address by its campaign, suffix and all", () => {
-      const addr = nodeAddress(depth2, "0d3d5cd5adf74270b194d23cad09e022");
-      expect(addr).toBe(
-        "justlogic__ab12cd::cycle_9f3a1b~justlogic__ff00aa::cycle_1122ab_s3" +
-          "|0d3d5cd5adf74270b194d23cad09e022",
-      );
-      expect(ownerOfNodeAddress(addr)).toBe("justlogic__ab12cd");
+    it("names no path for a campaign address", () => {
+      expect(() => pathOfAddress("justlogic__ab12cd")).toThrow();
+    });
+
+    it("owns an address by its root-hop campaign, at any depth", () => {
+      expect(ownerOfAddress(encodeCyclePath(depth1))).toBe("justlogic__ab12cd");
+      expect(ownerOfAddress(candidate)).toBe("justlogic__ab12cd");
+      expect(ownerOfAddress("justlogic__ab12cd")).toBe("justlogic__ab12cd");
     });
 
     it("owns an origin address by the origin id — it names no campaign", () => {
-      // An origin has no campaign; `cycle_<hash>` and `{dataset}__{rand6}` owners cannot collide.
-      expect(ownerOfNodeAddress(nodeAddress([], "cycle_47d99f21ef84"))).toBe(
-        "cycle_47d99f21ef84",
-      );
+      // `cycle_<hash>` and `{dataset}__{rand6}` owners cannot collide.
+      expect(ownerOfAddress("cycle_47d99f21ef84")).toBe("cycle_47d99f21ef84");
     });
 
     it("answers null on a malformed address rather than a wrong owner", () => {
-      expect(ownerOfNodeAddress("")).toBeNull();
-      expect(ownerOfNodeAddress("no-separator|cand")).toBeNull();
-      expect(ownerOfNodeAddress("|bad/slash")).toBeNull();
+      expect(ownerOfAddress("")).toBeNull();
+      expect(ownerOfAddress("::cy")).toBeNull();
+      expect(ownerOfAddress("bad space::cy/r1/k")).toBeNull();
     });
   });
 });

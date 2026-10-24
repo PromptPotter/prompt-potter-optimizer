@@ -25,9 +25,9 @@ class _CliFormatter(logging.Formatter):
 
 class _QuietPolls(logging.Filter):
     _POLLED = re.compile(
-        r"^/api/v1/(cycles|campaigns|machine-status|sessions/active|auth/(quota-status|me))(\?|$)"
+        r"^/api/v1/(hierarchy(/[^?]*)?|cycles|campaigns|machine-status|sessions/active|auth/(quota-status|me))(\?|$)"
     )
-    _SUFFIX = ("/dashboard", "/health", "/tree", "/ray", "/cells")
+    _SUFFIX = ("/dashboard", "/health", "/ray", "/cells")
     _QUIET_STATUS = frozenset({200, 304})
 
     def filter(self, record: logging.LogRecord) -> bool:

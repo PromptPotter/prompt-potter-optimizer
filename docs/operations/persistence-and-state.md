@@ -21,6 +21,25 @@ Your work lives in `.promptpotter/`: `campaigns/{campaign_id}/` is one campaign 
 - **Campaign** — `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`, a nested name's `/` written `.` (`bbh.word_sorting__…`), which no name may hold. `campaign.json` carries its `declaration` (the run it was minted to make — only the keys a layer set) and the `bench_defaults_pin` under it, `root_content_hash` (resume's drift check, which names a moved default), `treatment` (the optimizer it runs, its manifest digest the optimizer's defaults — [`../architecture.md`](../architecture.md) § Three identities) and, `purpose` (`optimize`, or `compare` naming the head-to-head arm it runs under — § The controlled comparison there); none is the id.
 - **Cycle** — `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
 
+### The hierarchy address
+
+Every served entry (`GET /hierarchy`, [`../specs/frontend-surface-contract.md`](../specs/frontend-surface-contract.md) § The served hierarchy) is keyed by an address the server mints and never renames:
+
+```
+campaign := [inside "~"] campaign_id                 bbeh__20261024-091500
+course   := campaign "::" cycle_id                   bbeh__20261024-091500::cycle_7f3a
+round    := course "/r" round_n                      bbeh__20261024-091500::cycle_7f3a/r2
+candidate:= round "/" arm_key                        bbeh__20261024-091500::cycle_7f3a/r2/<ArmKey>
+inside   := course ("~" course)*                     the L4 sandbox chain, the `?descend=` wire byte-exact
+```
+
+`(round, arm_key)` is the standing rounds' own join, unique per course, so a candidate's address is
+the key of a row on every surface; its individual is not, since a repair re-measures one individual on
+two courses. `webapp/lib/ids.ts::courseAddressOf` is the one place a candidate's address is cut back to
+its course.
+
+One minter, `domain/cycle_paths.py::hierarchy_address`, and **a course's address IS its encoded `CyclePath`** (`encode_cycle_path`, `webapp/lib/ids.ts::encodeCyclePath`), so the webapp mints none: it reads `address` and decodes a course's where a route wants typed hops. A cycle directory is never renamed, so a retired branch keeps its address for ever — which is what makes it the key of an open set, a list and an ETag. **A fork is stored as a sibling cycle and served as a child course of its campaign**, its `facts.spawn` naming the event it was born at: the parent course, the round and ledger offset of the cut, the address of the candidate it was cut from, the trigger and the direction (`CycleIndex` + `domain/run_records.py::ForkSpec`).
+
 **There is no Session tier** — owned by [`../architecture.md`](../architecture.md) § A campaign has one root cycle. `active_session.json` is a pointer at your latest launch and holds nothing a cycle needs; there is no `sessions/` tree.
 
 ## Active session pointer
@@ -225,13 +244,13 @@ Use when the active cycle went somewhere you don't want. `cycle_id` stays; round
 
 Use when a **data-affecting** edit (scoring formula, `pipeline_overlay`, `exclude_nodes`, `dataset_name`) makes resume's replayer find recorded decisions no longer hold. The optimizer halts rather than drift; either revert, or commit with `--fork-on-divergence`. It mints a new `cycle_id` **in the same campaign**, rooted at the divergence point, keeps the pre-divergence rounds by reading them where the parent's ledger closed them, records its `parent`, and re-runs the divergent round under the current scorer. The shared archive is not duplicated — both cycles read the same measurements through their own scoring ledger. **Why rewind isn't enough:** rewind restarts under the *same* policy and would re-hit the same divergence.
 
-**A cut has a DIRECTION** — which side the run continues on, written at the cut and served as `fork_direction`. The trigger usually implies it (`FORK_DIRECTION`, derived, so every fork already on disk answers it): a diag / steered fork is an `offshoot`, the child hanging off a line that keeps running; a `scoring_divergence`, `operator_rewind` or L2/L3 rebase **supersedes**, the child being the continuation the pointer moves to and the *parent* what was left behind. Same shape on disk, opposite reading — which is why nothing is deleted on a supersede. A correction is the one cut taken before its consequence is known, so it records the answer it later measured on `ForkSpec.direction`, which outranks the derived default; that is the only way `equivalent` arises. **How a cut READS once served** — the timeline renumber, which side wears `superseded_by`, which cycle speaks for the campaign — is owned by [`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree. What THIS layer must get right is that the direction, and how far it reaches, are on disk before any reader asks.
+**A cut has a DIRECTION** — which side the run continues on, written at the cut and served as `fork_direction`. The trigger usually implies it (`FORK_DIRECTION`, derived, so every fork already on disk answers it): a diag / steered fork is an `offshoot`, the child hanging off a line that keeps running; a `scoring_divergence`, `operator_rewind` or L2/L3 rebase **supersedes**, the child being the continuation the pointer moves to and the *parent* what was left behind. Same shape on disk, opposite reading — which is why nothing is deleted on a supersede. A correction is the one cut taken before its consequence is known, so it records the answer it later measured on `ForkSpec.direction`, which outranks the derived default; that is the only way `equivalent` arises. **How a cut READS once served** — where the fork's course hangs, which side wears `superseded`, which cycle speaks for the campaign — is owned by [`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree. What THIS layer must get right is that the direction, and how far it reaches, are on disk before any reader asks.
 
 **A cut retires only as far as the branch actually got** — owned by [`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree; the write side hands the branch exactly the candidates it retires (`repair.py::_rebank_on_branch`), and the reach is read back off the last round the branch's own ledger minted a candidate for, so the two sides cannot drift.
 
 **A supersede retires the parent, on disk, at the cut** — `mint_fork` appends `cycle_superseded` and, where no ending already stands, declares the parent terminal with `StopReason.REBASED` (`CampaignStore.mark_superseded`) — unless a producer holds it, which declares its own stop: a run-init fork ends the parent it opened on before its readout moves (`runner/entry.py`). The parent stops writing *by design*, and an undeclared deliberate stop would read as a crash: `detached`, then `producer_vanished` at the reaper's next sweep. Resumability is untouched — a later launch declaring `running` retires both records. An **`equivalent`** cut moves the pointer the same way and retires nothing.
 
-**After a REPAIR both sides carry the same `candidate_id`** — owned by [`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree (*identity outranks direction*); the withdrawn measurement is the one the round was actually steered by. A retired candidate wears **no crown**: it was elected over rows the cut replaced, so its `reading.election` wears no `selected` and no `crown` until the branch re-elects.
+**After a REPAIR both sides carry the same `candidate_id`** — owned by [`infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree (*identity outranks position*); the withdrawn measurement is the one the round was actually steered by. A retired candidate wears **no crown**: it was elected over rows the cut replaced, so its `reading.election` wears no `selected` and no `crown` until the branch re-elects.
 
 **Policy-only edits** (PoBB knobs, patience, thresholds, `n_variants`, `exploration.*`) can't have changed the data trace, so resume continues in-place and `--fork-on-divergence` is a no-op. Past decisions stay as the audit record of the policy that made them.
 

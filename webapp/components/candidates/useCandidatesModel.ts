@@ -9,10 +9,10 @@ import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
-import type { CourseLineage } from "@/lib/api";
-import { nodeKeyOf, pathOf, type DisplayMetric } from "@/lib/derivations";
+import type { HierarchyCourse } from "@/lib/api";
+import { courseAt, type DisplayMetric } from "@/lib/derivations";
+import { pathOfAddress } from "@/lib/ids";
 import { isSelectedCandidate, selectedCandidateOf } from "@/lib/types";
-import { encodeCyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "@/lib/hooks/useLineage";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
@@ -109,9 +109,9 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
   );
 
   const onFreeHierarchy = useCallback(
-    (course: CourseLineage) => {
-      revealLane(nodeKeyOf(course));
-      navigate(pathOf(course));
+    (course: HierarchyCourse) => {
+      revealLane(course.address);
+      navigate(pathOfAddress(course.address));
     },
     [revealLane, navigate],
   );
@@ -136,7 +136,7 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
   }, [overlay.maskActive, overlay.index, viewedPath, viewedCandidateId]);
 
   const lensCriterion =
-    (viewedPath && overlay.index.get(encodeCyclePath(viewedPath))?.course?.lens_criterion) || null;
+    courseAt(overlay.index, viewedPath)?.facts.lens_criterion ?? null;
 
   const divergenceBoundary = useMemo(() => {
     if (divergentRound == null) return null;
@@ -246,7 +246,7 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
     setLens,
     lensActive,
     lensCriterion,
-    lensShift: viewedNode?.kind === "course" ? viewedNode.lens_shift : null,
+    lensShift: viewedNode?.level === "course" ? (viewedNode.facts.lens_shift ?? null) : null,
     maskActive,
     maskLabel,
     scoringMaskActive,

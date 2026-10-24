@@ -168,6 +168,77 @@ invariants:
                       menu that is its own selection can never offer back an unticked value.'
 ```
 
+## The served hierarchy
+
+**Every surface that lists, switches, docks or heads a run renders ONE served entry shape** —
+`domain/hierarchy.py::HierarchyEntry`, minted by `application/hierarchy.py` alone and read by
+`GET /hierarchy` (the webapp's `lib/registry.tsx`, the `cycles` verb). An envelope every level
+shares (`address`, `parent`, `label`, `lede`, `caveat`, `tags`, `stats`, `child_count`, `children`)
+plus `facts` per level, discriminated on `level`. A generic row, hover card, switcher entry or dock chip
+reads the envelope and never opens `facts`; `facts` are typed inputs for a level-specific pane or a
+route argument, and a `facts` field no reader names is deleted (`scripts/complexity_ledger.py::BASELINE`
+`p_served` is the ratchet). The address grammar is
+[`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address.
+
+- **Tags and stats are the rendering, worded on the server, in served order.** The θ clause on an
+  accuracy stat, the "≥" on a floored bill and the "of 10" on a rounds count are worded at one site each.
+  <!-- probe: git grep -cE "rounds are won on" -- promptpotter/application/hierarchy.py == 1 -->
+  `stats[0]` is the row's headline. Grouping served rows, filtering on a served tag and formatting a
+  served time are layout; wording a number, ordering stats or deriving a state is not, and none
+  survives in `webapp/lib/derivations` for an entry.
+  <!-- probe: git grep -cE "buildForest|RunGroup|OriginGroup|campaignCard|courseStats|unitDisplayName|campaignLineParts" -- webapp == 0 -->
+- **A tag is asked with two predicates**, `hasTag(entry, kind)` and `tagValue(entry, kind)`
+  (`webapp/lib/hierarchy.ts`), and a bool served beside a tag is the duplicate this forbids. **One
+  declared exception, `mint`**: code branches on a course's kind exhaustively, a tag's value is an
+  untyped string, so the course builder mints the kind once and serves it twice — typed as
+  `facts.mint`, worded as the tag. Code reads the fact; the tag is worn.
+  <!-- probe: git grep -cE "tagValue\(.*mint" -- webapp == 0 -->
+- **One run-state derivation.** `HierarchyState.of` packages `derive_run_state` for a served entry,
+  once per course and once more for a line course with no mint record.
+  <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpotter == 2 -->
+  A campaign's `state` IS its line course's (`CampaignStore.line_holder`), so the two cannot disagree.
+  `RunStatus.of` has three callers until the dashboard folds into it.
+  <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 3 -->
+  Run state is read at the head always: a moment replays the record, never a process.
+- **A campaign is always served.** A line course with no `CycleIndex` yet still lists its campaign,
+  its state from `HierarchyState.of(run, None, …)`, its line stats absent and its `caveat` saying so —
+  dropping it would be a campaign the operator owns and no listing shows, with nothing raised.
+- **The producer is served without its clocks** (`HierarchyProducer`). The listing answers 304 on
+  a version that moves on writes and on the producer's beat edge, so a seconds count would freeze
+  at the last 200; durations stay on the dashboard read, which polls the viewed cycle.
+- **One poll.** The registry is one `hierarchyRead()` over every lifecycle; the sidebar's filter is
+  layout over `facts.lifecycle`, so an address resolves whatever the filter lists.
+  <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/registry.tsx == 1 -->
+- **The genealogy is the same entry, read deep.** `GET /hierarchy/{address}?lens=&samples=&at=&at_cycle=`
+  (`application/hierarchy_subtree.py::hierarchy_subtree`) serves the subtree at any address: a
+  course's children are its rounds, a round's its candidates in `ArmSlot` order, a candidate's the
+  inner campaigns it spawned, bounded at `lineage_queries.py::MAX_COURSE_DEPTH`. There is no second
+  genealogy route and no client fold.
+  <!-- probe: git grep -cE "\}/tree" -- promptpotter/presentation == 0 -->
+  <!-- probe: git grep -cE "def (build_lineage_tree|family_course_entries|lensed_tree|_fold_contributions)\(" -- promptpotter == 0 -->
+- **A fork is DRAWN at its spawn, never folded.** Every course serves its own rounds and candidates
+  under the labels its own counter minted; the forest hangs a fork's lane at `spawn.from_candidate`.
+  Folding was the one place the server rewrote another course's identity — labels renumbered, a replayed
+  C0 dropped, runs grafted — so a fork's replayed C0 is an honest candidate of its own lane: it measured
+  the origin individual again.
+  <!-- probe: git grep -cE "class (ArmNode|CourseLineage|ForkStamp)\b" -- promptpotter == 0 -->
+- **A retained individual is a REFERENCE, never re-listed.** A round names the candidate it measures
+  against by `RoundFacts.reference`, in its course or up the spawn chain. One individual, one row per
+  round that PROPOSED it: a re-listed copy would leave every pointer (`answers_for_id`, `main_line`, a
+  selection) choosing between copies of one measurement. Parallel candidates carry no order mark — a
+  round's arms walk concurrently, so any sequence among them is one the ledger interleaved; time order
+  is a step's offset.
+- **A retired candidate stays on its course**, tagged `superseded` with the address of the course that
+  took its place (`hierarchy_subtree.py::_retired`, reading back only as far as the branch got), with no
+  crown and the verdict `retired`. The webapp keys every row on `address`.
+  <!-- probe: git grep -cE "nodeKeyOf|nodeAddress|ownerOfNodeAddress" -- webapp == 0 -->
+- **The sidebar draws campaign → course → candidate → inner campaign**, rounds flattened (they are the
+  forest's columns), and a campaign with one course elides that course's row: a round row would add a
+  click per round to reach every candidate.
+- **`deletable_stubs` is counted on the subtree read alone** and null in the listing:
+  `CampaignStore.deletable_stubs` scans every sibling's ledger, the cost the 10 s listing poll must not
+  pay. Null says "not counted at this depth", never zero.
+
 ## The two blocking gates
 
 The only surfaces with a block here, because their constraints are legal and ordering rather
