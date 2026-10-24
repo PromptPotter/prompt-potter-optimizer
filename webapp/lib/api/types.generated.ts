@@ -2835,9 +2835,6 @@ export interface HierarchyStat {
   value: string;
   /** The second line under the value; null where none. */
   sub: string | null;
-  /** The number `value` words, for a meter's geometry only: never re-worded and
-   * never re-ranked. Null where `value` words no number. */
-  amount: number | null;
 }
 
 /** A course — one cycle's run, root, fork, diag or inner — as one hierarchy entry. */
@@ -3028,13 +3025,11 @@ export interface HierarchyProducer {
   alert: ProducerAlert | null;
 }
 
-/** When an entry opened, last moved and closed. */
+/** When an entry opened and last moved. */
 export interface HierarchySpan {
   opened_at: string;
   /** The newest activity under the entry. */
   last_at: string;
-  /** Null while the entry's run has not ended. */
-  closed_at: string | null;
 }
 
 /** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
@@ -3069,8 +3064,6 @@ export interface CourseSpawn {
   parent: string;
   /** The round it branched at; null where none was named. */
   at_round: number | null;
-  /** The parent ledger's offset the cut was taken at. */
-  at_offset: number;
   /** The address of the parent candidate it hangs from: the one its fork record
    * names, else the reference its first round re-read, else the parent's
    * origin. Served on the subtree read; null in the listing, which reads no

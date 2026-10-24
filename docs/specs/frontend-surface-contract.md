@@ -256,9 +256,9 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
   a round, because one ledger interleaves a round's walk with its neighbours' open and close. A bare
   heartbeat is no step and takes no slot of a window — it is the gap it shortens, which the next
   step's `gap_before_s` carries — so a long open call never serves an empty window. There is no second
-  chronology shape, and no span carries offsets: a step's `facts.offset` is the moment a surface picks,
-  and a fork's birth is its course's `spawn.at_offset`, so offsets on `HierarchySpan` would be a served
-  field with no reader.
+  chronology shape. **A served field has a reader or is not served**: no span carries offsets or a close
+  time, no spawn its cut offset and no stat a raw amount, because a step's `facts.offset` is the
+  moment a surface picks and every stat is worded on the server.
   <!-- probe: git grep -cE "class (RayItem|RayResponse)\b" -- promptpotter == 0 -->
 
 ## The two blocking gates

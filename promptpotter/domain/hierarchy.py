@@ -64,18 +64,13 @@ class HierarchyStat(FrozenModel):
     label: str
     value: str = Field(description="The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`.")
     sub: str | None = Field(description="The second line under the value; null where none.")
-    amount: float | None = Field(
-        description="The number `value` words, for a meter's geometry only: never re-worded and "
-        "never re-ranked. Null where `value` words no number."
-    )
 
 
 class HierarchySpan(FrozenModel):
-    """When an entry opened, last moved and closed."""
+    """When an entry opened and last moved."""
 
     opened_at: str
     last_at: str = Field(description="The newest activity under the entry.")
-    closed_at: str | None = Field(description="Null while the entry's run has not ended.")
 
 
 class HierarchyProducer(FrozenModel):
@@ -166,7 +161,6 @@ class CourseSpawn(FrozenModel):
 
     parent: str = Field(description="The address of the course it branched from.")
     at_round: int | None = Field(description="The round it branched at; null where none was named.")
-    at_offset: int = Field(description="The parent ledger's offset the cut was taken at.")
     from_candidate: str | None = Field(
         description="The address of the parent candidate it hangs from: the one its fork record "
         "names, else the reference its first round re-read, else the parent's origin. Served on "

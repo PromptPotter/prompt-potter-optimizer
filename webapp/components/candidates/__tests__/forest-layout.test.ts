@@ -78,7 +78,6 @@ function forkAt(parent: HierarchyCourse, round: number, rounds: Rounds): Hierarc
   const spawn: CourseSpawn = {
     parent: parent.address,
     at_round: round,
-    at_offset: 0,
     from_candidate: winnerAt(parent, round).address,
     trigger: "operator_steered",
     direction: "offshoot",

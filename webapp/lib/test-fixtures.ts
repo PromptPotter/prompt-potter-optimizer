@@ -354,7 +354,7 @@ export function hierarchyCourse(
     tags: courseTags(facts.mint ?? "root"),
     state: hierarchyState(),
     stats: [],
-    span: { opened_at: "", last_at: "", closed_at: null },
+    span: { opened_at: "", last_at: "" },
     children: [],
     level: "course",
     facts: {
@@ -384,7 +384,7 @@ export function hierarchyCampaign(
     tags: [],
     state: hierarchyState(),
     stats: [],
-    span: { opened_at: "", last_at: "", closed_at: null },
+    span: { opened_at: "", last_at: "" },
     children: [],
     level: "campaign",
     facts: {

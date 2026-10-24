@@ -3765,11 +3765,6 @@
         "additionalProperties": false,
         "description": "Where a fork was born on its parent's time line: the cut, as an event.",
         "properties": {
-          "at_offset": {
-            "description": "The parent ledger's offset the cut was taken at.",
-            "title": "At Offset",
-            "type": "integer"
-          },
           "at_round": {
             "anyOf": [
               {
@@ -3819,7 +3814,6 @@
         "required": [
           "parent",
           "at_round",
-          "at_offset",
           "from_candidate",
           "trigger",
           "direction",
@@ -7709,20 +7703,8 @@
       },
       "HierarchySpan": {
         "additionalProperties": false,
-        "description": "When an entry opened, last moved and closed.",
+        "description": "When an entry opened and last moved.",
         "properties": {
-          "closed_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null while the entry's run has not ended.",
-            "title": "Closed At"
-          },
           "last_at": {
             "description": "The newest activity under the entry.",
             "title": "Last At",
@@ -7735,8 +7717,7 @@
         },
         "required": [
           "opened_at",
-          "last_at",
-          "closed_at"
+          "last_at"
         ],
         "title": "HierarchySpan",
         "type": "object"
@@ -7745,18 +7726,6 @@
         "additionalProperties": false,
         "description": "One number an entry shows, worded by the server in the order it is served.",
         "properties": {
-          "amount": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The number `value` words, for a meter's geometry only: never re-worded and never re-ranked. Null where `value` words no number.",
-            "title": "Amount"
-          },
           "key": {
             "$ref": "#/components/schemas/StatKey"
           },
@@ -7786,8 +7755,7 @@
           "key",
           "label",
           "value",
-          "sub",
-          "amount"
+          "sub"
         ],
         "title": "HierarchyStat",
         "type": "object"
