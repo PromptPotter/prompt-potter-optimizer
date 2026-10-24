@@ -21,6 +21,18 @@ Your work lives in `.promptpotter/`: `campaigns/{campaign_id}/` is one campaign 
 - **Campaign** — `campaign_id = {dataset}__{rand6_hex}`, minted fresh per `new`, a nested name's `/` written `.` (`bbh.word_sorting__…`), which no name may hold. `campaign.json` carries its `declaration` (the run it was minted to make — only the keys a layer set) and the `bench_defaults_pin` under it, `root_content_hash` (resume's drift check, which names a moved default), `treatment` (the optimizer it runs, its manifest digest the optimizer's defaults — [`../architecture.md`](../architecture.md) § Three identities) and, `purpose` (`optimize`, or `compare` naming the head-to-head arm it runs under — § The controlled comparison there); none is the id.
 - **Cycle** — `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_` on branches). Path resolution is always `(campaign_id, cycle_id)`.
 
+### The hierarchy address
+
+Every served entry (`GET /hierarchy`, [`../specs/frontend-surface-contract.md`](../specs/frontend-surface-contract.md) § The served hierarchy) is keyed by an address the server mints and never renames:
+
+```
+campaign := [inside "~"] campaign_id                 bbeh__20261024-091500
+course   := campaign "::" cycle_id                   bbeh__20261024-091500::cycle_7f3a
+inside   := course ("~" course)*                     the L4 sandbox chain, the `?descend=` wire byte-exact
+```
+
+One minter, `domain/cycle_paths.py::hierarchy_address`, and **a course's address IS its encoded `CyclePath`** (`encode_cycle_path`, `webapp/lib/ids.ts::encodeCyclePath`), so the webapp mints none: it reads `address` and decodes a course's where a route wants typed hops. A cycle directory is never renamed, so a retired branch keeps its address for ever — which is what makes it the key of an open set, a list and an ETag. **A fork is stored as a sibling cycle and served as a child course of its campaign**, its `facts.spawn` naming the event it was born at: the parent course, the round and ledger offset of the cut, the candidate, the trigger and the direction (`CycleIndex` + `domain/run_records.py::ForkSpec`).
+
 **There is no Session tier** — owned by [`../architecture.md`](../architecture.md) § A campaign has one root cycle. `active_session.json` is a pointer at your latest launch and holds nothing a cycle needs; there is no `sessions/` tree.
 
 ## Active session pointer

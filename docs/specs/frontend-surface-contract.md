@@ -168,6 +168,48 @@ invariants:
                       menu that is its own selection can never offer back an unticked value.'
 ```
 
+## The served hierarchy
+
+**Every surface that lists, switches, docks or heads a run renders ONE served entry shape** —
+`domain/hierarchy.py::HierarchyEntry`, minted by `application/hierarchy.py` alone and read by
+`GET /hierarchy` (the webapp's `lib/registry.tsx`, the `cycles` verb). An envelope every level
+shares (`address`, `parent`, `label`, `lede`, `caveat`, `tags`, `stats`, `child_count`, `children`)
+plus `facts` per level, discriminated on `level`. A generic row, hover card, switcher entry or dock chip
+reads the envelope and never opens `facts`; `facts` are typed inputs for a level-specific pane or a
+route argument, and a `facts` field no reader names is deleted (`scripts/complexity_ledger.py::BASELINE`
+`p_served` is the ratchet). The address grammar is
+[`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address.
+
+- **Tags and stats are the rendering, worded on the server, in served order.** The θ clause on an
+  accuracy stat, the "≥" on a floored bill and the "of 10" on a rounds count are worded at one site each.
+  <!-- probe: git grep -cE "rounds are won on" -- promptpotter/application/hierarchy.py == 1 -->
+  `stats[0]` is the row's headline. Grouping served rows, filtering on a served tag and formatting a
+  served time are layout; wording a number, ordering stats or deriving a state is not, and none
+  survives in `webapp/lib/derivations` for an entry.
+  <!-- probe: git grep -cE "buildForest|RunGroup|OriginGroup|campaignCard|courseStats|unitDisplayName|campaignLineParts" -- webapp == 0 -->
+- **A tag is asked with two predicates**, `hasTag(entry, kind)` and `tagValue(entry, kind)`
+  (`webapp/lib/hierarchy.ts`), and a bool served beside a tag is the duplicate this forbids. **One
+  declared exception, `mint`**: code branches on a course's kind exhaustively, a tag's value is an
+  untyped string, so the course builder mints the kind once and serves it twice — typed as
+  `facts.mint`, worded as the tag. Code reads the fact; the tag is worn.
+  <!-- probe: git grep -cE "tagValue\(.*mint" -- webapp == 0 -->
+- **One run-state derivation.** `HierarchyState.of` packages `derive_run_state` for a served entry,
+  once per course and once more for a line course with no mint record.
+  <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpotter == 2 -->
+  A campaign's `state` IS its line course's (`CampaignStore.line_holder`), so the two cannot disagree.
+  `RunStatus.of` has three callers until the dashboard folds into it.
+  <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 3 -->
+  Run state is read at the head always: a moment replays the record, never a process.
+- **A campaign is always served.** A line course with no `CycleIndex` yet still lists its campaign,
+  its state from `HierarchyState.of(run, None, …)`, its line stats absent and its `caveat` saying so —
+  dropping it would be a campaign the operator owns and no listing shows, with nothing raised.
+- **The producer is served without its clocks** (`HierarchyProducer`). The listing answers 304 on
+  a version that moves on writes and on the producer's beat edge, so a seconds count would freeze
+  at the last 200; durations stay on the dashboard read, which polls the viewed cycle.
+- **One poll.** The registry is one `hierarchyRead()` over every lifecycle; the sidebar's filter is
+  layout over `facts.lifecycle`, so an address resolves whatever the filter lists.
+  <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/registry.tsx == 1 -->
+
 ## The two blocking gates
 
 The only surfaces with a block here, because their constraints are legal and ordering rather
