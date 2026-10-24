@@ -13,6 +13,7 @@ import type {
   HierarchyCourse,
   HierarchyRound,
   HierarchyState,
+  HierarchyStep,
   HierarchyTag,
   LifetimeSpend,
   LiveCandidate,
@@ -27,7 +28,24 @@ import type {
   RunStanding,
   ServedDashboard,
   ServedRound,
+  StepFacts,
 } from "@/lib/api/types";
+
+// A step as served: its address and label are the server's, minted from its course and facts.
+export function hierarchyStep(parent: string, facts: StepFacts): HierarchyStep {
+  return {
+    address: `${parent}/@${facts.offset}`,
+    parent,
+    label: facts.activity.label,
+    lede: null,
+    caveat: null,
+    tags: [],
+    stats: [],
+    children: [],
+    level: "step",
+    facts,
+  };
+}
 
 export function pairedReading(
   lift: number,
@@ -217,7 +235,6 @@ export function hierarchyCandidate(
     caveat: null,
     tags: [],
     stats: [],
-    child_count: over.children?.length ?? 0,
     children: [],
     level: "candidate",
     ...over,
@@ -261,7 +278,6 @@ export function roundsOf(
       caveat: null,
       tags: [],
       stats: [],
-      child_count: children.length,
       children,
       level: "round",
       facts: { round, elects_on: "ability", reference: null },
@@ -338,7 +354,6 @@ export function hierarchyCourse(
     state: hierarchyState(),
     stats: [],
     span: { opened_at: "", last_at: "", closed_at: null },
-    child_count: 0,
     children: [],
     level: "course",
     facts: {
@@ -369,7 +384,6 @@ export function hierarchyCampaign(
     state: hierarchyState(),
     stats: [],
     span: { opened_at: "", last_at: "", closed_at: null },
-    child_count: 0,
     children: [],
     level: "campaign",
     facts: {

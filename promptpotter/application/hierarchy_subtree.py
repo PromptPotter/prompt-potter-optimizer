@@ -15,8 +15,10 @@ from promptpotter.domain.cycle_paths import (
     UNIT_SEP,
     CycleHop,
     CyclePath,
+    candidate_address,
     decode_cycle_path,
     encode_cycle_path,
+    round_address,
 )
 from promptpotter.domain.hierarchy import (
     CandidateFacts,
@@ -58,16 +60,6 @@ from promptpotter.infrastructure.store.stores import (
     resolve_cycle_path,
 )
 from promptpotter.shared.errors import NotFoundError
-
-_ROUND_SEP = "/r"
-
-
-def candidate_address(course: str, round_: int, key: str) -> str:
-    return f"{course}{_ROUND_SEP}{round_}/{key}"
-
-
-def _round_address(course: str, round_: int) -> str:
-    return f"{course}{_ROUND_SEP}{round_}"
 
 
 def _campaign_of(address: str) -> tuple[CyclePath, str]:
@@ -373,14 +365,13 @@ class _Build:
             ]
             rounds.append(
                 HierarchyRound(
-                    address=_round_address(course.entry.address, rnd.round),
+                    address=round_address(course.entry.address, rnd.round),
                     parent=course.entry.address,
                     label=f"Round {rnd.round}",
                     lede=None if rnd.election is None else rnd.election.verdict_reason,
                     caveat=None,
                     tags=[],
                     stats=[],
-                    child_count=len(members),
                     children=list(members),
                     facts=RoundFacts(
                         round=rnd.round,
@@ -394,7 +385,6 @@ class _Build:
         spawn = course.entry.facts.spawn
         return course.entry.model_copy(
             update={
-                "child_count": len(rounds),
                 "children": rounds,
                 "facts": course.entry.facts.model_copy(
                     update={
@@ -455,7 +445,7 @@ class _Build:
         )
         return HierarchyCandidate(
             address=c.address,
-            parent=_round_address(course.entry.address, c.round),
+            parent=round_address(course.entry.address, c.round),
             label=reading.arm.label,
             lede=_lede(c),
             caveat=None
@@ -463,7 +453,6 @@ class _Build:
             else f"{THETA_CAVEAT_INFO[caveat].head}. {THETA_CAVEAT_INFO[caveat].body}",
             tags=tags,
             stats=_candidate_stats(reading, elects_on),
-            child_count=len(c.inner),
             children=list(c.inner),
             facts=facts,
         )

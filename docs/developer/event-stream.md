@@ -33,7 +33,7 @@ data: {"kind": "phase", "cycle_id": "cycle_abc123",
 | `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, the cycle's served dashboard. |
 | `activity` | object | The run's current state as of this frame: `status`, the one line saying what it is doing, `notices`, what was said that still holds, and `decision`, the choice it is held on — worded, with each answer as the command to send. Whole on every frame — see § Current state. |
 
-Adding a new kind starts at `ProjectionKind` (closed-set policy — security box 1) in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or `_PROJECTION_ONLY`, for a kind the tail synthesizes rather than reads), then its answer in `domain/activity.py` — a case in `ActivityFeed._item` for the line it reads as, or a place in `SilentRecord` if no line is ever made of it, which is what `/ray` drops on. The record class raises at import if skipped or placed twice, the answer fails the type check, and `gate.py --only specs` refuses the spec until it is regenerated.
+Adding a new kind starts at `ProjectionKind` (closed-set policy — security box 1) in [`promptpotter/domain/projection_envelope.py`](../../promptpotter/domain/projection_envelope.py), then the record class on `CycleRecord` (or `_PROJECTION_ONLY`, for a kind the tail synthesizes rather than reads), then its answer in `domain/activity.py` — a case in `ActivityFeed._item` for the line it reads as, or a place in `SilentRecord` if no line is ever made of it, which is what the step window drops on. The record class raises at import if skipped or placed twice, the answer fails the type check, and `gate.py --only specs` refuses the spec until it is regenerated.
 
 ## Subscription contract — snapshot-then-tail
 
@@ -61,15 +61,15 @@ A subscriber wants to know what the run is doing now, not to replay its log. So 
 
 The `Last-Event-ID` header is reserved for a future profile's resume-from-sequence semantics (declared in the AsyncAPI HTTP binding, not yet honored by the handler).
 
-## History lives on the ray, not here
+## History lives in the step window, not here
 
 This stream has **no replay**, by construction: `snapshot_frame` parks the tail one past the offset its dashboard is a fold of (`at_offset`) — at end-of-file only for a warming shape, which carries none — so a subscriber starts where its snapshot ends and never receives what came before.
 
-That is correct, and it is correct because history has its own home — `GET /campaigns/{c}/cycles/{cy}/ray`, the **time-ray**: one merged chronology across a course, its forks, and its inner runs, windowed and paged backwards. Its items carry the same reader's line for that record (`activity`) and a `path` the envelope cannot carry (an inner `cycle_id` repeats across sibling sandboxes, so it does not identify a cycle in a family).
+That is correct, and it is correct because history has its own home — `GET /hierarchy/{course}/@`, the **step window**: one merged chronology across a course, its forks, and its inner runs, windowed and paged backwards. Each `HierarchyStep` carries the same reader's line for that record (`facts.activity`) and, as `parent`, the course address the envelope cannot carry (an inner `cycle_id` repeats across sibling sandboxes, so it does not identify a cycle in a family).
 
-**The difference in SHAPE between the two follows from the difference in scope.** This stream hands over one record at a time as it lands, so it hands over the whole thing; a ray window is up to `MAX_RAY_LIMIT` records at once, so it serves the reading and never the record — each record's bulk (an LLM's prompt and response, a sample's query and prediction, a phase's whole view) stays with the surface built for it, every one of which is fetched one round at a time. The reader is a validator input on the ray's ETag for the same reason the drop set is: it decides the body and it moves on deploy rather than on a write.
+**The difference in SHAPE between the two follows from the difference in scope.** This stream hands over one record at a time as it lands, so it hands over the whole thing; a step window is up to `MAX_STEP_LIMIT` records at once, so it serves the reading and never the record — each record's bulk (an LLM's prompt and response, a sample's query and prediction, a phase's whole view) stays with the surface built for it, every one of which is fetched one round at a time. The reader is a validator input on the window's ETag for the same reason the drop set is: it decides the body and it moves on deploy rather than on a write.
 
-**Do not add a `since=` parameter to this stream.** A second replay mechanism is exactly what the ray exists to avoid. The two objects have different scopes and that is deliberate: the tail is per-cycle and live, the ray is family-wide and historical. A client joins them on `(path, offset)` — a live frame's `sequence` IS a ray item's `offset`, because both are the physical line index of that cycle's own ledger file.
+**Do not add a `since=` parameter to this stream.** A second replay mechanism is exactly what the step window exists to avoid. The two objects have different scopes and that is deliberate: the tail is per-cycle and live, the window is family-wide and historical. A client joins them on `(course, offset)` — a live frame's `sequence` IS a step's `facts.offset`, because both are the physical line index of that cycle's own ledger file.
 
 ## Writer / reader split
 

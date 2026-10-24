@@ -1,7 +1,7 @@
-import type { ActivityItem, ProducerReading, RayItem } from "@/lib/api/types";
+import type { ActivityItem, HierarchyStep, ProducerReading } from "@/lib/api/types";
 import type { RunPhase, RunStatus } from "@/lib/api/types.generated";
 import { fmtDuration } from "@/lib/format";
-import { encodeCyclePath, type CyclePath } from "@/lib/ids";
+import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { STATUS_MARK, phaseParked, phaseWalks, type RunPhaseTone } from "@/lib/run-phase";
 
 export interface RayStep {
@@ -12,7 +12,7 @@ export interface RayStep {
   // In `path`'s OWN ledger: below the viewed course it is an address to navigate to, never a moment to fold to.
   offset: number;
   ts: string;
-  // served: `RayItem.gap_before_s`, heartbeats included
+  // served: `StepFacts.gap_before_s`, heartbeats included
   gapBeforeS: number;
   cluster: number;
   activity: ActivityItem;
@@ -20,29 +20,21 @@ export interface RayStep {
   arm: string | null;
 }
 
-function toPath(item: RayItem): CyclePath {
-  return item.path.map((h) => ({ campaignId: h.campaign_id, cycleId: h.cycle_id }));
-}
-
 // Only steps BELOW `rootPathKey` cluster: the root's own events are the story being told.
-export function raySteps(items: readonly RayItem[], rootPathKey: string): RayStep[] {
+export function raySteps(served: readonly HierarchyStep[], rootPathKey: string): RayStep[] {
   const steps: RayStep[] = [];
 
-  for (const item of items) {
-    // A bare heartbeat ends a silence without becoming a step.
-    const activity = item.activity;
-    if (!activity) continue;
-
-    const path = toPath(item);
-    const pathKey = encodeCyclePath(path);
+  for (const step of served) {
+    const { activity, offset, ts, gap_before_s } = step.facts;
+    const pathKey = step.parent;
     const prev = steps[steps.length - 1];
     const address = { activity, round: activity.round, arm: activity.arm };
 
     if (prev && prev.pathKey === pathKey && pathKey !== rootPathKey) {
       steps[steps.length - 1] = {
         ...prev,
-        offset: item.offset,
-        ts: item.ts,
+        offset,
+        ts,
         cluster: prev.cluster + 1,
         ...address,
       };
@@ -50,12 +42,12 @@ export function raySteps(items: readonly RayItem[], rootPathKey: string): RaySte
     }
 
     steps.push({
-      key: `${pathKey}#${item.offset}`,
-      path,
+      key: step.address,
+      path: pathOfAddress(pathKey),
       pathKey,
-      offset: item.offset,
-      ts: item.ts,
-      gapBeforeS: item.gap_before_s,
+      offset,
+      ts,
+      gapBeforeS: gap_before_s,
       cluster: 1,
       ...address,
     });
@@ -73,7 +65,7 @@ export interface RayHead {
 
 export function rayHead(
   steps: readonly RayStep[],
-  items: readonly RayItem[],
+  served: readonly HierarchyStep[],
   run: { run_phase: RunPhase; status: RunStatus; producer: ProducerReading } | null,
   rootPathKey: string,
   // served: `dashboard.json::waiting_on`
@@ -110,10 +102,8 @@ export function rayHead(
   }
 
   // The root's newest line still reads `running`: its call is open, and a child holds the head.
-  const rootNewest = items.findLast(
-    (i) => i.activity !== null && encodeCyclePath(toPath(i)) === rootPathKey,
-  );
-  if (rootNewest?.activity?.kind === "running" && target) {
+  const rootNewest = served.findLast((s) => s.parent === rootPathKey);
+  if (rootNewest?.facts.activity.kind === "running" && target) {
     return {
       tone: "quiet",
       wedged: false,

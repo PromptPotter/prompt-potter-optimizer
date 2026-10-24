@@ -27,7 +27,7 @@ class _QuietPolls(logging.Filter):
     _POLLED = re.compile(
         r"^/api/v1/(hierarchy(/[^?]*)?|cycles|campaigns|machine-status|sessions/active|auth/(quota-status|me))(\?|$)"
     )
-    _SUFFIX = ("/dashboard", "/health", "/ray", "/cells")
+    _SUFFIX = ("/dashboard", "/health", "/cells")
     _QUIET_STATUS = frozenset({200, 304})
 
     def filter(self, record: logging.LogRecord) -> bool:

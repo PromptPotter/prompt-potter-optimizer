@@ -4,7 +4,6 @@ from promptpotter.presentation.api.routers.campaigns import (
     evidence,
     files,
     manifests,
-    ray,
     storage,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
@@ -16,6 +15,5 @@ __all__ = [
     "evidence",
     "files",
     "manifests",
-    "ray",
     "storage",
 ]

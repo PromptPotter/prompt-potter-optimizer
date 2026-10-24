@@ -13,9 +13,9 @@ from typing import Any, NamedTuple
 
 from promptpotter.domain import activity
 from promptpotter.domain.activity import ActivityFeed, ActivityItem
-from promptpotter.domain.cycle_paths import CyclePath, encode_cycle_path
+from promptpotter.domain.cycle_paths import CyclePath, encode_cycle_path, step_address
+from promptpotter.domain.hierarchy import MAX_STEP_LIMIT, HierarchyStep, HierarchySteps, StepFacts
 from promptpotter.domain.projection_envelope import RECORD_KINDS, bearing_record
-from promptpotter.domain.ray import MAX_RAY_LIMIT, RayItem, RayResponse
 from promptpotter.domain.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
@@ -56,7 +56,7 @@ class _Tail(NamedTuple):
 
 class _RayTail:
     def __init__(
-        self, limit: int = MAX_RAY_LIMIT, path_and_bound: tuple[str, RayCursor] | None = None
+        self, limit: int = MAX_STEP_LIMIT, path_and_bound: tuple[str, RayCursor] | None = None
     ) -> None:
         self._below = path_and_bound
         # Fed every bearing record, kept or not: one record declares the round of those after it.
@@ -81,7 +81,7 @@ class _RayTail:
                 return
         else:
             self._last_epoch, self._last_ts = own, str(line.get("timestamp"))
-        # A bare heartbeat rides unread: it is what ends a silence on the ray.
+        # A bare heartbeat is kept to end a silence, then served as no step.
         if item is None and not isinstance(record, LLMCallProgressRecord):
             return
         assert self._last_epoch is not None
@@ -159,7 +159,7 @@ def ray_validator_parts(
 
 def build_family_ray(
     courses: list[FamilyCourse], *, limit: int, before: RayCursor | None
-) -> RayResponse:
+) -> HierarchySteps:
     pool: list[tuple[RayCursor, CyclePath, _Raw]] = []
     truncated = False
 
@@ -179,19 +179,24 @@ def build_family_ray(
         truncated = True
 
     epochs = [row.epoch for _key, _path, row in pool]
-    items = [
-        RayItem(
-            path=list(path),
-            offset=row.offset,
-            ts=row.ts,
-            gap_before_s=gap,
-            activity=row.activity,
+    steps = [
+        HierarchyStep(
+            address=step_address(key, row.offset),
+            parent=key,
+            label=row.activity.label,
+            lede=None,
+            caveat=None,
+            tags=[],
+            stats=[],
+            children=[],
+            facts=StepFacts(offset=row.offset, ts=row.ts, gap_before_s=gap, activity=row.activity),
         )
-        for (_key, path, row), gap in zip(
+        for ((_epoch, key, _offset), _path, row), gap in zip(
             pool, [0.0, *(b - a for a, b in pairwise(epochs))], strict=True
         )
+        if row.activity is not None
     ]
-    return RayResponse(
-        items=items,
+    return HierarchySteps(
+        steps=steps,
         cursor_prev=encode_ray_cursor(pool[0][0]) if truncated and pool else None,
     )

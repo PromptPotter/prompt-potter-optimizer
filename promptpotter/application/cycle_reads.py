@@ -16,9 +16,9 @@ from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.export import ExportTier, ExportVersionError, PromptExport
+from promptpotter.domain.hierarchy import HierarchySteps
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.ray import RayResponse
 from promptpotter.domain.results import (
     ArmReading,
     ArmState,
@@ -215,7 +215,7 @@ class FamilyRay:
     def validator(self) -> tuple[object, ...]:
         return ray_validator_parts(self.courses, limit=self.limit, before=self.before)
 
-    def window(self) -> RayResponse:
+    def window(self) -> HierarchySteps:
         return build_family_ray(self.courses, limit=self.limit, before=self.cursor)
 
 

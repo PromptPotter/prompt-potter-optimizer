@@ -63,6 +63,18 @@ def hierarchy_address(inside: CyclePath, campaign_id: str, cycle_id: str | None 
     return HOP_SEP.join((*((encode_cycle_path(inside),) if inside else ()), campaign_id))
 
 
+def round_address(course: str, round_: int) -> str:
+    return f"{course}/r{round_}"
+
+
+def candidate_address(course: str, round_: int, key: str) -> str:
+    return f"{round_address(course, round_)}/{key}"
+
+
+def step_address(course: str, offset: int) -> str:
+    return f"{course}/@{offset}"
+
+
 def command_address(path: CyclePath) -> dict[str, str]:
     root, *tail = path
     address = {"campaign_id": root.campaign_id, "cycle_id": root.cycle_id}

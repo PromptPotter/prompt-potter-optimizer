@@ -170,15 +170,6 @@ def _course_spans(
     return [LedgerSpan(layout.ledger) if moment is None else moment.span(layout.ledger)]
 
 
-def own_round_count(stores: Stores, hop: CycleHop, index: CycleIndex) -> int:
-    """A course's rounds on its own ledger, closed and open: the rounds its subtree serves."""
-    # A root's chain is its own ledger, so its index already counted them.
-    if index.parent is None:
-        return len(index.rounds) + len(index.open_rounds)
-    standing = scan_standing_rounds(_course_spans(stores, hop, index, moment=None))
-    return len({rnd for rnd, _ in standing.arms} | set(standing.rounds))
-
-
 _NO_ELECTION = ArmElection(held=False, selected=False, leading=False, crown=None)
 
 

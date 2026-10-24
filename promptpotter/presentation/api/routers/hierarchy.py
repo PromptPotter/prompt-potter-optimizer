@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request, Response
 
+from promptpotter.application.cycle_reads import open_family_ray
 from promptpotter.application.hierarchy import hierarchy_version, list_hierarchy
 from promptpotter.application.hierarchy_subtree import (
     hierarchy_subtree,
@@ -13,7 +14,13 @@ from promptpotter.application.hierarchy_subtree import (
 from promptpotter.application.mask.record import parse_lens, parse_sample_ids
 from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.cycle_paths import decode_cycle_path
-from promptpotter.domain.hierarchy import HierarchyEntry, HierarchyResponse
+from promptpotter.domain.hierarchy import (
+    DEFAULT_STEP_LIMIT,
+    MAX_STEP_LIMIT,
+    HierarchyEntry,
+    HierarchyResponse,
+    HierarchySteps,
+)
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 
@@ -55,6 +62,28 @@ def get_hierarchy(
             depth=depth,
         ),
     )
+
+
+# Declared before the subtree route, whose `{address:path}` would otherwise take the `/@` too.
+@hierarchy_router.get(
+    "/hierarchy/{address:path}/@", response_model=HierarchySteps, tags=["Hierarchy"]
+)
+def get_hierarchy_steps(
+    request: Request,
+    stores: StoresDep,
+    address: str,
+    limit: int = Query(DEFAULT_STEP_LIMIT, ge=1, le=MAX_STEP_LIMIT),
+    before: str | None = Query(None),
+) -> Response:
+    """The course's chronology: its steps, its forks' and its inner runs', merged by time.
+
+    The replay endpoint: the SSE tail always seeks to EOF, so history has no other home.
+    Windowed newest-first, delivered oldest-first; ``before`` is the opaque ``cursor_prev`` of a prior
+    response (absent = the head window, malformed = 400, never a 304). Consecutive windows page back
+    without overlap or hole; revalidate any window with ``If-None-Match``.
+    """
+    steps = open_family_ray(stores, decode_cycle_path(address), limit=limit, before=before)
+    return conditional_json(request, steps.validator, steps.window)
 
 
 @hierarchy_router.get(

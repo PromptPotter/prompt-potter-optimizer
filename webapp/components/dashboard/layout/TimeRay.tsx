@@ -17,10 +17,10 @@ export const TimeRay = memo(function TimeRay() {
   const { index } = useViewedLineage();
   const { dash } = useCycleStream();
   const { pick } = useSelectNode();
-  const { items, loaded, failed, hasMore, loadOlder } = useTimeRay();
+  const { steps: served, loaded, failed, hasMore, loadOlder } = useTimeRay();
 
   const rootKey = viewedPath ? encodeCyclePath(viewedPath) : "";
-  const steps = useMemo(() => raySteps(items, rootKey), [items, rootKey]);
+  const steps = useMemo(() => raySteps(served, rootKey), [served, rootKey]);
 
   const trackRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -37,12 +37,12 @@ export const TimeRay = memo(function TimeRay() {
     () =>
       rayHead(
         steps,
-        items,
+        served,
         runPhase && status && producer ? { run_phase: runPhase, status, producer } : null,
         rootKey,
         waitingOn,
       ),
-    [steps, items, runPhase, status, producer, rootKey, waitingOn],
+    [steps, served, runPhase, status, producer, rootKey, waitingOn],
   );
 
   if (!viewedPath || (!loaded && steps.length === 0)) return null;

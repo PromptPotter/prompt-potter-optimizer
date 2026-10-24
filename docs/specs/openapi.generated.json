@@ -7173,11 +7173,6 @@
             "description": "What could not be read; null where all was.",
             "title": "Caveat"
           },
-          "child_count": {
-            "description": "A campaign's courses; a course's rounds on its own ledger, closed and open; a round's candidates; a candidate's inner campaigns.",
-            "title": "Child Count",
-            "type": "integer"
-          },
           "children": {
             "description": "A listing serves a campaign's courses to `?depth=` and nothing under them; the subtree read serves every level, courses root first, candidates in slot order.",
             "items": {
@@ -7276,7 +7271,6 @@
           "caveat",
           "tags",
           "stats",
-          "child_count",
           "children",
           "state",
           "span",
@@ -7305,11 +7299,6 @@
             ],
             "description": "What could not be read; null where all was.",
             "title": "Caveat"
-          },
-          "child_count": {
-            "description": "A campaign's courses; a course's rounds on its own ledger, closed and open; a round's candidates; a candidate's inner campaigns.",
-            "title": "Child Count",
-            "type": "integer"
           },
           "children": {
             "description": "A listing serves a campaign's courses to `?depth=` and nothing under them; the subtree read serves every level, courses root first, candidates in slot order.",
@@ -7403,7 +7392,6 @@
           "caveat",
           "tags",
           "stats",
-          "child_count",
           "children",
           "facts"
         ],
@@ -7430,11 +7418,6 @@
             ],
             "description": "What could not be read; null where all was.",
             "title": "Caveat"
-          },
-          "child_count": {
-            "description": "A campaign's courses; a course's rounds on its own ledger, closed and open; a round's candidates; a candidate's inner campaigns.",
-            "title": "Child Count",
-            "type": "integer"
           },
           "children": {
             "description": "A listing serves a campaign's courses to `?depth=` and nothing under them; the subtree read serves every level, courses root first, candidates in slot order.",
@@ -7534,7 +7517,6 @@
           "caveat",
           "tags",
           "stats",
-          "child_count",
           "children",
           "state",
           "span",
@@ -7626,11 +7608,6 @@
             ],
             "description": "What could not be read; null where all was.",
             "title": "Caveat"
-          },
-          "child_count": {
-            "description": "A campaign's courses; a course's rounds on its own ledger, closed and open; a round's candidates; a candidate's inner campaigns.",
-            "title": "Child Count",
-            "type": "integer"
           },
           "children": {
             "description": "A listing serves a campaign's courses to `?depth=` and nothing under them; the subtree read serves every level, courses root first, candidates in slot order.",
@@ -7724,7 +7701,6 @@
           "caveat",
           "tags",
           "stats",
-          "child_count",
           "children",
           "facts"
         ],
@@ -7870,6 +7846,149 @@
           "intervened"
         ],
         "title": "HierarchyState",
+        "type": "object"
+      },
+      "HierarchyStep": {
+        "additionalProperties": false,
+        "description": "One ledger record that reads as a line, under its own course; served in a window only.",
+        "properties": {
+          "address": {
+            "description": "Server-minted and stable: the key of every row and every open set. A course's is its `CyclePath` on the wire (`encodeCyclePath`).",
+            "title": "Address",
+            "type": "string"
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What could not be read; null where all was.",
+            "title": "Caveat"
+          },
+          "children": {
+            "description": "A listing serves a campaign's courses to `?depth=` and nothing under them; the subtree read serves every level, courses root first, candidates in slot order.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "campaign": "#/components/schemas/HierarchyCampaign",
+                  "candidate": "#/components/schemas/HierarchyCandidate",
+                  "course": "#/components/schemas/HierarchyCourse",
+                  "round": "#/components/schemas/HierarchyRound"
+                },
+                "propertyName": "level"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HierarchyCampaign"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCourse"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyRound"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCandidate"
+                }
+              ]
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/StepFacts"
+          },
+          "label": {
+            "description": "The display name.",
+            "title": "Label",
+            "type": "string"
+          },
+          "lede": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one sentence under the title: the selection line.",
+            "title": "Lede"
+          },
+          "level": {
+            "const": "step",
+            "default": "step",
+            "title": "Level",
+            "type": "string"
+          },
+          "parent": {
+            "description": "The course whose own ledger holds the record.",
+            "title": "Parent",
+            "type": "string"
+          },
+          "stats": {
+            "description": "Server-ordered; `stats[0]` is the headline.",
+            "items": {
+              "$ref": "#/components/schemas/HierarchyStat"
+            },
+            "title": "Stats",
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyTag"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "parent",
+          "label",
+          "lede",
+          "caveat",
+          "tags",
+          "stats",
+          "children",
+          "facts"
+        ],
+        "title": "HierarchyStep",
+        "type": "object"
+      },
+      "HierarchySteps": {
+        "additionalProperties": false,
+        "description": "One window of a family's chronology, oldest-first: a course, its forks and inner runs.",
+        "properties": {
+          "cursor_prev": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque cursor for the window immediately older than this one; null when this window already reaches the family's beginning.",
+            "title": "Cursor Prev"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyStep"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps",
+          "cursor_prev"
+        ],
+        "title": "HierarchySteps",
         "type": "object"
       },
       "HierarchyTag": {
@@ -12560,85 +12679,6 @@
         "title": "RankedEdit",
         "type": "object"
       },
-      "RayItem": {
-        "additionalProperties": false,
-        "description": "One ray event, addressed by ``path``: a bare ``cycle_id`` is ambiguous in an L4 family.",
-        "properties": {
-          "activity": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ActivityItem"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The record's reading — its line, and the round and candidate it is about. Null on a bare heartbeat alone: the process proved alive and there is nothing to read, so it ends a silence without becoming a step. A `running` item with no later reading on its path is a call still open."
-          },
-          "gap_before_s": {
-            "description": "Seconds since the item before it in this window; 0 on the window's first.",
-            "minimum": 0.0,
-            "title": "Gap Before S",
-            "type": "number"
-          },
-          "offset": {
-            "description": "Physical 0-based line index in this cycle's own ledger — the same space as ProjectionEnvelope.sequence, so a live SSE frame de-duplicates against a ray item on (path, offset). SPARSE: a record no line is made of rides nowhere, so consecutive items skip offsets; a gap between ray offsets is not a missing record.",
-            "minimum": 0.0,
-            "title": "Offset",
-            "type": "integer"
-          },
-          "path": {
-            "description": "The cycle this record belongs to, root → leaf — THE address.",
-            "items": {
-              "$ref": "#/components/schemas/CycleHop"
-            },
-            "title": "Path",
-            "type": "array"
-          },
-          "ts": {
-            "description": "Effective timestamp: the record's own, raised to its file predecessor's when the two invert (records are stamped at construction but appended later).",
-            "title": "Ts",
-            "type": "string"
-          }
-        },
-        "required": [
-          "path",
-          "offset",
-          "ts",
-          "gap_before_s",
-          "activity"
-        ],
-        "title": "RayItem",
-        "type": "object"
-      },
-      "RayResponse": {
-        "additionalProperties": false,
-        "description": "One ordered window of a family's chronology, oldest-first.",
-        "properties": {
-          "cursor_prev": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Opaque cursor for the window immediately older than this one; null when this window already reaches the family's beginning.",
-            "title": "Cursor Prev"
-          },
-          "items": {
-            "description": "The window, oldest-first: every record a line was read off, and each bare heartbeat between them.",
-            "items": {
-              "$ref": "#/components/schemas/RayItem"
-            },
-            "title": "Items",
-            "type": "array"
-          }
-        },
-        "title": "RayResponse",
-        "type": "object"
-      },
       "ReadingState": {
         "description": "Whether a pair was read, and the ONE reason it was not.",
         "enum": [
@@ -15138,6 +15178,40 @@
         "title": "StepCyclePayload",
         "type": "object"
       },
+      "StepFacts": {
+        "additionalProperties": false,
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/ActivityItem",
+            "description": "The record's reading. A `running` step with no later step on its course is a call still open."
+          },
+          "gap_before_s": {
+            "description": "Seconds since the record before it in this window, heartbeats included; 0 on the window's first.",
+            "minimum": 0.0,
+            "title": "Gap Before S",
+            "type": "number"
+          },
+          "offset": {
+            "description": "The line index in its course's OWN ledger — the space `?at=` and `ProjectionEnvelope.sequence` speak, so a live frame de-duplicates against a step on (course, offset). SPARSE: a record no line is made of is no step.",
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "ts": {
+            "description": "The record's own time, raised to its file predecessor's when the two invert (records are stamped at construction but appended later).",
+            "title": "Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "offset",
+          "ts",
+          "gap_before_s",
+          "activity"
+        ],
+        "title": "StepFacts",
+        "type": "object"
+      },
       "StopReason": {
         "description": "Why a cycle's run ended or paused.",
         "enum": [
@@ -17385,102 +17459,6 @@
           }
         },
         "summary": "List Cycle Files",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
-    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/ray": {
-      "get": {
-        "description": "One merged, ordered sequence of what happened across this cycle, its forks and its inner runs.\n\nIt is the replay endpoint: the SSE tail always seeks to EOF, so history has no other home.\nWindowed newest-first, delivered oldest-first; ``before`` is the opaque ``cursor_prev`` of a prior response (absent = the head window, malformed = 400, never a 304).\nConsecutive windows page back without overlap or hole; revalidate any window with ``If-None-Match``.",
-        "operationId": "get_family_ray_api_v1_campaigns__campaign_id__cycles__cycle_id__ray_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "campaign_id",
-            "required": true,
-            "schema": {
-              "title": "Campaign Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "cycle_id",
-            "required": true,
-            "schema": {
-              "title": "Cycle Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "descend",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Descend"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 200,
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "before",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Before"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RayResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Get Family Ray",
         "tags": [
           "Campaigns"
         ]
@@ -20372,6 +20350,77 @@
           }
         },
         "summary": "Get Hierarchy Subtree",
+        "tags": [
+          "Hierarchy"
+        ]
+      }
+    },
+    "/api/v1/hierarchy/{address}/@": {
+      "get": {
+        "description": "The course's chronology: its steps, its forks' and its inner runs', merged by time.\n\nThe replay endpoint: the SSE tail always seeks to EOF, so history has no other home.\nWindowed newest-first, delivered oldest-first; ``before`` is the opaque ``cursor_prev`` of a prior\nresponse (absent = the head window, malformed = 400, never a 304). Consecutive windows page back\nwithout overlap or hole; revalidate any window with ``If-None-Match``.",
+        "operationId": "get_hierarchy_steps_api_v1_hierarchy__address____get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "title": "Address",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchySteps"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Get Hierarchy Steps",
         "tags": [
           "Hierarchy"
         ]

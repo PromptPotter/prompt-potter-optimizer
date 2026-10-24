@@ -53,7 +53,7 @@ interface WorkspaceState {
   viewedCandidateId: string | null;
   following: boolean;
   tab: Tab;
-  // An offset in the viewed LEAF's ledger (`RayItem.offset`); null is the head.
+  // An offset in the viewed LEAF's ledger (`StepFacts.offset`); null is the head.
   at: number | null;
   setAt: (offset: number | null) => void;
   openCell: CellAddress | null;
