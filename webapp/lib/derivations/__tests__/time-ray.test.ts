@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { fmtGap } from "@/lib/format";
 import { raySteps, rayHead } from "@/lib/derivations";
-import type { ActivityItem, ProducerReading, RayItem } from "@/lib/api/types";
+import type { ActivityItem, HierarchyStep, ProducerReading } from "@/lib/api/types";
 import type { RunPhase, RunStatus } from "@/lib/api/types.generated";
-import { producerReading as producer } from "@/lib/test-fixtures";
+import { hierarchyStep, producerReading as producer } from "@/lib/test-fixtures";
 
 type ProducerState = ProducerReading["state"];
 
@@ -27,49 +27,33 @@ function read(over: Partial<ActivityItem>): ActivityItem {
   };
 }
 
-function item(over: Partial<RayItem> & { ts: string }): RayItem {
-  return {
-    path: [{ campaign_id: "camp", cycle_id: "cycle_root" }],
-    offset: 0,
-    gap_before_s: 0,
-    activity: read({}),
-    ...over,
-  };
-}
-
-function round(sec: number, n: number, offset: number, gap = 0): RayItem {
-  return item({
-    ts: at(sec),
-    offset,
-    gap_before_s: gap,
-    activity: read({ label: `Round ${n}`, round: n }),
+function item(
+  over: { ts: string; offset?: number; gap?: number; activity?: ActivityItem },
+  course = ROOT,
+): HierarchyStep {
+  return hierarchyStep(course, {
+    offset: over.offset ?? 0,
+    ts: over.ts,
+    gap_before_s: over.gap ?? 0,
+    activity: over.activity ?? read({}),
   });
 }
 
-function heartbeat(sec: number, offset: number, gap = 0): RayItem {
-  return item({ ts: at(sec), offset, gap_before_s: gap, activity: null });
+function round(sec: number, n: number, offset: number, gap = 0): HierarchyStep {
+  return item({ ts: at(sec), offset, gap, activity: read({ label: `Round ${n}`, round: n }) });
 }
 
-function innerRound(sec: number, n: number, offset: number, gap = 0): RayItem {
-  return item({
-    ts: at(sec),
-    offset,
-    gap_before_s: gap,
-    path: [
-      { campaign_id: "camp", cycle_id: "cycle_root" },
-      { campaign_id: "inner", cycle_id: "cycle_in" },
-    ],
-    activity: read({ label: `Round ${n}`, round: n }),
-  });
+function innerRound(sec: number, n: number, offset: number, gap = 0): HierarchyStep {
+  return item(
+    { ts: at(sec), offset, gap, activity: read({ label: `Round ${n}`, round: n }) },
+    INNER,
+  );
 }
 
 describe("raySteps", () => {
-  it("drops bare heartbeats from the steps and reads each step's served gap", () => {
-    // The server measures a gap from the item before it, heartbeats included; a step never sums them.
-    const steps = raySteps(
-      [round(0, 1, 0), heartbeat(60, 1, 60), heartbeat(110, 2, 50), round(120, 2, 3, 10)],
-      ROOT,
-    );
+  it("reads each step's served gap, never a sum of its own", () => {
+    // The server measures a gap from the record before it, heartbeats included, and serves no heartbeat.
+    const steps = raySteps([round(0, 1, 0), round(120, 2, 3, 10)], ROOT);
     expect(steps).toHaveLength(2);
     expect(steps[1]?.gapBeforeS).toBe(10);
     expect(fmtGap(steps[1]!.gapBeforeS)).toBe("");
@@ -119,7 +103,7 @@ describe("rayHead", () => {
   const RUNNING: RunStatus = { label: "served running", mark: "running" };
 
   const head = (
-    items: RayItem[],
+    items: HierarchyStep[],
     phase: RunPhase,
     reading: ProducerReading,
     status: RunStatus = RUNNING,

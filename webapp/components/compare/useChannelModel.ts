@@ -8,7 +8,6 @@ import { candidateSubject, readingPath } from "@/lib/api/reads";
 import {
   applyFlatEdits,
   candidateObserveConfig,
-  armOfId,
   candidatesAtPath,
   descendantsOf,
   indexLineage,
@@ -38,7 +37,9 @@ function useChannelHead(
 ) {
   return useMemo(() => {
     const candidates = candidatesAtPath(index, reading && readingPath(reading));
-    const own = reading ? armOfId(index, reading.candidate_id) : null;
+    // On the reading's own course: a repair re-measures an individual another course answers for.
+    const mine = reading ? candidates.filter((c) => c.facts.individual === reading.candidate_id) : [];
+    const own = mine.find((c) => c.facts.answers_for_id) ?? mine[0] ?? null;
     const winner = candidates.find((c) => c.facts.stands) ?? own;
     const latest = candidates.find((c) => c.facts.course_latest) ?? null;
     const sameAs = (a: HierarchyCandidate | null, b: HierarchyCandidate | null) =>

@@ -299,11 +299,11 @@ Forks within a family share one event stream via `CycleEventLog.inherit_from(par
 
 A family is a partial order over **cuts**, and there are exactly two operations over them: **iterate** by time (the ray — one chronology, forks interleaved with their parents) and **reduce** to one by causality (a **fold** — the inherited prefix, then the cycle's own records).
 
-A cut is `(cycle, offset)`, resolved as `domain/cycle_paths.py::Cut`. `offset` is the physical 0-based line index in that cycle's **own** ledger: the one space `ProjectionEnvelope.sequence`, `RayItem.offset`, `dashboard.json::at_offset` and `round_NNNN.json::at_offset` share, so a ray item addresses a fold directly. An inherited prefix is walked in front of that space and is not in it — which is why a cut rides `iter(own_limit=…)` and never a comparison inside the loop.
+A cut is `(cycle, offset)`, resolved as `domain/cycle_paths.py::Cut`. `offset` is the physical 0-based line index in that cycle's **own** ledger: the one space `ProjectionEnvelope.sequence`, `StepFacts.offset`, `dashboard.json::at_offset` and `round_NNNN.json::at_offset` share, so a step addresses a fold directly. An inherited prefix is walked in front of that space and is not in it — which is why a cut rides `iter(own_limit=…)` and never a comparison inside the loop.
 
 Three consequences that a surface must not re-decide:
 
-- **A cut names a `CycleHop`, not a `CyclePath`.** Descent is spent before anything folds (`resolve_cycle_path` returns a sandbox-rooted store plus the leaf), so a path would be a lie at depth ≥ 1. `CyclePath` is the WIRE address and stays `RayItem`'s.
+- **A cut names a `CycleHop`, not a `CyclePath`.** Descent is spent before anything folds (`resolve_cycle_path` returns a sandbox-rooted store plus the leaf), so a path would be a lie at depth ≥ 1. `CyclePath` is the WIRE address, and a step's `parent` is its encoding.
 - **`cycle` and `hop` ride together** because they must agree; every construction site derives one from the other through `cycle_dir_for`.
 - **Every artifact stamps the cut it is of**, so the ledger is the truth and each file is a cache: `?at=<offset>` on the dashboard route re-folds any past moment off disk, and `index.json::forked_at_offset` is a cut on the *parent*. The scans take the same offset as a `read_model.py::Moment` (`ledger_chain(cycle_dir, moment=…)`): its own ledger to that line, any other ledger of the family to its last record stamped no later — which is how the round, the cycle-scope cells and the tree replay to one instant.
 

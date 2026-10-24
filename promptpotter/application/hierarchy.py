@@ -47,7 +47,6 @@ from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
 from promptpotter.infrastructure.store.layout import sibling_kind
-from promptpotter.infrastructure.store.lineage_queries import own_round_count
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError
@@ -251,7 +250,6 @@ def course_entry(
             last_at=index.updated_at,
             closed_at=index.finished_at if run.run_phase is RunPhase.TERMINAL else None,
         ),
-        child_count=own_round_count(stores, hop, index),
         children=[],
         facts=CourseFacts(
             mint=mint,
@@ -365,7 +363,6 @@ def campaign_entry(
             last_at=max((index.updated_at for _, index in held), default=campaign.created_at),
             closed_at=None if line is None else line.span.closed_at,
         ),
-        child_count=len(held),
         children=list(courses.values()) if depth > 0 else [],
         facts=CampaignFacts(
             label=campaign.label or None,

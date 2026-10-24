@@ -11,10 +11,10 @@ import {
   type ReactNode,
 } from "react";
 import { reportIncident } from "@/lib/diagnostics";
-import { dashboardRead, isWarming, rayRead } from "./api";
+import { dashboardRead, isWarming, stepsRead } from "./api";
 import { encodeCyclePath, type CyclePath } from "./ids";
 import { useAuthGate } from "./auth-context";
-import type { ArmName, LiveCandidate, RayItem, ServedDashboard } from "./api/types";
+import type { ArmName, HierarchyStep, LiveCandidate, ServedDashboard } from "./api/types";
 import { shownData, useRead } from "./hooks/useRead";
 import { invalidateReads, readThrough } from "./read-cache";
 import { useWorkspace } from "./workspace";
@@ -83,7 +83,7 @@ const LIVE_INTERVAL_MS = 2000;
 const RAY_WINDOW = 200;
 
 export interface TimeRayState {
-  items: RayItem[];
+  steps: HierarchyStep[];
   loaded: boolean;
   failed: boolean;
   hasMore: boolean;
@@ -158,18 +158,18 @@ function useDashboard(path: CyclePath | null, unit: string | null, intervalMs: n
   return { state, replaying: at !== null };
 }
 
-const NO_ITEMS: RayItem[] = [];
+const NO_STEPS: HierarchyStep[] = [];
 
 function useRay(path: CyclePath | null, unit: string | null, intervalMs: number): TimeRayState {
   const { onAuthError } = useAuthGate();
-  const head = useRead(path ? rayRead(path, RAY_WINDOW) : null, { auth: true, intervalMs });
+  const head = useRead(path ? stepsRead(path, RAY_WINDOW) : null, { auth: true, intervalMs });
   const headWindow = shownData(head);
 
-  const [paged, setPaged] = useState<{ unit: string | null; items: RayItem[]; cursor: string | null }>(
-    { unit, items: [], cursor: null },
+  const [paged, setPaged] = useState<{ unit: string | null; steps: HierarchyStep[]; cursor: string | null }>(
+    { unit, steps: [], cursor: null },
   );
-  if (paged.unit !== unit) setPaged({ unit, items: [], cursor: null });
-  const older = paged.unit === unit ? paged.items : NO_ITEMS;
+  if (paged.unit !== unit) setPaged({ unit, steps: [], cursor: null });
+  const older = paged.unit === unit ? paged.steps : NO_STEPS;
   // A fresh head window's cursor names a boundary already paged past.
   const cursor = older.length > 0 ? paged.cursor : (headWindow?.cursor_prev ?? null);
 
@@ -177,12 +177,12 @@ function useRay(path: CyclePath | null, unit: string | null, intervalMs: number)
   const loadOlder = useCallback(() => {
     if (!path || !cursor || loadingRef.current) return;
     loadingRef.current = true;
-    const page = rayRead(path, RAY_WINDOW, cursor);
+    const page = stepsRead(path, RAY_WINDOW, cursor);
     void readThrough(page.id, page.load, new AbortController().signal)
       .then((res) =>
         setPaged((prev) =>
           prev.unit === unit
-            ? { unit, items: [...res.items, ...prev.items], cursor: res.cursor_prev }
+            ? { unit, steps: [...res.steps, ...prev.steps], cursor: res.cursor_prev }
             : prev,
         ),
       )
@@ -195,14 +195,14 @@ function useRay(path: CyclePath | null, unit: string | null, intervalMs: number)
       });
   }, [path, unit, cursor, onAuthError]);
 
-  const headItems = headWindow?.items;
-  const items = useMemo(() => [...older, ...(headItems ?? [])], [older, headItems]);
+  const headSteps = headWindow?.steps;
+  const steps = useMemo(() => [...older, ...(headSteps ?? [])], [older, headSteps]);
   const loaded = head.status === "ready" || head.status === "failed";
   const failed = head.status === "failed";
 
   return useMemo<TimeRayState>(
-    () => ({ items, loaded, failed, hasMore: cursor !== null, loadOlder }),
-    [items, loaded, failed, cursor, loadOlder],
+    () => ({ steps, loaded, failed, hasMore: cursor !== null, loadOlder }),
+    [steps, loaded, failed, cursor, loadOlder],
   );
 }
 

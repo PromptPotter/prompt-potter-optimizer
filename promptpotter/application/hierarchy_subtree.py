@@ -15,8 +15,10 @@ from promptpotter.domain.cycle_paths import (
     UNIT_SEP,
     CycleHop,
     CyclePath,
+    candidate_address,
     decode_cycle_path,
     encode_cycle_path,
+    round_address,
 )
 from promptpotter.domain.hierarchy import (
     CandidateFacts,
@@ -59,16 +61,6 @@ from promptpotter.infrastructure.store.stores import (
 )
 from promptpotter.shared.errors import NotFoundError
 
-_ROUND_SEP = "/r"
-
-
-def candidate_address(course: str, round_: int, key: str) -> str:
-    return f"{course}{_ROUND_SEP}{round_}/{key}"
-
-
-def _round_address(course: str, round_: int) -> str:
-    return f"{course}{_ROUND_SEP}{round_}"
-
 
 def _campaign_of(address: str) -> tuple[CyclePath, str]:
     """The campaign an address sits in, and the store path it is listed inside."""
@@ -77,6 +69,12 @@ def _campaign_of(address: str) -> tuple[CyclePath, str]:
     inside = decode_cycle_path(HOP_SEP.join(above))
     campaign_id, sep, _ = last.partition(UNIT_SEP)
     return inside, campaign_id if sep else last
+
+
+def _top_campaign(address: str) -> str:
+    """The top-level campaign an address sits under: what a subtree is built and versioned from."""
+    inside, campaign_id = _campaign_of(address)
+    return inside[0].campaign_id if inside else campaign_id
 
 
 @dataclass
@@ -373,14 +371,13 @@ class _Build:
             ]
             rounds.append(
                 HierarchyRound(
-                    address=_round_address(course.entry.address, rnd.round),
+                    address=round_address(course.entry.address, rnd.round),
                     parent=course.entry.address,
                     label=f"Round {rnd.round}",
                     lede=None if rnd.election is None else rnd.election.verdict_reason,
                     caveat=None,
                     tags=[],
                     stats=[],
-                    child_count=len(members),
                     children=list(members),
                     facts=RoundFacts(
                         round=rnd.round,
@@ -394,7 +391,6 @@ class _Build:
         spawn = course.entry.facts.spawn
         return course.entry.model_copy(
             update={
-                "child_count": len(rounds),
                 "children": rounds,
                 "facts": course.entry.facts.model_copy(
                     update={
@@ -455,7 +451,7 @@ class _Build:
         )
         return HierarchyCandidate(
             address=c.address,
-            parent=_round_address(course.entry.address, c.round),
+            parent=round_address(course.entry.address, c.round),
             label=reading.arm.label,
             lede=_lede(c),
             caveat=None
@@ -463,7 +459,6 @@ class _Build:
             else f"{THETA_CAVEAT_INFO[caveat].head}. {THETA_CAVEAT_INFO[caveat].body}",
             tags=tags,
             stats=_candidate_stats(reading, elects_on),
-            child_count=len(c.inner),
             children=list(c.inner),
             facts=facts,
         )
@@ -521,8 +516,7 @@ def hierarchy_subtree(
     Built from the top-level campaign down, so an inner entry's ``parent`` is the candidate that
     spawned it on every read, never re-derived for a direct one.
     """
-    top = address.partition("/")[0].split(HOP_SEP)[0].partition(UNIT_SEP)[0]
-    campaign = owned_campaign(stores, top)
+    campaign = owned_campaign(stores, _top_campaign(address))
     root = _answering(_Build(moment).campaign(stores, (), campaign, depth=MAX_COURSE_DEPTH))
     if lens is not None or samples:
         root = lensed(stores, root, lens, samples)
@@ -552,10 +546,10 @@ def subtree_moment(
 
 
 def subtree_version(stores: Stores, address: str, *, masked: bool) -> tuple[object, ...]:
-    """Stats only: every store the campaign's family spans and, under a mask, what it grades from."""
-    family = {
-        c.store.base_dir: c.store for c in iter_family_courses(stores, _root_path(stores, address))
-    }.values()
+    """Stats only: every store the TOP campaign's family spans — what the body is built from —
+    and, under a mask, what it grades from."""
+    top = (owned_campaign(stores, _top_campaign(address)).root_hop,)
+    family = {c.store.base_dir: c.store for c in iter_family_courses(stores, top)}.values()
     if not masked:
         return tuple(held.campaigns.version() for held in family)
     names = {

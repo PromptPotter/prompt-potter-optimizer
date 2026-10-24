@@ -31,7 +31,7 @@ import type {
   Evidence,
   OriginListResponse,
   QuotaStatus,
-  RayResponse,
+  HierarchySteps,
   RoundAudit,
   RoundView,
   ServedDashboard,
@@ -226,7 +226,7 @@ export function isWarming(body: DashboardBody): body is WarmingDashboard {
   return "warming_up" in body;
 }
 
-// `at` is a leaf-cycle ledger offset (`RayItem.offset`); one file, so it validates on `Last-Modified`.
+// `at` is a leaf-cycle ledger offset (`StepFacts.offset`); one file, so it validates on `Last-Modified`.
 export function dashboardRead(path: CyclePath, at: number | null): ReadDescriptor<DashboardBody> {
   const url = cyclePathUrl(path, at == null ? "/dashboard" : `/dashboard?at=${at}`);
   return {
@@ -378,13 +378,13 @@ export function subtreeRead(
   return byEtag("subtree", `${API}/hierarchy/${enc(address)}${q ? `?${q}` : ""}`);
 }
 
-// Windowed newest-first, delivered oldest-first; `before` is a prior `cursor_prev`.
-export function rayRead(
+// A course's steps, windowed newest-first, delivered oldest-first; `before` is a prior `cursor_prev`.
+export function stepsRead(
   path: CyclePath,
   limit: number,
   before: string | null = null,
-): ReadDescriptor<RayResponse> {
+): ReadDescriptor<HierarchySteps> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (before) params.set("before", before);
-  return byEtag("ray", cyclePathUrl(path, `/ray?${params.toString()}`));
+  return byEtag("steps", `${API}/hierarchy/${enc(encodeCyclePath(path))}/@?${params.toString()}`);
 }

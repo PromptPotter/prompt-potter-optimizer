@@ -2490,38 +2490,6 @@ export interface ConfigCoupling {
   active: boolean;
 }
 
-/** One ordered window of a family's chronology, oldest-first. */
-export interface RayResponse {
-  /** The window, oldest-first: every record a line was read off, and each bare
-   * heartbeat between them. */
-  items: RayItem[];
-  /** Opaque cursor for the window immediately older than this one; null when this
-   * window already reaches the family's beginning. */
-  cursor_prev: string | null;
-}
-
-/** One ray event, addressed by ``path``: a bare ``cycle_id`` is ambiguous in an L4 family. */
-export interface RayItem {
-  /** The cycle this record belongs to, root → leaf — THE address. */
-  path: CycleHop[];
-  /** Physical 0-based line index in this cycle's own ledger — the same space as
-   * ProjectionEnvelope.sequence, so a live SSE frame de-duplicates against a
-   * ray item on (path, offset). SPARSE: a record no line is made of rides
-   * nowhere, so consecutive items skip offsets; a gap between ray offsets is
-   * not a missing record. */
-  offset: number;
-  /** Effective timestamp: the record's own, raised to its file predecessor's when
-   * the two invert (records are stamped at construction but appended later). */
-  ts: string;
-  /** Seconds since the item before it in this window; 0 on the window's first. */
-  gap_before_s: number;
-  /** The record's reading — its line, and the round and candidate it is about. Null
-   * on a bare heartbeat alone: the process proved alive and there is nothing
-   * to read, so it ends a silence without becoming a step. A `running` item
-   * with no later reading on its path is a call still open. */
-  activity: ActivityItem | null;
-}
-
 export interface CampaignStorageResponse {
   /** The campaign measured */
   campaign_id: string;
@@ -2846,9 +2814,6 @@ export interface HierarchyCampaign {
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
   stats: HierarchyStat[];
-  /** A campaign's courses; a course's rounds on its own ledger, closed and open; a
-   * round's candidates; a candidate's inner campaigns. */
-  child_count: number;
   /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
    * subtree read serves every level, courses root first, candidates in slot
    * order. */
@@ -2899,9 +2864,6 @@ export interface HierarchyCourse {
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
   stats: HierarchyStat[];
-  /** A campaign's courses; a course's rounds on its own ledger, closed and open; a
-   * round's candidates; a candidate's inner campaigns. */
-  child_count: number;
   /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
    * subtree read serves every level, courses root first, candidates in slot
    * order. */
@@ -2929,9 +2891,6 @@ export interface HierarchyRound {
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
   stats: HierarchyStat[];
-  /** A campaign's courses; a course's rounds on its own ledger, closed and open; a
-   * round's candidates; a candidate's inner campaigns. */
-  child_count: number;
   /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
    * subtree read serves every level, courses root first, candidates in slot
    * order. */
@@ -2957,9 +2916,6 @@ export interface HierarchyCandidate {
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
   stats: HierarchyStat[];
-  /** A campaign's courses; a course's rounds on its own ledger, closed and open; a
-   * round's candidates; a candidate's inner campaigns. */
-  child_count: number;
   /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
    * subtree read serves every level, courses root first, candidates in slot
    * order. */
@@ -3224,6 +3180,57 @@ export interface VendorModels {
   /** Full ids, de-duplicated, routing suffix kept: it routes and bills, so it names
    * a different run. */
   models: string[];
+}
+
+/** One window of a family's chronology, oldest-first: a course, its forks and inner runs. */
+export interface HierarchySteps {
+  steps: HierarchyStep[];
+  /** Opaque cursor for the window immediately older than this one; null when this
+   * window already reaches the family's beginning. */
+  cursor_prev: string | null;
+}
+
+/** One ledger record that reads as a line, under its own course; served in a window only. */
+export interface HierarchyStep {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The course whose own ledger holds the record. */
+  parent: string;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
+   * subtree read serves every level, courses root first, candidates in slot
+   * order. */
+  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
+  level: 'step';
+  facts: StepFacts;
+}
+
+export interface StepFacts {
+  /** The line index in its course's OWN ledger — the space `?at=` and
+   * `ProjectionEnvelope.sequence` speak, so a live frame de-duplicates
+   * against a step on (course, offset). SPARSE: a record no line is made of
+   * is no step. */
+  offset: number;
+  /** The record's own time, raised to its file predecessor's when the two invert
+   * (records are stamped at construction but appended later). */
+  ts: string;
+  /** Seconds of silence before it: since the newer of the window's previous step
+   * and its own course's previous step or heartbeat. 0 where neither exists.
+   * A heartbeat takes no slot of a window, so a long open call never serves
+   * one empty. */
+  gap_before_s: number;
+  /** The record's reading. A `running` step with no later step on its course is a
+   * call still open. */
+  activity: ActivityItem;
 }
 
 export interface DatasetIndexResponse {

@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
+from promptpotter.domain.activity import ActivityItem
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
@@ -22,7 +23,6 @@ from promptpotter.domain.run_records import ForkDirection, ForkTrigger
 from promptpotter.domain.spend import LifetimeSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
-type Level = Literal["campaign", "course", "round", "candidate"]
 type CourseKind = Literal["root", "fork", "diag", "inner"]
 type TagKind = Literal[
     "dataset",
@@ -39,6 +39,10 @@ type StatKey = Literal[
     "spend_lifetime", "spend", "bench", "rounds", "accuracy", "lives", "ability", "lift"
 ]
 type RankMove = Literal["up", "down", "unchanged"]
+
+# A step window: what one request is served, and the most a store's fold keeps.
+DEFAULT_STEP_LIMIT = 200
+MAX_STEP_LIMIT = 1000
 
 
 class HierarchyTag(FrozenModel):
@@ -319,10 +323,6 @@ class _HierarchyEntry(FrozenModel):
     caveat: str | None = Field(description="What could not be read; null where all was.")
     tags: list[HierarchyTag]
     stats: list[HierarchyStat] = Field(description="Server-ordered; `stats[0]` is the headline.")
-    child_count: int = Field(
-        description="A campaign's courses; a course's rounds on its own ledger, closed and open; "
-        "a round's candidates; a candidate's inner campaigns."
-    )
     children: list[HierarchyEntry] = Field(
         description="A listing serves a campaign's courses to `?depth=` and nothing under them; "
         "the subtree read serves every level, courses root first, candidates in slot order."
@@ -365,6 +365,47 @@ class HierarchyCandidate(_HierarchyEntry):
 
     level: Literal["candidate"] = "candidate"
     facts: CandidateFacts
+
+
+class StepFacts(FrozenModel):
+    offset: int = Field(
+        ge=0,
+        description="The line index in its course's OWN ledger — the space `?at=` and "
+        "`ProjectionEnvelope.sequence` speak, so a live frame de-duplicates against a step on "
+        "(course, offset). SPARSE: a record no line is made of is no step.",
+    )
+    ts: str = Field(
+        description="The record's own time, raised to its file predecessor's when the two invert "
+        "(records are stamped at construction but appended later)."
+    )
+    gap_before_s: float = Field(
+        ge=0,
+        description="Seconds of silence before it: since the newer of the window's previous step "
+        "and its own course's previous step or heartbeat. 0 where neither exists. A heartbeat "
+        "takes no slot of a window, so a long open call never serves one empty.",
+    )
+    activity: ActivityItem = Field(
+        description="The record's reading. A `running` step with no later step on its course is a "
+        "call still open."
+    )
+
+
+class HierarchyStep(_HierarchyEntry):
+    """One ledger record that reads as a line, under its own course; served in a window only."""
+
+    level: Literal["step"] = "step"
+    parent: str = Field(description="The course whose own ledger holds the record.")
+    facts: StepFacts
+
+
+class HierarchySteps(FrozenModel):
+    """One window of a family's chronology, oldest-first: a course, its forks and inner runs."""
+
+    steps: list[HierarchyStep]
+    cursor_prev: str | None = Field(
+        description="Opaque cursor for the window immediately older than this one; null when "
+        "this window already reaches the family's beginning."
+    )
 
 
 HierarchyEntry = Annotated[
