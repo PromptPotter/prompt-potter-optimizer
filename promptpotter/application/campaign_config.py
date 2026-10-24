@@ -18,6 +18,7 @@ from promptpotter.domain.campaign import (
 from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.results import DisplayMetric, HardSampleOrder
+from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.judges.protocol import JudgeSpec
@@ -322,6 +323,7 @@ class CampaignConfig(StrictModel):
     sp_budget_origin: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         DEFAULT_ORIGIN_BUDGET,
         ge=1,
+        le=MAX_PASS_ROWS,
         description="Origin eval budget — how many bank samples the origin (C0) is "
         "scored on at check-in. The bench's, whatever the optimizer: a round's own panel is "
         "its sampler's knob. Wide because origin breadth is the one breadth that is nearly "

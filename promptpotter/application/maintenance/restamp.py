@@ -6,7 +6,7 @@ import types
 from collections import Counter
 from collections.abc import Callable
 from functools import reduce
-from typing import Annotated, Any, NamedTuple, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, NamedTuple, Union, get_args, get_origin
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -21,13 +21,9 @@ from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord
-from promptpotter.domain.run_records import (
-    CycleRecord,
-    RoundClosedRecord,
-    RoundRestatedRecord,
-    RoundStatement,
-)
+from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import GradedCell
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.cycle_index import (
     read_cycle_index,
     write_cycle_index,
@@ -40,8 +36,8 @@ from promptpotter.infrastructure.store.io import (
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, inner_sandboxes_dir
-from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.infrastructure.store.user_store import User
+from promptpotter.shared.errors import LedgerUnreadableError
 
 
 def _whole(_path: pathlib.Path) -> dict[str, Any]:
@@ -95,14 +91,31 @@ _SURFACES: tuple[_Surface, ...] = (
 )
 
 
-def _nested_model(ann: Any) -> type[BaseModel] | None:
+def _model_arms(ann: object) -> list[type[BaseModel]]:
+    if get_origin(ann) is Annotated:
+        return _model_arms(get_args(ann)[0])
     if isinstance(ann, type) and issubclass(ann, BaseModel):
-        return ann
+        return [ann]
     if get_origin(ann) in (Union, types.UnionType):
-        for arg in get_args(ann):
-            if isinstance(arg, type) and issubclass(arg, BaseModel):
-                return arg
-    return None
+        return [m for arg in get_args(ann) for m in _model_arms(arg)]
+    return []
+
+
+def _tags_match(arm: type[BaseModel], value: dict[str, object]) -> bool:
+    return all(
+        value[key] in get_args(field.annotation)
+        for key, field in arm.model_fields.items()
+        if get_origin(field.annotation) is Literal and key in value
+    )
+
+
+def _nested_model(ann: object, value: dict[str, object]) -> type[BaseModel] | None:
+    """The arm the VALUE is: a union pruned against its first arm strips every other arm's keys."""
+    arms = [arm for arm in _model_arms(ann) if _tags_match(arm, value)]
+    if len(arms) == 1:
+        return arms[0]
+    # Ambiguous: only an arm declaring every key may prune, and then it drops nothing.
+    return next((arm for arm in arms if value.keys() <= arm.model_fields.keys()), None)
 
 
 def _holds_parts(ann: object) -> bool:
@@ -136,7 +149,7 @@ def _prune_to_schema(
         if field is None:
             dropped.append((".".join(path), value))
             continue
-        nested = _nested_model(field.annotation)
+        nested = _nested_model(field.annotation, value) if isinstance(value, dict) else None
         if _holds_parts(field.annotation) and isinstance(value, dict):
             pruned[key], gone = _prune_parts(value, path)
             dropped.extend(gone)
@@ -254,12 +267,19 @@ _LEDGER_ARMS: dict[str, type[BaseModel]] = {
 
 
 def _prune_record(rec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    # `ledger.py::iter` SKIPS a line carrying a key its arm no longer declares: the whole record is lost.
+    # A line carrying a key its arm no longer declares refuses its whole cycle (`ledger_record`).
     arm = _LEDGER_ARMS.get(str(rec.get("record_type")))
     if arm is None:
         return rec, []
     pruned, dropped = _prune_to_schema(rec, arm)
-    return (pruned, [dotted for dotted, _ in dropped]) if dropped else (rec, [])
+    if not dropped:
+        return rec, []
+    try:
+        arm.model_validate(pruned)
+    except ValidationError:
+        # A prune that leaves the line unreadable deleted a key the reader needs: keep the line.
+        return rec, []
+    return pruned, [dotted for dotted, _ in dropped]
 
 
 def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
@@ -289,7 +309,7 @@ def _compacted(
             lines.append(line)
             after += len(line)
             continue
-        # Prune BEFORE projecting: a stale key on the record makes the reader skip the line.
+        # Prune BEFORE projecting: a stale key on the record refuses the line to its reader.
         rec, dropped = _prune_record(rec)
         gone.update(dropped)
         out = _compact_record(rec)
@@ -345,8 +365,8 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     for saved, name in sorted(rows, reverse=True)[:10]:
         print(f"  {saved / mb:8.2f} MB  {name}")
     if gone:
-        print("\nDropped — record keys the engine no longer declares, which the reader was")
-        print("silently SKIPPING the whole line over:")
+        print("\nDropped — record keys the engine no longer declares, each of which refused")
+        print("its cycle to every reader:")
         for key, n in gone.most_common():
             print(f"  {n:4d}x  {key}")
     if not apply and touched:
@@ -373,7 +393,7 @@ def reproject_cycle_indexes(*, apply: bool) -> dict[str, int]:
             if apply:
                 write_cycle_index(cycle_dir)
             touched += 1
-        except (OSError, ValueError):
+        except (OSError, ValueError, LedgerUnreadableError):
             failed += 1
 
     verb = "re-projected" if apply else "would re-project"
@@ -385,42 +405,17 @@ def reproject_cycle_indexes(*, apply: bool) -> dict[str, int]:
     return {"cycle_indexes": len(cycle_dirs), "cycle_indexes_reprojected": touched}
 
 
-def _drift_cause(exc: ValidationError) -> str:
-    err = exc.errors()[0]
-    loc = ".".join("[]" if isinstance(part, int) else str(part) for part in err["loc"])
-    return f"{loc or '<document>'}: {err['type']}"
+def check_cycle_ledgers() -> dict[str, int]:
+    ledgers = list(iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT))
+    refused: list[LedgerUnreadableError] = []
+    for ledger in ledgers:
+        try:
+            for _ in CycleEventLog(ledger).iter():
+                pass
+        except LedgerUnreadableError as refusal:
+            refused.append(refusal)
 
-
-_STATEMENTS: dict[str, type[RoundStatement]] = {
-    "round_closed": RoundClosedRecord,
-    "round_restated": RoundRestatedRecord,
-}
-
-
-def check_round_closes() -> dict[str, int]:
-    causes: Counter[str] = Counter()
-    first: dict[str, pathlib.Path] = {}
-    checked = 0
-    for ledger in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
-        for record in iter_jsonl(ledger, record_types=frozenset(_STATEMENTS)):
-            if (statement := _STATEMENTS.get(str(record.get("record_type")))) is None:
-                continue
-            checked += 1
-            try:
-                statement.model_validate(record)
-            except ValidationError as exc:
-                cause = _drift_cause(exc)
-                causes[cause] += 1
-                first.setdefault(cause, ledger)
-
-    failed = sum(causes.values())
-    print(f"\nRound closes — {checked} checked, {checked - failed} load")
-    for cause, n in causes.most_common():
-        print(f"  {n:>6} {cause}")
-        print(f"         first: {first[cause]}")
-    if failed:
-        print(
-            "  Never rewritten here: pruning cannot restore a renamed field's value, so the fix "
-            "is the model or a migration of its own."
-        )
-    return {"rounds_checked": checked, "rounds_unreadable": failed}
+    print(f"\nCycle ledgers — {len(ledgers)} checked, {len(ledgers) - len(refused)} read")
+    for cause in refused:
+        print(f"  {cause}")
+    return {"ledgers_checked": len(ledgers), "ledgers_refused": len(refused)}

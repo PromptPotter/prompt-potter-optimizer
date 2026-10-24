@@ -6,11 +6,7 @@ from promptpotter.application.cycle_reads import open_family_ray
 from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
 from promptpotter.domain.ray import DEFAULT_RAY_LIMIT, MAX_RAY_LIMIT, RayResponse
 from promptpotter.presentation.api.deps import StoresDep
-from promptpotter.presentation.api.routers.campaigns._conditional import (
-    client_has_etag,
-    model_json,
-    weak_etag,
-)
+from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
 
@@ -35,8 +31,4 @@ def get_family_ray(
     """
     path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     ray = open_family_ray(stores, path, limit=limit, before=before)
-    etag = weak_etag(*ray.validator)
-    headers = {"ETag": etag}
-    if client_has_etag(request.headers.get("if-none-match"), etag):
-        return Response(status_code=304, headers=headers)
-    return model_json(ray.window(), headers=headers)
+    return conditional_json(request, ray.validator, ray.window)

@@ -58,7 +58,7 @@ from promptpotter.infrastructure.projections.cycle_index import (
     write_cycle_index,
 )
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
-from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.runtime_flags import derive_run_state, run_state_stamps
 from promptpotter.infrastructure.store.account_spend import banked_metered, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -95,8 +95,9 @@ from promptpotter.infrastructure.store.layout import (
     root_cycle_id,
     sibling_kind,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
+from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig
 from promptpotter.infrastructure.store.session_pointer import (
+    active_pointer_path,
     clear_active_pointer,
     read_active_pointer,
 )
@@ -198,6 +199,27 @@ class CampaignStore:
     def _cycle_dirs(self) -> list[Path]:
         root = self._campaigns_root()
         return sorted(p for p in root.glob("*/cycles/*") if p.is_dir()) if root.exists() else []
+
+    def version(self) -> tuple[object, ...]:
+        """Stats only: what a read over this store's campaigns, cycles and run states stands on."""
+        root = self._campaigns_root()
+        return (
+            str(self._base_dir),
+            file_sig(root),
+            file_sig(active_pointer_path(self._base_dir)),
+            file_sig(CycleEventLog.workspace_path(self._base_dir)),
+            *(
+                (
+                    campaign.name,
+                    file_sig(CampaignLayout(campaign).manifest),
+                    *(
+                        (cycle.name, *run_state_stamps(cycle))
+                        for cycle in sorted(campaign_cycles_dir(campaign).glob("*"))
+                    ),
+                )
+                for campaign in (sorted(root.iterdir()) if root.is_dir() else ())
+            ),
+        )
 
     def iter_campaign_dirs(self) -> list[Path]:
         """Archived included: archiving must not free daily spend-cap budget."""
@@ -526,7 +548,7 @@ class CampaignStore:
                 self._write_export(hop, export)
 
     def _write_export(self, hop: CycleHop, export: PromptExport) -> None:
-        write_text(self._layout(hop).export, export.model_dump_json(indent=2) + "\n")
+        write_text(self._layout(hop).export, export.to_json())
 
     def restate_export_bench(self, hop: CycleHop, bench: BenchScore) -> None:
         export = self.read_export(hop)

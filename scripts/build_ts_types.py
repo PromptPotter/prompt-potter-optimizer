@@ -455,6 +455,25 @@ def _emit_display_metrics() -> str:
     )
 
 
+def _emit_export_tiers() -> str:
+    from promptpotter.domain.export import EXPORT_TIER_INFO
+
+    members = " | ".join(json.dumps(tier) for tier in EXPORT_TIER_INFO)
+    rows = "\n".join(
+        f"  {{ id: {json.dumps(tier)}, label: {json.dumps(info.label, ensure_ascii=False)},"
+        f" pasted: {'true' if info.pasted else 'false'} }},"
+        for tier, info in EXPORT_TIER_INFO.items()
+    )
+    return (
+        "// What `GET …/export?tier=` serves, in offer order. Mirror of\n"
+        "// domain/export.py::EXPORT_TIER_INFO — `pasted` tiers are text to copy, the rest download.\n"
+        f"export type ExportTier = {members};\n\n"
+        "export const EXPORT_TIERS: readonly { id: ExportTier; label: string; pasted: boolean }[] = [\n"
+        f"{rows}\n"
+        "];"
+    )
+
+
 def _emit_verify_strategy_labels() -> str:
     from promptpotter.domain.results import VERIFY_STRATEGY_LABELS
 
@@ -676,6 +695,7 @@ def main() -> int:
     blocks.append(_emit_pipeline_schema_words())
     blocks.append(_emit_display_metrics())
     blocks.append(_emit_verify_strategy_labels())
+    blocks.append(_emit_export_tiers())
     blocks.append(_emit_lens_labels())
     blocks.append(_emit_cell_term_meta())
     blocks.append(_emit_recent_step())

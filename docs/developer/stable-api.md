@@ -258,6 +258,13 @@ refuses on**, since we owe no back-compat · **JSON and scalars, never pickle**.
 carries the node config the winner ran under, minus each node's rendered prompt — that is
 `prompt_fields` again, and one artifact does not state a fact twice.
 
+`lineage` is how the winner was reached: one entity per candidate, the origin stating its loci
+whole and every other one only the `changes` over its parent, joined by PROV-O's `wasDerivedFrom`,
+`wasGeneratedBy` (its round, the members that proposed it); every round measured on the file's one
+`dataset_hash`. The file's
+`@context` names those keys, so it is JSON-LD with no library. Write it with `export.to_json()`;
+the `export` verb and route serve it, and its `package` tier wraps it as an Agent Skill.
+
 That node config names the model the winner was won on, and a reader must treat it as binding: an
 optimized prompt does not carry across models. [Why Prompt Optimization Works, and Why It Sometimes
 Doesn't](https://arxiv.org/abs/2605.26655) found edits that help one benchmark often fail on another

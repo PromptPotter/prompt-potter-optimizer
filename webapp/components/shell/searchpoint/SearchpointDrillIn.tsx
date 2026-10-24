@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import type { ArmReading, BenchPassProgress } from "@/lib/api/types";
+import type { ArmReading, VerificationMark } from "@/lib/api/types";
 import type { NodeSchemaReading } from "@/lib/types";
 import { readPaired, type ObserveConfig } from "@/lib/derivations";
 import { TERMS } from "@/lib/terms";
@@ -24,7 +24,8 @@ export function SearchpointDrillIn({
 }: {
   reading: ArmReading | null;
   cfg: ObserveConfig | null;
-  benchPass?: BenchPassProgress | null;
+  // The arm's bench pass while it is in flight, or the one that failed; a read one is `reading.bench`.
+  benchPass?: VerificationMark | null;
   stats?: ReactNode;
   measurements?: ReactNode;
   schema: NodeSchemaReading;
@@ -75,8 +76,10 @@ export function SearchpointDrillIn({
                 k="bench · held out"
                 hint="This same searchpoint on the held-out bench set: questions no round of the search ever read, so no candidate was chosen on them. A different set of questions from the accuracy above, so the two rates are not differenced. Any bench lift is against the ORIGIN, not the parent."
                 v={
-                  benchPass != null
-                    ? `${benchPass.accuracy == null ? "—" : fmtPct1(benchPass.accuracy)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
+                  benchPass?.failure != null
+                    ? `failed · ${benchPass.failure}`
+                    : benchPass != null
+                    ? `${fmtPct1(benchPass.level?.value)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null
                       ? `— of ${bench?.n}`
                       : `${fmtPct1(bench.level.value)} of ${bench.n}${

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
-from typing import Any
-
+from promptpotter.application.views.render.export import winner_pointer
 from promptpotter.application.views.render.heatmap import render_hard_sample_heatmap
 from promptpotter.application.views.render.phase import stop_lines
 from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct, overlap_series
@@ -25,19 +23,6 @@ def _ending_lines(stop_reason: StopReason | None) -> list[str]:
         return ["- ended: not yet"]
     head, *rest = stop_lines(stop_reason)
     return [f"- ended: {head}", *(f"- {line}" for line in rest)]
-
-
-def _json_block(label: str, value: Any) -> list[str]:
-    if not value:
-        return []
-    return [
-        f"**{label}:**",
-        "",
-        "```json",
-        json.dumps(value, indent=2, ensure_ascii=False, default=str),
-        "```",
-        "",
-    ]
 
 
 _SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
@@ -219,10 +204,7 @@ def to_markdown(view: LogMdView) -> str:
 
     parts += _render_hard_samples(view.hard_samples)
 
-    if view.final is not None:
-        parts.append("## Final Winner")
-        parts.append("")
-        parts += _json_block("Prompt fields", view.final.result_prompt_fields)
-        parts += _json_block("Pipeline params", view.final.result_pipeline_params)
+    if (hop := view.exported) is not None:
+        parts += ["## Winner", "", winner_pointer(hop), ""]
 
     return "\n".join(parts).rstrip() + "\n"

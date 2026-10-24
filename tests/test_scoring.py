@@ -65,6 +65,7 @@ from promptpotter.application.intelligence.rasch import (
     responses_of,
     theta_lift_over_parent,
 )
+from promptpotter.application.jobs.launcher.admission import PassStoppedError, paid_pass
 from promptpotter.application.optimizer_manifest import binding_optimizer, resolve_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
 from promptpotter.application.optimizers import paper_templates
@@ -146,6 +147,7 @@ from promptpotter.application.scoring.paired import (
 )
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
+    PairedGrade,
     cells_read,
     closest_to_bar,
     crowning_cells,
@@ -164,7 +166,7 @@ from promptpotter.domain.bench import (
     partition_bank,
 )
 from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
-from promptpotter.domain.command_kinds import SubmitArmsPayload, SubmittedArm
+from promptpotter.domain.command_kinds import PauseCyclePayload, SubmitArmsPayload, SubmittedArm
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.paired_reading import (
@@ -182,7 +184,7 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
 )
 from promptpotter.domain.phase_views import BenchGradedView
-from promptpotter.domain.phases import CampaignPhase, StopLoop, StopReason, WalkEnd
+from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason, WalkEnd
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNode
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import (
@@ -220,6 +222,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.scoring import (
+    MAX_PASS_ROWS,
     NO_RESULT,
     ROW_GRADES,
     CellSheet,
@@ -246,8 +249,8 @@ from promptpotter.infrastructure.llm.telemetry import (
     reset_cycle_ledger,
     set_cycle_ledger,
 )
-from promptpotter.infrastructure.producer_lock import release_cycle
-from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.producer_lock import cycle_held, release_cycle
+from promptpotter.infrastructure.runtime_flags import derive_run_state, standing_controls
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
@@ -857,6 +860,32 @@ def _ruler(
     )
 
 
+def _charged_by_length() -> tuple[CellSheet, CellSheet]:
+    # justlogic's composite: 14 verdicts won and one lost; every tie is the longer answer's loss.
+    scorer = compile_scorer(
+        "label_match(predicted, ground_truth)",
+        "fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))",
+        verifier_graded=False,
+    )
+
+    def walked(hits: set[int], tokens: int) -> CellSheet:
+        steps = {"step_tokens": {"solve": {"input": tokens, "output": 0}}}
+        return scorer.sheet(
+            measurement(
+                sid,
+                None,
+                query=f"q{sid}",
+                predicted="a" if sid in hits else "b",
+                ground_truth="a",
+                error=None,
+                pipeline_data=steps,
+            ).facts
+            for sid in range(34)
+        )
+
+    return walked(set(range(17)), 2768), walked(set(range(14, 18)), 692)
+
+
 _PEER_BANK = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(16)]
 # Each search row's place in the order the search reads it, under the peer cycle's own split.
 _PEER_READ_ORDER = {
@@ -1059,6 +1088,11 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         )[0]
         is None
     ), "one cell won and one lost is a tie, whatever the δ weighting or the fit's last digit"
+    longer, terse_parent = _charged_by_length()
+    level = _ruler(dict.fromkeys(range(34), 0.0))
+    assert elect_round_winner([ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level)[0] == (
+        "l"
+    ), "a cost term's tie-break was counted as a verdict lost"
 
     # The bar is what the parent can do, not the draw that crowned it: no later race reads those cells.
     crowned_on = sheet(measurements([1.0] * 4, range(30, 34)))
@@ -1520,11 +1554,88 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 )
             )
 
+        # The one stop reaches a pass in flight: the cycle reads as scoring, the pause is taken at
+        # the next cell, and the pass banks as stopped on the cells it walked.
+        stores = session.store
+        stores.campaigns.create_campaign(minted_campaign(_PEER_HOP))
+        stores.campaigns.mint_cycle(_PEER_HOP)
+        cycle_dir = stores.campaigns.cycle_dir(_PEER_HOP)
+        loop_control, session.state.control = (
+            session.state.control,
+            RunControl(enclosing=(cycle_dir,)),
+        )
+        pause = PauseCyclePayload(
+            campaign_id=_PEER_HOP.campaign_id, cycle_id=_PEER_HOP.cycle_id, reason="stop"
+        )
+        measure = vars(query_loop)["measure_sample"]
+        walked: list[int] = []
+        phases: list[RunPhase] = []
+        acks: list[str] = []
+
+        async def _stopped_mid_pass(
+            sample: Sample, at: Any, *, pipeline_params: Any
+        ) -> MeasuredCell:
+            walked.append(sample.id)
+            if len(walked) == 2:
+                phases.append(derive_run_state(cycle_dir).run_phase)
+                acks.append((await CommandDispatcher(stores).dispatch(CommandCall(pause))).ack)
+                phases.append(derive_run_state(cycle_dir).run_phase)
+            cell: MeasuredCell = await measure(sample, at, pipeline_params=pipeline_params)
+            return cell
+
+        async def _bench_pick() -> BenchPass:
+            async with paid_pass(stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget()):
+                return await score_on_bench(
+                    session,
+                    cycle.points.measured(head),
+                    individual_id=head.individual.id,
+                    subject="selected",
+                    label=head.label,
+                    round_num=1,
+                    cb=callbacks,
+                )
+
+        with monkeypatch.context() as patched:
+            patched.setattr(query_loop, "measure_sample", _stopped_mid_pass)
+            with pytest.raises(PassStoppedError):
+                asyncio.run(_bench_pick())
+        session.state.control = loop_control
+        assert (phases, acks) == ([RunPhase.SCORING, RunPhase.PAUSED], ["accepted"]), (
+            "a pause was refused by a pass in flight, or the cycle never read as scoring"
+        )
+        [*_, stopped_view] = [
+            record.view
+            for _, record in callbacks.ledger.iter()
+            if isinstance(record, PhaseRecord) and record.event == "graded"
+        ]
+        assert isinstance(stopped_view, BenchGradedView)
+        paused_pass = stopped_view.bench_pass
+        assert stopped_view.state is ReadingState.PASS_STOPPED and paused_pass.stop is not None
+        assert paused_pass.stop.cause is StopReason.PAUSED and 0 < len(paused_pass.cells) < 4, (
+            "a paused pass banked no record of the cells it walked, or never stopped"
+        )
+        assert standing_controls(cycle_dir).pause is None and not cycle_held(cycle_dir), (
+            "the pass left its pause unapplied, or kept the cycle after it stopped"
+        )
+        with pytest.raises(PayloadInvalidError):
+            asyncio.run(
+                score_search_point(
+                    cycle.parent_point,
+                    search * (MAX_PASS_ROWS // len(search) + 1),
+                    session,
+                    label="origin",
+                    measured=None,
+                )
+            )
+
         passes = graded()
         [taken] = passes.selections.values()
         assert (taken.candidate_id, taken.round, taken.stop) == (head.individual.id, 1, None), (
             "the bench grades the pick the optimizer declared"
         )
+        assert {key for key, _, _ in paused_pass.cells} <= {
+            key for key, _, replayed in taken.cells if replayed
+        }, "the pass after a stop bought again a cell the stopped pass had banked"
         assert graded(taken).selections[taken.candidate_id] is taken, "a held pass was sent again"
         left = taken.model_copy(update={"sp_hash": "a pick the line left"})
         resent = graded(left).selections[taken.candidate_id]
@@ -1893,6 +2004,13 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     unpaired.set_current(ArmKey("challenger"))
     challenger = sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8]))
     assert unpaired.check(challenger.cells) is None, "an arm was cut on cells its rival never sat"
+    longer, terse_parent = _charged_by_length()
+    charged = PoBBCheck(cfg, n_min=6, n_samples=34, ruler=None, parent=parent)
+    charged.register_completed(terse_parent, key=parent)
+    standings: list[node_contract.RaceSnapshot] = []
+    charged.set_current(ArmKey("l"), on_snapshot=standings.append)
+    charged.check(longer.cells)
+    assert standings[-1].p_best > 0.5, "a cost term's tie-breaks pinned p_best at a coin"
 
     # The collapse gate reads the answer, not the labels: a verifier proves an answer wrong by an
     # unsolved cell, and alike-and-all-solved is NOT collapsed.
@@ -1944,8 +2062,11 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     )
 
     # On a graded backend p_best discriminates; concordant cells move θ and must not reach ε.
+    def uncharged(*values: float) -> list[PairedGrade]:
+        return [PairedGrade(v, v) for v in values]
+
     sids = [str(s) for s in range(12)]
-    strong, weak = [0.66] * 12, [0.30] * 12
+    strong, weak = uncharged(*[0.66] * 12), uncharged(*[0.30] * 12)
     prior = ArmKey("prior")
     p_strong, _ = elimination_p_best(strong, {prior: weak}, sids, None)
     assert p_strong > 0.9, f"graded gate failed to discriminate: {p_strong}"
@@ -1964,14 +2085,14 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
         calibration_model="1PL",
         anchor_id="test-anchor",
     )
-    nothing_solved = [0.0] * 6
+    nothing_solved = uncharged(*[0.0] * 6)
     p_thin, _ = elimination_p_best(
-        nothing_solved, {prior: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]}, prefix, warm
+        nothing_solved, {prior: uncharged(0.0, 0.0, 0.0, 1.0, 0.0, 0.0)}, prefix, warm
     )
     assert p_thin == pytest.approx(0.25), f"one adverse cell may not reach past 0.25: {p_thin}"
     assert p_thin > epsilon, "a one-cell verdict must not be cuttable"
     p_wide, _ = elimination_p_best(
-        nothing_solved, {prior: [1.0, 0.0, 1.0, 1.0, 0.0, 0.0]}, prefix, warm
+        nothing_solved, {prior: uncharged(1.0, 0.0, 1.0, 1.0, 0.0, 0.0)}, prefix, warm
     )
     assert p_wide == pytest.approx(0.0625), f"three adverse cells support a cut: {p_wide}"
     assert p_wide < epsilon, "the width is there — ε decides"

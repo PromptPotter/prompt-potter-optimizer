@@ -43,6 +43,7 @@ export interface RunPhaseMark {
 
 export const STATUS_MARK: Record<RunStatus["mark"], RunPhaseMark> = {
   running: { glyph: "●", tone: "live" },
+  scoring: { glyph: "◐", tone: "live" },
   starting: { glyph: "◌", tone: "live" },
   queued: { glyph: "…", tone: "quiet" },
   gate: { glyph: "◆", tone: "attention" },

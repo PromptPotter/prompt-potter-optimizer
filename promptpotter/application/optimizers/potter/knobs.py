@@ -9,6 +9,7 @@ from pydantic import Field
 
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.pool import Access
+from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -37,6 +38,7 @@ class EscalationLadder(StrEnum):
 class AdaptiveQueueKnobs(StrictModel):
     sp_budget_round: Annotated[int, Knob(Scope.POLICY, Estimand.SELECTION)] = Field(
         ge=1,
+        le=MAX_PASS_ROWS,
         description="Per-round eval budget — how many cells each candidate is scored on per "
         "round. The search split is the bank; each round `select_round_subset` picks this many "
         "informative cells from it. Not the pool's size.",

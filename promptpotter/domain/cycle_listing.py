@@ -84,6 +84,7 @@ class CycleIndex(FrozenModel):
 type StatusMark = Literal[
     "archived",
     "running",
+    "scoring",
     "starting",
     "queued",
     "gate",

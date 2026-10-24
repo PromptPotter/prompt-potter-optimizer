@@ -27,7 +27,14 @@ from promptpotter.domain.phases import (
     WalkEnd,
 )
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
+from promptpotter.domain.scoring import (
+    MAX_PASS_ROWS,
+    CellSheet,
+    GradedCell,
+    MeasuredCell,
+    Scorer,
+    WalkedCell,
+)
 from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.send_pacing import HELD_POLL_S
@@ -43,7 +50,12 @@ from promptpotter.infrastructure.llm.telemetry import (
     emit_sample_started,
 )
 from promptpotter.infrastructure.runtime_flags import effective_lookahead
-from promptpotter.shared.errors import ErrorCategory, SendRefusedError, graceful
+from promptpotter.shared.errors import (
+    ErrorCategory,
+    PayloadInvalidError,
+    SendRefusedError,
+    graceful,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
@@ -539,6 +551,12 @@ async def run_walks[K: Hashable](
 ) -> StopReason | None:
     """Rows, cuts and events land where a SERIAL phase lands them, in *walks*' order; ``keep_cut``
     returns a budget stop, not raises."""
+    if over := [w.n for w in walks.values() if w is not None and w.n > MAX_PASS_ROWS]:
+        raise PayloadInvalidError(
+            f"A pass scores at most {MAX_PASS_ROWS} rows, and this one asks for {max(over)}. "
+            "Cut the set where it is defined: the dataset's split or the pass's sample size.",
+            code="pass_too_large",
+        )
     phase = _ScoringPhase(
         list(walks), list(walks.values()), session, backfills, blocks, on_turn, on_decided
     )

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, NoReturn, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
+from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.jobs.quota import (
     admit_launch,
     check_launch_quotas,
@@ -30,6 +31,7 @@ from promptpotter.application.jobs.registry import (
     SlotHolder,
 )
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
@@ -49,16 +51,22 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     HeldBudget,
 )
-from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
+from promptpotter.infrastructure.llm.send_pacing import set_abort_check, set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
     JobHold,
     SpendBook,
     bound_spend_book,
     spending_under,
 )
+from promptpotter.infrastructure.producer_lock import hold_pass, release_pass
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import CycleBusyError, MachineBusyError, NotFoundError
+from promptpotter.shared.errors import (
+    ConflictError,
+    CycleBusyError,
+    MachineBusyError,
+    NotFoundError,
+)
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
 
@@ -161,7 +169,7 @@ def request_job(
             holder=holder,
             hop=hop,
         )
-        # A pass takes no claim: a claim reads as an attached producer, and scoring needs a still cycle.
+        # A pass takes no claim: it never queues, and holds the cycle itself once admitted (`paid_pass`).
         if hop != UNRESOLVED_HOP and isinstance(holder, CampaignLaunch):
             claim_cycle(stores, job_registry, job, hop)
         return job
@@ -170,7 +178,10 @@ def request_job(
 def _refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> None:
     """ONE check for launches and passes alike: a run attached, or a pass scoring it."""
     run = derive_run_state(stores.campaigns.cycle_dir(hop))
-    if run.producer.attached:
+    # The pass first: it registers before it holds the cycle, and holding reads as attached.
+    if (holder := job_registry.pass_on(stores.campaigns.workspace, hop)) is not None:
+        status = RunPhase.SCORING.value
+    elif run.producer.attached:
         claim = stores.campaigns.launch_claim(hop)
         holder = (
             job_registry.running_job_for(stores.campaigns.workspace, hop)
@@ -178,8 +189,6 @@ def _refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop
             else job_registry.get(claim.job_id)
         )
         status = run.run_phase.value
-    elif (holder := job_registry.pass_on(stores.campaigns.workspace, hop)) is not None:
-        status = "scoring"
     else:
         return
     raise CycleBusyError(
@@ -429,11 +438,17 @@ def inner_share(
     job_registry.release(job.job_id)
 
 
+class PassStoppedError(ConflictError):
+    """A pause reached the pass: what it measured is banked, and a rerun replays it."""
+
+    code = "pass_stopped"
+
+
 @asynccontextmanager
 async def paid_pass(
     *, stores: Stores, verb: ScoringVerb, hop: CycleHop | None, declared: Budget
 ) -> AsyncIterator[SpendBook]:
-    """Never queues: its caller waits on the answer."""
+    """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops it."""
     job_registry = JobRegistry.attach()
     job = await asyncio.to_thread(
         request_job,
@@ -445,11 +460,17 @@ async def paid_pass(
     if job.queued:
         refuse_as_busy(stores, job_registry, job)
     admitted = False
+    holding: CycleHop | None = None
     try:
         meters: CeilingMeter = (
             "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
         )
         if hop is not None:
+            cycle_dir = stores.campaigns.cycle_dir(hop)
+            hold_pass(cycle_dir)
+            holding = hop
+            # The rate-limit and slot waits poll it too, as a loop's do.
+            set_abort_check(RunControl(cycle_dir=cycle_dir).pause_requested)
             ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
             declared = ceiling.over(declared)
         held = await asyncio.to_thread(
@@ -478,8 +499,31 @@ async def paid_pass(
             yield book
     except BaseException as exc:
         job_registry.release(job.job_id, refusal="" if admitted else str(exc))
+        stopped_by = _let_go(stores, holding)
+        if stopped_by is not None and launch_interrupted(exc):
+            raise PassStoppedError(
+                f"The {verb} pass stopped: {stopped_by}. Every cell it measured is banked, and a "
+                "rerun replays them."
+            ) from None
         raise
     job_registry.release(job.job_id)
+    _let_go(stores, holding)
+
+
+def _let_go(stores: Stores, holding: CycleHop | None) -> str | None:
+    """Applies a pause asked of the pass, however it ended, before the cycle is let go; who asked."""
+    if holding is None:
+        return None
+    cycle_dir = stores.campaigns.cycle_dir(holding)
+    control = RunControl(cycle_dir=cycle_dir)
+    try:
+        if not control.pause_requested():
+            return None
+        with verb_ledger(stores, holding):
+            taken = control.take_pause()
+        return None if taken is None else taken[1]
+    finally:
+        release_pass(cycle_dir)
 
 
 def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:

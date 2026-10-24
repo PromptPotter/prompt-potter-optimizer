@@ -7,7 +7,7 @@ import logging
 import signal
 import sys
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter import connectors
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.domain.results import CycleResult
     from promptpotter.domain.run_mode import RunMode
+    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -104,10 +105,12 @@ def held_run(launched: object) -> HeldRun:
 
 
 @contextlib.contextmanager
-def _terminal_inputs(session: Session) -> Iterator[None]:
+def ctrl_c_pauses(
+    stores: Stores, pause: PauseCyclePayload
+) -> Iterator[Callable[[CyclePayload], None]]:
+    """The first Ctrl+C sends *pause* as the browser's press does, then cancels this task; the second force-quits."""
     loop, run = asyncio.get_running_loop(), asyncio.current_task()
     assert run is not None
-    stores, hop = session.store, session.hop
     asked: set[asyncio.Task[None]] = set()
 
     async def send(payload: CyclePayload, *, then_cancel: bool) -> None:
@@ -132,38 +135,41 @@ def _terminal_inputs(session: Session) -> Iterator[None]:
         if interrupted:
             raise KeyboardInterrupt
         interrupted = True
-        loop.call_soon_threadsafe(
-            functools.partial(
-                dispatch,
-                PauseCyclePayload(
-                    campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C"
-                ),
-                then_cancel=True,
-            )
-        )
+        loop.call_soon_threadsafe(functools.partial(dispatch, pause, then_cancel=True))
 
-    def read_decisions() -> None:
-        spelled: dict[str, GateDecision] = {
-            key: d for d in get_args(GateDecision) for key in (d, d[0])
-        }
-        with contextlib.suppress(OSError, ValueError, RuntimeError):
-            for line in sys.stdin:
-                decision = spelled.get(line.strip().lower())
-                if decision is not None:
-                    loop.call_soon_threadsafe(
-                        dispatch,
-                        OriginGateDecisionPayload(
-                            campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, decision=decision
-                        ),
-                    )
-
-    if sys.stdin is not None and sys.stdin.isatty():
-        threading.Thread(target=read_decisions, daemon=True, name="terminal-gate-input").start()
     previous = signal.signal(signal.SIGINT, on_sigint)
     try:
-        yield
+        yield dispatch
     finally:
         signal.signal(signal.SIGINT, previous)
+
+
+@contextlib.contextmanager
+def _terminal_inputs(session: Session) -> Iterator[None]:
+    loop, hop = asyncio.get_running_loop(), session.hop
+    pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
+    with ctrl_c_pauses(session.store, pause) as dispatch:
+
+        def read_decisions() -> None:
+            spelled: dict[str, GateDecision] = {
+                key: d for d in get_args(GateDecision) for key in (d, d[0])
+            }
+            with contextlib.suppress(OSError, ValueError, RuntimeError):
+                for line in sys.stdin:
+                    decision = spelled.get(line.strip().lower())
+                    if decision is not None:
+                        loop.call_soon_threadsafe(
+                            dispatch,
+                            OriginGateDecisionPayload(
+                                campaign_id=hop.campaign_id,
+                                cycle_id=hop.cycle_id,
+                                decision=decision,
+                            ),
+                        )
+
+        if sys.stdin is not None and sys.stdin.isatty():
+            threading.Thread(target=read_decisions, daemon=True, name="terminal-gate-input").start()
+        yield
 
 
 async def run_inline(held: HeldRun, *, mode: RunMode) -> CycleResult:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, replace
 from functools import partial
 from statistics import fmean
@@ -16,6 +17,7 @@ from promptpotter.application.scoring.paired import (
 )
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
+    reread_cells,
     score_search_point,
 )
 from promptpotter.application.scoring.selection import level_band
@@ -58,7 +60,7 @@ from promptpotter.domain.results import (
 from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.store.archive_queries import bench_reads
-from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -159,7 +161,7 @@ def bench_series(
             head = outcome.head
             assert head is not None, "a round that selected ends on the arm it selected"
             taken = passes.pass_of(head.individual.id)
-            # Ungraded (an `at_end` line's, or a pause cut its pass): never the one it displaced.
+            # Ungraded (an `at_end` line's) or stopped short: never the one it displaced.
             standing = None if taken is None else headline(taken)
         series.append(standing)
     return origin, series
@@ -368,43 +370,49 @@ async def score_on_bench(
             rows=len(session.state.scoring.require_partition().bench),
         ),
     )
+    # Counted before the send, so the pass is never one of its own readers.
+    reads_before = _reads_before(session)
     try:
         return await _pass_on_bench(
-            session, search_point, individual_id=individual_id, round_num=round_num
+            session,
+            search_point,
+            individual_id=individual_id,
+            round_num=round_num,
+            reads_before=reads_before,
         )
+    except (KeyboardInterrupt, asyncio.CancelledError) as paused:
+        # A pause banks the pass as stopped, on the cells its walk filed before it.
+        bench = list(session.state.scoring.require_partition().bench)
+        held = reread_cells(search_point, bench, session, label=MeasurementRole.BENCH)
+        stopped = _bench_pass(
+            session,
+            search_point,
+            individual_id=individual_id,
+            round_num=round_num,
+            cells=held.addresses(),
+            stop=PassStop(cause=run_stop_reason(paused), warning=None),
+            reads_before=reads_before,
+        )
+        graded(cb, session, stopped, subject=subject, label=label)
+        raise
     finally:
         cb.on_phase(CampaignPhase.BENCH, "exit")
 
 
-async def member_on_bench(
+async def _pass_on_bench(
     session: Session,
     search_point: JobSearchPoint,
     *,
-    path: CyclePath,
     individual_id: str,
     round_num: int,
-) -> MemberRows | None:
-    """A pass outside the line's record, read on the line's rule."""
-    taken = await _pass_on_bench(
-        session, search_point, individual_id=individual_id, round_num=round_num
-    )
-    scorer = session.state.scoring.require_scorer()
-    read = _read_pass(session.store, taken, scorer, tolerance=_tolerance(session))
-    return _bench_member(path, read, instrument_id=session.instrument_id)
-
-
-async def _pass_on_bench(
-    session: Session, search_point: JobSearchPoint, *, individual_id: str, round_num: int
+    reads_before: int,
 ) -> BenchPass:
-    bench = list(session.state.scoring.require_partition().bench)
-    # Counted before the send, so the pass is never one of its own readers.
-    reads_before = _reads_before(session)
     scored = await score_search_point(
         search_point,
-        bench,
+        list(session.state.scoring.require_partition().bench),
         session,
         label=MeasurementRole.BENCH,
-        measured=None,
+        measured=MeasuredPass(individual_id, MeasurementRole.BENCH),
     )
     stop: PassStop | None = None
     if scored.stopped is not None:
@@ -415,11 +423,33 @@ async def _pass_on_bench(
             if signal is not None and signal.check_name == SCORING_ERROR_ABORT
             else None,
         )
+    return _bench_pass(
+        session,
+        search_point,
+        individual_id=individual_id,
+        round_num=round_num,
+        cells=scored.cells,
+        stop=stop,
+        reads_before=reads_before,
+    )
+
+
+def _bench_pass(
+    session: Session,
+    search_point: JobSearchPoint,
+    *,
+    individual_id: str,
+    round_num: int,
+    cells: list[WalkedCell],
+    stop: PassStop | None,
+    reads_before: int,
+) -> BenchPass:
+    bench = session.state.scoring.require_partition().bench
     return BenchPass(
         round=round_num,
         candidate_id=individual_id,
         sp_hash=search_point.sp_hash(session.pipeline_schema),
-        cells=scored.cells,
+        cells=cells,
         sample_keys=[s.key for s in bench],
         stop=stop,
         scorer_id=session.state.scoring.require_scorer().id,

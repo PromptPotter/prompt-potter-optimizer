@@ -4,7 +4,6 @@ source:
   recipe: justlogic
   split: train
   train_per_depth: 200
-  held_per_depth: 300
 
 pipeline:
   description: >-
@@ -73,7 +72,7 @@ campaign:
   # inner cell ignores it — its drawn rows are its whole bank.
   # `demo` opens the shot surface, CAPO's `few_shot` and potter's `l1_generate.k_max` alike.
   # One split for both cuts, so `justlogic/d234-held`'s search and demo pools are `d234`'s rows; its
-  # bench is the 30 it ranks plus its bank's 900 bench-only rows (`d234-held/README.md`).
+  # bench is the 30 it ranks plus its bank's 120 bench-only rows (`d234-held/README.md`).
   dataset_split:
     bench: 30
     demo: 50

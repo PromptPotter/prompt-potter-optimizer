@@ -13,7 +13,9 @@ export function BenchAction({ path }: { path: CyclePath }) {
     return null;
   }
   const campaignId = pathRoot(path).campaignId;
-  const busy = cmd.pending !== null || dash?.bench_pass != null;
+  const busy =
+    cmd.pending !== null ||
+    dash?.verification.some((m) => m.kind === "bench" && m.state === "running") === true;
 
   return (
     <>

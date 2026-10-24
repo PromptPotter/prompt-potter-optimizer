@@ -1,4 +1,9 @@
-import type { ArmReading, BenchPassProgress, CourseNode, LineageNode } from "@/lib/api/types";
+import type {
+  ArmReading,
+  CourseNode,
+  LineageNode,
+  VerificationMark,
+} from "@/lib/api/types";
 import { DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import type { CandidateBar } from "@/lib/types";
 import { fmtLevel } from "@/lib/format";
@@ -35,15 +40,17 @@ export interface CandidateBarsInput {
   viewedNode: LineageNode | undefined;
   inflightByKey: ReadonlyMap<string, ArmReading>;
   sampleSet: number[] | null;
-  benchPass: BenchPassProgress | null;
+  marks: readonly VerificationMark[];
 }
 
 export function candidateBars({
   viewedNode,
   inflightByKey,
   sampleSet,
-  benchPass,
+  marks,
 }: CandidateBarsInput): CandidateBar[] {
+  const markOf = (kind: VerificationMark["kind"], key: string) =>
+    marks.find((m) => m.kind === kind && m.arm.key === key) ?? null;
   // Live side of each supersede cut only — retired tails double a round.
   const nodes: readonly LineageNode[] = viewedNode?.children ?? [];
   return splitRetired(nodes).live.map<CandidateBar>((node, idx) => {
@@ -76,7 +83,8 @@ export function candidateBars({
       reading: live ?? node.reading,
       source: live ? "inflight" : "history",
       overlap,
-      benchPass: benchPass?.arm === node.reading.arm.key ? benchPass : null,
+      verify: markOf("verify", node.reading.arm.key),
+      bench: markOf("bench", node.reading.arm.key),
     };
   });
 }

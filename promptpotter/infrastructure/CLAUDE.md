@@ -91,8 +91,10 @@ slot seeded with its parent's fold at the cut (`store/read_model.py::LedgerIndex
 read (`infrastructure/projections/live_dashboard/projection.py::fold_at`) views; a launch's checkout
 (`DashboardCheckout.over`) folds the same file once into a fold it alone owns (`store/read_model.py::folded`).
 **Every ledger reader — index, fan-out, `iter`, the SSE tail — takes a line through ONE policy**
-(`store/read_model.py::ledger_record` + `feed_fold`): a line no model accepts, or a fold raising on
-it, is logged and skipped, never a stop, so a writer's checkout and every refold hold one value. Each `RunWiringRecord` clears what the launch before
+(`store/read_model.py::ledger_record`): a line no model accepts is a `LedgerUnreadableError` to every
+reader that takes its kind, never read around. The index holds it by kind, so run state and spend
+still read and `delete` can bank before it removes. A fold raising on a line is logged and folded
+past (`feed_fold`), so a writer's checkout and every refold hold one value. Each `RunWiringRecord` clears what the launch before
 it left and every stamp is a record's own timestamp, so a refold reproduces the file at every
 offset, and no field on this model is on-disk shape anyone must migrate. **What a cycle runs under is a ledger record too** (`RunWiringRecord`, declared at the
 mint and again by each launch — `application/run_observers.py::declare_run_wiring`), so the

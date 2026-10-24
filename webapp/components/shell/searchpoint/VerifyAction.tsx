@@ -29,12 +29,13 @@ export function VerifyAction({
   const [strategy, setStrategy] = useState<VerifyStrategy>("random");
   const [samples, setSamples] = useState("");
   const sending = cmd.pending !== null;
-  const { readings, pass, unit } = useVerify(path, sending ? PASS_POLL_MS : undefined);
+  const { readings, passes, unit } = useVerify(path, sending ? PASS_POLL_MS : undefined);
 
   if (!path || !candidate.label) return null;
 
   const reading = readings.get(candidate.arm) ?? null;
-  const flying = pass !== null && pass.arm.key === candidate.arm ? pass : null;
+  const last = passes.get(candidate.arm) ?? null;
+  const flying = last?.state === "running" ? last : null;
   const busy = sending || flying !== null;
 
   function run() {
@@ -108,12 +109,15 @@ export function VerifyAction({
       {busy && (
         <p className="verify-action-note">
           {flying && unit
-            ? `Measuring ${flying.arm.label} on ${unitCount(flying.rows, unit)} it has never seen, ${VERIFY_STRATEGY_LABELS[flying.strategy]}.`
+            ? `Measuring ${flying.arm.label} on ${unitCount(flying.rows, unit)} it has never seen, ${flying.scored} scored.`
             : `Measuring ${candidate.label} on cells it has never seen.`}{" "}
           This mints no round, so the cycle&rsquo;s own series does not move.
         </p>
       )}
       {cmd.failure ? <p className="verify-action-note error">{cmd.failure.message}</p> : null}
+      {!busy && last?.failure != null && (
+        <p className="verify-action-note error">The last verify failed: {last.failure}</p>
+      )}
       {reading && unit && <VerifyReading reading={reading} unit={unit} />}
     </div>
   );

@@ -82,7 +82,7 @@ SCOPE_ROLES: dict[RoleScope, frozenset[MeasurementRole]] = {
 # A cell of these roles is a cell of the ARM its individual is in its round; any other is a pass.
 ARM_ROLES = frozenset({MeasurementRole.ORIGIN, MeasurementRole.PANEL, MeasurementRole.PARENT})
 # The passes whose cells reach the ledger one by one, so a live surface draws and ticks them.
-RECORDED_ROLES = ARM_ROLES | {MeasurementRole.BENCH}
+RECORDED_ROLES = ARM_ROLES | {MeasurementRole.BENCH, MeasurementRole.VERIFY}
 
 
 @dataclass(frozen=True)

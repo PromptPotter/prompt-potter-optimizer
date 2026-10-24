@@ -29,7 +29,7 @@ test.describe("dashboard", () => {
   });
 
   test("a served object in scope can be copied", async ({ page }) => {
-    await expect(page.getByRole("button", { name: /Copy all candidates as JSON/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Copy all candidates/ })).toBeVisible();
   });
 
   test("the collapsed panes open, and what they draw survives a poll", async ({ page }) => {

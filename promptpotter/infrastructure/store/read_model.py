@@ -13,10 +13,14 @@ from itertools import islice
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, Protocol, cast, get_args, runtime_checkable
 
+from pydantic import ValidationError
+
 from promptpotter.domain.run_records import SpendHoldRecord, TokenUsageRecord
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import append_line, open_text_robust
+from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.shared.clock import epoch_seconds
+from promptpotter.shared.errors import LedgerUnreadableError
 
 logger = logging.getLogger(__name__)
 
@@ -144,18 +148,33 @@ def line_dict(raw: bytes) -> dict[str, Any]:
     return rec
 
 
+def _refusal(ledger: Path, offset: int, exc: ValueError) -> LedgerUnreadableError:
+    if isinstance(exc, ValidationError):
+        err = exc.errors()[0]
+        reason = f"{'.'.join(map(str, err['loc'])) or 'the record'}: {err['msg']}"
+    else:
+        reason = str(exc)
+    cycle_dir = CycleLayout.of_ledger(ledger).cycle_dir
+    campaign_dir = cycle_dir.parent.parent
+    held = campaign_cycles_dir(campaign_dir) == cycle_dir.parent
+    return LedgerUnreadableError(
+        ledger=str(ledger),
+        offset=offset,
+        reason=reason,
+        campaign_id=campaign_dir.name if held else None,
+    )
+
+
 def ledger_record[R](
     validate: Callable[[bytes], R], raw: bytes, *, ledger: Path, offset: int
 ) -> R | None:
-    """The feed policy every ledger reader applies, with `feed_fold`: a line no reader can take is
-    logged and skipped, never a stop."""
+    """Every ledger reader's one policy: a line it cannot take refuses the read."""
     if not raw.strip():
         return None
     try:
         return validate(raw)
-    except ValueError:
-        logger.warning("skipping unparseable ledger line at offset %d in %s", offset, ledger)
-        return None
+    except ValueError as exc:
+        raise _refusal(ledger, offset, exc) from exc
 
 
 def feed_fold[T](fold: _Feeds[T], offset: int, record: T, *, ledger: Path) -> None:
@@ -277,18 +296,38 @@ class _Feeder:
         probes = b"|".join(sorted(re.escape(p.encode()) for p in self._models))
         self._screen = re.compile(b'"(' + probes + b')"') if probes else _SCREENS_NOTHING
         self._placed = [fold for fold in folds.values() if isinstance(fold, Positioned)]
+        # By kind, so the folds that never take a refused line (run state, spend) still read whole.
+        self.refused: dict[type[StrictModel], LedgerUnreadableError] = {}
 
     def line(self, offset: int, raw: bytes) -> None:
         for placed in self._placed:
             placed.at_offset = offset
         if self._screen.search(raw) is None:
             return
-        record = ledger_record(self._typed, raw, ledger=self._ledger, offset=offset)
+        try:
+            record = ledger_record(self._typed, raw, ledger=self._ledger, offset=offset)
+        except LedgerUnreadableError as refusal:
+            for model in self._reached(raw):
+                self.refused.setdefault(model, refusal)
+            return
         if record is None:
             return
         for fold in self.folds.values():
             if type(record) in fold.records:
                 feed_fold(fold, offset, record, ledger=self._ledger)
+
+    def vouch(self, fold: LedgerFold[Any, Any]) -> None:
+        for model in fold.records:
+            if (refusal := self.refused.get(model)) is not None:
+                raise refusal.with_traceback(None)
+
+    def _reached(self, raw: bytes) -> list[type[StrictModel]]:
+        try:
+            rec = line_dict(raw)
+        except ValueError:
+            # No record at all, so it may have been any kind it names.
+            return [self._models[kind.decode()] for kind in self._screen.findall(raw)]
+        return [self._models[rec["record_type"]]]
 
     def _typed(self, raw: bytes) -> StrictModel | None:
         rec = line_dict(raw)
@@ -316,7 +355,9 @@ def folded[F: LedgerFold[Any, Any]](
 ) -> F:
     """No index holds it, so nothing feeds it after: its caller alone owns what it folds on to."""
     made = _fresh(fold, seed)
-    _fold_lines(ledger, _Feeder(ledger, {fold: made}), until)
+    feeder = _Feeder(ledger, {fold: made})
+    _fold_lines(ledger, feeder, until)
+    feeder.vouch(made)
     return made
 
 
@@ -358,7 +399,9 @@ class LedgerIndex(_LedgerTail):
         with self._lock:
             self._open(fold, seed)
             if until is None or until >= self._lines:
-                return cast("LedgerFold[Any, V]", self._feeder.folds[fold]).value()
+                held = self._feeder.folds[fold]
+                self._feeder.vouch(held)
+                return cast("LedgerFold[Any, V]", held).value()
             return cast("LedgerFold[Any, V]", self._prefix(fold, until)).value()
 
     def prefix[F: LedgerFold[Any, Any]](
@@ -387,8 +430,11 @@ class LedgerIndex(_LedgerTail):
         if not joining:
             return
         # A fold joins at the line the others stand at, so none of them refolds for it.
-        _fold_lines(self._path, _Feeder(self._path, joining), self._lines)
+        joiner = _Feeder(self._path, joining)
+        _fold_lines(self._path, joiner, self._lines)
+        refused = self._feeder.refused | joiner.refused
         self._feeder = _Feeder(self._path, held | joining)
+        self._feeder.refused = refused
         for stale in [key for key in self._prefixes if key[0] in joining]:
             del self._prefixes[stale]
 
@@ -427,14 +473,21 @@ class LineIndex(_LedgerTail):
         self._folds: dict[type[Any], LineFold[Any]] = {
             type(fold): fold for fold in (make() for make in self._roster)
         }
+        self._refused: LedgerUnreadableError | None = None
 
     def view[V](self, fold: Callable[[], LineFold[V]]) -> V:
         with self._lock:
             self._refresh()
+            if self._refused is not None:
+                raise self._refused.with_traceback(None)
             return cast("LineFold[V]", self._folds[cast("type[Any]", fold)]).value()
 
     def _feed(self, raw: bytes) -> None:
-        line = ledger_record(line_dict, raw, ledger=self._path, offset=self._lines)
+        try:
+            line = ledger_record(line_dict, raw, ledger=self._path, offset=self._lines)
+        except LedgerUnreadableError as refusal:
+            self._refused = self._refused or refusal
+            return
         if line is None:
             return
         for fold in self._folds.values():

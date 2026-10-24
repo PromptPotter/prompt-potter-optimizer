@@ -25,7 +25,7 @@ from promptpotter.domain.phases import (
     RunState,
     stop_next_step,
 )
-from promptpotter.domain.results import VerifyStrategy, closed_after_origin
+from promptpotter.domain.results import closed_after_origin
 from promptpotter.domain.run_records import ForkRemainder
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import Budget, CeilingMeter, MeteredSpend
@@ -42,7 +42,6 @@ from promptpotter.infrastructure.runtime_flags import (
     effective_lookahead,
     requested_lookahead,
     standing_controls,
-    verify_stale_after,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,
@@ -51,14 +50,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.stores import Stores
-
-
-class VerifyPassProgress(StrictModel):
-    """``verify_pass`` on a served dashboard — one candidate being re-scored on unseen cells."""
-
-    arm: ArmName = Field(description="The candidate the pass re-scores, as its row names it.")
-    rows: int = Field(description="Unseen search cells the pass sends.")
-    strategy: VerifyStrategy
 
 
 class WarmingDashboard(StrictModel):
@@ -201,9 +192,6 @@ class ServedDashboard(DashboardFacts):
         description="How many cells that line is read on — its round's origin panel, which every "
         "member drawn on it holds whole. Null with `overlap_line_round`."
     )
-    verify_pass: VerifyPassProgress | None = Field(
-        description="A verify pass in flight on one of this cycle's candidates, null outside one."
-    )
     composite_fitness_weights: dict[str, float] | None = Field(
         description="`composite_fitness_formula` as `{term: weight}`, where it IS an anchored "
         "criterion — what a scoring form's dials seed from. Null says the formula cannot carry "
@@ -274,7 +262,8 @@ class _Standing(NamedTuple):
     lookahead: int
     lookahead_auto: bool
     verify: VerifyLedger
-    verify_stale_after: float | None
+    # A pass still running on the ledger that no attached run and no paid pass's job scores.
+    orphaned: bool
     fork_remainder: ForkRemainder
     bench_score: BenchScore | None
     # ``None`` where the manifest, and so the meter, is gone.
@@ -369,6 +358,10 @@ def _serve(
         if not run.producer.appending:
             # A killed run never publishes its closing zero, so it would go on reporting calls out.
             banked.update(in_flight=0, lookahead_allowed=0, waiting_on=None)
+        if standing.orphaned:
+            banked["verification"] = [
+                m.orphaned() if m.state == "running" else m for m in state.verification
+            ]
         elif (held := state.backpressure) is not None:
             banked["backpressure"] = ServedBackpressure.at(held, standing.at)
     verify = None if standing is None else standing.verify
@@ -377,8 +370,6 @@ def _serve(
         {} if verify is None else {key: read for key, (_, read) in verify.graded.items()},
         state.level_series,
     )
-    opened = None if verify is None else verify.open
-    stale_after = None if standing is None else standing.verify_stale_after
     formula = state.composite_fitness_formula
     dials = None if formula is None else anchored_criterion_dials(formula)
     affordable, most = state.lookahead_affordable, state.lookahead_most
@@ -408,12 +399,6 @@ def _serve(
         pause=run.pause,
         overlap_line_round=None if line_round is None else line_round.round,
         overlap_line_n=None if line_round is None else len(line_round.overlap.positions),
-        verify_pass=VerifyPassProgress(arm=opened.arm, rows=opened.rows, strategy=opened.strategy)
-        if opened is not None
-        and standing is not None
-        and stale_after is not None
-        and standing.at < stale_after
-        else None,
         composite_fitness_weights=None
         if dials is None
         else {name: d.weight for name, d in dials.items()},
@@ -484,7 +469,9 @@ def served_dashboard(
             lookahead=requested_lookahead(armed),
             lookahead_auto=armed.lookahead is not None and armed.lookahead.auto,
             verify=scan_ledger_verify(CycleLayout(cycle_path).ledger),
-            verify_stale_after=verify_stale_after(cycle_path),
+            orphaned=any(m.state == "running" for m in state.verification)
+            and not run.producer.attached
+            and JobRegistry.attach().pass_on(stores.campaigns.workspace, hop) is None,
             fork_remainder=_remainder(stores, hop, limits),
             bench_score=None
             if campaign is None or config is None

@@ -8,12 +8,12 @@ import { fmtSigned, fmtTheta, unitCount } from "@/lib/format";
 import { NOT_SEPARABLE } from "@/lib/fitness";
 import type { CandidateBar } from "@/lib/types";
 import {
+  CANDIDATE_SERIES,
   activeSeries,
   seriesByKey,
   seriesColumn,
   whiskerBands,
   type SeriesCtx,
-  type SeriesSpec,
   type WhiskerBand,
 } from "./series";
 import type { Chart as ChartJS, ChartData, ChartOptions, ChartType, Plugin } from "chart.js";
@@ -45,6 +45,8 @@ declare module "chart.js" {
     divergenceLine?: { index: number | null };
     inFlightPulse?: { index: number | null };
     ciWhisker?: { bands: WhiskerBand[]; shaded: boolean };
+    verificationMarks?: { marks: MarkRow[]; still: boolean };
+    partialPanels?: { short: boolean[]; picked: number | null };
     xBridge?: { onGeometry: (g: PlotGeometry) => void };
   }
 }
@@ -149,14 +151,18 @@ function drawRibbons(chart: ChartJS, bands: WhiskerBand[]): void {
   ctx.restore();
 }
 
+const isMark = (label: unknown): boolean => seriesByKey(String(label ?? ""))?.kind === "mark";
+
+// Shaded, a bar channel's bands are a ribbon; a mark's interval is always its own whisker.
 const ciWhiskerPlugin: Plugin<"bar", BandOpts> = {
   id: "ciWhisker",
   beforeDatasetsDraw(chart, _args, opts) {
-    if (opts?.shaded && opts.bands?.length) drawRibbons(chart, opts.bands);
+    const ribbons = opts?.bands?.filter((b) => !isMark(b.anchor));
+    if (opts?.shaded && ribbons?.length) drawRibbons(chart, ribbons);
   },
   afterDatasetsDraw(chart, _args, opts) {
-    const bands = opts?.bands;
-    if (!bands?.length || opts?.shaded) return;
+    const bands = opts?.shaded ? opts.bands?.filter((b) => isMark(b.anchor)) : opts?.bands;
+    if (!bands?.length) return;
     const { ctx } = chart;
     ctx.save();
     ctx.strokeStyle = getCss("--color-ci");
@@ -225,29 +231,32 @@ const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
 
 const PULSE_PERIOD_MS = 1600;
 const POINT_PULSE_WIDTH = 10;
+// One pending frame per chart, whichever plugin asks: each asks again from the frame it drew.
 const pulseRaf = new WeakMap<object, number>();
+function nextPulseFrame(chart: ChartJS): void {
+  if (pulseRaf.has(chart)) return;
+  pulseRaf.set(
+    chart,
+    requestAnimationFrame(() => {
+      pulseRaf.delete(chart);
+      if (chart.ctx) chart.draw();
+    }),
+  );
+}
+
 const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
   id: "inFlightPulse",
   afterDatasetsDraw(chart, _args, opts) {
     const idx = opts?.index;
-    const cancel = () => {
-      const raf = pulseRaf.get(chart);
-      if (raf != null) {
-        cancelAnimationFrame(raf);
-        pulseRaf.delete(chart);
-      }
-    };
-    if (idx == null || idx < 0) {
-      cancel();
-      return;
-    }
+    if (idx == null || idx < 0) return;
     const { ctx } = chart;
     if (!ctx) return;
     let left = Infinity;
     let right = -Infinity;
     let top = Infinity;
     let base = -Infinity;
-    chart.data.datasets.forEach((_ds, di) => {
+    chart.data.datasets.forEach((ds, di) => {
+      if (isMark(ds.label)) return;
       const el = chart.getDatasetMeta(di).data[idx] as
         | { getProps?: (p: string[], final: boolean) => Record<string, number> }
         | undefined;
@@ -262,10 +271,7 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
       top = Math.min(top, y);
       base = Math.max(base, b);
     });
-    if ([left, right, top, base].some((v) => !Number.isFinite(v))) {
-      cancel();
-      return;
-    }
+    if ([left, right, top, base].some((v) => !Number.isFinite(v))) return;
     const t = 0.5 + 0.5 * Math.sin((Date.now() / PULSE_PERIOD_MS) * Math.PI * 2);
     const glow = getCss("--color-success");
     ctx.save();
@@ -276,17 +282,118 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
     ctx.shadowBlur = 7 + 9 * t;
     ctx.strokeRect(left - 1.5, top - 1.5, right - left + 3, base - top + 3);
     ctx.restore();
-    pulseRaf.set(
-      chart,
-      requestAnimationFrame(() => {
-        if (chart.ctx) chart.draw();
-      }),
-    );
+    nextPulseFrame(chart);
   },
   beforeDestroy(chart) {
     const raf = pulseRaf.get(chart);
     if (raf != null) cancelAnimationFrame(raf);
     pulseRaf.delete(chart);
+  },
+};
+
+const MARK_R = 5;
+const MARK_GAP = 7;
+const MARK_STEP = 11;
+const MARK_PULSE_MS = 1400;
+type MarkOpts = { marks: MarkRow[]; still: boolean };
+interface MarkRow {
+  key: string;
+  filled: boolean;
+  running: boolean[];
+}
+type MarkEl = { x: number; y: number; skip?: boolean };
+
+// Beside the bar group, never on it: each mark series keeps its slot, drawn or not.
+const verificationMarksPlugin: Plugin<"bar", MarkOpts> = {
+  id: "verificationMarks",
+  afterDatasetsUpdate(chart, _args, opts) {
+    const rows = opts?.marks;
+    const xScale = chart.scales.x;
+    if (!rows?.length || !xScale) return;
+    const bars = chart.data.datasets.flatMap((ds, di) =>
+      seriesByKey(String(ds.label ?? ""))?.kind === "bar" ? [chart.getDatasetMeta(di)] : [],
+    );
+    rows.forEach((row, slot) => {
+      const di = chart.data.datasets.findIndex((ds) => ds.label === row.key);
+      if (di < 0) return;
+      chart.getDatasetMeta(di).data.forEach((el, i) => {
+        let right = xScale.getPixelForValue(i);
+        for (const meta of bars) {
+          const bar = (meta.data[i] as Placed)?.getProps?.(["x", "width"], true);
+          const x = bar?.x;
+          const w = bar?.width;
+          // A bar channel drawn as a line has points, no width.
+          if (typeof x === "number") right = Math.max(right, typeof w === "number" ? x + w / 2 : x);
+        }
+        (el as unknown as MarkEl).x = right + MARK_GAP + MARK_STEP * slot;
+      });
+    });
+  },
+  afterDatasetsDraw(chart, _args, opts) {
+    const rows = opts?.marks;
+    if (!rows?.length) return;
+    const { ctx } = chart;
+    const t = 0.5 + 0.5 * Math.cos((Date.now() / MARK_PULSE_MS) * Math.PI * 2);
+    let pulsing = false;
+    ctx.save();
+    ctx.lineWidth = 1.4;
+    for (const row of rows) {
+      const di = chart.data.datasets.findIndex((ds) => ds.label === row.key);
+      const ink = chart.data.datasets[di]?.borderColor;
+      if (di < 0 || typeof ink !== "string") continue;
+      ctx.strokeStyle = ink;
+      ctx.fillStyle = ink;
+      chart.getDatasetMeta(di).data.forEach((el, i) => {
+        const { x, y, skip } = el as unknown as MarkEl;
+        if (skip || !Number.isFinite(x) || !Number.isFinite(y)) return;
+        const running = row.running[i] === true;
+        pulsing ||= running && !opts.still;
+        ctx.globalAlpha = !running ? 1 : opts.still ? 0.6 : 0.35 + 0.65 * t;
+        ctx.beginPath();
+        ctx.moveTo(x, y - MARK_R);
+        ctx.lineTo(x + MARK_R, y);
+        ctx.lineTo(x, y + MARK_R);
+        ctx.lineTo(x - MARK_R, y);
+        ctx.closePath();
+        if (row.filled) ctx.fill();
+        ctx.stroke();
+      });
+    }
+    ctx.restore();
+    if (pulsing) nextPulseFrame(chart);
+  },
+};
+
+const HEX_R = 4;
+// A point on fewer rows than its panel holds is an empty hexagon, never a dot.
+const partialPanelsPlugin: Plugin<"bar", { short: boolean[]; picked: number | null }> = {
+  id: "partialPanels",
+  afterDatasetsDraw(chart, _args, opts) {
+    const short = opts?.short;
+    if (!short?.some(Boolean)) return;
+    const { ctx } = chart;
+    ctx.save();
+    ctx.lineWidth = 1.4;
+    ctx.fillStyle = getCss("--color-background-primary");
+    chart.data.datasets.forEach((ds, di) => {
+      if (seriesByKey(String(ds.label ?? ""))?.kind !== "bar" || typeof ds.borderColor !== "string") return;
+      ctx.strokeStyle = ds.borderColor;
+      chart.getDatasetMeta(di).data.forEach((el, i) => {
+        if (!short[i]) return;
+        const { x, y, skip } = el as unknown as MarkEl;
+        if (skip || !Number.isFinite(x) || !Number.isFinite(y)) return;
+        const r = i === opts.picked ? HEX_R + 2 : HEX_R;
+        ctx.beginPath();
+        for (let k = 0; k < 6; k++) {
+          const a = (Math.PI / 3) * k - Math.PI / 2;
+          ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      });
+    });
+    ctx.restore();
   },
 };
 
@@ -312,8 +419,12 @@ const CHART_PLUGINS = [
   divergenceLinePlugin,
   inFlightPulsePlugin,
   ciWhiskerPlugin,
+  verificationMarksPlugin,
+  partialPanelsPlugin,
   xBridgePlugin,
 ];
+
+const MARK_SERIES = CANDIDATE_SERIES.filter((s) => s.kind === "mark");
 
 const ROTATE_THRESHOLD = 8;
 const LINES_ABOVE = 12;
@@ -371,20 +482,39 @@ export const FitnessChart = memo(function FitnessChart({
     [views],
   );
 
+  const shortPanels = useMemo(
+    () =>
+      views.map((v) => {
+        const p = v.reading?.panel;
+        return p?.scored != null && p.expected != null && p.scored < p.expected;
+      }),
+    [views],
+  );
+
+  const marks = useMemo<MarkRow[]>(
+    () =>
+      MARK_SERIES.map((spec) => ({
+        key: spec.key,
+        filled: spec.mark?.filled === true,
+        running: views.map((v) => spec.mark?.of(v)?.state === "running"),
+      })),
+    [views],
+  );
+
   const data = useMemo<ChartData<"bar" | "line">>(() => {
     const bars = active.filter((s) => s.kind === "bar").length;
-    const cat = bars <= 1 ? 0.55 : bars === 2 ? 0.75 : bars === 3 ? 0.9 : 0.95;
+    // A group carrying marks narrows, leaving them room before the next group.
+    const roomy = active.some((s) => s.kind === "mark") ? 0.7 : 1;
+    const cat = roomy * (bars <= 1 ? 0.55 : bars === 2 ? 0.75 : bars === 3 ? 0.9 : 0.95);
     const barCount = Math.max(1, labels.length);
     const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * Math.max(1, bars)))));
-    const outline = (spec: SeriesSpec, ink: string) => {
-      const base = spec.hollow ? ink : "transparent";
-      const baseW = spec.hollow ? 1.5 : 0;
-      if (!selectionBorder) return { borderColor: base, borderWidth: baseW };
+    const outline = () => {
+      if (!selectionBorder) return { borderColor: "transparent", borderWidth: 0 };
       return {
         borderColor: labels.map((_, i) =>
-          i === selectionBorder.idx ? selectionBorder.colour : base,
+          i === selectionBorder.idx ? selectionBorder.colour : "transparent",
         ),
-        borderWidth: labels.map((_, i) => (i === selectionBorder.idx ? 3 : baseW)),
+        borderWidth: labels.map((_, i) => (i === selectionBorder.idx ? 3 : 0)),
       };
     };
     return {
@@ -392,6 +522,23 @@ export const FitnessChart = memo(function FitnessChart({
       datasets: active.map((spec) => {
         const ink = getCss(spec.ink(ctx));
         const data = seriesColumn(spec, views);
+        if (spec.kind === "mark") {
+          // Hit targets only: `verificationMarks` places and draws each diamond.
+          return {
+            type: "line" as const,
+            label: spec.key,
+            data,
+            borderColor: ink,
+            showLine: false,
+            pointRadius: MARK_R,
+            pointHoverRadius: MARK_R,
+            pointHitRadius: MARK_R + 3,
+            pointBackgroundColor: "transparent",
+            pointBorderColor: "transparent",
+            yAxisID: spec.axis,
+            animation: false as const,
+          };
+        }
         if (spec.kind === "line") {
           return {
             type: "line" as const,
@@ -414,8 +561,10 @@ export const FitnessChart = memo(function FitnessChart({
             type: "line" as const,
             label: spec.key,
             data,
-            ...lineLook(ink, spec.hollow),
-            pointRadius: labels.map((_, i) => (i === picked ? 5 : 2)),
+            ...lineLook(ink),
+            // `partialPanels` draws a short panel's hexagon in place of the dot.
+            pointRadius: labels.map((_, i) => (shortPanels[i] ? 0 : i === picked ? 5 : 2)),
+            pointHoverRadius: labels.map((_, i) => (shortPanels[i] ? 0 : 4)),
             pointBorderColor: labels.map((_, i) =>
               i === picked && selectionBorder ? selectionBorder.colour : ink,
             ),
@@ -428,8 +577,8 @@ export const FitnessChart = memo(function FitnessChart({
         return {
           label: spec.key,
           data,
-          backgroundColor: spec.hollow ? "transparent" : ink,
-          ...outline(spec, ink),
+          backgroundColor: ink,
+          ...outline(),
           yAxisID: spec.axis,
           barPercentage: 0.95,
           categoryPercentage: cat,
@@ -440,7 +589,7 @@ export const FitnessChart = memo(function FitnessChart({
       }),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, views, active, ctx, themeVersion, selectionBorder, asLines]);
+  }, [labels, views, active, ctx, themeVersion, selectionBorder, asLines, shortPanels]);
 
   const rotate = labels.length > ROTATE_THRESHOLD;
   const options = useMemo<ChartOptions<"bar">>(() => ({
@@ -538,10 +687,12 @@ export const FitnessChart = memo(function FitnessChart({
       divergenceLine: { index: divergenceBoundary },
       inFlightPulse: { index: inFlightIndex },
       ciWhisker: { bands, shaded: asLines },
+      verificationMarks: { marks, still: reducedMotion },
+      partialPanels: { short: asLines ? shortPanels : [], picked: selectionBorder?.idx ?? null },
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, rotate, asLines, reducedMotion, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, cutCounts, onGeometry, bands]);
+  }), [themeVersion, ctx, rotate, asLines, reducedMotion, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, parentIdx, crown, cutCounts, onGeometry, bands, marks, shortPanels, selectionBorder]);
 
   return (
     <div className="fitness-chart-frame">

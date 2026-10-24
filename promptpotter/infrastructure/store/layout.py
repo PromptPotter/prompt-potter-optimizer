@@ -258,6 +258,11 @@ class CycleLayout:
         """Never unlinked: every launch reuses the path."""
         return self.runtime / "producer.lock"
 
+    @property
+    def pass_lock(self) -> Path:
+        """Held beside the producer lock while a paid pass, not a loop, holds the cycle."""
+        return self.runtime / "pass.lock"
+
 
 @dataclass(frozen=True, slots=True)
 class CampaignLayout:

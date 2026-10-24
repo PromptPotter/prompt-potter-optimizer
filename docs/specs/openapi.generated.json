@@ -1584,73 +1584,6 @@
         "title": "BandedValue",
         "type": "object"
       },
-      "BenchPassProgress": {
-        "additionalProperties": false,
-        "description": "The held-out pass in flight; its rows are no round's cells.",
-        "properties": {
-          "accuracy": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The gateway's running accuracy over the rows scored; null before the first.",
-            "title": "Accuracy"
-          },
-          "arm": {
-            "description": "The arm the pass grades — the join to its row.",
-            "title": "Arm",
-            "type": "string"
-          },
-          "label": {
-            "description": "That arm's label, to render.",
-            "title": "Label",
-            "type": "string"
-          },
-          "round": {
-            "description": "The round whose selection is graded; 0 is the origin.",
-            "title": "Round",
-            "type": "integer"
-          },
-          "rows": {
-            "description": "Bench rows the pass sends.",
-            "title": "Rows",
-            "type": "integer"
-          },
-          "scored": {
-            "description": "Rows of it scored so far.",
-            "title": "Scored",
-            "type": "integer"
-          },
-          "sp_hash": {
-            "description": "The searchpoint scored — the archive's `prompt_fields_id`.",
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "subject": {
-            "enum": [
-              "origin",
-              "selected"
-            ],
-            "title": "Subject",
-            "type": "string"
-          }
-        },
-        "required": [
-          "subject",
-          "arm",
-          "label",
-          "sp_hash",
-          "round",
-          "rows",
-          "scored"
-        ],
-        "title": "BenchPassProgress",
-        "type": "object"
-      },
       "BenchReading": {
         "additionalProperties": false,
         "description": "One individual's bench pass, read under a named scorer.",
@@ -2308,6 +2241,7 @@
           "sp_budget_origin": {
             "default": 40,
             "description": "Origin eval budget — how many bank samples the origin (C0) is scored on at check-in. The bench's, whatever the optimizer: a round's own panel is its sampler's knob. Wide because origin breadth is the one breadth that is nearly free: θ_origin is the term EVERY delta subtracts, and its rows are content-addressed cache replayed into every candidate arm, fork and resume — paid once per config. Candidate breadth is paid per candidate, per round. Every comparison downstream is matched by sample key or θ-space, so an origin scored on a superset stays like-for-like. A bank smaller than this scores on the whole bank (`sample_dataset` is a prefix slice) — not an error.",
+            "maximum": 150.0,
             "minimum": 1.0,
             "title": "Sp Budget Origin",
             "type": "integer"
@@ -8590,8 +8524,19 @@
         "additionalProperties": false,
         "description": "One held slot, whoever holds it: a campaign run or a paid verb's scoring pass.",
         "properties": {
+          "cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CycleHop"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cycle the job holds, which `/cycles` lists with its run phase — `scoring` for a pass on it; null for a fresh mint and a pass scoring no cycle."
+          },
           "holder": {
-            "description": "WHAT holds the slot, by `kind`: a `campaign_launch` (its run is a cycle `/cycles` lists) or a `scoring_pass` (a paid verb with no cycle of its own).",
+            "description": "WHAT holds the slot, by `kind`: a `campaign_launch` or a `scoring_pass` (a paid verb outside any run).",
             "discriminator": {
               "mapping": {
                 "campaign_launch": "#/components/schemas/CampaignLaunch",
@@ -8645,6 +8590,7 @@
           "job_id",
           "what",
           "holder",
+          "cycle",
           "user",
           "mine",
           "started_at"
@@ -11487,7 +11433,7 @@
                 "$ref": "#/components/schemas/WalkEnd"
               }
             ],
-            "description": "The walk's own end, or the run stop that cut the pass before it was sent.",
+            "description": "The walk's own end, or the run stop that cut the pass: a pause mid-walk, a spent budget before it was sent.",
             "title": "Cause"
           },
           "warning": {
@@ -13008,11 +12954,12 @@
         "type": "object"
       },
       "RunPhase": {
-        "description": "The one run-state vocabulary every surface reads.\n\n- ``queued``: a launch claimed the cycle and waits for a machine slot.\n- ``starting``: a claimed launch past the queue, its process coming up.\n- ``running``: a process is attached and driving the cycle.\n- ``paused``: the worker exited and the cycle stays active and resumable.\n- ``gate``: holding for the operator, at the round-0 origin gate or for a round's arms.\n- ``detached``: active with no process holding its lock; derived at the read, never stored.\n- ``terminal``: the cycle finished, and its stop reason says why.",
+        "description": "The one run-state vocabulary every surface reads.\n\n- ``queued``: a launch claimed the cycle and waits for a machine slot.\n- ``starting``: a claimed launch past the queue, its process coming up.\n- ``running``: a process is attached and driving the cycle.\n- ``scoring``: a paid pass (bench, verify, noise floor) holds the cycle outside its loop.\n- ``paused``: the worker exited and the cycle stays active and resumable.\n- ``gate``: holding for the operator, at the round-0 origin gate or for a round's arms.\n- ``detached``: active with no process holding its lock; derived at the read, never stored.\n- ``terminal``: the cycle finished, and its stop reason says why.",
         "enum": [
           "queued",
           "starting",
           "running",
+          "scoring",
           "paused",
           "gate",
           "detached",
@@ -13591,16 +13538,6 @@
               }
             ]
           },
-          "bench_pass": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchPassProgress"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "bench_score": {
             "anyOf": [
               {
@@ -14069,16 +14006,13 @@
             "title": "Total Queries Scored",
             "type": "integer"
           },
-          "verify_pass": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/VerifyPassProgress"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "A verify pass in flight on one of this cycle's candidates, null outside one."
+          "verification": {
+            "description": "Each arm's latest verify and held-out bench pass on this cycle's ledger, in flight or ended; its rows are no round's cells.",
+            "items": {
+              "$ref": "#/components/schemas/VerificationMark"
+            },
+            "title": "Verification",
+            "type": "array"
           },
           "waiting_on": {
             "anyOf": [
@@ -14125,7 +14059,6 @@
           "pause",
           "overlap_line_round",
           "overlap_line_n",
-          "verify_pass",
           "composite_fitness_weights",
           "composite_fitness_anchors",
           "sample_lookahead",
@@ -14870,6 +14803,7 @@
         "enum": [
           "archived",
           "running",
+          "scoring",
           "starting",
           "queued",
           "gate",
@@ -15762,6 +15696,77 @@
         "title": "VendorModels",
         "type": "object"
       },
+      "VerificationMark": {
+        "additionalProperties": false,
+        "description": "The latest verify or bench pass on one arm, as its records left it.",
+        "properties": {
+          "arm": {
+            "$ref": "#/components/schemas/ArmName",
+            "description": "The arm the pass measures; `arm.key` joins it to its row."
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a `failed` pass ended without a reading.",
+            "title": "Failure"
+          },
+          "kind": {
+            "enum": [
+              "verify",
+              "bench"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BandedValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accuracy over the rows scored: the running value, unbanded, while `running`; the pass's reading once `done`. Null before the first row, and on a `failed` pass, which reads nothing."
+          },
+          "rows": {
+            "description": "Rows the pass sends.",
+            "title": "Rows",
+            "type": "integer"
+          },
+          "scored": {
+            "description": "Rows of it scored so far.",
+            "title": "Scored",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "arm",
+          "state",
+          "rows",
+          "scored",
+          "level",
+          "failure"
+        ],
+        "title": "VerificationMark",
+        "type": "object"
+      },
       "VerifyCandidatePayload": {
         "additionalProperties": false,
         "description": "``samples`` omitted is the ANSWER, not an absence: the count is derived from the\nper-candidate round budget and the rounds run since this cycle's last verification\n(``application/diagnostics/verify.py::derive_verify_samples``). A larger explicit count is\nrefused, naming the budget — which is what keeps one click on a million-row dataset from being\na million-cell bill.\n\nAddressed as the ``evidence`` read addresses a searchpoint — cycle, descent, ``candidate_id``\n— so an L4 inner candidate is as reachable as a top-level one.",
@@ -15800,7 +15805,7 @@
           "samples": {
             "anyOf": [
               {
-                "maximum": 10000.0,
+                "maximum": 150.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -15837,36 +15842,6 @@
           "candidate_id"
         ],
         "title": "VerifyCandidatePayload",
-        "type": "object"
-      },
-      "VerifyPassProgress": {
-        "additionalProperties": false,
-        "description": "``verify_pass`` on a served dashboard — one candidate being re-scored on unseen cells.",
-        "properties": {
-          "arm": {
-            "$ref": "#/components/schemas/ArmName",
-            "description": "The candidate the pass re-scores, as its row names it."
-          },
-          "rows": {
-            "description": "Unseen search cells the pass sends.",
-            "title": "Rows",
-            "type": "integer"
-          },
-          "strategy": {
-            "enum": [
-              "random",
-              "hard"
-            ],
-            "title": "Strategy",
-            "type": "string"
-          }
-        },
-        "required": [
-          "arm",
-          "rows",
-          "strategy"
-        ],
-        "title": "VerifyPassProgress",
         "type": "object"
       },
       "VerifyReading": {
@@ -16956,6 +16931,88 @@
         "tags": [
           "Campaigns",
           "Stream"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/export": {
+      "get": {
+        "description": "One reading of the cycle, chosen by what its reader does next — the CLI's `export --tier`.\n\n``chat`` and ``report`` are text to paste, ``deploy`` is ``export.json``; ``notebook`` and ``package`` are several files, served as one zip.\n``deploy`` and ``package`` answer 409 until the cycle has written ``export.json``.",
+        "operationId": "get_cycle_export_api_v1_campaigns__campaign_id__cycles__cycle_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cycle_id",
+            "required": true,
+            "schema": {
+              "title": "Cycle Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tier",
+            "required": true,
+            "schema": {
+              "enum": [
+                "chat",
+                "report",
+                "notebook",
+                "deploy",
+                "package"
+              ],
+              "title": "Tier",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {},
+              "application/zip": {},
+              "text/plain": {}
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Get Cycle Export",
+        "tags": [
+          "Campaigns"
         ]
       }
     },

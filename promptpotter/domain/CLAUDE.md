@@ -41,8 +41,9 @@ The word `legacy` is **never** sanctioned.
 - `export.py` — the export artifact (`cycles/{id}/export.json`): the winning prompt by field name
   plus the provenance that makes its fitness readable — the formula the number was computed under,
   n, lift + CI, θ, the rows' own hash, the optimizer manifest — and an `artifact_version` a reader
-  refuses on. Pure over ONE `RoundResult`, which is what keeps it here: the projection can grow no
-  file read and no session dependency. **The round it projects is the optimizer's declared pick,
+  refuses on, plus the PROV-O `lineage` that reached it. Pure over the winner's `RoundResult` and
+  the cycle's rounds, which is what keeps it here: the projection can grow no file read and no
+  session dependency. `ExportTier` is the closed set every export surface offers. **The round it projects is the optimizer's declared pick,
   origin round included** — a campaign that never selected past it exports its origin under round
   0, not nothing. Read the round file's `prompts`, never `CycleResult.result_prompt_fields`:
   that one is the wire-side projection. It holds one prompt per prompt node, each in its node's
@@ -131,15 +132,14 @@ outcome is CORRECT depends on what the payload carries:
   stay required. A missing field means the record cannot be vouched for, and a tolerant read
   hands back a winner prompt with a silently defaulted field — a wrong answer beats an
   unreadable one only until someone believes it.
-- **Ledger** — the `CycleRecord` arms. Tolerant by SKIP, not by default: every ledger reader (`infrastructure/store/read_model.py::ledger_record`) logs
-  a key no arm declares and drops the WHOLE line, so a field DELETE erases every record carrying
-  it and nothing raises. Here pruning IS the repair — `application/maintenance/restamp.py::_prune_record`, derived from
-  the union and, inside `optimizer_state`, from each part's registered kind, so no field delete
-  needs a migration of its own.
+- **Ledger** — the `CycleRecord` arms. Never tolerant: a line no arm accepts refuses its cycle to
+  every reader of its kind (`infrastructure/store/read_model.py::ledger_record`). A key no arm
+  declares any more is pruned off — `application/maintenance/restamp.py::_prune_record`, derived from
+  the union arm the value IS and, inside `optimizer_state`, from each part's registered kind, so no
+  field delete needs a migration of its own; a line that would not load pruned is kept as it was.
 
-`application/maintenance/restamp.py::check_round_closes` reports a close that no longer loads —
-a round the scan silently stops counting; PRUNING never repairs one, because it cannot restore a
-renamed field's value.
+A renamed or newly required field cannot be pruned back: `application/maintenance/restamp.py::check_cycle_ledgers` lists
+each refused cycle, and deleting its campaign is the remedy.
 
 ## Conventions
 

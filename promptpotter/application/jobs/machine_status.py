@@ -4,6 +4,7 @@ from pydantic import Field
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity, throttle_hold
 from promptpotter.application.jobs.registry import (
+    UNRESOLVED_HOP,
     EmbeddedRun,
     InnerRun,
     Job,
@@ -11,6 +12,7 @@ from promptpotter.application.jobs.registry import (
     SlotHolder,
 )
 from promptpotter.config.settings import settings
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.migration import is_host
@@ -28,8 +30,12 @@ class MachineSlot(StrictModel):
     job_id: str
     what: str = Field(description=_WHAT_DOC)
     holder: SlotHolder = Field(
-        description="WHAT holds the slot, by `kind`: a `campaign_launch` (its run is a cycle "
-        "`/cycles` lists) or a `scoring_pass` (a paid verb with no cycle of its own)."
+        description="WHAT holds the slot, by `kind`: a `campaign_launch` or a `scoring_pass` "
+        "(a paid verb outside any run)."
+    )
+    cycle: CycleHop | None = Field(
+        description="The cycle the job holds, which `/cycles` lists with its run phase — "
+        "`scoring` for a pass on it; null for a fresh mint and a pass scoring no cycle."
     )
     user: str = Field(description="user_id of the account whose job holds the slot")
     mine: bool = Field(
@@ -48,6 +54,7 @@ class MachineSlot(StrictModel):
             job_id=job.job_id,
             what=job.what,
             holder=holder,
+            cycle=None if job.hop == UNRESOLVED_HOP else job.hop,
             user=job.user_id,
             mine=job.user_id == account,
             started_at=job.started_at,

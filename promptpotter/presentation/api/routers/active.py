@@ -4,7 +4,12 @@ from fastapi import APIRouter, Query, Request, Response
 from pydantic import Field
 
 from promptpotter.application.campaign_config import OptimizationConfig
-from promptpotter.application.cycle_listing import CyclesResponse, active_pointer, list_cycles
+from promptpotter.application.cycle_listing import (
+    CyclesResponse,
+    active_pointer,
+    cycle_list_version,
+    list_cycles,
+)
 from promptpotter.application.jobs.machine_status import MachineStatusResponse, machine_status
 from promptpotter.application.pipeline_resolve import (
     OptimizerKnobsResponse,
@@ -67,11 +72,11 @@ def get_cycles(
     ``descend`` is the ``~``-joined ``campaign::cycle`` chain of ``.inner/`` sandboxes to enter; absent is the tenant's own tree.
     The pointer is raw: whether the pointed cycle is live is its entry's ``run_phase``.
     """
+    inside = decode_cycle_path(descend)
     return conditional_json(
         request,
-        list_cycles(
-            stores, inside=decode_cycle_path(descend), campaign_id=campaign, attached_only=attached
-        ),
+        (cycle_list_version(stores, inside=inside), campaign, attached),
+        lambda: list_cycles(stores, inside=inside, campaign_id=campaign, attached_only=attached),
     )
 
 

@@ -20,7 +20,6 @@ from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.views.render.markdown import to_markdown
 from promptpotter.application.views.view_models import (
     DigestStatusView,
-    FinalWinnerView,
     ForkSummaryView,
     HardSamplesView,
     LogMdView,
@@ -110,6 +109,7 @@ def from_disk_log(
     index: CycleIndex,
     rounds: list[RoundResult],
     *,
+    hop: CycleHop,
     spend_by_round: dict[int, SpendRollup],
     spent: LedgerSpend,
     level_series: LevelSeries | None,
@@ -160,14 +160,6 @@ def from_disk_log(
             )
         )
 
-    final_view = (
-        FinalWinnerView(
-            result_prompt_fields=final.result_prompt_fields,
-            result_pipeline_params=final.result_pipeline_params or {},
-        )
-        if final
-        else None
-    )
     hard: HardSamplesView | None = None
     if hard_samples is not None:
         measured = hard_samples.sample_order
@@ -190,7 +182,8 @@ def from_disk_log(
         # Declared at run init, so a RUNNING cycle's digest names the formula its numbers carry.
         formula=index.scorer_cell_formula,
         hard_samples=hard,
-        final=final_view,
+        # The winner is the package's to state, so an ended cycle's digest names where it is.
+        exported=hop if final else None,
         forks=fork_views,
     )
 
@@ -231,6 +224,7 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
         from_disk_log(
             index,
             rounds,
+            hop=hop,
             hard_samples=read_hard_samples(layout.hard_samples),
             streams_dir=layout.streams,
             hard_sample_order=config.hard_sample_order,
@@ -256,6 +250,7 @@ def _render_campaign_log_md(session: Session) -> None:
         from_disk_log(
             index,
             _banked_rounds(session, root),
+            hop=root,
             streams_dir=root_layout.streams,
             fork_indices=_load_sibling_indices(store, campaign_id, exclude=root.cycle_id),
             spend_by_round=_spend_by_round(root_layout),

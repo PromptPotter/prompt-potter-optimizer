@@ -40,16 +40,16 @@ export function useCandidateBars(index: LineageIndex) {
 
   const areCourses = useMemo(() => barsAreCourses(viewedNode), [viewedNode]);
 
-  const benchPass = dash?.bench_pass ?? null;
+  const marks = dash?.verification;
   const views = useMemo<CandidateBar[]>(
     () =>
       candidateBars({
         viewedNode,
         inflightByKey,
         sampleSet,
-        benchPass,
+        marks: marks ?? [],
       }),
-    [viewedNode, inflightByKey, sampleSet, benchPass],
+    [viewedNode, inflightByKey, sampleSet, marks],
   );
 
   const floorPinned = useMemo(

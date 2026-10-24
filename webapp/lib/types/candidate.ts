@@ -2,8 +2,8 @@ import type {
   ArmAbility,
   ArmNode,
   ArmReading,
-  BenchPassProgress,
   CourseNode,
+  VerificationMark,
 } from "@/lib/api/types";
 
 export type CandidateSource = "history" | "inflight";
@@ -35,8 +35,9 @@ export interface ArmBar extends BarBase {
   source: CandidateSource;
   // Null unless this bar answered the WHOLE shared basis.
   overlap: { rate: number | null; n: number } | null;
-  // served: `dash.bench_pass`; a finished pass is `reading.bench`.
-  benchPass: BenchPassProgress | null;
+  // served: `dash.verification`, this cycle's own passes on the arm.
+  verify: VerificationMark | null;
+  bench: VerificationMark | null;
 }
 
 // A run drawn as a bar: no arm, so no reading — its level is the served `run_standing`.

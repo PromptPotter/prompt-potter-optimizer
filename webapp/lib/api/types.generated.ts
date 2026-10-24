@@ -54,7 +54,9 @@ export interface ServedDashboard {
   run_standing: RunStanding | null;
   rounds: ServedRound[];
   bench_score: BenchScore | null;
-  bench_pass: BenchPassProgress | null;
+  /** Each arm's latest verify and held-out bench pass on this cycle's ledger, in
+   * flight or ended; its rows are no round's cells. */
+  verification: VerificationMark[];
   composite_fitness_formula: string | null;
   display_metric: 'accuracy' | 'composite' | 'ability';
   elects_on: 'accuracy' | 'composite' | 'ability';
@@ -92,7 +94,7 @@ export interface ServedDashboard {
   cycle_id: string;
   /** The cycle's phase, derived at the read (`derive_run_state`) — never the
    * runner's own `declared_phase`, which says `running` forever after a kill. */
-  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** How the cycle reads: `run_phase` and `stop_reason` as one word and one mark. */
   status: RunStatus;
   /** What the operator does now, as the cycle's `stop_reason` states it
@@ -116,8 +118,6 @@ export interface ServedDashboard {
   /** How many cells that line is read on — its round's origin panel, which every
    * member drawn on it holds whole. Null with `overlap_line_round`. */
   overlap_line_n: number | null;
-  /** A verify pass in flight on one of this cycle's candidates, null outside one. */
-  verify_pass: VerifyPassProgress | null;
   /** `composite_fitness_formula` as `{term: weight}`, where it IS an anchored
    * criterion — what a scoring form's dials seed from. Null says the formula
    * cannot carry them, so the form opens on its expression rather than
@@ -758,7 +758,8 @@ export interface BenchStatus {
 
 /** Why a bench pass holds fewer rows than it was sent on. */
 export interface PassStop {
-  /** The walk's own end, or the run stop that cut the pass before it was sent. */
+  /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
+   * spent budget before it was sent. */
   cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
   /** The backend's dominant warning, where errors ended the pass. */
   warning: string | null;
@@ -786,23 +787,22 @@ export interface BenchScope {
   vs_origin: PairedReading | null;
 }
 
-/** The held-out pass in flight; its rows are no round's cells. */
-export interface BenchPassProgress {
-  subject: 'origin' | 'selected';
-  /** The arm the pass grades — the join to its row. */
-  arm: string;
-  /** That arm's label, to render. */
-  label: string;
-  /** The searchpoint scored — the archive's `prompt_fields_id`. */
-  sp_hash: string;
-  /** The round whose selection is graded; 0 is the origin. */
-  round: number;
-  /** Bench rows the pass sends. */
+/** The latest verify or bench pass on one arm, as its records left it. */
+export interface VerificationMark {
+  kind: 'verify' | 'bench';
+  /** The arm the pass measures; `arm.key` joins it to its row. */
+  arm: ArmName;
+  state: 'running' | 'done' | 'failed';
+  /** Rows the pass sends. */
   rows: number;
   /** Rows of it scored so far. */
   scored: number;
-  /** The gateway's running accuracy over the rows scored; null before the first. */
-  accuracy: number | null;
+  /** Accuracy over the rows scored: the running value, unbanded, while `running`;
+   * the pass's reading once `done`. Null before the first row, and on a
+   * `failed` pass, which reads nothing. */
+  level: BandedValue | null;
+  /** Why a `failed` pass ended without a reading. */
+  failure: string | null;
 }
 
 /** A backend transport or 5xx retry; a 429 is ``backpressure``, never one of these. */
@@ -1090,7 +1090,7 @@ export interface DashboardError {
 /** How a run reads on a row: one word and the mark drawn beside it. */
 export interface RunStatus {
   label: string;
-  mark: 'archived' | 'running' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+  mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
 }
 
 /** One cycle's producer as served: its state, its two server-measured clocks and its words. */
@@ -1154,15 +1154,6 @@ export interface PauseReading {
   detail: string;
   next_step: string;
   at: string;
-}
-
-/** ``verify_pass`` on a served dashboard — one candidate being re-scored on unseen cells. */
-export interface VerifyPassProgress {
-  /** The candidate the pass re-scores, as its row names it. */
-  arm: ArmName;
-  /** Unseen search cells the pass sends. */
-  rows: number;
-  strategy: 'random' | 'hard';
 }
 
 /** What a run's spend caps have counted, in the units they meter, by kind. */
@@ -1235,7 +1226,7 @@ export interface WarmingDashboard {
   warming_up: true;
   campaign_id: string;
   cycle_id: string;
-  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   producer: ProducerReading;
   run_admission: RunAdmission;
   pause: PauseReading | null;
@@ -1522,7 +1513,7 @@ export interface CourseNode {
   course_kind: 'root' | 'fork' | 'diag' | 'inner';
   /** The ONE server-owned run-state (`derive_run_state`), the same value `/cycles`
    * serves. */
-  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** How the course reads on a row — its phase and why it ended as one word and one
    * mark, as `/cycles` serves it. */
   status: RunStatus;
@@ -2393,7 +2384,7 @@ export interface LineStanding {
    * holder's run state as `run_phase_label` words it. */
   status: RunStatus;
   /** The holder's derived run state, as `/cycles` serves. */
-  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   producer_attached: boolean;
   /** Why the holder ended; null while it has not. */
   stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
@@ -3063,7 +3054,7 @@ export interface CycleListEntry {
    * lifecycle + control flags + freshness; every picker dot and badge reads
    * this, none re-derive it. 'terminal' pairs with `stop_reason` for the
    * reason label. */
-  run_phase: 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** A process holds this cycle (`ProducerReading.attached`, derived with
    * `run_phase`): running, holding for the operator, or running out a pause.
    * What the dock counts as in flight. */
@@ -3134,10 +3125,12 @@ export interface MachineSlot {
    * `campaign/cycle`, a mint's dataset, or a scoring pass's verb and the
    * cycle or workspace it scores. */
   what: string;
-  /** WHAT holds the slot, by `kind`: a `campaign_launch` (its run is a cycle
-   * `/cycles` lists) or a `scoring_pass` (a paid verb with no cycle of its
-   * own). */
+  /** WHAT holds the slot, by `kind`: a `campaign_launch` or a `scoring_pass` (a
+   * paid verb outside any run). */
   holder: CampaignLaunch | ScoringPass;
+  /** The cycle the job holds, which `/cycles` lists with its run phase — `scoring`
+   * for a pass on it; null for a fresh mint and a pass scoring no cycle. */
+  cycle: CycleHop | null;
   /** user_id of the account whose job holds the slot */
   user: string;
   /** The CALLER's account holds it — a delegate's job is its owner's. The test a
@@ -4271,7 +4264,7 @@ export interface VerifyCandidatePayload {
 }
 
 // The coarse run-state axis (domain/phases.py::RunPhase).
-export type RunPhase = 'queued' | 'starting' | 'running' | 'paused' | 'gate' | 'detached' | 'terminal';
+export type RunPhase = 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
 
 // What a cycle's producer is doing now (domain/phases.py::ProducerState).
 export type ProducerState = 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'claimed' | 'absent';
@@ -4436,6 +4429,7 @@ export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
   'queued': { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, parked: "waiting for a machine slot", parked_attached: "waiting for a machine slot" },
   'starting': { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, parked: "coming up", parked_attached: "coming up" },
   'running': { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, parked: "", parked_attached: "" },
+  'scoring': { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, parked: "", parked_attached: "" },
   'paused': { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, parked: "resumable", parked_attached: "stopping at its next checkpoint" },
   'gate': { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, parked: "awaiting your decision", parked_attached: "awaiting your decision" },
   'detached': { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, parked: "producer gone", parked_attached: "producer gone" },
@@ -4681,6 +4675,18 @@ export const VERIFY_STRATEGY_LABELS: Record<VerifyReading["strategy"], string> =
   'random': 'picked at random',
   'hard': 'hardest first',
 };
+
+// What `GET …/export?tier=` serves, in offer order. Mirror of
+// domain/export.py::EXPORT_TIER_INFO — `pasted` tiers are text to copy, the rest download.
+export type ExportTier = "chat" | "report" | "notebook" | "deploy" | "package";
+
+export const EXPORT_TIERS: readonly { id: ExportTier; label: string; pasted: boolean }[] = [
+  { id: "chat", label: "Chat — the candidates as compact text", pasted: true },
+  { id: "report", label: "Report — that text under its provenance header", pasted: true },
+  { id: "notebook", label: "Notebook — candidates.jsonl and its dataset card", pasted: false },
+  { id: "deploy", label: "Deploy — export.json", pasted: false },
+  { id: "package", label: "Package — a skill folder for another agent", pasted: false },
+];
 
 // Each lens a picklist offers by name -> its label, keyed as the `lens=` it sends, in
 // picklist order. Mirrors of application/mask/record.py::SCORE_LENS_LABELS and

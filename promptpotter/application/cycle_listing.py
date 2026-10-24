@@ -98,6 +98,10 @@ class CyclesResponse(StrictModel):
     cycles: list[CycleListEntry]
 
 
+def cycle_list_version(stores: Stores, *, inside: CyclePath) -> tuple[object, ...]:
+    return descend_store(stores, inside).campaigns.version()
+
+
 def list_cycles(
     stores: Stores, *, inside: CyclePath, campaign_id: str | None, attached_only: bool
 ) -> CyclesResponse:

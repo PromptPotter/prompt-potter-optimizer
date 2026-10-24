@@ -11,6 +11,12 @@
   color: var(--color-accent);
 }
 
+.failed,
+.failed:hover,
+.failed:focus-visible {
+  color: var(--color-danger);
+}
+
 .text {
   font-size: var(--text-xs);
   padding: 3px var(--space-8);

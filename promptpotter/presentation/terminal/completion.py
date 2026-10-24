@@ -1,36 +1,26 @@
 from __future__ import annotations
 
 import html
-import json
 from typing import TYPE_CHECKING
 
+from promptpotter.application.views.render.export import winner_pointer
 from promptpotter.application.views.render.phase import render_completion
 from promptpotter.application.views.render.primitives import BOLD, RESET, YELLOW
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.results import CycleResult
 
 
-def render_completion_html(result: CycleResult) -> str:
+def render_completion_html(result: CycleResult, hop: CycleHop) -> str:
     if not result.result_prompt_fields:
         return ""
-    prompt_json = html.escape(
-        json.dumps(dict(result.result_prompt_fields), indent=2, ensure_ascii=False, default=str)
-    )
-    pp_json = html.escape(
-        json.dumps(
-            dict(result.result_pipeline_params or {}), indent=2, ensure_ascii=False, default=str
-        )
-    )
     return (
         "<div style='font-family:monospace'>"
-        "<h3 style='margin:8px 0 4px'>Final Winner</h3>"
-        "<details><summary>Prompt fields</summary>"
-        f"<pre>{prompt_json}</pre></details>"
-        "<details><summary>Pipeline params</summary>"
-        f"<pre>{pp_json}</pre></details></div>"
+        "<h3 style='margin:8px 0 4px'>Winner</h3>"
+        f"<p>{html.escape(winner_pointer(hop))}</p></div>"
     )
 
 
@@ -68,4 +58,4 @@ def report_completion(result: CycleResult, *, session: Session) -> None:
             ),
         )
     )
-    _try_display_html(render_completion_html(result))
+    _try_display_html(render_completion_html(result, session.hop))

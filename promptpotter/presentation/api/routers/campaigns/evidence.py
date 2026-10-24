@@ -10,7 +10,7 @@ from promptpotter.application.evidence.metric_catalogue import MEASURAND
 from promptpotter.application.evidence.read import Evidence, select_evidence
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.presentation.api.deps import StoresDep
-from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
+from promptpotter.presentation.api.routers.campaigns._conditional import hashed_json
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
 
@@ -125,4 +125,4 @@ def get_evidence(
         include_config=config,
         metric=metric,
     )
-    return conditional_json(request, evidence, stamp="generated_at")
+    return hashed_json(request, evidence, stamp="generated_at")

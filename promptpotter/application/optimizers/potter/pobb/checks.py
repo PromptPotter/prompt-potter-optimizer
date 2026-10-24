@@ -5,17 +5,19 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, TypedDict
 
-from promptpotter.application.intelligence.rasch import graded_response, theta_cells
+from promptpotter.application.intelligence.rasch import theta_cells
 from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.scoring.selection import (
+    PairedGrade,
     PairedPosterior,
     cells_read,
+    discordance,
     elimination_p_best_bounds,
+    paired_grades,
     paired_p_best,
 )
 from promptpotter.domain.scoring import NO_RESULT, is_answer_collapsed
 from promptpotter.domain.validators import StopSignal
-from promptpotter.shared.statistics import discordant_counts
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
@@ -23,10 +25,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
-
-
-def _graded(cells: Iterable[GradedCell]) -> dict[str, float]:
-    return {cell.key: graded_response(cell) for cell in cells if cell.scored}
 
 
 class EliminationGate(StrEnum):
@@ -103,8 +101,8 @@ class PoBBCheck:
         self.epsilon_elimination = knobs.epsilon_elimination
         self.leader_lock_in = knobs.leader_lock_in
         self.n_samples = n_samples
-        # The GRADED response, never a binarized hit, which is degenerate on a graded backend.
-        self.priors_by_sample: dict[ArmKey, dict[str, float]] = {}
+        # The GRADED response and verdict, never a binarized hit, degenerate on a graded backend.
+        self.priors_by_sample: dict[ArmKey, dict[str, PairedGrade]] = {}
         self._current: ArmKey | None = None
         self._on_snapshot: Callable[[RaceSnapshot], None] | None = None
 
@@ -121,10 +119,10 @@ class PoBBCheck:
         self._on_snapshot = on_snapshot
 
     def register_completed(self, results: Iterable[GradedCell], *, key: ArmKey) -> None:
-        self.priors_by_sample[key] = _graded(results)
+        self.priors_by_sample[key] = paired_grades(results)
 
     def extend_prior(self, key: ArmKey, rows: Iterable[GradedCell]) -> None:
-        self.priors_by_sample[key].update(_graded(rows))
+        self.priors_by_sample[key].update(paired_grades(rows))
 
     def epsilon_at(self, n: int) -> float:
         if self.epsilon <= self.epsilon_floor:
@@ -168,7 +166,7 @@ class PoBBCheck:
                 "n_paired": float(len(fit.priors[pid])),
                 "n_discordant": float(
                     sum(
-                        discordant_counts(
+                        discordance(
                             [own[c] for c in fit.priors[pid]], list(fit.priors[pid].values())
                         )
                     )
@@ -222,13 +220,13 @@ class PoBBCheck:
     ) -> int | None:
         """An ``unresolved`` candidate may never become a prior: graded where its rows say, anything elsewhere, never counted on."""
         measured = [cell for cell in results if cell.scored]
-        grades = _graded(measured)
+        grades = paired_grades(measured)
         cells = list(grades)
         said = {cell.facts.predicted for cell in measured}
         # A prior's absent cells are read worst-case by the bounds, as `check` reads it on shared ones.
         priors = dict(self.priors_by_sample)
         pending = {
-            pid: _graded(rows)
+            pid: paired_grades(rows)
             for pid, rows in (unresolved or {}).items()
             if pid not in self.priors_by_sample
         }
@@ -237,7 +235,7 @@ class PoBBCheck:
             if row is None or row.scored:
                 cells.append(sample.key)
             if row is not None and row.scored:
-                grades[sample.key] = graded_response(row)
+                grades.update(paired_grades([row]))
                 said.add(row.facts.predicted)
             if m < self.n_min:
                 continue

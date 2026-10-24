@@ -31,6 +31,8 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.account_spend import LifetimeSpend, campaign_spend
+from promptpotter.infrastructure.store.dataset_access import definition_version
+from promptpotter.infrastructure.store.read_model import file_sig
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 
 
@@ -201,6 +203,19 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         bench=None if config is None else cycle_bench(stores, campaign, holder, config),
         runs_with=runs_with,
         comparison=comparison_line(campaign.declaration.purpose),
+    )
+
+
+def campaign_list_version(stores: Stores, *, inside: CyclePath) -> tuple[object, ...]:
+    """Stats only: every input a listing reads, so a client holding it is answered unread."""
+    leaf = descend_store(stores, inside)
+    names = sorted({c.dataset_name for c in leaf.campaigns.list_campaigns(lifecycle="all")})
+    return (
+        str(leaf.identity.user_id),
+        leaf.campaigns.version(),
+        leaf.archive.version(),
+        file_sig(leaf.ruler.path),
+        *(definition_version(leaf, name) for name in names),
     )
 
 

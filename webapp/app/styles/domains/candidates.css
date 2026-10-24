@@ -19,7 +19,8 @@
 .fitness-chart-frame{position:relative;height:var(--chart-h);width:100%;min-width:0}
 .fitness-legend{display:flex;justify-content:center;gap:var(--space-14);font-size:var(--text-xs);color:var(--color-text-secondary);font-family:var(--font-mono);margin-bottom:var(--space-8)}
 .fitness-legend .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:var(--space-4);vertical-align:middle;background:var(--ink)}
-.fitness-legend .swatch.hollow{background:transparent;border:1.5px solid var(--ink)}
+.fitness-legend .swatch.mark{width:7px;height:7px;border-radius:0;transform:rotate(45deg);background:transparent;border:1.4px solid var(--ink)}
+.fitness-legend .swatch.mark.filled{background:var(--ink)}
 .fitness-legend .swatch.line{width:16px;height:0;border-radius:0;background:transparent;border-top:1.5px dashed var(--ink)}
 
 /* No horizontal padding or border: the SVG viewport must BE the chart's plot area, so percentage x lands on the bar centres. */

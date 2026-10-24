@@ -17,6 +17,7 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
 )
 from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
+from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
 from promptpotter.domain.results import RescoreCount, VerifyStrategy, rescore_count
 from promptpotter.domain.spend import Budget
 from promptpotter.presentation.cli.parsers import (
@@ -600,6 +601,32 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "level, same codec as the API's '?descend=' and `evidence`'s ';in='. The only verb that "
                 "takes it — every run-control verb acts on the outer run, and `verify` / `evidence` "
                 "address an inner searchpoint through their subject.",
+            ),
+        ),
+    ),
+    Verb(
+        "export",
+        "export:cmd_export",
+        help="One reading of a cycle, chosen by what you do with it next — the same tiers the "
+        "webapp's copy and download offer and `GET …/cycles/{id}/export?tier=` serves. `chat` and "
+        "`report` print text to paste; `deploy` prints `export.json`; `notebook` and `package` "
+        "write a folder. Read-only, zero spend.",
+        args=(
+            ACTIVE_CAMPAIGN,
+            ACTIVE_CYCLE,
+            Arg(
+                "--tier",
+                required=True,
+                choices=get_args(ExportTier),
+                help="; ".join(f"{tier}: {info.label}" for tier, info in EXPORT_TIER_INFO.items()),
+            ),
+            Arg(
+                "--out",
+                type=Path,
+                default=None,
+                metavar="DIR",
+                help="Write the files under DIR/<name>/ (default: print a one-file tier, and write "
+                "a several-file tier under ./<name>/).",
             ),
         ),
     ),

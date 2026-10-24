@@ -22,11 +22,10 @@ from promptpotter.domain.run_records import StandingBudgetRecord
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
-from promptpotter.infrastructure.producer_lock import cycle_held, held
+from promptpotter.infrastructure.producer_lock import cycle_held, held, pass_held
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     Controls,
     Progress,
-    scan_cycle_facts,
     scan_launch_claim,
     scan_ledger_controls,
     scan_ledger_declared_phase,
@@ -92,17 +91,6 @@ def _beat_stale_after(cycle_dir: Path) -> float | None:
     return None if beat is None else beat + RUN_FRESH_S
 
 
-# Spans one slow cell; bounds only how long a KILLED verify pass reads as in flight.
-VERIFY_FRESH_S = 300.0
-
-
-def verify_stale_after(cycle_dir: Path) -> float | None:
-    try:
-        return CycleLayout(cycle_dir).ledger.stat().st_mtime + VERIFY_FRESH_S
-    except OSError:
-        return None
-
-
 def _beating(cycle_dir: Path) -> bool:
     edge = _beat_stale_after(cycle_dir)
     return edge is not None and time.time() < edge
@@ -114,6 +102,7 @@ def read_run_state(
     pause_requested: bool,
     declared: str,
     held: bool,
+    scoring: bool,
     beating: bool,
     silent_for_s: float | None,
     open_for_s: float | None,
@@ -140,6 +129,9 @@ def read_run_state(
         else:
             state = ProducerState.IDLE
         producer = ProducerReading.of(state, silent_for_s=silent_for_s, open_for_s=open_for_s)
+    # Before the lifecycle: a pass scores ended cycles too, and a pause asked of it is standing.
+    if scoring:
+        return RunState(RunPhase.PAUSED if pause_requested else RunPhase.SCORING, producer)
     if terminal:
         return RunState(RunPhase.TERMINAL, producer)
     if pause_requested or declared == RunPhase.PAUSED:
@@ -151,11 +143,13 @@ def read_run_state(
 
 def derive_run_state(cycle_dir: Path) -> RunState:
     ledger = CycleLayout(cycle_dir).ledger
-    declared, gate, drafts = scan_ledger_declared_phase(ledger)
+    last = scan_ledger_declared_phase(ledger)
+    declared = "" if last is None else last.run_phase.value
     terminal = declared == RunPhase.TERMINAL
     producer_held = cycle_held(cycle_dir)
+    scoring = producer_held and pass_held(cycle_dir)
     progress = scan_ledger_progress(ledger) if producer_held else Progress()
-    asked = None if terminal else standing_controls(cycle_dir).pause
+    asked = standing_controls(cycle_dir).pause if scoring or not terminal else None
     claim = None if producer_held else scan_launch_claim(ledger)
     now = time.time()
     run = read_run_state(
@@ -163,6 +157,7 @@ def derive_run_state(cycle_dir: Path) -> RunState:
         pause_requested=asked is not None,
         declared="" if terminal else declared,
         held=producer_held,
+        scoring=scoring,
         beating=_beating(cycle_dir),
         silent_for_s=None
         if progress.progressed_at is None
@@ -171,12 +166,13 @@ def derive_run_state(cycle_dir: Path) -> RunState:
         if progress.waiting_since is None
         else max(0.0, now - progress.waiting_since),
         claimed=None if claim is None or not held(Path(claim.claimant_lock)) else claim.stage,
-        gate=gate,
-        drafts=drafts,
+        gate=None if last is None else last.gate,
+        drafts=0 if last is None else len(last.drafts),
     )._replace(inner=in_inner_sandbox(cycle_dir))
     if run.run_phase is not RunPhase.PAUSED:
         return run
-    stood = scan_cycle_facts(ledger).paused
+    # A pass declares no stop: the pause it reads as is the one asked of it.
+    stood = last if not scoring and last is not None and last.run_phase is RunPhase.PAUSED else None
     if stood is not None and stood.stop_reason is not None and stood.cause is not None:
         return run._replace(
             pause=PauseReading(
@@ -200,9 +196,32 @@ def derive_run_state(cycle_dir: Path) -> RunState:
     )
 
 
+def _mtime_ns(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def run_state_stamps(cycle_dir: Path) -> tuple[int | None, ...]:
+    """What moves `derive_run_state`, in ns: the files it reads and two edges no write marks."""
+    layout = CycleLayout(cycle_dir)
+    edge = _beat_stale_after(cycle_dir)
+    claim = scan_launch_claim(layout.ledger)
+    return (
+        _mtime_ns(layout.cycle_dir),
+        # The producer lock: a directory's mtime sees a child's create AND unlink.
+        _mtime_ns(layout.runtime),
+        _mtime_ns(layout.ledger),
+        # A pass that dies writes nothing: past this edge its served mark reads its process gone.
+        None if edge is None or time.time() < edge else int(edge * 1e9),
+        # A live claim ends with its process, which no write marks: it never 304s.
+        time.time_ns() if claim is not None and held(Path(claim.claimant_lock)) else None,
+    )
+
+
 def run_phase_validator_epoch(cycle_dir: Path) -> float | None:
     """Stats only, no parse: this is the 2 s poll's 304 path."""
-    layout = CycleLayout(cycle_dir)
     campaign = CampaignLayout(_campaign_dir(cycle_dir))
     cycles = campaign_cycles_dir(campaign.campaign_dir)
     # The campaign's metered spend is served too: every cycle's ledger, and a deleted one's tombstone.
@@ -210,24 +229,12 @@ def run_phase_validator_epoch(cycle_dir: Path) -> float | None:
         [CycleLayout(sibling).ledger for sibling in cycles.iterdir()] if cycles.is_dir() else []
     )
     tombstones = CycleEventLog.workspace_path(WorkspaceDir(campaign.campaign_dir.parent.parent))
-    stamps: list[float] = []
-    for path in (
-        layout.cycle_dir,
-        layout.runtime,  # the producer lock: a directory's mtime sees a child's create AND unlink
-        layout.ledger,
-        campaign.manifest,
-        cycles,
-        *siblings,
-        tombstones,
-    ):
-        try:
-            stamps.append(path.stat().st_mtime)
-        except OSError:
-            continue
-    for edge in (_beat_stale_after(cycle_dir), verify_stale_after(cycle_dir)):
-        if edge is not None and time.time() >= edge:
-            stamps.append(edge)
-    # A claim lasts as long as its process, which no write marks: a claimed cycle is never a 304.
-    if scan_launch_claim(layout.ledger) is not None:
-        stamps.append(time.time())
-    return max(stamps) if stamps else None
+    stamps = [
+        stamp
+        for stamp in (
+            *run_state_stamps(cycle_dir),
+            *map(_mtime_ns, (campaign.manifest, cycles, *siblings, tombstones)),
+        )
+        if stamp is not None
+    ]
+    return max(stamps) / 1e9 if stamps else None

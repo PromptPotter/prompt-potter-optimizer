@@ -20,6 +20,7 @@ from promptpotter.application.preflight import (
     refuse_arm_below_round,
     run_preflight_checks,
 )
+from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.inner.spawn_context import (
     publish_inner_spawn_context,
     retarget_inner_spawn,
@@ -179,6 +180,8 @@ async def open_diagnostic(stores: Stores, hop: CycleHop, *, source: RunSource) -
         raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
     bound, config = await bind_cycle_session(stores, campaign, hop)
     session = configure_and_apply_pipeline(bound, config)
+    # Its cycle's pause stops the pass; the loop's skip and look-ahead are the loop's to spend.
+    session.state.control = RunControl(enclosing=(stores.campaigns.cycle_dir(hop),))
     # As `run_optimization` does: a pp-self point's connector dispatches no inner run without it.
     publish_inner_spawn_context(session)
     arm_diagnostic_scoring(session, config, source=source)

@@ -8,12 +8,11 @@ from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
     fit_theta,
     graded_response,
-    responses_of,
     theta_bounds_given_delta,
     theta_cells,
     theta_lift_over_parent,
 )
-from promptpotter.domain.scoring import CellSheet, GradedCell
+from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradedCell
 from promptpotter.shared.statistics import (
     discordant_counts,
     mean_ci,
@@ -42,6 +41,27 @@ def level_band(
     _, ci_lo, ci_hi = band
     # Clipped to the metric's support: the SE floor gives an all-0.0 arm a band reaching below zero.
     return (level, min(max(ci_lo, 0.0), 1.0), min(max(ci_hi, 0.0), 1.0))
+
+
+class PairedGrade(NamedTuple):
+    """What a pairing reads off one cell: θ is fit on ``response``, a sign test counts ``verdict``."""
+
+    response: float
+    verdict: float
+
+
+def paired_grades(cells: Iterable[GradedCell]) -> dict[str, PairedGrade]:
+    """The cost term reaches a pairing through θ alone; a sign test counts disagreeing VERDICTS."""
+    verdict = ROW_GRADES["fitness"]
+    return {
+        cell.key: PairedGrade(graded_response(cell), verdict.read(cell))
+        for cell in cells
+        if cell.scored
+    }
+
+
+def discordance(candidate: Sequence[PairedGrade], prior: Sequence[PairedGrade]) -> tuple[int, int]:
+    return discordant_counts([g.verdict for g in candidate], [g.verdict for g in prior])
 
 
 def cells_read(
@@ -104,7 +124,7 @@ def elect_round_winner(
         ruler,
     )
 
-    parent = responses_of(parent_results)
+    parent = paired_grades(parent_results)
     best_rank: tuple[float, int] = (0.0, 0)
     winner: ArmKey | None = None
     reads = readable_lifts(keys, coverage_floor, abilities)
@@ -113,9 +133,9 @@ def elect_round_winner(
         if lift <= FIT_SLACK:
             continue
         # A θ lift the paired cells contradict is the prior's or the δ weighting's, never the arm's.
-        own = responses_of(rows[key])
+        own = paired_grades(rows[key])
         shared = [k for k in own if k in parent]
-        wins, losses = discordant_counts([own[k] for k in shared], [parent[k] for k in shared])
+        wins, losses = discordance([own[k] for k in shared], [parent[k] for k in shared])
         if wins <= losses:
             continue
         # The bar is read off no cell that crowned the parent: the draw leaves out `crowning_cells`.
@@ -128,8 +148,8 @@ def elect_round_winner(
 
 
 def elimination_p_best(
-    candidate_grades: Sequence[float],
-    paired_prior_grades: Mapping[ArmKey, Sequence[float]],
+    candidate_grades: Sequence[PairedGrade],
+    paired_prior_grades: Mapping[ArmKey, Sequence[PairedGrade]],
     candidate_cells: Sequence[str],
     ruler: DeltaRuler | None,
 ) -> tuple[float, dict[ArmKey, float]]:
@@ -140,8 +160,8 @@ def elimination_p_best(
     # The one sanctioned provisional δ: cells the ruler has not absorbed stand at its centre for BOTH arms.
     entries = ruler.entries_covering(candidate_cells) if ruler is not None else None
 
-    def read(grades: Sequence[float]) -> tuple[float, float]:
-        on_cells = {key: float(g) for key, g in zip(candidate_cells, grades, strict=True)}
+    def read(grades: Sequence[PairedGrade]) -> tuple[float, float]:
+        on_cells = {key: g.response for key, g in zip(candidate_cells, grades, strict=True)}
         fitted = fit_theta(on_cells, entries)
         if fitted is None:
             raise ValueError("elimination_p_best: a reading needs at least one graded cell")
@@ -153,30 +173,29 @@ def elimination_p_best(
     for pid, grades in paired_prior_grades.items():
         theta_p, se_p = read(grades)
         p = p_exceeds(theta_c, se_c, theta_p, se_p)
-        per_prior[pid] = _capped(p, sign_posterior(*discordant_counts(candidate_grades, grades)))
+        per_prior[pid] = _capped(p, sign_posterior(*discordance(candidate_grades, grades)))
     return min(per_prior.values()), per_prior
 
 
 class PairedPosterior(NamedTuple):
     cells: list[str]
-    grades: list[float]
+    grades: list[PairedGrade]
     # Each prior's grades on the cells it shares with the candidate: the pairs its θ was read on.
-    priors: dict[ArmKey, dict[str, float]]
+    priors: dict[ArmKey, dict[str, PairedGrade]]
     p_best: float
     p_better: dict[ArmKey, float]
 
 
 def paired_p_best(
     rows: Sequence[GradedCell],
-    priors: Mapping[ArmKey, Mapping[str, float]],
+    priors: Mapping[ArmKey, Mapping[str, PairedGrade]],
     ruler: DeltaRuler | None,
     *,
     min_shared: int,
 ) -> PairedPosterior | None:
     """Over rows carrying a verdict only: a backend error is no evidence of inability. A prior is
     read on the cells it shares with the candidate, so a parent still catching up is a prior."""
-    graded = [cell for cell in rows if cell.scored]
-    own = {cell.key: graded_response(cell) for cell in graded}
+    own = paired_grades(rows)
     paired = {
         pid: shared
         for pid, grades in priors.items()
@@ -200,10 +219,14 @@ def _capped(p: float, bound: float) -> float:
     return 0.5 + reach if p > 0.5 else 0.5 - reach
 
 
+_UNSOLVED = PairedGrade(0.0, 0.0)
+_SOLVED = PairedGrade(1.0, 1.0)
+
+
 def elimination_p_best_bounds(
     cells: Sequence[str],
-    candidate: Mapping[str, float],
-    priors: Mapping[ArmKey, Mapping[str, float]],
+    candidate: Mapping[str, PairedGrade],
+    priors: Mapping[ArmKey, Mapping[str, PairedGrade]],
     ruler: DeltaRuler | None,
     *,
     settled: Collection[ArmKey],
@@ -213,18 +236,24 @@ def elimination_p_best_bounds(
     entries = ruler.entries_covering(sids) if ruler is not None else None
     known = {s: candidate[s] for s in sids if s in candidate}
     c_low, c_high, c_floor = theta_bounds_given_delta(
-        known, [s for s in sids if s not in known], entries
+        {s: g.response for s, g in known.items()}, [s for s in sids if s not in known], entries
     )
     low: dict[ArmKey, float] = {}
     high: dict[ArmKey, float] = {}
     for pid, grades in priors.items():
         both = {s: grades[s] for s in known if s in grades}
         rest = [s for s in sids if s not in both]
-        p_low, p_high, p_floor = theta_bounds_given_delta(both, rest, entries)
-        wins, losses = discordant_counts([known[s] for s in both], list(both.values()))
+        p_low, p_high, p_floor = theta_bounds_given_delta(
+            {s: g.response for s, g in both.items()}, rest, entries
+        )
+        wins, losses = discordance([known[s] for s in both], list(both.values()))
         # An absent grade can go either way, so it is read as the worst case for each bound.
-        can_lose = sum(1 for s in rest if candidate.get(s, 0.0) < grades.get(s, 1.0))
-        can_win = sum(1 for s in rest if candidate.get(s, 1.0) > grades.get(s, 0.0))
+        _, can_lose = discordance(
+            [candidate.get(s, _UNSOLVED) for s in rest], [grades.get(s, _SOLVED) for s in rest]
+        )
+        can_win, _ = discordance(
+            [candidate.get(s, _SOLVED) for s in rest], [grades.get(s, _UNSOLVED) for s in rest]
+        )
         worst = p_exceeds(c_low, c_floor, p_high, p_floor) if c_low < p_high else 0.5
         best = p_exceeds(c_high, c_floor, p_low, p_floor) if c_high > p_low else 0.5
         low[pid] = _capped(worst, sign_posterior(wins, losses + can_lose))

@@ -174,7 +174,8 @@ class PassStop(FrozenModel):
     """Why a bench pass holds fewer rows than it was sent on."""
 
     cause: StopReason | WalkEnd = Field(
-        description="The walk's own end, or the run stop that cut the pass before it was sent."
+        description="The walk's own end, or the run stop that cut the pass: a pause mid-walk, a "
+        "spent budget before it was sent."
     )
     warning: str | None = Field(
         description="The backend's dominant warning, where errors ended the pass."

@@ -437,6 +437,15 @@ class MeasurementArchive:
         held = tuple((key, *sigs[key]) for key in keys if key in sigs)
         return held or None
 
+    def version(self) -> tuple[object, ...]:
+        """Stats only: moves on an index append, a cell file's write and a compaction."""
+        return (
+            str(self._base_dir),
+            file_sig(self._index_path()),
+            self.signature(),
+            file_sig(self._cold_dir()),
+        )
+
     def files_signature(self, file_keys: Iterable[str]) -> tuple[Any, ...]:
         return tuple(file_sig(self.cell_path(key)) for key in sorted(set(file_keys)))
 

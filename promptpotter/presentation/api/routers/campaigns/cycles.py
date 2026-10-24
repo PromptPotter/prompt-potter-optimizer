@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+from pathlib import PurePosixPath
+
 from fastapi import Query, Request, Response
 
-from promptpotter.application.cycle_reads import RoundView, round_audit, served_round, view_cycle
+from promptpotter.application.cycle_reads import (
+    RoundView,
+    export_cycle,
+    round_audit,
+    served_round,
+    tree_version,
+    view_cycle,
+)
 from promptpotter.application.mask.record import parse_lens, parse_sample_ids
 from promptpotter.application.mask.tree_lens import lensed_tree
 from promptpotter.application.served_dashboard import (
@@ -11,15 +20,15 @@ from promptpotter.application.served_dashboard import (
     served_dashboard,
 )
 from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
+from promptpotter.domain.export import ExportTier
 from promptpotter.domain.lineage_tree import CourseNode
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
-    client_has_etag,
     client_seen_at_or_after,
+    conditional_json,
     http_date,
     model_json,
-    weak_etag,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 from promptpotter.shared.errors import NotFoundError
@@ -104,6 +113,40 @@ def get_cycle_round_audit(
     return round_audit(cycle, round_num)
 
 
+_EXPORT_MEDIA = {".txt": "text/plain", ".json": "application/json", ".zip": "application/zip"}
+
+
+@campaigns_router.get(
+    "/campaigns/{campaign_id}/cycles/{cycle_id}/export",
+    response_class=Response,
+    responses={200: {"content": {media: {} for media in _EXPORT_MEDIA.values()}}},
+)
+def get_cycle_export(
+    stores: StoresDep,
+    campaign_id: str,
+    cycle_id: str,
+    tier: ExportTier,
+    descend: str | None = Query(None),
+) -> Response:
+    """One reading of the cycle, chosen by what its reader does next — the CLI's `export --tier`.
+
+    ``chat`` and ``report`` are text to paste, ``deploy`` is ``export.json``; ``notebook`` and ``package`` are several files, served as one zip.
+    ``deploy`` and ``package`` answer 409 until the cycle has written ``export.json``.
+    """
+    files = export_cycle(
+        stores,
+        (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend)),
+        tier,
+    )
+    name = files.download_name
+    single = files.single
+    return Response(
+        content=files.zipped() if single is None else single.encode(),
+        media_type=_EXPORT_MEDIA[PurePosixPath(name).suffix],
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/tree",
     response_model=CourseNode,
@@ -127,16 +170,13 @@ def get_lineage_tree(
     """
     path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     root = view_cycle(stores, path)
-    mtime_ns = root.tree_changed_ns
-    etag = weak_etag(mtime_ns, lens, samples, at, at_cycle)
-    headers = {"ETag": etag}
-    if mtime_ns is not None and client_has_etag(request.headers.get("if-none-match"), etag):
-        return Response(status_code=304, headers=headers)
 
-    selected = parse_lens(lens, allow_abort=True) if lens else None
-    sample_ids = parse_sample_ids(samples)
-    replayed = view_cycle(stores, decode_cycle_path(at_cycle)) if at_cycle else root
-    return model_json(
-        lensed_tree(stores, path, selected, sample_ids, moment=replayed.moment(at)),
-        headers=headers,
-    )
+    def build() -> CourseNode:
+        selected = parse_lens(lens, allow_abort=True) if lens else None
+        replayed = view_cycle(stores, decode_cycle_path(at_cycle)) if at_cycle else root
+        return lensed_tree(
+            stores, path, selected, parse_sample_ids(samples), moment=replayed.moment(at)
+        )
+
+    version = tree_version(stores, path, masked=bool(lens or samples))
+    return conditional_json(request, (version, lens, samples, at, at_cycle), build)

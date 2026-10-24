@@ -1,4 +1,5 @@
-import { API, jget, jgetIfModified, jgetIfNoneMatch, jpost } from "./client";
+import { API, jget, jgetIfModified, jgetIfNoneMatch, jpost, send, toApiError } from "./client";
+import type { ExportTier } from "./types.generated";
 import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
 import type { ReadDescriptor } from "../read-cache";
 import type {
@@ -147,6 +148,17 @@ export function cyclePathUrl(path: CyclePath, suffix: string): string {
   return `${base}${sep}descend=${enc(descend)}`;
 }
 
+// One reading of the cycle per tier, serialized by the server for every surface.
+export function exportUrl(path: CyclePath, tier: ExportTier): string {
+  return cyclePathUrl(path, `/export?tier=${enc(tier)}`);
+}
+
+export async function exportText(path: CyclePath, tier: ExportTier): Promise<string> {
+  const r = await send(exportUrl(path, tier));
+  if (!r.ok) throw await toApiError(r);
+  return r.text();
+}
+
 // `dashboard.json` is not a cycle file — read it through `dashboardRead`.
 export function cycleFileRead(
   path: CyclePath,
@@ -241,15 +253,15 @@ export function cyclesRead(
 }
 
 export function campaignStorageRead(campaignId: string): ReadDescriptor<CampaignStorageResponse> {
-  return byEtag("campaign-storage", `${API}/campaigns/${enc(campaignId)}/storage`);
+  return once("campaign-storage", `${API}/campaigns/${enc(campaignId)}/storage`);
 }
 
 export function workspaceStorageRead(): ReadDescriptor<WorkspaceStorageResponse> {
-  return byEtag("workspace-storage", `${API}/workspace/storage`);
+  return once("workspace-storage", `${API}/workspace/storage`);
 }
 
 export function storageByDatasetRead(): ReadDescriptor<DatasetStorageResponse> {
-  return byEtag("storage-by-dataset", `${API}/workspace/storage-by-dataset`);
+  return once("storage-by-dataset", `${API}/workspace/storage-by-dataset`);
 }
 
 export function optimizerKnobsRead(optimizer: string): ReadDescriptor<OptimizerKnobsResponse> {

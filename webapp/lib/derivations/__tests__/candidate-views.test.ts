@@ -3,9 +3,9 @@ import { barLevel, barsAreCourses, candidateBars } from "../candidate-views";
 import type {
   ArmNode,
   ArmReading,
-  BenchPassProgress,
   CourseNode,
   ForkStamp,
+  VerificationMark,
 } from "@/lib/api";
 import {
   armNode,
@@ -22,7 +22,7 @@ const standsAt = (rate: number) =>
 const EMPTY = {
   inflightByKey: new Map<string, ArmReading>(),
   sampleSet: null,
-  benchPass: null,
+  marks: [],
 };
 
 type ReadingOver = Parameters<typeof armReading>[0];
@@ -185,21 +185,25 @@ it("drops the tail a supersede cut retired — one round of three, never six", (
   expect(bars.map((b) => b.idx)).toEqual([0, 1]);
 });
 
-it("marks the bench pass in flight on the arm it grades, and no other", () => {
-  const pass: BenchPassProgress = {
-    subject: "selected",
-    arm: "b",
-    label: "C1.2",
-    sp_hash: "",
-    round: 1,
+it("hangs each pass on the arm it measures, by kind, and on no other", () => {
+  const mark = (kind: VerificationMark["kind"], key: string): VerificationMark => ({
+    kind,
+    arm: { key, round: 1, label: "C1.2" },
+    state: "running",
     rows: 10,
     scored: 0,
-    accuracy: null,
-  };
+    level: null,
+    failure: null,
+  });
+  const bench = mark("bench", "b");
+  const verify = mark("verify", "a");
   const bars = candidateBars({
     ...EMPTY,
     viewedNode: course([arm("a", "C1.1"), arm("b", "C1.2")]),
-    benchPass: pass,
+    marks: [bench, verify],
   });
-  expect(bars.map((b) => b.reading && b.benchPass)).toEqual([null, pass]);
+  expect(bars.map((b) => b.reading && [b.verify, b.bench])).toEqual([
+    [verify, null],
+    [null, bench],
+  ]);
 });

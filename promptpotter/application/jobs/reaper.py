@@ -11,6 +11,7 @@ from promptpotter.infrastructure.store.layout import (
     read_sandbox_owner,
     tenant_workspace,
 )
+from promptpotter.shared.errors import LedgerUnreadableError
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +69,15 @@ def sweep_dead_cycles(projects_root: Path) -> int:
     for root in _sweep_roots(projects_root):
         for ledger_path in root.glob("*/campaigns/*/cycles/*/.runtime/ledger.jsonl"):
             cycle_dir = ledger_path.parent.parent
-            if _store_for(cycle_dir).mark_producer_vanished(
-                CycleHop(campaign_id=cycle_dir.parents[1].name, cycle_id=cycle_dir.name)
-            ):
-                reaped += 1
+            try:
+                vanished = _store_for(cycle_dir).mark_producer_vanished(
+                    CycleHop(campaign_id=cycle_dir.parents[1].name, cycle_id=cycle_dir.name)
+                )
+            except LedgerUnreadableError as refused:
+                # A refused cycle is no answer for the cycles after it: each is reaped on its own.
+                logger.warning("sweep left a refused cycle: %s", refused)
+                continue
+            reaped += vanished
     if reaped:
         logger.info("sweep stamped %d dead cycle(s) terminal", reaped)
     return reaped

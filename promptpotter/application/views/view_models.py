@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
 from promptpotter.domain.cells import HardSamples
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phase_views import ViewAnchors
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import (
@@ -86,12 +87,6 @@ class HardSamplesView:
 
 
 @dataclass(frozen=True)
-class FinalWinnerView:
-    result_prompt_fields: dict[str, Any]
-    result_pipeline_params: dict[str, Any]
-
-
-@dataclass(frozen=True)
 class ForkSummaryView:
     cycle_id: str
     # What the id's own separator says the cycle is (``layout.py::sibling_kind``).
@@ -107,6 +102,7 @@ class LogMdView:
     rounds: tuple[RoundDigestView, ...]
     formula: str | None
     hard_samples: HardSamplesView | None
-    final: FinalWinnerView | None
+    # The ended cycle whose package states the winner; ``None`` while it runs.
+    exported: CycleHop | None
     # Best first, so the head is the family's best wherever it beats this cycle's own.
     forks: tuple[ForkSummaryView, ...] = ()

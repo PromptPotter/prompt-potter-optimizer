@@ -8,8 +8,8 @@ from typing import ClassVar, assert_never
 
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir
-from promptpotter.domain.dashboard_rows import RoundSummary
-from promptpotter.domain.paired_reading import ArmKey, ArmName
+from promptpotter.domain.dashboard_rows import RoundSummary, VerificationKind, VerificationMark
+from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ArmName
 from promptpotter.domain.phase_views import (
     BenchEnterView,
     BenchGradedView,
@@ -19,6 +19,8 @@ from promptpotter.domain.phase_views import (
     MeasureEnterView,
     OptimizerStepEnterView,
     RoundStartView,
+    VerifyEnterView,
+    VerifyGradedView,
 )
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -69,7 +71,6 @@ from promptpotter.infrastructure.projections.live_dashboard.blocks import (
 from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     BackendWarning,
-    BenchPassProgress,
     CatchUpLogEntry,
     CurrentRound,
     DashboardError,
@@ -119,6 +120,14 @@ _PHASE_TO_STATE: dict[str, DashboardState] = {
 
 _CHECKIN_NODE = "checkin"
 
+_VERIFY_UNREAD = "The pass ended without a reading; the verb that sent it says why."
+
+
+def _opened(kind: VerificationKind, arm: ArmName, rows: int) -> VerificationMark:
+    return VerificationMark(
+        kind=kind, arm=arm, state="running", rows=rows, scored=0, level=None, failure=None
+    )
+
 
 class LiveDashboardProjection(Projection):
     records: ClassVar[RecordClasses]
@@ -146,6 +155,8 @@ class LiveDashboardProjection(Projection):
         self._open_samples: dict[int, tuple[str, ArmKey | None, int]] = {}
         self._bench_readings: dict[int, BenchReading] = {}
         self._around_bench: tuple[DashboardState, str | None, ArmName | None] | None = None
+        # Between a bench or verify bracket: its cells move no run state.
+        self._in_pass = False
         self._flight: tuple[int, int, int] = (0, 0, 0)
         self._affordable: int | None = None
         self._cell_reserve_usd: float | None = None
@@ -188,6 +199,9 @@ class LiveDashboardProjection(Projection):
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
         for name, value in LiveDashboardState.launched(record).items():
             setattr(self.state, name, value)
+        self.state.verification = [
+            m.orphaned() if m.state == "running" else m for m in self.state.verification
+        ]
         self._launch()
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
@@ -282,29 +296,54 @@ class LiveDashboardProjection(Projection):
             case OptimizerStepEnterView():
                 self._step_node = view.node
             case BenchEnterView():
-                s.bench_pass = BenchPassProgress(
-                    subject=view.subject,
-                    arm=view.arm,
-                    label=view.label,
-                    sp_hash=view.sp_hash,
-                    round=view.round,
-                    rows=view.rows,
-                    scored=0,
-                )
+                self._in_pass = True
+                arm = ArmName(key=view.arm, round=view.round, label=view.label)
+                self._mark(_opened("bench", arm, view.rows))
+            case VerifyEnterView():
+                self._in_pass = True
+                self._mark(_opened("verify", view.arm, view.rows))
             case BenchScoredView():
                 s.bench_score = view.bench
                 for reading in (view.bench.origin, view.bench.selected):
                     if reading is not None:
                         self._place_bench(reading)
-            case BenchGradedView():
-                if (reading := view.reading) is not None:
+            case BenchGradedView(bench_pass=taken, reading=reading):
+                if reading is not None:
                     self._place_bench(reading)
-        if record.phase == CampaignPhase.BENCH and record.event == "exit":
-            s.bench_pass = None
-            if (around := self._around_bench) is not None:
-                self._around_bench = None
-                state, step, s.measuring_arm = around
-                self._set_state(state, step=step)
+                arm = ArmName(key=ArmKey(taken.candidate_id), round=taken.round, label=view.label)
+                self._mark(
+                    _opened("bench", arm, len(taken.sample_keys)).ended(
+                        scored=len(taken.cells) if reading is None else reading.n,
+                        level=None if reading is None else reading.level,
+                        failure=None
+                        if reading is not None
+                        else READING_STATE_INFO[view.state].sentence,
+                    )
+                )
+            case VerifyGradedView(verify_pass=banked, reading=read):
+                self._mark(
+                    _opened("verify", banked.arm, len(banked.positions)).ended(
+                        scored=read.fresh.n, level=read.fresh.accuracy, failure=None
+                    )
+                )
+        if record.event == "exit" and record.phase in (CampaignPhase.BENCH, CampaignPhase.VERIFY):
+            self._in_pass = False
+        if record.phase == CampaignPhase.VERIFY and record.event == "exit":
+            # A verify is graded inside its bracket; a bench pass after it.
+            s.verification = [
+                m.ended(scored=m.scored, level=None, failure=_VERIFY_UNREAD)
+                if m.kind == "verify" and m.state == "running"
+                else m
+                for m in s.verification
+            ]
+        if (
+            record.phase == CampaignPhase.BENCH
+            and record.event == "exit"
+            and (around := self._around_bench) is not None
+        ):
+            self._around_bench = None
+            state, step, s.measuring_arm = around
+            self._set_state(state, step=step)
 
     def _handle_election(self, record: ElectionRecord) -> None:
         self._buffer.election = record
@@ -321,6 +360,12 @@ class LiveDashboardProjection(Projection):
             self._open_samples.clear()
         if isinstance(record.state, Measuring) and record.state.sample_order:
             self.state.declared_sample_order = record.state.sample_order
+
+    def _mark(self, mark: VerificationMark) -> None:
+        held = [
+            m for m in self.state.verification if (m.kind, m.arm.key) != (mark.kind, mark.arm.key)
+        ]
+        self.state.verification = [*held, mark]
 
     def _place_bench(self, reading: BenchReading) -> None:
         # Kept, not only applied: the origin's reading lands before round 0's summary exists.
@@ -352,7 +397,7 @@ class LiveDashboardProjection(Projection):
             record.sample_lookahead,
         )
         self._refresh_open_sample_markers()
-        if self.state.state is not DashboardState.BENCH:
+        if not self._in_pass:
             self._set_state(DashboardState.SCORING)
 
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
@@ -360,13 +405,17 @@ class LiveDashboardProjection(Projection):
         self._open_samples.pop(record.position, None)
         self._absorb_sample_scored(record.result.facts, last_in_candidate=(qi + 1 >= qt))
         # A pass no arm walks (a bench pass, a verify) moves the run's scalars, never the round's arms.
-        if self._buffer.take(record) is None and (bench_pass := self.state.bench_pass) is not None:
-            self.state.bench_pass = bench_pass.model_copy(
-                update={
-                    "scored": bench_pass.scored + 1,
-                    "accuracy": None if record.running is None else record.running.accuracy,
-                }
-            )
+        if self._buffer.take(record) is not None:
+            return
+        for held in self.state.verification:
+            if (
+                held.state == "running"
+                and held.kind == record.role.value
+                and held.arm.key == record.individual_id
+            ):
+                running = None if record.running is None else record.running.accuracy
+                self._mark(held.scored_one(running))
+                return
 
     def _handle_race_standing(self, record: RaceStandingRecord) -> None:
         self._buffer.record_race_standing(
@@ -421,7 +470,7 @@ class LiveDashboardProjection(Projection):
 
         self._refresh_open_sample_markers()
         s.last_query_elapsed_s = None if query_time is None else round(query_time, 2)
-        if s.state is not DashboardState.BENCH:
+        if not self._in_pass:
             self._set_state(
                 DashboardState.BETWEEN_CANDIDATES
                 if last_in_candidate

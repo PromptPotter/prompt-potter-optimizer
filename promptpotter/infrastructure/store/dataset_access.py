@@ -16,6 +16,7 @@ from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.io import read_yaml_optional
 from promptpotter.infrastructure.store.layout import validate_dataset_name
+from promptpotter.infrastructure.store.read_model import file_sig
 from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError
 
 if TYPE_CHECKING:
@@ -250,6 +251,16 @@ def resolve_dataset(stores: Stores, name: str) -> ResolvedDataset:
     if is_dataset_dir(install_dir):
         return ResolvedDataset(name, install_dir, "install")
     raise DatasetAccessError(name)
+
+
+def definition_version(stores: Stores, name: str) -> tuple[object, ...]:
+    """Stats only: which tier *name* resolves to, and every file its definition reads there."""
+    try:
+        dataset = resolve_dataset(stores, name)
+    except DatasetAccessError:
+        return (name, None)
+    files = definition_files(dataset.directory)
+    return (name, str(dataset.directory), *(file_sig(path) for path in files))
 
 
 def declared_backend_type(dataset_dir: Path) -> str:

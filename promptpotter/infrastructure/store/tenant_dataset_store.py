@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from functools import partial
 from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
-from promptpotter.domain.sample import Bank
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
+    MATERIALIZED_PANEL_FILE,
     ORIGIN_FILE,
     render_framing_file,
 )
@@ -117,6 +118,22 @@ class TenantDatasetStore:
     def bank(self, digest: str) -> Bank | None:
         rows = self._banked_rows(digest)
         return None if rows is None else Bank.read(rows)
+
+    def rows(self, digest: str, slots: Iterable[int]) -> dict[int, Sample] | None:
+        """Only *slots* validated: a page of a big bank builds the rows it shows and no others."""
+        rows = self._banked_rows(digest)
+        return None if rows is None else {slot: Sample(id=slot, **rows[slot]) for slot in slots}
+
+    def held_version(self, name: str) -> tuple[object, ...]:
+        """Stats only: what moves the bank *name* holds, a bank's own rows being its hash."""
+        banks = self._base_dir / BANKS_DIR
+        return (
+            str(self._base_dir),
+            file_sig(banks),
+            file_sig(self._labels_path()),
+            file_sig(banks / _CUTS_FILE),
+            file_sig(self.materialized_panel_dir(name) / MATERIALIZED_PANEL_FILE),
+        )
 
     def labelled(self, label: str) -> Bank | None:
         digest = self.hash_of(label)

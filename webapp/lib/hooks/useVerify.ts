@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { dashboardRead, isWarming } from "@/lib/api";
-import type { MeasuredUnit, VerifyPassProgress, VerifyReading } from "@/lib/api/types";
+import type { MeasuredUnit, VerificationMark, VerifyReading } from "@/lib/api/types";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
@@ -10,7 +10,8 @@ import { readyData, useRead } from "./useRead";
 
 export interface VerifyState {
   readings: ReadonlyMap<string, VerifyReading>;
-  pass: VerifyPassProgress | null;
+  // Each arm's latest verify pass on the cycle, by `arm.key`.
+  passes: ReadonlyMap<string, VerificationMark>;
   unit: MeasuredUnit | null;
 }
 
@@ -28,7 +29,7 @@ export function useVerify(
   );
   const body = streamed ? dash : read && !isWarming(read) ? read : null;
   const rounds = body?.rounds;
-  const pass = body?.verify_pass ?? null;
+  const marks = body?.verification;
   const unit = body?.measured_unit ?? null;
   return useMemo(() => {
     const readings = new Map<string, VerifyReading>();
@@ -37,6 +38,9 @@ export function useVerify(
         if (reading.verify) readings.set(reading.arm.key, reading.verify);
       }
     }
-    return { readings, pass, unit };
-  }, [rounds, pass, unit]);
+    const passes = new Map(
+      (marks ?? []).filter((m) => m.kind === "verify").map((m) => [m.arm.key, m]),
+    );
+    return { readings, passes, unit };
+  }, [rounds, marks, unit]);
 }

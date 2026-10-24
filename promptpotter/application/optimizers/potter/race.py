@@ -216,7 +216,10 @@ class PoBBRace(CatchUpPool):
                 "leader": context["leader"],
                 "paired_breakdown": signal.paired_breakdown,
                 "candidate_cells": fit.cells,
-                "prior_histories": {pid: dict(grades) for pid, grades in fit.priors.items()},
+                "prior_histories": {
+                    pid: {cell: grade._asdict() for cell, grade in grades.items()}
+                    for pid, grades in fit.priors.items()
+                },
             }
         check = self._check
         if gate is EliminationGate.LOCK_IN:

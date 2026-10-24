@@ -263,6 +263,30 @@ class ManifestUnreadableError(ConflictError):
         )
 
 
+class LedgerUnreadableError(ConflictError):
+    """A ledger is never migrated: a line this build cannot read refuses every reader of its kind."""
+
+    code = "ledger_unreadable"
+
+    def __init__(self, *, ledger: str, offset: int, reason: str, campaign_id: str | None) -> None:
+        remedy = (
+            "no verb repairs it"
+            if campaign_id is None
+            else f"`python -m promptpotter delete {campaign_id}` removes its campaign and keeps "
+            "every measurement cache"
+        )
+        super().__init__(
+            f"{ledger} line {offset} was written in a shape this build does not read ({reason}). "
+            f"No migration exists: {remedy}.",
+            details={
+                "ledger": ledger,
+                "offset": offset,
+                "reason": reason,
+                "campaign_id": campaign_id,
+            },
+        )
+
+
 class RequestTooLargeError(RuntimeError):
     def __init__(
         self,

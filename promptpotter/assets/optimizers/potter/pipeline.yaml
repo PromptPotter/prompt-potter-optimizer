@@ -14,6 +14,8 @@ available_models:
   - deepseek/deepseek-v4-flash:nitro
   - openai/gpt-oss-20b:nitro
   - openai/gpt-oss-120b:nitro
+  - anthropic/claude-haiku-5.5
+  - z-ai/glm-5.3-flash
 nodes:
   # Run init's, both: the pools `l1_generate` draws from, seeded once before round 0's critique
   # reads them. The block pool leads with what earlier runs on this answer space earned.

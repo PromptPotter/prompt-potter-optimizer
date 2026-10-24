@@ -1,6 +1,8 @@
 source:
   depths: [2, 3, 4]
   held_tail: true
+  # 40 per depth: the bench is 30 + 120 = 150 rows, the operator's ceiling for any pass.
+  held_per_depth: 40
 
 campaign:
   optimization:

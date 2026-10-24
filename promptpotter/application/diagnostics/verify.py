@@ -45,14 +45,15 @@ from promptpotter.domain.results import (
     arm_name,
     individual_cells,
 )
+from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.infrastructure.ledger import ledger_chain
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, at_round
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_verify,
     scan_ledger_walks,
 )
 from promptpotter.shared.errors import DiagnosticError
-from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
@@ -69,7 +70,7 @@ def derive_verify_samples(
     *, round_cell_budget: int, rounds_unverified: int, unmeasured: int
 ) -> int:
     lift = min(max(rounds_unverified, 1), _VERIFY_LIFT_CAP)
-    return max(0, min(round_cell_budget * lift, unmeasured))
+    return max(0, min(round_cell_budget * lift, unmeasured, MAX_PASS_ROWS))
 
 
 def rounds_since_verified(verified_rounds: Iterable[int], *, round_num: int) -> int:
@@ -290,7 +291,8 @@ async def verify_candidate(
         raise DiagnosticError(
             f"--samples {samples} is above this candidate's verify budget of {budget} "
             f"({round_cells} cells per candidate per round, lifted by the "
-            f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured). "
+            f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured "
+            f"and at {MAX_PASS_ROWS} per pass). "
             f"Pass {budget} or fewer, or verify again after more rounds."
         )
     # The ruler the campaign's elections read now, less the candidate under verification.
@@ -319,7 +321,8 @@ async def verify_candidate(
         len(picked),
         len(measured_keys),
     )
-    with diagnostic_trace(stores, hop):
+    # Bound at the candidate's round: each cell's record names one, and the pass bills there.
+    with diagnostic_trace(stores, hop), at_round(round_num):
         ledger = active_cycle_ledger()
         assert ledger is not None
         on_phase = RunCallbacks(ledger).on_phase
@@ -335,7 +338,7 @@ async def verify_candidate(
                     picked,
                     session,
                     label=MeasurementRole.VERIFY,
-                    measured=None,
+                    measured=MeasuredPass(candidate_id, MeasurementRole.VERIFY),
                 ),
             )
             banked = VerifyPass(

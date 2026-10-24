@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -67,15 +67,16 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.dataset_access import resolve_dataset
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
-from promptpotter.infrastructure.store.read_model import Moment, derived
+from promptpotter.infrastructure.store.dataset_access import definition_version, resolve_dataset
+from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.read_model import Moment, derived, file_sig
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.measurement_context import RoleScope
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.bench import PartitionRecord
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
     from promptpotter.domain.scoring import GradedCell, PipelineData, Scorer
@@ -242,26 +243,6 @@ def _dataset_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
     return Bank.of(()) if held is None else held
 
 
-def _scope_samples(
-    stores: Stores, art_store: Stores, name: str, hop: CycleHop | None
-) -> tuple[Bank, list[Sample]]:
-    """The bank a scope reads, and the rows it shows: a cycle reads the bank it DREW, by hash."""
-    if hop is None:
-        bank = _dataset_bank(stores, resolve_dataset(stores, name))
-        return bank, list(bank.samples)
-    drawn = art_store.campaigns.read_bank_partition(hop)
-    if drawn is None:
-        return Bank.of(()), []
-    held = stores.tenant_datasets.bank(drawn.dataset_hash)
-    if held is None:
-        raise PayloadInvalidError(
-            f"This campaign drew its samples from a bank no longer held ({drawn.dataset_hash}).",
-            code="campaign_roster_unreadable",
-            details={"dataset_name": name, "dataset_hash": drawn.dataset_hash},
-        )
-    return held, [s for s in held.samples if s.id in drawn.bank_ids]
-
-
 def _artifact_scope_store(
     stores: Stores,
     campaign_id: str | None,
@@ -278,7 +259,83 @@ def _artifact_scope_store(
     return leaf_store, leaf.campaign_id, leaf.cycle_id
 
 
-def _cycle_view(stores: Stores, hop: CycleHop, slots: Mapping[str, int]) -> HardSamples:
+@dataclass(frozen=True)
+class CellsScope:
+    """One log's scope, resolved: ``art_store`` is the leaf's, a sandbox's at depth."""
+
+    stores: Stores
+    art_store: Stores
+    name: str
+    scope: HeatmapScope
+    hop: CycleHop | None
+    at: int | None
+
+    def version(self) -> tuple[object, ...]:
+        """Stats only: what the log reads, so a client holding it is answered unread."""
+        art = self.art_store
+        read = (
+            self.name,
+            self.scope,
+            self.hop,
+            self.at,
+            definition_version(self.stores, self.name),
+            art.archive.version(),
+        )
+        if self.hop is None:
+            return (
+                *read,
+                self.stores.tenant_datasets.held_version(self.name),
+                file_sig(art.ruler.path),
+            )
+        cycle_dir = cycle_dir_for(art.base_dir, self.hop)
+        campaign_id = self.hop.campaign_id
+        # Its campaign's ledgers name the line; a fork's chain may reach past them.
+        chain = ledger_chain(CycleDir(cycle_dir), moment=None) if cycle_dir.is_dir() else []
+        ledgers = {*art.campaigns.campaign_cycle_ledgers(campaign_id), *(p for p, _ in chain)}
+        return (
+            *read,
+            file_sig(CampaignLayout(art.campaigns.campaign_root_dir(campaign_id)).manifest),
+            file_sig(CycleLayout(cycle_dir).hard_samples),
+            *((str(path), file_sig(path)) for path in sorted(ledgers)),
+        )
+
+
+def cells_scope(
+    stores: Stores,
+    name: str,
+    *,
+    scope: HeatmapScope,
+    campaign_id: str | None,
+    cycle_id: str | None,
+    descend: CyclePath,
+    at: int | None,
+) -> CellsScope:
+    art_store, art_campaign, art_cycle = _artifact_scope_store(
+        stores, campaign_id, cycle_id, descend
+    )
+    if at is not None and scope != "cycle":
+        raise BadRequestError("at replays one cycle's ledger: it needs scope=cycle and its ids")
+    hop = _scope_cycle(art_store, scope, art_campaign, art_cycle)
+    return CellsScope(stores, art_store, name, scope, hop, at)
+
+
+def _drawn_rows(
+    cells: CellsScope, drawn: PartitionRecord | None, slots: list[int]
+) -> dict[int, Sample]:
+    """A cycle reads the bank it DREW, by hash, and only the rows a page shows."""
+    if drawn is None:
+        return {}
+    rows = cells.stores.tenant_datasets.rows(drawn.dataset_hash, slots)
+    if rows is None:
+        raise PayloadInvalidError(
+            f"This campaign drew its samples from a bank no longer held ({drawn.dataset_hash}).",
+            code="campaign_roster_unreadable",
+            details={"dataset_name": cells.name, "dataset_hash": drawn.dataset_hash},
+        )
+    return rows
+
+
+def _cycle_view(stores: Stores, hop: CycleHop) -> HardSamples:
     """Every round's close writes ``hard_samples.json``, so a cycle without one read no scale."""
     cycle_dir = cycle_dir_for(stores.base_dir, hop)
     if not cycle_dir.exists():
@@ -294,18 +351,14 @@ def _cycle_view(stores: Stores, hop: CycleHop, slots: Mapping[str, int]) -> Hard
         frontier=None,
         arm_theta={},
         parent_grades={},
-        slots=slots,
+        slots={},
         # Nothing measured: the round order is empty whatever leads it.
         n_min=0,
         cycle_id=hop.cycle_id,
     )
 
 
-def _resolve_scope_artifact(
-    stores: Stores, hop: CycleHop | None, name: str, bank: Bank
-) -> HardSamples:
-    if hop is not None:
-        return _cycle_view(stores, hop, bank.slot_of)
+def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
     scorer = dataset_scorer(resolve_dataset(stores, name).directory)
     knobs = _dataset_campaign_config(stores, name).optimization
     n_min, enable_2pl = knobs.elimination_n_min, knobs.enable_2pl_graduation
@@ -374,67 +427,52 @@ class _LeaderboardPage:
     """Page positions in served order; index + 1 IS each row's ``hard_sample_rank``."""
 
 
-def _resolve_leaderboard_page(
-    stores: Stores,
-    *,
-    name: str,
-    scope: HeatmapScope,
-    campaign_id: str | None,
-    cycle_id: str | None,
-    descend: CyclePath,
-    limit: int,
-    max_unmeasured: int | None,
-    order: HardSampleOrder | None,
-    at: int | None,
+def _selected(
+    view: HardSamples, members: Collection[int], max_unmeasured: int | None, limit: int
+) -> list[int]:
+    in_view = [view.positions[k] for k in view.sample_order if view.positions[k] in members]
+    selection = in_view + sorted(set(members).difference(in_view))
+    return _trim_unmeasured(selection, set(in_view), max_unmeasured)[:limit]
+
+
+def _leaderboard_page(
+    cells: CellsScope, *, limit: int, max_unmeasured: int | None, order: HardSampleOrder | None
 ) -> _LeaderboardPage:
     """*Measured* is a GRADED cell in this scope, never a δ entry, which forks inherit."""
-    art_store, art_campaign, art_cycle = _artifact_scope_store(
-        stores, campaign_id, cycle_id, descend
-    )
-    if at is not None and scope != "cycle":
-        raise BadRequestError("at replays one cycle's ledger: it needs scope=cycle and its ids")
-    hop = _scope_cycle(art_store, scope, art_campaign, art_cycle)
-    bank, rows = _scope_samples(stores, art_store, name, hop)
-    slots = bank.slot_of
-    shown = {s.id: s for s in rows}
-    view = _resolve_scope_artifact(art_store, hop, name, bank)
-    in_view = [slots[k] for k in view.sample_order if slots.get(k) in shown]
-    selection = in_view + sorted(shown.keys() - set(in_view))
-    selected = _trim_unmeasured(selection, set(in_view), max_unmeasured)[:limit]
-    wanted = {shown[sid].key: sid for sid in selected}
-
-    candidates, cells = _page_cells(art_store, hop, name, bank, wanted, at)
+    art_store, hop = cells.art_store, cells.hop
+    if hop is None:
+        bank = _dataset_bank(cells.stores, resolve_dataset(cells.stores, cells.name))
+        view = _dataset_view(art_store, cells.name, bank)
+        selected = _selected(view, range(len(bank.samples)), max_unmeasured, limit)
+        shown = {sid: bank.samples[sid] for sid in selected}
+        wanted = {shown[sid].key: sid for sid in selected}
+        candidates, rows = _dataset_cells(art_store, cells.name, bank, wanted)
+    else:
+        drawn = art_store.campaigns.read_bank_partition(hop)
+        view = _cycle_view(art_store, hop)
+        members = frozenset() if drawn is None else drawn.bank_ids
+        selected = _selected(view, members, max_unmeasured, limit)
+        shown = _drawn_rows(cells, drawn, selected)
+        wanted = {shown[sid].key: sid for sid in selected}
+        graded_under = campaign_scorer(art_store, hop.campaign_id)
+        if graded_under is None:
+            raise NotFoundError(f"Campaign '{hop.campaign_id}' not found")
+        candidates, rows = _cycle_cells(art_store, hop, graded_under, wanted, cells.at)
 
     resolved, ranked = rank_hard_samples(
         view,
         wanted,
-        measured={shown[c.position].key for c in cells if c.fitness is not None},
-        order=order or _dataset_campaign_config(stores, name).hard_sample_order,
+        measured={shown[c.position].key for c in rows if c.fitness is not None},
+        order=order or _dataset_campaign_config(cells.stores, cells.name).hard_sample_order,
     )
     return _LeaderboardPage(
         shown=shown,
         view=view,
         candidates=candidates,
-        cells=cells,
+        cells=rows,
         order=resolved,
-        ranked=[slots[key] for key in ranked],
+        ranked=[wanted[key] for key in ranked],
     )
-
-
-def _page_cells(
-    art_store: Stores,
-    hop: CycleHop | None,
-    name: str,
-    bank: Bank,
-    wanted: Mapping[str, int],
-    at: int | None,
-) -> ScopeCells:
-    if hop is None:
-        return _dataset_cells(art_store, name, bank, wanted)
-    graded_under = campaign_scorer(art_store, hop.campaign_id)
-    if graded_under is None:
-        raise NotFoundError(f"Campaign '{hop.campaign_id}' not found")
-    return _cycle_cells(art_store, hop, graded_under, wanted, at)
 
 
 def _cycle_cells(
@@ -519,34 +557,17 @@ def _graded(cells: list[CellRow]) -> list[float]:
 
 
 def measurement_log(
-    stores: Stores,
-    name: str,
+    cells: CellsScope,
     *,
-    scope: HeatmapScope,
-    campaign_id: str | None,
-    cycle_id: str | None,
-    descend: CyclePath,
     limit: int,
     max_unmeasured: int | None,
     order: HardSampleOrder | None,
     candidate_id: str | None,
     round: int | None,
     status: SampleStatus | None,
-    at: int | None = None,
 ) -> CellsResponse:
-    """*at* replays the cycle scope to that ledger line, under the ranking as it stands NOW."""
-    page = _resolve_leaderboard_page(
-        stores,
-        name=name,
-        scope=scope,
-        campaign_id=campaign_id,
-        cycle_id=cycle_id,
-        descend=descend,
-        limit=limit,
-        max_unmeasured=max_unmeasured,
-        order=order,
-        at=at,
-    )
+    """A cycle scope's ``at`` replays its ledger to that line, under the ranking as it stands NOW."""
+    page = _leaderboard_page(cells, limit=limit, max_unmeasured=max_unmeasured, order=order)
     shown = page.shown
 
     round_of = {c.key: c.round for c in page.candidates}
@@ -595,8 +616,8 @@ def measurement_log(
     samples = [_item(sid) for sid in ranked]
     spreads = Counter(item.hit_spread for item in samples)
     return CellsResponse(
-        name=name,
-        scope=scope,
+        name=cells.name,
+        scope=cells.scope,
         order=page.order,
         ruler=page.view.ruler,
         samples=samples,

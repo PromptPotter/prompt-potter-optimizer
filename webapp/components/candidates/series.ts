@@ -1,9 +1,8 @@
 "use client";
 
-import type { MeasuredUnit } from "@/lib/api/types";
-import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
+import type { MeasuredUnit, VerificationMark } from "@/lib/api/types";
 import { barLevel, barStarted, type DisplayMetric } from "@/lib/derivations";
-import { fmtNum, unitCount } from "@/lib/format";
+import { fmtNum, fmtPct0, unitCount } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 
 export type SeriesKey =
@@ -33,11 +32,12 @@ export interface SeriesSpec {
   legend?: (ctx: SeriesCtx) => string;
   hint?: (ctx: SeriesCtx) => string;
   ink: (ctx: SeriesCtx) => string;
-  kind: "bar" | "line";
+  // A mark is a diamond beside its bar's group: a check on it, never a second bar.
+  kind: "bar" | "line" | "mark";
   axis: "y" | "y1";
   gap: "floor-when-started" | "sparse";
   signed?: true;
-  hollow?: true;
+  mark?: { of: (v: CandidateBar) => VerificationMark | null; filled: boolean };
   valueOf: (v: CandidateBar) => number | null;
   applies: (ctx: SeriesCtx) => boolean;
   tip: (v: CandidateBar, ctx: SeriesCtx) => string;
@@ -52,13 +52,38 @@ const metricInk =
   (ctx: SeriesCtx): string =>
     metricInkToken(m, ctx.electedMetric);
 
-const benchLevel = (v: CandidateBar): number | null => {
-  if (!v.reading) return null;
-  return v.benchPass ? v.benchPass.accuracy : (v.reading.bench?.level?.value ?? null);
+const MARK_NAME: Record<VerificationMark["kind"], string> = {
+  verify: "verify",
+  bench: "held-out bench",
 };
 
-const hasBench = (v: CandidateBar): boolean =>
-  v.reading !== null && (v.benchPass != null || v.reading.bench != null);
+const MARK_ROWS: Record<VerificationMark["kind"], string> = {
+  verify: " never seen",
+  bench: "",
+};
+
+const pct = (v: number) => (v * 100).toFixed(0);
+
+function markTip(m: VerificationMark | null, unit: MeasuredUnit): string {
+  if (m == null) return "—";
+  const name = MARK_NAME[m.kind];
+  if (m.failure != null) return `${name}, failed: ${m.failure}`;
+  const level = m.level;
+  const band =
+    level?.ci_lo != null && level.ci_hi != null ? ` [${pct(level.ci_lo)}, ${pct(level.ci_hi)}]` : "";
+  if (m.state === "running") {
+    const sofar = level == null ? "" : `, ${fmtPct0(level.value)} so far`;
+    return `${name}, ${m.scored} of ${unitCount(m.rows, unit)}${MARK_ROWS[m.kind]}${sofar}`;
+  }
+  const read = level == null ? ", no level" : `, ${fmtPct0(level.value)}${band}`;
+  return `${name}, ${unitCount(m.scored, unit)}${MARK_ROWS[m.kind]}${read}`;
+}
+
+// A course bar carries no arm, so no pass of this cycle reads it.
+const verifyOf = (v: CandidateBar) => (v.reading ? v.verify : null);
+const benchOf = (v: CandidateBar) => (v.reading ? v.bench : null);
+
+const markLevel = (m: VerificationMark | null): number | null => m?.level?.value ?? null;
 
 // Array order is draw order.
 export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
@@ -131,40 +156,29 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     key: "verify",
     legend: () => "verify",
     hint: () =>
-      "This candidate on search cells its rounds never bought, read on those fresh cells alone — the check on the level its bar claims. Picked hardest-first, they sit below that level by construction.",
-    ink: () => "--color-new",
-    hollow: true,
-    kind: "bar",
+      "An open diamond: this candidate on search cells its rounds never bought, read on those fresh cells alone — the check on the level its bar claims. Picked hardest-first, they sit below that level by construction. It pulses while the pass is out.",
+    ink: () => "--color-accent",
+    kind: "mark",
+    mark: { of: verifyOf, filled: false },
     axis: "y",
     gap: "sparse",
-    valueOf: (v) => v.reading?.verify?.fresh.accuracy?.value ?? null,
-    applies: (c) => c.views.some((v) => v.reading?.verify != null),
-    tip: (v, c) => {
-      const r = v.reading?.verify;
-      if (r == null) return "verify: —";
-      return `verify: ${fmtNum(r.fresh.accuracy?.value)} on ${unitCount(r.fresh.n, c.unit)} fresh, ${VERIFY_STRATEGY_LABELS[r.strategy]}`;
-    },
+    valueOf: (v) => markLevel(verifyOf(v)),
+    applies: (c) => c.views.some((v) => markLevel(verifyOf(v)) != null),
+    tip: (v, c) => markTip(verifyOf(v), c.unit),
   },
   {
     key: "bench",
     legend: () => "bench · held out",
     hint: () =>
-      "This candidate on the held-out bench set — questions no round of the search ever read. Graded for the origin as the run starts and for the selection as it ends, so most bars carry none.",
+      "A filled diamond: this candidate on the held-out bench set — questions no round of the search ever read. Graded for the origin as the run starts and for the selection as it ends, so most bars carry none. It pulses while the pass is out.",
     ink: () => "--color-accent",
-    hollow: true,
-    kind: "bar",
+    kind: "mark",
+    mark: { of: benchOf, filled: true },
     axis: "y",
     gap: "sparse",
-    valueOf: benchLevel,
-    applies: (c) => c.views.some(hasBench),
-    tip: (v, c) => {
-      const level = benchLevel(v);
-      const at = level == null ? "—" : fmtNum(level);
-      if (v.reading && v.benchPass)
-        return `bench: ${at} so far · ${v.benchPass.scored} of ${unitCount(v.benchPass.rows, c.unit)} held out`;
-      const b = v.reading?.bench;
-      return b == null ? "bench: —" : `bench: ${at} on ${unitCount(b.n, c.unit)} held out`;
-    },
+    valueOf: (v) => markLevel(benchOf(v)),
+    applies: (c) => c.views.some((v) => markLevel(benchOf(v)) != null),
+    tip: (v, c) => markTip(benchOf(v), c.unit),
   },
   {
     key: "cached",
@@ -222,20 +236,13 @@ export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
       hi: ctx.views.map((v) => v.reading?.own?.accuracy?.ci_hi ?? null),
     });
   }
-  if (ctx.views.some((v) => v.reading?.verify != null)) {
+  for (const spec of CANDIDATE_SERIES) {
+    const mark = spec.mark;
+    if (!mark || !spec.applies(ctx)) continue;
     bands.push({
-      anchor: "verify",
-      lo: ctx.views.map((v) => v.reading?.verify?.fresh.accuracy?.ci_lo ?? null),
-      hi: ctx.views.map((v) => v.reading?.verify?.fresh.accuracy?.ci_hi ?? null),
-    });
-  }
-  if (ctx.views.some(hasBench)) {
-    const edge = (side: "ci_lo" | "ci_hi") => (v: CandidateBar) =>
-      !v.reading || v.benchPass ? null : (v.reading.bench?.level?.[side] ?? null);
-    bands.push({
-      anchor: "bench",
-      lo: ctx.views.map(edge("ci_lo")),
-      hi: ctx.views.map(edge("ci_hi")),
+      anchor: spec.key,
+      lo: ctx.views.map((v) => mark.of(v)?.level?.ci_lo ?? null),
+      hi: ctx.views.map((v) => mark.of(v)?.level?.ci_hi ?? null),
     });
   }
   if (ctx.metrics.has("ability")) {

@@ -106,3 +106,23 @@ def release_cycle(cycle_dir: Path) -> None:
 
 def cycle_held(cycle_dir: Path) -> bool:
     return held(CycleLayout(cycle_dir).producer_lock)
+
+
+def hold_pass(cycle_dir: Path) -> None:
+    """A scoring pass is a producer too: it holds the cycle against a launch, a delete and a rewind."""
+    hold_cycle(cycle_dir)
+    if not take(CycleLayout(cycle_dir).pass_lock):
+        release_cycle(cycle_dir)
+        raise ConflictError(
+            f"cycle {cycle_dir.name} has a scoring pass in flight. Pause it or let it end.",
+            code="producer_live",
+        )
+
+
+def release_pass(cycle_dir: Path) -> None:
+    release(CycleLayout(cycle_dir).pass_lock)
+    release_cycle(cycle_dir)
+
+
+def pass_held(cycle_dir: Path) -> bool:
+    return held(CycleLayout(cycle_dir).pass_lock)

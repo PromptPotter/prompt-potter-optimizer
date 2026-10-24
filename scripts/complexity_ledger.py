@@ -38,7 +38,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 447,
+    "modules": 449,
     # Every `__init__.py` among them.
     "init_files": 56,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -54,9 +54,9 @@ BASELINE = {
     # Leaves of `CycleResult` — what a run produces.
     "cycle_result_fields": 825,
     # Parameters annotated `Any`.
-    "any_params": 46,
+    "any_params": 44,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 65,
+    "domain_any_maps": 66,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 8,
     # Injections the optimizers' runtimes price — each a block an optimizer prompt can carry.
@@ -77,10 +77,10 @@ BASELINE = {
     # Modules a test run imports: our own, followed through their module-level imports, plus
     # each outside distribution's top name. A test that reaches the server app or an extra
     # moves it as one function does not.
-    "test_reach": 358,
+    "test_reach": 360,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
-    "served_fields": 1647,
+    "served_fields": 1643,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 18,
@@ -96,7 +96,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes; each `CycleRead` alike.
     "p_member": 309,
     # Places a test reaches a private name of the package: an import, an attribute, a patch target.
-    "test_private_reach": 11,
+    "test_private_reach": 12,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"

@@ -19,10 +19,9 @@ from promptpotter.domain.phase_views import (
     BenchGradedView,
     InitEnterView,
     InitExitView,
-    VerifyEnterView,
     VerifyGradedView,
 )
-from promptpotter.domain.phases import CampaignPhase, ErrorRecord, GateKind, RunPhase
+from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase
 from promptpotter.domain.results import (
     ArmState,
     Cut,
@@ -701,28 +700,21 @@ class _Answers:
         return self._frozen
 
 
-class DeclaredPhase(NamedTuple):
-    run_phase: str = ""
-    gate: GateKind | None = None
-    drafts: int = 0
-
-
 class _DeclaredPhase:
     records: ClassVar[RecordClasses] = (RunPhaseRecord,)
 
     def __init__(self) -> None:
-        self._declared = DeclaredPhase()
+        self._declared: RunPhaseRecord | None = None
 
     def feed(self, offset: int, record: RunPhaseRecord) -> None:
-        self._declared = DeclaredPhase(record.run_phase.value, record.gate, len(record.drafts))
+        self._declared = record
 
-    def value(self) -> DeclaredPhase:
+    def value(self) -> RunPhaseRecord | None:
         return self._declared
 
 
 class VerifyLedger(NamedTuple):
     graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]]
-    open: VerifyEnterView | None
     # EVERY graded pass, oldest first: a later one buys other cells and retires none.
     passes: list[VerifyPass]
 
@@ -732,23 +724,15 @@ class _Verify:
 
     def __init__(self) -> None:
         self._graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]] = {}
-        self._open: VerifyEnterView | None = None
         self._passes: list[VerifyPass] = []
 
     def feed(self, offset: int, record: PhaseRecord) -> None:
-        if record.phase != CampaignPhase.VERIFY:
-            return
-        match record.view:
-            case VerifyEnterView() as entered:
-                self._open = entered
-            case VerifyGradedView(verify_pass=banked, reading=reading):
-                self._graded[banked.arm.key] = banked, reading
-                self._passes.append(banked)
-        if record.event == "exit":
-            self._open = None
+        if isinstance(banked := record.view, VerifyGradedView):
+            self._graded[banked.verify_pass.arm.key] = banked.verify_pass, banked.reading
+            self._passes.append(banked.verify_pass)
 
     def value(self) -> VerifyLedger:
-        return VerifyLedger(dict(self._graded), self._open, list(self._passes))
+        return VerifyLedger(dict(self._graded), list(self._passes))
 
 
 class LedgerSpend(NamedTuple):
@@ -1062,7 +1046,7 @@ def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[Walked
     return walks
 
 
-def scan_ledger_declared_phase(ledger_path: Path) -> DeclaredPhase:
+def scan_ledger_declared_phase(ledger_path: Path) -> RunPhaseRecord | None:
     return _view(ledger_path, _DeclaredPhase)
 
 

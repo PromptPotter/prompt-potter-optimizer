@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import Field
 
-from promptpotter.domain.bench import BenchReading
+from promptpotter.domain.bench import BandedValue, BenchReading
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.paired_reading import ArmKey, ArmName
@@ -160,6 +160,52 @@ class RunLimits(StrictModel):
     # Its money axes are the CAMPAIGN's ceiling, which every live cycle shares.
     budget: Budget = Budget()
     optimizer: list[OptimizerLimit] = Field(default_factory=list)
+
+
+#: `verify` re-scores search rows the arm never read; `bench` reads the held-out rows.
+VerificationKind = Literal["verify", "bench"]
+VerificationState = Literal["running", "done", "failed"]
+
+
+class VerificationMark(FrozenModel):
+    """The latest verify or bench pass on one arm, as its records left it."""
+
+    kind: VerificationKind
+    arm: ArmName = Field(description="The arm the pass measures; `arm.key` joins it to its row.")
+    state: VerificationState
+    rows: int = Field(description="Rows the pass sends.")
+    scored: int = Field(description="Rows of it scored so far.")
+    level: BandedValue | None = Field(
+        description="Accuracy over the rows scored: the running value, unbanded, while `running`; "
+        "the pass's reading once `done`. Null before the first row, and on a `failed` pass, "
+        "which reads nothing."
+    )
+    failure: str | None = Field(description="Why a `failed` pass ended without a reading.")
+
+    def scored_one(self, accuracy: float | None) -> VerificationMark:
+        level = None if accuracy is None else BandedValue(value=accuracy, ci_lo=None, ci_hi=None)
+        return self.model_copy(update={"scored": self.scored + 1, "level": level})
+
+    def ended(
+        self, *, scored: int, level: BandedValue | None, failure: str | None
+    ) -> VerificationMark:
+        state: VerificationState = "done" if failure is None else "failed"
+        return self.model_copy(
+            update={
+                "state": state,
+                "scored": scored,
+                "level": level if failure is None else None,
+                "failure": failure,
+            }
+        )
+
+    def orphaned(self) -> VerificationMark:
+        """A pass whose process is gone before it was graded."""
+        return self.ended(
+            scored=self.scored,
+            level=None,
+            failure="The process ended before the pass was graded.",
+        )
 
 
 class RoundHealth(FrozenModel):

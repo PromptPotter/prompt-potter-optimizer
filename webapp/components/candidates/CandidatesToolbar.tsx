@@ -9,18 +9,22 @@ import {
   ChipGroup,
   CopyButton,
   HoverCard,
+  IconDownload,
   IconMore,
   Menu,
   MenuCheck,
+  MenuItem,
   MenuRadioGroup,
   MenuSep,
   Toolbar,
   ToolbarSep,
   ToolbarSpacer,
 } from "@/components/ui";
+import { exportText, exportUrl } from "@/lib/api/reads";
 import {
   ABORT_LENS_LABELS,
   DISPLAY_METRICS,
+  EXPORT_TIERS,
   SCORE_LENS_LABELS,
 } from "@/lib/api/types.generated";
 import { setScoringMask } from "@/lib/scoring-mask";
@@ -187,7 +191,46 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
           </>
         )}
       </Menu>
-      <CopyButton data={m.views} title="Copy all candidates as JSON" />
+      {viewedPath && (
+        <>
+          <CopyButton
+            title="Copy this run's candidates"
+            choices={EXPORT_TIERS.filter((t) => t.pasted).map((t) => ({
+              key: t.id,
+              label: t.label,
+              data: () => exportText(viewedPath, t.id),
+            }))}
+          />
+          <Menu
+            align="right"
+            renderTrigger={({ open, toggle }) => (
+              <Chip
+                icon
+                on={open}
+                ariaLabel="Download this run"
+                title="Download this run"
+                onClick={toggle}
+              >
+                <IconDownload />
+              </Chip>
+            )}
+          >
+            {({ close }) =>
+              EXPORT_TIERS.filter((t) => !t.pasted).map((t) => (
+                <MenuItem
+                  key={t.id}
+                  onClick={() => {
+                    close();
+                    window.location.assign(exportUrl(viewedPath, t.id));
+                  }}
+                >
+                  {t.label}
+                </MenuItem>
+              ))
+            }
+          </Menu>
+        </>
+      )}
     </Toolbar>
   );
 }

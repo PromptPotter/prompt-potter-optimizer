@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _active_pointer_path(workspace: WorkspaceDir) -> Path:
+def active_pointer_path(workspace: WorkspaceDir) -> Path:
     return workspace / ".workspace" / "active_session.json"
 
 
@@ -27,24 +27,24 @@ def save_active_pointer(workspace: WorkspaceDir, hop: CycleHop) -> None:
     validate_path_component(hop.campaign_id)
     validate_path_component(hop.cycle_id)
     write_json(
-        _active_pointer_path(workspace),
+        active_pointer_path(workspace),
         {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id},
     )
 
 
 def clear_active_pointer(workspace: WorkspaceDir) -> None:
-    _active_pointer_path(workspace).unlink(missing_ok=True)
+    active_pointer_path(workspace).unlink(missing_ok=True)
 
 
 def read_active_pointer(workspace: WorkspaceDir) -> tuple[str, str]:
-    ptr = read_json_tolerant(_active_pointer_path(workspace))
+    ptr = read_json_tolerant(active_pointer_path(workspace))
     if not isinstance(ptr, dict):
         return "", ""
     return ptr.get("campaign_id", ""), ptr.get("cycle_id", "")
 
 
 def active_pointer_exists(workspace: WorkspaceDir) -> bool:
-    return _active_pointer_path(workspace).exists()
+    return active_pointer_path(workspace).exists()
 
 
 def cleanup_stub_fork_if_empty(*, campaign_store: CampaignStore, hop: CycleHop) -> tuple[bool, str]:

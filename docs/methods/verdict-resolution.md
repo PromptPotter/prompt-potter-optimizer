@@ -236,8 +236,9 @@ provisional, and say so rather than passing it on.
 
 - **The bar is a point estimate with a sign floor.** `selection.py::elect_round_winner` admits on
   a raw θ lift over the parent above `rasch.py::FIT_SLACK` AND more of the cells the arm shares
-  with the parent won than lost — so a lift the fit's last digit or the δ weighting made, on cells
-  the arm did no better on, keeps the parent. A pick's rows on the cells it won its race on are
+  with the parent won than lost on their VERDICTS — so a lift the fit's last digit or the δ
+  weighting made, on cells the arm did no better on, keeps the parent, while a cost term's
+  tie-break counts as neither (`candidate-elimination.md` § The θ rule, step 4). A pick's rows on the cells it won its race on are
   the max over its round's arms, and `rescore_parent` replays them, so the draw never puts those
   cells in a later race (`selection.py::crowning_cells`): the parent's bar is read on cells no
   election chose it by, and needs no credit for its own winner's curse. There is still no

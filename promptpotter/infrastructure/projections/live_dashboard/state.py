@@ -5,9 +5,14 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import BenchScore, BenchSubject
+from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.dashboard_rows import LiveCandidate, RoundSummary, RunLimits
+from promptpotter.domain.dashboard_rows import (
+    LiveCandidate,
+    RoundSummary,
+    RunLimits,
+    VerificationMark,
+)
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.results import DisplayMetric, RunStanding
@@ -65,22 +70,6 @@ class RacingBlock(StrictModel):
     top: list[dict[str, Any]]
 
 
-class BenchPassProgress(StrictModel):
-    """The held-out pass in flight; its rows are no round's cells."""
-
-    subject: BenchSubject
-    arm: ArmKey = Field(description="The arm the pass grades — the join to its row.")
-    label: str = Field(description="That arm's label, to render.")
-    sp_hash: str = Field(description="The searchpoint scored — the archive's `prompt_fields_id`.")
-    round: int = Field(description="The round whose selection is graded; 0 is the origin.")
-    rows: int = Field(description="Bench rows the pass sends.")
-    scored: int = Field(description="Rows of it scored so far.")
-    accuracy: float | None = Field(
-        default=None,
-        description="The gateway's running accuracy over the rows scored; null before the first.",
-    )
-
-
 class CurrentRound(StrictModel):
     """The round in flight, rebuilt whole on every persist."""
 
@@ -123,7 +112,11 @@ class DashboardFacts(StrictModel):
 
     # As the run last DECLARED it; the served body reads it anew (`served_dashboard`).
     bench_score: BenchScore | None = None
-    bench_pass: BenchPassProgress | None = None
+    verification: list[VerificationMark] = Field(
+        default_factory=list,
+        description="Each arm's latest verify and held-out bench pass on this cycle's ledger, "
+        "in flight or ended; its rows are no round's cells.",
+    )
     composite_fitness_formula: str | None = None
     display_metric: DisplayMetric
     elects_on: DisplayMetric
@@ -223,7 +216,6 @@ class LiveDashboardState(DashboardFacts):
             "error": None,
             # A resumed run grades its selection again; the prior pass graded a stale one.
             "bench_score": None,
-            "bench_pass": None,
             "current_query_payload": None,
             "current_position": None,
             "open_positions": [],

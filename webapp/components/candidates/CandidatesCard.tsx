@@ -44,7 +44,12 @@ function FitnessLegend({ model: m }: { model: CandidatesModel }) {
       {legend.map((s) => (
         <span key={s.key} title={s.hint?.(seriesCtx)}>
           <span
-            className={cx("swatch", s.kind === "line" && "line", s.hollow && "hollow")}
+            className={cx(
+              "swatch",
+              s.kind === "line" && "line",
+              s.kind === "mark" && "mark",
+              s.mark?.filled && "filled",
+            )}
             style={{ "--ink": `var(${s.ink(seriesCtx)})` } as CSSProperties}
           />
           {s.legend?.(seriesCtx)}

@@ -49,7 +49,14 @@ export const IconMore = ({ size = 15 }: GlyphProps) => (
   </Icon>
 );
 
-export const IconClose = ({ size = 16 }: GlyphProps) => (
+export const IconDownload = ({ size = 15 }: GlyphProps) => (
+  <Icon size={size} strokeWidth={1.7}>
+    <path d="M12 4v11M7 10l5 5 5-5" />
+    <path d="M5 20h14" />
+  </Icon>
+);
+
+export const IconClose =({ size = 16 }: GlyphProps) => (
   <Icon size={size} strokeWidth={1.7}>
     <path d="M6 6l12 12M18 6 6 18" />
   </Icon>

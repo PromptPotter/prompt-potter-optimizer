@@ -134,7 +134,6 @@ class CycleEventLog:
         for raw in theirs.splitlines():
             offset = self._next_offset
             self._next_offset += 1
-            # A line no arm reads still CONSUMES its offset, as ``iter`` counts it.
             record: CycleRecord | None = ledger_record(
                 RECORD_ADAPTER.validate_json, raw, ledger=self._path, offset=offset
             )

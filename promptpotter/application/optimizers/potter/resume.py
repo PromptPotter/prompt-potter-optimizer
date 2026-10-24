@@ -13,7 +13,11 @@ from promptpotter.application.optimizers.potter.l1.critique import distil_critiq
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.optimizers.potter.records import Ladder, PotterCheckpointKind
 from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.scoring.selection import elect_round_winner, paired_p_best
+from promptpotter.application.scoring.selection import (
+    PairedGrade,
+    elect_round_winner,
+    paired_p_best,
+)
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.scoring import is_answer_collapsed
 from promptpotter.infrastructure.llm.telemetry import at_round
@@ -58,7 +62,7 @@ def _pobb_replay_snapshot(
     if any(cell not in rows for cell in cells):
         return None
     priors = {
-        ArmKey(pid): {str(cell): float(grade) for cell, grade in grades.items()}
+        ArmKey(pid): {str(cell): PairedGrade(**grade) for cell, grade in grades.items()}
         for pid, grades in data["prior_histories"].items()
     }
     fit = paired_p_best(

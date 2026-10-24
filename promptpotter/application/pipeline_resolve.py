@@ -88,12 +88,12 @@ from promptpotter.infrastructure.store.dataset_access import (
     dataset_connector,
     dataset_experiment,
     declared_pipelines,
-    definition_files,
+    definition_version,
     read_dataset_definition,
     read_dataset_pipeline,
     resolve_dataset,
 )
-from promptpotter.infrastructure.store.read_model import derived, file_sig
+from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import descend_store, owned_campaign
 from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import (
@@ -1351,8 +1351,6 @@ def line_config(stores: Stores, campaign: Campaign, holder: CycleHop) -> Campaig
 
 
 def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
-    dataset = _dataset_of(stores, campaign)
-    dataset_dir = None if dataset is None else dataset.directory
     # VALUES, never the ledger's stat: a running root appends there on every sample.
     seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
     declaration = stores.campaigns.read_resolved_run(campaign.root_hop).declaration
@@ -1360,10 +1358,8 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     return (
         campaign.declaration.digest,
         None if lock is None else stable_hash(lock.locked),
-        campaign.dataset_name,
         campaign.root_cycle_id,
-        dataset_dir,
-        *(() if dataset_dir is None else (file_sig(p) for p in definition_files(dataset_dir))),
+        definition_version(stores, campaign.dataset_name),
         None if declaration is None else stable_hash(declaration),
         None if seed is None else stable_hash(seed.model_dump(mode="json")),
     )

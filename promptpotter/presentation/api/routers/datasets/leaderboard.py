@@ -4,7 +4,11 @@ from typing import Annotated
 
 from fastapi import Query, Request, Response
 
-from promptpotter.application.scoring.measurement_log import measurement_log, open_cell
+from promptpotter.application.scoring.measurement_log import (
+    cells_scope,
+    measurement_log,
+    open_cell,
+)
 from promptpotter.domain.cells import Cell, CellsResponse, HeatmapScope
 from promptpotter.domain.cycle_paths import decode_cycle_path
 from promptpotter.domain.results import HardSampleOrder
@@ -75,22 +79,28 @@ def get_dataset_cells(
     ),
 ) -> Response:
     """The measurement log; under a filter, ``samples`` and ``candidates`` shrink to the ones holding a kept cell."""
-    log = measurement_log(
+    cells = cells_scope(
         stores,
         name,
         scope=scope,
         campaign_id=campaign_id,
         cycle_id=cycle_id,
         descend=decode_cycle_path(descend),
-        limit=limit,
-        max_unmeasured=max_unmeasured,
-        order=order,
-        candidate_id=candidate_id,
-        round=round,
-        status=status,
         at=at,
     )
-    return conditional_json(request, log)
+    return conditional_json(
+        request,
+        (cells.version(), limit, max_unmeasured, order, candidate_id, round, status),
+        lambda: measurement_log(
+            cells,
+            limit=limit,
+            max_unmeasured=max_unmeasured,
+            order=order,
+            candidate_id=candidate_id,
+            round=round,
+            status=status,
+        ),
+    )
 
 
 @datasets_router.get("/{name:path}/cells/{answer}", response_model=Cell)

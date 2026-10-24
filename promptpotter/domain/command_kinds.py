@@ -20,6 +20,7 @@ from promptpotter.domain.pipeline_schema import ParamIntent
 from promptpotter.domain.results import VerifyStrategy
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ConfigOverrides
+from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel, WireInt
 from promptpotter.shared.identity import (
@@ -442,7 +443,7 @@ class VerifyCandidatePayload(CyclePayload, kind=CommandKind.VERIFY_CANDIDATE):
     inner_refusal: ClassVar[str | None] = None
 
     candidate_id: str = Field(min_length=1, max_length=128)
-    samples: WireInt | None = Field(default=None, ge=1, le=10_000)
+    samples: WireInt | None = Field(default=None, ge=1, le=MAX_PASS_ROWS)
     strategy: VerifyStrategy = "random"
     seed: WireInt | None = None
 

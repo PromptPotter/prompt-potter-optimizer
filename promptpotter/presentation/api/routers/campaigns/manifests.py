@@ -31,7 +31,10 @@ from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.cycle_paths import decode_cycle_path
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import StoresDep
-from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
+from promptpotter.presentation.api.routers.campaigns._conditional import (
+    conditional_json,
+    hashed_json,
+)
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
 
 
@@ -53,10 +56,12 @@ def list_campaigns(
 
     ``descend`` enters an inner store exactly as on ``GET /cycles``.
     """
+    inside = decode_cycle_path(descend)
     return conditional_json(
         request,
-        campaign_listing.list_campaigns(
-            stores, inside=decode_cycle_path(descend), dataset=dataset, lifecycle=lifecycle
+        (campaign_listing.campaign_list_version(stores, inside=inside), dataset, lifecycle),
+        lambda: campaign_listing.list_campaigns(
+            stores, inside=inside, dataset=dataset, lifecycle=lifecycle
         ),
     )
 
@@ -103,7 +108,7 @@ def get_campaign_pipeline(
     ),
 ) -> Response:
     """What this campaign runs, the one server-owned answer; ownership-gated, 404 on cross-tenant reads."""
-    return conditional_json(request, resolve_pipeline_at(stores, campaign_id, at))
+    return hashed_json(request, resolve_pipeline_at(stores, campaign_id, at))
 
 
 @campaigns_router.post("/campaigns/{campaign_id}/fork-preview", response_model=ForkPreviewResponse)

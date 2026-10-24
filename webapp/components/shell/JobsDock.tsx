@@ -13,7 +13,7 @@ import { PotterMark } from "@/components/brand/PotterMark";
 
 const POTTER_GLYPH = <PotterMark size={16} />;
 
-// A pass has no cycle, so no status: its phase is whether it has started.
+// A pass scoring no cycle has no status: its phase is whether it has started.
 function passMark(s: MachineSlot): "running" | "starting" {
   return s.started_at === null ? "starting" : "running";
 }
@@ -26,9 +26,10 @@ export function JobsDock() {
   const { runningCycles, campaigns } = useRegistry();
   const { campaignId, cycleId, navigate, openAccount } = useWorkspace();
   const machine = readyData(useMachineStatus());
-  // A run's slot is its cycle, already listed above; only a pass is the machine read's alone.
+  // A slot holding a cycle is that cycle, already listed above; only a cycleless pass is the
+  // machine read's alone.
   const passes = (machine?.running ?? []).filter(
-    (s) => s.mine && s.holder.kind === "scoring_pass",
+    (s) => s.mine && s.holder.kind === "scoring_pass" && s.cycle === null,
   );
   const n = runningCycles.length + passes.length;
 

@@ -12,6 +12,7 @@ import contextvars
 import json
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -51,7 +52,9 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     apply_config_overrides,
 )
+from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.initialization import loop_start
+from promptpotter.application.maintenance import restamp
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
@@ -75,13 +78,15 @@ from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.search_point_scorer import replayable_on
+from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.bench import DatasetSplit, partition_bank
+from promptpotter.domain.command_kinds import DeleteCampaignPayload
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import (
     ArmSlot,
@@ -101,6 +106,7 @@ from promptpotter.domain.run_records import (
     RebaseRequest,
     ResumeCheckpointRecord,
     RoundEnteredRecord,
+    RunPhaseRecord,
 )
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
@@ -132,7 +138,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.errors import LedgerUnreadableError, PayloadInvalidError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -546,6 +552,23 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert remembered("shared") == ["no", "no"]
     assert sample_fold_rows(built_stores, dataset_hash=ds.dataset_hash) == [fold_row("x")]
 
+    # A restamp prunes a record against the union arm it IS: read as the first arm, a walked
+    # arm lost its `sp_hash`, and the rewritten ledger refused its cycle to every reader.
+    [announced] = [
+        rec
+        for rec in map(json.loads, campaigns.ledger(arm_root).read_text("utf-8").splitlines())
+        if rec["record_type"] == "arm"
+    ][:1]
+    walked = announced | {
+        "state": announced["state"]
+        | {"state": "measuring", "sp_hash": "h", "resolved_params": {}, "expected_samples": 2},
+        "retired_key": 1,
+    }
+    pruned, dropped = restamp._prune_record(walked)
+    assert dropped == ["retired_key"] and pruned["state"] == walked["state"], (
+        "a restamp deleted a key the reader of that record still needs"
+    )
+
     # A relabel moves a name onto a bank: it rewrites no paid row and no campaign, and every cell
     # filed under the bank replays on the samples the new name resolves to.
     def tree_bytes() -> dict[Path, bytes]:
@@ -890,9 +913,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     origin, held = build_lineage_tree(stores, (hop,), moment=None).children
     assert (origin.stands, held.stands) == (True, False), "an uncrowned re-run took the stand"
 
-    # A ledger read SKIPS a line that fails validation; a close holding an unregistered slice
-    # stops the read instead. `rewrite_lines` writes a fresh file: a ledger index takes a
-    # same-inode growth for an append, and no writer here grows a file in place.
+    # A close holding an unregistered slice stops the read. `rewrite_lines` writes a fresh file: a
+    # ledger index takes a same-inode growth for an append, and no writer here grows one in place.
     peer, ledger = _minted(stores, "cycle_of_a_peer")
     _emit_round(closing, ledger, [], "c0")
 
@@ -907,6 +929,53 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         list(CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(peer))).iter())
     with pytest.raises(UnregisteredStatePartError):
         stores.campaigns.standing_rounds(peer, moment=None)
+
+    # A close this build cannot read refuses its cycle to every reader of rounds, never half-read;
+    # the remedy it names deletes the campaign, paused as it is, and keeps the paid measurement.
+    stranded = CycleHop(campaign_id="stranded__20260101-000000", cycle_id="cycle_stranded")
+    stores.campaigns.create_campaign(
+        minted_campaign(stranded, owner_user_id=str(stores.identity.user_id))
+    )
+    stores.campaigns.mint_cycle(stranded)
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(stranded)))
+    _emit_round(closing, ledger, [], "c0")
+    ledger.append(RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT))
+    retired: list[int] = []
+
+    def _retire(lines: list[str]) -> tuple[list[str], None]:
+        records = [json.loads(line) for line in lines]
+        retired.append(max(i for i, rec in enumerate(records) if "optimizer_state" in rec))
+        records[retired[0]]["a_field_no_build_declares"] = True
+        return [json.dumps(rec) + "\n" for rec in records], None
+
+    rewrite_lines(ledger.path, _retire)
+    paid = _file(stores.archive, [_row("q_stranded")], dataset_hash="strandedds")
+    readers: dict[str, Callable[[], object]] = {
+        "iter": lambda: list(CycleEventLog(ledger.path).iter()),
+        "resume": lambda: stores.campaigns.standing_rounds(stranded, moment=None),
+        "export": lambda: closed_rounds(stores, stranded, scorer, moment=None),
+        "index": lambda: stores.campaigns.load(stranded, moment=None),
+        "tree": lambda: build_lineage_tree(stores, (stranded,), moment=None),
+        "dashboard": lambda: served_dashboard(stores, stranded),
+    }
+    for name, read in readers.items():
+        with pytest.raises(LedgerUnreadableError) as unreadable:
+            read()
+        named = (unreadable.value.details["offset"], unreadable.value.details["campaign_id"])
+        assert named == (retired[0], stranded.campaign_id), (
+            f"the {name} read refused another line, or named another campaign to delete"
+        )
+    asyncio.run(
+        CommandDispatcher(stores).dispatch(
+            CommandCall(DeleteCampaignPayload(campaign_id=stranded.campaign_id))
+        )
+    )
+    assert not stores.campaigns.campaign_root_dir(stranded.campaign_id).exists(), (
+        "the remedy left the refused campaign standing"
+    )
+    assert all(stores.archive.answer(ref) is not None for ref in paid), (
+        "the remedy took a paid measurement with the campaign"
+    )
 
     # A fork: an unmodified origin inherits the branch-point candidate's reading; an edited one
     # rescores.

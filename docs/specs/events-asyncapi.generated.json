@@ -5379,7 +5379,7 @@
                 "$ref": "#/components/schemas/WalkEnd"
               }
             ],
-            "description": "The walk's own end, or the run stop that cut the pass before it was sent.",
+            "description": "The walk's own end, or the run stop that cut the pass: a pause mid-walk, a spent budget before it was sent.",
             "title": "Cause"
           },
           "warning": {
@@ -6977,11 +6977,12 @@
         "type": "object"
       },
       "RunPhase": {
-        "description": "The one run-state vocabulary every surface reads.\n\n- ``queued``: a launch claimed the cycle and waits for a machine slot.\n- ``starting``: a claimed launch past the queue, its process coming up.\n- ``running``: a process is attached and driving the cycle.\n- ``paused``: the worker exited and the cycle stays active and resumable.\n- ``gate``: holding for the operator, at the round-0 origin gate or for a round's arms.\n- ``detached``: active with no process holding its lock; derived at the read, never stored.\n- ``terminal``: the cycle finished, and its stop reason says why.",
+        "description": "The one run-state vocabulary every surface reads.\n\n- ``queued``: a launch claimed the cycle and waits for a machine slot.\n- ``starting``: a claimed launch past the queue, its process coming up.\n- ``running``: a process is attached and driving the cycle.\n- ``scoring``: a paid pass (bench, verify, noise floor) holds the cycle outside its loop.\n- ``paused``: the worker exited and the cycle stays active and resumable.\n- ``gate``: holding for the operator, at the round-0 origin gate or for a round's arms.\n- ``detached``: active with no process holding its lock; derived at the read, never stored.\n- ``terminal``: the cycle finished, and its stop reason says why.",
         "enum": [
           "queued",
           "starting",
           "running",
+          "scoring",
           "paused",
           "gate",
           "detached",

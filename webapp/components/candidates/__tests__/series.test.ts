@@ -6,7 +6,7 @@ import {
   whiskerBands,
   type SeriesCtx,
 } from "../series";
-import type { VerifyReading } from "@/lib/api/types";
+import type { VerificationMark } from "@/lib/api/types";
 import type { ArmBar, CandidateBar } from "@/lib/types";
 import { armNode, armReading, ownLevel } from "@/lib/test-fixtures";
 
@@ -23,7 +23,8 @@ function bar(
     reading: node.reading,
     source: "history",
     overlap: null,
-    benchPass: null,
+    verify: null,
+    bench: null,
     ...over,
   };
 }
@@ -128,32 +129,33 @@ describe("the confidence band", () => {
   });
 
   it("puts a verify on its fresh cells alone, under the band those cells produced", () => {
-    const verify: VerifyReading = {
-      label: "C1.1",
-      scorer_id: "s",
-      strategy: "random",
-      fresh: { accuracy: { value: 0.5, ci_lo: 0.2, ci_hi: 0.8 }, composite: null, n: 6 },
-      recorded: { accuracy: { value: 0.75, ci_lo: 0.5, ci_hi: 1 }, composite: null, n: 12 },
-      accuracy_increment: -0.25,
-      composite_increment: null,
-      vs_origin: {
-        state: "same_individual",
-        a: null,
-        b: null,
-        cell_set: null,
-        instrument_id: null,
-        scope: "report",
-        spec: { alpha: 0.05, null_value: 0 },
-        coverage: null,
-        headline: null,
-        beside: [],
-      },
-      held: true,
-      held_absent: null,
+    const verify: VerificationMark = {
+      kind: "verify",
+      arm: { key: "a", round: 1, label: "C1.1" },
+      state: "done",
+      rows: 6,
+      scored: 6,
+      level: { value: 0.5, ci_lo: 0.2, ci_hi: 0.8 },
+      failure: null,
     };
-    const views = [bar({ own: ownLevel(0.75), verify }), bar({ own: ownLevel(0.6) })];
+    const running: VerificationMark = {
+      ...verify,
+      kind: "bench",
+      state: "running",
+      scored: 3,
+      level: { value: 0.4, ci_lo: null, ci_hi: null },
+    };
+    const views = [
+      bar({ own: ownLevel(0.75) }, { verify, bench: running }),
+      bar({ own: ownLevel(0.6) }),
+    ];
     expect(seriesColumn(spec("verify"), views)).toEqual([0.5, null]);
-    const band = whiskerBands(ctx({ metrics: new Set(), views })).find((b) => b.anchor === "verify");
-    expect(band).toEqual({ anchor: "verify", lo: [0.2, null], hi: [0.8, null] });
+    expect(seriesColumn(spec("bench"), views)).toEqual([0.4, null]);
+    const bands = whiskerBands(ctx({ metrics: new Set(), views }));
+    expect(bands).toEqual([
+      { anchor: "verify", lo: [0.2, null], hi: [0.8, null] },
+      // A pass in flight has a running level and no band yet.
+      { anchor: "bench", lo: [null, null], hi: [null, null] },
+    ]);
   });
 });

@@ -39,7 +39,8 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
   const cfg = round.unfiled
     ? liveCandidateObserveConfig(dash, selected.arm)
     : candidateObserveConfig(round.doc, selected.arm, selected.label);
-  const pass = dash?.bench_pass ?? null;
+  const benchPass =
+    dash?.verification.find((m) => m.kind === "bench" && m.arm.key === selected.arm) ?? null;
 
   return (
     <section className="scoring-inspector" aria-label="Scoring inspector">
@@ -63,7 +64,7 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
       <SearchpointDrillIn
         reading={row?.reading ?? null}
         cfg={cfg}
-        benchPass={pass && pass.arm === selected.arm ? pass : null}
+        benchPass={benchPass?.state === "done" ? null : benchPass}
         measurements={<MeasurementsPane preset={{ ...preset, groupBy: "none" }} />}
         schema={cv.schema}
         pending={

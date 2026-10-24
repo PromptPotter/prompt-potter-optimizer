@@ -100,6 +100,7 @@ def _export_artifact(
     campaign = session.store.campaigns.load_campaign(session.campaign_id)
     return build_prompt_export(
         winner,
+        cycle.rounds,
         tool_version=APP_VERSION,
         campaign_id=session.campaign_id,
         cycle_id=session.cycle_id,

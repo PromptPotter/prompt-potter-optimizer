@@ -85,6 +85,7 @@ class RunPhase(enum.StrEnum):
     - ``queued``: a launch claimed the cycle and waits for a machine slot.
     - ``starting``: a claimed launch past the queue, its process coming up.
     - ``running``: a process is attached and driving the cycle.
+    - ``scoring``: a paid pass (bench, verify, noise floor) holds the cycle outside its loop.
     - ``paused``: the worker exited and the cycle stays active and resumable.
     - ``gate``: holding for the operator, at the round-0 origin gate or for a round's arms.
     - ``detached``: active with no process holding its lock; derived at the read, never stored.
@@ -94,13 +95,14 @@ class RunPhase(enum.StrEnum):
     QUEUED = "queued"
     STARTING = "starting"
     RUNNING = "running"
+    SCORING = "scoring"
     PAUSED = "paused"
     GATE = "gate"
     DETACHED = "detached"
     TERMINAL = "terminal"
 
 
-# What a RUNNER can say of itself (``RunPhaseRecord``): the other four are derived at the read.
+# What a RUNNER can say of itself (``RunPhaseRecord``): the others are derived at the read.
 DeclaredRunPhase = Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.GATE, RunPhase.TERMINAL]
 
 LaunchStage = Literal[RunPhase.QUEUED, RunPhase.STARTING]
@@ -405,6 +407,8 @@ RUN_PHASE_INFO: dict[RunPhase, RunPhaseInfo] = {
         "coming up",
     ),
     RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", "", "", ""),
+    # No loop walks it, so a skip or a look-ahead has nothing to spend; the one stop reaches it.
+    RunPhase.SCORING: RunPhaseInfo("Scoring", False, False, False, 1, "pause", "", "", ""),
     # Asked to pause, an attached producer runs on to its checkpoint.
     RunPhase.PAUSED: RunPhaseInfo(
         "Paused",

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import os
+from collections.abc import Callable
 from datetime import UTC, datetime
 from email.utils import format_datetime, parsedate_to_datetime
 
 from fastapi import Request, Response
 from pydantic import BaseModel
+
+# A restart may serve new code over unchanged inputs, so no ETag outlives its process.
+_PROCESS = os.urandom(8).hex()
 
 
 def http_date(epoch_seconds: float) -> str:
@@ -24,9 +29,7 @@ def client_seen_at_or_after(if_modified_since: str | None, mtime_epoch: float) -
     return int(client_dt.timestamp()) >= int(mtime_epoch)
 
 
-def weak_etag(*parts: object) -> str:
-    """Pass the mtime AND every query value that changes the body: an unpassed part goes stale."""
-    digest = hashlib.sha256("\x1f".join(repr(p) for p in parts).encode()).hexdigest()
+def _weak(digest: str) -> str:
     return f'W/"{digest[:32]}"'
 
 
@@ -51,13 +54,23 @@ def model_json(model: BaseModel, *, headers: dict[str, str] | None = None) -> Re
     )
 
 
-def conditional_json(request: Request, model: BaseModel, *, stamp: str | None = None) -> Response:
-    """``stamp`` names a field that moves on every request: it stays out of the validator."""
+def conditional_json(
+    request: Request, version: tuple[object, ...], build: Callable[[], BaseModel]
+) -> Response:
+    """A 304 before *build* runs: an input or query value left out of *version* goes stale."""
+    etag = _weak(hashlib.sha256("\x1f".join(map(repr, (_PROCESS, *version))).encode()).hexdigest())
+    if client_has_etag(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304, headers={"ETag": etag})
+    return model_json(build(), headers={"ETag": etag})
+
+
+def hashed_json(request: Request, model: BaseModel, *, stamp: str | None = None) -> Response:
+    """Decided after the work, for a read no input stamp covers; ``stamp`` moves on every request."""
     response = model_json(model)
     validated = (
         model.model_dump_json(by_alias=True, exclude={stamp}).encode() if stamp else response.body
     )
-    etag = f'W/"{hashlib.sha256(validated).hexdigest()[:32]}"'
+    etag = _weak(hashlib.sha256(validated).hexdigest())
     if client_has_etag(request.headers.get("if-none-match"), etag):
         return Response(status_code=304, headers={"ETag": etag})
     response.headers["ETag"] = etag

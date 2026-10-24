@@ -9,9 +9,10 @@ from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.bench import BandedValue
-from promptpotter.domain.command_kinds import VerifyCandidatePayload
+from promptpotter.domain.command_kinds import PauseCyclePayload, VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import CycleHop, command_address
 from promptpotter.domain.paired_reading import READING_STATE_INFO
+from promptpotter.presentation.cli.commands.launch import ctrl_c_pauses
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import BadRequestError, PayloadInvalidError
@@ -36,15 +37,18 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         campaign_id=resolve_campaign_id_hint(stores, spec.campaign_id, inside=spec.inside),
         cycle_id=spec.cycle_id,
     )
+    address = command_address((*spec.inside, leaf))
     fields = {
-        **command_address((*spec.inside, leaf)),
+        **address,
         "candidate_id": spec.candidate_id,
         "samples": args.samples,
         "strategy": args.strategy,
         "seed": args.seed,
     }
     payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
-    dispatched = await CommandDispatcher(stores).dispatch(CommandCall(payload))
+    pause = PauseCyclePayload.model_validate({**address, "reason": "Ctrl+C"})
+    with ctrl_c_pauses(stores, pause):
+        dispatched = await CommandDispatcher(stores).dispatch(CommandCall(payload))
 
     outcome = dispatched.result
     assert isinstance(outcome, VerifyOutcome), "a fresh key applies, and the applier answers one"
