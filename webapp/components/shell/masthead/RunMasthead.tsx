@@ -9,9 +9,6 @@ import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import {
   benchReading,
   budgetAxis,
-  campaignLineParts,
-  campaignModels,
-  campaignVendors,
   capLines,
   fmtLift,
   ratePricedText,
@@ -19,7 +16,8 @@ import {
   spendHeadline,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
-import { shortModel } from "@/lib/format";
+import { fmtAgo, shortId, shortModel } from "@/lib/format";
+import { tagValue } from "@/lib/hierarchy";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
 import { measuringArm, useCycleStream } from "@/lib/poll";
@@ -30,17 +28,16 @@ import { useWorkspace } from "@/lib/workspace";
 
 export function RunMasthead() {
   const { campaignId, leafCycleId, viewedPath, following, followActive } = useWorkspace();
-  const { forest } = useRegistry();
+  const { entries } = useRegistry();
   const { dash } = useCycleStream();
   const served = useServedCriterion();
 
-  const run = useMemo(
-    () =>
-      forest.flatMap((o) => o.runs).find((r) => r.campaign.campaign_id === campaignId) ?? null,
-    [forest, campaignId],
+  const campaign = useMemo(
+    () => entries.find((c) => c.address === campaignId) ?? null,
+    [entries, campaignId],
   );
-
-  const campaign = run?.campaign ?? null;
+  const suffix = campaign && shortId(campaign.address);
+  const runsWith = campaign?.facts.runs_with ?? null;
   const innerLeaf = viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
 
   const status = dash?.status ?? null;
@@ -70,9 +67,9 @@ export function RunMasthead() {
     <header className="run-header">
       <div className="run-header-inner">
         <div className="run-title">
-          {campaign && <Badge>{campaign.dataset_name}</Badge>}
-          {campaign?.label && <span className="run-name">{campaign.label}</span>}
-          {campaign?.id_suffix && <span className="run-suffix">__{campaign.id_suffix}</span>}
+          {campaign && <Badge>{tagValue(campaign, "dataset")}</Badge>}
+          {campaign && <span className="run-name">{campaign.label}</span>}
+          {suffix && suffix !== campaign.address && <span className="run-suffix">__{suffix}</span>}
           <CampaignSwitcher />
           {innerLeaf && (
             <span className="inner-breadcrumb">
@@ -91,18 +88,21 @@ export function RunMasthead() {
             </span>
           )}
         </div>
-        {run && (
+        {campaign && (
           <div className="run-setup">
             <span className="run-setup-vendors">
-              {campaignVendors(run).map((v) => (
+              {runsWith?.vendors.map((v) => (
                 <VendorLogo key={v.vendor} vendor={v.vendor} models={v.models} />
               ))}
             </span>
             {[
-              ...(run.campaign.runs_with ? [`${run.campaign.runs_with.optimizer} optimizer`] : []),
-              ...campaignModels(run).map(shortModel),
-              ...campaignLineParts(run),
-            ].join(" · ")}
+              runsWith ? `${runsWith.optimizer} optimizer` : "pipeline unreadable",
+              ...(runsWith?.vendors.flatMap((v) => v.models).map(shortModel) ?? []),
+              campaign.stats.find((s) => s.key === "rounds")?.value,
+              fmtAgo(campaign.span.last_at),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
             {served.formula ? <CriterionLine mask={served.mask} /> : null}
           </div>
         )}

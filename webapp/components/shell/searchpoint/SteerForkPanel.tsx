@@ -13,9 +13,9 @@ import { useCommand } from "@/lib/hooks/useCommand";
 import type { NodePrompt, ParamIntent } from "@/lib/api/types";
 import { useRound } from "@/lib/hooks/useRound";
 import { useAuth } from "@/lib/auth-context";
-import { pathRoot, type CyclePath } from "@/lib/ids";
+import { encodeCyclePath, pathRoot, type CyclePath } from "@/lib/ids";
 import { useDashboardAt } from "@/lib/poll";
-import { useCycleEntry } from "@/lib/registry";
+import { useEntry } from "@/lib/registry";
 import { phaseWalks } from "@/lib/run-phase";
 import {
   candidateSearchPoint,
@@ -40,9 +40,9 @@ export function SteerForkPanel({
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const { campaignId, cycleId } = pathRoot(path);
   const dash = useDashboardAt(path);
-  const isLive = phaseWalks(useCycleEntry(campaignId, cycleId)?.run_phase);
+  const root = pathRoot(path);
+  const isLive = phaseWalks(useEntry(encodeCyclePath([root]))?.state.run_phase);
   const { unfiled, doc } = useRound(path, candidate.round);
   const { me } = useAuth();
   const seed = unfiled
@@ -58,7 +58,7 @@ export function SteerForkPanel({
     Record<string, unknown>
   > | null>(null);
   const steerOverlay = pickedOverlay ?? overlay;
-  const preview = useRead(forkPreviewRead(campaignId, steerOverlay));
+  const preview = useRead(forkPreviewRead(root.campaignId, steerOverlay));
   const verdict = readyData(preview);
   const checking = preview.status === "loading";
   const permittedList = [

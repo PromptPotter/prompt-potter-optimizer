@@ -1798,11 +1798,6 @@ export interface CampaignFacts {
   lifecycle: 'active' | 'archived' | 'deleted';
   /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
   spend_lifetime: LifetimeSpend;
-  /** The line's cycles, read whole, in the meter the campaign's ceiling counts. */
-  spend_metered: MeteredSpend;
-  /** The headline, read off the line's banked passes; null where the line's config
-   * did not resolve. */
-  bench: BenchScore | null;
   /** What the root course runs with; null where its pipeline did not resolve. */
   runs_with: CampaignRunsWith | null;
 }
@@ -1875,8 +1870,6 @@ export interface CourseFacts {
   task: string | null;
   /** Null before round 0 closes. */
   standing: RunStanding | null;
-  /** This course's own ledger, in the meter its campaign's ceiling counts. */
-  spend_metered: MeteredSpend;
   /** Rounds closed AFTER the origin. */
   rounds_closed: number;
 }

@@ -9,13 +9,11 @@ import type {
   HealthResponse,
   LifecycleFilter,
   BackendResponse,
-  CampaignListResponse,
   CampaignPipelineResponse,
   CampaignStorageResponse,
   ConfigMapResponse,
   DatasetPipelineResponse,
   OptimizerPipelineResponse,
-  CyclesResponse,
   DatasetIndexResponse,
   DraftListResponse,
   Cell,
@@ -25,6 +23,7 @@ import type {
   FilesResponse,
   ForkPreviewResponse,
   HardSamplesScope,
+  HierarchyResponse,
   CourseLineage,
   MachineStatusResponse,
   OptimizerKnobsResponse,
@@ -237,19 +236,9 @@ export function dashboardRead(path: CyclePath, at: number | null): ReadDescripto
   };
 }
 
-export function campaignsRead(lifecycle: LifecycleFilter): ReadDescriptor<CampaignListResponse> {
-  const qs = lifecycle !== "active" ? `?lifecycle=${enc(lifecycle)}` : "";
-  return byEtag("campaigns", `${API}/campaigns${qs}`);
-}
-
-export function cyclesRead(
-  filter: { campaign?: string; attached?: boolean } = {},
-): ReadDescriptor<CyclesResponse> {
-  const params = new URLSearchParams();
-  if (filter.campaign) params.set("campaign", filter.campaign);
-  if (filter.attached) params.set("attached", "true");
-  const qs = params.toString();
-  return byEtag("cycles", `${API}/cycles${qs ? `?${qs}` : ""}`);
+export function hierarchyRead(lifecycle: LifecycleFilter): ReadDescriptor<HierarchyResponse> {
+  const qs = lifecycle !== "active" ? `&lifecycle=${enc(lifecycle)}` : "";
+  return byEtag("hierarchy", `${API}/hierarchy?depth=1${qs}`);
 }
 
 export function campaignStorageRead(campaignId: string): ReadDescriptor<CampaignStorageResponse> {

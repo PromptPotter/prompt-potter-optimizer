@@ -4,10 +4,10 @@ interface Tagged {
   tags: readonly HierarchyTag[];
 }
 
-export function hasTag(entry: Tagged, kind: HierarchyTag["kind"]): boolean {
-  return entry.tags.some((t) => t.kind === kind);
+export function hasTag(entry: Tagged | null, kind: HierarchyTag["kind"]): boolean {
+  return entry?.tags.some((t) => t.kind === kind) ?? false;
 }
 
-export function tagValue(entry: Tagged, kind: HierarchyTag["kind"]): string | null {
-  return entry.tags.find((t) => t.kind === kind)?.value ?? null;
+export function tagValue(entry: Tagged | null, kind: HierarchyTag["kind"]): string | null {
+  return entry?.tags.find((t) => t.kind === kind)?.value ?? null;
 }

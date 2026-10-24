@@ -306,7 +306,7 @@ tenant fact, not an entry, and its 2 s poll is its own.
 **Polling.** The registry's two 10 s reads become ONE `hierarchyRead(lifecycle)` on `byEtag`; the tree
 poll and the active-pointer poll are untouched. Per-address ETags and `GET /hierarchy/{address}` are
 stage 2's, when a course's subtree first carries rounds; stage 1's body is the campaign count.
-<!-- target: git grep -cE "hierarchyRead\(" -- webapp/lib/registry.tsx == 1 -->
+<!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/registry.tsx == 1 -->
 
 ## 5. Every consumer, five entry points
 
@@ -343,8 +343,8 @@ Webapp, component by component — each reads a served entry and nothing it comp
 Grouping served rows for a menu or a header, filtering by a served tag and formatting a served time are
 layout (`webapp/CLAUDE.md` § Scoring authority); wording a number, ordering stats or deriving a
 state is not, and none survives in `webapp/lib/derivations` for these two levels.
-<!-- target: git grep -cE "buildForest|RunGroup|OriginGroup|campaignCard|courseStats|unitDisplayName|campaignLineParts" -- webapp == 0 -->
-<!-- target: git grep -cE "superseded_by" -- webapp/lib/registry.tsx == 0 -->
+<!-- probe: git grep -cE "buildForest|RunGroup|OriginGroup|campaignCard|courseStats|unitDisplayName|campaignLineParts" -- webapp == 0 -->
+<!-- probe: git grep -cE "superseded_by" -- webapp/lib/registry.tsx == 0 -->
 
 ## 6. Docs that move with the code
 

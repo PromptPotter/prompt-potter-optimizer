@@ -1,13 +1,9 @@
 "use client";
 import { VendorLogo } from "@/components/ui";
+import type { HierarchyCampaign } from "@/lib/api";
 import type { RunStatus } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
-import {
-  campaignLineParts,
-  campaignVendors,
-  spendHeadline,
-  type RunGroup,
-} from "@/lib/derivations";
+import { fmtAgo } from "@/lib/format";
 import { STATUS_MARK } from "@/lib/run-phase";
 
 export function PhaseMark({ status }: { status: RunStatus }) {
@@ -19,24 +15,25 @@ export function PhaseMark({ status }: { status: RunStatus }) {
   );
 }
 
-export function CampaignRowLabel({ run }: { run: RunGroup }) {
-  const vendors = campaignVendors(run);
-  const line = campaignLineParts(run).join(" · ");
+export function CampaignRowLabel({ campaign }: { campaign: HierarchyCampaign }) {
+  const vendors = campaign.tags.filter((t) => t.kind === "vendor");
+  const rounds = campaign.stats.find((s) => s.key === "rounds")?.value;
+  const line = [rounds, fmtAgo(campaign.span.last_at)].filter(Boolean).join(" · ");
   return (
     <span className="unit-library-row">
       <span className="unit-library-name unit-library-name-split">
         {vendors.length > 0 && (
           <span className="unit-library-vendors">
             {vendors.map((v) => (
-              <VendorLogo key={v.vendor} vendor={v.vendor} models={v.models} />
+              <VendorLogo key={v.value} vendor={v.value} />
             ))}
           </span>
         )}
-        <span className="unit-library-name-head">{run.campaign.display_name}</span>
+        <span className="unit-library-name-head">{campaign.label}</span>
       </span>
       <span className="unit-library-meta unit-library-meta-marked">
-        <PhaseMark status={run.line.status} />
-        <span className="unit-library-spend">{spendHeadline(run.campaign.spend_metered)}</span>
+        <PhaseMark status={campaign.state.status} />
+        <span className="unit-library-spend">{campaign.stats[0]?.value}</span>
       </span>
       {line && (
         <span

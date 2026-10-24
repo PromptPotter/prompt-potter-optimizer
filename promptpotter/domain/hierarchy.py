@@ -4,7 +4,6 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_listing import CycleIndex, RunStatus
 from promptpotter.domain.phases import (
@@ -19,7 +18,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.results import RunStanding
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
-from promptpotter.domain.spend import LifetimeSpend, MeteredSpend
+from promptpotter.domain.spend import LifetimeSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 type Level = Literal["campaign", "course"]
@@ -124,13 +123,6 @@ class CampaignFacts(FrozenModel):
     spend_lifetime: LifetimeSpend = Field(
         description="Every cycle's bill, forks, forwarded inner spend and deleted cycles included."
     )
-    spend_metered: MeteredSpend = Field(
-        description="The line's cycles, read whole, in the meter the campaign's ceiling counts."
-    )
-    bench: BenchScore | None = Field(
-        description="The headline, read off the line's banked passes; null where the line's "
-        "config did not resolve."
-    )
     runs_with: CampaignRunsWith | None = Field(
         description="What the root course runs with; null where its pipeline did not resolve."
     )
@@ -159,9 +151,6 @@ class CourseFacts(FrozenModel):
     )
     task: str | None = Field(description="The outer panel cell an L4 inner course measures.")
     standing: RunStanding | None = Field(description="Null before round 0 closes.")
-    spend_metered: MeteredSpend = Field(
-        description="This course's own ledger, in the meter its campaign's ceiling counts."
-    )
     rounds_closed: int = Field(description="Rounds closed AFTER the origin.")
 
 

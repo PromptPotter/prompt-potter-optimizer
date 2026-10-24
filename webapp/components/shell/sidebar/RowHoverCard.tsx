@@ -2,23 +2,96 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { CopyButton, HoverCard } from "@/components/ui";
 import { readyData, useRead } from "@/lib/hooks/useRead";
-import { campaignStorageRead, configMapRead } from "@/lib/api";
-import { declaredKnobs, type RowCardFacts } from "@/lib/derivations";
+import {
+  campaignStorageRead,
+  configMapRead,
+  type ConfigKnob,
+  type ConfigMapResponse,
+  type HierarchyEntry,
+} from "@/lib/api";
+import type { SummaryFacts } from "@/lib/derivations";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
-import { fmtBytes, fmtValue } from "@/lib/format";
+import { fmtAgo, fmtBytes, fmtDateTime, fmtValue } from "@/lib/format";
+
+export interface CandidateCard extends SummaryFacts {
+  level: "candidate";
+  lede: string;
+  caveat?: ReactNode;
+  facts: [string, string][];
+}
 
 const snake = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
-export function RowHoverCard({ card, children }: { card: RowCardFacts; children: ReactNode }) {
+// A knob moving several estimands is listed under each, so the path dedupes it.
+function declaredKnobs(map: ConfigMapResponse): ConfigKnob[] {
+  const byPath = new Map<string, ConfigKnob>();
+  for (const group of map.groups) {
+    for (const knob of group.knobs) {
+      const scalar = knob.value == null || typeof knob.value !== "object";
+      if (knob.source === "campaign" && scalar) byPath.set(knob.path, knob);
+    }
+  }
+  return [...byPath.values()];
+}
+
+function settingValue(v: unknown): string {
+  return Array.isArray(v) ? v.map((x) => fmtValue(x)).join(",") : fmtValue(v);
+}
+
+export function RowHoverCard({
+  card,
+  children,
+}: {
+  card: HierarchyEntry | CandidateCard;
+  children: ReactNode;
+}) {
   return (
-    <HoverCard block className="rowhover-shell" content={<RowCardBody card={card} />}>
+    <HoverCard
+      block
+      className="rowhover-shell"
+      content={card.level === "candidate" ? <CandidateBody card={card} /> : <EntryBody entry={card} />}
+    >
       {children}
     </HoverCard>
   );
 }
 
-function RowCardBody({ card }: { card: RowCardFacts }) {
-  const { campaignId, settings } = card;
+function Facts({ facts }: { facts: [string, string][] }) {
+  return (
+    <dl className="rowhover-facts">
+      {facts.map(([label, value]) => (
+        <Fragment key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
+
+function CandidateBody({ card }: { card: CandidateCard }) {
+  const payload = {
+    name: card.label,
+    ...(card.state ? { state: card.state.status.label } : {}),
+    ...Object.fromEntries(card.stats.map((s) => [snake(s.label), s.value])),
+    ...Object.fromEntries(card.facts.map(([k, v]) => [snake(k), v])),
+  };
+  return (
+    <div className="rowhover">
+      <SummaryBlock
+        facts={card}
+        lede={<p className="rowhover-lede">{card.lede}</p>}
+        actions={<CopyButton title="Copy these details as JSON" data={payload} />}
+      />
+      {card.caveat && <div className="rowhover-caveat">{card.caveat}</div>}
+      <Facts facts={card.facts} />
+    </div>
+  );
+}
+
+function EntryBody({ entry }: { entry: HierarchyEntry }) {
+  const campaign = entry.level === "campaign" ? entry : null;
+  const campaignId = campaign?.address ?? null;
   const read = useRead(campaignId != null ? campaignStorageRead(campaignId) : null);
   const data = readyData(read);
   const error = read.status === "failed";
@@ -28,6 +101,7 @@ function RowCardBody({ card }: { card: RowCardFacts }) {
     useRead(campaignId != null && configAsked ? configMapRead(campaignId) : null),
   );
   const knobs = configMap ? declaredKnobs(configMap) : null;
+  const runsWith = campaign?.facts.runs_with ?? null;
 
   const sizes: [string, number | undefined, boolean?][] = [
     ["Dataset", data?.dataset_bytes],
@@ -39,67 +113,36 @@ function RowCardBody({ card }: { card: RowCardFacts }) {
     ["Reports", data?.reports_bytes, true],
   ];
   const size = (n: number | undefined) => (error ? "—" : n === undefined ? "…" : fmtBytes(n));
-
-  const payload = {
-    name: card.title,
-    ...(card.state ? { state: card.state } : {}),
-    ...Object.fromEntries(card.stats.map((s) => [snake(s.label), s.value])),
-    ...Object.fromEntries(card.facts.map(([k, v]) => [snake(k), v])),
-    ...(settings === undefined
-      ? {}
-      : {
-          runs_with: settings
-            ? settings.map((s) => ({
-                node: s.node,
-                key: s.key,
-                value: s.value,
-                source: s.source,
-              }))
-            : "pipeline unreadable",
-        }),
-    ...(knobs
-      ? { declared_config: Object.fromEntries(knobs.map((k) => [k.path, fmtValue(k.value)])) }
-      : {}),
-    ...(data
-      ? {
-          on_disk: {
-            total: size(data.on_disk_bytes),
-            ...Object.fromEntries(sizes.map(([k, n]) => [snake(k), size(n)])),
-          },
-        }
-      : {}),
-  };
+  const { opened_at, last_at } = entry.span;
 
   return (
     <div className="rowhover">
       <SummaryBlock
-        facts={card}
-        lede={<p className="rowhover-lede">{card.lede}</p>}
-        actions={<CopyButton title="Copy these details as JSON" data={payload} />}
+        facts={entry}
+        lede={entry.lede ? <p className="rowhover-lede">{entry.lede}</p> : null}
+        actions={<CopyButton title="Copy this entry as JSON" data={entry} />}
       />
-      {card.caveat && <div className="rowhover-caveat">{card.caveat}</div>}
+      {entry.caveat && <div className="rowhover-caveat">{entry.caveat}</div>}
+      <Facts
+        facts={[
+          ["Last activity", fmtAgo(last_at) || fmtDateTime(last_at)],
+          ["Opened", fmtDateTime(opened_at)],
+          ["Address", entry.address],
+        ]}
+      />
 
-      <dl className="rowhover-facts">
-        {card.facts.map(([label, value]) => (
-          <Fragment key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </Fragment>
-        ))}
-      </dl>
-
-      {settings !== undefined && (
+      {campaign && (
         <section>
           <p className="rowhover-heading">Runs with</p>
-          {settings ? (
+          {runsWith ? (
             <dl className="rowhover-facts">
-              {settings.map((s) => (
+              {runsWith.params.map((s) => (
                 <Fragment key={`${s.node}.${s.key}`}>
                   <dt>
                     {s.node} · {s.key}
                   </dt>
                   <dd>
-                    {s.value}
+                    {settingValue(s.value)}
                     <span className="rowhover-source">{s.source}</span>
                   </dd>
                 </Fragment>

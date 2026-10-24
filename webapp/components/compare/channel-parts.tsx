@@ -113,7 +113,7 @@ export function SpentReading({ metered }: { metered: MeteredSpend | null }) {
   return (
     <span className="cmp-metric">
       {value}
-      <span className="cmp-metric-band" title={sub}>
+      <span className="cmp-metric-band" title={sub ?? undefined}>
         {sub}
       </span>
     </span>

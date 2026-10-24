@@ -1,16 +1,11 @@
 "use client";
 
+import type { HierarchyCampaign } from "@/lib/api";
 import { defaultChannel, useCompareSelection } from "@/lib/compare-selection";
 
-export function CompareToggle({
-  campaignId,
-  answeringCycleId,
-}: {
-  campaignId: string;
-  answeringCycleId: string;
-}) {
+export function CompareToggle({ campaign }: { campaign: HierarchyCampaign }) {
   const { hasCampaign, toggleCampaign } = useCompareSelection();
-  const on = hasCampaign(campaignId);
+  const on = hasCampaign(campaign.address);
   return (
     <button
       type="button"
@@ -20,7 +15,8 @@ export function CompareToggle({
       aria-label={on ? "Remove from the comparison" : "Add to the comparison"}
       onClick={(e) => {
         e.stopPropagation();
-        toggleCampaign(campaignId, defaultChannel(campaignId, answeringCycleId).subject);
+        const channel = defaultChannel(campaign);
+        toggleCampaign(channel.rootCampaignId, channel.subject);
       }}
     >
       {on ? "◧" : "▢"}

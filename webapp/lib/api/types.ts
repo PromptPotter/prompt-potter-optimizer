@@ -3,9 +3,7 @@ export type {
   SeriesReading,
   ArchiveReport,
   ActiveSessionResponse,
-  CampaignListResponse,
   CampaignRunsWith,
-  CampaignSummary,
   RunsWithParam,
   VendorModels,
   RankedEdit,
@@ -41,9 +39,6 @@ export type {
   BandedValue,
   BenchReading,
   BenchScore,
-  CycleListEntry,
-  LineStanding,
-  CyclesResponse,
   DatasetItem,
   DatasetPipelineResponse,
   NestedPipelineRef,
@@ -197,14 +192,16 @@ import type {
   CampaignPipelineResponse,
   CellsResponse,
   CourseLineage,
-  CycleListEntry,
   DraftCampaignWire,
   EditDraftPatch,
+  HierarchyCampaign,
   ServedDashboard,
 } from "./types.generated";
 
 // The two kinds strictly alternate, each typed to hold only the other: narrow on `kind` once.
 export type LineageNode = CourseLineage | ArmNode;
+
+export type HierarchyEntry = HierarchyCampaign["children"][number];
 
 export type DraftPatch = Partial<EditDraftPatch>;
 
@@ -212,8 +209,6 @@ export type Provenance = DraftCampaignWire["field_provenance"][string];
 
 // served: `domain/cells.py::HeatmapScope`
 export type HardSamplesScope = CellsResponse["scope"];
-
-export type MintKind = CycleListEntry["mint_kind"];
 
 export type MeasuredUnit = ServedDashboard["measured_unit"];
 

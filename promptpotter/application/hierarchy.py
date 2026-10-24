@@ -4,7 +4,7 @@ from pathlib import Path
 
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.pipeline_resolve import campaign_runs_with, line_config
-from promptpotter.application.runner.campaign_result import cycle_bench, read_line_spend
+from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits
 from promptpotter.domain.bench import BenchScore
@@ -245,7 +245,6 @@ def course_entry(
             spawn=spawn,
             task=None if index.spawned_by is None else index.spawned_by.task or None,
             standing=index.standing,
-            spend_metered=spent,
             rounds_closed=index.rounds_closed,
         ),
     )
@@ -377,11 +376,6 @@ def campaign_entry(
             line=hierarchy_address(inside, campaign.campaign_id, holder.cycle_id),
             lifecycle=campaign.lifecycle_status,
             spend_lifetime=spend_lifetime,
-            spend_metered=MeteredSpend.of(
-                read_line_spend(stores, campaign).spend,
-                ceiling_meter(campaign.declaration.purpose),
-            ),
-            bench=bench,
             runs_with=runs_with,
         ),
     )

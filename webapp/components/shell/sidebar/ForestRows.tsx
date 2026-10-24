@@ -2,27 +2,29 @@
 
 import { type ReactNode, useMemo } from "react";
 import { cx } from "@/lib/cx";
-import { tagValue } from "@/lib/hierarchy";
+import { hasTag, tagValue } from "@/lib/hierarchy";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { fmtPct0, fmtSigned, fmtThetaSe, sideTone } from "@/lib/format";
 import { ARM_VERDICT_LABELS, THETA_CAVEAT_INFO } from "@/lib/api/types.generated";
 import {
-  accuracyStat,
-  campaignCard,
+  groupByRoot,
   liftOf,
   nodeKeyOf,
   panelCellLabel,
   pathOf,
   splitRetired,
-  type NodeKind,
-  type OriginGroup,
   type RetiredGroup,
-  type RowCardFacts,
+  type RootGroup,
   type RowStat,
-  type RunGroup,
 } from "@/lib/derivations";
-import { encodeCyclePath, nodeAddress, shortFamilyTail, type CyclePath } from "@/lib/ids";
-import type { ArmNode, CourseLineage, RunStanding } from "@/lib/api";
+import {
+  decodeCyclePath,
+  encodeCyclePath,
+  nodeAddress,
+  shortFamilyTail,
+  type CyclePath,
+} from "@/lib/ids";
+import type { ArmNode, CourseLineage, HierarchyCampaign, HierarchyCourse } from "@/lib/api";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { PairedLift } from "@/components/shell/PairedLift";
@@ -32,30 +34,32 @@ import { CompareToggle } from "./CompareToggle";
 import { RowHoverCard } from "./RowHoverCard";
 
 export interface TreeCtx {
-  isNodeOpen: (kind: NodeKind, path: string) => boolean;
-  toggleNode: (kind: NodeKind, path: string) => void;
+  isNodeOpen: (key: string, openByDefault: boolean) => boolean;
+  toggleNode: (key: string) => void;
   viewedPath: CyclePath | null;
   viewedCandidateId: string | null;
   showCandidates: boolean;
 }
 
 function courseOpen(ctx: TreeCtx, path: CyclePath): boolean {
-  return ctx.showCandidates && ctx.isNodeOpen("course", encodeCyclePath(path));
+  // Closed by default: an open course fetches `/tree`.
+  return ctx.showCandidates && ctx.isNodeOpen(encodeCyclePath(path), false);
 }
 
-export function ForestRows({ origins, ctx }: { origins: OriginGroup[]; ctx: TreeCtx }) {
+export function ForestRows({ entries, ctx }: { entries: HierarchyCampaign[]; ctx: TreeCtx }) {
+  const groups = useMemo(() => groupByRoot(entries), [entries]);
   return (
     <>
-      {origins.map((origin) => (
-        <OriginRow key={origin.originId} origin={origin} ctx={ctx} />
+      {groups.map((group) => (
+        <OriginRow key={group.rootCycleId} group={group} ctx={ctx} />
       ))}
     </>
   );
 }
 
 function GroupRow({
-  kind,
   addr,
+  openByDefault,
   ctx,
   className,
   title,
@@ -63,8 +67,8 @@ function GroupRow({
   meta,
   children,
 }: {
-  kind: NodeKind;
   addr: string;
+  openByDefault: boolean;
   ctx: TreeCtx;
   className: string;
   title: string;
@@ -72,14 +76,14 @@ function GroupRow({
   meta?: ReactNode;
   children: ReactNode;
 }) {
-  const open = ctx.isNodeOpen(kind, addr);
+  const open = ctx.isNodeOpen(addr, openByDefault);
   return (
     <>
       <div className={`unit-library-family ${className}`}>
         <button
           type="button"
           className="unit-library-twist"
-          onClick={() => ctx.toggleNode(kind, addr)}
+          onClick={() => ctx.toggleNode(addr)}
           aria-label={open ? "Collapse" : "Expand"}
           aria-expanded={open}
           tabIndex={-1}
@@ -98,25 +102,26 @@ function GroupRow({
   );
 }
 
-function OriginRow({ origin, ctx }: { origin: OriginGroup; ctx: TreeCtx }) {
-  if (origin.runs.length === 1) return <RunRow run={origin.runs[0]!} ctx={ctx} />;
+function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
+  const { rootCycleId, campaigns } = group;
+  if (campaigns.length === 1) return <RunRow campaign={campaigns[0]!} ctx={ctx} />;
   return (
     <GroupRow
-      kind="org"
-      addr={nodeAddress([], origin.originId)}
+      addr={nodeAddress([], rootCycleId)}
+      openByDefault
       ctx={ctx}
       className="origin-row"
-      title={`${origin.runs.length} campaigns start from this same specification (${origin.originId}). Identical runs mean the candidates that produced them collapsed to the same prompt.`}
+      title={`${campaigns.length} campaigns start from this same specification (${rootCycleId}). Identical runs mean the candidates that produced them collapsed to the same prompt.`}
       name={
         <>
-          spec {shortOrigin(origin.originId)}
-          <span className="unit-library-kind">{origin.runs.length} runs</span>
+          spec {shortOrigin(rootCycleId)}
+          <span className="unit-library-kind">{campaigns.length} runs</span>
         </>
       }
     >
-      {origin.runs.map((run) => (
-        <li key={run.campaign.campaign_id}>
-          <RunRow run={run} ctx={ctx} />
+      {campaigns.map((campaign) => (
+        <li key={campaign.address}>
+          <RunRow campaign={campaign} ctx={ctx} />
         </li>
       ))}
     </GroupRow>
@@ -127,31 +132,29 @@ function shortOrigin(originId: string): string {
   return originId.startsWith("cycle_") ? originId.slice(6, 14) : originId.slice(0, 8);
 }
 
-function RunRow({ run, ctx: shared }: { run: RunGroup; ctx: TreeCtx }) {
-  const { campaign } = run;
+function RunRow({ campaign, ctx: shared }: { campaign: HierarchyCampaign; ctx: TreeCtx }) {
+  const selfOptimization = hasTag(campaign, "self_optimization");
   // Whatever the preference says: a self-optimization candidate CONTAINS its inner runs.
   const ctx = useMemo(
-    () => (campaign.self_optimization ? { ...shared, showCandidates: true } : shared),
-    [shared, campaign.self_optimization],
+    () => (selfOptimization ? { ...shared, showCandidates: true } : shared),
+    [shared, selfOptimization],
   );
-  const rootPath: CyclePath = [
-    { campaignId: campaign.campaign_id, cycleId: campaign.root_cycle_id },
-  ];
-  const tree = useLineageTree(rootPath, courseOpen(ctx, rootPath));
+  const rootPath = useMemo(
+    () => decodeCyclePath(campaign.facts.root) ?? [],
+    [campaign.facts.root],
+  );
+  const tree = useLineageTree(rootPath, rootPath.length > 0 && courseOpen(ctx, rootPath));
 
   return (
     <CourseRow
+      entry={campaign}
       node={tree.root}
       path={rootPath}
       tree={tree}
       ctx={ctx}
-      run={run}
       chrome={
         <>
-          <CompareToggle
-            campaignId={campaign.campaign_id}
-            answeringCycleId={run.line.holder.cycle_id}
-          />
+          <CompareToggle campaign={campaign} />
           <CampaignMenu campaign={campaign} />
         </>
       }
@@ -160,19 +163,19 @@ function RunRow({ run, ctx: shared }: { run: RunGroup; ctx: TreeCtx }) {
 }
 
 function CourseRow({
+  entry,
   node,
   path,
   tree,
   ctx,
-  run,
   chrome,
 }: {
+  entry: HierarchyCampaign | HierarchyCourse;
   node: CourseLineage | null;
   path: CyclePath;
   tree: CampaignTree;
   ctx: TreeCtx;
-  run?: RunGroup;
-  chrome?: React.ReactNode;
+  chrome?: ReactNode;
 }) {
   const { navigate } = useWorkspace();
   const addr = encodeCyclePath(path);
@@ -180,35 +183,12 @@ function CourseRow({
   const rows = node?.children ?? [];
   const { live: liveRows, retired: retiredGroups } = splitRetired(rows);
 
-  // A root row reads the served line ALWAYS — never the tree node it only has while expanded.
-  const task = node?.course.facts.task ?? null;
-  const standing = run ? run.line.standing : (node?.course.facts.standing ?? null);
-  const status = run ? run.line.status : (node?.course.state.status ?? null);
-  const label = run
-    ? run.campaign.display_name
-    : task
-      ? panelCellLabel(task)
-      : (node ? (tagValue(node.course, "dataset") ?? "") : "");
-
-  const archived = run?.campaign.lifecycle_status === "archived";
+  const archived = entry.level === "campaign" && entry.facts.lifecycle === "archived";
   // The WHOLE path, not the leaf cycleId: `cycle_id` is an origin hash two campaigns can share.
   const selected =
     ctx.viewedPath != null &&
     encodeCyclePath(ctx.viewedPath) === encodeCyclePath(path) &&
     ctx.viewedCandidateId == null;
-
-  const cycleId = path[path.length - 1]!.cycleId;
-  const card: RowCardFacts = run
-    ? campaignCard(run, node)
-    : {
-        title: label,
-        state: status?.label,
-        lede: task
-          ? "An inner run: it measured one candidate of the course above on one panel cell."
-          : "The course and what it ran. Its origin is the C0 row inside it.",
-        stats: innerStats(node, standing),
-        facts: innerFacts(node, cycleId),
-      };
 
   const row = (
     <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
@@ -216,7 +196,7 @@ function CourseRow({
         <button
           type="button"
           className="unit-library-twist"
-          onClick={() => ctx.toggleNode("course", addr)}
+          onClick={() => ctx.toggleNode(addr)}
           aria-label={open ? "Collapse" : "Expand"}
           aria-expanded={open}
           tabIndex={-1}
@@ -231,18 +211,10 @@ function CourseRow({
         aria-current={selected ? "true" : undefined}
         disabled={archived}
       >
-        {run ? (
-          <CampaignRowLabel run={run} />
+        {entry.level === "campaign" ? (
+          <CampaignRowLabel campaign={entry} />
         ) : (
-          <span className="unit-library-row">
-            <span className="unit-library-name">{label}</span>
-            <span className="unit-library-meta unit-library-meta-marked">
-              {status && <PhaseMark status={status} />}
-              <span>
-                {standing ? <PairedLift reading={standing.vs_origin} unread="label" /> : "—"}
-              </span>
-            </span>
-          </span>
+          <CourseRowLabel course={entry} />
         )}
       </button>
       {chrome}
@@ -251,7 +223,7 @@ function CourseRow({
 
   return (
     <>
-      <RowHoverCard card={card}>{row}</RowHoverCard>
+      <RowHoverCard card={entry}>{row}</RowHoverCard>
       {open && (
         <ul className="unit-library-children">
           {!tree.loaded && !tree.failed && <li className="inner-library-empty">Loading…</li>}
@@ -280,21 +252,19 @@ function CourseRow({
   );
 }
 
-function innerFacts(node: CourseLineage | null, cycleId: string): [string, string][] {
-  const facts: [string, string][] = [];
-  const dataset = node ? tagValue(node.course, "dataset") : null;
-  if (dataset) facts.push(["Dataset", dataset]);
-  if (node?.course.facts.task) facts.push(["Task", node.course.facts.task]);
-  facts.push(["Cycle", cycleId]);
-  return facts;
-}
-
-function innerStats(node: CourseLineage | null, standing: RunStanding | null) {
-  const stats: RowStat[] = standing ? [accuracyStat(standing, node)] : [];
-  if (standing?.stalls_left != null && standing.stalls_left_cap != null) {
-    stats.push({ label: "Lives", value: `${standing.stalls_left} / ${standing.stalls_left_cap}` });
-  }
-  return stats;
+function CourseRowLabel({ course }: { course: HierarchyCourse }) {
+  const { task, standing } = course.facts;
+  return (
+    <span className="unit-library-row">
+      <span className="unit-library-name">
+        {task ? panelCellLabel(task) : (tagValue(course, "dataset") ?? "")}
+      </span>
+      <span className="unit-library-meta unit-library-meta-marked">
+        <PhaseMark status={course.state.status} />
+        <span>{standing ? <PairedLift reading={standing.vs_origin} unread="label" /> : "—"}</span>
+      </span>
+    </span>
+  );
 }
 
 function RetiredGroupRow({
@@ -312,8 +282,8 @@ function RetiredGroupRow({
   const attempts = `${n} attempt${n === 1 ? "" : "s"}`;
   return (
     <GroupRow
-      kind="retired"
       addr={nodeAddress(timeline, group.branch)}
+      openByDefault={false}
       ctx={ctx}
       className="retired"
       title={`${attempts} the run left behind when it branched to ${group.branch} and continued there. They keep their labels and their numbers; the attempts that replaced them are on the line above.`}
@@ -345,7 +315,7 @@ function CandidateRow({
   const { reading, fork } = cand;
   const candPath = pathOf(cand);
   const addr = nodeKeyOf(cand);
-  const open = ctx.isNodeOpen("cand", addr);
+  const open = ctx.isNodeOpen(addr, true);
   const hasChildren = inner.length > 0;
   // Keyed on the ROUND, not the label: a fork's C0 replays the candidate it was cut from.
   const isOrigin = reading.arm.round === 0;
@@ -402,9 +372,10 @@ function CandidateRow({
   if (fork?.steered_by) facts.push(["Steered by", fork.steered_by]);
 
   const card = {
-    title: cand.label,
-    state: verdict,
-    tags: fork ? [`⑂${cutFrom ? ` from ${cutFrom}` : " fork"}`] : undefined,
+    level: "candidate" as const,
+    label: cand.label,
+    state: { status: { label: verdict } },
+    tags: fork ? [{ label: `⑂${cutFrom ? ` from ${cutFrom}` : " fork"}` }] : undefined,
     lede,
     stats,
     caveat: caveat ? (
@@ -423,7 +394,7 @@ function CandidateRow({
             <button
               type="button"
               className="unit-library-twist"
-              onClick={() => ctx.toggleNode("cand", addr)}
+              onClick={() => ctx.toggleNode(addr)}
               aria-label={open ? "Collapse" : "Expand"}
               aria-expanded={open}
               tabIndex={-1}
@@ -478,6 +449,7 @@ function CandidateRow({
           {inner.map((course) => (
             <li key={encodeCyclePath(pathOf(course))}>
               <CourseRow
+                entry={course.course}
                 node={course}
                 path={pathOf(course)}
                 tree={tree}

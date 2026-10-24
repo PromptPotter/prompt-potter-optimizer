@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Evidence, SubjectReading } from "@/lib/api";
+import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api";
 import { CardFrame, SegmentedControl, Toolbar, ToolbarSep } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useCompareSelection } from "@/lib/compare-selection";
@@ -61,17 +61,17 @@ export function ComparePane() {
   // "" omits the query param, so the server picks its own default.
   const [metric, setMetric] = useState("");
   const [grid, setGrid] = useState("");
-  const { forest } = useRegistry();
-  const runs = useMemo(
-    () => new Map(forest.flatMap((o) => o.runs).map((r) => [r.campaign.campaign_id, r])),
-    [forest],
-  );
-  const compared = channels.flatMap((c) => runs.get(c.rootCampaignId)?.line ?? []);
+  const { entries, byAddress } = useRegistry();
+  const runs = useMemo(() => new Map(entries.map((c) => [c.address, c])), [entries]);
+  const compared = channels.flatMap((c): HierarchyCourse[] => {
+    const line = byAddress.get(runs.get(c.rootCampaignId)?.facts.line ?? "");
+    return line?.level === "course" ? [line] : [];
+  });
   const moved = compared
-    .map((a) => `${a.holder.cycle_id}:${a.rounds_closed}:${a.run_phase}`)
+    .map((a) => `${a.address}:${a.facts.rounds_closed}:${a.state.run_phase}`)
     .join("|");
   useEffect(() => invalidateReads("evidence"), [moved]);
-  const running = compared.some((a) => phaseWalks(a.run_phase));
+  const running = compared.some((a) => phaseWalks(a.state.run_phase));
   const { evidence, loading, error, invalidMetric } = useEvidence(
     selected,
     running ? LIVE_EVIDENCE_MS : null,

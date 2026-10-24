@@ -80,14 +80,14 @@ BASELINE = {
     "test_reach": 363,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
-    "served_fields": 1703,
+    "served_fields": 1700,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 18,
     # The arms each of those files leaves out: a mirror rotting raises it.
     "p_record_drift": 525,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 193,
+    "p_served": 201,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 11,
     # The rows each of those files leaves out.

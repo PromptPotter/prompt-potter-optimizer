@@ -2267,17 +2267,6 @@
         "additionalProperties": false,
         "description": "A campaign's typed facts, for a pane or a route argument; its rows read the envelope.",
         "properties": {
-          "bench": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchScore"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The headline, read off the line's banked passes; null where the line's config did not resolve."
-          },
           "lifecycle": {
             "$ref": "#/components/schemas/LifecycleStatus"
           },
@@ -2305,10 +2294,6 @@
           "spend_lifetime": {
             "$ref": "#/components/schemas/LifetimeSpend",
             "description": "Every cycle's bill, forks, forwarded inner spend and deleted cycles included."
-          },
-          "spend_metered": {
-            "$ref": "#/components/schemas/MeteredSpend",
-            "description": "The line's cycles, read whole, in the meter the campaign's ceiling counts."
           }
         },
         "required": [
@@ -2316,8 +2301,6 @@
           "line",
           "lifecycle",
           "spend_lifetime",
-          "spend_metered",
-          "bench",
           "runs_with"
         ],
         "title": "CampaignFacts",
@@ -3931,10 +3914,6 @@
             ],
             "description": "Null on a root, and on a cycle cut from another tree."
           },
-          "spend_metered": {
-            "$ref": "#/components/schemas/MeteredSpend",
-            "description": "This course's own ledger, in the meter its campaign's ceiling counts."
-          },
           "standing": {
             "anyOf": [
               {
@@ -3963,7 +3942,6 @@
           "spawn",
           "task",
           "standing",
-          "spend_metered",
           "rounds_closed"
         ],
         "title": "CourseFacts",

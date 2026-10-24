@@ -113,16 +113,20 @@ export function LineageProvider({
     [lensParam, samples],
   );
 
-  const { cycles } = useRegistry();
-  const resting = useMemo(() => {
-    const all = new Set<string>();
-    const live = new Set<string>();
-    for (const c of cycles) {
-      all.add(c.campaign_id);
-      if (!phaseIs(c.run_phase, "settled")) live.add(c.campaign_id);
-    }
-    return new Set([...all].filter((id) => !live.has(id)));
-  }, [cycles]);
+  const { entries } = useRegistry();
+  const resting = useMemo(
+    () =>
+      new Set(
+        entries
+          .filter(
+            (e) =>
+              e.children.length > 0 &&
+              e.children.every((c) => phaseIs(c.state.run_phase, "settled")),
+          )
+          .map((e) => e.address),
+      ),
+    [entries],
+  );
 
   // The offset is the viewed LEAF's, which the root-keyed tree is not addressed by.
   const { at, viewedPath: leafPath } = useWorkspace();

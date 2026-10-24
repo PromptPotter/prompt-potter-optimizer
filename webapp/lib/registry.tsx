@@ -3,24 +3,21 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import {
   activeRead,
-  campaignsRead,
-  cyclesRead,
-  type CampaignSummary,
-  type CycleListEntry,
+  hierarchyRead,
+  type HierarchyCampaign,
+  type HierarchyCourse,
+  type HierarchyEntry,
   type LifecycleFilter,
 } from "./api";
-import { buildForest, type OriginGroup } from "./derivations";
+import { coursesOf, runningCourses } from "./derivations/hierarchy";
 import { shownData, useRead, type ReadFailure } from "./hooks/useRead";
-import { dockPriority } from "./run-phase";
 
 interface Registry {
-  cycles: CycleListEntry[];
-  campaigns: CampaignSummary[];
-  forest: OriginGroup[];
-  runningCycles: CycleListEntry[];
-  cyclesLoaded: boolean;
+  entries: HierarchyCampaign[];
+  byAddress: ReadonlyMap<string, HierarchyEntry>;
+  running: HierarchyCourse[];
   // False from a filter change until the read for the new filter lands.
-  campaignsLoaded: boolean;
+  loaded: boolean;
   failure: ReadFailure | null;
   lifecycleFilter: LifecycleFilter;
   setLifecycleFilter: (f: LifecycleFilter) => void;
@@ -32,63 +29,44 @@ const REGISTRY_INTERVAL_MS = 10000;
 // Matches the dashboard's live beat, so a CLI-minted cycle is followed without the registry's lag.
 const POINTER_INTERVAL_MS = 2000;
 
-const NO_CYCLES: CycleListEntry[] = [];
-const NO_CAMPAIGNS: CampaignSummary[] = [];
+const NO_ENTRIES: HierarchyCampaign[] = [];
 
 export function RegistryProvider({ children }: { children: ReactNode }) {
   const [lifecycleFilter, setLifecycleFilter] = useState<LifecycleFilter>("active");
-  const cyclesResult = useRead(cyclesRead(), { auth: true, intervalMs: REGISTRY_INTERVAL_MS });
-  const campaignsResult = useRead(campaignsRead(lifecycleFilter), {
+  const read = useRead(hierarchyRead(lifecycleFilter), {
     auth: true,
     intervalMs: REGISTRY_INTERVAL_MS,
   });
 
-  const cycles = shownData(cyclesResult)?.cycles ?? NO_CYCLES;
-  const landed = shownData(campaignsResult)?.campaigns ?? null;
-  const [lastCampaigns, setLastCampaigns] = useState<CampaignSummary[]>(NO_CAMPAIGNS);
-  if (landed !== null && landed !== lastCampaigns) setLastCampaigns(landed);
-  const campaigns = landed ?? lastCampaigns;
+  const landed = shownData(read)?.entries ?? null;
+  const [lastEntries, setLastEntries] = useState<HierarchyCampaign[]>(NO_ENTRIES);
+  if (landed !== null && landed !== lastEntries) setLastEntries(landed);
+  const entries = landed ?? lastEntries;
 
-  const forest = useMemo(() => buildForest(campaigns, cycles), [campaigns, cycles]);
-  const runningCycles = useMemo(
-    () =>
-      cycles
-        .filter((c) => c.producer_attached)
-        .sort((a, b) => dockPriority(a.run_phase) - dockPriority(b.run_phase)),
-    [cycles],
-  );
+  const byAddress = useMemo(() => {
+    const m = new Map<string, HierarchyEntry>();
+    for (const campaign of entries) {
+      m.set(campaign.address, campaign);
+      for (const course of coursesOf(campaign)) m.set(course.address, course);
+    }
+    return m;
+  }, [entries]);
+  const running = useMemo(() => runningCourses(entries), [entries]);
 
-  const failure =
-    cyclesResult.status === "failed"
-      ? cyclesResult.failure
-      : campaignsResult.status === "failed"
-        ? campaignsResult.failure
-        : null;
-  const cyclesLoaded = cyclesResult.status === "ready" || cyclesResult.status === "failed";
-  const campaignsLoaded = landed !== null;
+  const failure = read.status === "failed" ? read.failure : null;
+  const loaded = landed !== null;
 
   const value = useMemo<Registry>(
     () => ({
-      cycles,
-      campaigns,
-      forest,
-      runningCycles,
-      cyclesLoaded,
-      campaignsLoaded,
+      entries,
+      byAddress,
+      running,
+      loaded,
       failure,
       lifecycleFilter,
       setLifecycleFilter,
     }),
-    [
-      cycles,
-      campaigns,
-      forest,
-      runningCycles,
-      cyclesLoaded,
-      campaignsLoaded,
-      failure,
-      lifecycleFilter,
-    ],
+    [entries, byAddress, running, loaded, failure, lifecycleFilter],
   );
   return <RegistryContext.Provider value={value}>{children}</RegistryContext.Provider>;
 }
@@ -97,6 +75,11 @@ export function useRegistry(): Registry {
   const v = useContext(RegistryContext);
   if (!v) throw new Error("useRegistry must be called inside <RegistryProvider>");
   return v;
+}
+
+export function useEntry(address: string | null): HierarchyEntry | null {
+  const { byAddress } = useRegistry();
+  return address === null ? null : (byAddress.get(address) ?? null);
 }
 
 export interface ActivePointer {
@@ -117,15 +100,4 @@ export function useActivePointer(): ActivePointer {
     () => ({ campaignId, cycleId, failure }),
     [campaignId, cycleId, failure],
   );
-}
-
-export function useCampaign(campaignId: string | null): CampaignSummary | null {
-  const { campaigns } = useRegistry();
-  return campaigns.find((c) => c.campaign_id === campaignId) ?? null;
-}
-
-export function useCycleEntry(campaignId: string | null, cycleId: string | null): CycleListEntry | null {
-  const { cycles } = useRegistry();
-  if (!campaignId || !cycleId) return null;
-  return cycles.find((c) => c.campaign_id === campaignId && c.cycle_id === cycleId) ?? null;
 }
