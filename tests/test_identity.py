@@ -16,6 +16,7 @@ import random
 import re
 import zipfile
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from typing import Any, cast
 
@@ -73,6 +74,7 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
+    SelectedOptimizer,
     binding_optimizer,
     binding_prompt_overrides,
     resolve_optimizer,
@@ -117,7 +119,7 @@ from promptpotter.application.runner.inner.tasks import (
     InnerTaskSpec,
     inner_instrument_config,
 )
-from promptpotter.config.paths import install_datasets_root
+from promptpotter.config.paths import block_pack_path, install_datasets_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import DEFAULT_CONNECTOR, get
 from promptpotter.connectors import harbor as harbor_connector
@@ -152,6 +154,7 @@ from promptpotter.domain.pipeline_schema import (
     narrowing_of,
 )
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
+from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptBlock
 from promptpotter.domain.results import PointContext
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
@@ -376,23 +379,48 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert named.pool_refusals(
         mint=MintFacts([Sample(id=1, query="q", ground_truth="a")], unranked, None)
     ), "a demo pool naming a key its partition lacks reached a mint"
-    # A block presuming what the run lacks is noise in its prompt: naming one refuses the mint.
-    ranks = entry_id(
-        "task_intent", "Your task is to identify the single best match from the candidates."
+    # A pack's blocks are starting content: campaigns on two packs merging under one treatment is silent.
+    made = Authored(
+        kind="authored", author="t", date=date(2026, 1, 1), experiment="t", version="0", notes=None
     )
-    last_line = entry_id(
-        "answer_format", "Show your reasoning, then state the final answer clearly on its own line."
-    )
-    for path, matcher, admitted in (
-        (ranks, "label_match", False),
-        (last_line, "list_rr", False),
-        (last_line, "label_match", True),
-    ):
-        picked = resolve_optimizer(
-            "potter", {"block_pool": ManifestNodeOverlay(config={"active": [path]})}, gate="off"
-        )
-        refused = picked.pool_refusals(mint=MintFacts((), unranked, matcher))
-        assert (not refused) == admitted, f"{path} under {matcher}: admission missed a presumption"
+    ranking = {"task_intent": "Pick the single best match.", "answer_format": "End on the answer."}
+    packs = {
+        "one": {"thinking_style": PromptBlock(text="Think it through.", provenance=made)},
+        "two": {
+            field: PromptBlock(text=ranking[field], presumes=frozenset({presumed}), provenance=made)
+            for field, presumed in (
+                ("task_intent", Presumption.RANKING),
+                ("answer_format", Presumption.LAST_LINE_ANSWER),
+            )
+        },
+    }
+    with monkeypatch.context() as home:
+        home.setenv("PROMPTPOTTER_HOME", str(tmp_path / "packs-home"))
+        for name, blocks in packs.items():
+            file = block_pack_path(name)
+            file.parent.mkdir(parents=True)
+            held: dict[str, tuple[PromptBlock, ...]] = {f: (b,) for f, b in blocks.items()}
+            file.write_text(BlockPack(works={}, prompt_fields=held).model_dump_json(), "utf-8")
+
+        def drawing(names: list[str], active: list[str]) -> SelectedOptimizer:
+            overlay = ManifestNodeOverlay(config={"packs": names, "active": active})
+            return resolve_optimizer("potter", {"block_pool": overlay}, gate="off")
+
+        assert drawing(["one"], ["*"]).treatment().source != (
+            drawing(["two"], ["*"]).treatment().source
+        ), "campaigns seeded from two different block packs share one treatment"
+        # A block presuming what the run lacks is noise in its prompt: naming one refuses the mint.
+        ranks = entry_id("task_intent", ranking["task_intent"])
+        last_line = entry_id("answer_format", ranking["answer_format"])
+        for path, matcher, admitted in (
+            (ranks, "label_match", False),
+            (last_line, "list_rr", False),
+            (last_line, "label_match", True),
+        ):
+            refused = drawing(["two"], [path]).pool_refusals(mint=MintFacts((), unranked, matcher))
+            assert (not refused) == admitted, (
+                f"{path} under {matcher}: admission missed a presumption"
+            )
 
     # The determinism clamp outranks every other layer and keys the bank.
     reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")

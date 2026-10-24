@@ -81,6 +81,15 @@ def optimizer_manifest_path(shipped: Path) -> Path:
     return _shadowed(Path("optimizers") / shipped.name / "pipeline.yaml", shipped / "pipeline.yaml")
 
 
+def block_packs_root() -> Path:
+    """The one place a pack resolves: a directory placed or linked here, since none ships."""
+    return user_data_root() / "block_packs"
+
+
+def block_pack_path(name: str) -> Path:
+    return block_packs_root() / name / "pack.json"
+
+
 def checkin_manifest_path() -> Path:
     return _shadowed(Path("checkin") / "pipeline.yaml", checkin_assets_root() / "pipeline.yaml")
 

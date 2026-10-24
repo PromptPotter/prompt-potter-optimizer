@@ -44,7 +44,7 @@ BASELINE = {
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 2,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
-    "config_leaf_fields": 89,
+    "config_leaf_fields": 90,
     # `Settings` fields — what the environment can set.
     "settings_env": 43,
     # The upper-case constants `config/settings.py` exports.

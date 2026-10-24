@@ -51,6 +51,7 @@ Reads happen by opening the on-disk artifact tree. The read VERBS are the four w
 
 ```
 .promptpotter/
+  block_packs/{name}/pack.json         # installed block packs, the operator's (`config/paths.py::block_packs_root`)
   projects/{tenant_id}/
     .workspace/
       active_session.json              # { campaign_id, cycle_id }

@@ -743,7 +743,7 @@ class Initializer(NodeMember, Protocol):
     @property
     def pool(self) -> type[Pool]: ...
 
-    def starting_content(self) -> object:
+    def starting_content(self, selected: SelectedOptimizer) -> object:
         """What it seeds from beside the run's own data, which ``Treatment.source`` hashes."""
         ...
 

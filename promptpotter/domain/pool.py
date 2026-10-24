@@ -24,7 +24,7 @@ EARNED_SOURCE: Annotated[str, shapes_optimizer_prompt] = "earned"
 
 
 class PoolSource(enum.StrEnum):
-    # The shipped prompt block library and the blocks runs earned beside it: both move under a
+    # The installed block packs and the blocks runs earned beside them: both move under a
     # running campaign, so the pool banks its entries whole.
     LIBRARY = "library"
     # The cycle's demo split, pinned by its bank's hash: the pool banks sample keys.

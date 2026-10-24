@@ -160,6 +160,10 @@ packaged manifest of that name (provider / model / temperature per node); absent
 is read. The generated `resolved_schemas.json` beside each is deliberately not overridable, so the
 seam is a file, never a directory.
 
+**`$PROMPTPOTTER_HOME/block_packs/{name}/pack.json` is stable** (`config/paths.py::block_packs_root`):
+a block pack the `block_pool` node's `packs` knob may name. None ships; a pack is installed by
+placing or linking its directory there, so where its content is kept is the operator's.
+
 The derived `assets/webapp/` tree is staged by
 `scripts/build_release.py`, the supported way to build a wheel — a bare `uv build` produces
 one that quietly serves no dashboard. There is no `REPO_ROOT`, and

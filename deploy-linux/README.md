@@ -74,8 +74,8 @@ state tree. The tree is named in one place (`config/paths.py`), so the tier is c
 expensive to *live with*. **Move the tree; never teach the resolver to read both**, and count what
 would move first: `ls .promptpotter/projects/*/campaigns`.
 
-**Never rename**, at any tier: the **provider** (provenance, not a label) · `prompt_variants.json`'s
-**`"source"`** (a citation) · **`name:` in
+**Never rename**, at any tier: the **provider** (provenance, not a label) · a block pack's
+**`works`** keys (a citation) · **`name:` in
 `assets/optimizers/potter/pipeline.yaml`**, which identifies the optimizer pipeline rather than the seller.
 
 *(Written against the live single-tenant install; no second unit has been built from it, so tier 3

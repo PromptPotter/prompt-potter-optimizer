@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Annotated, ClassVar
 
 from pydantic import Field
@@ -11,7 +10,8 @@ from promptpotter.application.bench.node_context import Target
 from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.scoring.formula.matchers import MATCHERS
-from promptpotter.config.prompt_blocks import library_entries, library_identity
+from promptpotter.config.paths import block_packs_root
+from promptpotter.config.prompt_blocks import missing_packs, pack_entries, pack_identity
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
 from promptpotter.domain.pool import (
     EARNED_SOURCE,
@@ -23,11 +23,11 @@ from promptpotter.domain.pool import (
     kept,
     unnamed,
 )
-from promptpotter.domain.prompt_block import Presumption
+from promptpotter.domain.prompt_block import AUTHORED_SOURCE, PackName, Presumption
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping
 
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -39,13 +39,23 @@ class PoolKnobs(StrictModel):
     active: Annotated[list[str], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         min_length=1,
         description="The entries in play, as paths: `*` for all, an entry's content id, or a "
-        "leading run of its group — a block's `field` or `field/source`, the earned blocks' "
-        f"source being `{EARNED_SOURCE}`; a shot's sample key. A path keeping nothing is refused "
-        "before any spend.",
+        "leading run of its group — a block's `field` or `field/source`, a cited block's source "
+        f"being its work's arXiv id, an authored one's `{AUTHORED_SOURCE}` and an earned one's "
+        f"`{EARNED_SOURCE}`; a shot's sample key. A path keeping nothing is refused before any "
+        f"spend, except `field/{EARNED_SOURCE}`, whose blocks are mined at run init.",
     )
 
 
-class _PoolInitializer(nodes.Member, ABC):
+class BlockPoolKnobs(PoolKnobs):
+    packs: Annotated[list[PackName], Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        description="The block packs the pool draws from, in draw order: each a directory the "
+        "operator installs under the user-data root's `block_packs/`, none shipped. Their blocks "
+        "are the treatment's starting content, so campaigns on different packs never share an "
+        "identity. Empty, the pool holds the earned blocks alone.",
+    )
+
+
+class _PoolInitializer(nodes.Member):
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     knobs: ClassVar[type[StrictModel]] = PoolKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Target})
@@ -53,12 +63,6 @@ class _PoolInitializer(nodes.Member, ABC):
 
     def active(self, selected: SelectedOptimizer) -> list[str]:
         return selected.knobs_of(self.name, PoolKnobs).active
-
-    def initialize(self, ctx: NodeContext[PoolKnobs]) -> None:
-        ctx.put(self.seed(ctx, ctx.knobs.active))
-
-    @abstractmethod
-    def seed(self, ctx: NodeContext[PoolKnobs], paths: Sequence[str]) -> Pool: ...
 
 
 def _admits(schema: PipelineSchema, matcher: str | None) -> frozenset[Presumption]:
@@ -68,37 +72,36 @@ def _admits(schema: PipelineSchema, matcher: str | None) -> frozenset[Presumptio
 
 class BlockPoolInitializer(_PoolInitializer):
     name: ClassVar[str] = BlockPool.kind
+    knobs: ClassVar[type[StrictModel]] = BlockPoolKnobs
     pool: ClassVar[type[Pool]] = BlockPool
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({BlockPool})
 
-    def starting_content(self) -> object:
-        return library_identity()
+    def starting_content(self, selected: SelectedOptimizer) -> object:
+        return pack_identity(selected.knobs_of(self.name, BlockPoolKnobs).packs)
 
     def refusal(
         self, selected: SelectedOptimizer, *, closed: bool, mint: MintFacts | None
     ) -> str | None:
+        packs = selected.knobs_of(self.name, BlockPoolKnobs).packs
+        if absent := missing_packs(packs):
+            return f"{self.name}.packs names {absent}, which {block_packs_root()} does not hold"
         paths = self.active(selected)
         # At load no chain is known, so a path is checked against every entry any chain admits.
         admits = frozenset(Presumption) if mint is None else _admits(mint.schema, mint.matcher)
-        library = [(e.id, e.group) for e in library_entries(admits=admits).values()]
-        fields = dict.fromkeys(group[0] for _, group in library)
-        # Earned entries exist only once run init mines them, so their group is all a path can name now.
-        earned: list[tuple[str, tuple[str, ...]]] = [
-            ("", (field, EARNED_SOURCE)) for field in fields
-        ]
-        if bad := unnamed(paths, library + earned):
+        held = [(e.id, e.group) for e in pack_entries(packs, admits=admits).values()]
+        named = [p for p in paths if p.partition("/")[2] != EARNED_SOURCE]
+        if bad := unnamed(named, held):
             return (
-                f"{self.name}.active names {bad}, which match no prompt block library entry this "
-                "run admits"
+                f"{self.name}.active names {bad}, which match no entry of {packs} this run admits"
             )
-        if closed and not kept(paths, library):
+        if closed and not kept(paths, held):
             return (
-                f"{self.name}.active keeps no library entry, and a `closed` reader may write only "
+                f"{self.name}.active keeps no pack entry, and a `closed` reader may write only "
                 "an entry's id — earned blocks are mined at run init and may be none"
             )
         return None
 
-    def seed(self, ctx: NodeContext[PoolKnobs], paths: Sequence[str]) -> BlockPool:
+    def initialize(self, ctx: NodeContext[BlockPoolKnobs]) -> None:
         target = ctx.read(Target)
         earned = (
             PoolEntry(id=entry_id(field, text), group=(field, EARNED_SOURCE), text=text)
@@ -107,10 +110,10 @@ class BlockPoolInitializer(_PoolInitializer):
         )
         entries: Mapping[str, PoolEntry] = {
             **{e.id: e for e in earned},
-            **library_entries(admits=_admits(ctx.schema, target.matcher)),
+            **pack_entries(ctx.knobs.packs, admits=_admits(ctx.schema, target.matcher)),
         }
-        active = kept(paths, ((i, e.group) for i, e in entries.items()))
-        return BlockPool(entries=tuple(entries[i] for i in active))
+        active = kept(ctx.knobs.active, ((i, e.group) for i, e in entries.items()))
+        ctx.put(BlockPool(entries=tuple(entries[i] for i in active)))
 
 
 class DemoPoolInitializer(_PoolInitializer):
@@ -118,7 +121,7 @@ class DemoPoolInitializer(_PoolInitializer):
     pool: ClassVar[type[Pool]] = DemoPool
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({DemoPool})
 
-    def starting_content(self) -> object:
+    def starting_content(self, selected: SelectedOptimizer) -> object:
         return None
 
     def refusal(
@@ -130,8 +133,9 @@ class DemoPoolInitializer(_PoolInitializer):
             return f"{self.name}.active names {bad}, which the demo partition lacks"
         return None
 
-    def seed(self, ctx: NodeContext[PoolKnobs], paths: Sequence[str]) -> DemoPool:
-        return DemoPool(keys=kept(paths, ((s.key, ()) for s in ctx.read(Target).demo_split)))
+    def initialize(self, ctx: NodeContext[PoolKnobs]) -> None:
+        demo = ctx.read(Target).demo_split
+        ctx.put(DemoPool(keys=kept(ctx.knobs.active, ((s.key, ()) for s in demo))))
 
 
 MEMBERS = (BlockPoolInitializer(), DemoPoolInitializer())

@@ -23,6 +23,7 @@ nodes:
     type: algorithm
     config:
       active: ['*']
+      packs: []
   demo_pool:
     type: algorithm
     config:

@@ -483,7 +483,7 @@ class SelectedOptimizer:
             source=stable_hash(
                 [
                     self.runtime.source_digest(roster, proxies),
-                    {i.name: i.starting_content() for i in self.plan.initializers},
+                    {i.name: i.starting_content(self) for i in self.plan.initializers},
                 ]
             ),
         )

@@ -26,6 +26,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import write_bytes
 from promptpotter.infrastructure.store.measurement_archive import config_key
+from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.extras import Extra, require_extra
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
 
@@ -184,9 +185,14 @@ class BankLoader:
         rows = self.rows()
         if self.shuffled:
             random.Random(_BANK_SEED).shuffle(rows)
+        # A sample is its content, so a source repeating a row would bank one sample twice.
+        drawn: dict[str, str] = {}
+        for query, truth in map(self.draw, rows):
+            if drawn.setdefault(query, truth) != truth:
+                raise PayloadInvalidError(f"the source answers one query two ways: {query[:80]!r}")
         samples = [
             Sample(id=i, query=query, ground_truth=truth)
-            for i, (query, truth) in enumerate(map(self.draw, rows[: self.cap]))
+            for i, (query, truth) in enumerate(list(drawn.items())[: self.cap])
         ]
         if self.bench_tail is None:
             return samples
@@ -373,18 +379,30 @@ def _cell(value: object) -> str:
 
 def _columns(src: Source) -> BankLoader:
     """Two columns of a hub split: `query` and `truth` name them, `truth_prefix` leads the answer,
-    and `where` names a boolean column a row must hold."""
+    and `where` names a boolean column a row must hold. A `query` holding `{column}` is a template
+    over the row, and `data_files` picks files of a repo whose files share no schema. A class-label
+    truth reads as its name."""
     query, truth, prefix, where = (
         src["query"],
         src["truth"],
         src.get("truth_prefix", ""),
         src.get("where"),
     )
-    return _bank(
-        src,
-        lambda: [row for row in _hub_split(src) if where is None or row[where]],
-        lambda row: (str(row[query]), f"{prefix}{_cell(row[truth])}"),
-    )
+
+    def rows() -> list[Row]:
+        files = {"data_files": src["data_files"]} if "data_files" in src.params else {}
+        ds = from_hub(src, *_configs(src), split=src["split"], **files)
+        named = getattr(ds.features[truth], "int2str", None)
+        return [
+            {**row, truth: row[truth] if named is None else named(row[truth])}
+            for row in ds
+            if where is None or row[where]
+        ]
+
+    def query_of(row: Row) -> str:
+        return str(query).format_map(row) if "{" in str(query) else str(row[query])
+
+    return _bank(src, rows, lambda row: (query_of(row), f"{prefix}{_cell(row[truth])}"))
 
 
 def _table(src: Source) -> BankLoader:

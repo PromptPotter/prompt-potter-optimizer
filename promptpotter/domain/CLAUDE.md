@@ -78,7 +78,7 @@ The word `legacy` is **never** sanctioned.
   `output`.
 - `pool.py` — a pool is a `StateSlice` of entries of ONE kind (`BlockPool`, `DemoPool`) from ONE
   declared `PoolSource`, banking what a reader draws: a block pool every entry in play whole, so a
-  library edit never reaches a running campaign, a demo pool the sample keys its pinned bank
+  pack edit never reaches a running campaign, a demo pool the sample keys its pinned bank
   resolves. A member declares the pools it `draws` and reads one under an `Access` (`off` ·
   `open` · `closed`); a pool is the one part many members may write (`StatePart.writers`).
   Seeded by a run-init member, banked like any slice, so a resume hands back the pool its round

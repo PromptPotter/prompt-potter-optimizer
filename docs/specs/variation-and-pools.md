@@ -107,7 +107,7 @@ the fitness is accuracy on a fixed panel — θ has no ratio scale.
 this section holds only what is still to build.
 
 - **The campaign's own measured individuals are the next pool**, each entry its content id.
-  Harvested templates enter later, each through a manifest that states its source — § Out of scope.
+  Harvested templates enter as block packs, each block citing its work — § Out of scope.
 - **Static or growing is a setting.** Under `open`, a knob bounds how many of a round's arms may
   carry a new value; each new value becomes an entry with its writer recorded. At zero the pool is
   static and every value an arm carries was predefined.
@@ -118,7 +118,7 @@ this section holds only what is still to build.
 - **A write during a run is a record, taken at a round boundary.** A node's own write is its
   decision record. A write from outside the loop is a Control-remote command — owned by
   [`../architecture.md`](../architecture.md) § Control-remote; its payload model is declared
-  before its handler. Editing `prompt_variants.json` or a
+  before its handler. Editing a block pack or a
   manifest is not a write to a running campaign: it is a treatment change for the next mint.
 
 ## Knobs and the served shape
@@ -207,5 +207,5 @@ browser — owned by [`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) 
 - **Authoring a pool's content at check-in.** The check-in picks among declared entries; writing
   new ones is the pool-write command or the upload path `candidate_library` already has.
 - **Param recombination in a controlled comparison.** The controlled search is the prompt's fields.
-- **The harvested templates as shipped pools.** No licence was verified per source; each enters
-  through a manifest that states its source and deviations, or not at all.
+- **A shipped block library.** Core ships no block: a block pool's material is the packs its
+  `packs` knob names, each installed by the operator and each cited work carrying its licence.

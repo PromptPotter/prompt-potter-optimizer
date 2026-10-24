@@ -84,9 +84,9 @@ class L1GenerateKnobs(StrictModel):
     )
     block_access: Annotated[Access, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
         description=(
-            "How ``l1_generate`` takes the ``block_pool`` node's pool — the entries of the prompt "
-            "block library (``promptpotter/config/prompt_variants.json``) the pool's ``active`` "
-            "paths keep, led by the blocks earlier runs on this answer space earned. ``open`` "
+            "How ``l1_generate`` takes the ``block_pool`` node's pool — the entries of the block "
+            "packs that node names which its ``active`` paths keep, led by the blocks earlier "
+            "runs on this answer space earned. ``open`` "
             "shows a per-field window of them as material L1 may reuse verbatim, adapt or ignore. "
             "``closed`` makes a pooled field's value one of the active subset's entry ids, an enum "
             "on the wire listing them all, and withdraws every field the subset holds no entry "
