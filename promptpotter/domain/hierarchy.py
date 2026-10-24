@@ -381,9 +381,9 @@ class StepFacts(FrozenModel):
     )
     gap_before_s: float = Field(
         ge=0,
-        description="Seconds of silence before it: since the newer of the window's previous step "
-        "and its own course's previous step or heartbeat. 0 where neither exists. A heartbeat "
-        "takes no slot of a window, so a long open call never serves one empty.",
+        description="Seconds of silence before it: since the newest step or heartbeat anywhere in "
+        "the family that the window knows of; 0 where none. A heartbeat takes no slot of a "
+        "window, so a long open call never serves one empty.",
     )
     activity: ActivityItem = Field(
         description="The record's reading. A `running` step with no later step on its course is a "

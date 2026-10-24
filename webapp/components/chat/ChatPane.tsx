@@ -2,7 +2,7 @@
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/chat-foundation.md`): never hide them.
 import { useEffect, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";
-import { useViewedCourse } from "@/lib/lineage";
+import { useViewedRunState } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useIngest } from "@/lib/ingest-flow";
@@ -24,16 +24,17 @@ export function ChatPane() {
   const { composing } = useIngest();
   const thread = useThread<RunSummary>();
 
-  const course = useViewedCourse();
+  const runState = useViewedRunState();
 
   // The served `attached`, NOT `isLive`, which is false at the gate.
   const attached = dash?.producer.attached === true;
-  // Frozen off the COURSE's detach, so the ending's word and next step are that same read's.
-  const liveCycleKey = cycleId && course?.state.producer.attached ? cycleId : null;
+  // Frozen off the COURSE's detach, so the ending's word and next step are that same read's; keyed
+  // on the leaf, the cycle the dashboard and so the frozen numbers are.
+  const liveCycleKey = leafCycleId && runState?.producer.attached ? leafCycleId : null;
   const [prevLiveCycle, setPrevLiveCycle] = useState(liveCycleKey);
   if (liveCycleKey !== prevLiveCycle) {
     setPrevLiveCycle(liveCycleKey);
-    const ended = runSummary(dash, course);
+    const ended = runSummary(dash, runState);
     // The identity check stops a cycle switch filing the new cycle's numbers under the old one's ending.
     if (prevLiveCycle && !liveCycleKey && ended?.cycleId === prevLiveCycle) {
       thread.appendRun(ended.cycleId, ended);

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from bisect import bisect_left
 from collections import deque
 from functools import partial
 from pathlib import Path
@@ -37,7 +38,7 @@ assert _INNER_KINDS <= RECORD_KINDS, (
 # A validator input that moves on DEPLOY, not on a write: left out, a changed one 304s forever.
 _CURATION_TAG = (
     sorted(_INNER_KINDS),
-    hashlib.sha256(Path(activity.__file__).read_bytes()).hexdigest(),
+    *(hashlib.sha256(Path(f).read_bytes()).hexdigest() for f in (activity.__file__, __file__)),
 )
 
 
@@ -46,7 +47,7 @@ class _Raw(NamedTuple):
     epoch: float
     ts: str
     activity: ActivityItem
-    # This ledger's previous step or heartbeat: what ends the silence before it.
+    # This ledger's previous step or heartbeat: what ends a silence, on this course or any after it.
     heard: float | None
 
 
@@ -162,9 +163,10 @@ def ray_validator_parts(
     return tuple(parts)
 
 
-def _silence(row: _Raw, before: float | None) -> float:
-    heard = [epoch for epoch in (before, row.heard) if epoch is not None]
-    return row.epoch - max(heard) if heard else 0.0
+def _silence(epoch: float, heard: list[float]) -> float:
+    """Since the newest step or heartbeat before *epoch* anywhere in the pool; 0 where none."""
+    at = bisect_left(heard, epoch)
+    return epoch - heard[at - 1] if at else 0.0
 
 
 def build_family_ray(
@@ -188,7 +190,11 @@ def build_family_ray(
         pool = pool[-limit:]
         truncated = True
 
-    prior: list[float | None] = [None, *(row.epoch for _key, _path, row in pool[:-1])]
+    # Family-wide: a fork's step after its parent's long, beating call ends no silence of its own.
+    heard = sorted(
+        {row.epoch for _key, _path, row in pool}
+        | {row.heard for _key, _path, row in pool if row.heard is not None}
+    )
     steps = [
         HierarchyStep(
             address=step_address(key, row.offset),
@@ -202,11 +208,11 @@ def build_family_ray(
             facts=StepFacts(
                 offset=row.offset,
                 ts=row.ts,
-                gap_before_s=_silence(row, before),
+                gap_before_s=_silence(row.epoch, heard),
                 activity=row.activity,
             ),
         )
-        for ((_epoch, key, _offset), _path, row), before in zip(pool, prior, strict=True)
+        for (_epoch, key, _offset), _path, row in pool
     ]
     return HierarchySteps(
         steps=steps,

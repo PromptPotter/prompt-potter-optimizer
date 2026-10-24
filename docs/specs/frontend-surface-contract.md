@@ -202,7 +202,9 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
 - **A run's word is the course's; the dashboard read is run CONTROL.** The state word and the next
   step (`HierarchyState.status` / `next_step`) ride the course entry alone, worded with the campaign's
   lifecycle, and the masthead, `OptimizerCard`, the time ray's head and the chat's frozen `run` item read
-  them through `lib/lineage.tsx::useViewedCourse`. The dashboard keeps what control acts on and what
+  them through `lib/lineage.tsx::useViewedRunState`. The state is built off the HEAD index under any
+  moment, so it is one value under every mask and moment, and the hook keeps the last landing's
+  across a re-key rather than blanking. The dashboard keeps what control acts on and what
   only the head measures: `run_phase` (its 2 s poll invalidates every slower read on a change),
   `run_admission` and `pause` (a verb's admission moves with the producer, not only the phase), the
   clocked `producer`, spend metering, limits and the walk. `run_standing` and `bench_score` stay too —

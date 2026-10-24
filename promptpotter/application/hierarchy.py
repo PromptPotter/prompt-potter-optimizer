@@ -174,6 +174,7 @@ def course_entry(
     cycle_dir: Path,
     index: CycleIndex,
     *,
+    head: CycleIndex,
     moment: Moment | None,
     runs_with: CampaignRunsWith | None,
     config: CampaignConfig | None,
@@ -233,7 +234,8 @@ def course_entry(
         lede=None if index.standing is None else index.standing.selection_line,
         caveat=None,
         tags=tags,
-        state=HierarchyState.of(run, index, lifecycle=campaign.lifecycle_status),
+        # Run state is the head's under any moment: a replayed stop beside a live phase is no state.
+        state=HierarchyState.of(run, head, lifecycle=campaign.lifecycle_status),
         stats=[
             _spend_stat("spend", "Spend", spent, _rate_priced(spent)),
             *_line_stats(index, cap, on_theta=on_theta),
@@ -291,7 +293,7 @@ def campaign_entry(
     """*moment* replays the ledgers: a course minted after it is not in the entry."""
     held = sorted(
         (
-            (hop, index)
+            (hop, index, now)
             for hop, now in stores.campaigns.campaign_cycles(campaign.campaign_id)
             if (
                 index := now
@@ -306,7 +308,7 @@ def campaign_entry(
     runs_with = campaign_runs_with(stores, campaign)
     config = line_config(stores, campaign, holder)
     courses: dict[str, HierarchyCourse] = {}
-    for hop, index in held:
+    for hop, index, now in held:
         if depth == 0 and hop != holder:
             continue
         courses[hop.cycle_id] = course_entry(
@@ -315,6 +317,7 @@ def campaign_entry(
             campaign,
             stores.campaigns.cycle_dir(hop),
             index,
+            head=now,
             moment=moment,
             runs_with=runs_with,
             config=config if hop == holder else line_config(stores, campaign, hop),
@@ -352,7 +355,7 @@ def campaign_entry(
         ],
         span=HierarchySpan(
             opened_at=campaign.created_at,
-            last_at=max((index.updated_at for _, index in held), default=campaign.created_at),
+            last_at=max((index.updated_at for _, index, _ in held), default=campaign.created_at),
         ),
         children=list(courses.values()) if depth > 0 else [],
         facts=CampaignFacts(

@@ -7,7 +7,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleStream, useTimeRay } from "@/lib/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
-import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
+import { useViewedLineage, useViewedRunState } from "@/lib/lineage";
 import { armAt, rayHead, raySteps, type RayStep } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 
@@ -16,7 +16,7 @@ export const TimeRay = memo(function TimeRay() {
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
   const { dash } = useCycleStream();
-  const course = useViewedCourse();
+  const state = useViewedRunState();
   const { pick } = useSelectNode();
   const { steps: served, loaded, failed, hasMore, loadOlder } = useTimeRay();
 
@@ -31,8 +31,7 @@ export const TimeRay = memo(function TimeRay() {
   }, [steps.length, at]);
 
   const waitingOn = dash?.waiting_on ?? null;
-  // The phase and its word are the course's, one value; only the clocked producer is the dashboard's.
-  const state = course?.state ?? null;
+  // The phase and its word are the course's, one value; the dashboard's producer carries the clocks.
   const producer = dash?.producer ?? null;
   const head = useMemo(
     () =>
@@ -117,7 +116,7 @@ function Gap({ seconds }: { seconds: number }) {
   return (
     <span
       className="dash-time-ray-gap"
-      title={`No step anywhere in this family, and no heartbeat on this step's run, for ${label}. An open call beats every 15 s, so this is real silence, not a long call.`}
+      title={`No step and no heartbeat anywhere in this family for ${label}. An open call beats every 15 s, so this is real silence, not a long call.`}
     >
       ── {label} ──
     </span>

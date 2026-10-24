@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { cx } from "@/lib/cx";
 import { phaseWalks } from "@/lib/run-phase";
-import { useViewedCourse } from "@/lib/lineage";
+import { useViewedRunState } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import {
@@ -25,7 +25,7 @@ interface Props {
 export function OptimizerCard({ pipeline }: Props) {
   const [knobsOpen, setKnobsOpen] = useState(false);
   const { dash, isLive } = useCycleStream();
-  const course = useViewedCourse();
+  const runState = useViewedRunState();
   const view = pipeline?.view ?? null;
   const activeId = dash?.current_round.active_node ?? null;
   const {
@@ -41,7 +41,7 @@ export function OptimizerCard({ pipeline }: Props) {
   const activeLabel = isLive && viewingLive && activeId ? nodeLabel[activeId] : null;
   const runIsRunning = viewingLive && phaseWalks(dash?.run_phase);
   // The SERVER's phase, never a local "idle": that word covers paused, held and dead alike.
-  const status = !dash || !course
+  const status = !dash
     ? "pending"
     : !viewingLive
       ? `round ${viewedRound}`
@@ -49,7 +49,9 @@ export function OptimizerCard({ pipeline }: Props) {
         ? activeLabel
           ? `live · ${activeLabel}`
           : "live"
-        : course.state.status.label;
+        : runState
+          ? runState.status.label
+          : "pending";
 
   // Off the audit twin: a node can be configured for a model and not have fired at all.
   const models = {

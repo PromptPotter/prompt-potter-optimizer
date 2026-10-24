@@ -3214,10 +3214,9 @@ export interface StepFacts {
   /** The record's own time, raised to its file predecessor's when the two invert
    * (records are stamped at construction but appended later). */
   ts: string;
-  /** Seconds of silence before it: since the newer of the window's previous step
-   * and its own course's previous step or heartbeat. 0 where neither exists.
-   * A heartbeat takes no slot of a window, so a long open call never serves
-   * one empty. */
+  /** Seconds of silence before it: since the newest step or heartbeat anywhere in
+   * the family that the window knows of; 0 where none. A heartbeat takes no
+   * slot of a window, so a long open call never serves one empty. */
   gap_before_s: number;
   /** The record's reading. A `running` step with no later step on its course is a
    * call still open. */
