@@ -16,7 +16,7 @@ export function CompareToggle({ campaign }: { campaign: HierarchyCampaign }) {
       onClick={(e) => {
         e.stopPropagation();
         const channel = defaultChannel(campaign);
-        if (channel) toggleCampaign(channel.rootCampaignId, channel.subject);
+        toggleCampaign(channel.rootCampaignId, channel.subject);
       }}
     >
       {on ? "◧" : "▢"}

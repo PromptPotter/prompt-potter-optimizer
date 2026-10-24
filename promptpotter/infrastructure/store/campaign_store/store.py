@@ -632,11 +632,11 @@ class CampaignStore:
 
     def enumerate_cycles(self) -> list[tuple[CycleHop, CycleIndex]]:
         """Every cycle of every campaign in this store whose ledger folds to an index."""
-        return [
-            (CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name), index)
-            for cycle_dir in self._cycle_dirs()
-            if (index := read_cycle_index(cycle_dir, moment=None)) is not None
-        ]
+        return _indexed(self._cycle_dirs())
+
+    def campaign_cycles(self, campaign_id: str) -> list[tuple[CycleHop, CycleIndex]]:
+        """`enumerate_cycles`, narrowed to one campaign's directory."""
+        return _indexed(self.campaign_cycle_dirs(campaign_id))
 
     def _stub_deletion_blocked(self, hop: CycleHop) -> str | None:
         cycle_dir = self.cycle_dir(hop)
@@ -766,3 +766,11 @@ class CampaignStore:
             ]
             lines.append("")
         write_text(self._layout(hop).optimized_surface, "\n".join(lines))
+
+
+def _indexed(cycle_dirs: list[Path]) -> list[tuple[CycleHop, CycleIndex]]:
+    return [
+        (CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name), index)
+        for cycle_dir in cycle_dirs
+        if (index := read_cycle_index(cycle_dir, moment=None)) is not None
+    ]

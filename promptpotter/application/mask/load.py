@@ -87,9 +87,7 @@ def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
     stores, scorer = session.store, session.state.scoring.require_scorer()
     edges: list[tuple[str, CycleIndex, frozenset[int]]] = []
     lines: list[list[RoundResult]] = []
-    for hop, index in stores.campaigns.enumerate_cycles():
-        if hop.campaign_id != session.campaign_id:
-            continue
+    for hop, index in stores.campaigns.campaign_cycles(session.campaign_id):
         if not (rounds := closed_rounds(stores, hop, scorer, moment=None)):
             continue
         # The cycle's OWN closes: a fork's lifted rounds are its parent's simulations.
@@ -187,9 +185,7 @@ def load_mask_record(
     edges: dict[str, tuple[str | None, int | None]] = {}
     crowns: dict[str, dict[int, ArmKey]] = {}
     decisions: dict[str, dict[int, list[ResumeCheckpointRecord]]] = {}
-    for hop, index in stores.campaigns.enumerate_cycles():
-        if hop.campaign_id != campaign_id:
-            continue
+    for hop, index in stores.campaigns.campaign_cycles(campaign_id):
         cid = hop.cycle_id
         cdir = cycle_dir_for(stores.base_dir, hop)
         edges[cid] = _cycle_edge(index)

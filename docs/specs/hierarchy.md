@@ -173,6 +173,10 @@ polls the viewed cycle.
 The webapp asks a tag with two predicates, `hasTag(entry, kind)` and `tagValue(entry, kind)`
 (`webapp/lib/hierarchy.ts`), and nothing else: `useLeafIsL4` is `hasTag(…, "self_optimization")`,
 the viewed dataset is `tagValue(…, "dataset")`. A bool beside a tag is the duplicate this rule forbids.
+**One declared exception: `mint`**, the only tag code branches on exhaustively (a glyph per kind, the
+inner walk). A tag's value is an untyped string, so the course builder mints the kind ONCE and serves it
+twice — typed as `facts.mint` (`CourseKind`), worded as the tag. Code reads the fact; the tag is worn.
+<!-- probe: git grep -cE "tagValue\(.*mint" -- webapp == 0 -->
 
 ### State — one derivation
 
@@ -313,7 +317,7 @@ stage 2's, when a course's subtree first carries rounds; stage 1's body is the c
 
 | Entry | Today | After |
 |---|---|---|
-| **CLI** | `cycles` prints `CycleListEntry` rows | `cycles` keeps its name (one of the four read verbs, `docs/operations/persistence-and-state.md` § Active session pointer) and prints one line per course entry from `list_hierarchy`: `state.status.label`, `run_phase`, `producer.label`, `pause.detail`, `admission.offers`, the `rounds` stat, `*` on the active pointer; `--inside` / `--campaign` / `--attached` map to the parameters. No campaigns verb exists today and none is added — reads open the tree. |
+| **CLI** | `cycles` prints `CycleListEntry` rows | `cycles` keeps its name (one of the four read verbs, `docs/operations/persistence-and-state.md` § Active session pointer) and prints one line per course entry from `list_hierarchy`: `state.status.label`, `run_phase`, `producer.label`, `pause.detail`, `admission.offers`, the `rounds` stat, `<- active pointer` on the active pointer's course; `--inside` / `--campaign` / `--attached` map to the parameters. No campaigns verb exists today and none is added — reads open the tree. |
 | **`/potter-run`** | names `cycles --attached`, `cycles --inside` | unchanged — the verb and its columns survive; the skill quotes no field name. |
 | **Embedded** | `application/embedded_run.py::open_session` lists nothing | unchanged — a host imports `list_hierarchy` from `application/`; parity is by placement (`<entry-point-parity>`). |
 | **REST** | `/campaigns`, `/cycles`, `/tree` | § 4. `docs/specs/openapi.generated.json` regenerates. |
@@ -372,7 +376,7 @@ recorded as decided.
 `CampaignListResponse`, `total`, `campaign_metered_usd`, `id_suffix`, `comparison`, `display_name`;
 `CampaignStore._list_entry` (`enumerate_cycles` yields `(CycleHop, CycleIndex)`); `_course_scalars`
 and the course half of the tree's course model; the two list routes; `webapp/lib/derivations/campaign-forest.ts`,
-`campaign-summary.ts` and its test, `lib/names.ts`; `useCampaign`, `useCycleEntry`, `forest`,
+`campaign-summary.ts` and its test, `lib/names.ts`; `useCycleEntry`, `forest`,
 `runningCycles`, `innerStats`, `innerFacts`, `byDataset`'s input shape, `RunGroup`, `OriginGroup`,
 `NodeKind`, `nodeKey`, `MintKind`, `LineageNode`'s course half. `campaign_list_version` goes in group
 1a, its body moved whole into `hierarchy_version`.

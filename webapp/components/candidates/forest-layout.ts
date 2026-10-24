@@ -47,8 +47,12 @@ export const KIND_GLYPH: Record<CourseKind, string> = {
   inner: "◇",
 };
 
-export const TRIGGER_GLYPH: Record<string, string> = {
+export const TRIGGER_GLYPH: Record<CourseSpawn["trigger"], string> = {
   operator_steered: "✎",
+  operator_diag: "",
+  operator_rewind: "",
+  optimizer_rebase: "",
+  scoring_divergence: "",
 };
 
 export const DIRECTION_GLYPH: Record<CourseSpawn["direction"], string> = {

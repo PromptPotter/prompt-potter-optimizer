@@ -1,5 +1,4 @@
 "use client";
-import { useMemo } from "react";
 import { Badge, CopyButton, Term, VendorLogo } from "@/components/ui";
 import { BenchAction } from "@/components/shell/masthead/BenchAction";
 import { CampaignSwitcher } from "@/components/shell/masthead/CampaignSwitcher";

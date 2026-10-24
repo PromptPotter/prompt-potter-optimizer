@@ -309,26 +309,21 @@ def campaign_entry(
     stores: Stores, inside: CyclePath, campaign: Campaign, *, depth: int
 ) -> HierarchyCampaign:
     held = sorted(
-        (
-            (cycle_dir, index)
-            for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign.campaign_id)
-            if (index := read_cycle_index(cycle_dir, moment=None)) is not None
-        ),
-        key=lambda entry: (entry[0].name != campaign.root_cycle_id, entry[1].created_at),
+        stores.campaigns.campaign_cycles(campaign.campaign_id),
+        key=lambda entry: (entry[0].cycle_id != campaign.root_cycle_id, entry[1].created_at),
     )
     holder = stores.campaigns.line_holder(campaign.root_hop)
     runs_with = campaign_runs_with(stores, campaign)
     config = line_config(stores, campaign, holder)
     courses: dict[str, HierarchyCourse] = {}
-    for cycle_dir, index in held:
-        hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
+    for hop, index in held:
         if depth == 0 and hop != holder:
             continue
         courses[hop.cycle_id] = course_entry(
             stores,
             inside,
             campaign,
-            cycle_dir,
+            stores.campaigns.cycle_dir(hop),
             index,
             moment=None,
             runs_with=runs_with,

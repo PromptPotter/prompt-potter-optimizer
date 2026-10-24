@@ -2,7 +2,6 @@
 
 import type { CourseLineage } from "@/lib/api";
 import type { CyclePath } from "@/lib/ids";
-import { tagValue } from "@/lib/hierarchy";
 import { phaseWalks } from "@/lib/run-phase";
 import { candidatesAtPath, walkCourses, type LineageIndex } from "./lineage-candidates";
 
@@ -37,7 +36,7 @@ export function runningInnerRun(root: CourseLineage | null): CourseLineage | nul
   if (!root) return null;
   return (
     walkCourses(root).find(
-      (c) => tagValue(c.course, "mint") === "inner" && phaseWalks(c.course.state.run_phase),
+      (c) => c.course.facts.mint === "inner" && phaseWalks(c.course.state.run_phase),
     ) ?? null
   );
 }

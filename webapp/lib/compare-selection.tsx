@@ -13,9 +13,9 @@ export interface CompareChannel {
 }
 
 /** After a supersede the line is a fork's: the served `facts.line` names it. */
-export function defaultChannel(campaign: HierarchyCampaign): CompareChannel | null {
+export function defaultChannel(campaign: HierarchyCampaign): CompareChannel {
   const line = decodeCyclePath(campaign.facts.line)?.at(-1);
-  if (!line) return null;
+  if (!line) throw new Error(`undecodable line ${campaign.facts.line}`);
   return {
     rootCampaignId: campaign.address,
     subject: subjectKey("course", [line.campaignId, line.cycleId]),

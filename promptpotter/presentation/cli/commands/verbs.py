@@ -587,7 +587,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "cycles",
         "cycles:cmd_cycles",
-        help="Every cycle with its run state (`run_phase`) — derived at each read and written to "
+        help="Every cycle of every campaign you own that loads, with its run state (`run_phase`) — derived at each read and written to "
         "no file, so this is where a terminal reads which runs are live. Read-only, zero spend.",
         args=(
             Arg("--campaign", default="", help="Only this campaign's cycles."),

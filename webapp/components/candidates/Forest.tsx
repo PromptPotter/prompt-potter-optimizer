@@ -50,7 +50,7 @@ function SpawnGlyph({ kind, spawn }: { kind: CourseKind; spawn: CourseSpawn | nu
   return (
     <>
       {KIND_GLYPH[kind]}
-      {spawn === null ? "" : `${TRIGGER_GLYPH[spawn.trigger] ?? ""}${DIRECTION_GLYPH[spawn.direction]}`}
+      {spawn === null ? "" : `${TRIGGER_GLYPH[spawn.trigger]}${DIRECTION_GLYPH[spawn.direction]}`}
     </>
   );
 }

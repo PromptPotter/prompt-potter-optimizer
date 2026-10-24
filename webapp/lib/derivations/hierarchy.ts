@@ -12,7 +12,7 @@ export function groupByRoot(entries: readonly HierarchyCampaign[]): RootGroup[] 
   const groups: RootGroup[] = [];
   for (const campaign of entries) {
     const rootCycleId = decodeCyclePath(campaign.facts.root)?.at(-1)?.cycleId;
-    if (rootCycleId === undefined) continue;
+    if (rootCycleId === undefined) throw new Error(`undecodable root ${campaign.facts.root}`);
     const last = groups.at(-1);
     if (last?.rootCycleId === rootCycleId) last.campaigns.push(campaign);
     else groups.push({ rootCycleId, campaigns: [campaign] });

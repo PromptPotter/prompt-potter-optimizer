@@ -17,7 +17,12 @@ def _line(course: HierarchyCourse, *, active: bool) -> str:
         f"{course.address}  {state.run_phase.value}  {state.status.label}"
         + (f"  {rounds}" if rounds else "")
         + f"  {state.producer.label}"
-        + (f"  paused: {state.pause.detail}" if state.pause and state.pause.detail else "")
+        + (
+            f"  paused by {state.pause.cause.value}"
+            + (f": {state.pause.detail}" if state.pause.detail else "")
+            if state.pause
+            else ""
+        )
         + (
             f"  next: {state.admission.offers}"
             if state.admission.offers
