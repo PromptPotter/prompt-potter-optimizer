@@ -13,7 +13,6 @@ from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import ceiling_meter
-from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits, ServedRound, served_rounds
 from promptpotter.domain.paired_reading import ArmName
@@ -23,7 +22,6 @@ from promptpotter.domain.phases import (
     RunAdmission,
     RunPhase,
     RunState,
-    stop_next_step,
 )
 from promptpotter.domain.results import closed_after_origin
 from promptpotter.domain.run_records import ForkRemainder
@@ -165,14 +163,6 @@ class ServedDashboard(DashboardFacts):
     run_phase: RunPhase = Field(
         description="The cycle's phase, derived at the read (`derive_run_state`) — never the "
         "runner's own `declared_phase`, which says `running` forever after a kill."
-    )
-    status: RunStatus = Field(
-        description="How the cycle reads: `run_phase` and `stop_reason` as one word and one mark."
-    )
-    next_step: str = Field(
-        description="What the operator does now, as the cycle's `stop_reason` states it "
-        "(`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. "
-        "Empty where the cycle has not stopped, or its reason states that nothing is owed."
     )
     producer: ProducerReading = Field(description="The cycle's producer, derived with the phase.")
     run_admission: RunAdmission = Field(
@@ -392,8 +382,6 @@ def _serve(
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
         run_phase=run.run_phase,
-        status=RunStatus.of(run.run_phase, state.stop_reason),
-        next_step=stop_next_step(state.stop_reason),
         producer=run.producer,
         run_admission=run.admission,
         pause=run.pause,

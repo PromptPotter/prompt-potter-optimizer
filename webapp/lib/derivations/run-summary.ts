@@ -1,4 +1,4 @@
-import type { MeteredSpend } from "@/lib/api/types";
+import type { HierarchyState, MeteredSpend } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtPaired } from "./paired-reading";
 import { rowAt } from "./round-candidates";
@@ -29,15 +29,19 @@ export function runSummaryFacts(s: RunSummary): SummaryFacts {
   };
 }
 
-export function runSummary(dash: DashboardSnapshot | null): RunSummary | null {
-  if (!dash?.cycle_id) return null;
+// The state word and next step are the COURSE's; the numbers frozen beside them, the dashboard's.
+export function runSummary(
+  dash: DashboardSnapshot | null,
+  state: HierarchyState | null,
+): RunSummary | null {
+  if (!dash?.cycle_id || !state) return null;
   const standing = dash.run_standing;
   const winner = standing?.selection ?? null;
   const changes = winner ? rowAt(dash, winner.key)?.reading.changes_description : undefined;
   return {
     cycleId: dash.cycle_id,
-    state: dash.status.label,
-    nextStep: dash.next_step,
+    state: state.status.label,
+    nextStep: state.next_step,
     rounds: standing && winner ? standing.rounds_closed : null,
     winnerLabel: winner?.label ?? null,
     vsOrigin: standing ? fmtPaired(standing.vs_origin, "rates") : "—",

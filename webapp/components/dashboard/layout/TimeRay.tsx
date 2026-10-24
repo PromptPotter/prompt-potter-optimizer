@@ -7,7 +7,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleStream, useTimeRay } from "@/lib/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
-import { useViewedLineage } from "@/lib/lineage";
+import { useViewedLineage, useViewedRunState } from "@/lib/lineage";
 import { armAt, rayHead, raySteps, type RayStep } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 
@@ -16,6 +16,7 @@ export const TimeRay = memo(function TimeRay() {
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
   const { dash } = useCycleStream();
+  const state = useViewedRunState();
   const { pick } = useSelectNode();
   const { steps: served, loaded, failed, hasMore, loadOlder } = useTimeRay();
 
@@ -30,19 +31,18 @@ export const TimeRay = memo(function TimeRay() {
   }, [steps.length, at]);
 
   const waitingOn = dash?.waiting_on ?? null;
-  const runPhase = dash?.run_phase ?? null;
-  const status = dash?.status ?? null;
+  // The phase and its word are the course's, one value; the dashboard's producer carries the clocks.
   const producer = dash?.producer ?? null;
   const head = useMemo(
     () =>
       rayHead(
         steps,
         served,
-        runPhase && status && producer ? { run_phase: runPhase, status, producer } : null,
+        state && producer ? { run_phase: state.run_phase, status: state.status, producer } : null,
         rootKey,
         waitingOn,
       ),
-    [steps, served, runPhase, status, producer, rootKey, waitingOn],
+    [steps, served, state, producer, rootKey, waitingOn],
   );
 
   if (!viewedPath || (!loaded && steps.length === 0)) return null;
@@ -116,7 +116,7 @@ function Gap({ seconds }: { seconds: number }) {
   return (
     <span
       className="dash-time-ray-gap"
-      title={`No step anywhere in this family, and no heartbeat on this step's run, for ${label}. An open call beats every 15 s, so this is real silence, not a long call.`}
+      title={`No step and no heartbeat anywhere in this family for ${label}. An open call beats every 15 s, so this is real silence, not a long call.`}
     >
       ── {label} ──
     </span>

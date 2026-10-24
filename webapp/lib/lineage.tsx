@@ -4,10 +4,16 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api";
 import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
-import type { HierarchyCampaign } from "@/lib/api/types";
+import type { HierarchyCampaign, HierarchyState } from "@/lib/api/types";
 import { phaseIs } from "@/lib/run-phase";
-import { candidatesAtPath, coursesOf, indexLineage, type LineageIndex } from "@/lib/derivations";
-import type { CyclePath } from "@/lib/ids";
+import {
+  candidatesAtPath,
+  courseAt,
+  coursesOf,
+  indexLineage,
+  type LineageIndex,
+} from "@/lib/derivations";
+import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
 import { useDebounced } from "@/lib/hooks/useDebounced";
@@ -168,6 +174,18 @@ export function useViewedLineage(): ViewedLineage {
   const ctx = useContext(ViewedLineageContext);
   if (ctx === null) throw new Error("useLineage* must be used within a LineageProvider");
   return ctx;
+}
+
+// The viewed leaf's run state, off its course entry: the one word and next step every surface reads.
+// Served at the head under any mask or moment, so the last landing's stands across a re-key.
+export function useViewedRunState(): HierarchyState | null {
+  const { index } = useViewedLineage();
+  const { viewedPath } = useWorkspace();
+  const landed = useMemo(() => courseAt(index, viewedPath), [index, viewedPath]);
+  const [kept, setKept] = useState(landed);
+  if (landed !== null && landed !== kept) setKept(landed);
+  const address = viewedPath ? encodeCyclePath(viewedPath) : null;
+  return (landed ?? (kept?.address === address ? kept : null))?.state ?? null;
 }
 
 // A sidebar row's campaign, by its address.

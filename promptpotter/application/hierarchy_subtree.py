@@ -175,9 +175,7 @@ def _theta(reading: ArmReading, *, elected: bool) -> HierarchyStat | None:
         if elected
         else None
     )
-    return HierarchyStat(
-        key="ability", label="Ability θ", value=value, sub=sub, amount=ability.theta
-    )
+    return HierarchyStat(key="ability", label="Ability θ", value=value, sub=sub)
 
 
 def _accuracy(reading: ArmReading) -> HierarchyStat:
@@ -191,7 +189,6 @@ def _accuracy(reading: ArmReading) -> HierarchyStat:
         sub=None
         if scored is None
         else f"{scored}{'' if expected is None else f' of {expected}'} scored",
-        amount=accuracy,
     )
 
 

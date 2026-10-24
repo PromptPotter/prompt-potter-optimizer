@@ -488,7 +488,11 @@ def _status(stores: Stores, campaign: Campaign) -> RunStatus:
     holder = stores.campaigns.line_holder(campaign.root_hop)
     index = stores.campaigns.load(holder, moment=None)
     run = derive_run_state(stores.campaigns.cycle_dir(holder))
-    return RunStatus.of(run.run_phase, None if index is None else index.stop_reason)
+    return RunStatus.of(
+        run.run_phase,
+        None if index is None else index.stop_reason,
+        lifecycle=campaign.lifecycle_status,
+    )
 
 
 def _read(

@@ -197,8 +197,20 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
   once per course and once more for a line course with no mint record.
   <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpotter == 2 -->
   A campaign's `state` IS its line course's (`CampaignStore.line_holder`), so the two cannot disagree.
-  `RunStatus.of` has three callers until the dashboard folds into it.
-  <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 3 -->
+  `RunStatus.of` has two callers: that one, and `evidence/head_to_head.py`, whose subject is an arm.
+  <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 2 -->
+- **A run's word is the course's; the dashboard read is run CONTROL.** The state word and the next
+  step (`HierarchyState.status` / `next_step`) ride the course entry alone, worded with the campaign's
+  lifecycle, and the masthead, `OptimizerCard`, the time ray's head and the chat's frozen `run` item read
+  them through `lib/lineage.tsx::useViewedRunState`. The state is built off the HEAD index under any
+  moment, so it is one value under every mask and moment, and the hook keeps the last landing's
+  across a re-key rather than blanking. The dashboard keeps what control acts on and what
+  only the head measures: `run_phase` (its 2 s poll invalidates every slower read on a change),
+  `run_admission` and `pause` (a verb's admission moves with the producer, not only the phase), the
+  clocked `producer`, spend metering, limits and the walk. `run_standing` and `bench_score` stay too —
+  banked in `dashboard.json`, and the course's `standing` is served under the request's lens. The chat
+  freezes its `run` item on the COURSE's detach, so the word and next step it keeps are one read's.
+  <!-- probe: git grep -cE "dash\??\.(status|next_step)\b" -- webapp == 0 -->
   Run state is read at the head always: a moment replays the record, never a process.
 - **A campaign is always served.** A line course with no `CycleIndex` yet still lists its campaign,
   its state from `HierarchyState.of(run, None, …)`, its line stats absent and its `caveat` saying so —
@@ -246,9 +258,9 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
   a round, because one ledger interleaves a round's walk with its neighbours' open and close. A bare
   heartbeat is no step and takes no slot of a window — it is the gap it shortens, which the next
   step's `gap_before_s` carries — so a long open call never serves an empty window. There is no second
-  chronology shape, and no span carries offsets: a step's `facts.offset` is the moment a surface picks,
-  and a fork's birth is its course's `spawn.at_offset`, so offsets on `HierarchySpan` would be a served
-  field with no reader.
+  chronology shape. **A served field has a reader or is not served**: no span carries offsets or a close
+  time, no spawn its cut offset and no stat a raw amount, because a step's `facts.offset` is the
+  moment a surface picks and every stat is worded on the server.
   <!-- probe: git grep -cE "class (RayItem|RayResponse)\b" -- promptpotter == 0 -->
 
 ## The two blocking gates

@@ -3765,11 +3765,6 @@
         "additionalProperties": false,
         "description": "Where a fork was born on its parent's time line: the cut, as an event.",
         "properties": {
-          "at_offset": {
-            "description": "The parent ledger's offset the cut was taken at.",
-            "title": "At Offset",
-            "type": "integer"
-          },
           "at_round": {
             "anyOf": [
               {
@@ -3819,7 +3814,6 @@
         "required": [
           "parent",
           "at_round",
-          "at_offset",
           "from_candidate",
           "trigger",
           "direction",
@@ -7709,20 +7703,8 @@
       },
       "HierarchySpan": {
         "additionalProperties": false,
-        "description": "When an entry opened, last moved and closed.",
+        "description": "When an entry opened and last moved.",
         "properties": {
-          "closed_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null while the entry's run has not ended.",
-            "title": "Closed At"
-          },
           "last_at": {
             "description": "The newest activity under the entry.",
             "title": "Last At",
@@ -7735,8 +7717,7 @@
         },
         "required": [
           "opened_at",
-          "last_at",
-          "closed_at"
+          "last_at"
         ],
         "title": "HierarchySpan",
         "type": "object"
@@ -7745,18 +7726,6 @@
         "additionalProperties": false,
         "description": "One number an entry shows, worded by the server in the order it is served.",
         "properties": {
-          "amount": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The number `value` words, for a meter's geometry only: never re-worded and never re-ranked. Null where `value` words no number.",
-            "title": "Amount"
-          },
           "key": {
             "$ref": "#/components/schemas/StatKey"
           },
@@ -7786,8 +7755,7 @@
           "key",
           "label",
           "value",
-          "sub",
-          "amount"
+          "sub"
         ],
         "title": "HierarchyStat",
         "type": "object"
@@ -7803,6 +7771,11 @@
             "description": "An operator intervened by hand, so the run is no longer purely reproducible.",
             "title": "Intervened",
             "type": "boolean"
+          },
+          "next_step": {
+            "description": "What the operator does now, as `stop_reason` states it (`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. Empty while the run has not stopped, or where its reason owes nothing.",
+            "title": "Next Step",
+            "type": "string"
           },
           "pause": {
             "anyOf": [
@@ -7843,6 +7816,7 @@
           "pause",
           "admission",
           "stop_reason",
+          "next_step",
           "intervened"
         ],
         "title": "HierarchyState",
@@ -14111,11 +14085,6 @@
               }
             ]
           },
-          "next_step": {
-            "description": "What the operator does now, as the cycle's `stop_reason` states it (`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. Empty where the cycle has not stopped, or its reason states that nothing is owed.",
-            "title": "Next Step",
-            "type": "string"
-          },
           "observed": {
             "anyOf": [
               {
@@ -14287,10 +14256,6 @@
             "title": "State Since",
             "type": "string"
           },
-          "status": {
-            "$ref": "#/components/schemas/RunStatus",
-            "description": "How the cycle reads: `run_phase` and `stop_reason` as one word and one mark."
-          },
           "stop_reason": {
             "anyOf": [
               {
@@ -14356,8 +14321,6 @@
           "campaign_id",
           "cycle_id",
           "run_phase",
-          "status",
-          "next_step",
           "producer",
           "run_admission",
           "pause",
@@ -15186,7 +15149,7 @@
             "description": "The record's reading. A `running` step with no later step on its course is a call still open."
           },
           "gap_before_s": {
-            "description": "Seconds of silence before it: since the newer of the window's previous step and its own course's previous step or heartbeat. 0 where neither exists. A heartbeat takes no slot of a window, so a long open call never serves one empty.",
+            "description": "Seconds of silence before it: since the newest step or heartbeat anywhere in the family that the window knows of; 0 where none. A heartbeat takes no slot of a window, so a long open call never serves one empty.",
             "minimum": 0.0,
             "title": "Gap Before S",
             "type": "number"

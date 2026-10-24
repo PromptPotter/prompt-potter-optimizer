@@ -98,7 +98,7 @@ class RunStatus(FrozenModel):
         run_phase: RunPhase,
         stop_reason: StopReason | None,
         *,
-        lifecycle: LifecycleStatus = "active",
+        lifecycle: LifecycleStatus,
     ) -> RunStatus:
         if lifecycle == "archived":
             return cls(label=LIFECYCLE_STATUS_LABELS[lifecycle], mark="archived")

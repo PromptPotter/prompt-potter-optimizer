@@ -38,7 +38,6 @@ from promptpotter.domain.hierarchy import (
     StatKey,
 )
 from promptpotter.domain.paired_reading import READING_STATE_INFO, MeasurandUnit, PairedReading
-from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import RunStanding
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
@@ -80,7 +79,6 @@ def _spend_stat(
         label=label,
         value=f"{'≥ ' if spent.bill_is_floor else ''}${spent.billed_usd:.2f}",
         sub=sub,
-        amount=spent.billed_usd,
     )
 
 
@@ -97,7 +95,7 @@ def _rounds_stat(closed: int, cap: int | None) -> HierarchyStat:
         value = f"{closed} · no rounds axis"
     else:
         value = f"{closed} of {cap}"
-    return HierarchyStat(key="rounds", label="Rounds", value=value, sub=None, amount=closed)
+    return HierarchyStat(key="rounds", label="Rounds", value=value, sub=None)
 
 
 def lift_stat(
@@ -111,7 +109,6 @@ def lift_stat(
             label=label,
             value=READING_STATE_INFO[pair.state].label,
             sub=" · ".join(notes) or None,
-            amount=None,
         )
     est = lift.estimate
     if lift.measurand.unit is MeasurandUnit.RATE:
@@ -125,7 +122,6 @@ def lift_stat(
         label=label,
         value=value,
         sub=" · ".join([f"{against} {levels}", *notes]),
-        amount=est.value,
     )
 
 
@@ -153,7 +149,6 @@ def _line_stats(index: CycleIndex, cap: int | None, *, on_theta: bool) -> list[H
                 label="Lives",
                 value=standing.lives.bar,
                 sub=standing.lives.label,
-                amount=standing.stalls_left,
             )
         ]
     )
@@ -169,7 +164,6 @@ def _bench_stat(bench: BenchScore) -> HierarchyStat:
         if level is None
         else f"{level.value:.3f}",
         sub=bench.line,
-        amount=None if level is None else level.value,
     )
 
 
@@ -180,6 +174,7 @@ def course_entry(
     cycle_dir: Path,
     index: CycleIndex,
     *,
+    head: CycleIndex,
     moment: Moment | None,
     runs_with: CampaignRunsWith | None,
     config: CampaignConfig | None,
@@ -224,7 +219,6 @@ def course_entry(
         else CourseSpawn(
             parent=hierarchy_address(inside, hop.campaign_id, parent_id),
             at_round=fork.from_round,
-            at_offset=cut,
             from_candidate=None,
             trigger=fork.trigger,
             direction=fork.resolved_direction,
@@ -240,7 +234,8 @@ def course_entry(
         lede=None if index.standing is None else index.standing.selection_line,
         caveat=None,
         tags=tags,
-        state=HierarchyState.of(run, index, lifecycle=campaign.lifecycle_status),
+        # Run state is the head's under any moment: a replayed stop beside a live phase is no state.
+        state=HierarchyState.of(run, head, lifecycle=campaign.lifecycle_status),
         stats=[
             _spend_stat("spend", "Spend", spent, _rate_priced(spent)),
             *_line_stats(index, cap, on_theta=on_theta),
@@ -248,7 +243,6 @@ def course_entry(
         span=HierarchySpan(
             opened_at=index.created_at,
             last_at=index.updated_at,
-            closed_at=index.finished_at if run.run_phase is RunPhase.TERMINAL else None,
         ),
         children=[],
         facts=CourseFacts(
@@ -299,7 +293,7 @@ def campaign_entry(
     """*moment* replays the ledgers: a course minted after it is not in the entry."""
     held = sorted(
         (
-            (hop, index)
+            (hop, index, now)
             for hop, now in stores.campaigns.campaign_cycles(campaign.campaign_id)
             if (
                 index := now
@@ -314,7 +308,7 @@ def campaign_entry(
     runs_with = campaign_runs_with(stores, campaign)
     config = line_config(stores, campaign, holder)
     courses: dict[str, HierarchyCourse] = {}
-    for hop, index in held:
+    for hop, index, now in held:
         if depth == 0 and hop != holder:
             continue
         courses[hop.cycle_id] = course_entry(
@@ -323,6 +317,7 @@ def campaign_entry(
             campaign,
             stores.campaigns.cycle_dir(hop),
             index,
+            head=now,
             moment=moment,
             runs_with=runs_with,
             config=config if hop == holder else line_config(stores, campaign, hop),
@@ -360,8 +355,7 @@ def campaign_entry(
         ],
         span=HierarchySpan(
             opened_at=campaign.created_at,
-            last_at=max((index.updated_at for _, index in held), default=campaign.created_at),
-            closed_at=None if line is None else line.span.closed_at,
+            last_at=max((index.updated_at for _, index, _ in held), default=campaign.created_at),
         ),
         children=list(courses.values()) if depth > 0 else [],
         facts=CampaignFacts(
