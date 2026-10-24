@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 from promptpotter.domain.prompt_block import Presumption
+from promptpotter.domain.scoring import MeasuredCell, find_rank
 from promptpotter.shared.answer_text import (
     extract_boxed_number,
     extract_gsm8k_number,
@@ -57,6 +58,22 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 def _list_rr(predicted: str, ground_truth: str) -> float:
     rank = text_list_rank(predicted, ground_truth)
     return 1.0 / rank if rank else 0.0
+
+
+def _ranking_rank(facts: MeasuredCell) -> tuple[int | None, int]:
+    ranking = facts.pipeline.result_ranking or ()
+    return find_rank(ranking, facts.ground_truth), len(ranking)
+
+
+def backend_rank(facts: MeasuredCell) -> tuple[int | None, int] | None:
+    """The truth's place among the backend's candidates; ``None`` where it ranked one or none."""
+    ranking = facts.pipeline.result_ranking or ()
+    return _ranking_rank(facts) if len(ranking) > 1 else None
+
+
+def _line_rank(facts: MeasuredCell) -> tuple[int | None, int]:
+    lines = text_list_items(facts.predicted)
+    return text_list_rank(facts.predicted, facts.ground_truth), len(lines)
 
 
 def _label_match(predicted: str, ground_truth: str) -> float:
@@ -260,15 +277,14 @@ def _number_answer(read: Callable[[str], float | None]) -> Callable[[str], str]:
     def answer(text: str) -> str:
         n = read(text)
         if n is None:
-            return text.strip()
+            return ""
         return str(int(n)) if n.is_integer() else str(n)
 
     return answer
 
 
 def _list_answer(text: str) -> str:
-    items = text_list_items(text)
-    return " | ".join(items) if items else text
+    return " | ".join(text_list_items(text))
 
 
 def _math_answer(text: str) -> str:
@@ -278,24 +294,29 @@ def _math_answer(text: str) -> str:
 
 class Matcher(NamedTuple):
     score: Callable[..., float]
-    # The span `score` reads off a reply, as one string; `None` where it reads no answer text.
+    # The span `score` reads off a reply, as one string, `""` where it finds none; `None` where it
+    # reads no answer text.
     answer: Callable[[str], str] | None
     # Told to the prompt, never gated; `""` where it compares the raw text.
     note: str
     # What a prompt block may presume of a reply this matcher reads.
     admits: frozenset[Presumption]
+    # Where the truth sits in a ranking `score` reads of its own, and its width; `None` where it
+    # reads none, so its cells carry the backend's (`backend_rank`).
+    ranking: Callable[[MeasuredCell], tuple[int | None, int]] | None
 
 
 _LAST_LINE = frozenset({Presumption.LAST_LINE_ANSWER})
 
 MATCHERS: dict[str, Matcher] = {
-    "rr": Matcher(_rr, None, "", frozenset()),
+    "rr": Matcher(_rr, None, "", frozenset(), _ranking_rank),
     "gsm8k_match": Matcher(
         _gsm8k_match,
         _number_answer(extract_gsm8k_number),
         "Scoring reads the answer from the '#### N' field (else the last number in "
         "the text). End with the final number on its own line as '#### 42'.",
         _LAST_LINE,
+        None,
     ),
     "aime_match": Matcher(
         _aime_match,
@@ -304,6 +325,7 @@ MATCHERS: dict[str, Matcher] = {
         "number in the text). Put the answer in \\boxed{} on the last line — e.g. "
         "\\boxed{42}.",
         _LAST_LINE,
+        None,
     ),
     "label_match": Matcher(
         _label_match,
@@ -314,6 +336,7 @@ MATCHERS: dict[str, Matcher] = {
         "chain-of-thought, an unbolded answer leaves the label buried in the "
         "reasoning and scores as a miss; the bold lets scoring isolate it.",
         _LAST_LINE,
+        None,
     ),
     "em_match": Matcher(
         _em_match,
@@ -321,10 +344,11 @@ MATCHERS: dict[str, Matcher] = {
         "Scoring takes the LAST bolded span (the last **…** run) of the output and "
         "compares it to the gold answer after SQuAD normalization — lowercased, "
         "punctuation and the articles a/an/the removed, whitespace collapsed. Commit the "
-        "final answer on its own last line wrapped in double asterisks, as the shortest "
-        "span that answers the question — e.g. **Arthur's Magazine** — a sentence around "
-        "it, or any extra word, scores as a miss.",
+        "final answer on its own last line wrapped in double asterisks, as the exact span "
+        "the source states — e.g. **Arthur's Magazine** — a sentence around it, an extra "
+        "word or a dropped one scores as a miss.",
         _LAST_LINE,
+        None,
     ),
     "math_match": Matcher(
         _math_match,
@@ -336,6 +360,7 @@ MATCHERS: dict[str, Matcher] = {
         "asks for — e.g. \\boxed{\\frac{3}{4}} or \\boxed{44} — no units, no words and no "
         "equals sign inside the box.",
         _LAST_LINE,
+        None,
     ),
     "list_rr": Matcher(
         _list_rr,
@@ -346,6 +371,7 @@ MATCHERS: dict[str, Matcher] = {
         "numbering are stripped, so they neither help nor hurt; prose wrapped around "
         "the list makes its own line an item and pushes the real ones down.",
         frozenset(),
+        _line_rank,
     ),
     "meeting_plan_match": Matcher(
         _meeting_plan_match,
@@ -359,6 +385,7 @@ MATCHERS: dict[str, Matcher] = {
         "first sentence that breaks a rule. The answer scores when the friends validly met equal "
         "the gold plan's count, so end with 'SOLUTION:' and the itinerary alone.",
         frozenset(),
+        None,
     ),
     "blocksworld_plan_match": Matcher(
         _blocksworld_plan_match,
@@ -371,6 +398,7 @@ MATCHERS: dict[str, Matcher] = {
         "only when every goal fact holds at the end. Finish with '[PLAN]', the actions, then "
         "'[PLAN END]', with nothing else between the markers.",
         frozenset(),
+        None,
     ),
 }
 

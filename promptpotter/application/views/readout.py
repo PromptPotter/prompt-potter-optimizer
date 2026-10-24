@@ -7,7 +7,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.scoring.formula.compiler import split_scoring_block
 from promptpotter.application.views.render.ansi import (
     render_round_verdict,
     render_run_spend,
@@ -92,7 +91,6 @@ from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
 from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -123,7 +121,6 @@ class ReadoutProjection(Projection):
         sink: StatusFn | None,
         patience: int | None,
         pipeline_schema: PipelineSchema | None,
-        scoring_formula: str | None = None,
         measured_unit: MeasuredUnit = "sample",
     ) -> None:
         self._round_num = 0
@@ -131,7 +128,6 @@ class ReadoutProjection(Projection):
         self.patience = patience
         self.pipeline_schema = pipeline_schema
         self._display_tags = display_tags(pipeline_schema)
-        self.scoring_formula = scoring_formula
         self.measured_unit = measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
         self._closed: dict[int, RoundStatement] = {}
@@ -170,9 +166,6 @@ class ReadoutProjection(Projection):
             sink=sink,
             patience=campaign_config.optimization.convergence_patience,
             pipeline_schema=session.pipeline_schema,
-            scoring_formula=split_scoring_block(
-                campaign_config.scoring, judge_instrument=judge_instrument(campaign_config.judges)
-            ).per_sample,
             measured_unit=session.backend_client.measured_unit,
         )
 
@@ -445,7 +438,6 @@ class ReadoutProjection(Projection):
                 facts,
                 grade,
                 prefix=prefix,
-                scoring_formula=self.scoring_formula,
                 display_tags=self._display_tags,
             )
         )

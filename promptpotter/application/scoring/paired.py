@@ -308,7 +308,7 @@ class _Reader:
             return _graded(self._grade, cell)
         assert self._expression is not None
         try:
-            channels = cell_channels_of(cell.facts, cell.grade.fitness)
+            channels = cell_channels_of(cell.facts, cell.grade)
             return self._expression.evaluate(channels, "this cell")
         except ScoringFormulaError:
             return None

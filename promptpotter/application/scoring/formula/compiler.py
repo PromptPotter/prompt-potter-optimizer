@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable, Mapping
 from types import SimpleNamespace
 from typing import Any, Literal, NamedTuple
 
-from promptpotter.application.scoring.formula.matchers import MATCHERS, matcher_of
+from promptpotter.application.scoring.formula.matchers import MATCHERS, backend_rank, matcher_of
 from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
@@ -17,6 +17,7 @@ from promptpotter.domain.scoring import (
     TURN_SCALAR_KEYS,
     Dial,
     DialKind,
+    Grade,
     GradedCell,
     MeasuredCell,
     Scorer,
@@ -254,29 +255,31 @@ def _inner(facts: MeasuredCell, read: Callable[[InnerCellFacts], float | None]) 
     return None if inner is None else _number(read(inner))
 
 
-_CHANNEL_READERS: dict[str, Callable[[MeasuredCell, float | None], float | None]] = {
-    "fitness": lambda _facts, fitness: _number(fitness),
-    "ground_truth_rank": lambda facts, _fitness: _number(facts.ground_truth_rank),
+_CHANNEL_READERS: dict[str, Callable[[MeasuredCell, Grade | None], float | None]] = {
+    "fitness": lambda _facts, grade: None if grade is None else _number(grade.fitness),
+    "ground_truth_rank": lambda _facts, grade: (
+        None if grade is None else _number(grade.ground_truth_rank)
+    ),
     # `cost_s`, never `total_time`: a replayed row's `total_time` is zeroed.
-    "latency": lambda facts, _fitness: facts.cost_s,
-    "unworked": lambda facts, _fitness: facts.pipeline.unworked_s,
-    "bench_lift": lambda facts, _fitness: facts.pipeline.mean_bench_lift,
-    "bench_origin": lambda facts, _fitness: _inner(facts, lambda i: i.bench_origin_level),
-    "bench_final_lift": lambda facts, _fitness: _inner(facts, lambda i: i.bench_final_lift),
-    "lift": lambda facts, _fitness: _inner(facts, lambda i: i.mean_round_delta),
-    "origin": lambda facts, _fitness: _inner(facts, lambda i: i.origin_level),
-    "final_lift": lambda facts, _fitness: _inner(facts, lambda i: i.final_lift),
-    "peak_lift": lambda facts, _fitness: _inner(facts, lambda i: i.peak_lift),
-    "rounds": lambda facts, _fitness: _inner(facts, lambda i: i.rounds_ran),
-    "round_budget": lambda facts, _fitness: _inner(facts, lambda i: i.round_budget),
-    "cost": lambda facts, _fitness: _own_else_steps(
+    "latency": lambda facts, _grade: facts.cost_s,
+    "unworked": lambda facts, _grade: facts.pipeline.unworked_s,
+    "bench_lift": lambda facts, _grade: facts.pipeline.mean_bench_lift,
+    "bench_origin": lambda facts, _grade: _inner(facts, lambda i: i.bench_origin_level),
+    "bench_final_lift": lambda facts, _grade: _inner(facts, lambda i: i.bench_final_lift),
+    "lift": lambda facts, _grade: _inner(facts, lambda i: i.mean_round_delta),
+    "origin": lambda facts, _grade: _inner(facts, lambda i: i.origin_level),
+    "final_lift": lambda facts, _grade: _inner(facts, lambda i: i.final_lift),
+    "peak_lift": lambda facts, _grade: _inner(facts, lambda i: i.peak_lift),
+    "rounds": lambda facts, _grade: _inner(facts, lambda i: i.rounds_ran),
+    "round_budget": lambda facts, _grade: _inner(facts, lambda i: i.round_budget),
+    "cost": lambda facts, _grade: _own_else_steps(
         _inner(facts, lambda i: i.sent_usd), _step_cost(facts.pipeline.step_tokens)
     ),
-    "tokens": lambda facts, _fitness: _own_else_steps(
+    "tokens": lambda facts, _grade: _own_else_steps(
         _inner(facts, lambda i: i.tokens), _step_tokens(facts.pipeline.step_tokens)
     ),
     # Characters, not tokens: no tokenizer ships.
-    "target_prompt_chars": lambda facts, _fitness: _number(facts.pipeline.target_prompt_chars),
+    "target_prompt_chars": lambda facts, _grade: _number(facts.pipeline.target_prompt_chars),
 }
 
 # Deliberately NOT channels: a predicate answers for ANY cell, measured or not.
@@ -336,28 +339,28 @@ assert all(term.direction == "low" for term in CELL_TERMS.values() if term.dial 
 )
 
 
-def cell_channels_of(facts: MeasuredCell, fitness: float | None) -> dict[str, float]:
+def cell_channels_of(facts: MeasuredCell, grade: Grade | None) -> dict[str, float]:
     """A key absent from the result is a channel the cell cannot answer."""
     out: dict[str, float] = {}
     for name, read in _CHANNEL_READERS.items():
-        value = read(facts, fitness)
+        value = read(facts, grade)
         if value is not None:
             out[name] = value
     return out
 
 
-def cell_namespace(facts: MeasuredCell) -> dict[str, Any]:
+def cell_namespace(facts: MeasuredCell, grade: Grade) -> dict[str, Any]:
     """An absent term stays unbound: a bound 0 would score a measurement nobody took."""
-    # ``ground_truth_rank`` is bound even at ``None``, which ``rr`` scores as a miss.
     ns: dict[str, Any] = {
-        "ground_truth_rank": facts.ground_truth_rank,
         "error": facts.error,
         "predicted": facts.predicted,
         "ground_truth": facts.ground_truth,
         **{name: m.score for name, m in MATCHERS.items()},
     }
-    if facts.n_candidates is not None:
-        ns["n_candidates"] = facts.n_candidates
+    # Inside a ranking the rank is bound even at ``None``, which ``rr`` scores as a miss.
+    if grade.n_candidates is not None:
+        ns["ground_truth_rank"] = grade.ground_truth_rank
+        ns["n_candidates"] = grade.n_candidates
     if account := TokenAccount.from_step_tokens(facts.pipeline.step_tokens):
         ns["input_tokens"] = account.input
         ns["output_tokens"] = account.output
@@ -385,17 +388,14 @@ CELL_INTRINSIC_NAMES: frozenset[str] = frozenset(
 )
 """A ``pipeline_data`` key colliding with one of these is SILENTLY dropped by ``cell_namespace``'s splat."""
 
+# Maximal: a thinner probe would under-report and let a real collision through.
 _INTRINSIC_PROBE = MeasuredCell.from_wire(
-    {
-        "sample_key": "_",
-        # Maximal: a thinner probe would under-report and let a real collision through.
-        "n_candidates": 0,
-        "pipeline_data": {"step_tokens": {"_": {}}},
-    }
+    {"sample_key": "_", "pipeline_data": {"step_tokens": {"_": {}}}}
 )
+_RANKED_PROBE = Grade(None, None, None, None, None, 0)
 
 assert (
-    set(cell_namespace(_INTRINSIC_PROBE)) - set(_INTRINSIC_PROBE.pipeline.terms())
+    set(cell_namespace(_INTRINSIC_PROBE, _RANKED_PROBE)) - set(_INTRINSIC_PROBE.pipeline.terms())
     == CELL_INTRINSIC_NAMES
 ), "CELL_INTRINSIC_NAMES drifted from what cell_namespace binds"
 assert not (TURN_SCALAR_KEYS & CELL_INTRINSIC_NAMES), (
@@ -404,10 +404,10 @@ assert not (TURN_SCALAR_KEYS & CELL_INTRINSIC_NAMES), (
 )
 
 
-def objective_namespace(facts: MeasuredCell, fitness: float) -> dict[str, Any]:
+def objective_namespace(facts: MeasuredCell, grade: Grade) -> dict[str, Any]:
     """The per-sample side wins every collision: one term never means two things across formulas."""
     health = {name: read(facts) for name, read in _ROW_HEALTH.items()}
-    return {**cell_channels_of(facts, fitness), **health, **cell_namespace(facts)}
+    return {**cell_channels_of(facts, grade), **health, **cell_namespace(facts, grade)}
 
 
 _LABEL_TERM = "ground_truth"
@@ -454,24 +454,34 @@ def compile_scorer(
 
     scorer_id = auto_scorer_id(per_sample, per_cell, judge_instrument=judge_instrument)
     matcher = matcher_of(per_sample)
+    span = None if matcher is None else MATCHERS[matcher].answer
+    own = None if matcher is None else MATCHERS[matcher].ranking
+    # A rank is a position against a LABEL: a labelless cell sits in no ranking.
+    ranking = None if verifier_graded else backend_rank if own is None else own
 
-    def _fitness(facts: MeasuredCell) -> float:
+    def _fitness(facts: MeasuredCell, grade: Grade) -> float:
         query = facts.query[:80]
-        value = compiled.evaluate(cell_namespace(facts), f"query {query!r}")
+        value = compiled.evaluate(cell_namespace(facts, grade), f"query {query!r}")
         return clamp_unit_score(value, formula=per_sample, subject=f"query {query!r}")
 
     if not per_cell:
         return Scorer(
-            id=scorer_id, per_cell=None, matcher=matcher, fitness=_fitness, objective=None
+            id=scorer_id,
+            per_cell=None,
+            matcher=matcher,
+            span=span,
+            ranking=ranking,
+            fitness=_fitness,
+            objective=None,
         )
 
     composite = compile_expression(per_cell, source="per_cell scoring formula")
     if verifier_graded:
         _refuse_label_formula(per_cell, composite.names, source="per_cell scoring formula")
 
-    def _objective(facts: MeasuredCell, fitness: float) -> float:
+    def _objective(facts: MeasuredCell, grade: Grade) -> float:
         subject = f"query {facts.query[:80]!r}"
-        namespace = objective_namespace(facts, fitness)
+        namespace = objective_namespace(facts, grade)
         charged = clamp_unit_score(
             composite.evaluate(namespace, subject), formula=per_cell, subject=subject
         )
@@ -484,7 +494,13 @@ def compile_scorer(
         return charged + MISS_COST_SHARE * (solved - charged)
 
     return Scorer(
-        id=scorer_id, per_cell=per_cell, matcher=matcher, fitness=_fitness, objective=_objective
+        id=scorer_id,
+        per_cell=per_cell,
+        matcher=matcher,
+        span=span,
+        ranking=ranking,
+        fitness=_fitness,
+        objective=_objective,
     )
 
 
@@ -548,7 +564,7 @@ def origin_anchors(rows: Iterable[GradedCell]) -> dict[str, float]:
     for cell in rows:
         if cell.facts.errored:
             continue
-        for name, value in cell_channels_of(cell.facts, cell.grade.fitness).items():
+        for name, value in cell_channels_of(cell.facts, cell.grade).items():
             if CELL_TERMS[name].dial == "anchored":
                 carried.setdefault(name, []).append(value)
     levels = {name: statistics.median(values) for name, values in carried.items()}

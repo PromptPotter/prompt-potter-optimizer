@@ -52,7 +52,7 @@ BASELINE = {
     # Leaves of `OptSearchPoint` — what a run is handed.
     "opt_search_point_fields": 10,
     # Leaves of `CycleResult` — what a run produces.
-    "cycle_result_fields": 825,
+    "cycle_result_fields": 826,
     # Parameters annotated `Any`.
     "any_params": 44,
     # `dict[str, Any]` maps declared in `domain/`.

@@ -634,7 +634,15 @@ class _CutAfter:
         return StopSignal(self.name, "eliminated", {"queries_scored": len(results)})
 
 
-_HIT = Scorer(id="hit", per_cell=None, matcher=None, fitness=lambda _row: 1.0, objective=None)
+_HIT = Scorer(
+    id="hit",
+    per_cell=None,
+    matcher=None,
+    span=None,
+    ranking=None,
+    fitness=lambda _row, _grade: 1.0,
+    objective=None,
+)
 
 
 def _searching(usd_per_query: float) -> Any:

@@ -56,7 +56,7 @@ def cell_channels(rows: Iterable[GradedCell]) -> dict[str, dict[str, float]]:
     """Keyed by the row's `query`: a per-campaign `position` names a different cell across campaigns."""
     sums: dict[str, dict[str, list[float]]] = {}
     for row in rows:
-        answered = cell_channels_of(row.facts, row.grade.fitness)
+        answered = cell_channels_of(row.facts, row.grade)
         # No key for a row that answered nothing: an empty map reads as unscorable, not unmeasured.
         if not answered:
             continue

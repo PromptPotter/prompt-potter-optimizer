@@ -445,7 +445,6 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     for sid in (1, 2):
         row = {
             **_row(f"q{sid}"),
-            "ground_truth_rank": 0,
             "pipeline_data": {
                 "terminal_node": "llm_only",
                 "diagnostics": {"warnings": []},

@@ -163,7 +163,6 @@ def render_round_stats(
     # No per-node tally: `terminal_node` is the deepest node each sample REACHED, constant on a healthy round.
     if fold is not None and fold.degraded and fold.walked:
         lines.append(_node_line(f"Degradation: {fold.degraded / fold.walked:.0%}"))
-    # Absent on an llm_only-style pipeline, which ranks nothing.
     if fold is not None and (recall := fold.recall_at):
         lines.append(
             _node_line("Recall: " + " ".join(f"top-{k}={share:.0%}" for k, share in recall.items()))

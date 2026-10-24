@@ -256,6 +256,10 @@ def _gate_facts(health: DegradationHealth) -> list[DecisionFact]:
                 f"{health.transient_count} transient",
             )
         )
+    if health.output_ceiling_count > 0:
+        facts.append(
+            DecisionFact(label="Ran to the output ceiling", value=str(health.output_ceiling_count))
+        )
     if health.dominant_node:
         facts.append(DecisionFact(label="Worst node", value=health.dominant_node))
     if health.last_error:

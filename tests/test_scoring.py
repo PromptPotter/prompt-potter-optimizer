@@ -499,8 +499,6 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
             "env_reward": 0.25,
         },
         "cached": True,
-        "ground_truth_rank": 3,
-        "n_candidates": 5,
         "answer": "file.a1",
         "retry_of_degraded": True,
         "degraded_obs_count": 2,
@@ -512,10 +510,6 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     assert (facts.cost_s, facts.elapsed_s, facts.shown_s) == (1.5, 2.0, 1.5), (
         "latency reads the step timings, the elapsed the total"
     )
-    unranked = MeasuredCell.from_wire({**banked, "ground_truth_rank": None}).wire()
-    assert unranked["ground_truth_rank"] is None and unranked["n_candidates"] == 5, (
-        "an absent rank stays absent beside the facts that are present"
-    )
     usage = StepUsage(
         input=3, output=4, estimated=True, cost_usd=0.5, model="m", reasoning=0, cache_read=0
     )
@@ -526,7 +520,6 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         sample_key="k",
         predicted="p",
         cached=True,
-        n_candidates=3,
         retry_of_degraded=True,
         rerun_comparison={"hit_change": "MISS->HIT", "rank_change": None, "improved": True},
         pipeline=PipelineData(
@@ -557,6 +550,25 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     assert (graded.grade.fitness, graded.grade.unscored) == (0.25, None), "the stale grade stood"
     assert graded.wire() == {**answered.wire(), "fitness": 0.25, "objective": 0.25}, (
         "a graded cell is its facts plus this formula's grade"
+    )
+
+    def replied(predicted: str, *ranking: str) -> MeasuredCell:
+        pipeline = dataclasses.replace(answered.pipeline, result_ranking=ranking)
+        return dataclasses.replace(answered, predicted=predicted, pipeline=pipeline)
+
+    blob, ranked = replied("Weigh it.\n**a**", "Weigh it.\n**a**"), replied("x", "x", "a")
+    readings = [
+        (read.ground_truth_rank, read.n_candidates, read.fitness)
+        for formula, row in (
+            ("label_match(predicted, ground_truth)", blob),
+            ("list_rr(predicted, ground_truth)", blob),
+            ("label_match(predicted, ground_truth)", ranked),
+            ("rr(ground_truth_rank)", ranked),
+        )
+        for read in [compile_scorer(formula, verifier_graded=False).grade(row).grade]
+    ]
+    assert readings == [(None, None, 1.0), (2, 2, 0.5), (2, 2, 0.0), (2, 2, 0.5)], (
+        "a reply's lines rank only under the formula reading them; the backend's ranking always"
     )
     composed = compile_scorer("skill_opened", "fitness * 0.5", verifier_graded=True)
 

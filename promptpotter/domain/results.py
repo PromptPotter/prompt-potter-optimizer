@@ -109,7 +109,7 @@ class CellFold(FrozenModel):
     composite_fitness: float | None
     deprecated: int
     degraded: int
-    # :func:`recall_at`; empty where the backend ranks nothing.
+    # :func:`recall_at`; empty where the formula reads no ranking.
     recall_at: dict[int, float]
 
 
@@ -343,9 +343,10 @@ def unscoreable_cells(results: Iterable[GradedCell]) -> int:
 
 
 def recall_at(results: Iterable[GradedCell]) -> dict[int, float]:
-    ranks = [r.facts.ground_truth_rank for r in results if not r.facts.errored]
-    if not any(rank is not None for rank in ranks):
+    answered = [r.grade for r in results if not r.facts.errored]
+    if all(grade.n_candidates is None for grade in answered):
         return {}
+    ranks = [grade.ground_truth_rank for grade in answered]
     return {
         k: sum(1 for rank in ranks if rank is not None and rank <= k) / len(ranks) for k in (1, 5)
     }
@@ -791,6 +792,8 @@ class DegradationHealth(FrozenModel):
     not_attempted: int = 0
     # Sent and measured, no verdict (the formula named a term the row lacks): in ``samples``, no rate.
     unscored: int = 0
+    # Answers cut at the output-token ceiling, scored as written. REPORTED, never graded.
+    output_ceiling_count: int = 0
     # ``None`` where the answer space makes collapse meaningless. REPORTED, never graded.
     answer_modal_share: float | None = None
     degraded_rate: float

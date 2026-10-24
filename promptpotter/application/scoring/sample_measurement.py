@@ -14,7 +14,6 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
-from promptpotter.application.scoring.row_diagnostics import rank_ground_truth
 from promptpotter.domain.pipeline_schema import LLMSpendBound, WebSpendBound
 from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
 from promptpotter.domain.sample import Sample
@@ -498,7 +497,6 @@ async def measure_sample(
                 "Backend returned ERROR as candidate — pipeline internal failure for this query.",
                 category=ErrorCategory.PIPELINE,
             )
-        gt_rank, n_candidates = rank_ground_truth(ranked, predicted, ground_truth)
 
         pd = _observations(data, ranked, pipeline_schema, spent)
         # The envelope's final reading, taken AFTER its scope closed.
@@ -516,8 +514,6 @@ async def measure_sample(
                     spent.step_tokens, data, pipeline_schema, wire_params, pairs
                 ),
             ),
-            ground_truth_rank=gt_rank,
-            n_candidates=n_candidates,
         )
 
         # Banked HERE and top-level: a replay never re-enters this function, and a formula names no nested value.
@@ -684,12 +680,12 @@ def _unmeasured(sample: Sample, exc: Exception) -> MeasuredCell:
 def compare_rerun(
     cached_result: MeasuredCell, rerun_result: MeasuredCell, scorer: Scorer
 ) -> RerunComparison:
-    cached_hit = scorer.grade(cached_result).hit
-    rerun_hit = scorer.grade(rerun_result).hit
+    cached, rerun = scorer.grade(cached_result), scorer.grade(rerun_result)
+    cached_hit, rerun_hit = cached.hit, rerun.hit
     hit_change = f"{'HIT' if cached_hit else 'MISS'}->{'HIT' if rerun_hit else 'MISS'}"
 
-    cached_rank = cached_result.ground_truth_rank
-    rerun_rank = rerun_result.ground_truth_rank
+    cached_rank = cached.grade.ground_truth_rank
+    rerun_rank = rerun.grade.ground_truth_rank
     rank_change = (
         f"{cached_rank}->{rerun_rank}"
         if cached_rank is not None and rerun_rank is not None

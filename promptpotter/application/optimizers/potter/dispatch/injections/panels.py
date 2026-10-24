@@ -4,7 +4,7 @@ import math
 import re
 import zlib
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise, zip_longest
 from typing import Any, NamedTuple
@@ -42,7 +42,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
-from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
 from promptpotter.domain.candidate_diff import (
@@ -68,7 +67,7 @@ from promptpotter.domain.results import (
     overlap_line,
     triggered_rates,
 )
-from promptpotter.domain.results_health import evidence_starved_node
+from promptpotter.domain.results_health import evidence_starved_node, ran_to_output_ceiling
 from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.scoring import (
     CellSheet,
@@ -79,6 +78,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.spend import TokenAccount
+from promptpotter.shared.answer_text import tail
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.statistics import min_detectable_effect
 
@@ -178,7 +178,7 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
                 extras.append(f"gt_in_ranked={s.gt_in_ranked}")
             extra_str = f" | {', '.join(extras)}" if extras else ""
             s_lines.append(
-                f"  MISS [{s.terminal_node}] {s.query[:70]} → {s.predicted[:60]}"
+                f"  MISS [{s.terminal_node}] {s.query[:70]} → {s.predicted}"
                 f" (GT: {s.ground_truth[:60]}, {rank_str}{extra_str})"
             )
         parts.append("\n".join(s_lines))
@@ -470,13 +470,27 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
         if r.facts.verifier_graded:
             parts.append(f"VERIFIER SCORE: {r.grade.fitness}")
         else:
-            predicted = _head_at_line(r.facts.predicted, TRANSCRIPT_PREDICTED_CAP)
-            gt = r.facts.ground_truth[:60]
-            parts.append(f"PREDICTED: {predicted}\nGROUND TRUTH: {gt}")
+            scored, reply = _answer_read(r, TRANSCRIPT_PREDICTED_CAP)
+            lines = [] if scored is None else [f"SCORED: {scored}"]
+            lines.append(f"GROUND TRUTH: {r.facts.ground_truth[:60]}")
+            if reply is not None:
+                lines.append(f"REPLY ENDS: {reply}")
+            parts.append("\n".join(lines))
+        if ran_to_output_ceiling(r.facts):
+            parts.append(
+                "RAN TO THE OUTPUT CEILING — the reply hit its token limit before it finished."
+            )
         if verdict := _judge_verdict(r):
             parts.append(verdict)
         sections.append(Item("\n".join(parts), trusted=False, quotes=frozenset({r.key})))
     return sections
+
+
+def _answer_read(cell: GradedCell, cap: int) -> tuple[str | None, str | None]:
+    span, reply = cell.grade.span, tail(cell.facts.predicted, cap)
+    if span is None:
+        return None, reply
+    return span[:cap] or "(no answer span)", None if reply == " ".join(span.split()) else reply
 
 
 def _judge_verdict(cell: GradedCell) -> str:
@@ -630,7 +644,9 @@ def _errored(b: InjectionBundle) -> list[GradedCell]:
 
 
 def _predicted_counts(cells: Sequence[GradedCell]) -> Counter[str]:
-    return Counter(c.facts.predicted for c in cells if c.facts.predicted)
+    # A formula reading no answer text compares the reply itself.
+    said = (c.facts.predicted if c.grade.span is None else c.grade.span for c in cells)
+    return Counter(answer for answer in said if answer)
 
 
 def _tally(counts: Counter[str], total: int, *, rows: int | None = None) -> str:
@@ -728,19 +744,14 @@ def _contains(outer: tuple[str, ...], inner: tuple[str, ...]) -> bool:
     return any(outer[i : i + n] == inner for i in range(len(outer) - n + 1))
 
 
-def _span_answer(b: InjectionBundle) -> Callable[[str], str] | None:
-    """The span the matcher scores, where an extent can miss: a label answer has none to overlap."""
-    matcher = b.cycle_slice.matcher
-    if matcher is None or _no_labels(b) or enumerable_truth_labels(b.trajectory_results):
-        return None
-    return MATCHERS[matcher].answer
+def _extent_can_miss(b: InjectionBundle) -> bool:
+    """A label answer has no extent to overlap."""
+    return not _no_labels(b) and not enumerable_truth_labels(b.trajectory_results)
 
 
-def _span_near_miss(answer: Callable[[str], str] | None, cell: GradedCell) -> bool:
+def _span_near_miss(cell: GradedCell) -> bool:
     """The answer and the truth share a contiguous word span: the reasoning landed, the extent did not."""
-    if answer is None:
-        return False
-    said, true = _words(answer(cell.facts.predicted)), _words(cell.facts.ground_truth)
+    said, true = _words(cell.grade.span or ""), _words(cell.facts.ground_truth)
     if not said or not true:
         return False
     return _contains(said, true) if len(said) >= len(true) else _contains(true, said)
@@ -756,8 +767,8 @@ def _shown_misses(b: InjectionBundle) -> list[tuple[float | None, GradedCell]]:
     ordered = _ordered_misses(b)
     if clustered := _cluster_rows(b):
         return [(d, r) for d, r in ordered if b.slot_of[r.key] in clustered]
-    answer = _span_answer(b)
-    near = [(d, r) for d, r in ordered if _span_near_miss(answer, r)]
+    extent = _extent_can_miss(b)
+    near = [(d, r) for d, r in ordered if extent and _span_near_miss(r)]
     near_keys = {r.key for _, r in near}
     tied = _tied_deltas(ordered)
     rest = [(d, r) for d, r in ordered if r.key not in near_keys]
@@ -769,10 +780,13 @@ def _shown_misses(b: InjectionBundle) -> list[tuple[float | None, GradedCell]]:
     return [*near, *read, *pinned, *uncarried][:MISS_ROWS_CAP]
 
 
-def _last_step(trace: str, cap: int) -> str:
-    """The tail: a trace's wrong step is usually its conclusion."""
-    text = " ".join(trace.split())
-    return text if len(text) <= cap else "…" + text[-cap:]
+def _miss_outcome(r: GradedCell) -> str:
+    scored, reply = _answer_read(r, MISS_PREDICTED_CAP)
+    return (
+        ("" if scored is None else f" | scored: {scored}")
+        + f" | true: {r.facts.ground_truth[:MISS_GT_CAP]}"
+        + ("" if reply is None else f" | reply ends: {reply}")
+    )
 
 
 def _miss_row(
@@ -787,17 +801,13 @@ def _miss_row(
         f"  [#{b.slot_of[r.key]}] "
         + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
         + f" | {_query_stem(r, MISS_QUERY_CAP)}"
-        + (
-            _verifier_outcome(r)
-            if verifier
-            else f" | said: {r.facts.predicted[:MISS_PREDICTED_CAP]}"
-            f" | true: {r.facts.ground_truth[:MISS_GT_CAP]}"
-        )
+        + (_verifier_outcome(r) if verifier else _miss_outcome(r))
+        + (" | RAN TO THE OUTPUT CEILING" if ran_to_output_ceiling(r.facts) else "")
     )
     if not (trace := r.facts.pipeline.reasoning_trace):
         return Item(row, trusted=False)
     # A row whose transcript is PLACED is not stepped twice; one the budget dropped keeps its step.
-    stepped = f"{row} | last step: {_last_step(trace, MISS_STEP_CAP)}"
+    stepped = f"{row} | last step: {tail(trace, MISS_STEP_CAP)}"
     return Item(stepped, trusted=False, if_quoted=(r.key, row))
 
 
@@ -829,8 +839,8 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
     tied = _tied_deltas(ordered)
     shown = _shown_misses(b)
     clustered = bool(_cluster_rows(b))
-    answer = None if clustered else _span_answer(b)
-    near = sum(1 for _, r in shown if _span_near_miss(answer, r))
+    extent = not clustered and _extent_can_miss(b)
+    near = sum(1 for _, r in shown if extent and _span_near_miss(r))
     # One row per miss, never a tally by label: a cluster is a MECHANISM, and only the stem and
     # the last step can show one.
     rows_out = [_miss_row(b, r, delta, tied, verifier=verifier) for delta, r in shown]
@@ -852,7 +862,15 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
         f"FAILING SAMPLES ({len(rows)} still unsolved{held} — latest outcome per "
         f"{b.measured_unit} across every configuration tried; {'; '.join(order)}):"
     )
-    out = [Item(header), *rows_out]
+    out = [Item(header)]
+    if ceiling := sum(1 for r in rows if ran_to_output_ceiling(r.facts)):
+        out.append(
+            Item(
+                f"{ceiling} of the {len(rows)} RAN TO THE OUTPUT CEILING: each reply hit its token "
+                "limit before it finished, so what was scored is wherever it stopped."
+            )
+        )
+    out.extend(rows_out)
     if errored:
         out.append(
             Item(

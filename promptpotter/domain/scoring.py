@@ -253,9 +253,6 @@ class MeasuredCell:
         default_factory=PipelineData, metadata=always_as("pipeline_data")
     )
     cached: bool = field(default=False, metadata=ALWAYS)
-    # A ``None`` rank beside a count is a value: the truth was not in the ranking.
-    ground_truth_rank: int | None = field(default=None, metadata=BY_HAND)
-    n_candidates: int | None = None
     # The archive's address, ``{cell file}.{answer id}``; ``None`` where nothing was filed.
     answer: str | None = None
     retry_of_deprecated_cache: bool = False
@@ -274,15 +271,11 @@ class MeasuredCell:
         key = row.get("sample_key")
         if not isinstance(key, str) or not key:
             raise KeyError(f"a measured cell names its sample; this record carries {key!r}")
-        rank = row.get("ground_truth_rank")
         return _CELL.read(
             row,
             sample_key=key,
             error_category=(
                 (error_category(row) or ErrorCategory.UNKNOWN) if is_error_result(row) else None
-            ),
-            ground_truth_rank=(
-                None if rank is None else whole(rank, "MeasuredCell.ground_truth_rank")
             ),
         )
 
@@ -290,8 +283,6 @@ class MeasuredCell:
         out = _CELL.write(self)
         if self.error_category is not None:
             out["error_category"] = self.error_category.value
-        if self.n_candidates is not None or self.ground_truth_rank is not None:
-            out["ground_truth_rank"] = self.ground_truth_rank
         return out
 
     def ledger_wire(self) -> dict[str, object]:
@@ -371,23 +362,38 @@ class Grade(NamedTuple):
     fitness: float | None
     objective: float | None
     unscored: str | None
+    # What the matcher compared to the truth; `None` where the formula reads no answer text.
+    span: str | None
+    # Where the truth sits in the ranking the formula reads, and its width; both `None` where it
+    # reads none. A `None` rank beside a width is a value: the truth was not in the ranking.
+    ground_truth_rank: int | None
+    n_candidates: int | None
 
     @classmethod
     def from_wire(cls, row: Mapping[str, object]) -> Grade:
-        fitness, objective, unscored = (row.get(key) for key in cls._fields)
+        fitness, objective, unscored, span, rank, width = (row.get(key) for key in cls._fields)
         return cls(
             None if fitness is None else real(fitness, "Grade.fitness"),
             None if objective is None else real(objective, "Grade.objective"),
             None if unscored is None else text(unscored, "Grade.unscored"),
+            None if span is None else text(span, "Grade.span"),
+            None if rank is None else whole(rank, "Grade.ground_truth_rank"),
+            None if width is None else whole(width, "Grade.n_candidates"),
         )
 
     def wire(self) -> dict[str, object]:
         if self.unscored is not None:
             return {"unscored": self.unscored}
-        return {"fitness": self.fitness, "objective": self.objective}
+        out: dict[str, object] = {"fitness": self.fitness, "objective": self.objective}
+        if self.span is not None:
+            out["span"] = self.span
+        if self.n_candidates is not None:
+            out["ground_truth_rank"] = self.ground_truth_rank
+            out["n_candidates"] = self.n_candidates
+        return out
 
 
-_ERRORED = Grade(0.0, 0.0, None)
+_ERRORED = Grade(0.0, 0.0, None, None, None, None)
 
 GRADE_KEYS: frozenset[str] = frozenset(Grade._fields)
 
@@ -544,21 +550,29 @@ class Scorer:
     per_cell: str | None
     # The one matcher ``per_sample`` calls, which decides what a prediction's answer is.
     matcher: str | None
-    fitness: Callable[[MeasuredCell], float]
+    # That matcher's span: what its score reads off a reply.
+    span: Callable[[str], str] | None
+    # Where the truth sits in the ranking the formula reads, and its width; `None` on a cell in none.
+    ranking: Callable[[MeasuredCell], tuple[int | None, int] | None] | None
+    fitness: Callable[[MeasuredCell, Grade], float]
     # Reads the cell WITH its fitness: every shipped composite names it.
-    objective: Callable[[MeasuredCell, float], float] | None
+    objective: Callable[[MeasuredCell, Grade], float] | None
 
     def grade(self, facts: MeasuredCell) -> GradedCell:
         """Only ``ScoringTermMissingError`` resolves to UNSCORED; its parent halts loud."""
         if facts.errored:
             return GradedCell.of(facts, _ERRORED)
+        ranked = None if self.ranking is None else self.ranking(facts)
+        rank, width = (None, None) if ranked is None else ranked
+        read = Grade(None, None, None, None, rank, width)
         try:
-            fitness = self.fitness(facts)
+            read = read._replace(fitness=self.fitness(facts, read))
             # In this order: the composite reads the correctness it is composed OF.
-            objective = fitness if self.objective is None else self.objective(facts, fitness)
+            objective = read.fitness if self.objective is None else self.objective(facts, read)
         except ScoringTermMissingError as exc:
-            return GradedCell.of(facts, Grade(None, None, str(exc)))
-        return GradedCell.of(facts, Grade(fitness, objective, None))
+            return GradedCell.of(facts, Grade(None, None, str(exc), None, None, None))
+        span = None if self.span is None else self.span(facts.predicted)
+        return GradedCell.of(facts, read._replace(objective=objective, span=span))
 
     def sheet(self, facts: Iterable[MeasuredCell]) -> CellSheet:
         return CellSheet(self.id, tuple(self.grade(cell) for cell in facts))
@@ -581,6 +595,16 @@ def extract_item_label(c: Any) -> str:
     if isinstance(c, dict):
         return str(c.get("candidate", c))
     return c[0] if isinstance(c, (list, tuple)) else str(c)
+
+
+@shapes_optimizer_prompt
+def find_rank(items: Sequence[Any], ground_truth: str) -> int | None:
+    if not items or not ground_truth:
+        return None
+    for i, c in enumerate(items):
+        if extract_item_label(c) == ground_truth:
+            return i + 1
+    return None
 
 
 @shapes_optimizer_prompt

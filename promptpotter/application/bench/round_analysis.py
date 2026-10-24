@@ -9,7 +9,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
 from promptpotter.domain.round_diagnostics import NearMiss, RoundDiagnostics, SampleDiag
-from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.shared.answer_text import tail
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -47,15 +47,16 @@ def compute_round_diagnostics(
 def _rank_analysis(
     results: Sequence[GradedCell],
 ) -> tuple[dict[str, int], dict[int, float], list[NearMiss], int]:
-    answered = [r.facts for r in results if not r.facts.errored]
+    answered = [r for r in results if not r.facts.errored]
     n_valid = len(answered)
-    # A rank is a position against a LABEL: with none, absence, never `not_found` and a 0.0 top-k.
-    if all_verifier_graded(r.facts.ground_truth for r in results):
+    # A formula reading no ranking leaves absence, never `not_found` and a 0.0 top-k.
+    ranked = [r for r in answered if r.grade.n_candidates is not None]
+    if not ranked:
         return {}, {}, [], n_valid
-    ranks = [facts.ground_truth_rank for facts in answered]
+    ranks = [r.grade.ground_truth_rank for r in ranked]
     buckets: dict[str, int] = dict.fromkeys(_RANK_BUCKET_KEYS, 0)
     near_misses: list[NearMiss] = []
-    for facts, rank in zip(answered, ranks, strict=True):
+    for facts, rank in zip((r.facts for r in ranked), ranks, strict=True):
         if rank == 1:
             buckets["1"] += 1
         elif rank is not None and rank <= 10:
@@ -65,7 +66,7 @@ def _rank_analysis(
                     query=facts.query[:80],
                     ground_truth=facts.ground_truth[:60],
                     rank=rank,
-                    predicted=(facts.predicted or "?")[:60],
+                    predicted=tail(facts.predicted or "?", 60),
                 )
             )
         elif rank is not None and rank <= 20:
@@ -73,10 +74,9 @@ def _rank_analysis(
         else:
             buckets["not_found"] += 1
     top_k: dict[int, float] = {}
-    if n_valid:
-        for k in _TOP_K_LEVELS:
-            in_top_k = sum(1 for rank in ranks if rank is not None and rank <= k)
-            top_k[k] = in_top_k / n_valid
+    for k in _TOP_K_LEVELS:
+        in_top_k = sum(1 for rank in ranks if rank is not None and rank <= k)
+        top_k[k] = in_top_k / len(ranks)
 
     return buckets, top_k, near_misses, n_valid
 
@@ -111,8 +111,8 @@ def _sample_diagnostics(
             SampleDiag(
                 query=facts.query[:80],
                 ground_truth=facts.ground_truth[:60],
-                predicted=(facts.predicted or "?")[:60],
-                rank=facts.ground_truth_rank,
+                predicted=tail(facts.predicted or "?", 60),
+                rank=r.grade.ground_truth_rank,
                 terminal_node=terminal_node(facts) or UNKNOWN_STEP,
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.pipeline_schema import NodeRole
-from promptpotter.domain.scoring import PipelineData, extract_item_label, is_verifier_graded
-from promptpotter.shared.answer_text import text_list_items, text_list_rank
+from promptpotter.domain.scoring import PipelineData, find_rank, is_verifier_graded
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
@@ -16,24 +14,6 @@ shapes_optimizer_prompt(__name__)
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.scoring import GradedCell, MeasuredCell
-
-
-def rank_ground_truth(
-    ranked: Sequence[Any], predicted: str, ground_truth: str
-) -> tuple[int | None, int]:
-    # A node emitting its whole list as ONE text blob (``llm_only``): ``predicted`` IS that list.
-    if len(ranked) == 1 and "\n" in predicted:
-        return text_list_rank(predicted, ground_truth), len(text_list_items(predicted))
-    return find_rank(list(ranked), ground_truth), len(ranked)
-
-
-def find_rank(items: list[Any], ground_truth: str) -> int | None:
-    if not items or not ground_truth:
-        return None
-    for i, c in enumerate(items):
-        if extract_item_label(c) == ground_truth:
-            return i + 1
-    return None
 
 
 def judge_readings(facts: MeasuredCell) -> list[tuple[str, str, str]]:

@@ -490,7 +490,15 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     # Traced: every round's ended-on individual re-read on ONE scale, whatever its election read.
     bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(12)]
-    scorer = Scorer(id="acc", per_cell=None, matcher=None, fitness=lambda _row: 0.0, objective=None)
+    scorer = Scorer(
+        id="acc",
+        per_cell=None,
+        matcher=None,
+        span=None,
+        ranking=None,
+        fitness=lambda _row, _grade: 0.0,
+        objective=None,
+    )
 
     solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False)], name="ds")
 

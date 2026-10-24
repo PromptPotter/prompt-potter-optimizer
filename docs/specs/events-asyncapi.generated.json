@@ -2940,6 +2940,11 @@
             "title": "Not Attempted",
             "type": "integer"
           },
+          "output_ceiling_count": {
+            "default": 0,
+            "title": "Output Ceiling Count",
+            "type": "integer"
+          },
           "prior_clean_rounds": {
             "title": "Prior Clean Rounds",
             "type": "integer"

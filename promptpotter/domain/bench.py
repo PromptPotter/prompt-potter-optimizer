@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cached_property
 from typing import Literal, NamedTuple, Self, get_args
 
 from pydantic import Field, model_validator
@@ -104,7 +105,7 @@ class PartitionRecord(FrozenModel):
     demo_ids: list[int]
     timestamp: str = Field(default_factory=utcnow_iso)
 
-    @property
+    @cached_property
     def bank_ids(self) -> frozenset[int]:
         return frozenset([*self.search_ids, *self.bench_ids, *self.demo_ids])
 

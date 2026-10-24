@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.scoring.formula.matchers import MATCHERS, matcher_of
 from promptpotter.application.views.render.primitives import (
     DIM,
     RED,
@@ -34,25 +33,17 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def extract_display_answer(predicted: str, formula: str | None) -> str:
-    """Single-line is the CONTRACT: a multi-line answer splits the row of every one-line readout."""
-    text = predicted or ""
-    matcher = matcher_of(formula)
-    answer = None if matcher is None else MATCHERS[matcher].answer
-    return _one_line(text if answer is None else answer(text))
-
-
 def fmt_query_result(
     position: int,
     facts: MeasuredCell,
     grade: Grade,
     *,
     prefix: str = "",
-    scoring_formula: str | None = None,
     display_tags: dict[str, str],
 ) -> str:
     cached = facts.cached
-    pred = _ellide(extract_display_answer(facts.predicted, scoring_formula), 30)
+    # One line is the CONTRACT: a multi-line answer splits the row of every one-line readout.
+    pred = _ellide(_one_line(facts.predicted if grade.span is None else grade.span), 30)
     gt = _ellide(facts.ground_truth.strip(), 30)
     q = _ellide(facts.query.replace("\n", " ").strip(), 15)
     err = facts.error or ("pipeline error" if facts.errored else None)
@@ -72,8 +63,8 @@ def fmt_query_result(
     elif is_hit(grade.fitness):
         tag = "HIT"
     else:
-        gt_rank = facts.ground_truth_rank
-        n_cand = facts.n_candidates or 0
+        gt_rank = grade.ground_truth_rank
+        n_cand = grade.n_candidates or 0
         if gt_rank is not None:
             tag = f"MISS {gt_rank}/{n_cand}"
         elif n_cand:

@@ -538,7 +538,7 @@ def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
     costs = [
         cost
         for cell in cycle.selection.results
-        if (cost := cell_channels_of(cell.facts, cell.grade.fitness).get("cost")) is not None
+        if (cost := cell_channels_of(cell.facts, cell.grade).get("cost")) is not None
     ]
     if not costs:
         return

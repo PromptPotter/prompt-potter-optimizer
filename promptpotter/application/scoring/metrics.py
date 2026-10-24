@@ -26,7 +26,7 @@ def _channel_means(scoreable: Sequence[GradedCell]) -> dict[str, float]:
     """Over the rows that ANSWERED each channel: the full count reports the round as cheaper than it was."""
     sums: dict[str, list[float]] = {}
     for cell in scoreable:
-        answered = cell_channels_of(cell.facts, cell.grade.fitness)
+        answered = cell_channels_of(cell.facts, cell.grade)
         for name in _MEANED_CHANNELS:
             if (value := answered.get(name)) is not None:
                 sums.setdefault(name, []).append(value)

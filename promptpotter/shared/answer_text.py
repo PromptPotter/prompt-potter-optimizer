@@ -15,6 +15,11 @@ def truncate(s: str, max_len: int, ellipsis: str = "…") -> str:
     return (cut if cut else s[: max_len - len(ellipsis)]) + ellipsis
 
 
+def tail(text: str, cap: int) -> str:
+    flat = " ".join(text.split())
+    return flat if len(flat) <= cap else "…" + flat[-cap:]
+
+
 GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
 NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
 BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")

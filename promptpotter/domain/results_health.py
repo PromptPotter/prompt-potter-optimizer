@@ -104,6 +104,22 @@ def _terminal_llm_shape(facts: MeasuredCell, node: str) -> tuple[str | None, int
     return (usage.finish_reason, usage.reasoning or 0)
 
 
+def _answered(facts: MeasuredCell) -> bool:
+    predicted = facts.predicted.strip()
+    return bool(predicted) and predicted != NO_RESULT
+
+
+def ran_to_output_ceiling(facts: MeasuredCell) -> bool:
+    """An answer cut at its token ceiling: a miss the prompt's length owns, never infra."""
+    node = terminal_node(facts)
+    return (
+        node is not None
+        and not facts.errored
+        and _answered(facts)
+        and _terminal_llm_shape(facts, node)[0] == "length"
+    )
+
+
 def classify_result(facts: MeasuredCell) -> ResultClassification:
     """Truncation is INFRA (a provider ceiling, recurring per sample); a backend 4xx is FATAL on one sighting."""
     advisories = _collect_advisories(facts)
@@ -113,9 +129,7 @@ def classify_result(facts: MeasuredCell) -> ResultClassification:
 
     node = terminal_node(facts)
     # ``content_empty`` describes ONE ATTEMPT: the backend retries, and that retry can answer.
-    predicted = facts.predicted.strip()
-    answered = bool(predicted) and predicted != NO_RESULT
-    if node is not None and f"{node}:content_empty" in advisories and not answered:
+    if node is not None and f"{node}:content_empty" in advisories and not _answered(facts):
         finish_reason, reasoning_tokens = _terminal_llm_shape(facts, node)
         # Reasoning tokens prove the model WORKED, so an empty answer is the ROUTE's, never the candidate's.
         if reasoning_tokens > 0:
@@ -226,6 +240,7 @@ def compute_degradation_health(
     hole_count: int = 0,
     not_attempted: int = 0,
     unscored: int = 0,
+    output_ceiling_count: int = 0,
     last_error: str | None = None,
     answer_modal_share: float | None = None,
     node_failure_rates: dict[str, float] | None = None,
@@ -260,6 +275,7 @@ def compute_degradation_health(
             hole_count=hole_count,
             not_attempted=not_attempted,
             unscored=unscored,
+            output_ceiling_count=output_ceiling_count,
             last_error=last_error,
             degraded_rate=0.0,
             consecutive_degraded_rounds=0,
@@ -276,6 +292,7 @@ def compute_degradation_health(
         samples=attempted,
         not_attempted=not_attempted,
         unscored=unscored,
+        output_ceiling_count=output_ceiling_count,
         last_error=last_error,
         structural_count=structural_count,
         transient_count=transient_count,
@@ -540,6 +557,7 @@ def compute_round_health(
     unscored: int = 0,
 ) -> DegradationHealth | None:
     structural = transient = no_result = holes = 0
+    ceiling = sum(1 for r in results if ran_to_output_ceiling(r.facts))
     structural_nodes: dict[str, int] = {}
     # From the END: `Walk.take` appends the row of the cell that aborts the round before returning.
     last_error = next(
@@ -582,6 +600,7 @@ def compute_round_health(
         hole_count=holes,
         not_attempted=not_attempted,
         unscored=unscored,
+        output_ceiling_count=ceiling,
         last_error=last_error,
         # Over every attempted row: hedging IS how a round produces unscoreable rows.
         answer_modal_share=modal_answer_share(results),
