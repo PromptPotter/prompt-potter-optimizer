@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import Field
 
 from promptpotter.application import optimizers
+from promptpotter.application.mask.tree_lens import lensed_tree
 from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
 from promptpotter.application.served_dashboard import WarmingDashboard, served_dashboard
 from promptpotter.application.views.render.export import ExportFiles, Provenance, export_files
@@ -39,7 +40,6 @@ from promptpotter.infrastructure.store.family_ray_queries import (
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_queries import (
     FamilyCourse,
-    build_lineage_tree,
     iter_family_courses,
 )
 from promptpotter.infrastructure.store.read_model import Moment, file_sig
@@ -169,7 +169,7 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
         None if selection is None else served_round(cycle.stores, hop, selection.round, moment=None)
     )
     arm = None if round_view is None or selection is None else round_view.arms.get(selection.key)
-    course = build_lineage_tree(stores, path, moment=None)
+    course = lensed_tree(stores, path, None, None, moment=None)
     models = (
         {}
         if arm is None

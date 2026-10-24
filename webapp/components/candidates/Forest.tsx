@@ -6,7 +6,8 @@ import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { fmtPaired } from "@/lib/derivations";
-import type { CourseLineage } from "@/lib/api";
+import type { CourseLineage, CourseSpawn } from "@/lib/api";
+import { tagValue } from "@/lib/hierarchy";
 import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
   DIRECTION_GLYPH,
@@ -40,9 +41,18 @@ export interface CladogramCtx {
 }
 
 function courseName(course: CourseLineage): string {
-  return course.course_kind === "root"
-    ? course.dataset_name || course.id
+  return tagValue(course.course, "mint") === "root"
+    ? (tagValue(course.course, "dataset") ?? course.id)
     : shortFamilyTail(course.id);
+}
+
+function SpawnGlyph({ kind, spawn }: { kind: string | null; spawn: CourseSpawn | null }) {
+  return (
+    <>
+      {kind === null ? "" : (KIND_GLYPH[kind] ?? "")}
+      {spawn === null ? "" : `${TRIGGER_GLYPH[spawn.trigger] ?? ""}${DIRECTION_GLYPH[spawn.direction]}`}
+    </>
+  );
 }
 
 const CandidateNode = memo(function CandidateNode({
@@ -286,6 +296,7 @@ export function Forest({
           {/* Painted before the nodes so their clicks win. */}
           {laneList.map((l) => {
             const course = l.course;
+            const { spawn, standing } = course.course.facts;
             const isEmpty = l.candidates.length === 0;
             const roundCount = new Set(l.candidates.map((c) => c.reading.arm.round)).size;
             const verb = l.expanded ? "Collapse" : "Expand";
@@ -303,20 +314,20 @@ export function Forest({
               >
                 <title>
                   {course.id}
-                  {`\n${course.course_kind}`}
-                  {course.task ? ` · ${course.task}` : ""}
-                  {course.trigger === "operator_steered"
-                    ? ` · steered${course.steered_by ? ` by ${course.steered_by}` : ""}`
+                  {`\n${tagValue(course.course, "mint") ?? ""}`}
+                  {course.course.facts.task ? ` · ${course.course.facts.task}` : ""}
+                  {spawn?.trigger === "operator_steered"
+                    ? ` · steered${spawn.issued_by ? ` by ${spawn.issued_by}` : ""}`
                     : ""}
-                  {course.fork_direction === "supersede"
+                  {spawn?.direction === "supersede"
                     ? "\n↳ this branch is the line — the parent keeps what it was cut from"
                     : ""}
-                  {course.fork_direction === "equivalent"
+                  {spawn?.direction === "equivalent"
                     ? "\n≡ the cut reached nothing — this branch and its parent continue identically"
                     : ""}
-                  {` · ${course.status.label}`}
-                  {course.run_standing?.selection
-                    ? ` · selection ${course.run_standing.selection.label} ${fmtPaired(course.run_standing.vs_origin, "rates")}`
+                  {` · ${course.course.state.status.label}`}
+                  {standing?.selection
+                    ? ` · selection ${standing.selection.label} ${fmtPaired(standing.vs_origin, "rates")}`
                     : ""}
                   {isEmpty
                     ? "\nNo post-divergence rounds — use Clean up in the header to prune"
@@ -335,7 +346,7 @@ export function Forest({
               const cycName = layoutEntry ? courseName(layoutEntry.course) : nodeCycleId;
               const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
               // Inside an <svg>, so `<Hearts>` can't mount; the served bar is the same pips as text.
-              const laneHearts = layoutEntry?.course.run_standing?.lives?.bar ?? "";
+              const laneHearts = layoutEntry?.course.course.facts.standing?.lives?.bar ?? "";
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
               const ink = inkOf(n);
@@ -381,9 +392,7 @@ export function Forest({
                   {d.labels && rowLabelText && (
                     <text x={n.x + 8} y={n.y + 3} className="family-cladogram-cyclelabel">
                       <tspan className="family-cladogram-glyph">
-                        {KIND_GLYPH[n.courseKind]}
-                        {TRIGGER_GLYPH[n.trigger] ?? ""}
-                        {n.forkDirection ? DIRECTION_GLYPH[n.forkDirection] : ""}
+                        <SpawnGlyph kind={n.courseKind} spawn={n.spawn} />
                       </tspan>
                       <tspan dx="4">{rowLabelText}</tspan>
                       {laneHearts && (
@@ -440,9 +449,7 @@ export function Forest({
                   className="family-cladogram-cyclelabel"
                 >
                   <tspan className="family-cladogram-glyph">
-                    {KIND_GLYPH[course.course_kind]}
-                    {TRIGGER_GLYPH[course.trigger] ?? ""}
-                    {course.fork_direction ? DIRECTION_GLYPH[course.fork_direction] : ""}
+                    <SpawnGlyph kind={tagValue(course.course, "mint")} spawn={course.course.facts.spawn} />
                   </tspan>
                   <tspan dx="4">{courseName(course)}</tspan>
                 </text>

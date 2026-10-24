@@ -47,6 +47,7 @@ from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
 from promptpotter.infrastructure.store.layout import sibling_kind
+from promptpotter.infrastructure.store.lineage_queries import iter_family_courses
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError
@@ -248,6 +249,36 @@ def course_entry(
             rounds_closed=index.rounds_closed,
         ),
     )
+
+
+def family_course_entries(
+    stores: Stores, path: CyclePath, *, moment: Moment | None
+) -> dict[str, HierarchyCourse]:
+    """Every course the tree at *path* folds, by address: the entries the listing serves for each."""
+    lines: dict[tuple[Path, str], tuple[Campaign, CampaignRunsWith | None]] = {}
+    out: dict[str, HierarchyCourse] = {}
+    for family in iter_family_courses(stores, path):
+        store, hop = family.store, family.path[-1]
+        if (key := (store.base_dir, hop.campaign_id)) not in lines:
+            campaign = store.campaigns.load_campaign(hop.campaign_id)
+            if campaign is None:
+                continue
+            lines[key] = (campaign, campaign_runs_with(store, campaign))
+        campaign, runs_with = lines[key]
+        cycle_dir = store.campaigns.cycle_dir(hop)
+        if (index := read_cycle_index(cycle_dir, moment=moment)) is None:
+            continue
+        out[encode_cycle_path(family.path)] = course_entry(
+            store,
+            family.path[:-1],
+            campaign,
+            cycle_dir,
+            index,
+            moment=moment,
+            runs_with=runs_with,
+            config=line_config(store, campaign, hop),
+        )
+    return out
 
 
 def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> list[HierarchyTag]:

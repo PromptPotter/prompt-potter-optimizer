@@ -886,7 +886,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the selector elects on. Candidate: the declaration its round's election carried (`Election.elects_on`), null on a round that never elected. Course: the declaration its own elections carried. `ability`: the rounds are won on theta, not on accuracy.",
+            "description": "The column the selector elects on: the declaration its round's election carried (`Election.elects_on`), null on a round that never elected. `ability`: the rounds are won on theta, not on accuracy.",
             "title": "Elects On"
           },
           "fork": {
@@ -3980,52 +3980,14 @@
             "title": "Children",
             "type": "array"
           },
-          "course_kind": {
-            "enum": [
-              "root",
-              "fork",
-              "diag",
-              "inner"
-            ],
-            "title": "Course Kind",
-            "type": "string"
-          },
-          "dataset_name": {
-            "title": "Dataset Name",
-            "type": "string"
+          "course": {
+            "$ref": "#/components/schemas/HierarchyCourse",
+            "description": "The course as the hierarchy serves it, minted by the one course builder: a timeline a supersede folded onto its branch carries the branch's."
           },
           "deletable_stubs": {
             "description": "How many cycles `cleanup-empty-cycles` addressed at this course deletes now: its forks that closed no round of their own, hold no producer and no descendant, and are not the active cycle (`CampaignStore.deletable_stubs`, the command's own list). A fork is no node of this tree, so no count over its nodes can stand in for it.",
             "title": "Deletable Stubs",
             "type": "integer"
-          },
-          "elects_on": {
-            "anyOf": [
-              {
-                "enum": [
-                  "accuracy",
-                  "composite",
-                  "ability"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The column the selector elects on. Candidate: the declaration its round's election carried (`Election.elects_on`), null on a round that never elected. Course: the declaration its own elections carried. `ability`: the rounds are won on theta, not on accuracy.",
-            "title": "Elects On"
-          },
-          "fork_direction": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ForkDirection"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which side of this cut the run CONTINUES on, derived from `trigger` (`FORK_TRAITS`). `offshoot` = this branch hangs off a line that keeps running; `supersede` = this branch IS the line and the PARENT is what was left behind. Null for roots and inner runs, which were not cut from anything. Served, never derived in the client — the two read identically on disk and only this says them apart."
           },
           "id": {
             "description": "Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin.",
@@ -4093,68 +4055,12 @@
             },
             "title": "Path",
             "type": "array"
-          },
-          "run_phase": {
-            "$ref": "#/components/schemas/RunPhase",
-            "description": "The ONE server-owned run-state (`derive_run_state`), the same value `/cycles` serves."
-          },
-          "run_standing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunStanding"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Where the run stands as the course's newest standing round left it, over its whole history: its selection, that selection against the origin on the origin panel, and what it has cost. A course whose line moved to a branch serves the branch's. Null before round 0 closes."
-          },
-          "status": {
-            "$ref": "#/components/schemas/RunStatus",
-            "description": "How the course reads on a row — its phase and why it ended as one word and one mark, as `/cycles` serves it."
-          },
-          "steered_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "As `ForkStamp.steered_by`.",
-            "title": "Steered By"
-          },
-          "task": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "An inner run's benchmark task. Load-bearing: every task runs for every candidate, so the candidate edge alone does not identify an inner run.",
-            "title": "Task"
-          },
-          "trigger": {
-            "description": "Fork trigger; empty for roots and inner runs.",
-            "title": "Trigger",
-            "type": "string"
           }
         },
         "required": [
           "id",
           "label",
-          "course_kind",
-          "run_phase",
-          "status",
-          "dataset_name",
-          "trigger",
-          "fork_direction",
-          "steered_by",
-          "task",
-          "run_standing",
+          "course",
           "deletable_stubs"
         ],
         "title": "CourseLineage",

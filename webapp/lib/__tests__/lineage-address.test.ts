@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import type { CourseLineage } from "@/lib/api";
 import { armAt, candidatesAtPath, indexLineage, innerPanelIndex, panelCellKey } from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
-import { armNode, armReading, courseLineage } from "@/lib/test-fixtures";
+import {
+  armNode,
+  armReading,
+  courseLineage,
+  courseTags,
+  hierarchyCourse,
+} from "@/lib/test-fixtures";
 
 const ROOT: CyclePath = [{ campaignId: "demo__aaaaaa", cycleId: "cycle_root" }];
 const FORK: CyclePath = [{ campaignId: "demo__aaaaaa", cycleId: "cycle_root_fork_beef" }];
@@ -13,8 +19,7 @@ const hops = (path: CyclePath) =>
 const innerRun = (id: string, task: string | null) =>
   courseLineage({
     id,
-    course_kind: "inner",
-    task,
+    course: hierarchyCourse({ address: id, tags: courseTags("inner") }, { task }),
     path: hops([...ROOT, { campaignId: "inner__1", cycleId: id }]),
   });
 

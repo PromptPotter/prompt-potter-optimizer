@@ -3,15 +3,15 @@ from __future__ import annotations
 import itertools
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import NamedTuple, TypedDict
+from typing import NamedTuple
 
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_listing import CycleIndex, CycleListEntry, RunStatus
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
+from promptpotter.domain.cycle_listing import CycleIndex, CycleListEntry
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath, encode_cycle_path
+from promptpotter.domain.hierarchy import HierarchyCourse
 from promptpotter.domain.lineage_tree import (
     ArmNode,
-    CourseKind,
     CourseLineage,
     ForkStamp,
     LensShift,
@@ -19,7 +19,6 @@ from promptpotter.domain.lineage_tree import (
     RankMove,
 )
 from promptpotter.domain.paired_reading import ArmKey, ArmName
-from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import (
     ArmElection,
     ArmFit,
@@ -29,7 +28,6 @@ from promptpotter.domain.results import (
     DisplayMetric,
     Election,
     LineRate,
-    RunStanding,
     ScoreSummary,
     VerifyReading,
     arm_name,
@@ -38,10 +36,9 @@ from promptpotter.domain.results import (
     overlap_line,
     panel_cuts,
 )
-from promptpotter.domain.run_records import ElectionRecord, ForkDirection
+from promptpotter.domain.run_records import ForkDirection
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
-from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     StandingRounds,
     scan_bench_readings,
@@ -77,8 +74,9 @@ class FamilyCourse(NamedTuple):
 class _Reads:
     """Per-build and thrown away: a memo outliving the request serves a round that has closed."""
 
-    def __init__(self, *, moment: Moment | None) -> None:
+    def __init__(self, *, moment: Moment | None, courses: Mapping[str, HierarchyCourse]) -> None:
         self.moment = moment
+        self.courses = courses
         self._cycles: dict[Path, list[CycleListEntry]] = {}
         self._campaigns: dict[tuple[Path, str], Campaign | None] = {}
         # Keyed on the full identity: a cycle_id is a content hash, so campaigns and inner cells repeat it.
@@ -173,56 +171,6 @@ def _round_facts(
     return out
 
 
-class _CourseScalars(TypedDict):
-    course_kind: CourseKind
-    run_phase: RunPhase
-    status: RunStatus
-    trigger: str
-    fork_direction: ForkDirection | None
-    steered_by: str | None
-    task: str | None
-    dataset_name: str
-    run_standing: RunStanding | None
-    deletable_stubs: int
-    elects_on: DisplayMetric | None
-
-
-def _course_scalars(
-    stores: Stores,
-    hop: CycleHop,
-    index: CycleIndex | None,
-    reads: _Reads,
-    elections: Mapping[int, ElectionRecord],
-) -> _CourseScalars:
-    layout = _layout(stores, hop)
-
-    fork = None if index is None else index.fork
-    spawned = None if index is None else index.spawned_by
-    campaign = reads.campaign(stores, hop.campaign_id)
-
-    # Inner by where it lives: a rebase pair in the sandbox has no `spawned_by`, and "root" puts two roots in one tree.
-    kind: CourseKind = sibling_kind(hop.cycle_id)
-    # A fork's course is folded into its parent's and never served: only a family root is asked.
-    stubs = len(stores.campaigns.deletable_stubs(hop)) if kind == "root" else 0
-    if kind == "root" and (spawned or stores.inner):
-        kind = "inner"
-
-    run = derive_run_state(layout.cycle_dir)
-    return {
-        "course_kind": kind,
-        "run_phase": run.run_phase,
-        "status": RunStatus.of(run.run_phase, None if index is None else index.stop_reason),
-        "trigger": "" if fork is None else fork.trigger.value,
-        "fork_direction": None if fork is None else fork.resolved_direction,
-        "steered_by": None if fork is None else fork.issued_by.display,
-        "task": None if spawned is None else spawned.task or None,
-        "dataset_name": campaign.dataset_name if campaign else "",
-        "run_standing": None if index is None else index.standing,
-        "deletable_stubs": stubs,
-        "elects_on": next((e.elects_on for e in elections.values()), None),
-    }
-
-
 def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
     leaf = path[-1]
     reads.seen.add((stores.base_dir, leaf.campaign_id, leaf.cycle_id))
@@ -262,11 +210,11 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
                     inner=True,
                 )
             )
-    return out if reads.moment is None else [c for c in out if c.manifest is not None]
+    return [c for c in out if c.manifest is not None]
 
 
 def iter_family_courses(stores: Stores, path: CyclePath) -> list[FamilyCourse]:
-    reads = _Reads(moment=None)
+    reads = _Reads(moment=None, courses={})
     root_store, _ = resolve_cycle_path(stores, path)
     root = FamilyCourse(
         store=root_store,
@@ -330,12 +278,13 @@ def _is_replay(node: ArmNode) -> bool:
 
 
 def _stamp(course: CourseLineage) -> ForkStamp:
+    spawn = course.course.facts.spawn
     return ForkStamp(
-        kind=course.course_kind,
-        trigger=course.trigger,
-        direction=course.fork_direction,
-        steered_by=course.steered_by,
-        status=course.status,
+        kind=sibling_kind(course.id),
+        trigger="" if spawn is None else spawn.trigger.value,
+        direction=None if spawn is None else spawn.direction,
+        steered_by=None if spawn is None else spawn.issued_by,
+        status=course.course.state.status,
         cut_from=None,
     )
 
@@ -406,11 +355,13 @@ def _contributions(
         attempts = [
             _empty_attempt(course, cut_from=cut_from, round_=cut_round + 1, row=reads.row())
         ]
+    spec = None if fork.manifest is None else fork.manifest.fork
+    direction = None if spec is None else spec.resolved_direction
     return _Contribution(
         attempts,
         [k for c in replays for k in c.children],
-        course.fork_direction is ForkDirection.SUPERSEDE,
-        course.fork_direction is not None and course.fork_direction is not ForkDirection.OFFSHOOT,
+        direction is ForkDirection.SUPERSEDE,
+        direction is not None and direction is not ForkDirection.OFFSHOOT,
         reach,
         course,
     )
@@ -700,7 +651,6 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
     )
     standing = scan_standing_rounds(spans)
     candidates = _tree_arms(standing)
-    elections = standing.elections
     children = _child_courses(stores, path, reads)
     inner = [c for c in children if c.inner]
     forks = sorted(
@@ -748,14 +698,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
         contributions,
     )
 
-    scalars = _course_scalars(stores, leaf, index, reads, elections)
     branch = next((c.course for c in reversed(contributions) if c.takes_the_line), None)
-    if branch is not None:
-        scalars |= {
-            "run_phase": branch.run_phase,
-            "status": branch.status,
-            "run_standing": branch.run_standing,
-        }
 
     # After the fold: a fork's attempts arrive naming its replayed C0 and judged short against its own rounds.
     origin_row = _origin_row(kids, candidates[0].id) if candidates else None
@@ -781,11 +724,22 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
         label=leaf.cycle_id,
         path=hops,
         children=kids,
-        **scalars,
+        course=reads.courses[encode_cycle_path(path)] if branch is None else branch.course,
+        # A fork's course is folded into its parent's and never served: only a family root is asked.
+        deletable_stubs=len(stores.campaigns.deletable_stubs(leaf))
+        if sibling_kind(leaf.cycle_id) == "root"
+        else 0,
     )
 
 
-def build_lineage_tree(stores: Stores, path: CyclePath, *, moment: Moment | None) -> CourseLineage:
-    """*moment* replays the ledgers only: run-state stays the live one, as on a replayed dashboard."""
+def build_lineage_tree(
+    stores: Stores,
+    path: CyclePath,
+    *,
+    moment: Moment | None,
+    courses: Mapping[str, HierarchyCourse],
+) -> CourseLineage:
+    """*moment* replays the ledgers only; *courses* is every family course's entry by address."""
     store_at, _ = resolve_cycle_path(stores, path)
-    return _with_heads(_build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads(moment=moment)))
+    reads = _Reads(moment=moment, courses=courses)
+    return _with_heads(_build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=reads))

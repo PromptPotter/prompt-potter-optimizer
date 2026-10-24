@@ -6,9 +6,9 @@ from pydantic import Field
 
 from promptpotter.domain.cycle_listing import RunStatus
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.hierarchy import HierarchyCourse
 from promptpotter.domain.opt_search_point import Variation
-from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.results import ArmReading, ArmVerdict, DisplayMetric, RunStanding
+from promptpotter.domain.results import ArmReading, ArmVerdict, DisplayMetric
 from promptpotter.domain.run_records import ForkDirection
 from promptpotter.domain.strict_model import FrozenModel
 
@@ -107,19 +107,18 @@ class _Node(FrozenModel):
         "left the origin's individual on two rows, the one still on a line. Null on a course "
         "that has minted nothing.",
     )
-    elects_on: DisplayMetric | None = Field(
-        default=None,
-        description="The column the selector elects on. Candidate: the declaration its round's "
-        "election carried (`Election.elects_on`), null on a round that never elected. Course: "
-        "the declaration its own elections carried. `ability`: the rounds are won on theta, not "
-        "on accuracy.",
-    )
 
 
 class ArmNode(_Node):
     """One arm on a course's timeline; everything measured or decided about it is its `reading`."""
 
     kind: Literal["candidate"] = "candidate"
+    elects_on: DisplayMetric | None = Field(
+        default=None,
+        description="The column the selector elects on: the declaration its round's election "
+        "carried (`Election.elects_on`), null on a round that never elected. `ability`: the "
+        "rounds are won on theta, not on accuracy.",
+    )
     row: int = Field(
         description="THE key of this row in this response: unique tree-wide, where `id` is not — "
         "a supersede cut leaves one individual on two rows, and a later round can read it again. "
@@ -237,34 +236,9 @@ class CourseLineage(_Node):
 
     kind: Literal["course"] = "course"
     children: list[ArmNode] = Field(default_factory=list)
-    course_kind: CourseKind
-    run_phase: RunPhase = Field(
-        description="The ONE server-owned run-state (`derive_run_state`), the same value "
-        "`/cycles` serves."
-    )
-    status: RunStatus = Field(
-        description="How the course reads on a row — its phase and why it ended as one word and "
-        "one mark, as `/cycles` serves it."
-    )
-    dataset_name: str
-    trigger: str = Field(description="Fork trigger; empty for roots and inner runs.")
-    fork_direction: ForkDirection | None = Field(
-        description="Which side of this cut the run CONTINUES on, derived from `trigger` "
-        "(`FORK_TRAITS`). `offshoot` = this branch hangs off a line that keeps running; "
-        "`supersede` = this branch IS the line and the PARENT is what was left behind. Null "
-        "for roots and inner runs, which were not cut from anything. Served, never derived "
-        "in the client — the two read identically on disk and only this says them apart.",
-    )
-    steered_by: str | None = Field(description="As `ForkStamp.steered_by`.")
-    task: str | None = Field(
-        description="An inner run's benchmark task. Load-bearing: every task runs for every "
-        "candidate, so the candidate edge alone does not identify an inner run.",
-    )
-    run_standing: RunStanding | None = Field(
-        description="Where the run stands as the course's newest standing round left it, over "
-        "its whole history: its selection, that selection against the origin on the origin "
-        "panel, and what it has cost. A course whose line moved to a branch serves the "
-        "branch's. Null before round 0 closes.",
+    course: HierarchyCourse = Field(
+        description="The course as the hierarchy serves it, minted by the one course builder: a "
+        "timeline a supersede folded onto its branch carries the branch's."
     )
     deletable_stubs: int = Field(
         description="How many cycles `cleanup-empty-cycles` addressed at this course deletes "

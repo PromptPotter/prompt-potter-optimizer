@@ -102,7 +102,7 @@ export function accuracyStat(standing: RunStanding, node: CourseLineage | null):
   return {
     label: "Accuracy",
     value: fmtPaired(standing.vs_origin, "rates"),
-    sub: node?.elects_on === "ability" ? `${line} · rounds are won on θ` : line,
+    sub: node?.children.some((c) => c.elects_on === "ability") ? `${line} · rounds are won on θ` : line,
   };
 }
 

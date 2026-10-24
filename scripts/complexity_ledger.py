@@ -77,17 +77,17 @@ BASELINE = {
     # Modules a test run imports: our own, followed through their module-level imports, plus
     # each outside distribution's top name. A test that reaches the server app or an extra
     # moves it as one function does not.
-    "test_reach": 362,
+    "test_reach": 363,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
-    "served_fields": 1712,
+    "served_fields": 1703,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 18,
     # The arms each of those files leaves out: a mirror rotting raises it.
     "p_record_drift": 525,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 197,
+    "p_served": 193,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 11,
     # The rows each of those files leaves out.

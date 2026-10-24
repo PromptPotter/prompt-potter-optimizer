@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.application import optimizers
+from promptpotter.application.hierarchy import family_course_entries
 from promptpotter.application.mask.divergence import (
     Verdict,
     find_divergences,
@@ -11,12 +12,12 @@ from promptpotter.application.mask.divergence import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import Lens, MaskReading, MaskRecord
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
 from promptpotter.domain.lineage_tree import ArmNode, CourseLineage, LineageDivergence
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.infrastructure.store.lineage_queries import build_lineage_tree, rank_moves
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
-from promptpotter.shared.errors import BadRequestError
+from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import Eliminator
@@ -134,7 +135,10 @@ def lensed_tree(
     *,
     moment: Moment | None,
 ) -> CourseLineage:
-    tree = build_lineage_tree(stores, path, moment=moment)
+    courses = family_course_entries(stores, path, moment=moment)
+    if encode_cycle_path(path) not in courses:
+        raise NotFoundError(f"No minted course at {encode_cycle_path(path)!r}")
+    tree = build_lineage_tree(stores, path, moment=moment, courses=courses)
     if lens is None and not samples:
         return tree
     if lens is not None and lens.kind == "abort":

@@ -3,6 +3,7 @@ import { barLevel, barsAreCourses, candidateBars } from "../candidate-views";
 import type {
   ArmNode,
   ArmReading,
+  CourseFacts,
   CourseLineage,
   ForkStamp,
   VerificationMark,
@@ -11,6 +12,8 @@ import {
   armNode,
   armReading,
   courseLineage,
+  courseTags,
+  hierarchyCourse,
   ownLevel,
   pairedReading,
   runStanding,
@@ -41,6 +44,11 @@ const arm = (id: string, label: string, reading: ReadingOver = {}, over: Partial
 
 const course = (kids: ArmNode[]) => courseLineage({ id: "c0", label: "root", children: kids });
 const runsUnder = (runs: CourseLineage[]) => armNode({ id: "a", children: runs });
+const run = (id: string, facts: Partial<CourseFacts>) =>
+  courseLineage({
+    id,
+    course: hierarchyCourse({ address: id, tags: courseTags("inner", "justlogic") }, facts),
+  });
 
 describe("the half choice — the tree's, once its walk is decided", () => {
   it("keeps the TREE's reading even while a live row for the same arm exists", () => {
@@ -99,9 +107,9 @@ describe("the half choice — the tree's, once its walk is decided", () => {
 
 describe("course bars carry no verdict", () => {
   const runs = runsUnder([
-    courseLineage({ id: "r1", dataset_name: "justlogic", run_standing: standsAt(0.6) }),
-    courseLineage({ id: "r2", task: "justlogic/seed-2", run_standing: standsAt(0.3) }),
-    courseLineage({ id: "r3", dataset_name: "justlogic", run_standing: runStanding(0, "C0") }),
+    run("r1", { standing: standsAt(0.6) }),
+    run("r2", { task: "justlogic/seed-2", standing: standsAt(0.3) }),
+    run("r3", { standing: runStanding(0, "C0") }),
   ]);
 
   it("draws a run at its selection's served rate against its origin, blank where no pair was read", () => {

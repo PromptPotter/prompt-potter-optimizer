@@ -1,5 +1,6 @@
-import type { ArmElection, ArmNode, CourseLineage, LineageDivergence } from "@/lib/api";
+import type { ArmElection, ArmNode, CourseLineage, CourseSpawn, LineageDivergence } from "@/lib/api";
 import { nodeKeyOf, pathOf } from "@/lib/derivations";
+import { tagValue } from "@/lib/hierarchy";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
 export interface Density {
@@ -33,9 +34,7 @@ export const HEADER_H = 18;
 export const TOP_PAD = HEADER_H + 8;
 export const NODE_R = 3.5;
 
-export type CourseKind = CourseLineage["course_kind"];
-
-export const KIND_GLYPH: Record<CourseKind, string> = {
+export const KIND_GLYPH: Record<string, string> = {
   root: "●",
   fork: "⑂",
   diag: "Δ",
@@ -46,9 +45,7 @@ export const TRIGGER_GLYPH: Record<string, string> = {
   operator_steered: "✎",
 };
 
-export type ForkDirection = NonNullable<CourseLineage["fork_direction"]>;
-
-export const DIRECTION_GLYPH: Record<ForkDirection, string> = {
+export const DIRECTION_GLYPH: Record<CourseSpawn["direction"], string> = {
   offshoot: "",
   supersede: "↳",
   equivalent: "≡",
@@ -104,7 +101,7 @@ export function extentKeys(
   const keys = new Set<string>();
   const addMeasurements = (cand: ArmNode): void => {
     for (const child of cand.children) {
-      if (child.course_kind !== "inner") continue;
+      if (tagValue(child.course, "mint") !== "inner") continue;
       for (const c of child.children) {
         keys.add(nodeKeyOf(c));
         addMeasurements(c);
@@ -200,9 +197,8 @@ export interface RoundNodePos {
   crown: ArmElection["crown"];
   isExpanded: boolean;
   isLastInLane: boolean;
-  courseKind: CourseKind;
-  trigger: string;
-  forkDirection: ForkDirection | null;
+  courseKind: string | null;
+  spawn: CourseSpawn | null;
   divergence: LineageDivergence | null;
   divergent: boolean;
   retiredBy: string | null;
@@ -250,9 +246,8 @@ function placedNode(
     crown,
     isExpanded,
     isLastInLane: false,
-    courseKind: l.course.course_kind,
-    trigger: l.course.trigger,
-    forkDirection: l.course.fork_direction,
+    courseKind: tagValue(l.course.course, "mint"),
+    spawn: l.course.course.facts.spawn,
     divergence: cand.divergence,
     divergent: cand.divergent,
     retiredBy: cand.superseded_by,

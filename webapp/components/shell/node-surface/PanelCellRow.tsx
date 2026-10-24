@@ -47,7 +47,8 @@ export function PanelCellRow({
     );
   }
 
-  const live = phaseWalks(run.run_phase);
+  const { state, facts } = run.course;
+  const live = phaseWalks(state.run_phase);
   const at = pathOf(run).at(-1);
 
   return (
@@ -74,11 +75,11 @@ export function PanelCellRow({
         )}
       </span>
       <span className="pcr-meta">
-        {phaseIs(run.run_phase, "settled") && (
-          <span className="pcr-status">{run.status.label}</span>
+        {phaseIs(state.run_phase, "settled") && (
+          <span className="pcr-status">{state.status.label}</span>
         )}
         <span className="pcr-score">
-          {run.run_standing ? <PairedLift reading={run.run_standing.vs_origin} /> : "—"}
+          {facts.standing ? <PairedLift reading={facts.standing.vs_origin} /> : "—"}
         </span>
       </span>
     </button>

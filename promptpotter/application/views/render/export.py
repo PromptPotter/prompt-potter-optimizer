@@ -150,9 +150,10 @@ def chat_text(course: CourseLineage, unit: MeasuredUnit) -> str:
     """One block per candidate in timeline order, every number a served one under its served name."""
     arms = _live(course)
     label_of = {node.id: node.label for node in arms}
+    elects_on = next((node.elects_on for node in arms if node.elects_on is not None), None)
     lines = [
         f"candidates of {course.label} · {len(arms)} rows · elected on "
-        f"{course.elects_on or '—'} · in timeline order"
+        f"{elects_on or '—'} · in timeline order"
     ]
     for node in arms:
         lines += ["", *_arm_lines(node, label_of, unit)]

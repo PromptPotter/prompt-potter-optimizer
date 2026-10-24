@@ -276,10 +276,11 @@ becomes `CourseLineage{course: HierarchyCourse, origin_row, children: list[ArmNo
 lens_shift, deletable_stubs}` in `domain/lineage_tree.py` (renamed from `CourseNode` in group 1a), its
 course half deleted (`run_phase`, `status`, `dataset_name`, `course_kind`, `trigger`, `fork_direction`,
 `steered_by`, `task`, `run_standing`, `elects_on`; `CourseKind` becomes the `mint` tag's value set).
-`application/mask/tree_lens.py::lensed_tree` mints the family's course entries over
+`application/hierarchy.py::family_course_entries` mints the family's course entries over
 `infrastructure/store/lineage_queries.py::iter_family_courses` with `course_entry`, resolving
-`runs_with` once and each course's `config`, and hands them in; it is the one caller.
-<!-- target: git grep -cE "build_lineage_tree\(" -- promptpotter == 2 -->
+`runs_with` once per campaign and each course's `config`;
+`application/mask/tree_lens.py::lensed_tree` hands them in and is the one caller.
+<!-- probe: git grep -cE "build_lineage_tree\(" -- promptpotter == 2 -->
 A supersede fork still folds onto its parent's timeline; the folded entry's `course` is the line
 holder's entry — choosing which course to mint replaces today's rewrite of three scalars.
 `?at=` on the tree mints every course at that moment, which is "the same card one layer down at a chosen

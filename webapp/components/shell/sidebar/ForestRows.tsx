@@ -2,6 +2,7 @@
 
 import { type ReactNode, useMemo } from "react";
 import { cx } from "@/lib/cx";
+import { tagValue } from "@/lib/hierarchy";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { fmtPct0, fmtSigned, fmtThetaSe, sideTone } from "@/lib/format";
 import { ARM_VERDICT_LABELS, THETA_CAVEAT_INFO } from "@/lib/api/types.generated";
@@ -180,13 +181,14 @@ function CourseRow({
   const { live: liveRows, retired: retiredGroups } = splitRetired(rows);
 
   // A root row reads the served line ALWAYS — never the tree node it only has while expanded.
-  const standing = run ? run.line.standing : (node?.run_standing ?? null);
-  const status = run ? run.line.status : (node?.status ?? null);
+  const task = node?.course.facts.task ?? null;
+  const standing = run ? run.line.standing : (node?.course.facts.standing ?? null);
+  const status = run ? run.line.status : (node?.course.state.status ?? null);
   const label = run
     ? run.campaign.display_name
-    : node?.task
-      ? panelCellLabel(node.task)
-      : (node?.dataset_name ?? "");
+    : task
+      ? panelCellLabel(task)
+      : (node ? (tagValue(node.course, "dataset") ?? "") : "");
 
   const archived = run?.campaign.lifecycle_status === "archived";
   // The WHOLE path, not the leaf cycleId: `cycle_id` is an origin hash two campaigns can share.
@@ -201,7 +203,7 @@ function CourseRow({
     : {
         title: label,
         state: status?.label,
-        lede: node?.task
+        lede: task
           ? "An inner run: it measured one candidate of the course above on one panel cell."
           : "The course and what it ran. Its origin is the C0 row inside it.",
         stats: innerStats(node, standing),
@@ -280,8 +282,9 @@ function CourseRow({
 
 function innerFacts(node: CourseLineage | null, cycleId: string): [string, string][] {
   const facts: [string, string][] = [];
-  if (node?.dataset_name) facts.push(["Dataset", node.dataset_name]);
-  if (node?.task) facts.push(["Task", node.task]);
+  const dataset = node ? tagValue(node.course, "dataset") : null;
+  if (dataset) facts.push(["Dataset", dataset]);
+  if (node?.course.facts.task) facts.push(["Task", node.course.facts.task]);
   facts.push(["Cycle", cycleId]);
   return facts;
 }

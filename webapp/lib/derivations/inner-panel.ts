@@ -2,6 +2,7 @@
 
 import type { CourseLineage } from "@/lib/api";
 import type { CyclePath } from "@/lib/ids";
+import { tagValue } from "@/lib/hierarchy";
 import { phaseWalks } from "@/lib/run-phase";
 import { candidatesAtPath, walkCourses, type LineageIndex } from "./lineage-candidates";
 
@@ -13,7 +14,8 @@ export function innerPanelIndex(
   for (const cand of candidatesAtPath(index, path)) {
     for (const run of cand.children) {
       // No `task` means an interrupted mint; a wrong join is worse than an absent one.
-      if (run.task) m.set(panelCellKey(cand.reading.arm.label, run.task), run);
+      const { task } = run.course.facts;
+      if (task) m.set(panelCellKey(cand.reading.arm.label, task), run);
     }
   }
   return m;
@@ -34,6 +36,8 @@ export function panelCellLabel(cell: string): string {
 export function runningInnerRun(root: CourseLineage | null): CourseLineage | null {
   if (!root) return null;
   return (
-    walkCourses(root).find((c) => c.course_kind === "inner" && phaseWalks(c.run_phase)) ?? null
+    walkCourses(root).find(
+      (c) => tagValue(c.course, "mint") === "inner" && phaseWalks(c.course.state.run_phase),
+    ) ?? null
   );
 }
