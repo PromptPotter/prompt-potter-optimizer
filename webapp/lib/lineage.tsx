@@ -4,7 +4,7 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { treeRead, type TreeMask, type TreeMoment } from "@/lib/api";
 import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
-import type { CourseNode } from "@/lib/api/types";
+import type { CourseLineage } from "@/lib/api/types";
 import { phaseIs } from "@/lib/run-phase";
 import { indexLineage, type LineageIndex } from "@/lib/derivations";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
@@ -21,7 +21,7 @@ const POLL_MS = 5000;
 const LENS_LABELS: Record<string, string> = { ...SCORE_LENS_LABELS, ...ABORT_LENS_LABELS };
 
 export interface CampaignTree {
-  root: CourseNode | null;
+  root: CourseLineage | null;
   loaded: boolean;
   failed: boolean;
 }
@@ -29,7 +29,7 @@ export interface CampaignTree {
 const EMPTY: CampaignTree = { root: null, loaded: false, failed: false };
 
 export interface ViewedLineage {
-  tree: CourseNode | null;
+  tree: CourseLineage | null;
   index: LineageIndex;
   // "" (off), "score:<formula>", or "abort:<variant>"; the open scoring-mask panel overrides it.
   lens: string;
@@ -43,7 +43,7 @@ interface TreeAddressing {
   viewedAddress: string | null;
   viewedMask: TreeMask | null;
   viewedMoment: TreeMoment | null;
-  // Campaigns whose every `/cycles` row is terminal: read once, re-asked only by an invalidation.
+  // Campaigns whose every course entry is settled: read once, re-asked only by an invalidation.
   resting: ReadonlySet<string>;
 }
 
@@ -113,16 +113,20 @@ export function LineageProvider({
     [lensParam, samples],
   );
 
-  const { cycles } = useRegistry();
-  const resting = useMemo(() => {
-    const all = new Set<string>();
-    const live = new Set<string>();
-    for (const c of cycles) {
-      all.add(c.campaign_id);
-      if (!phaseIs(c.run_phase, "settled")) live.add(c.campaign_id);
-    }
-    return new Set([...all].filter((id) => !live.has(id)));
-  }, [cycles]);
+  const { entries } = useRegistry();
+  const resting = useMemo(
+    () =>
+      new Set(
+        entries
+          .filter(
+            (e) =>
+              e.children.length > 0 &&
+              e.children.every((c) => phaseIs(c.state.run_phase, "settled")),
+          )
+          .map((e) => e.address),
+      ),
+    [entries],
+  );
 
   // The offset is the viewed LEAF's, which the root-keyed tree is not addressed by.
   const { at, viewedPath: leafPath } = useWorkspace();

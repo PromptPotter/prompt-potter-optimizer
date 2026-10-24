@@ -17,14 +17,14 @@ import {
   scoreboardReading,
   type CompareItem,
   type LineageIndex,
-  type RunGroup,
 } from "@/lib/derivations";
+import type { HierarchyCampaign } from "@/lib/api";
 import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { useLineageTree } from "@/lib/lineage";
 import { fmtMetricInterval, fmtMetricValue, shortId } from "@/lib/format";
-import { encodeCyclePath, type CyclePath } from "@/lib/ids";
+import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { editsFor, pointKeyOf, useScenarioEdits } from "./config-edit";
 
 export type MetricUnit = Parameters<typeof fmtMetricValue>[0];
@@ -82,17 +82,17 @@ function useChannelHead(
 
 export function useChannelModel(
   { channel, reading }: CompareItem,
-  run: RunGroup | null,
+  run: HierarchyCampaign | null,
   unit: MetricUnit,
   seedOn: "winner" | "own",
 ) {
   const { edits } = useScenarioEdits();
   const subject = channel.subject;
-  const campaignName = run?.campaign.label || shortId(channel.rootCampaignId);
-  const rootCycle = run?.campaign.root_cycle_id ?? null;
+  const campaignName = run?.label || shortId(channel.rootCampaignId);
+  const rootAddress = run?.facts.root ?? null;
   const rootPath = useMemo<CyclePath>(
-    () => (rootCycle ? [{ campaignId: channel.rootCampaignId, cycleId: rootCycle }] : []),
-    [rootCycle, channel.rootCampaignId],
+    () => (rootAddress ? (decodeCyclePath(rootAddress) ?? []) : []),
+    [rootAddress],
   );
 
   const { root, loaded, failed } = useLineageTree(rootPath, rootPath.length > 0);

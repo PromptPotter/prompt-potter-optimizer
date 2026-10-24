@@ -28,7 +28,7 @@ from promptpotter.domain.spend import (
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.domain.cycle_listing import CycleIndex
+    from promptpotter.domain.cycle_index import CycleIndex
     from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.run_records import CycleFinal, WallClock

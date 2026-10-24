@@ -13,7 +13,7 @@ from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import ceiling_meter
-from promptpotter.domain.cycle_listing import RunStatus
+from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits, ServedRound, served_rounds
 from promptpotter.domain.paired_reading import ArmName

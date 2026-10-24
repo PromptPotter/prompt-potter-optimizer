@@ -7,15 +7,12 @@ import type {
   ActivityResponse,
   BackendHealthResponse,
   HealthResponse,
-  LifecycleFilter,
   BackendResponse,
-  CampaignListResponse,
   CampaignPipelineResponse,
   CampaignStorageResponse,
   ConfigMapResponse,
   DatasetPipelineResponse,
   OptimizerPipelineResponse,
-  CyclesResponse,
   DatasetIndexResponse,
   DraftListResponse,
   Cell,
@@ -25,7 +22,8 @@ import type {
   FilesResponse,
   ForkPreviewResponse,
   HardSamplesScope,
-  CourseNode,
+  HierarchyResponse,
+  CourseLineage,
   MachineStatusResponse,
   OptimizerKnobsResponse,
   OptimizerRoster,
@@ -237,19 +235,9 @@ export function dashboardRead(path: CyclePath, at: number | null): ReadDescripto
   };
 }
 
-export function campaignsRead(lifecycle: LifecycleFilter): ReadDescriptor<CampaignListResponse> {
-  const qs = lifecycle !== "active" ? `?lifecycle=${enc(lifecycle)}` : "";
-  return byEtag("campaigns", `${API}/campaigns${qs}`);
-}
-
-export function cyclesRead(
-  filter: { campaign?: string; attached?: boolean } = {},
-): ReadDescriptor<CyclesResponse> {
-  const params = new URLSearchParams();
-  if (filter.campaign) params.set("campaign", filter.campaign);
-  if (filter.attached) params.set("attached", "true");
-  const qs = params.toString();
-  return byEtag("cycles", `${API}/cycles${qs ? `?${qs}` : ""}`);
+// Every lifecycle: an address resolves whether or not the sidebar's filter lists it.
+export function hierarchyRead(): ReadDescriptor<HierarchyResponse> {
+  return byEtag("hierarchy", `${API}/hierarchy?depth=1&lifecycle=all`);
 }
 
 export function campaignStorageRead(campaignId: string): ReadDescriptor<CampaignStorageResponse> {
@@ -377,7 +365,7 @@ export function treeRead(
   path: CyclePath,
   mask: TreeMask | null,
   moment: TreeMoment | null = null,
-): ReadDescriptor<CourseNode> {
+): ReadDescriptor<CourseLineage> {
   const params = new URLSearchParams();
   if (mask?.lens) params.set("lens", mask.lens);
   if (mask?.samples && mask.samples.length > 0) params.set("samples", mask.samples.join(","));

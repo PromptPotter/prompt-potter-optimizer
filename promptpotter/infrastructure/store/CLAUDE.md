@@ -57,6 +57,10 @@ A round's LEVEL is the cycle's, never the round's: `RoundClosedRecord.level_seri
 `ArmState`**: the election stamps it AFTER the arm's last
 `ArmRecord`, so it would be an all-null column on every live run.
 
+**A course's card is the hierarchy's.** `build_lineage_tree` folds topology over the entries
+`application/hierarchy.py::family_course_entries` mints, so the tree and the listing cannot word one
+course two ways; a timeline a supersede folded onto its branch carries the branch's entry.
+
 **It is a READ MODEL and decides nothing.** The decision genealogy (`application/mask/`, the
 resume replayers) rides positional `(cycle_id, round)` and must not move onto it. What a cut
 writes, and why — [`docs/operations/persistence-and-state.md`](../../../docs/operations/persistence-and-state.md).

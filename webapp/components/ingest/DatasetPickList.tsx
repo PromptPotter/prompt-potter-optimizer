@@ -1,7 +1,7 @@
 "use client";
 
 import type { DatasetIndexEntry, DraftSummary, OriginEntry } from "@/lib/api";
-import { fmtPct0 } from "@/lib/format";
+import { fmtAgo, fmtPct0 } from "@/lib/format";
 
 export function DatasetPickList({
   drafts,
@@ -54,7 +54,9 @@ export function DatasetPickList({
                   onClick={() => onReopenDraft(d.draft_id)}
                 >
                   <span className="ingest-pick-name">{d.slug}</span>
-                  <span className="ingest-pick-meta">{d.n_samples}</span>
+                  <span className="ingest-pick-meta">
+                    {d.n_samples} · {fmtAgo(d.updated_at)}
+                  </span>
                 </button>
                 <button
                   type="button"

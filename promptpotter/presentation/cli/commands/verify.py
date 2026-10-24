@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.cycle_listing import resolve_campaign_id_hint
+from promptpotter.application.cycle_addressing import resolve_campaign_id_hint
 from promptpotter.application.diagnostics.verify import VerifyOutcome
 from promptpotter.application.evidence.subjects import parse_subject
 from promptpotter.application.views.render.primitives import fmt_ci

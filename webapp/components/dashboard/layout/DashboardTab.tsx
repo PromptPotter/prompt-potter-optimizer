@@ -5,7 +5,8 @@ import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useCandidatesState } from "@/lib/candidates-store";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useSelection } from "@/lib/SelectionContext";
-import { useCampaign } from "@/lib/registry";
+import { hasTag } from "@/lib/hierarchy";
+import { useEntry } from "@/lib/registry";
 import { useWorkspace } from "@/lib/workspace";
 import { RunErrorBanner } from "./RunErrorBanner";
 import { TopStrip } from "./TopStrip";
@@ -31,8 +32,8 @@ export function DashboardTab() {
   const { showForest } = useCandidatesState();
 
   const { viewedPath, campaignId } = useWorkspace();
-  const rootSelfOpt = useCampaign(campaignId)?.self_optimization;
-  const isOuterSelfOpt = viewedPath?.length === 1 && rootSelfOpt === true;
+  const rootSelfOpt = hasTag(useEntry(campaignId), "self_optimization");
+  const isOuterSelfOpt = viewedPath?.length === 1 && rootSelfOpt;
   // An L4 unit has no sample roster — its samples ARE the inner campaigns.
   const hasSamples = !cv.selfOptimization;
 

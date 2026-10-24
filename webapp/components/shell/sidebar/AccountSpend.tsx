@@ -13,10 +13,10 @@ import { useRegistry } from "@/lib/registry";
 const QUOTA_POLL_MS = 60_000;
 
 export function AccountSpend() {
-  const { campaigns } = useRegistry();
+  const { entries } = useRegistry();
   const read = useRead(quotaRead(), { auth: true, intervalMs: QUOTA_POLL_MS });
 
-  const signature = campaigns.map((c) => c.spend_lifetime.billed_usd).join(",");
+  const signature = entries.map((c) => c.facts.spend_lifetime.billed_usd).join(",");
   const asked = useRef(signature);
   useEffect(() => {
     if (asked.current === signature) return;

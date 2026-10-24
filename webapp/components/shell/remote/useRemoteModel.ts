@@ -7,7 +7,9 @@ import { pathOf, readSpend, runningInnerRun } from "@/lib/derivations";
 import { fmtDuration } from "@/lib/format";
 import { useCycleStream } from "@/lib/poll";
 import { useLineageTree } from "@/lib/lineage";
-import { useCycleEntry } from "@/lib/registry";
+import { tagValue } from "@/lib/hierarchy";
+import { encodeCyclePath } from "@/lib/ids";
+import { useEntry } from "@/lib/registry";
 import { useLeafIsL4, useWorkspace } from "@/lib/workspace";
 
 export type RemoteModel = NonNullable<ReturnType<typeof useRemoteModel>>;
@@ -22,7 +24,7 @@ export function useRemoteModel() {
     backToOuter,
   } = useWorkspace();
   const leafIsL4 = useLeafIsL4();
-  const leafEntry = useCycleEntry(leafCampaignId, leafCycleId);
+  const leafEntry = useEntry(viewedPath ? encodeCyclePath(viewedPath) : null);
   const { dash, status } = useCycleStream();
   const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");
   const isOuterView = (viewedPath?.length ?? 1) === 1;
@@ -82,9 +84,9 @@ export function useRemoteModel() {
 
   return {
     cycleId,
-    datasetName: leafEntry?.dataset_name,
+    datasetName: tagValue(leafEntry, "dataset") ?? undefined,
     updatedAt: dash.at_time,
-    babysat: Boolean(leafEntry?.human_intervened),
+    babysat: Boolean(leafEntry?.state.intervened),
     offline: status === "offline",
     inner: !isOuterView,
     innerHop,

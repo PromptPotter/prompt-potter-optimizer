@@ -22,7 +22,7 @@ from promptpotter.application.scoring.formula.compiler import (
     split_scoring_block,
 )
 from promptpotter.application.scoring.metrics import fold_cells
-from promptpotter.domain.cycle_listing import CycleIndex
+from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.results import (
@@ -87,16 +87,12 @@ def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
     stores, scorer = session.store, session.state.scoring.require_scorer()
     edges: list[tuple[str, CycleIndex, frozenset[int]]] = []
     lines: list[list[RoundResult]] = []
-    for entry in stores.campaigns.enumerate_cycles():
-        if entry.campaign_id != session.campaign_id:
-            continue
-        hop = CycleHop(campaign_id=entry.campaign_id, cycle_id=entry.cycle_id)
-        index = stores.campaigns.load(hop, moment=None)
-        if index is None or not (rounds := closed_rounds(stores, hop, scorer, moment=None)):
+    for hop, index in stores.campaigns.campaign_cycles(session.campaign_id):
+        if not (rounds := closed_rounds(stores, hop, scorer, moment=None)):
             continue
         # The cycle's OWN closes: a fork's lifted rounds are its parent's simulations.
         own = frozenset(scan_standing_rounds([LedgerSpan(stores.campaigns.ledger(hop))]).rounds)
-        edges.append((entry.cycle_id, index, own))
+        edges.append((hop.cycle_id, index, own))
         lines.append(rounds)
     cycles: list[SpineCycle] = []
     for (cid, index, own), series in zip(edges, difficulty.level_series(lines), strict=True):
@@ -184,19 +180,14 @@ def load_mask_record(
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         raise NotFoundError(f"Campaign '{campaign_id}' not found")
-    entries = [e for e in stores.campaigns.enumerate_cycles() if e.campaign_id == campaign_id]
 
     files: dict[str, dict[int, RoundResult]] = {}
     edges: dict[str, tuple[str | None, int | None]] = {}
     crowns: dict[str, dict[int, ArmKey]] = {}
     decisions: dict[str, dict[int, list[ResumeCheckpointRecord]]] = {}
-    for e in entries:
-        cid = e.cycle_id
-        hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
+    for hop, index in stores.campaigns.campaign_cycles(campaign_id):
+        cid = hop.cycle_id
         cdir = cycle_dir_for(stores.base_dir, hop)
-        index = stores.campaigns.load(hop, moment=None)
-        if index is None:
-            continue
         edges[cid] = _cycle_edge(index)
         decisions[cid] = (
             scan_standing_rounds(ledger_chain(CycleDir(cdir), moment=None)).decisions

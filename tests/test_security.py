@@ -222,7 +222,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         line = logged("/api/v1/auth/callback/google?state=one-time-state&code=one-time-code")
         assert "one-time" not in line, "the one-time code or state reached the access log"
         assert "/api/v1/auth/callback/google " in line
-        kept = "/api/v1/cycles?campaign_id=camp-1"
+        kept = "/api/v1/hierarchy?campaign=camp-1"
         assert kept in logged(kept), "a query that is no secret was cut from the log"
     finally:
         root.setLevel(levels[0])

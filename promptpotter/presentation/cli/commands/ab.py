@@ -6,7 +6,7 @@ import argparse
 from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.ab_replay import ab_replay_cycle
-from promptpotter.application.cycle_listing import (
+from promptpotter.application.cycle_addressing import (
     active_pointer,
     resolve_campaign_id,
     resolve_cycle_id,

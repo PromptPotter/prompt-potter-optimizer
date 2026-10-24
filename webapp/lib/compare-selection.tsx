@@ -2,7 +2,9 @@
 // Not in `view-memory.tsx`: that record is per campaign, and a comparison spans several.
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import type { HierarchyCampaign } from "./api";
 import { subjectKey } from "./api/reads";
+import { decodeCyclePath } from "./ids";
 
 export interface CompareChannel {
   /** For an L4 seed, the OUTER campaign: an inner one is in no registry and roots no tree. */
@@ -10,9 +12,14 @@ export interface CompareChannel {
   subject: string;
 }
 
-/** After a supersede the answering branch is a fork: `campaign-forest.ts::buildForest` resolves it. */
-export function defaultChannel(campaignId: string, answeringCycleId: string): CompareChannel {
-  return { rootCampaignId: campaignId, subject: subjectKey("course", [campaignId, answeringCycleId]) };
+/** After a supersede the line is a fork's: the served `facts.line` names it. */
+export function defaultChannel(campaign: HierarchyCampaign): CompareChannel {
+  const line = decodeCyclePath(campaign.facts.line)?.at(-1);
+  if (!line) throw new Error(`undecodable line ${campaign.facts.line}`);
+  return {
+    rootCampaignId: campaign.address,
+    subject: subjectKey("course", [line.campaignId, line.cycleId]),
+  };
 }
 
 interface CompareSelection {

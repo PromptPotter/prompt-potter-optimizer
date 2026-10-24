@@ -123,7 +123,7 @@
       },
       "ActiveSessionResponse": {
         "additionalProperties": false,
-        "description": "The tenant's latest launch — not the set of live runs, which is `run_phase` on `/cycles`.",
+        "description": "The tenant's latest launch — not the set of live runs, which is `state.producer` on `/hierarchy`.",
         "properties": {
           "campaign_id": {
             "anyOf": [
@@ -838,7 +838,7 @@
           "children": {
             "description": "The runs that measured this arm's individual.",
             "items": {
-              "$ref": "#/components/schemas/CourseNode"
+              "$ref": "#/components/schemas/CourseLineage"
             },
             "title": "Children",
             "type": "array"
@@ -886,7 +886,7 @@
                 "type": "null"
               }
             ],
-            "description": "The column the selector elects on. Candidate: the declaration its round's election carried (`Election.elects_on`), null on a round that never elected. Course: the declaration its own elections carried. `ability`: the rounds are won on theta, not on accuracy.",
+            "description": "The column the selector elects on: the declaration its round's election carried (`Election.elects_on`), null on a round that never elected. `ability`: the rounds are won on theta, not on accuracy.",
             "title": "Elects On"
           },
           "fork": {
@@ -2263,6 +2263,62 @@
         "title": "CampaignConfig",
         "type": "object"
       },
+      "CampaignFacts": {
+        "additionalProperties": false,
+        "description": "A campaign's typed facts, for a pane or a route argument; its rows read the envelope.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The operator's own name for it; null where none was given, and the envelope's `label` falls back to the dataset.",
+            "title": "Label"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/LifecycleStatus"
+          },
+          "line": {
+            "description": "The address of the course holding the line now: the root, or the fork a supersede handed it to.",
+            "title": "Line",
+            "type": "string"
+          },
+          "root": {
+            "description": "The root course's address.",
+            "title": "Root",
+            "type": "string"
+          },
+          "runs_with": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CampaignRunsWith"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the root course runs with; null where its pipeline did not resolve."
+          },
+          "spend_lifetime": {
+            "$ref": "#/components/schemas/LifetimeSpend",
+            "description": "Every cycle's bill, forks, forwarded inner spend and deleted cycles included."
+          }
+        },
+        "required": [
+          "label",
+          "root",
+          "line",
+          "lifecycle",
+          "spend_lifetime",
+          "runs_with"
+        ],
+        "title": "CampaignFacts",
+        "type": "object"
+      },
       "CampaignLaunch": {
         "additionalProperties": false,
         "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
@@ -2282,30 +2338,6 @@
           "dataset_name"
         ],
         "title": "CampaignLaunch",
-        "type": "object"
-      },
-      "CampaignListResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "campaigns": {
-            "description": "List of campaign summaries",
-            "items": {
-              "$ref": "#/components/schemas/CampaignSummary"
-            },
-            "title": "Campaigns",
-            "type": "array"
-          },
-          "total": {
-            "description": "Total number of campaigns",
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "campaigns",
-          "total"
-        ],
-        "title": "CampaignListResponse",
         "type": "object"
       },
       "CampaignPipelineResponse": {
@@ -2546,139 +2578,6 @@
           "loop_bytes"
         ],
         "title": "CampaignStorageResponse",
-        "type": "object"
-      },
-      "CampaignSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "bench": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchScore"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The headline (`architecture.md` § The bench score is not an optimizer's selection), read off the passes its line's ledgers banked, under the formula the line runs — whichever cycle rebases handed the line to. `status` says where it stands and whether its pass may be asked for; `selected` is null until the line grades its pick. Null where the root config did not resolve — a manifest this build cannot read."
-          },
-          "campaign_id": {
-            "description": "Campaign id ({dataset}__{rand6}) — one RUN of an origin",
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "campaign_metered_usd": {
-            "description": "What the campaign's money ceiling counts, in its meter: every cycle's own spend once, siblings and deleted cycles included. The number a surface sets beside the campaign's cap.",
-            "title": "Campaign Metered Usd",
-            "type": "number"
-          },
-          "comparison": {
-            "description": "Whether the campaign is a CONTROLLED arm of a head-to-head (its declaration's `compare` purpose, frozen at mint), as one sentence (`domain/campaign.py::comparison_line`): an arm reads no other campaign's measurements, refuses a steer and spends its declared budget; an ordinary campaign optimizes with everything that helps.",
-            "title": "Comparison",
-            "type": "string"
-          },
-          "created_at": {
-            "description": "ISO 8601 creation timestamp",
-            "title": "Created At",
-            "type": "string"
-          },
-          "dataset_name": {
-            "description": "Dataset this campaign optimizes",
-            "title": "Dataset Name",
-            "type": "string"
-          },
-          "display_name": {
-            "description": "What every surface calls the campaign: its label, else its dataset.",
-            "title": "Display Name",
-            "type": "string"
-          },
-          "id_suffix": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The id's `__xxxxxx` tail while it is all that tells one dataset's campaigns apart; null once the campaign carries a label, or where the id has no tail.",
-            "title": "Id Suffix"
-          },
-          "label": {
-            "default": "",
-            "description": "Operator-supplied campaign label",
-            "title": "Label",
-            "type": "string"
-          },
-          "lifecycle_status": {
-            "$ref": "#/components/schemas/LifecycleStatus",
-            "default": "active",
-            "description": "Operator visibility intent: 'active' (default sidebar), 'archived' (hidden), 'deleted' (soft-marked, data retained)"
-          },
-          "line": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LineStanding"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The campaign's line: the cycle answering for it now and how that cycle stands — its run state, its standing, its rounds and the budget binding them. Null while the root cycle is not on disk yet. Its `budget_rounds` is null where the root config did not resolve."
-          },
-          "root_cycle_id": {
-            "description": "The campaign's root cycle id — the content address of its origin and its run declaration together. Campaigns on one origin under one declaration share it and differ only in the random `campaign_id` suffix, which is what makes them separate RUNS of it; two arms of a head-to-head never share one. The sidebar groups the forest by this key.",
-            "title": "Root Cycle Id",
-            "type": "string"
-          },
-          "runs_with": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CampaignRunsWith"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What the ROOT course runs with — a second transport of the answer `GET /campaigns/{id}/pipeline` gives at the root, never a second source. Null when the root pipeline did not resolve. `budget_rounds` is the DECLARED `budget.rounds`; 0 means origin only."
-          },
-          "self_optimization": {
-            "description": "This campaign optimizes the optimizer itself (L4), answered off the connector its declaration froze at mint by the connector registry. The one test a surface draws the 'inner loops' disclosure and the self-optimization panel variants on.",
-            "title": "Self Optimization",
-            "type": "boolean"
-          },
-          "spend_lifetime": {
-            "$ref": "#/components/schemas/LifetimeSpend",
-            "description": "This campaign's share of `QuotaStatus.spend_lifetime`: every cycle's ledger, forks and forwarded L4 inner spend included, plus spend banked when one of its cycles was deleted. A wider scope than `spend_metered`, which reads the campaign's line alone."
-          },
-          "spend_metered": {
-            "$ref": "#/components/schemas/MeteredSpend",
-            "description": "The campaign's LINE — the root and every cycle a rebase handed it to — in the ceiling's meter, by bucket: the bill, or the search's incurred USD for a controlled arm. Part of `campaign_metered_usd`, which also counts every other cycle."
-          },
-          "updated_at": {
-            "description": "The newest activity on any of the campaign's cycles, `created_at` where none has any. The list is served in this order, newest first.",
-            "title": "Updated At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "dataset_name",
-          "display_name",
-          "id_suffix",
-          "line",
-          "created_at",
-          "updated_at",
-          "root_cycle_id",
-          "self_optimization",
-          "spend_lifetime",
-          "spend_metered",
-          "campaign_metered_usd",
-          "bench",
-          "runs_with",
-          "comparison"
-        ],
-        "title": "CampaignSummary",
         "type": "object"
       },
       "CancelQueuedRunPayload": {
@@ -3851,7 +3750,74 @@
         "title": "CostAbsence",
         "type": "string"
       },
-      "CourseNode": {
+      "CourseFacts": {
+        "additionalProperties": false,
+        "description": "A course's typed facts, for a pane or a route argument; its rows read the envelope.",
+        "properties": {
+          "mint": {
+            "$ref": "#/components/schemas/CourseKind",
+            "description": "How the course was minted; the `mint` tag renders it."
+          },
+          "rounds_closed": {
+            "description": "Rounds closed AFTER the origin.",
+            "title": "Rounds Closed",
+            "type": "integer"
+          },
+          "spawn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CourseSpawn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null on a root, and on a cycle cut from another tree."
+          },
+          "standing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunStanding"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null before round 0 closes."
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outer panel cell an L4 inner course measures.",
+            "title": "Task"
+          }
+        },
+        "required": [
+          "mint",
+          "spawn",
+          "task",
+          "standing",
+          "rounds_closed"
+        ],
+        "title": "CourseFacts",
+        "type": "object"
+      },
+      "CourseKind": {
+        "enum": [
+          "root",
+          "fork",
+          "diag",
+          "inner"
+        ],
+        "type": "string"
+      },
+      "CourseLineage": {
         "additionalProperties": false,
         "description": "One run, whose children are the arms on its ONE timeline, forks folded in.",
         "properties": {
@@ -3862,52 +3828,14 @@
             "title": "Children",
             "type": "array"
           },
-          "course_kind": {
-            "enum": [
-              "root",
-              "fork",
-              "diag",
-              "inner"
-            ],
-            "title": "Course Kind",
-            "type": "string"
-          },
-          "dataset_name": {
-            "title": "Dataset Name",
-            "type": "string"
+          "course": {
+            "$ref": "#/components/schemas/HierarchyCourse",
+            "description": "The course as the hierarchy serves it, minted by the one course builder: a timeline a supersede folded onto its branch carries the branch's."
           },
           "deletable_stubs": {
             "description": "How many cycles `cleanup-empty-cycles` addressed at this course deletes now: its forks that closed no round of their own, hold no producer and no descendant, and are not the active cycle (`CampaignStore.deletable_stubs`, the command's own list). A fork is no node of this tree, so no count over its nodes can stand in for it.",
             "title": "Deletable Stubs",
             "type": "integer"
-          },
-          "elects_on": {
-            "anyOf": [
-              {
-                "enum": [
-                  "accuracy",
-                  "composite",
-                  "ability"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The column the selector elects on. Candidate: the declaration its round's election carried (`Election.elects_on`), null on a round that never elected. Course: the declaration its own elections carried. `ability`: the rounds are won on theta, not on accuracy.",
-            "title": "Elects On"
-          },
-          "fork_direction": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ForkDirection"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which side of this cut the run CONTINUES on, derived from `trigger` (`FORK_TRAITS`). `offshoot` = this branch hangs off a line that keeps running; `supersede` = this branch IS the line and the PARENT is what was left behind. Null for roots and inner runs, which were not cut from anything. Served, never derived in the client — the two read identically on disk and only this says them apart."
           },
           "id": {
             "description": "Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin.",
@@ -3975,71 +3903,83 @@
             },
             "title": "Path",
             "type": "array"
-          },
-          "run_phase": {
-            "$ref": "#/components/schemas/RunPhase",
-            "description": "The ONE server-owned run-state (`derive_run_state`), the same value `/cycles` serves."
-          },
-          "run_standing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunStanding"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Where the run stands as the course's newest standing round left it, over its whole history: its selection, that selection against the origin on the origin panel, and what it has cost. A course whose line moved to a branch serves the branch's. Null before round 0 closes."
-          },
-          "status": {
-            "$ref": "#/components/schemas/RunStatus",
-            "description": "How the course reads on a row — its phase and why it ended as one word and one mark, as `/cycles` serves it."
-          },
-          "steered_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "As `ForkStamp.steered_by`.",
-            "title": "Steered By"
-          },
-          "task": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "An inner run's benchmark task. Load-bearing: every task runs for every candidate, so the candidate edge alone does not identify an inner run.",
-            "title": "Task"
-          },
-          "trigger": {
-            "description": "Fork trigger; empty for roots and inner runs.",
-            "title": "Trigger",
-            "type": "string"
           }
         },
         "required": [
           "id",
           "label",
-          "course_kind",
-          "run_phase",
-          "status",
-          "dataset_name",
-          "trigger",
-          "fork_direction",
-          "steered_by",
-          "task",
-          "run_standing",
+          "course",
           "deletable_stubs"
         ],
-        "title": "CourseNode",
+        "title": "CourseLineage",
+        "type": "object"
+      },
+      "CourseSpawn": {
+        "additionalProperties": false,
+        "description": "Where a fork was born on its parent's time line: the cut, as an event.",
+        "properties": {
+          "at_offset": {
+            "description": "The parent ledger's offset the cut was taken at.",
+            "title": "At Offset",
+            "type": "integer"
+          },
+          "at_round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The round it branched at; null where none was named.",
+            "title": "At Round"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/ForkDirection",
+            "description": "Which side of the cut the run continues on, measured or implied by `trigger`."
+          },
+          "from_candidate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The arm key it branched from, where one.",
+            "title": "From Candidate"
+          },
+          "issued_by": {
+            "description": "Who cut it, as its fork record names them.",
+            "title": "Issued By",
+            "type": "string"
+          },
+          "parent": {
+            "description": "The address of the course it branched from.",
+            "title": "Parent",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/ForkTrigger"
+          }
+        },
+        "required": [
+          "parent",
+          "at_round",
+          "at_offset",
+          "from_candidate",
+          "trigger",
+          "direction",
+          "reason",
+          "issued_by"
+        ],
+        "title": "CourseSpawn",
         "type": "object"
       },
       "Coverage": {
@@ -4277,154 +4217,6 @@
           "cycle_id"
         ],
         "title": "CycleHop",
-        "type": "object"
-      },
-      "CycleListEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "campaign_id": {
-            "description": "Campaign the cycle belongs to",
-            "title": "Campaign Id",
-            "type": "string"
-          },
-          "cycle_id": {
-            "title": "Cycle Id",
-            "type": "string"
-          },
-          "dataset_name": {
-            "default": "",
-            "title": "Dataset Name",
-            "type": "string"
-          },
-          "human_intervened": {
-            "default": false,
-            "description": "True once an operator manually intervened (e.g. skip-searchpoint); the cycle is babysat and no longer purely reproducible. Drives the 'babysat' badge; orthogonal to run_phase.",
-            "title": "Human Intervened",
-            "type": "boolean"
-          },
-          "is_root": {
-            "title": "Is Root",
-            "type": "boolean"
-          },
-          "mint_kind": {
-            "enum": [
-              "session",
-              "divergent_resume",
-              "user_fork",
-              "auto_rebase"
-            ],
-            "title": "Mint Kind",
-            "type": "string"
-          },
-          "parent_cycle_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Immediate parent for siblings (forks/diag); null for roots. Sidebar uses this to nest siblings.",
-            "title": "Parent Cycle Id"
-          },
-          "pause": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PauseReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Why the cycle reads `paused` — what caused it, who asked and what the operator does next (`RunState.pause`); null in every other phase."
-          },
-          "producer_attached": {
-            "description": "A process holds this cycle (`ProducerReading.attached`, derived with `run_phase`): running, holding for the operator, or running out a pause. What the dock counts as in flight.",
-            "title": "Producer Attached",
-            "type": "boolean"
-          },
-          "rounds_closed": {
-            "default": 0,
-            "description": "Rounds this cycle has closed AFTER the origin — the unit a rounds cap counts.",
-            "title": "Rounds Closed",
-            "type": "integer"
-          },
-          "run_admission": {
-            "$ref": "#/components/schemas/RunAdmission",
-            "description": "Which run verbs this cycle admits now, derived with `run_phase` — what the dispatcher refuses on, so a listing never offers a verb the cycle would decline."
-          },
-          "run_phase": {
-            "$ref": "#/components/schemas/RunPhase",
-            "default": "detached",
-            "description": "The single run-state value (RunPhase). Computed once by derive_run_state from lifecycle + control flags + freshness; every picker dot and badge reads this, none re-derive it. 'terminal' pairs with `stop_reason` for the reason label."
-          },
-          "status": {
-            "$ref": "#/components/schemas/RunStatus",
-            "description": "How the cycle reads on a row: `run_phase` and `stop_reason` as one word and one mark, so no surface words a phase itself."
-          },
-          "stop_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/StopReason"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Why the cycle ended; null while it has not. Label, outcome and next step derive from the one STOP_REASON_INFO table — never re-mapped per surface."
-          },
-          "updated_at": {
-            "default": "",
-            "title": "Updated At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "cycle_id",
-          "mint_kind",
-          "is_root",
-          "producer_attached",
-          "status",
-          "run_admission"
-        ],
-        "title": "CycleListEntry",
-        "type": "object"
-      },
-      "CyclesResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "active_cycle_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Active cycle per active_session.json; null when no session is active.",
-            "title": "Active Cycle Id"
-          },
-          "cycles": {
-            "items": {
-              "$ref": "#/components/schemas/CycleListEntry"
-            },
-            "title": "Cycles",
-            "type": "array"
-          },
-          "tenant_id": {
-            "title": "Tenant Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "tenant_id",
-          "active_cycle_id",
-          "cycles"
-        ],
-        "title": "CyclesResponse",
         "type": "object"
       },
       "DashboardCandidate": {
@@ -5538,10 +5330,6 @@
           "slug": {
             "title": "Slug",
             "type": "string"
-          },
-          "updated_at": {
-            "title": "Updated At",
-            "type": "string"
           }
         },
         "required": [
@@ -5564,7 +5352,6 @@
           "origin_prompts",
           "candidate_library_size",
           "created_at",
-          "updated_at",
           "active_steps",
           "pipeline_view",
           "node_config_schema",
@@ -7164,14 +6951,7 @@
             "description": "Which side of the cut the run CONTINUES on (`FORK_TRAITS`): `offshoot` hangs off a line that keeps running, `supersede` IS the line."
           },
           "kind": {
-            "enum": [
-              "root",
-              "fork",
-              "diag",
-              "inner"
-            ],
-            "title": "Kind",
-            "type": "string"
+            "$ref": "#/components/schemas/CourseKind"
           },
           "status": {
             "$ref": "#/components/schemas/RunStatus",
@@ -7204,6 +6984,18 @@
         ],
         "title": "ForkStamp",
         "type": "object"
+      },
+      "ForkTrigger": {
+        "description": "One value per caller of :func:`mint_fork`.",
+        "enum": [
+          "operator_diag",
+          "operator_rewind",
+          "operator_steered",
+          "optimizer_rebase",
+          "scoring_divergence"
+        ],
+        "title": "ForkTrigger",
+        "type": "string"
       },
       "GradeBenchPayload": {
         "additionalProperties": false,
@@ -7573,6 +7365,486 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HierarchyCampaign": {
+        "additionalProperties": false,
+        "description": "A campaign as one hierarchy entry: its state and line stats are its line course's.",
+        "properties": {
+          "address": {
+            "description": "Server-minted and stable: the key of every row and every open set. A course's is its `CyclePath` on the wire (`encodeCyclePath`).",
+            "title": "Address",
+            "type": "string"
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What could not be read; null where all was.",
+            "title": "Caveat"
+          },
+          "child_count": {
+            "description": "A campaign's courses; a course's rounds on its ledger, closed and open.",
+            "title": "Child Count",
+            "type": "integer"
+          },
+          "children": {
+            "description": "Served to `?depth=`: a campaign's courses root first; empty under a course.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "campaign": "#/components/schemas/HierarchyCampaign",
+                  "course": "#/components/schemas/HierarchyCourse"
+                },
+                "propertyName": "level"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HierarchyCampaign"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCourse"
+                }
+              ]
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/CampaignFacts"
+          },
+          "label": {
+            "description": "The display name.",
+            "title": "Label",
+            "type": "string"
+          },
+          "lede": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one sentence under the title: the selection line.",
+            "title": "Lede"
+          },
+          "level": {
+            "const": "campaign",
+            "default": "campaign",
+            "title": "Level",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
+            "title": "Parent"
+          },
+          "span": {
+            "$ref": "#/components/schemas/HierarchySpan"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HierarchyState"
+          },
+          "stats": {
+            "description": "Server-ordered; `stats[0]` is the headline.",
+            "items": {
+              "$ref": "#/components/schemas/HierarchyStat"
+            },
+            "title": "Stats",
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyTag"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "parent",
+          "label",
+          "lede",
+          "caveat",
+          "tags",
+          "state",
+          "stats",
+          "span",
+          "child_count",
+          "children",
+          "facts"
+        ],
+        "title": "HierarchyCampaign",
+        "type": "object"
+      },
+      "HierarchyCourse": {
+        "additionalProperties": false,
+        "description": "A course — one cycle's run, root, fork, diag or inner — as one hierarchy entry.",
+        "properties": {
+          "address": {
+            "description": "Server-minted and stable: the key of every row and every open set. A course's is its `CyclePath` on the wire (`encodeCyclePath`).",
+            "title": "Address",
+            "type": "string"
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What could not be read; null where all was.",
+            "title": "Caveat"
+          },
+          "child_count": {
+            "description": "A campaign's courses; a course's rounds on its ledger, closed and open.",
+            "title": "Child Count",
+            "type": "integer"
+          },
+          "children": {
+            "description": "Served to `?depth=`: a campaign's courses root first; empty under a course.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "campaign": "#/components/schemas/HierarchyCampaign",
+                  "course": "#/components/schemas/HierarchyCourse"
+                },
+                "propertyName": "level"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HierarchyCampaign"
+                },
+                {
+                  "$ref": "#/components/schemas/HierarchyCourse"
+                }
+              ]
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/CourseFacts"
+          },
+          "label": {
+            "description": "The display name.",
+            "title": "Label",
+            "type": "string"
+          },
+          "lede": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one sentence under the title: the selection line.",
+            "title": "Lede"
+          },
+          "level": {
+            "const": "course",
+            "default": "course",
+            "title": "Level",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
+            "title": "Parent"
+          },
+          "span": {
+            "$ref": "#/components/schemas/HierarchySpan"
+          },
+          "state": {
+            "$ref": "#/components/schemas/HierarchyState"
+          },
+          "stats": {
+            "description": "Server-ordered; `stats[0]` is the headline.",
+            "items": {
+              "$ref": "#/components/schemas/HierarchyStat"
+            },
+            "title": "Stats",
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyTag"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "parent",
+          "label",
+          "lede",
+          "caveat",
+          "tags",
+          "state",
+          "stats",
+          "span",
+          "child_count",
+          "children",
+          "facts"
+        ],
+        "title": "HierarchyCourse",
+        "type": "object"
+      },
+      "HierarchyProducer": {
+        "additionalProperties": false,
+        "description": "A cycle's producer as a listing serves it: what a write moves, never a clock.",
+        "properties": {
+          "alert": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProducerAlert"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What this state raises on its own; how long it has, the dashboard says."
+          },
+          "appending": {
+            "description": "That process is walking the loop.",
+            "title": "Appending",
+            "type": "boolean"
+          },
+          "attached": {
+            "description": "A process holds this cycle, running or launching it.",
+            "title": "Attached",
+            "type": "boolean"
+          },
+          "label": {
+            "description": "The state as a walking run's head reads it.",
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProducerState"
+          }
+        },
+        "required": [
+          "state",
+          "label",
+          "attached",
+          "appending",
+          "alert"
+        ],
+        "title": "HierarchyProducer",
+        "type": "object"
+      },
+      "HierarchyResponse": {
+        "additionalProperties": false,
+        "description": "Every campaign in one store, root-major and newest first.",
+        "properties": {
+          "entries": {
+            "description": "Campaigns sharing a root cycle sit together, the group of the newest first.",
+            "items": {
+              "$ref": "#/components/schemas/HierarchyCampaign"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "title": "HierarchyResponse",
+        "type": "object"
+      },
+      "HierarchySpan": {
+        "additionalProperties": false,
+        "description": "When an entry opened, last moved and closed.",
+        "properties": {
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null while the entry's run has not ended.",
+            "title": "Closed At"
+          },
+          "last_at": {
+            "description": "The newest activity under the entry.",
+            "title": "Last At",
+            "type": "string"
+          },
+          "opened_at": {
+            "title": "Opened At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "opened_at",
+          "last_at",
+          "closed_at"
+        ],
+        "title": "HierarchySpan",
+        "type": "object"
+      },
+      "HierarchyStat": {
+        "additionalProperties": false,
+        "description": "One number an entry shows, worded by the server in the order it is served.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number `value` words, for a meter's geometry only: never re-worded and never re-ranked. Null where `value` words no number.",
+            "title": "Amount"
+          },
+          "key": {
+            "$ref": "#/components/schemas/StatKey"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sub": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The second line under the value; null where none.",
+            "title": "Sub"
+          },
+          "value": {
+            "description": "The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`.",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "value",
+          "sub",
+          "amount"
+        ],
+        "title": "HierarchyStat",
+        "type": "object"
+      },
+      "HierarchyState": {
+        "additionalProperties": false,
+        "description": "A run's state as one value: the phase, its word and mark, the producer and the verbs.",
+        "properties": {
+          "admission": {
+            "$ref": "#/components/schemas/RunAdmission"
+          },
+          "intervened": {
+            "description": "An operator intervened by hand, so the run is no longer purely reproducible.",
+            "title": "Intervened",
+            "type": "boolean"
+          },
+          "pause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PauseReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the run reads paused; null otherwise."
+          },
+          "producer": {
+            "$ref": "#/components/schemas/HierarchyProducer"
+          },
+          "run_phase": {
+            "$ref": "#/components/schemas/RunPhase"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the run ended; null while it has not."
+          }
+        },
+        "required": [
+          "run_phase",
+          "status",
+          "producer",
+          "pause",
+          "admission",
+          "stop_reason",
+          "intervened"
+        ],
+        "title": "HierarchyState",
+        "type": "object"
+      },
+      "HierarchyTag": {
+        "additionalProperties": false,
+        "description": "One chip an entry wears, worded by the server.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/TagKind"
+          },
+          "label": {
+            "description": "The chip as it reads.",
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "description": "What a surface routes or branches on: the dataset slug, the vendor id, the mint word, the successor's address.",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "value",
+          "label"
+        ],
+        "title": "HierarchyTag",
         "type": "object"
       },
       "IndividualLineage": {
@@ -8146,103 +8418,6 @@
         "title": "LineRate",
         "type": "object"
       },
-      "LineStanding": {
-        "additionalProperties": false,
-        "description": "A campaign's line as one value: the cycle that answers for it now, and how that cycle stands.",
-        "properties": {
-          "budget_rounds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The `budget.rounds` binding the holder: what its last launch declared with the standing operator budget laid over, as its dashboard's `run_limits` reads; before any launch, its campaign's. 0 is origin only; null is no rounds axis.",
-            "title": "Budget Rounds"
-          },
-          "holder": {
-            "$ref": "#/components/schemas/CycleHop",
-            "description": "The cycle answering for the campaign."
-          },
-          "human_intervened": {
-            "title": "Human Intervened",
-            "type": "boolean"
-          },
-          "producer_attached": {
-            "title": "Producer Attached",
-            "type": "boolean"
-          },
-          "rounds_cap_note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What `budget_rounds` says beside a rounds count (`rounds_cap_note`); null where no rounds axis binds.",
-            "title": "Rounds Cap Note"
-          },
-          "rounds_closed": {
-            "description": "Rounds the holder closed AFTER the origin.",
-            "title": "Rounds Closed",
-            "type": "integer"
-          },
-          "rounds_line": {
-            "description": "`rounds_closed` against `budget_rounds` as a campaign row prints it (`rounds_line`).",
-            "title": "Rounds Line",
-            "type": "string"
-          },
-          "run_phase": {
-            "$ref": "#/components/schemas/RunPhase",
-            "description": "The holder's derived run state, as `/cycles` serves."
-          },
-          "standing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunStanding"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Where the holder's run stands; null until its round 0 closes."
-          },
-          "status": {
-            "$ref": "#/components/schemas/RunStatus",
-            "description": "The campaign row's word and mark: `Archived` where the campaign is, else the holder's run state as `run_phase_label` words it."
-          },
-          "stop_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/StopReason"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Why the holder ended; null while it has not."
-          }
-        },
-        "required": [
-          "holder",
-          "status",
-          "run_phase",
-          "producer_attached",
-          "stop_reason",
-          "standing",
-          "rounds_closed",
-          "budget_rounds",
-          "rounds_line",
-          "rounds_cap_note",
-          "human_intervened"
-        ],
-        "title": "LineStanding",
-        "type": "object"
-      },
       "LineageDivergence": {
         "additionalProperties": false,
         "description": "Where an alternative criterion would have elected someone else, on the node it describes.",
@@ -8533,7 +8708,7 @@
                 "type": "null"
               }
             ],
-            "description": "The cycle the job holds, which `/cycles` lists with its run phase — `scoring` for a pass on it; null for a fresh mint and a pass scoring no cycle."
+            "description": "The cycle the job holds, which `/hierarchy` serves as a course entry with its run phase — `scoring` for a pass on it; null for a fresh mint and a pass scoring no cycle."
           },
           "holder": {
             "description": "WHAT holds the slot, by `kind`: a `campaign_launch` or a `scoring_pass` (a paid verb outside any run).",
@@ -14780,6 +14955,17 @@
         "title": "StartRunPayload",
         "type": "object"
       },
+      "StatKey": {
+        "enum": [
+          "spend_lifetime",
+          "spend",
+          "bench",
+          "rounds",
+          "accuracy",
+          "lives"
+        ],
+        "type": "string"
+      },
       "StatusMark": {
         "enum": [
           "archived",
@@ -15371,6 +15557,19 @@
         ],
         "title": "SubmittedArm",
         "type": "object"
+      },
+      "TagKind": {
+        "enum": [
+          "dataset",
+          "optimizer",
+          "vendor",
+          "mint",
+          "lifecycle",
+          "self_optimization",
+          "arm",
+          "superseded"
+        ],
+        "type": "string"
       },
       "TermsConsent": {
         "additionalProperties": false,
@@ -16638,85 +16837,6 @@
         ]
       }
     },
-    "/api/v1/campaigns": {
-      "get": {
-        "description": "Every campaign in one store owned by the caller, newest first.\n\n``descend`` enters an inner store exactly as on ``GET /cycles``.",
-        "operationId": "list_campaigns_api_v1_campaigns_get",
-        "parameters": [
-          {
-            "description": "Filter to one dataset",
-            "in": "query",
-            "name": "dataset",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter to one dataset",
-              "title": "Dataset"
-            }
-          },
-          {
-            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'",
-            "in": "query",
-            "name": "lifecycle",
-            "required": false,
-            "schema": {
-              "$ref": "#/components/schemas/LifecycleFilter",
-              "default": "active",
-              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'"
-            }
-          },
-          {
-            "in": "query",
-            "name": "descend",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Descend"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CampaignListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "List Campaigns",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
     "/api/v1/campaigns/{campaign_id}/config-map": {
       "get": {
         "description": "One campaign's knob coupling and provenance map: what moves which estimand, what overwrites what, which knobs collide.\n\nRead over the config its root runs under; 404 on cross-user reads.",
@@ -17544,7 +17664,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CourseNode"
+                  "$ref": "#/components/schemas/CourseLineage"
                 }
               }
             },
@@ -19218,82 +19338,6 @@
         ]
       }
     },
-    "/api/v1/cycles": {
-      "get": {
-        "description": "Every cycle in one store plus that store's active pointer.\n\n``descend`` is the ``~``-joined ``campaign::cycle`` chain of ``.inner/`` sandboxes to enter; absent is the tenant's own tree.\nThe pointer is raw: whether the pointed cycle is live is its entry's ``run_phase``.",
-        "operationId": "get_cycles_api_v1_cycles_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "descend",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Descend"
-            }
-          },
-          {
-            "in": "query",
-            "name": "campaign",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Campaign"
-            }
-          },
-          {
-            "in": "query",
-            "name": "attached",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Attached",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CyclesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Get Cycles",
-        "tags": [
-          "Cycles"
-        ]
-      }
-    },
     "/api/v1/datasets": {
       "get": {
         "description": "Every dataset this identity may read: its own tenant origins, then install content.",
@@ -20099,6 +20143,128 @@
         "summary": "Health Check",
         "tags": [
           "Health"
+        ]
+      }
+    },
+    "/api/v1/hierarchy": {
+      "get": {
+        "description": "Every campaign in one store the caller owns, as hierarchy entries, each with its courses.\n\n``descend`` enters an inner store exactly as every per-cycle read does.",
+        "operationId": "get_hierarchy_api_v1_hierarchy_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "descend",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Descend"
+            }
+          },
+          {
+            "description": "Filter to one dataset",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one dataset",
+              "title": "Dataset"
+            }
+          },
+          {
+            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'",
+            "in": "query",
+            "name": "lifecycle",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/LifecycleFilter",
+              "default": "active",
+              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'"
+            }
+          },
+          {
+            "description": "Filter to one campaign id",
+            "in": "query",
+            "name": "campaign",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to one campaign id",
+              "title": "Campaign"
+            }
+          },
+          {
+            "description": "Keep only the courses a producer holds",
+            "in": "query",
+            "name": "attached",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Keep only the courses a producer holds",
+              "title": "Attached",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "0 serves campaigns alone, 1 their courses",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "0 serves campaigns alone, 1 their courses",
+              "minimum": 0,
+              "title": "Depth",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HierarchyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Get Hierarchy",
+        "tags": [
+          "Hierarchy"
         ]
       }
     },

@@ -2,13 +2,9 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from pydantic import Field
-
 from promptpotter.application.account import registered_or_default_identity
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.domain.cycle_listing import CycleListEntry
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
@@ -25,8 +21,9 @@ class ActivePointer(NamedTuple):
     cycle_id: str | None
 
 
-def active_pointer(stores: Stores) -> ActivePointer:
+def active_pointer(stores: Stores, *, inside: CyclePath = ()) -> ActivePointer:
     """Liveness is the entry's ``run_phase``; a pointer outliving its cycle dir names nothing."""
+    stores = descend_store(stores, inside)
     campaign_id, cycle_id = read_active_pointer(stores.base_dir)
     if not campaign_id or not cycle_id:
         return ActivePointer(None, None)
@@ -87,37 +84,4 @@ def resolve_cycle_id(stores: Stores, campaign_id: str, hint: str | None) -> str:
         else f"campaign {campaign_id!r} has {len(matches)} cycles; pass --cycle <prefix>. "
         f"Available: {_listed(matches)}.",
         code="ambiguous_id",
-    )
-
-
-class CyclesResponse(StrictModel):
-    tenant_id: str
-    active_cycle_id: str | None = Field(
-        description="Active cycle per active_session.json; null when no session is active."
-    )
-    cycles: list[CycleListEntry]
-
-
-def cycle_list_version(stores: Stores, *, inside: CyclePath) -> tuple[object, ...]:
-    return descend_store(stores, inside).campaigns.version()
-
-
-def list_cycles(
-    stores: Stores, *, inside: CyclePath, campaign_id: str | None, attached_only: bool
-) -> CyclesResponse:
-    leaf = descend_store(stores, inside)
-    pointer = active_pointer(leaf)
-    return CyclesResponse(
-        tenant_id=leaf.tenant_id,
-        active_cycle_id=pointer.cycle_id,
-        cycles=sorted(
-            (
-                cycle
-                for cycle in leaf.campaigns.enumerate_cycles()
-                if campaign_id in (None, cycle.campaign_id)
-                and (cycle.producer_attached or not attached_only)
-            ),
-            key=lambda cycle: cycle.updated_at,
-            reverse=True,
-        ),
     )

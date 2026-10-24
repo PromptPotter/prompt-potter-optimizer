@@ -15,17 +15,18 @@ export function SummaryBlock({
   lede?: ReactNode;
   actions?: ReactNode;
 }) {
+  const state = facts.state?.status.label;
   return (
     <div className={cx("summary-block", dense && "is-dense")}>
       <header className="summary-block-head">
         <div className="summary-block-titleline">
-          <span className="summary-block-title">{facts.title}</span>
-          {facts.tags?.map((t) => (
-            <span key={t} className="summary-block-tag">
-              {t}
+          <span className="summary-block-title">{facts.label}</span>
+          {facts.tags?.map((t, i) => (
+            <span key={i} className="summary-block-tag">
+              {t.label}
             </span>
           ))}
-          {facts.state && <span className="summary-block-state">{facts.state}</span>}
+          {state && <span className="summary-block-state">{state}</span>}
         </div>
         {actions}
       </header>

@@ -52,7 +52,7 @@ def main() -> None:
 
     if args.command is None:
         # Named as a string like the handlers: `--help` loads no use case.
-        listing = importlib.import_module("promptpotter.application.cycle_listing")
+        listing = importlib.import_module("promptpotter.application.cycle_addressing")
         if not listing.holds_active_pointer(tenant=args.tenant):
             print(
                 f"Welcome to {settings.BRAND_SHORT_NAME}.\n\n"

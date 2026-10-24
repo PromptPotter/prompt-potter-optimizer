@@ -2,8 +2,7 @@
 
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { ArmNode, HeadToHeadRow } from "@/lib/api";
-import { campaignCard, courseStats, type RunGroup } from "@/lib/derivations";
+import type { ArmNode, HeadToHeadRow, HierarchyCampaign } from "@/lib/api";
 import { useCompareSelection } from "@/lib/compare-selection";
 import { cx } from "@/lib/cx";
 import { fmtDuration, fmtSigned, shortId } from "@/lib/format";
@@ -77,7 +76,7 @@ export function ChannelColumn({
 }: {
   model: ChannelModel;
   headline: HeadToHeadRow;
-  run: RunGroup | null;
+  run: HierarchyCampaign | null;
   ink: string | null;
   place: ColumnPlace;
   children: ReactNode;
@@ -85,7 +84,6 @@ export function ChannelColumn({
   const { remove } = useCompareSelection();
   const { campaignName, head, selected, setSelected, folds, line } = model;
   const lead = benchLead(headline);
-  const summary = run && campaignCard(run, model.tree.root);
   const close = (
     <button
       type="button"
@@ -102,14 +100,10 @@ export function ChannelColumn({
         return (
           <div className="cmp-col-head">
             <Swatch ink={ink} />
-            {summary ? (
+            {run ? (
               <SummaryBlock
                 dense
-                facts={{
-                  ...summary,
-                  tags: [shortId(headline.campaign_id), ...(summary.tags ?? [])],
-                  stats: courseStats(run, model.tree.root),
-                }}
+                facts={{ ...run, tags: [{ label: shortId(run.address) }, ...run.tags] }}
                 actions={close}
               />
             ) : (

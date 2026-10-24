@@ -2,7 +2,7 @@ import type {
   ArmAbility,
   ArmNode,
   ArmReading,
-  CourseNode,
+  CourseLineage,
   VerificationMark,
 } from "@/lib/api/types";
 
@@ -42,7 +42,7 @@ export interface ArmBar extends BarBase {
 
 // A run drawn as a bar: no arm, so no reading — its level is the served `run_standing`.
 export interface CourseBar extends BarBase {
-  node: CourseNode;
+  node: CourseLineage;
   reading: null;
 }
 

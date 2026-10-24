@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ArmNode, CourseNode } from "@/lib/api";
+import type { ArmNode, CourseKind, CourseLineage } from "@/lib/api";
 import {
   ROOMY,
   LANE_H,
@@ -10,7 +10,14 @@ import {
   placeNodes,
 } from "../forest-layout";
 import { nodeKeyOf } from "@/lib/derivations";
-import { armNode, armReading, courseNode, ownLevel } from "@/lib/test-fixtures";
+import {
+  armNode,
+  armReading,
+  courseLineage,
+  courseTags,
+  hierarchyCourse,
+  ownLevel,
+} from "@/lib/test-fixtures";
 
 function cands(counts: number[]): ArmNode[] {
   return candsH(counts.map((n) => ({ n })));
@@ -34,12 +41,16 @@ function candsH(rounds: { n: number; held?: boolean }[]): ArmNode[] {
   );
 }
 
-function course(id: string, children: ArmNode[], over: Partial<CourseNode> = {}): CourseNode {
+function course(
+  id: string,
+  children: ArmNode[],
+  over: Partial<CourseLineage> = {},
+  mint: CourseKind = id.includes("_fork_") ? "fork" : "root",
+): CourseLineage {
   const path = over.path ?? [{ campaign_id: "camp", cycle_id: id }];
-  return courseNode({
+  return courseLineage({
     id,
-    course_kind: id.includes("_fork_") ? "fork" : "root",
-    dataset_name: "ds",
+    course: hierarchyCourse({ address: id, tags: courseTags(mint, "ds") }, { mint }),
     ...over,
     path,
     // Without its course's path, two seeds' identically-labelled arms share one `nodeKeyOf`.
@@ -47,11 +58,11 @@ function course(id: string, children: ArmNode[], over: Partial<CourseNode> = {})
   });
 }
 
-function laneKey(id: string, over: Partial<CourseNode> = {}): string {
+function laneKey(id: string, over: Partial<CourseLineage> = {}): string {
   return nodeKeyOf(course(id, [], over));
 }
 
-function hangOffWinner(parent: CourseNode, round: number, child: CourseNode): CourseNode {
+function hangOffWinner(parent: CourseLineage, round: number, child: CourseLineage): CourseLineage {
   const children = parent.children.map((c) =>
     c.reading.arm.round === round && c.reading.election.selected
       ? { ...c, children: [...c.children, child] }
@@ -84,14 +95,13 @@ describe("layout", () => {
   });
 
   it("two sandboxes' identically-named inner runs get their own lanes", () => {
-    const inner = (sandbox: string): CourseNode =>
+    const inner = (sandbox: string): CourseLineage =>
       course("cycle_inner", cands([1]), {
-        course_kind: "inner",
         path: [
           { campaign_id: "camp", cycle_id: sandbox },
           { campaign_id: "inner_camp", cycle_id: "cycle_inner" },
         ],
-      });
+      }, "inner");
     const tree = hangOffWinner(
       hangOffWinner(course("cycle_a", cands([1, 1])), 1, inner("cycle_a")),
       2,
@@ -160,14 +170,13 @@ describe("layout", () => {
   });
 
   it("the seed runs that measured the point stay whole; a fork beside it goes", () => {
-    const seed = (cycle: string, rounds: number[]): CourseNode =>
+    const seed = (cycle: string, rounds: number[]): CourseLineage =>
       course(cycle, cands(rounds), {
-        course_kind: "inner",
         path: [
           { campaign_id: "camp", cycle_id: "cycle_a" },
           { campaign_id: "inner_camp", cycle_id: cycle },
         ],
-      });
+      }, "inner");
     const measured = seed("cycle_seed", [1, 1]);
     const tree = hangOffWinner(
       hangOffWinner(course("cycle_a", cands([1, 1])), 1, measured),
@@ -184,14 +193,13 @@ describe("layout", () => {
   });
 
   it("a point inside a seed cuts within it, and the sibling seeds are out", () => {
-    const seed = (cycle: string): CourseNode =>
+    const seed = (cycle: string): CourseLineage =>
       course(cycle, cands([1, 1, 1]), {
-        course_kind: "inner",
         path: [
           { campaign_id: "camp", cycle_id: "cycle_a" },
           { campaign_id: "inner_camp", cycle_id: cycle },
         ],
-      });
+      }, "inner");
     const mine = seed("cycle_seed0");
     const sibling = seed("cycle_seed1");
     let tree = hangOffWinner(course("cycle_a", cands([1])), 1, mine);

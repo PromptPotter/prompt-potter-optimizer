@@ -25,8 +25,11 @@ from promptpotter.domain.spend import (
     MONEY_AXES,
     NOTHING_METERED,
     RATE_PRICED_LABEL,
+    ZERO_SPEND,
     Budget,
     CeilingMeter,
+    LifetimeSpend,
+    UserSpend,
     bill_is_floor,
 )
 from promptpotter.domain.strict_model import StrictModel
@@ -39,9 +42,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     unbounded_spend_book,
 )
 from promptpotter.infrastructure.store.account_spend import (
-    ZERO_SPEND,
-    LifetimeSpend,
-    UserSpend,
     account_ledgers,
     campaign_spend,
     sum_user_spend,

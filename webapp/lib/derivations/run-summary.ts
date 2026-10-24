@@ -1,9 +1,9 @@
 import type { MeteredSpend } from "@/lib/api/types";
 import type { DashboardSnapshot } from "@/lib/poll";
-import { SPEND_STAT_LABEL, cycleSpendStat, type SummaryFacts } from "./campaign-summary";
 import { fmtPaired } from "./paired-reading";
 import { rowAt } from "./round-candidates";
 import { readSpend } from "./spend";
+import { SPEND_STAT_LABEL, cycleSpendStat, type SummaryFacts } from "./summary-facts";
 
 export interface RunSummary {
   cycleId: string;
@@ -18,8 +18,8 @@ export interface RunSummary {
 
 export function runSummaryFacts(s: RunSummary): SummaryFacts {
   return {
-    title: "Run finished",
-    state: s.state,
+    label: "Run finished",
+    state: { status: { label: s.state } },
     stats: [
       { label: "Champion", value: s.winnerLabel ?? "—" },
       { label: "Accuracy", value: s.vsOrigin, sub: "origin → selection" },

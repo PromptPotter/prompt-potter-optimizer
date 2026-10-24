@@ -9,7 +9,7 @@ import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
-import type { CourseNode } from "@/lib/api";
+import type { CourseLineage } from "@/lib/api";
 import { nodeKeyOf, pathOf, type DisplayMetric } from "@/lib/derivations";
 import { isSelectedCandidate, selectedCandidateOf } from "@/lib/types";
 import { encodeCyclePath } from "@/lib/ids";
@@ -109,7 +109,7 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
   );
 
   const onFreeHierarchy = useCallback(
-    (course: CourseNode) => {
+    (course: CourseLineage) => {
       revealLane(nodeKeyOf(course));
       navigate(pathOf(course));
     },

@@ -47,6 +47,7 @@ from promptpotter.presentation.api.routers.backends import backends_router
 from promptpotter.presentation.api.routers.campaigns import campaigns_router
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.datasets import datasets_router
+from promptpotter.presentation.api.routers.hierarchy import hierarchy_router
 from promptpotter.presentation.api.routers.origins import origins_router
 from promptpotter.presentation.api.routers.site_records import site_records_router
 from promptpotter.presentation.terminal.server_banner import render_server_banner
@@ -286,6 +287,7 @@ API_ROUTERS: tuple[APIRouter, ...] = (
     backends_router,
     campaigns_router,
     active_router,
+    hierarchy_router,
     datasets_router,
     origins_router,
     commands_router,

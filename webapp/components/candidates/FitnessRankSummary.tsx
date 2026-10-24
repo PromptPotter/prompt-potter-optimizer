@@ -14,7 +14,7 @@ export function FitnessRankSummary({
   criterion,
 }: {
   views: CandidateBar[];
-  // served: `CourseNode.lens_shift` — the top by composite, not the θ-elected round winner.
+  // served: `CourseLineage.lens_shift` — the top by composite, not the θ-elected round winner.
   shift: LensShift | null;
   // `lensOf(mask) != null`, not "are tiles ticked": Expression mode builds a criterion with no tiles.
   criterion: boolean;
