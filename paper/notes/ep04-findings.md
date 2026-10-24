@@ -21,7 +21,7 @@ configs `C:\Users\dsacc\Streaming\stream_04_harness-arena\prep\jl-*.yaml`.
 8. **FIXED — `set-concurrent-cycles` refusal names `MACHINE_RUN_CAPACITY`.**
 5. **TermNorm "collapse" was a manual restart**; the 503s are TermNorm's fixed 60 s provider timeout
    (`config/pipeline.json:337`) against 8192-token answers, retried 5× by PP (each likely billed, recorded 0).
-   PP gives an unreachable backend 15 s. Fix in flight (PP side + `.scratch/termnorm-timeout.patch`).
+   PP gives an unreachable backend 15 s. Fix in flight (PP side + a TermNorm timeout patch).
 13. **`resume` on a partial origin (4/40) advanced to round 1** instead of finishing round 0 (`__da0bb8`, deleted).
 14. **"Caching wasn't working"** (operator) — replay vs provider cache, diagnosis in flight.
 
@@ -44,9 +44,9 @@ configs `C:\Users\dsacc\Streaming\stream_04_harness-arena\prep\jl-*.yaml`.
     has closed (`runner/loop.py`); **admission refuses a second job on a busy cycle** (`CycleBusyError`, 409 `cycle_busy`).
 14. **Caching:** replay cache worked; the ladder discarded ~20% of replays over a bare warning (a successful schema
     repair). FIXED — `needs_rerun` gates the ladder on infra/fatal codes. Provider prompt-cache is UNMEASURED
-    on task calls: TermNorm drops `cached_tokens` → `.scratch/termnorm-cache-read.patch`.
+    on task calls: TermNorm drops `cached_tokens` (a TermNorm-side patch).
 5b. **FIXED (PP side) — outage waits up to `BACKEND_OUTAGE_S`=600 s probing `/status`; a 5xx with `retryable: false`
-    halts the cell after one POST.** TermNorm side = `.scratch/termnorm-timeout.patch` (NOT applied — operator).
+    halts the cell after one POST.** TermNorm side = a timeout patch, the operator's to apply.
 
 ## Origin probe (2026-09-24, 30 cells, direct /matches, `scratchpad/origin_probe.py`)
 
@@ -65,16 +65,16 @@ Gemma at effort `low` timed out at TermNorm's 60 s on 25/30 cells.
 
 **Applied 2026-09-24:** `justlogic-d234` origin → the lean variant (prompt + schema descriptions), `per_cell` pin
 1546 → 692 (lean median total tokens, gpt-oss, 40 cells). L4's inner baseline moved with it. Everything after
-this probe — the check-in A/Bs, the reasoning floor (FIXED), the open origin experiments — lives in
-`.scratch/origin-research.md`, which supersedes this section.
+this probe — the check-in A/Bs, the reasoning floor (FIXED), the open origin experiments — superseded
+this section and is not kept.
 
-## Wall-clock (7 justlogic campaigns, 13,245 s total; `.scratch/ep04-wallclock.md`)
+## Wall-clock (7 justlogic campaigns, 13,245 s total; `../evidence/ep04-wallclock.md`)
 
 1. 3,366 s — `__37b160` re-resumed a model TermNorm timed out on (8× `503 LLM request timeout` at 60 s). OPEN:
-   root is TermNorm (`.scratch/termnorm-timeout.patch` → 504 `retryable:false`, PP halts after one POST).
+   root is TermNorm (its timeout patch → 504 `retryable:false`, PP halts after one POST).
 2. 2,934 s (~50% of every finished run) — optimizer calls, deepseek-v4-flash:nitro, `l1_generate` at effort
    high, median 47-78 s/call, reasoning 3.5-6.6k tokens. OPEN — the largest recurring lever. EFFORT IS NOT
-   IT: replaying 5 banked l1_generate calls at high/medium/low (`.scratch/l1gen-effort/`, $0.035) gave median
+   IT: replaying 5 banked l1_generate calls at high/medium/low ($0.035) gave median
    63/62/56 s and reasoning 6.4k/6.4k/5.3k, and `low` produced the single worst call (a repair, 156 s). The
    model reasons ~5k tokens whatever the rung → next lever is the INPUT (panel size) or a faster optimizer model.
 3. ~550 s — `__4d70b3` ran serial (avg 1.08 cells in flight; look-ahead never pressed). By design (browser-only).

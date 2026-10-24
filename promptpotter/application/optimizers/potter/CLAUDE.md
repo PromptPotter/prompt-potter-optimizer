@@ -47,7 +47,7 @@ The `escalation` node's `escalation_ladder` is `full` / `l1_l2` / `l1` — the a
 
 Fires on L1 stall (default), yield drought (`l2_axis_yield_drought`), or evidence-starvation (`l1_evidence_starved`). Every transition is a rule in `escalation/rules.py` — whether a round asks for a fire, which layer it reaches, what a landed L2 fire asks next — **the rule set is the policy**; the `Ladder` slice only holds the counters those rules read. **Each layer is its manifest node's member** (`members.py::L2Context`, `L3Plan`), and a fact about one node is stated on that node's member (`optimizers/nodes.py::LlmNode`), never in a table keyed by node name.
 
-- **Deterministic rules route; they never diagnose or stop.** A systemic fault brings L2 in as a *weak preemptor*, bypassing `l1_patience`, and L2 judges recoverability — fixable by steering L1's attention, or unfixable by any prompt move, in which case `terminate_proposal` is the HITL exit. The diagnose-and-stop authority lives in the LLM tier.
+- **Deterministic rules route; they never diagnose or stop.** A systemic fault brings L2 in as a *weak preemptor*, bypassing `l1_patience`, and L2 judges recoverability — fixable by steering L1's attention, or a BACKEND fault no prompt move recovers (never a hard task), in which case `terminate_proposal` is the HITL exit. The diagnose-and-stop authority lives in the LLM tier.
 - **L2 writes exactly two surfaces**: `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores) — **never pipeline_params**, which belong to `l1_generate`. Both land as ONE node overlay on `l1_generate` (`L2Memory.steer`, the shape the campaign's own `nodes` overlay takes), keyed as that node's config is: `layout`, `temperature`, `n_variants`.
 - **The steer is evidence-anchored**: it cites a specific axis, sample or yield number. Speculative moves ("maybe try X") are out of contract, and a fire touching no L1 surface is a wasted escalation scored as one (`l2_targets_l1_surface`).
 - **The framing is frozen — no layer writes `task_context`.** It is operator-authored evidence, locked structurally: no wire schema has a field of it. A round's findings reach L1 through `critique`, `axis_memory` and `mutation_memory` instead. `upstream_context` / `downstream_context` still splice into the TARGET prompt, but target text is L1's to write through `prompt_fields_updates` alone — a second carrier was scored yet never persisted on the candidate, so every delta reader disagreed about it.
@@ -57,7 +57,7 @@ Fires on L1 stall (default), yield drought (`l2_axis_yield_drought`), or evidenc
 
 Fires only on L2 stall. Produces a **strategic replan** — what L2 and L1 should do with the levers they hold, escalation policy, which axes are in scope — written to `L3Memory.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues — L2 thrashing within the plan.
 
-**Firing is rarer still than L2**: a fire signals the cycle's plan was wrong, not that one variant missed. If L3 fires repeatedly inside one cycle the plan-space itself is exhausted, and it should terminate rather than replan again.
+**Firing is rarer still than L2**: a fire signals the cycle's plan was wrong, not that one variant missed.
 
 ## The layer-control channel — `fork_proposal` + `terminate_proposal`
 
@@ -101,4 +101,4 @@ Conceptually L2 / L3 / L4 are one family, each mutating a slower-changing surfac
 
 ## Reviewing an L1 round trace
 
-Walk the checklist in the `potter-self` skill (§ The round-trace checklist) before reporting findings on any operator-pasted round dump — it names which checks are validator-enforced and which are analysis alone.
+Walk `potter-self`'s § The round-trace checklist before reporting on a pasted round dump.

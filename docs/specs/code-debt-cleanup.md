@@ -75,8 +75,7 @@ The arc's method is the session protocol in memory (`feedback_arc_of_arcs_loop`)
   so `runner/entry.py::_run_line`'s later passes are reached only by a test patching privates
   (`test_private_reach` 9). Action: a rebasing leg; the test drops its patches. **Re-test:**
   `test_private_reach` back to 6.
-- **Ledger and readout shapes the review left standing:** `export.json` is written and never read
-  back; the operator's seat is not a `Member`; the rebase clock has no test; `LiveCandidate.samples`
+- **Ledger and readout shapes the review left standing:** the operator's seat is not a `Member`; the rebase clock has no test; `LiveCandidate.samples`
   has no reader; `round_restated` carries the whole round body; `RunStanding.after` recomputes what
   the fold holds; the readout filters on `resumed_from_round`; `InnerCellFacts` keeps no unread
   rounds, so the sample readout cannot name them. Action: each to its root, one builder per seam.
@@ -95,7 +94,7 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
   **Decided:** a model keeps its pin only where its realized cache share and effective $/M beat
   running uncached; otherwise it drops the pin and the caching. Action: read both per model and
   host off a pinned campaign and its twin at `route_order: []`. **Rides with:** the next supervised
-  campaign on a pinned model, or the caching arc (`.scratch/caching-arc-state.md`). **Re-test:**
+  campaign on a pinned model. **Re-test:**
   the per-node table in each twin's `review.md` (`domain/spend.py::SpendRollup.by_node`); no pair
   read per pinned model means it stands.
 
@@ -202,9 +201,13 @@ and delete the entry if the answer is no.
   `infrastructure/projections/live_dashboard/projection.py::DashboardCheckout.over` or the origin round in `runner/run_prep.py`. **Re-test:**
   `scripts/offline_run.py --rounds 1 --rows 60` — `decisions MOVED` on the resume line means it
   still does.
-- **INVESTIGATE — two items filed with their re-tests in `.scratch/debug-arc-seed.md`**: errored
-  cells (`finish_reason=error` then a schema repair) and whether their rate differs by arm; and
-  potter's round-5 L2 layout refusal.
+- **INVESTIGATE — does an errored cell bias a head-to-head?** On `gpt-oss-20b:nitro` a target call
+  can end `finish_reason=error` and then pass one schema repair; it was seen in every arm of a
+  four-arm head-to-head, most on long-reasoning prompts. Unknown: whether the row banks the repaired
+  answer or a miss, so whether an arm whose prompts reason longer is graded by the provider's error
+  rate. **Rides with:** the next head-to-head read. **Re-test:** count the rows carrying the error
+  per arm off the archive and compare their hit rate with the arm's other rows — an arm-dependent
+  rate is a bias, an arm-independent one is noise on every arm alike.
 
 ## Open — left by the structure pass
 
@@ -237,16 +240,17 @@ means it stands.
   promptpotter/judges` — a hit means the pair stands; `gate.py --only layering` holds no rule for
   it, so it passes either way.
 - `domain/results.py::RoundOutcome.health` is still optional and `potter/dispatch/facade.py`
-  tolerates `None`; the subset mode a round ran under is derived again on every call
-  (`facade.py`, `subset_mode=`), never banked on the round. **Rides with:** any change to
-  `RoundOutcome`. **Re-test:** `grep -n "health: DegradationHealth | None"
-  promptpotter/domain/results.py`, and `grep -n subset_mode promptpotter/domain/results.py` — no
-  hit means it is still derived.
-- The webapp's poll, fork-dialog and compare seams and the identity follow-up seam are owed a
-  re-read against the code. The write-ups are `.scratch/root-hunt/webapp.md`
-  and `presentation.md` in the main checkout. Action: re-read each against the code, then take it
-  or delete it. **Rides with:** any change to a component or route a write-up names. **Re-test:**
-  the `file::symbol` each write-up names.
+  tolerates `None`. **Rides with:** any change to `RoundOutcome`. **Re-test:**
+  `grep -n "health: DegradationHealth | None" promptpotter/domain/results.py` — a hit means it
+  stands.
+- Four seams a pre-reshape hunt named are owed a re-read against the code: the poll store carries
+  fields nothing reads (`webapp/lib/poll.tsx::CycleStreamState`); the browser picks the best pointer
+  (`webapp/lib/derivations/searchPoint.ts::bestObserveTarget`, `webapp/lib/hooks/useCompareWithOrigin.ts`);
+  spend is summed and zero-filled in the browser (`webapp/lib/derivations/spend.ts::readSpend`); a
+  terminal fork builds its own overlay rather than dispatching `fork-cycle`
+  (`presentation/cli/commands/resume_command.py::_steer_overlay`). Action: re-read each, then take
+  it or delete it. **Rides with:** any change to a file named. **Re-test:** the `file::symbol`
+  still holding the logic.
 - `domain/phases.py` holds the stop-reason table and the producer reading for about two fifths of
   its length; `phases` no longer names them. A split adds modules and removes no cycle — measured,
   declined; a rename re-points some forty-six files. **Rides with:** a pass that already moves the

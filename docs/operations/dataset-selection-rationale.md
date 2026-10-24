@@ -41,7 +41,7 @@ Every dataset reconned, and what its number MEANT for wiring it. **The measured 
 |---|---|---|
 | **JustLogic — `justlogic/d234`** | iid mix of depths 2/3/4 | Synthetic 3-class deduction (`TRUE`/`FALSE`/`Uncertain`, Chen 2025): zero contamination, balanced gold distribution, so a class bias the pipeline shows is a reasoning failure rather than a label-skew coast. Cut, scoring rule and the `:nitro` speed trade are [`justlogic/d234/README.md`](../../promptpotter/assets/datasets/justlogic/d234/README.md)'s. |
 | **BBH, eight subtasks — `bbh/*`** | `lukaemon/bbh` test, 250 rows each, one environment per task | At the bar `gpt-oss-20b` solves all eight (70–100%): the BBH-era 7B anchors underpredict it by 30–50pp, the same direction as every other recon on this page. On the 8B the picture splits by TASK SHAPE, not family: the free-form answers (`word_sorting`, `multistep_arithmetic_two`) land in band over a 3% floor, the seven-option MC tasks (`logical_deduction`, `tracking_shuffled`) fall BELOW their 23–27% constant-label floors, `geometric_shapes` beats its floor by one SE only, and `dyck_languages` collapses — the 8B echoes brackets and bolds nothing. `salient_translation_error_detection` is the one task still in reach at the bar (63% over a 30% floor), which is why it is the bar's held-out seat. |
-| **HotpotQA distractor — `hotpotqa`** | validation, 2000-row cap, `em_match` on the shortest span, paragraphs in the prompt | In band under BOTH solvers over a 3% floor, so the two answer the same rows and the dataset's inner ruler links them. The misses at the bar are over-long spans (`University of Hawaiʻi at Mānoa in Honolulu CDP` for `Honolulu`) — a prompt-shaped target, not a knowledge gap. |
+| **HotpotQA distractor — `hotpotqa`** | validation, 2000-row cap, `em_match` on the last bold span, paragraphs in the prompt | In band under BOTH solvers over a 3% floor, so the two answer the same rows and the dataset's inner ruler links them. The match is exact after normalization, never the shortest span: a reply over-long against the gold misses, and one cut too short misses too. |
 | **GSM-Hard — `gsm_hard`** | train, 1319 rows, `gsm8k_match` | GSM8K's large-number re-cut: the one math seat in band under both solvers, misses arithmetic rather than parsing. `gsm8k` itself is saturated at the bar (§ Rejected without trial). |
 | **MGSM — `mgsm/{sw,te,bn,th}`** | test, 250 rows each, `gsm8k_match` | Language transfer again (cf. MMLU-ProX Swahili), but on arithmetic the axis is legitimate: the model must solve, not translate. Above band at the bar in all four; on the 8B only Telugu sits in band, the other three above it. |
 | **Text classification — `sst5`, `trec`, `subj`, `ag_news`, `aqua_rat`** | SetFit / CogComp / fancyzhx / deepmind test splits, 254–2210 rows | The prompt-optimization canon's second family after math. Cheap and short, so a reasoning lift is bounded; their value is the FLOOR test. `sst5` is the instructive reject: in band on accuracy at the bar but inside one SE of its constant-label floor, every miss one step on the five-point scale. `subj` on the 8B reads under its 63% floor. `trec` on the 8B is in band over a 27% floor — the 8B's held-out seat; `aqua_rat` and `ag_news` are above band on both. |
@@ -92,7 +92,7 @@ Captured so they are not re-investigated. All are projections, so read each thro
 ### Two things about JustLogic a reader of this page needs
 
 - **Depth cuts do not compare** — owned by [`../../promptpotter/assets/datasets/CLAUDE.md`](../../promptpotter/assets/datasets/CLAUDE.md) § L4 — `promptpotter-self`. Read it before reading two depth rows above as one band: the earlier d6-7 wiring and its recon numbers were replaced for that reason, not refined.
-- **The hedge is not a prompt-shaped target.** The pipeline's dominant pathology at `low` is retreat to `Uncertain`, and it does **not** respond to being told off — anti-hedge wording, derivation procedures and personas all measure *worse* than the plain origin, because the extra text competes for the budget the derivation needs. Attack the chain, not the conclusion.
+- **The hedge did not yield to being told off.** The pipeline's dominant pathology at `low` is retreat to `Uncertain`, and it did **not** respond to scolding — anti-hedge wording, derivation procedures and personas all measure *worse* than the plain origin, because the extra text competes for the budget the derivation needs. Attack the chain, not the conclusion.
 
 ## What a cell costs — and why an agent-backed dataset is a different animal
 
@@ -111,7 +111,30 @@ summed across `step_tokens` nodes. Recompute it by folding those two fields over
 | `sealqa/longseal-12` | harbor episode | 861 | 48.6 | 83.1 | **710.7** | 0.0008 | 21,301 |
 | `swiss-invoices-eval` | `llm_only` | 1356 | 3.4 | 11.7 | 67.2 | 0.00003 | — |
 
-Three things the table is for, none of them the headline number:
+**The `llm_only` side, censused 2026-10-21** over the local archive before the content-identity
+wipe: 24,935 cell rows and 16,227 live ledger sends after dedupe, nine days on one Windows desktop
+through OpenRouter, so every second is client-observed from that desk.
+
+| Call | p50 s | p90 s | p99 s | max s | $/call |
+|---|---|---|---|---|---|
+| target cell, single `llm_only` node | 0.92 | 5.28 | 40.61 | 225.35 | — |
+| optimizer call | 17.20 | 36.31 | 55.57 | 60.62 | 0.00134 |
+| `l1_generate` / `l1_critique` on `gpt-6-luna` | 29.85 / 26.94 | 42.61 / 37.89 | — | 60.62 | 0.0018 / 0.0016 |
+| L4 outer cell (one inner campaign) | 303.75 | 612.86 | — | 1708.28 | p50 $0.036 |
+
+- **The optimizer's latency is a reasoning-token bill.** About 90% of an L1 call's output on
+  `gpt-6-luna` is reasoning at ~80–86 tok/s; the same refine on `gpt-oss-20b` took 6.4 s at p50.
+- **The tail is the host's, not the model's.** `llama-3.1-8b-instruct:nitro` reads p99 8.27 s on
+  Groq and 56.14 s on CoreWeave / 55.09 s on Novita, where 4–6% of cells stall 45–65 s and then
+  succeed. That band drives every within-dataset spread (`bbh/word_sorting` at one configuration:
+  0.13–175.37 s, 319× its median). A wall-clock claim pins `route_order` and names the host.
+- **A failed cell banks no wall clock** — all 71 errored rows lacked `step_timings` — and no retry
+  and almost no blocked time (`unworked_s`, 55.7 s over 128 rows) was on record. No judge call had
+  been ledgered and no harbor cell was local, so neither has an `llm_only`-comparable figure here.
+- **34.7% of ledger sends were replays**, so a per-campaign dollar figure that ignores them
+  overstates the marginal cost by that share.
+
+Three things the agent table is for, none of them the headline number:
 
 - **The tail is the operational fact, not the median.** `sealqa` reads a comfortable 48.6 s at p50
   and 710.7 s at its worst — a 25× spread *inside one dataset at one setting*. Spend inside an

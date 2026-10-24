@@ -15,7 +15,7 @@ version exists.
 
 ## 1. Prepare
 
-- [ ] Draft the notes in `.scratch/release-vX.Y.Z.md`, which `gh release create --notes-file` reads.
+- [ ] The notes are staged ahead of the cut as `CHANGELOG.md` `## [Unreleased]` lines. At the cut, write the release body from them into a file outside the repo (the session scratchpad), shaped like the last release's (`gh release view`), for `gh release create --notes-file`.
 - [ ] Bump the version in `pyproject.toml`, `uv.lock` (the version hunk only), `CITATION.cff`, the `README.md` badge and the `CHANGELOG.md` entry.
 - [ ] Count the commits since the last tag by type, and quote the same count everywhere it appears.
 
@@ -47,11 +47,10 @@ version exists.
 ## 5. Tag, publish, confirm
 
 - [ ] `git tag -a vX.Y.Z -m "vX.Y.Z" <commit>` → `git push origin vX.Y.Z`.
-- [ ] `gh release create vX.Y.Z --title "…" --notes-file .scratch/release-vX.Y.Z-body.md` fires
+- [ ] `gh release create vX.Y.Z --title "…" --notes-file <the body file>` fires
       `publish.yml`, which checks the tag against `pyproject.toml` and `CITATION.cff` before uploading.
 - [ ] Confirm that `https://pypi.org/pypi/promptpotter/X.Y.Z/json` serves the version.
 
 ## 6. Close out
 
 - [ ] Remove the verify worktree (`git worktree remove`; a long path needs `\\?\` on Windows).
-- [ ] Mark the `.scratch/` notes as cut, with the final hashes.

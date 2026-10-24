@@ -141,7 +141,7 @@ What collapses: greedy promotion becomes the acquisition at `c = 0`, and the rew
 #### Members the presets need
 
 - **Composite fitness (C2; P1, spend, is done).** P2 a per-candidate rollup and its scatter panel, which waits on P3 · P3 `compile_post_aggregate_fitness(formula)` + `dataset.yaml` `campaign.scoring_post_aggregate` · P4 multi-objective racing, which is a `pareto` selector (GEPA's) with an eliminator reading the front.
-- **CAPO's features, ours too.** A demo pool held out at run init that `select_round_subset` and `sample_dataset` never draw; shots carried by sample id, rendered by `_render_few_shot_block` and emittable by `L1Variant` within `k_max` ([`prompt-field-roster.md`](prompt-field-roster.md) § What this does NOT change); a `target_prompt_chars` channel in the `per_cell` namespace, which lets any campaign's formula price prompt length; the `blocks` sampler, the `paired_t` eliminator, and a `population` selector with crossover lineage.
+- **CAPO's features, ours too.** A demo pool held out at run init that `AdaptiveQueue.draw` and `sample_dataset` never draw; shots carried by sample id, rendered by `_render_few_shot_block` and emittable by `L1Variant` within `k_max` ([`prompt-field-roster.md`](prompt-field-roster.md) § What this does NOT change); a `target_prompt_chars` channel in the `per_cell` namespace, which lets any campaign's formula price prompt length; the `blocks` sampler, the `paired_t` eliminator, and a `population` selector with crossover lineage.
 - **LEVI's calibration, ours too.** A screening phase any manifest can opt into — potter's
   included — on the check-in node rather than in a round: N calibration prompts (the origin plus
   proposed seeds) scored on the discovery set before round 1, the matrix banked on the cycle,
@@ -166,11 +166,85 @@ Each stage closes on a verification, never a date.
 
 1. **The contract** — §0, this section, the node types and parser rules, the two YAMLs. *Closes when* the four state one design and every new wire shape is declared before a handler moves.
 2. **The neutral migration** (breaking, before any peer). The individual and the round go neutral (`parent_ids`, `selected`, `optimizer_state`); `OptimizationConfig` splits into the bench's core plus `optimizer:` and the node overlay; the round spine walks the manifest; the bench score lands; `pobb/classification` and `DegradationCheck` move under the bench's measurement; L4 identity folds the manifest; the surfaces follow; the local store is wiped, so no key or render has to survive. *Closes when* the gate is green, an `optimizer: potter` campaign on `justlogic/d234` runs end to end and serves a bench-set headline, a grep for `l1_` / `pobb` / `escalat` / `critique` outside potter's directory returns only named exceptions, and every `complexity_ledger` baseline edit carries its reason.
-3. **CAPO — the general members first, the preset second** (§ Members the presets need), then `assets/optimizers/capo/pipeline.yaml`. *Closes when* a real campaign runs `optimizer: capo` and `evidence`'s head-to-head compares its bench headline with `potter`'s on one bench set — **M13's closing bar**.
-4. **LEVI, then GEPA.** GEPA's reflective rollouts run through the scoring gateway and its reflection through `llm_call`, so neither needs `litellm_sends_billed_as`. *Closes when* each runs a real campaign with its spend in the same `SpendRollup` as a `potter` round.
-5. **The comparability run** (PAID): BBEH, one target model, one grader by construction, one bench set, arms = `optimizer ∈ {potter, capo, levi, gepa}`, total calls held equal across arms, 3 seeds; paired per-cell differences with clustered SEs; exact/bootstrap CIs; Holm/BH across the optimizer matrix ([`../research/external-constraints.md`](../research/external-constraints.md) § M14). Retires the 28%. `<one-budget>` binds both axes — price it in dollars *and* wall clock before asking. **It yields TWO readings and a claim may quote only the matching one.** The *controlled* reading is an OPTIMIZER contrast under one bench — whose method is better under one harness, the question the guard licenses, and its arms are controlled arms of one declared head-to-head ([`../architecture.md`](../architecture.md) § The controlled comparison). Minting one is `new … --arm {id}:{key}` or `mint-campaign`'s `purpose` today, one arm at a time; the spec file declaring the instrument and budget up front and an N-arm mint verb over it are the next step, a front-end over `application/jobs/mint.py::_join_head_to_head` and the record it writes; potter's controller capped at `escalation_ladder: l1` adds the proposer-only row when the question is proposals alone. The *uncontrolled* reading is each peer run its own way, which the notebooks already produce. Neither substitutes for the other.
+3. **CAPO — the general members first, the preset second** (§ Members the presets need), then `assets/optimizers/capo/pipeline.yaml`. *Closes when* a real campaign runs `optimizer: capo` and `evidence`'s head-to-head compares its bench headline with `potter`'s on one bench set — **M13's closing bar**. **Met by `h2h-1007`** ([`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured).
+4. **LEVI, then GEPA.** GEPA's reflective rollouts run through the scoring gateway and its reflection through `llm_call`, so neither needs `litellm_sends_billed_as`. *Closes when* each runs a real campaign with its spend in the same `SpendRollup` as a `potter` round. **Met by `h2h-1007`.** Open on LEVI: `application/optimizers/paper_templates.py::marked` refuses a `<prompt>` block with no closing tag, which `gpt-oss-20b` emits on about one proposal in six, and its INVALID card names potter's `l1_generate`.
+5. **The comparability run** (PAID): BBEH, one target model, one grader by construction, one bench set, arms = `optimizer ∈ {potter, capo, levi, gepa}`, total calls held equal across arms, 3 seeds; paired per-cell differences with clustered SEs; exact/bootstrap CIs; Holm/BH across the optimizer matrix ([`../research/external-constraints.md`](../research/external-constraints.md) § M14). Retires the 28%. `<one-budget>` binds both axes — price it in dollars *and* wall clock before asking. **It yields TWO readings and a claim may quote only the matching one.** The *controlled* reading is an OPTIMIZER contrast under one bench — whose method is better under one harness, the question the guard licenses, and its arms are controlled arms of one declared head-to-head ([`../architecture.md`](../architecture.md) § The controlled comparison). Minting one is `new … --arm {id}:{key}` or `mint-campaign`'s `purpose` today, one arm at a time; the spec file declaring the instrument and budget up front and an N-arm mint verb over it are the next step, a front-end over `application/jobs/mint.py::_join_head_to_head` and the record it writes; potter's controller capped at `escalation_ladder: l1` adds the proposer-only row when the question is proposals alone. The *uncontrolled* reading is each peer run its own way, which the notebooks already produce. Neither substitutes for the other. **One seed on one dataset is done (`h2h-1007`);** the grid still needs `bbeh` re-ingested with a `dataset_split` bench partition and a bench wider than 100 rows, and opens on a cheap pair proving the ruler fix first (the h2h-3 re-run below).
 6. **The budget dimension** (PAID, strictly after 5): the same arms at two or three budget points, so cost is an axis rather than a constant. Stage 5 already matches calls at one point; this is the budget-matched Pareto comparison reviewers ask for first ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 4), and what makes the claim distinctive. The reason it is asked first: [LEVI](https://arxiv.org/abs/2605.09764) matches or exceeds [GEPA](https://arxiv.org/abs/2507.19457) at less than half its rollout budget, so an optimizer's margin can live entirely in its budget, and [HAL](https://arxiv.org/abs/2510.11977)'s cost–accuracy frontier is the form reviewers will read it in.
 7. **Third-party reachability**: a minimal example package — a `pyproject.toml` entry point, a manifest with one proposing node `propose`, one member, the one-liner that proves it loaded. *Closes when* `pip install -e .` in a scratch venv plus `optimizer: example` runs a round whose arms carry `source="example:propose"`, with **zero edits inside this tree**. That is the literal statement of the milestone.
+
+### Optimizer tuning — the standing board
+
+**The goal is the price of a unit of optimizer progress, read per dollar and per minute, at held or
+raised velocity.** How to work it is the `potter-self` skill's; this section is the open board, and
+a session that moves a card edits it here. Every number it rests on is in
+[`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured.
+
+- **A card is a question, the cheapest test that answers it, and the check that closes it** —
+  cheapest rung first: a frozen decision point (`decision-bank`), then `ab` / `seed-screen` /
+  `noise-floor`, then one campaign, then an outer round. A prompt or config edit that wins moves
+  into the base prompt in one deliberate batch, since it re-keys the banked cells.
+- **The operator's bar (2026-10-23): at least +10 points on a held-out bench in about five
+  rounds, then the same lift in less wall clock.** The instrument wanted is an official dataset
+  with a natural origin below 0.4 and a prompt that reaches 0.8. A one-key task (`bbh-dyck`,
+  `last-letters`), where one instruction fixes every row, is a smoke test, never the instrument.
+
+**The agreed path, in order.**
+1. **Find a setting that climbs.** None has cleared the bar on a held-out bench; the nearest are
+   `banking77` on `gemma-3-4b-it` and `logic-fld` on `gpt-oss-20b` (+0.08 each, one campaign).
+   Replicate the better one, and read what the proposer saw of the misses before buying more.
+2. **Screen library blocks without the optimizer**: authored mode, each arm the origin plus ONE
+   block, on fixed rows. The block pool's effect is unmeasured — the blocks-off arms sat inside
+   the replicate spread — so the pool is neither kept nor deleted on evidence yet.
+3. **Optimizer-model screen.** `gpt-6-luna` and `claude-haiku-5.5` lift; `qwen3.7-flash` lifted
+   at `medium` on `justlogic-d234-held` and not at `none` on `hotpotqa-distractor`;
+   `deepseek-v4-flash` did not. The `qwen3.7-flash @ none` arm halted at $0.17 of its $0.60 cap
+   and needs a clean re-run.
+4. **Combine** the winners.
+
+**Same lift in less wall clock** — a read of one 6-round campaign (1,114 s: measure 39%,
+origin-panel top-ups ~30%, generate 19%; rounds 4–6 promoted nothing):
+- The `n_min` origin-panel top-ups block the round close and send about half the target calls.
+  Running them beside the round raises `application/run_phase_control.py`'s "a scoring phase is
+  already publishing on this gauge"; the election now reads those cells, so the root is one
+  scoring pass over every member.
+- `l1_critique` gets the `detectable_move` panel, and `spanning_clusters` drops clusters below
+  it — critiques split misses into 2–5-row clusters, and every variant of a round targets one.
+- `mutation_memory` only for separated lifts: the lifting runs cited it zero times.
+- A transcript carries the question and the paragraph holding the gold, not the context in order
+  (`application/optimizers/potter/dispatch/bundle.py::TRANSCRIPT_QUERY_CAP`); `MISS_ROWS_CAP` 40 → 20 once the
+  top-ups are gone.
+
+**Defects met while running, each open.**
+- **A held leader's evidence is discarded** — the election now reads the round's rows plus the
+  origin-panel cells each arm paid for (`domain/results.py::election_rows`), yet an arm that leads
+  but misses the bar is never re-scored: on `logic-proverqa` (llama) C1.1 led C0 on the panel
+  0.45 vs 0.20 and its posterior rose only 0.623 → 0.788 under pooling, below the 0.85 bar. Carry
+  a held leader into the next round's draw so its rows accumulate. The sampler
+  (`application/intelligence/adaptive_queue_mechanism.py::pick_value`) draws cells the
+  parent misses, where few pairs are discordant, so a prompt that lifts the middle of the
+  distribution is invisible to the election.
+- **Whole-reply answer counting** survives `Grade.span`: `domain/scoring.py::modal_answer_share`
+  and `domain/scoring.py::is_answer_collapsed`, `application/optimizers/potter/pobb/checks.py`,
+  `infrastructure/projections/live_dashboard/blocks.py` and `application/bench/round_analysis.py`
+  read the whole reply.
+- **`l1_generate` never edits `answer_format`**: the potter manifest's "THE ONE UNPOLICED TRAP"
+  warns it off the whole field. Keep the parsed directive locked and free the rest — the diff is
+  shown to the operator before it lands.
+- **A new campaign can land on another campaign's cycle** — `new logic-proofwriter` after a bank
+  re-cut minted its campaign but ran on an older campaign's cycle and old bank. A cycle id must
+  hash what makes the run different, the bank's hash included; `logic-proofwriter` waits on it.
+- **A declared bench is not the held-out count**: `dataset_split: {bench: 100}` held out 162 rows on
+  a 174k-row bank, past the 150-row pass cap.
+- **Stops**: a stopped bench or verify pass acks `rejected`; a pass with no hop stops only on
+  Ctrl+C; a standing pause on a campaign stops a later bench pass, which exits with no result.
+- **One refusal, every entry point**: `seed-screen` skips the reasoning-model token-floor refusal
+  `new` raises, and `--set` parses `off` as `False`, which a `Literal` knob then refuses.
+
+**Owed re-run**: the h2h-3 pair on `hotpotqa-closedbook`, the ruler fix's proof on a cheap pair
+(~$0.40) — `new hotpotqa-closedbook --arm hotpotqa-cb-h2h-4:levi --set optimizer=levi --set
+nodes.levi_refine.model=openai/gpt-oss-20b:nitro --set nodes.proxy_css.discovery=40 --set
+nodes.proxy_css.size=20 --max-rounds 30 --max-usd 0.2`, and the same with `:potter --set
+optimizer=potter`. *Closes when* C0 reads near its ~21% on potter's round panels.
 
 ### SIFT reproduction — their method as a PromptPotter preset
 
@@ -242,9 +316,7 @@ shown as a sketch before it is built; every other choice inside a stage is made,
 report, and built.
 
 **Each stage starts by writing its closing check and watching it fail**, so "done" is the check
-turning green and never a reading of the diff. `.scratch/ga/7-build-plan.md` is the recon the
-planning pass starts from — what exists today, and one candidate design — never a plan to
-execute as written.
+turning green and never a reading of the diff.
 
 #### Order
 
@@ -361,7 +433,7 @@ Three systems are first-class here, named in every integration plan and recommen
 - 35 emit the ATIF trajectories `TurnRecord` projects.
 - `AGENTS.md` is the instruction file most of them read, and nothing stages it yet.
 
-Recon: `.scratch/coding-agents-recon-2026-10-20.md`.
+Read 2026-10-20 from Harbor's `main` (`agents/factory.py`, `agents/capabilities.py`) and each vendor's docs. Every campaign so far ran `terminus-2`, the one agent `skill_delivery: system_prompt` reaches; every other agent gets the Agent Skill channel.
 
 The seam for OpenShell is the containerized cell (the harbor connector). Run in an OpenShell sandbox, a cell never sees the account's key. That is what tier 3's per-account spend ceiling needs from a cell it cannot trust. Read 2026-10-20: the how-it-works page of v0.0.116 only. The latest version then was v0.1.4, and the license, the repo and the install were not read.
 
@@ -380,6 +452,42 @@ The seam for OpenShell is the containerized cell (the harbor connector). Run in 
 **The radius stops at the model the winner was won on** — owned by [`../research/external-constraints.md`](../research/external-constraints.md) § Direction; an export names its model, and a model swap is a new run, never a copy of the winner.
 
 **Open — two of the three consumers.** Our own runtime is built. `to_dspy` rides the `[dspy]` extra beside `presentation/teleprompter.py`, never core (the dependency arrow is one-way — [`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)), waits on Phase C, and applies the winner to a *live* program rather than emitting DSPy state, sidestepping the positional-zip corruption. MLflow's is the **Prompt Registry** (`register_prompt` / `load_prompt` / `search_prompts`), **not a model flavor**, because we produce prompts, not programs — written, and owned by [`../operations/observability.md`](../operations/observability.md) § MLflow. Its registry semantics (placeholders, versions, aliases) bind the write-back: [`../research/external-constraints.md`](../research/external-constraints.md) § TOOL.
+
+#### Copy and download — one standard, tiered by what the reader does next
+
+**Direction.** Every copy or download is one of five READINGS of the same served facts, chosen by the reader's next move, and a sixth costs one serializer — never a new wire type, a per-panel format or a second provenance header. **Every tier is SERVED**, the pasted ones included: one closed set `domain/export.py::ExportTier`, one serializer each in `application/views/render/export.py::export_files`, one read `application/cycle_reads.py::export_cycle`. A browser derivation of the chat text would be a second serializer beside the CLI's, so the webapp fetches it. `pasted` (`EXPORT_TIER_INFO`) splits the surfaces: a pasted tier is a `CopyButton` choice, the rest are download links. `export.json` stays the core of the downloads.
+
+**One name everywhere:** `GET /campaigns/{id}/cycles/{id}/export?tier=chat|report|notebook|deploy|package` · `python -m promptpotter export --tier …` · the candidates card's copy choices and download menu. The embedded launch has no read surface; a notebook host calls `export_cycle` itself.
+
+| Reader's next move | Tier | Shape | Borrows | On `hotpotqa-closedbook` cycle `0cefa0338c91`, 71 candidates |
+|---|---|---|---|---|
+| paste into a chat; read at a glance | **`chat`** | one header, at most five lines per candidate on the viewed course: label · round · parent · verdict / own level with CI and n, θ with its caveat / lift vs its reference with CI and flips / which loci changed and the proposer's sentence / bench and verify only where held; a run reads as its served standing line | `log.md`'s idiom (`application/views/render/markdown.py`), nothing outside | 355 lines, 37 kB |
+| file a bug | **`report`** — `chat` under a provenance header: `tool_version`, campaign and cycle ids, dataset and `dataset_hash`, the optimizer treatment, the models, the ledger offset | its first line is the stamp every artifact opens with (`{"tool": "promptpotter", "kind": …, "tool_version": …}`), so a paste back into a check-in is recognised | n8n's self-describing paste, as text | +7 lines |
+| notebook, pandas | **`notebook`** — `candidates.jsonl`, one flat record per candidate keyed by the served names (`arm.label`, `own.accuracy.value`, `vs_reference.headline.estimate.value`, …), beside a `README.md` dataset card | every candidate in the tree, not the drawn ones; no parquet, no pyarrow | Hugging Face datasets: JSONL rows + a card with YAML frontmatter | 71 records, 310 kB |
+| reproduce or deploy the winner | **`deploy`** — `export.json`; reader contract [`../developer/stable-api.md`](../developer/stable-api.md) § 5c | the winner flat, plus its `lineage` | DSPy `save()` inverted — fields by name | one file |
+| hand to another agent | **`package`** — a skill-shaped folder, below, as one zip | `SKILL.md` + the prompts rendered + `export.json` + the notebook rows | Agent Skills · PROV-O · OpenUSD composition | 4 files, 31 kB zipped |
+
+**The package** — a folder an agent opens without PromptPotter installed:
+
+```
+<dataset>-<cycle>/
+  SKILL.md                  frontmatter: name, description (required) + metadata: model, dataset, dataset_hash,
+                            scorer, bench lift + CI, campaign_id, cycle_id, tool_version
+                            body: how to run the winner — the model it binds to, its prompt per node
+  prompts/<node>.md         the winner's prompt per node, rendered as scored
+  export.json               the ONE machine file: the winner flat, and its lineage
+  evidence/candidates.jsonl the notebook tier
+```
+
+- **Agent Skills gives the envelope.** `SKILL.md` with YAML frontmatter is already how the harbor connector ships a candidate (`connectors/harbor.py::SKILL_FILENAME`, `SkillDelivery`) and what about 25 Harbor agents open unprompted (the coding-agent paragraph above), so the package IS a skill: an importing agent reads `SKILL.md` and can run the winner. The frontmatter's `metadata` is where the model it was won on rides, so a reader that reads nothing else still sees the binding (the radius rule above).
+- **PROV-O gives `export.json::lineage` two edges and no more:** `wasDerivedFrom` (candidate → parent, the served `parent_ids`), `wasGeneratedBy` (candidate → its round and the members that proposed it); every round measured on the file's one `dataset_hash`, stated once at its top level. One `@context` naming the PROV namespace makes the file JSON-LD to a reader that cares and a dict to one that does not; no library on either side.
+- **OpenUSD composition gives the shape that stops repetition.** The origin is the base layer (its loci stated once); each candidate is a sparse delta over its parent (`changes`, the moved loci and their new values — what `changes_description` says in prose, as data). A reader composes any candidate by walking deltas to the root, and the lineage never states a prompt twice. The winner's own fields stay flat because their reader will not compose.
+- **The package replaces `log.md`'s Final Winner block**; `log.md`'s `## Winner` points at it.
+- **Not borrowed:** LangSmith's run export — a cells tier is the measurement log, `GET /datasets/{name}/cells`'s, and the package carries its address rather than the rows; MLflow's model flavor (the open-consumers paragraph above); DSPy's positional state.
+
+**What an importing agent can do:** run the winner on the stated model; refuse a model swap, because the frontmatter names the binding; re-rank the candidates off `candidates.jsonl`; walk `export.json::lineage` to answer which edit moved the number; paste `export.json`'s prompts back into a check-in as the origin (`domain/run_records.py::CycleSeed.origin_prompts`) — the stamp is what makes that paste recognisable.
+
+**Cited from recall, not read in this pass** ([`../research/CLAUDE.md`](../research/CLAUDE.md)): PROV-O, JSON-LD, OpenUSD composition, Hugging Face datasets, n8n's paste format, LangSmith exports, DSPy `save()`. Read: the Agent Skills frontmatter (`name`, `description` required).
 
 ### Ecosystem outreach — optional, unscheduled, no commitment implied
 
@@ -432,7 +540,7 @@ The unit of optimization then becomes the skill and the unit of acceptance becom
 Why the schema steers at all is [`../concepts/structured-output.md`](../concepts/structured-output.md). Two axes now ride the same gate: the `description` prose, and whether the node uses its schema at all (`response_format`). **Open: contrast them on `justlogic/d234`** — promote at `proxy_lift_corr ≥ 0.6`, and a negative result closes an axis by reverting it. The verb is already there: `evidence --grid ROW,COL` DISCOVERS its factors off each subject's own config (`application/evidence/grid.py::levels_by_subject`), so a varying `response_format` lands as a config factor and a varying schema `description` as a prompt-field one. What is missing is the paired run, not a surface to read it on.
 
 ### Fitness comparability — the slice-4 remainder
-Open: the **cross-round headline surfaces** + the lineage `/N` badge, and **feeding graduated discrimination `aₛ` into `select_round_subset`**, which is still 1PL ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md)).
+Open: the **cross-round headline surfaces** + the lineage `/N` badge.
 
 ### Exit gate
 `rounds_to_separable ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules). **The clock is separability, never an absolute accuracy** — the admission bar takes datasets scoring 15–40% at origin, so a fixed accuracy target sits above their ceiling by construction and closes on nothing.
@@ -473,13 +581,13 @@ Hard-Sample Sorter Phase 2/3 · MCP server mode · research extensions.
 
 ## Captured — pending triage
 
-- **Origin panel that drifts on the δ ruler** — the panel every green bar is read on is the first round-panel-sized set of cells C0 answered, fixed for the life of the cycle (`domain/results.py::origin_panel`). The far-out version lets it swap a cell once the ruler has settled, drifting far slower than the acquisition subset the winners are decided on. Zero priority: the fixed panel is what makes the bars comparable, and drift can only cost that.
-- **Export / copy from dashboard** — one-click copy of the winning prompt + state on the optimizer box. The artifact is § Application radius's; this is it behind a button.
+- **Origin panel that drifts on the δ ruler** — the panel every green bar is read on is the first round-panel-sized set of cells C0 answered, fixed for the life of the cycle (`domain/results.py::origin_panel`). The far-out version lets it swap a cell once the ruler has settled, drifting far slower than the round draw the winners are decided on. Zero priority: the fixed panel is what makes the bars comparable, and drift can only cost that.
+- **A second panel trigger: the cheap top-up — blocked on a concept, not on code.** Today one `PanelTrigger` fires (`n_min`, `domain/results.py`). A second would read an arm on the origin panel when completing it costs little, but a fixed share of missing rows is a magic number. The unanswered question is the rule that prices a missing row against the round's marginal draw cell, so an arm may be partly backfilled when the row beats it. Pick it up after the app, not before.
 - **Origin check-in plain-language recap** — folded into the origin check-in flow; pending review.
 - **CPU-hours as a suite-wide measurement** — container and CPU time metered per phase (expansion · judge · evaluation) beside `SpendRollup`, for every connector rather than for one comparison. SIFT's cost table (§ SIFT reproduction) is the shape; to be designed, not dropped.
 - **Render-and-judge demo — a fun button, then a dataset** — one button hands the best optimizer prompt (the L4 winner) an objective such as *"a 3D unicorn"*: the candidate is a program that renders the picture, a VLM grades it against a few aspects, and the operator watches the picture improve. Representation change made visible: the image is not optimized, the program is. GEPA shows the shape with no example data (`seed_candidate=None`, 4 rubric aspects as its `dataset`). Needs a sandbox (their notebook runs LLM code in a bare `subprocess` with a 120 s timeout) and a turn cap (one VLM call per aspect per candidate). **Long term:** a set of such objectives with held-out ones, so the optimizer prompt's skill is measured on outputs anyone can see. Reading: [`../../paper/notes/gepa-optimize-anything-aie-2026.md`](../../paper/notes/gepa-optimize-anything-aie-2026.md) § 4.
-- **Run card: the post card of 21.10.2026 is the starting point** — the static card in the LinkedIn post "The best edit was not in the prompt" (real run `swiss-invoices-eval__b1b4f5`) is the agreed target for the webapp's run card, collapsed and interactive later. Keep from it: before/after against the origin with the distance drawn (accuracy, avg time, tokens and cost per cell, changed settings); the accuracy line carries regressions in words ("1 → 18 right · 1 newly wrong") instead of a separate flips bar, which only repeated the accuracy; accuracy per round with every candidate hollow and the winners joined in green; the lineage of elected mutations only; the samples as a two-row heatmap, one column per sample sorted by campaign hit rate: the campaign row in the three spread colours (19 never red · 47 partly orange · 4 always green of 70; a continuous gradient was tried and rejected), the winner row on the same columns (37 right, 2 wrong, very dark grey where it never ran the sample), which shows both readings of the next entry at once. Per-sample data: `run-heatmap-swiss-invoices-b1b4f5.json` in the post folder. New for the app, not in the post: `verify` (◇ with its interval) and a bench pass (◆, held-out) as their own marks on the chart, since they are called on a candidate, not run by every round. Design: Run Widget Studies artifact, section "The post card", https://claude.ai/artifact/8bra9rCBGvR4p8191YrZEE . Source: `CANVAS_25/Writing/BlogPosts/Published/261021_BestEditNotInPrompt/run-card.html`.
-- **The never / partly / always spread contradicts the headline beside it** — on `swiss-invoices-eval__b1b4f5` (retired copy under `.scratch/retired-campaigns-2026-09-24/`) the card leads with best C9.2 at 90% (18 of 20 on the origin panel) and, a section lower, "19 never · 47 partly · 4 always". Cause: `application/scoring/measurement_log.py::_cycle_cells` pools one column per candidate the cycle ran — losers and the 5% origin included — and `domain/cells.py::hit_spread` buckets each sample across all of them, so a sample only C0 saw is "never" by construction. **17 of the 19 "never" samples were measured once, by C0, in round 0**, and no later candidate ran them; of the other two, #31 and #96 were seen only by round 1–2 arms, and only #4 was ever missed by a late winner. On C9.2's own rows the split is 37 always / 2 never (#1, #4). `HardSamplesPreview.tsx`'s "N of M rows measured in this scope" title is the only scope hint, and it is a tooltip. **What the card needs is one decision, not a relabel:** the spread either (a) describes the SUBJECT — the selected searchpoint's own cells, the same subject every other line of the card describes — or (b) stays a search-coverage statistic and says so in the visible label ("never solved by any candidate"), with samples whose only measurers sit below some ability floor counted apart as *unchallenged* rather than *never*. (b) is closer to what the Rasch sort already wants; (a) is what the reader assumes. Evidence and per-sample measurers: the post folder `CANVAS_25/Writing/BlogPosts/Published/261021_BestEditNotInPrompt/` (`run-data-…json`, `run-signals-…json`).
+- **Run card: the post card of 21.10.2026 is the starting point** — the static card in the LinkedIn post "The best edit was not in the prompt" (real run `swiss-invoices-eval__b1b4f5`) is the agreed target for the webapp's run card, collapsed and interactive later. Keep from it: before/after against the origin with the distance drawn (accuracy, avg time, tokens and cost per cell, changed settings); the accuracy line carries regressions in words ("1 → 18 right · 1 newly wrong") instead of a separate flips bar, which only repeated the accuracy; accuracy per round with every candidate hollow and the winners joined in green; the lineage of elected mutations only; the samples as a two-row heatmap, one column per sample sorted by campaign hit rate: the campaign row in the three spread colours (19 never red · 47 partly orange · 4 always green of 70; a continuous gradient was tried and rejected), the winner row on the same columns (37 right, 2 wrong, very dark grey where it never ran the sample), which shows both readings of the next entry at once. Per-sample data: `run-heatmap-swiss-invoices-b1b4f5.json` in the post folder. Design: Run Widget Studies artifact, section "The post card", https://claude.ai/artifact/8bra9rCBGvR4p8191YrZEE . Source: `CANVAS_25/Writing/BlogPosts/Published/261021_BestEditNotInPrompt/run-card.html`.
+- **The never / partly / always spread contradicts the headline beside it** — on `swiss-invoices-eval__b1b4f5` the card leads with best C9.2 at 90% (18 of 20 on the origin panel) and, a section lower, "19 never · 47 partly · 4 always". Cause: `application/scoring/measurement_log.py::_cycle_cells` pools one column per candidate the cycle ran — losers and the 5% origin included — and `domain/cells.py::hit_spread` buckets each sample across all of them, so a sample only C0 saw is "never" by construction. **17 of the 19 "never" samples were measured once, by C0, in round 0**, and no later candidate ran them; of the other two, #31 and #96 were seen only by round 1–2 arms, and only #4 was ever missed by a late winner. On C9.2's own rows the split is 37 always / 2 never (#1, #4). `HardSamplesPreview.tsx`'s "N of M rows measured in this scope" title is the only scope hint, and it is a tooltip. **What the card needs is one decision, not a relabel:** the spread either (a) describes the SUBJECT — the selected searchpoint's own cells, the same subject every other line of the card describes — or (b) stays a search-coverage statistic and says so in the visible label ("never solved by any candidate"), with samples whose only measurers sit below some ability floor counted apart as *unchallenged* rather than *never*. (b) is closer to what the Rasch sort already wants; (a) is what the reader assumes. Evidence and per-sample measurers: the post folder `CANVAS_25/Writing/BlogPosts/Published/261021_BestEditNotInPrompt/` (`run-data-…json`, `run-signals-…json`).
 - **Model screen as a `seed-screen` variant** — the model as the screened axis, so a screen's results land in the tree with the analytics `seed-screen` already has, never in a script outside PromptPotter that only an agent can read.
 
 ## Identity — live forward gap (non-derivable)

@@ -121,7 +121,7 @@ What the pilot established:
 
 ### What the optimization runs on these benchmarks established
 
-The campaigns were retired and their artifacts kept locally in `.scratch/retired-campaigns-2026-09-24/` (`digest.md` is one line per cycle); what they decided:
+The campaigns were retired on 2026-09-24 and their artifacts deleted; what they decided:
 
 - **A ten-cell cut is used up in two promotions.** `inception/mercury-2.5` on `spreadsheetbench/s10` (advanced mode) took the overlap line from 4 to 6 to 8 of the same ten cells in two rounds and found no winner in the four after. Neither promotion was separable on its own — both intervals include zero, so `rounds_to_separable` stayed unset while `rounds_to_improved` was 1. A further campaign needs a larger cut, which is what `spreadsheetbench/s20` is.
 - **Headroom alone is not enough.** `qwen/qwen3.7-flash` at `none` found nothing that beat the origin on `spreadsheetbench/s10` or on `/s20`.
@@ -155,6 +155,8 @@ No one model is the development model for every kind of run on a dataset. Two th
 - **A search needs room to climb.** Use a model that misses a fair share of the questions, so a better prompt has something to win.
 - **An ablation needs room to fall.** Use a model that gets most questions right, so a removed section it needed shows as a miss. On the twelve questions `mimo` already misses every hard one, so a removal can only show damage on the seven easier ones; `glm` gets eleven right, so nearly every question can show it.
 - **A reported comparison uses neither rule.** It runs on the model the published rows used, or the operator's pick.
+
+**What the role may cost (operator, 2026-10-24).** The bar is the list OUTPUT price per M tokens, because input is small on every role: a **prompt** target below $0.10, an **agent** target below $0.30, the **optimizer** below $0.60. A target is paid on every row of every arm, so its bar is the tightest. Read prices off `https://openrouter.ai/api/v1/models` before calling a model cheap — `mimo-v2.6-flash` at $0.28 out is an agent target, never a prompt target.
 
 ## Per-sample timings understate wall-clock
 

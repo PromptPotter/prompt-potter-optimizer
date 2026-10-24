@@ -182,6 +182,29 @@ Beyond ranked items 1 and 2:
   - a bandit over an ensemble of LLM mutators.
 
   Read its sampling policy before designing L4 candidate selection.
+- **Algorithm configuration already settled how to race configurations** — from a 2026-10-14
+  literature pass, not re-read here, so unverified under this page's rule:
+  - the unit of replication is the environment, one pass per cell, every marginal dollar on a new
+    cell; repeats only to measure the noise floor (Birattari; COCO's "instances are repetitions");
+  - block on instance and pair in the same order with the same seeds; correct only the published
+    verdict, not the tests inside a race (ParamILS, irace, SMAC);
+  - irace tests first after 5 instances, then after every one, and closes a race after two tests
+    that eliminate nothing; SMAC's intensification meets the incumbent on 1, 2, 4… of its cells;
+  - retire saturated and flat environments and prefer high signal-to-noise ones; cut examples,
+    never scenarios (metabench, Signal and Noise);
+  - headroom does not predict a prompt's lift (ρ = 0.047 over 19.8k prompt pairs,
+    [2605.26655](https://arxiv.org/abs/2605.26655)), so headroom admits a dataset and never ranks it;
+  - among prompt-optimizer papers only RRSI gates on a noise floor measured by re-running the
+    unchanged harness (δ 0.004–0.020).
+- **Proposer mechanisms with their own ablation row** — from a 2026-10-07 citation harvest, not
+  re-read here, so unverified: failures alone to the proposer beat a natural mix, 53.9 vs 49.6
+  (2609.32452); a generalization-gate block in the proposer prompt, 51.6 → 58.4 held-out
+  (HarnessCompass, 2608.01918); per-operator win/loss history in the planner's prompt, 65.88 vs
+  34.12 without it (StraTune, 2609.32886); raw per-sample traces of earlier candidates, where a
+  summary was no better than scores alone (Meta-Harness, 2603.28052); the proposer emits only a
+  delta that a deterministic merge applies, 56.9 → 70.3 (ACE, 2510.04618). Against the whole idea
+  of a phrase library: GRACE's paraphrase ablation moved its result by about 0.2 points — the
+  acceptance gate may carry more than the wording.
 - **Precedent to cite:**
   - [STOP](https://arxiv.org/abs/2310.02304) is the closest prior art: an improver improving its
     own code with weights frozen.

@@ -16,6 +16,16 @@ block whose trigger fired.
 So: **price a proposal in the axis the operator named AND in the ones they didn't**, in the same breath — the units they'd feel, not the flattering ones (an inner cell costs ~11 minutes *and* ~$0.05; quote both). Trading one axis for another is an increase and is asked for explicitly. And when the budget genuinely binds, the move is to get more out of the measurements already being paid for — a better estimator, a signal already recorded and thrown away, a larger effect to detect — never a bigger N in whichever unit currently looks cheap.
 </one-budget>
 
+**When a measured number tempts a verdict that a dataset, a model or a task CANNOT be improved → `<reachable-by-default>`:**
+
+<reachable-by-default>
+**The AI blind spot this guards against:** a few tried prompts fail to move a score, and the AI writes "capability limit", "capability floor", "not prompt-shaped" or "no prompt can" — a claim about the whole prompt space read off a handful of points in it. It retires the dataset, the model or the direction, and the one experiment that would have climbed is never run.
+
+**The base assumption is that every task can be improved by a good enough optimizer.** It is hard, not impossible, and this repo exists to build the optimizer that does it, so a stance that headroom is unreachable makes progress impossible by construction. What a measurement shows is that THESE prompts did not move it — say exactly that ("written definitions moved it +0.05"), never what no prompt could do. A flat result is first a fact about the proposer, the evidence it was shown, the instrument's resolution or the election, and is probed there.
+
+Dataset choice still uses the band: a seat is picked for where its origin sits and how cleanly its rows resolve, never for being "unreachable" elsewhere. The one legitimate ceiling is arithmetic — a solver at 100% leaves no lift to measure.
+</reachable-by-default>
+
 **When an LLM call is slow / costly / token-heavy, OR you are adding anything to a prompt → `<simplify-the-problem>`:**
 
 <simplify-the-problem>

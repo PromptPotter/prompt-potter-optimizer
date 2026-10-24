@@ -19,7 +19,7 @@ This skill walks the loop: **read → classify → edit → predict → re-run o
 
 ## The tuning thread — start here when the operator says "continue"
 
-**`.scratch/optimizer-tuning.md` is the board, the findings and the method of the standing effort to lower the price of optimizer progress while holding its velocity.** Read it whole before anything else, say which card is in `Doing`, and work that one; update the board and its Findings before the session ends. It is interactive: the operator steers the order, you carry the cards.
+**[`docs/specs/roadmap.md`](../../../docs/specs/roadmap.md) § Optimizer tuning is the board of the standing effort to lower the price of optimizer progress while holding its velocity; its findings are rows of [`docs/research/benchmarks.md`](../../../docs/research/benchmarks.md) § Every dataset we measured.** Read the board before anything else, say which card you take, and work that one; move the board and write each measured number into benchmarks the turn it lands. It is interactive: the operator steers the order, you carry the cards.
 
 **Thinking is free and a test is paid, so the order is fixed.** Before any spend, exhaust what is banked: walk `.promptpotter/` and `.promptpotter/.inner/`, re-read rounds already paid for, and state what the proposed test could show that they cannot. Then say what result would change the next decision and whether the instrument can resolve an effect of that size (`evidence --subject`); a test that cannot separate its arms is not bought, however cheap. Signal per dollar and per minute is the objective, and most of the work is raising the first before lowering the second.
 
