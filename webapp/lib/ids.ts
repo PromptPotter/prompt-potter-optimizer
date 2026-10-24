@@ -61,23 +61,26 @@ export function decodeCyclePath(s: string): CyclePath | null {
   return hops.length ? hops : null;
 }
 
-// The empty-path form `|<id>` is an origin, which groups campaigns rather than addressing one.
-const NODE_SEP = "|";
-
-export function nodeAddress(path: CyclePath, nodeId?: string): string {
-  const encoded = encodeCyclePath(path);
-  return nodeId ? `${encoded}${NODE_SEP}${nodeId}` : encoded;
+// A hierarchy address below a course appends `/r{round}/{arm_key}`; the head is the course's path.
+export function courseAddressOf(address: string): string {
+  const cut = address.indexOf("/");
+  return cut < 0 ? address : address.slice(0, cut);
 }
 
-// Never feed a suffixed address to `decodeCyclePath`: it answers null and view memory goes inert.
-export function ownerOfNodeAddress(addr: string): string | null {
-  const cut = addr.indexOf(NODE_SEP);
-  const encoded = cut < 0 ? addr : addr.slice(0, cut);
-  if (!encoded) {
-    const nodeId = cut < 0 ? "" : addr.slice(cut + NODE_SEP.length);
-    return validIdComponent(nodeId) ? nodeId : null;
-  }
-  return decodeCyclePath(encoded)?.[0]?.campaignId ?? null;
+// Only for a course or anything under one: a campaign's address names no cycle.
+export function pathOfAddress(address: string): CyclePath {
+  const path = decodeCyclePath(courseAddressOf(address));
+  if (!path) throw new Error(`not a course address: ${address}`);
+  return path;
+}
+
+// The top-level id an address files under in view memory: its first campaign, or a bare id
+// (a top-level campaign's address, or an origin's cycle id, which groups campaigns).
+export function ownerOfAddress(address: string): string | null {
+  const top = courseAddressOf(address).split(HOP_SEP)[0] ?? "";
+  const cut = top.indexOf(UNIT_SEP);
+  const id = cut < 0 ? top : top.slice(0, cut);
+  return validIdComponent(id) ? id : null;
 }
 
 export function pathRoot(path: CyclePath): PathHop {

@@ -564,15 +564,21 @@ class CampaignStore:
             self._append(hop, CycleSupersededRecord(successor_cycle_id=successor_cycle_id))
         self._declare_ended(hop, StopReason.REBASED)
 
-    def line(self, hop: CycleHop) -> list[CycleHop]:
+    def line(self, hop: CycleHop, *, moment: Moment | None = None) -> list[CycleHop]:
+        """The supersede chain from *hop*; *moment* walks it as it stood then."""
         out = [hop]
-        while successor := scan_cycle_facts(self.ledger(hop)).superseded_by:
+        while successor := self._successor(hop, moment):
             hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=successor)
             out.append(hop)
         return out
 
-    def line_holder(self, hop: CycleHop) -> CycleHop:
-        return self.line(hop)[-1]
+    def line_holder(self, hop: CycleHop, *, moment: Moment | None = None) -> CycleHop:
+        return self.line(hop, moment=moment)[-1]
+
+    def _successor(self, hop: CycleHop, moment: Moment | None) -> str | None:
+        ledger = self.ledger(hop)
+        until = None if moment is None else moment.span(ledger).until
+        return scan_cycle_facts(ledger, until).superseded_by
 
     def declare_stop(
         self, hop: CycleHop, stop: RunPhaseRecord, *, error: ErrorRecord | None = None

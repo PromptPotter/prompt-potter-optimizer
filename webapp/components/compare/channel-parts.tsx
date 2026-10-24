@@ -2,7 +2,7 @@ import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import type { HeadToHeadRow, MeteredSpend } from "@/lib/api";
 import type { LiftEstimate } from "@/lib/api/types";
 import { GuardBadge } from "@/components/shell/GuardBadge";
-import { liftOf, pathOf, readPaired, cycleSpendStat, type LineStep } from "@/lib/derivations";
+import { liftOf, readPaired, cycleSpendStat, type LineStep } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import {
   sideTone,
@@ -12,7 +12,6 @@ import {
   fmtPct0,
   fmtSigned,
 } from "@/lib/format";
-import { encodeCyclePath } from "@/lib/ids";
 import { Badge } from "@/components/ui";
 
 interface MetricFigure {
@@ -40,10 +39,10 @@ export function MainLine({ steps }: { steps: readonly LineStep[] }) {
             </li>
           );
         }
-        const { reading } = s.node;
+        const { reading } = s.node.facts;
         return (
           <li
-            key={`${encodeCyclePath(pathOf(s.node))}/${s.node.id}`}
+            key={s.node.address}
             className={cx("cmp-line-step", reading.election.selected && "is-crowned")}
           >
             <span className="cmp-line-round">R{reading.arm.round}</span>

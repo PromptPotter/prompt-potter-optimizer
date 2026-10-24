@@ -1,5 +1,5 @@
 "use client";
-// served: the tree's `origin_row`; null until the tree places it.
+// served: the course's `facts.origin`; null until the subtree places it.
 
 import { useMemo } from "react";
 import { originAt, originPoint, type ObservePoint } from "@/lib/derivations";

@@ -9,12 +9,11 @@ export const BOTTOM_PAD = 4;
 
 export interface DendroNode {
   key: string;
-  candidateId: string;
+  address: string;
   round: number;
   label: string;
   isWinner: boolean;
   crown: ArmElection["crown"];
-  isFork: boolean;
   i: number;
   xf: number;
   y: number;
@@ -46,10 +45,9 @@ export interface DendroRow {
   key: string;
   round: number;
   label: string;
-  candidate_id: string;
+  address: string;
   is_selected: boolean;
   crown: ArmElection["crown"];
-  is_fork: boolean;
 }
 
 export function roundOf(bar: CandidateBar): number {
@@ -61,10 +59,9 @@ export function dendroRow(bar: CandidateBar): DendroRow {
     key: bar.key,
     round: roundOf(bar),
     label: bar.label,
-    candidate_id: bar.node.id,
+    address: bar.node.address,
     is_selected: bar.reading?.election.selected ?? false,
     crown: bar.reading?.election.crown ?? null,
-    is_fork: bar.reading !== null && bar.node.fork !== null,
   };
 }
 
@@ -86,12 +83,11 @@ export function dendrogram(
   rows.forEach((r, i) => {
     nodes.push({
       key: r.key,
-      candidateId: r.candidate_id,
+      address: r.address,
       round: r.round,
       label: r.label,
       isWinner: r.is_selected,
       crown: r.crown,
-      isFork: r.is_fork,
       i,
       xf: centers[i]!,
       y: NODE_ROW_Y,
@@ -100,7 +96,6 @@ export function dendrogram(
 
   const bands = new Map<number, { first: number; last: number }>();
   rows.forEach((r, i) => {
-    if (r.is_fork) return;
     const b = bands.get(r.round);
     if (b) b.last = i;
     else bands.set(r.round, { first: i, last: i });

@@ -1,22 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { barLevel, barsAreCourses, candidateBars } from "../candidate-views";
-import type {
-  ArmNode,
-  ArmReading,
-  CourseFacts,
-  CourseLineage,
-  ForkStamp,
-  VerificationMark,
-} from "@/lib/api";
+import type { ArmReading, CourseFacts, HierarchyCandidate, HierarchyCourse, VerificationMark } from "@/lib/api";
+import { encodeCyclePath } from "@/lib/ids";
 import {
-  armNode,
   armReading,
-  courseLineage,
   courseTags,
+  hierarchyCampaign,
+  hierarchyCandidate,
   hierarchyCourse,
   ownLevel,
   pairedReading,
+  roundsOf,
   runStanding,
+  supersededTag,
 } from "@/lib/test-fixtures";
 
 const standsAt = (rate: number) =>
@@ -30,25 +26,38 @@ const EMPTY = {
 
 type ReadingOver = Parameters<typeof armReading>[0];
 
-const arm = (id: string, label: string, reading: ReadingOver = {}, over: Partial<ArmNode> = {}) =>
-  armNode({
-    id,
-    label,
-    reading: armReading({
-      election: { held: true },
-      ...reading,
-      arm: { round: 1, label, key: id },
-    }),
-    ...over,
-  });
+const OUTER = [{ campaignId: "camp__aaaaaa", cycleId: "cycle_root" }];
+const C = encodeCyclePath(OUTER);
 
-const course = (kids: ArmNode[]) => courseLineage({ id: "c0", label: "root", children: kids });
-const runsUnder = (runs: CourseLineage[]) => armNode({ id: "a", children: runs });
+const arm = (
+  id: string,
+  label: string,
+  reading: ReadingOver = {},
+  facts: Partial<HierarchyCandidate["facts"]> = {},
+  over: Partial<HierarchyCandidate> = {},
+) =>
+  hierarchyCandidate(
+    C,
+    {
+      id,
+      reading: armReading({ election: { held: true }, ...reading, arm: { round: 1, label, key: id } }),
+      ...facts,
+    },
+    over,
+  );
+
+const course = (kids: HierarchyCandidate[]) =>
+  hierarchyCourse({ address: C, label: "root", children: roundsOf(C, kids) });
+const runsUnder = (runs: HierarchyCourse[]) =>
+  arm("a", "C1.1", {}, {}, { children: [hierarchyCampaign({ address: `${C}~inner__1`, children: runs })] });
 const run = (id: string, facts: Partial<CourseFacts>) =>
-  courseLineage({
-    id,
-    course: hierarchyCourse({ address: id, tags: courseTags("inner", "justlogic") }, { mint: "inner", ...facts }),
-  });
+  hierarchyCourse(
+    {
+      address: encodeCyclePath([...OUTER, { campaignId: "inner__1", cycleId: id }]),
+      tags: courseTags("inner", "justlogic"),
+    },
+    { mint: "inner", ...facts },
+  );
 
 describe("the half choice — the tree's, once its walk is decided", () => {
   it("keeps the TREE's reading even while a live row for the same arm exists", () => {
@@ -58,7 +67,7 @@ describe("the half choice — the tree's, once its walk is decided", () => {
       viewedNode: course([tree]),
       inflightByKey: new Map([["a", armReading({ own: ownLevel(0.2) })]]),
     });
-    expect(bars[0]?.reading).toBe(tree.reading);
+    expect(bars[0]?.reading).toBe(tree.facts.reading);
     expect(barLevel("accuracy", bars[0]!)).toBe(0.7);
     expect(bars[0]).toMatchObject({ source: "history" });
   });
@@ -83,22 +92,17 @@ describe("the half choice — the tree's, once its walk is decided", () => {
       viewedNode: course([tree]),
       inflightByKey: new Map([["a", armReading({ own: ownLevel(0.3) })]]),
     });
-    expect(bars[0]?.reading).toBe(tree.reading);
+    expect(bars[0]?.reading).toBe(tree.facts.reading);
     expect(barLevel("accuracy", bars[0]!)).toBeNull();
     expect(bars[0]).toMatchObject({ source: "history" });
   });
 
   it("joins the live half on the arm's key, never a label", () => {
-    const forked = armNode({
-      id: "f",
-      label: "C1.2",
-      reading: armReading({ arm: { round: 1, label: "C1.1", key: "f" } }),
-    });
     const live = armReading({ own: ownLevel(0.4) });
     const bars = candidateBars({
       ...EMPTY,
-      viewedNode: course([forked]),
-      inflightByKey: new Map([["f", live]]),
+      viewedNode: course([arm("f", "C1.2")]),
+      inflightByKey: new Map([["f", live], ["C1.2", armReading({ own: ownLevel(0.9) })]]),
     });
     expect(bars[0]).toMatchObject({ label: "C1.2", source: "inflight" });
     expect(barLevel("accuracy", bars[0]!)).toBe(0.4);
@@ -121,22 +125,14 @@ describe("course bars carry no verdict", () => {
 
   it("holds no reading and no basis — a run is not a scored row", () => {
     const bars = candidateBars({ ...EMPTY, viewedNode: runs, sampleSet: [1, 2] });
-    expect(bars[0]).toMatchObject({ reading: null, node: { kind: "course" } });
+    expect(bars[0]).toMatchObject({ reading: null, node: { level: "course" } });
     expect(bars[0] && "overlap" in bars[0]).toBe(false);
   });
 
-  it("is what barsAreCourses reports, and a fork keeps its own key", () => {
+  it("is what barsAreCourses reports; a course's own arms are not runs", () => {
     expect(barsAreCourses(runs)).toBe(true);
-    const fork: ForkStamp = {
-      kind: "fork",
-      trigger: "",
-      direction: null,
-      steered_by: null,
-      status: { label: "Running", mark: "running" },
-      cut_from: null,
-    };
-    const forks = course([arm("a", "C1.1"), arm("f", "C1.2", {}, { fork })]);
-    expect(barsAreCourses(forks)).toBe(false);
+    expect(barsAreCourses(course([arm("a", "C1.1")]))).toBe(false);
+    expect(barsAreCourses(arm("a", "C1.1"))).toBe(false);
   });
 });
 
@@ -178,17 +174,18 @@ describe("the overlap channel — drawn only on the WHOLE basis", () => {
 });
 
 it("drops the tail a supersede cut retired — one round of three, never six", () => {
+  const retired = { tags: [supersededTag(`${C}_fork`)] };
+  const live = [arm("new1", "C10.1", { own: ownLevel(0.26) }), arm("new2", "C10.2")];
   const bars = candidateBars({
     ...EMPTY,
-    // Both sides carry a distinct id and share labels, so nothing but `superseded_by` separates them.
+    // Both sides share labels, so nothing but the `superseded` tag separates them.
     viewedNode: course([
-      arm("old1", "C10.1", { own: ownLevel(0.29) }, { superseded_by: "cycle_fork" }),
-      arm("old2", "C10.2", { own: ownLevel(0.43) }, { superseded_by: "cycle_fork" }),
-      arm("new1", "C10.1", { own: ownLevel(0.26) }),
-      arm("new2", "C10.2"),
+      arm("old1", "C10.1", { own: ownLevel(0.29) }, {}, retired),
+      arm("old2", "C10.2", { own: ownLevel(0.43) }, {}, retired),
+      ...live,
     ]),
   });
-  expect(bars.map((b) => b.node.id)).toEqual(["new1", "new2"]);
+  expect(bars.map((b) => b.key)).toEqual(live.map((c) => c.address));
   // `idx` numbers the bars actually drawn — it is the join to the dendrogram beneath them.
   expect(bars.map((b) => b.idx)).toEqual([0, 1]);
 });

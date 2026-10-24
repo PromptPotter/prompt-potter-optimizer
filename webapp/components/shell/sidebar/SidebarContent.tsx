@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { SignInPrompt } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import { tagValue } from "@/lib/hierarchy";
-import { encodeCyclePath, rootCycleId } from "@/lib/ids";
 import { useActivePointer, useRegistry } from "@/lib/registry";
 import { useShowCandidates } from "@/lib/tree-prefs";
 import { useNodeToggle } from "@/lib/view-memory";
@@ -35,10 +34,7 @@ export function SidebarContent() {
   }, [listed]);
 
   // The ACTIVE cycle, never the viewed one: a manual selection must not pop a course open.
-  const focusKey = useMemo(() => {
-    if (!activeCampaignId || !activeCycleId) return null;
-    return encodeCyclePath([{ campaignId: activeCampaignId, cycleId: rootCycleId(activeCycleId) }]);
-  }, [activeCampaignId, activeCycleId]);
+  const focusKey = activeCampaignId && activeCycleId ? activeCampaignId : null;
 
   // Latched per (campaign, active cycle): unlatched, a remount re-opens a row just collapsed.
   useEffect(() => {

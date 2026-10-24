@@ -15,9 +15,9 @@ from promptpotter.application.views.render.primitives import fmt_pct
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
-from promptpotter.domain.lineage_tree import ArmNode, CourseLineage
+from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyCourse, HierarchyRound
 from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading
-from promptpotter.domain.results import ARM_VERDICT_LABELS, VERIFY_STRATEGY_LABELS
+from promptpotter.domain.results import VERIFY_STRATEGY_LABELS
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.errors import ConflictError
 
@@ -71,7 +71,7 @@ class ExportFiles:
 
 def export_files(
     tier: ExportTier,
-    course: CourseLineage,
+    course: HierarchyCourse,
     provenance: Provenance,
     *,
     unit: MeasuredUnit,
@@ -141,22 +141,36 @@ def provenance_lines(p: Provenance, kind: str) -> list[str]:
     ]
 
 
-def _live(course: CourseLineage) -> list[ArmNode]:
+def _live(course: HierarchyCourse) -> list[HierarchyCandidate]:
     """The live side of each supersede cut: a retired tail doubles its round."""
-    return [node for node in course.children if node.superseded_by is None]
+    return [
+        c
+        for rnd in course.children
+        for c in rnd.children
+        if isinstance(c, HierarchyCandidate) and c.tag("superseded") is None
+    ]
 
 
-def chat_text(course: CourseLineage, unit: MeasuredUnit) -> str:
-    """One block per candidate in timeline order, every number a served one under its served name."""
+def chat_text(course: HierarchyCourse, unit: MeasuredUnit) -> str:
+    """One block per candidate in round order, every number a served one under its served name."""
     arms = _live(course)
-    label_of = {node.id: node.label for node in arms}
-    elects_on = next((node.elects_on for node in arms if node.elects_on is not None), None)
+    label_of: dict[str, str] = {}
+    for c in arms:
+        label_of.setdefault(c.facts.individual, c.label)
+    elects_on = next(
+        (
+            rnd.facts.elects_on
+            for rnd in course.children
+            if isinstance(rnd, HierarchyRound) and rnd.facts.elects_on is not None
+        ),
+        None,
+    )
     lines = [
         f"candidates of {course.label} · {len(arms)} rows · elected on "
-        f"{elects_on or '—'} · in timeline order"
+        f"{elects_on or '—'} · in round order"
     ]
-    for node in arms:
-        lines += ["", *_arm_lines(node, label_of, unit)]
+    for c in arms:
+        lines += ["", *_arm_lines(c, label_of, unit)]
     return "\n".join(lines) + "\n"
 
 
@@ -168,15 +182,15 @@ def _band(lo: float | None, hi: float | None, fmt: Callable[[float], str]) -> st
     return "" if lo is None or hi is None else f" [{fmt(lo)}, {fmt(hi)}]"
 
 
-def _arm_lines(node: ArmNode, label_of: dict[str, str], unit: MeasuredUnit) -> list[str]:
-    r = node.reading
-    parents = [label_of.get(p, p) for p in node.parent_ids]
-    minted = "" if r.arm.label == node.label else f" (minted {r.arm.label})"
+def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUnit) -> list[str]:
+    r = c.facts.reading
+    parents = [label_of.get(p, p) for p in c.facts.parent_ids]
+    verdict = c.tag("verdict")
     head = [
-        f"{node.label}{minted}",
+        c.label,
         f"R{r.arm.round}",
         f"parent {' x '.join(parents)}" if parents else "origin",
-        ARM_VERDICT_LABELS[node.verdict],
+        "—" if verdict is None else verdict.label,
     ]
     out = ["  ".join(head)]
 
@@ -207,7 +221,7 @@ def _arm_lines(node: ArmNode, label_of: dict[str, str], unit: MeasuredUnit) -> l
     if r.vs_reference is not None:
         out.append(f"  {_pair_line(r.vs_reference, unit)}")
 
-    loci = list(dict.fromkeys(locus for v in node.variations for locus in v.loci))
+    loci = list(dict.fromkeys(locus for v in c.facts.variations for locus in v.loci))
     description = " ".join(r.changes_description.split())
     if loci or description:
         changed = f"changed {', '.join(loci)}" if loci else ""
@@ -275,24 +289,24 @@ _CYCLE_ADDRESS: dict[str, Any] = {
 }
 
 
-def candidate_records(course: CourseLineage) -> list[dict[str, Any]]:
+def candidate_records(course: HierarchyCourse) -> list[dict[str, Any]]:
     """One flat record per candidate, its reading keyed by the names the API serves it under."""
     return [
         {
-            "label": node.label,
-            "id": node.id,
-            "parent_ids": node.parent_ids,
-            "verdict": node.verdict,
-            "stands": node.stands,
-            "loci": list(dict.fromkeys(locus for v in node.variations for locus in v.loci)),
-            "members": [v.node for v in node.variations],
-            **_flat(node.reading.model_dump(mode="json", exclude=_CYCLE_ADDRESS)),
+            "label": c.label,
+            "id": c.facts.individual,
+            "parent_ids": c.facts.parent_ids,
+            "verdict": None if (verdict := c.tag("verdict")) is None else verdict.value,
+            "stands": c.facts.stands,
+            "loci": list(dict.fromkeys(locus for v in c.facts.variations for locus in v.loci)),
+            "members": [v.node for v in c.facts.variations],
+            **_flat(c.facts.reading.model_dump(mode="json", exclude=_CYCLE_ADDRESS)),
         }
-        for node in _live(course)
+        for c in _live(course)
     ]
 
 
-def candidates_jsonl(course: CourseLineage) -> str:
+def candidates_jsonl(course: HierarchyCourse) -> str:
     return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in candidate_records(course))
 
 
@@ -317,7 +331,7 @@ def dataset_card(p: Provenance, data_file: str) -> str:
             "",
             f"# {p.dataset_name} candidates — {p.cycle_id}",
             "",
-            f"`{data_file}` holds one record per candidate this cycle measured, in timeline order, "
+            f"`{data_file}` holds one record per candidate this cycle measured, in round order, "
             "all of the one campaign and cycle below, so a record carries arm keys and no cycle "
             "address. It is keyed by the names the PromptPotter API serves (`arm.label`, "
             "`own.accuracy.value`, "

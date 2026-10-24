@@ -24,29 +24,27 @@ The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_path
 
 **A cycle's own facts are ledger records too, and `index.json` is their fold.** Its mint (`CycleMintedRecord` — parent, cut offset and `ForkSpec` for a fork), a launch's claim on it and that claim's release, its ending (the last `RunPhaseRecord` `terminal`), its result (`CycleFinalRecord`), a supersede, a measured fork direction, an operator intervention and an L4 spawn are each one append; `projections/cycle_index.py::read_cycle_index` is the ONE reading of them (`CampaignStore.load`), and `write_cycle_index` the file's one writer. Nothing reads the file, and `ledger_chain` finds a fork's parent on the mint record, never in it.
 
-## The lineage tree — one timeline per campaign
+## The lineage tree — every course drawn where it spawned
 
-`store/lineage_queries.py` serves the genealogy; nodes alternate `Course -> Candidate -> Course`
-at any depth, so L5+ needs no new tier. **A fork is not a node** — its candidates mount onto
-the parent's ONE timeline and are renumbered into it, because `C{round}.{n}` is a position in
-a course's PRIVATE counter and every course mints its own `C1.1`. **Unless the fork corrects
-the parent** (a `supersede` cut): then its attempts take the positions they replaced, and the
-retired tail keeps its numbers under `superseded_by`.
+`application/hierarchy_subtree.py::hierarchy_subtree` serves the genealogy as the hierarchy's own
+entries: campaign → course → round → candidate → inner campaign, at any depth, so L5+ needs no new
+tier. **A fork IS a course**, hung off its parent at `CourseFacts.spawn` (`from_candidate`, the
+candidate it was cut from), and every candidate keeps the label its own course minted — `C{round}.{n}`
+is a position in a course's PRIVATE counter, so nothing is renumbered and nothing is folded onto
+another course's timeline. A candidate's address, `{course}/r{n}/{arm_key}`, is the key.
 
 Three bounds — get them wrong and the tree lies without erroring:
 
-- **A cut retires only as far as the branch actually GOT** — `_retired_by` reads the branch's
-  own reach back rather than asserting the future. A branch that died retires nothing.
-- **Identity outranks direction.** A repair re-measures without re-minting, so a
-  `candidate_id` already on the timeline is corrected in place (`equivalent` — the common
-  outcome) or kept beside its
-  withdrawn twin (`supersede` — two measurements of one individual, both facts), never given
-  a fresh index. The RUNS are single-homed on the live row: they measured the INDIVIDUAL, and
-  a fork's inner runs land in the PARENT's sandbox, so all of them arrive filed under the row
-  being replaced. ⑂ marks an OFFSHOOT only — except on a branch that minted nothing, whose
-  row is the course as a stand-in and keeps its own provenance.
-- **Whichever cut moved the POINTER answers for run-state** — `supersede` and `equivalent`
-  both do, `offshoot` alone leaves the parent running. Separate from what a cut retires.
+- **A cut retires only as far as the branch actually GOT** — `_retired` reads the branch's
+  own reach back rather than asserting the future. A branch that died retires nothing. A retired
+  candidate stays on its course as the record of what ran, tagged `superseded` with the address
+  of the course that took its place, and loses its crown.
+- **Identity outranks position.** A repair re-measures without re-minting, so two candidates on
+  two courses can share an `individual`; `answers_for_id` marks the ONE a remembered id resolves
+  to — the first live, measured one, else the first.
+- **An inner run hangs under the candidate that SPAWNED it** (`spawned_by`'s round and
+  individual), searched on its own course first, then its campaign's other courses: a fork's
+  inner runs land in the parent's sandbox.
 
 **A round fact lands on the record that OWNS it.** Everything
 `elect_round_winner` stamps rides `ElectionRecord` — the crown, each arm's θ and its matched-parent
@@ -57,9 +55,9 @@ A round's LEVEL is the cycle's, never the round's: `RoundClosedRecord.level_seri
 `ArmState`**: the election stamps it AFTER the arm's last
 `ArmRecord`, so it would be an all-null column on every live run.
 
-**A course's card is the hierarchy's.** `build_lineage_tree` folds topology over the entries
-`application/hierarchy.py::family_course_entries` mints, so the tree and the listing cannot word one
-course two ways; a timeline a supersede folded onto its branch carries the branch's entry.
+**A course's card is the hierarchy's.** The subtree extends the entries
+`application/hierarchy.py::campaign_entry` mints, so the tree and the listing cannot word one
+course two ways.
 
 **It is a READ MODEL and decides nothing.** The decision genealogy (`application/mask/`, the
 resume replayers) rides positional `(cycle_id, round)` and must not move onto it. What a cut
@@ -70,7 +68,7 @@ writes, and why — [`docs/operations/persistence-and-state.md`](../../../docs/o
 **`measurements/` is ONE content-addressed tree per archive home (`Stores.archive_home`), and it outlives the campaigns that filled it.** Three consequences:
 
 - **A row is filed under the BANK it measured — the dataset hash, never a label and never the campaign that paid for it.** A relabel moves a name onto a hash and rewrites no row; a re-cut bank is a new hash. On the recursion that is the *inner* benchmark's bank (`dataset.yaml` `panel.inner_benchmark`) — an inner sandbox isolates campaign state but deliberately shares `shared_root`, so **`promptpotter-self`'s bytes are almost all filed under the inner dataset's hash.** Scoping anything by `--dataset promptpotter-self` reaches the outer cells and essentially nothing L4 actually cost. Count before concluding: `compact-archive inventory --dataset <name>` resolves the label to the hash it names now and prints configurations, answers and bytes by dataset, role and age.
-- **Nothing on an answer names a campaign.** It carries its configuration, its dataset, its role and its grade — no `campaign_id`, no `cycle_id`, no run, because a cache hit is supposed to cross campaigns; which walk took which answer is the ledger's to say. So "what did this campaign cost on disk" is not a question the archive answers, and the join a surface needs is `ArmNode.reading.sp_hash` → the row's `prompt_fields_id` (`docs/developer/README.md` § Cross-run memory).
+- **Nothing on an answer names a campaign.** It carries its configuration, its dataset, its role and its grade — no `campaign_id`, no `cycle_id`, no run, because a cache hit is supposed to cross campaigns; which walk took which answer is the ledger's to say. So "what did this campaign cost on disk" is not a question the archive answers, and the join a surface needs is `CandidateFacts.reading.sp_hash` → the row's `prompt_fields_id` (`docs/developer/README.md` § Cross-run memory).
 - **Cycle state is disposable and the rows are not**, so the rows routinely outlive every campaign that could select them: an emptied `.promptpotter/.inner/` leaves its measurements addressable only by dataset. Selecting a family and acting on "what it produced" is therefore a claim about *surviving* state — say so, rather than reporting a smaller number as if it were the whole.
 
 Reversibility is what makes the first two survivable: `compact` keeps every field the δ ruler re-grades from and the replay cache needs, so compacting rows another campaign replays from costs it nothing. Only `purge-cold` needs the attribution, and only it is irreversible.

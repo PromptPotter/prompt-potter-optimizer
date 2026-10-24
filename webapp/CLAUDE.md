@@ -25,7 +25,7 @@ Each rule binds this layer but is stated by the file governing the artifact it c
 - **Visual identity and copy register** — owned by [`BRAND.md`](../../promptpotter-web/BRAND.md) in the sibling site repo (`runfish5/promptpotter-web`); never introduce a parallel design spec, tokens doc or theme-decision file, and read every value as `var(--…)`.
 - **What `dashboard.json` guarantees its readers** — owned by [`../promptpotter/infrastructure/CLAUDE.md`](../promptpotter/infrastructure/CLAUDE.md) § Persistence; poll it and trust it, never reconstruct a served field from a second source.
 - **Which model a new field lands on to reach a panel** — owned by [`../docs/developer/adding-a-surface.md`](../docs/developer/adding-a-surface.md) § 3; a panel reading a field no writer sets is the half-wiring that recipe exists to prevent.
-- **The lineage tree — forks, crowns, θ** — owned by [`../promptpotter/infrastructure/store/CLAUDE.md`](../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree; this layer renders what `/tree` serves and derives no lineage of its own.
+- **The lineage tree — forks, crowns, θ** — owned by [`../promptpotter/infrastructure/store/CLAUDE.md`](../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree; this layer renders what `/hierarchy/{address}` serves and derives no lineage of its own.
 - **The check list this layer's gate runs** — owned by `scripts/gate.py`; run `python scripts/gate.py --web`.
 - **Where a distributor's brand values come from** — owned by [`../deploy-linux/README.md`](../deploy-linux/README.md) § Running it under your own name; a new `lib/brand.ts` field is unreachable until `deploy-linux/brand-env.sh` exports its `NEXT_PUBLIC_*`.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import math
 import statistics
 from collections.abc import Callable, Iterable, Mapping
@@ -166,6 +167,8 @@ class CompiledExpression(NamedTuple):
     evaluate: Callable[[dict[str, Any], str], float]
 
 
+# Pure over its two strings, and every read of a campaign's bench or rows compiles its formula.
+@functools.lru_cache(maxsize=256)
 def compile_expression(formula: str, *, source: str) -> CompiledExpression:
     """A term the record lacks raises ``ScoringTermMissingError``, which a read side reports as *unscorable*."""
     try:

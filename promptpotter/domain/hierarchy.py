@@ -6,6 +6,7 @@ from pydantic import Field
 
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
+from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.phases import (
     PauseReading,
     ProducerAlert,
@@ -16,17 +17,28 @@ from promptpotter.domain.phases import (
     RunState,
     StopReason,
 )
-from promptpotter.domain.results import RunStanding
+from promptpotter.domain.results import ArmReading, DisplayMetric, RunStanding
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
 from promptpotter.domain.spend import LifetimeSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
-type Level = Literal["campaign", "course"]
+type Level = Literal["campaign", "course", "round", "candidate"]
 type CourseKind = Literal["root", "fork", "diag", "inner"]
 type TagKind = Literal[
-    "dataset", "optimizer", "vendor", "mint", "lifecycle", "self_optimization", "arm", "superseded"
+    "dataset",
+    "optimizer",
+    "vendor",
+    "mint",
+    "lifecycle",
+    "self_optimization",
+    "arm",
+    "superseded",
+    "verdict",
 ]
-type StatKey = Literal["spend_lifetime", "spend", "bench", "rounds", "accuracy", "lives"]
+type StatKey = Literal[
+    "spend_lifetime", "spend", "bench", "rounds", "accuracy", "lives", "ability", "lift"
+]
+type RankMove = Literal["up", "down", "unchanged"]
 
 
 class HierarchyTag(FrozenModel):
@@ -131,6 +143,11 @@ class CampaignFacts(FrozenModel):
     runs_with: CampaignRunsWith | None = Field(
         description="What the root course runs with; null where its pipeline did not resolve."
     )
+    deletable_stubs: int | None = Field(
+        description="How many cycles `cleanup-empty-cycles` deletes here now "
+        "(`CampaignStore.deletable_stubs`, the command's own list). Counted on the subtree read "
+        "only — every sibling's ledger is scanned per fork — so null in the listing."
+    )
 
 
 class CourseSpawn(FrozenModel):
@@ -139,7 +156,11 @@ class CourseSpawn(FrozenModel):
     parent: str = Field(description="The address of the course it branched from.")
     at_round: int | None = Field(description="The round it branched at; null where none was named.")
     at_offset: int = Field(description="The parent ledger's offset the cut was taken at.")
-    from_candidate: str | None = Field(description="The arm key it branched from, where one.")
+    from_candidate: str | None = Field(
+        description="The address of the parent candidate it hangs from: the one its fork record "
+        "names, else the reference its first round re-read, else the parent's origin. Served on "
+        "the subtree read; null in the listing, which reads no candidate."
+    )
     trigger: ForkTrigger
     direction: ForkDirection = Field(
         description="Which side of the cut the run continues on, measured or implied by `trigger`."
@@ -158,6 +179,130 @@ class CourseFacts(FrozenModel):
     task: str | None = Field(description="The outer panel cell an L4 inner course measures.")
     standing: RunStanding | None = Field(description="Null before round 0 closes.")
     rounds_closed: int = Field(description="Rounds closed AFTER the origin.")
+    origin: str | None = Field(
+        description="The address of the arm the course's standing is paired against: its own "
+        "round-0 candidate, else its spawn parent's origin. Served on the subtree read; null in "
+        "the listing."
+    )
+    lens_criterion: str | None = Field(
+        description="The `per_cell` formula this course was read under for the request's lens — "
+        "a `dials:` lens realized against this campaign's anchors, a `score:` one as given. What a "
+        "fork applying the lens carries as `scoring.per_cell`. Null without one."
+    )
+    lens_shift: LensShift | None = Field(
+        description="How the request's lens reorders this course's candidates. Null without a "
+        "lens, and where it ranked none of them."
+    )
+
+
+class LensShift(FrozenModel):
+    """What the request's lens did to one course's candidate ordering."""
+
+    top_composite: str | None = Field(
+        description="The address of the candidate ranked first by composite; null where that "
+        "candidate is retired."
+    )
+    top_lens: str | None = Field(description="The same, ranked by `lens_value`.")
+    top_changed: bool = Field(description="The lens ranks another candidate first.")
+    moved_up: int
+    moved_down: int
+    unchanged: int
+
+
+class LineageDivergence(FrozenModel):
+    """Where an alternative criterion would have elected someone else, on the candidate it names."""
+
+    alternative_candidate_id: str | None = Field(
+        description="The individual the masked criterion would have elected instead (measured, "
+        "so nameable); null when the round would simply have held on origin."
+    )
+
+
+class MainLineStep(FrozenModel):
+    """One round on the main line to a candidate."""
+
+    round: int
+    candidates: list[str] = Field(
+        description="The addresses of the candidates the round's election crowned; at the "
+        "candidate's own round, the candidate. Empty: the election crowned nobody."
+    )
+
+
+class RoundFacts(FrozenModel):
+    """A round's typed facts: what its election declared and what it measured against."""
+
+    round: int
+    elects_on: DisplayMetric | None = Field(
+        description="The column the round's election elected on (`Election.elects_on`); null on "
+        "a round never elected. `ability`: the round is won on θ, not on accuracy."
+    )
+    reference: str | None = Field(
+        description="The address of the candidate the round measured its arms against — the "
+        "individual its `parent`-role arm re-read, in this course or up its spawn chain. Never a "
+        "child of the round: a reference is not re-listed. Null at round 0 and where none was read."
+    )
+
+
+class CandidateFacts(FrozenModel):
+    """One arm a round proposed; everything measured or decided about it is its `reading`."""
+
+    individual: str = Field(
+        description="`OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one "
+        "individual again."
+    )
+    parent_ids: list[str] = Field(
+        description="Every individual this one derives from — one for a mutation, several for a "
+        "crossover; empty only at an origin."
+    )
+    variations: list[Variation] = Field(
+        description="The variation nodes that wrote this individual, in the order they ran. Empty "
+        "on an origin."
+    )
+    reading: ArmReading = Field(
+        description="`reading.arm` is the key every per-cycle document of this course speaks; "
+        "`reading.sp_hash` joins to the archive rows. A retired candidate's election wears no "
+        "crown: the course that took its place re-asks it."
+    )
+    stands: bool = Field(
+        description="The newest crowned live candidate of its course — the parent the next round "
+        "mutates from. At most one per course."
+    )
+    course_latest: bool = Field(description="The newest candidate its course proposed.")
+    answers_for_id: bool = Field(
+        description="The ONE candidate across the subtree a remembered individual id resolves "
+        "to: the live one where a supersede left the individual on two, the first where several "
+        "stand."
+    )
+    main_line: list[MainLineStep] = Field(
+        description="The main line to THIS candidate, origin first: the spawn anchor's line up to "
+        "where its course branched, each elected round of its course before it with the "
+        "candidates crowned, then this candidate, then any later round that crowned nobody up to "
+        "the next crown. Read off crowns, never `parent_ids`."
+    )
+    lens_value: float | None = Field(
+        description="This candidate's composite fitness under the request's `score:` lens. Null "
+        "without a lens, or where no row carries a verdict under it."
+    )
+    lens_rank_move: RankMove | None = Field(
+        description="Which way the lens moved this candidate among its course's: its position by "
+        "`lens_value` against its position by the reading's composite. Null without a lens, or "
+        "where either value is."
+    )
+    sample_set_accuracy: float | None = Field(
+        description="Accuracy over the request's `samples=` subset, served only where this "
+        "candidate carries a scoreable verdict for ALL of it. Null without a `samples=` mask."
+    )
+    sample_set_n: int | None = Field(
+        description="How many of the `samples=` subset this candidate carries a scoreable verdict "
+        "for. Null without a `samples=` mask."
+    )
+    divergence: LineageDivergence | None = Field(
+        description="Set on a closed round's crowned candidate where the request's lens would "
+        "have elected someone else."
+    )
+    divergent: bool = Field(
+        description="Inside the counterfactual below a divergence — the client dims it."
+    )
 
 
 class _HierarchyEntry(FrozenModel):
@@ -173,32 +318,59 @@ class _HierarchyEntry(FrozenModel):
     lede: str | None = Field(description="The one sentence under the title: the selection line.")
     caveat: str | None = Field(description="What could not be read; null where all was.")
     tags: list[HierarchyTag]
-    state: HierarchyState
     stats: list[HierarchyStat] = Field(description="Server-ordered; `stats[0]` is the headline.")
-    span: HierarchySpan
     child_count: int = Field(
-        description="A campaign's courses; a course's rounds on its ledger, closed and open."
+        description="A campaign's courses; a course's rounds on its own ledger, closed and open; "
+        "a round's candidates; a candidate's inner campaigns."
     )
     children: list[HierarchyEntry] = Field(
-        description="Served to `?depth=`: a campaign's courses root first; empty under a course."
+        description="A listing serves a campaign's courses to `?depth=` and nothing under them; "
+        "the subtree read serves every level, courses root first, candidates in slot order."
     )
 
+    def tag(self, kind: TagKind) -> HierarchyTag | None:
+        return next((t for t in self.tags if t.kind == kind), None)
 
-class HierarchyCampaign(_HierarchyEntry):
+
+class _RunEntry(_HierarchyEntry):
+    """What only a level with a run of its own carries."""
+
+    state: HierarchyState
+    span: HierarchySpan
+
+
+class HierarchyCampaign(_RunEntry):
     """A campaign as one hierarchy entry: its state and line stats are its line course's."""
 
     level: Literal["campaign"] = "campaign"
     facts: CampaignFacts
 
 
-class HierarchyCourse(_HierarchyEntry):
+class HierarchyCourse(_RunEntry):
     """A course — one cycle's run, root, fork, diag or inner — as one hierarchy entry."""
 
     level: Literal["course"] = "course"
     facts: CourseFacts
 
 
-HierarchyEntry = Annotated[HierarchyCampaign | HierarchyCourse, Field(discriminator="level")]
+class HierarchyRound(_HierarchyEntry):
+    """One round of a course's own ledger; its children are the candidates it proposed."""
+
+    level: Literal["round"] = "round"
+    facts: RoundFacts
+
+
+class HierarchyCandidate(_HierarchyEntry):
+    """One candidate a round proposed; its children are the inner campaigns it spawned."""
+
+    level: Literal["candidate"] = "candidate"
+    facts: CandidateFacts
+
+
+HierarchyEntry = Annotated[
+    HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate,
+    Field(discriminator="level"),
+]
 
 
 class HierarchyResponse(StrictModel):

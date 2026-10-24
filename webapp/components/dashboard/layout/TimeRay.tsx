@@ -8,7 +8,7 @@ import { useSelection } from "@/lib/SelectionContext";
 import { useCycleStream, useTimeRay } from "@/lib/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import { useViewedLineage } from "@/lib/lineage";
-import { rayHead, raySteps, type RayStep } from "@/lib/derivations";
+import { armAt, rayHead, raySteps, type RayStep } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 
 export const TimeRay = memo(function TimeRay() {
@@ -52,11 +52,9 @@ export const TimeRay = memo(function TimeRay() {
     // Another course's ledger offset means nothing here, so that step returns this course to its head.
     setAt(elsewhere ? null : step.offset);
     if (step.arm) {
-      const node = index
-        .get(step.pathKey)
-        ?.candidates.find((c) => c.reading.arm.key === step.arm);
+      const node = armAt(index, step.path, step.arm);
       if (node) {
-        pick(node, step.path);
+        pick(node);
         return;
       }
     }

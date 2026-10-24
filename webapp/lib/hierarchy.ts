@@ -11,3 +11,7 @@ export function hasTag(entry: Tagged | null, kind: HierarchyTag["kind"]): boolea
 export function tagValue(entry: Tagged | null, kind: HierarchyTag["kind"]): string | null {
   return entry?.tags.find((t) => t.kind === kind)?.value ?? null;
 }
+
+export function tagLabel(entry: Tagged | null, kind: HierarchyTag["kind"]): string | null {
+  return entry?.tags.find((t) => t.kind === kind)?.label ?? null;
+}

@@ -1,8 +1,8 @@
-import type { ArmNode, LensShift } from "@/lib/api";
+import type { CandidateFacts, LensShift } from "@/lib/api";
 import type { CandidateBar } from "@/lib/types";
 import { fmtNum } from "@/lib/format";
 
-const MOVE_MARK: Record<NonNullable<ArmNode["lens_rank_move"]>, { glyph: string; cls: string }> = {
+const MOVE_MARK: Record<NonNullable<CandidateFacts["lens_rank_move"]>, { glyph: string; cls: string }> = {
   up: { glyph: "▲", cls: "rank-up" },
   down: { glyph: "▼", cls: "rank-down" },
   unchanged: { glyph: "·", cls: "rank-flat" },
@@ -14,7 +14,7 @@ export function FitnessRankSummary({
   criterion,
 }: {
   views: CandidateBar[];
-  // served: `CourseLineage.lens_shift` — the top by composite, not the θ-elected round winner.
+  // served: `CourseFacts.lens_shift` — the top by composite, not the θ-elected round winner.
   shift: LensShift | null;
   // `lensOf(mask) != null`, not "are tiles ticked": Expression mode builds a criterion with no tiles.
   criterion: boolean;
@@ -33,14 +33,16 @@ export function FitnessRankSummary({
       </span>
     );
   }
+  const labelOf = (address: string | null): string =>
+    views.find((v) => v.key === address)?.label ?? "—";
   return (
     <>
       {shift && (
         <>
           <div>
             {shift.top_changed
-              ? <span className="rank-up">top fitness flips {shift.top_composite ?? "—"} → {shift.top_lens ?? "—"}</span>
-              : <span className="rank-flat">top fitness unchanged ({shift.top_composite ?? "—"})</span>}
+              ? <span className="rank-up">top fitness flips {labelOf(shift.top_composite)} → {labelOf(shift.top_lens)}</span>
+              : <span className="rank-flat">top fitness unchanged ({labelOf(shift.top_composite)})</span>}
           </div>
           <div>
             <span className="rank-up">▲ {shift.moved_up}</span> moved up · <span className="rank-down">▼ {shift.moved_down}</span> moved down · <span className="rank-flat">· {shift.unchanged}</span> unchanged
@@ -49,12 +51,12 @@ export function FitnessRankSummary({
       )}
       <div style={{ marginTop: 6 }}>
         candidates: {views.map((b, i) => {
-          const move = b.reading ? b.node.lens_rank_move : null;
+          const move = b.reading ? b.node.facts.lens_rank_move : null;
           const mark = move ? MOVE_MARK[move] : { glyph: "—", cls: "rank-flat" };
           return (
             <span key={b.key}>
               {i > 0 && " · "}
-              {b.label} {fmtNum(b.reading?.own?.composite?.value ?? null, 3)}→{fmtNum(b.reading ? b.node.lens_value : null, 3)}{" "}
+              {b.label} {fmtNum(b.reading?.own?.composite?.value ?? null, 3)}→{fmtNum(b.reading ? b.node.facts.lens_value : null, 3)}{" "}
               <span className={mark.cls}>{mark.glyph}</span>
             </span>
           );

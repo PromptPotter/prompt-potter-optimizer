@@ -44,7 +44,7 @@ Three verdicts ship, and each answers a different "what if".
 
 | Ask | How | Names an alternative? |
 |---|---|---|
-| **A different scoring formula** | `?lens=score:<formula>` on `GET /campaigns/{c}/cycles/{cy}/tree`, the formula a `per_cell` composite — each node also gets a `lens_value`. `?lens=dials:<term=weight,…>` says the same thing as weights: the server realizes them on the campaign's own anchors (the origin's levels, under whatever the active criterion already pins) and serves the formula it read under as the course's `lens_criterion` | Yes — the candidate that formula ranks first |
+| **A different scoring formula** | `?lens=score:<formula>` on `GET /hierarchy/{address}`, the formula a `per_cell` composite — each candidate also gets a `lens_value`. `?lens=dials:<term=weight,…>` says the same thing as weights: the server realizes them on the campaign's own anchors (the origin's levels, under whatever the active criterion already pins) and serves the formula it read under as the course's `lens_criterion` | Yes — the candidate that formula ranks first |
 | **A PoBB gate switched off** | `?lens=abort:<variant>`, variant = `<gate>_off` for any `EliminationGate` (`epsilon` \| `lock_in` \| `collapsed`), or `all_off` — the table is DERIVED from that enum, so a new gate is switchable without editing this row | No — the continuation was never measured |
 | **A changed engine or scorer** | `python -m promptpotter ab [--campaign <id>]` — replays one whole campaign, the active one by default | Where a `round_winner` decision flips, yes |
 

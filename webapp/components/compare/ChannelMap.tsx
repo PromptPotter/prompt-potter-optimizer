@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import type { ArmNode, SubjectReading } from "@/lib/api";
+import type { HierarchyCandidate, SubjectReading } from "@/lib/api";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import {
   Forest,
@@ -10,9 +10,9 @@ import {
 } from "@/components/candidates/Forest";
 import { DENSE, type RoundNodePos } from "@/components/candidates/forest-layout";
 import { useCompareSelection } from "@/lib/compare-selection";
-import { nodeKeyOf, nodeOverlays, pathOf, walkCourses } from "@/lib/derivations";
+import { nodeOverlays } from "@/lib/derivations";
 import { fmtPct0 } from "@/lib/format";
-import { encodeCyclePath } from "@/lib/ids";
+import { encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import type { ChannelModel } from "./useChannelModel";
 
 export function ChannelMap({
@@ -31,8 +31,7 @@ export function ChannelMap({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [whole, setWhole] = useState(false);
 
-  const courses = useMemo(() => (root ? walkCourses(root) : []), [root]);
-  const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(courses, "accuracy"), [courses]);
+  const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(index, "accuracy"), [index]);
 
   const viewedKey = useMemo(
     () => (reading ? encodeCyclePath(readingPath(reading)) : null),
@@ -41,14 +40,13 @@ export function ChannelMap({
   const laneKeys = useMemo(() => {
     const keys = [
       ...new Set(
-        points.flatMap((p) => {
-          const course = index.get(p.coursePathKey)?.course;
-          return course ? [nodeKeyOf(course)] : [];
-        }),
+        points.flatMap((p) =>
+          index.byAddress.get(p.coursePathKey)?.level === "course" ? [p.coursePathKey] : [],
+        ),
       ),
     ];
     if (keys.length > 0) return keys;
-    return root ? [nodeKeyOf(root)] : [];
+    return root ? [root.facts.root] : [];
   }, [root, points, index]);
   // Compared as a string: `points` is rebuilt every evidence fetch, and re-seeding would drop opened lanes.
   const seed = laneKeys.join("~");
@@ -73,10 +71,7 @@ export function ChannelMap({
       channels: points,
       clip: whole ? null : own,
       invalidated,
-      isPicked: (n: RoundNodePos) =>
-        !!selected &&
-        n.candidateId === selected.id &&
-        n.coursePathKey === encodeCyclePath(pathOf(selected)),
+      isPicked: (n: RoundNodePos) => n.candKey === selected?.address,
       // The served node, not a lane lookup: a fork-contributed attempt is indexed under the fork's lane.
       onPickCandidate: (n: RoundNodePos) => setSelected(n.node === selected ? null : n.node),
     }),
@@ -120,14 +115,15 @@ export function ChannelMap({
   );
 }
 
-function ArmedActions({ armed, subject }: { armed: ArmNode; subject: string }) {
+function ArmedActions({ armed, subject }: { armed: HierarchyCandidate; subject: string }) {
   const { hasSubject, addSubject, replace } = useCompareSelection();
-  const accuracy = armed.reading.own?.accuracy?.value ?? null;
-  const path = pathOf(armed);
+  const { reading } = armed.facts;
+  const accuracy = reading.own?.accuracy?.value ?? null;
+  const path = pathOfAddress(armed.address);
   const leaf = path.at(-1);
   const top = path.at(0);
   if (!leaf || !top) return null;
-  const next = candidateSubject(path, armed.id);
+  const next = candidateSubject(path, armed.facts.individual);
   if (next === subject) return null;
   const already = hasSubject(next);
   return (
@@ -135,7 +131,7 @@ function ArmedActions({ armed, subject }: { armed: ArmNode; subject: string }) {
       <strong>{armed.label}</strong>
       <span className="l4-dim">
         {" "}
-        R{armed.reading.arm.round} · {accuracy === null ? "—" : fmtPct0(accuracy)}
+        R{reading.arm.round} · {accuracy === null ? "—" : fmtPct0(accuracy)}
       </span>
       {accuracy === null && (
         <span className="l4-dim">nothing scored here yet — it reads as unmeasured</span>

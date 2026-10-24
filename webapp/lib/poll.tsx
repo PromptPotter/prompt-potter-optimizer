@@ -222,7 +222,7 @@ export function CycleStreamProvider({
   if (wantSlow !== slow) setSlow(wantSlow);
   const ray = useRay(path, unit, intervalMs);
 
-  // `run_phase` also rides `/hierarchy` and `/tree`, so a change re-asks every live read.
+  // `run_phase` also rides `/hierarchy` and `/hierarchy/{address}`, so a change re-asks every live read.
   const phase = state.dash?.run_phase ?? null;
   const seenRef = useRef<{ unit: string | null; phase: string | null }>({ unit: null, phase: null });
   useEffect(() => {
