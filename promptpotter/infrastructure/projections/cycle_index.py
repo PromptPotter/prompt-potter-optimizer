@@ -52,6 +52,10 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
             )
             for n, held in standing.rounds.items()
         ],
+        open_rounds=sorted({rnd for rnd, _ in standing.arms} - set(standing.rounds)),
+        elects_on=standing.elections[max(standing.elections)].elects_on
+        if standing.elections
+        else None,
         standing=standing.standing,
     )
 

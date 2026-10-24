@@ -4,7 +4,7 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { treeRead, type TreeMask, type TreeMoment } from "@/lib/api";
 import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
-import type { CourseNode } from "@/lib/api/types";
+import type { CourseLineage } from "@/lib/api/types";
 import { phaseIs } from "@/lib/run-phase";
 import { indexLineage, type LineageIndex } from "@/lib/derivations";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
@@ -21,7 +21,7 @@ const POLL_MS = 5000;
 const LENS_LABELS: Record<string, string> = { ...SCORE_LENS_LABELS, ...ABORT_LENS_LABELS };
 
 export interface CampaignTree {
-  root: CourseNode | null;
+  root: CourseLineage | null;
   loaded: boolean;
   failed: boolean;
 }
@@ -29,7 +29,7 @@ export interface CampaignTree {
 const EMPTY: CampaignTree = { root: null, loaded: false, failed: false };
 
 export interface ViewedLineage {
-  tree: CourseNode | null;
+  tree: CourseLineage | null;
   index: LineageIndex;
   // "" (off), "score:<formula>", or "abort:<variant>"; the open scoring-mask panel overrides it.
   lens: string;

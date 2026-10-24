@@ -45,6 +45,7 @@ from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
+from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey
@@ -1266,44 +1267,6 @@ def optimizer_roster() -> OptimizerRoster:
     return OptimizerRoster(default=default, optimizers=entries)
 
 
-class RunsWithParam(StrictModel):
-    """One setting a campaign's root course runs with, and the layer that chose it."""
-
-    node: str
-    key: str = Field(description="The config grid's own param key (`NodeConfigParam.key`)")
-    value: Any
-    source: ParamSource
-
-
-class VendorModels(StrictModel):
-    """The models of one vendor that a campaign's root course runs."""
-
-    vendor: str = Field(
-        description="Who TRAINED them: the namespace of the model id, or the bare id where it "
-        "names none. Lowercased, routing suffix dropped."
-    )
-    models: list[str] = Field(
-        description="Full ids, de-duplicated, routing suffix kept: it routes and bills, so it "
-        "names a different run."
-    )
-
-
-class CampaignRunsWith(StrictModel):
-    """What a campaign's root course runs with — the root's pipeline resolution, cut to settings."""
-
-    params: list[RunsWithParam] = Field(
-        description="Scalar settings in active-step order, `model` included; no prompt text"
-    )
-    vendors: list[VendorModels] = Field(
-        description="Every model in `params`, grouped under its vendor in first-seen order"
-    )
-    optimizer: str = Field(description="The optimizer manifest the root course runs")
-    budget_rounds: int | None = Field(
-        description="The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = "
-        "no rounds axis"
-    )
-
-
 # A prompt, a description and a nested value are no setting one line can print.
 _RUNS_WITH_KINDS = frozenset({"model", "enum", "number", "bool", "string"})
 _ROOT_UNRESOLVED = (
@@ -1338,10 +1301,10 @@ def campaign_runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith |
     )
 
 
-def line_config(stores: Stores, campaign: Campaign, holder: CycleHop) -> CampaignConfig | None:
+def line_config(stores: Stores, campaign: Campaign, hop: CycleHop) -> CampaignConfig | None:
     """``None`` is a row whose config-bound readings are served null, never a failed list."""
     try:
-        config = resolve_campaign_config(stores, campaign, holder)
+        config = resolve_campaign_config(stores, campaign, hop)
         # A config naming no formula resolves and still grades nothing.
         scorer_of(config, verifier_graded=False)
     except _ROOT_UNRESOLVED:

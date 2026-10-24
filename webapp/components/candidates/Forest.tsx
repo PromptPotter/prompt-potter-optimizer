@@ -6,7 +6,7 @@ import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, shortFamilyTail } from "@/lib/ids";
 import { fmtPaired } from "@/lib/derivations";
-import type { CourseNode } from "@/lib/api";
+import type { CourseLineage } from "@/lib/api";
 import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
   DIRECTION_GLYPH,
@@ -39,7 +39,7 @@ export interface CladogramCtx {
   invalidated?: ReadonlySet<string>;
 }
 
-function courseName(course: CourseNode): string {
+function courseName(course: CourseLineage): string {
   return course.course_kind === "root"
     ? course.dataset_name || course.id
     : shortFamilyTail(course.id);
@@ -169,7 +169,7 @@ export function Forest({
   ctx,
   d,
 }: {
-  tree: CourseNode;
+  tree: CourseLineage;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;

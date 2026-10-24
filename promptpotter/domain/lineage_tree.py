@@ -132,7 +132,7 @@ class ArmNode(_Node):
         "ran: each `{manifest}:{node}`, whether it computed its result or asked a model, and the "
         "loci it left different. Empty on an origin, and on the stand-in row of a branch.",
     )
-    children: list[CourseNode] = Field(
+    children: list[CourseLineage] = Field(
         default_factory=list, description="The runs that measured this arm's individual."
     )
     reading: ArmReading = Field(
@@ -232,7 +232,7 @@ class ArmNode(_Node):
         return self.reading.arm.round
 
 
-class CourseNode(_Node):
+class CourseLineage(_Node):
     """One run, whose children are the arms on its ONE timeline, forks folded in."""
 
     kind: Literal["course"] = "course"

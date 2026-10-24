@@ -12,7 +12,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.lineage_tree import (
     ArmNode,
     CourseKind,
-    CourseNode,
+    CourseLineage,
     ForkStamp,
     LensShift,
     MainLineStep,
@@ -329,7 +329,7 @@ def _is_replay(node: ArmNode) -> bool:
     return node.reading.role == MeasurementRole.ORIGIN and bool(node.parent_ids)
 
 
-def _stamp(course: CourseNode) -> ForkStamp:
+def _stamp(course: CourseLineage) -> ForkStamp:
     return ForkStamp(
         kind=course.course_kind,
         trigger=course.trigger,
@@ -340,7 +340,7 @@ def _stamp(course: CourseNode) -> ForkStamp:
     )
 
 
-def _empty_attempt(course: CourseNode, *, cut_from: str, round_: int, row: int) -> ArmNode:
+def _empty_attempt(course: CourseLineage, *, cut_from: str, round_: int, row: int) -> ArmNode:
     return ArmNode(
         id=course.id,
         row=row,
@@ -372,11 +372,11 @@ def _empty_attempt(course: CourseNode, *, cut_from: str, round_: int, row: int) 
 
 class _Contribution(NamedTuple):
     attempts: list[ArmNode]
-    replayed_runs: list[CourseNode]
+    replayed_runs: list[CourseLineage]
     supersedes: bool
     takes_the_line: bool
     reach: int | None
-    course: CourseNode
+    course: CourseLineage
 
 
 def _contributions(
@@ -470,7 +470,7 @@ def _arm_node(
     row: int,
     facts: _RoundFacts,
     readings: _Readings,
-    children: list[CourseNode],
+    children: list[CourseLineage],
     retired_by: str | None,
     hops: list[CycleHop],
 ) -> ArmNode:
@@ -599,12 +599,12 @@ def _main_line(arms: list[ArmNode], head: ArmNode) -> list[MainLineStep]:
     return steps
 
 
-def _with_heads(root: CourseNode) -> CourseNode:
+def _with_heads(root: CourseLineage) -> CourseLineage:
     at_path: dict[tuple[CycleHop, ...], list[ArmNode]] = {}
     at_id: dict[str, ArmNode] = {}
     stands: set[int] = set()
 
-    def collect(course: CourseNode) -> None:
+    def collect(course: CourseLineage) -> None:
         standing: int | None = None
         for arm in course.children:
             at_path.setdefault(tuple(arm.path), []).append(arm)
@@ -636,7 +636,7 @@ def _with_heads(root: CourseNode) -> CourseNode:
         if crowned is not None:
             winners.add(crowned.row)
 
-    def stamp(course: CourseNode) -> CourseNode:
+    def stamp(course: CourseLineage) -> CourseLineage:
         kids: list[ArmNode] = []
         labels: dict[str, str] = {}
         for arm in course.children:
@@ -684,7 +684,7 @@ def _readings(
     )
 
 
-def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> CourseNode:
+def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> CourseLineage:
     leaf = path[-1]
     index = _read_index(stores, leaf, moment=reads.moment)
     layout = _layout(stores, leaf)
@@ -715,7 +715,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
     # Forks resolve first: a replayed origin grafts its runs onto the candidate it replays.
     by_id = {c.id: c for c in candidates}
     contributions: list[_Contribution] = []
-    grafts: dict[str, list[CourseNode]] = {}
+    grafts: dict[str, list[CourseLineage]] = {}
     retired: dict[str, str] = {}
     for fork in forks:
         cut_from = _parent_candidate_of(fork, candidates)
@@ -772,7 +772,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
     ]
 
     edge_id = _course_edge(index)
-    return CourseNode(
+    return CourseLineage(
         id=leaf.cycle_id,
         origin_row=origin_row,
         parent_ids=[edge_id]
@@ -785,7 +785,7 @@ def _build(stores: Stores, path: CyclePath, *, depth: int, reads: _Reads) -> Cou
     )
 
 
-def build_lineage_tree(stores: Stores, path: CyclePath, *, moment: Moment | None) -> CourseNode:
+def build_lineage_tree(stores: Stores, path: CyclePath, *, moment: Moment | None) -> CourseLineage:
     """*moment* replays the ledgers only: run-state stays the live one, as on a replayed dashboard."""
     store_at, _ = resolve_cycle_path(stores, path)
     return _with_heads(_build(store_at, path, depth=_MAX_COURSE_DEPTH, reads=_Reads(moment=moment)))

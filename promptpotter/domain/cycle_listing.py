@@ -14,7 +14,7 @@ from promptpotter.domain.phases import (
     StopReason,
     run_phase_label,
 )
-from promptpotter.domain.results import RunStanding, closed_after_origin
+from promptpotter.domain.results import DisplayMetric, RunStanding, closed_after_origin
 from promptpotter.domain.run_records import (
     MINT_KIND_FOR_TRIGGER,
     CycleFinal,
@@ -59,6 +59,10 @@ class CycleIndex(FrozenModel):
     final: CycleFinal | None = None
     superseded_by: str | None = None
     rounds: list[IndexRound] = Field(default_factory=list)
+    # Rounds an arm walked in that no close stands for yet.
+    open_rounds: list[int] = Field(default_factory=list)
+    # How the newest election elected; ``None`` before the first.
+    elects_on: DisplayMetric | None = None
     standing: RunStanding | None = None
 
     @property

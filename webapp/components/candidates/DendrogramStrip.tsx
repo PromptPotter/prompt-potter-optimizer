@@ -4,7 +4,7 @@ import { cx } from "@/lib/cx";
 import { barValueLabel, type DisplayMetric } from "@/lib/derivations";
 import { useStableContent } from "@/lib/stable";
 import { pressable } from "@/components/ui";
-import type { CourseNode } from "@/lib/api";
+import type { CourseLineage } from "@/lib/api";
 import type { CandidateBar } from "@/lib/types";
 import { dendroRow, dendrogram, type DendroRow } from "./dendrogram";
 import type { PlotGeometry } from "./FitnessChart";
@@ -15,8 +15,8 @@ interface Props {
   metric: DisplayMetric;
   selectedKey: string | null;
   onSelect: (view: CandidateBar | null) => void;
-  forkedFrom: ReadonlyMap<string, CourseNode>;
-  onFreeHierarchy: (course: CourseNode) => void;
+  forkedFrom: ReadonlyMap<string, CourseLineage>;
+  onFreeHierarchy: (course: CourseLineage) => void;
 }
 
 export const DendrogramStrip = memo(function DendrogramStrip({

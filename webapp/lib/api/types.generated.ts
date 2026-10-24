@@ -1474,7 +1474,7 @@ export interface RoundAudit {
 }
 
 /** One run, whose children are the arms on its ONE timeline, forks folded in. */
-export interface CourseNode {
+export interface CourseLineage {
   /** Course: the cycle_id. Candidate: the searchpoint id minted at L1/origin. */
   id: string;
   /** Every candidate this node derives from — one for a mutation, several for a
@@ -1599,7 +1599,7 @@ export interface ArmNode {
    * stand-in row of a branch. */
   variations: Variation[];
   /** The runs that measured this arm's individual. */
-  children: CourseNode[];
+  children: CourseLineage[];
   /** `reading.arm` is the arm in the course that MINTED it — the key every per-
    * cycle document of that course speaks — while `label` above is its
    * position on this timeline; the two differ only on an attempt a fork
@@ -3283,6 +3283,176 @@ export interface KnobRow {
   exclusive_maximum: number | null;
   /** The value the manifest declares — a campaign's floor */
   value: unknown;
+}
+
+/** Every campaign in one store, root-major and newest first. */
+export interface HierarchyResponse {
+  /** Campaigns sharing a root cycle sit together, the group of the newest first. */
+  entries: HierarchyCampaign[];
+}
+
+/** A campaign as one hierarchy entry: its state and line stats are its line course's. */
+export interface HierarchyCampaign {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  state: HierarchyState;
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  span: HierarchySpan;
+  /** A campaign's courses; a course's rounds on its ledger, closed and open. */
+  child_count: number;
+  /** Served to `?depth=`: a campaign's courses root first; empty under a course. */
+  children: (HierarchyCampaign | HierarchyCourse)[];
+  level: 'campaign';
+  facts: CampaignFacts;
+}
+
+/** One chip an entry wears, worded by the server. */
+export interface HierarchyTag {
+  kind: 'dataset' | 'optimizer' | 'vendor' | 'mint' | 'lifecycle' | 'self_optimization' | 'arm' | 'superseded';
+  /** What a surface routes or branches on: the dataset slug, the vendor id, the
+   * mint word, the successor's address. */
+  value: string;
+  /** The chip as it reads. */
+  label: string;
+}
+
+/** A run's state as one value: the phase, its word and mark, the producer and the verbs. */
+export interface HierarchyState {
+  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
+  status: RunStatus;
+  producer: HierarchyProducer;
+  /** Why the run reads paused; null otherwise. */
+  pause: PauseReading | null;
+  admission: RunAdmission;
+  /** Why the run ended; null while it has not. */
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  /** An operator intervened by hand, so the run is no longer purely reproducible. */
+  intervened: boolean;
+}
+
+/** A cycle's producer as a listing serves it: what a write moves, never a clock. */
+export interface HierarchyProducer {
+  state: 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'claimed' | 'absent';
+  /** The state as a walking run's head reads it. */
+  label: string;
+  /** A process holds this cycle, running or launching it. */
+  attached: boolean;
+  /** That process is walking the loop. */
+  appending: boolean;
+  /** What this state raises on its own; how long it has, the dashboard says. */
+  alert: ProducerAlert | null;
+}
+
+/** One number an entry shows, worded by the server in the order it is served. */
+export interface HierarchyStat {
+  key: 'spend_lifetime' | 'spend' | 'bench' | 'rounds' | 'accuracy' | 'lives';
+  label: string;
+  /** The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`. */
+  value: string;
+  /** The second line under the value; null where none. */
+  sub: string | null;
+  /** The number `value` words, for a meter's geometry only: never re-worded and
+   * never re-ranked. Null where `value` words no number. */
+  amount: number | null;
+}
+
+/** When an entry opened, last moved and closed. */
+export interface HierarchySpan {
+  opened_at: string;
+  /** The newest activity under the entry. */
+  last_at: string;
+  /** Null while the entry's run has not ended. */
+  closed_at: string | null;
+}
+
+/** A course — one cycle's run, root, fork, diag or inner — as one hierarchy entry. */
+export interface HierarchyCourse {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  state: HierarchyState;
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  span: HierarchySpan;
+  /** A campaign's courses; a course's rounds on its ledger, closed and open. */
+  child_count: number;
+  /** Served to `?depth=`: a campaign's courses root first; empty under a course. */
+  children: (HierarchyCampaign | HierarchyCourse)[];
+  level: 'course';
+  facts: CourseFacts;
+}
+
+/** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
+export interface CourseFacts {
+  /** Null on a root, and on a cycle cut from another tree. */
+  spawn: CourseSpawn | null;
+  /** The outer panel cell an L4 inner course measures. */
+  task: string | null;
+  /** Null before round 0 closes. */
+  standing: RunStanding | null;
+  /** This course's own ledger, in the meter its campaign's ceiling counts. */
+  spend_metered: MeteredSpend;
+  /** Rounds closed AFTER the origin. */
+  rounds_closed: number;
+}
+
+/** Where a fork was born on its parent's time line: the cut, as an event. */
+export interface CourseSpawn {
+  /** The address of the course it branched from. */
+  parent: string;
+  /** The round it branched at; null where none was named. */
+  at_round: number | null;
+  /** The parent ledger's offset the cut was taken at. */
+  at_offset: number;
+  /** The arm key it branched from, where one. */
+  from_candidate: string | null;
+  trigger: 'operator_diag' | 'operator_rewind' | 'operator_steered' | 'optimizer_rebase' | 'scoring_divergence';
+  /** Which side of the cut the run continues on, measured or implied by `trigger`. */
+  direction: 'offshoot' | 'supersede' | 'equivalent';
+  reason: string;
+  /** Who cut it, as its fork record names them. */
+  issued_by: string;
+}
+
+/** A campaign's typed facts, for a pane or a route argument; its rows read the envelope. */
+export interface CampaignFacts {
+  /** The root course's address. */
+  root: string;
+  /** The address of the course holding the line now: the root, or the fork a
+   * supersede handed it to. */
+  line: string;
+  lifecycle: 'active' | 'archived' | 'deleted';
+  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
+  spend_lifetime: LifetimeSpend;
+  /** The line's cycles, read whole, in the meter the campaign's ceiling counts. */
+  spend_metered: MeteredSpend;
+  /** The headline, read off the line's banked passes; null where the line's config
+   * did not resolve. */
+  bench: BenchScore | null;
+  /** What the root course runs with; null where its pipeline did not resolve. */
+  runs_with: CampaignRunsWith | null;
 }
 
 export interface DatasetIndexResponse {

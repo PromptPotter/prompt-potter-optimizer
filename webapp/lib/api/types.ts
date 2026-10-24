@@ -62,7 +62,7 @@ export type {
   DashboardError,
   LineageDivergence,
   ArmNode,
-  CourseNode,
+  CourseLineage,
   ForkStamp,
   LensShift,
   MainLineStep,
@@ -179,13 +179,24 @@ export type {
   RaisedCommand,
   ResolveOriginResponse,
   StartCheckinResponse,
+  CampaignFacts,
+  CourseFacts,
+  CourseSpawn,
+  HierarchyCampaign,
+  HierarchyCourse,
+  HierarchyProducer,
+  HierarchyResponse,
+  HierarchySpan,
+  HierarchyStat,
+  HierarchyState,
+  HierarchyTag,
 } from "./types.generated";
 
 import type {
   ArmNode,
   CampaignPipelineResponse,
   CellsResponse,
-  CourseNode,
+  CourseLineage,
   CycleListEntry,
   DraftCampaignWire,
   EditDraftPatch,
@@ -193,7 +204,7 @@ import type {
 } from "./types.generated";
 
 // The two kinds strictly alternate, each typed to hold only the other: narrow on `kind` once.
-export type LineageNode = CourseNode | ArmNode;
+export type LineageNode = CourseLineage | ArmNode;
 
 export type DraftPatch = Partial<EditDraftPatch>;
 

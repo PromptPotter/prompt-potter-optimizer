@@ -20,6 +20,7 @@ from promptpotter.application.datasets.origin_readiness import (
     RaisedCommand,
     load_resolution,
 )
+from promptpotter.application.hierarchy import hierarchy_version
 from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     ForkPreviewRequest,
@@ -59,7 +60,7 @@ def list_campaigns(
     inside = decode_cycle_path(descend)
     return conditional_json(
         request,
-        (campaign_listing.campaign_list_version(stores, inside=inside), dataset, lifecycle),
+        (hierarchy_version(stores, inside=inside), dataset, lifecycle),
         lambda: campaign_listing.list_campaigns(
             stores, inside=inside, dataset=dataset, lifecycle=lifecycle
         ),

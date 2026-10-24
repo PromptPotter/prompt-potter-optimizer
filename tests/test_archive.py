@@ -53,6 +53,7 @@ from promptpotter.application.campaign_config import (
     apply_config_overrides,
 )
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.initialization import loop_start
 from promptpotter.application.maintenance import restamp
 from promptpotter.application.maintenance.archive_maintenance import (
@@ -82,7 +83,7 @@ from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.command_kinds import DeleteCampaignPayload
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop, hierarchy_address
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
@@ -1081,7 +1082,12 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert base.scoring is None, "applying a scenario wrote through to its base config"
 
     # A fork's own ledger displaces its parent's prefix once.
-    displaced, ledger = _minted(stores, "cycle_displaced")
+    displaced = CycleHop(campaign_id="displaced__20260101-000000", cycle_id="cycle_displaced")
+    stores.campaigns.create_campaign(
+        minted_campaign(displaced, owner_user_id=str(stores.identity.user_id))
+    )
+    stores.campaigns.mint_cycle(displaced)
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(displaced)))
     closed = []
     prefix = [_emit_round(closing, ledger, closed, f"p{n}") for n in range(3)]
     fork_hop = _mint_sibling(
@@ -1138,6 +1144,19 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         )
     store.mark_superseded(displaced, fork_hop.cycle_id)
     assert ended(displaced) is StopReason.REBASED, "a superseded parent no producer holds runs on"
+    [listed] = list_hierarchy(
+        stores,
+        inside=(),
+        dataset=None,
+        lifecycle="all",
+        campaign_id=displaced.campaign_id,
+        attached_only=False,
+        depth=0,
+    ).entries
+    # Whether the listing and the tree agree on the line's course is the tree step's to assert.
+    assert listed.facts.line == hierarchy_address((), fork_hop.campaign_id, fork_hop.cycle_id), (
+        "the campaign's line stayed on the cycle a supersede retired"
+    )
 
     # The operator's `--from` rewinds the line's first cycle; a rebase's fork stands on its own cut.
     rewinds: list[int | None] = []

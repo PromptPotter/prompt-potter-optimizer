@@ -3,7 +3,7 @@ import type {
   BenchScore,
   ConfigKnob,
   ConfigMapResponse,
-  CourseNode,
+  CourseLineage,
   MeteredSpend,
   RunStanding,
   RunsWithParam,
@@ -97,7 +97,7 @@ export function benchReading(bench: BenchScore | null | undefined): RowStat {
 }
 
 // The θ clause only where the served node elects on θ; a peer optimizer's rounds do not.
-export function accuracyStat(standing: RunStanding, node: CourseNode | null): RowStat {
+export function accuracyStat(standing: RunStanding, node: CourseLineage | null): RowStat {
   const line = standing.selection_line;
   return {
     label: "Accuracy",
@@ -126,7 +126,7 @@ export function campaignLineParts(run: RunGroup): string[] {
 }
 
 // What a head-to-head column does not already print: its bench and its spend are rows of their own.
-export function courseStats(run: RunGroup, node: CourseNode | null): RowStat[] {
+export function courseStats(run: RunGroup, node: CourseLineage | null): RowStat[] {
   const { campaign, line } = run;
   const lifetime = campaign.spend_lifetime;
   const standing = line.standing;
@@ -156,7 +156,7 @@ export function courseStats(run: RunGroup, node: CourseNode | null): RowStat[] {
   return stats;
 }
 
-export function campaignCard(run: RunGroup, node: CourseNode | null): RowCardFacts {
+export function campaignCard(run: RunGroup, node: CourseLineage | null): RowCardFacts {
   const { campaign, line } = run;
   const archived = campaign.lifecycle_status === "archived";
   const cycleId = campaign.root_cycle_id;

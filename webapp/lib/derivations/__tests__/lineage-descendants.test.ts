@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { descendantsOf } from "../lineage-descendants";
 import { indexLineage, mainLineOf } from "../lineage-candidates";
-import type { CourseNode } from "@/lib/api";
-import { armNode, courseNode } from "@/lib/test-fixtures";
+import type { CourseLineage } from "@/lib/api";
+import { armNode, courseLineage } from "@/lib/test-fixtures";
 
 // A missed descendant fails SILENTLY: a channel keeps rendering a measurement an edit invalidated.
-function family(): CourseNode {
-  return courseNode({
+function family(): CourseLineage {
+  return courseLineage({
     id: "cyc_root",
     children: [
       armNode({ id: "C0" }),
@@ -14,7 +14,7 @@ function family(): CourseNode {
         id: "R1.1",
         parent_ids: ["C0"],
         children: [
-          courseNode({
+          courseLineage({
             id: "cyc_inner",
             children: [armNode({ id: "F1.1", parent_ids: ["R1.1"] })],
           }),
@@ -46,7 +46,7 @@ describe("descendantsOf", () => {
   });
 
   it("terminates on a tree that cycles", () => {
-    const cyclic = courseNode({
+    const cyclic = courseLineage({
       id: "c",
       children: [
         armNode({ id: "A", parent_ids: ["B"] }),
@@ -70,7 +70,7 @@ describe("mainLineOf", () => {
     { round: 3, rows: [head.row] },
     { round: 4, rows: [] },
   ];
-  const root = courseNode({
+  const root = courseLineage({
     id: "cyc_root",
     children: [origin, retired, live, armNode({ id: "R1.2" }, 1), head],
   });

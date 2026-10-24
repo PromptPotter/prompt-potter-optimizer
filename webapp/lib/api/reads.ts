@@ -25,7 +25,7 @@ import type {
   FilesResponse,
   ForkPreviewResponse,
   HardSamplesScope,
-  CourseNode,
+  CourseLineage,
   MachineStatusResponse,
   OptimizerKnobsResponse,
   OptimizerRoster,
@@ -377,7 +377,7 @@ export function treeRead(
   path: CyclePath,
   mask: TreeMask | null,
   moment: TreeMoment | null = null,
-): ReadDescriptor<CourseNode> {
+): ReadDescriptor<CourseLineage> {
   const params = new URLSearchParams();
   if (mask?.lens) params.set("lens", mask.lens);
   if (mask?.samples && mask.samples.length > 0) params.set("samples", mask.samples.join(","));

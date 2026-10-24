@@ -15,7 +15,7 @@ from promptpotter.application.views.render.primitives import fmt_pct
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
-from promptpotter.domain.lineage_tree import ArmNode, CourseNode
+from promptpotter.domain.lineage_tree import ArmNode, CourseLineage
 from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading
 from promptpotter.domain.results import ARM_VERDICT_LABELS, VERIFY_STRATEGY_LABELS
 from promptpotter.domain.treatment import Treatment
@@ -71,7 +71,7 @@ class ExportFiles:
 
 def export_files(
     tier: ExportTier,
-    course: CourseNode,
+    course: CourseLineage,
     provenance: Provenance,
     *,
     unit: MeasuredUnit,
@@ -141,12 +141,12 @@ def provenance_lines(p: Provenance, kind: str) -> list[str]:
     ]
 
 
-def _live(course: CourseNode) -> list[ArmNode]:
+def _live(course: CourseLineage) -> list[ArmNode]:
     """The live side of each supersede cut: a retired tail doubles its round."""
     return [node for node in course.children if node.superseded_by is None]
 
 
-def chat_text(course: CourseNode, unit: MeasuredUnit) -> str:
+def chat_text(course: CourseLineage, unit: MeasuredUnit) -> str:
     """One block per candidate in timeline order, every number a served one under its served name."""
     arms = _live(course)
     label_of = {node.id: node.label for node in arms}
@@ -274,7 +274,7 @@ _CYCLE_ADDRESS: dict[str, Any] = {
 }
 
 
-def candidate_records(course: CourseNode) -> list[dict[str, Any]]:
+def candidate_records(course: CourseLineage) -> list[dict[str, Any]]:
     """One flat record per candidate, its reading keyed by the names the API serves it under."""
     return [
         {
@@ -291,7 +291,7 @@ def candidate_records(course: CourseNode) -> list[dict[str, Any]]:
     ]
 
 
-def candidates_jsonl(course: CourseNode) -> str:
+def candidates_jsonl(course: CourseLineage) -> str:
     return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in candidate_records(course))
 
 

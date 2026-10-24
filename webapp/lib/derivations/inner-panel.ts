@@ -1,6 +1,6 @@
 // Keyed on `reading.arm.label`, NOT the timeline `label`: the joined rows come from the leaf's `dashboard.json`.
 
-import type { CourseNode } from "@/lib/api";
+import type { CourseLineage } from "@/lib/api";
 import type { CyclePath } from "@/lib/ids";
 import { phaseWalks } from "@/lib/run-phase";
 import { candidatesAtPath, walkCourses, type LineageIndex } from "./lineage-candidates";
@@ -8,8 +8,8 @@ import { candidatesAtPath, walkCourses, type LineageIndex } from "./lineage-cand
 export function innerPanelIndex(
   index: LineageIndex,
   path: CyclePath | null,
-): ReadonlyMap<string, CourseNode> {
-  const m = new Map<string, CourseNode>();
+): ReadonlyMap<string, CourseLineage> {
+  const m = new Map<string, CourseLineage>();
   for (const cand of candidatesAtPath(index, path)) {
     for (const run of cand.children) {
       // No `task` means an interrupted mint; a wrong join is worse than an absent one.
@@ -31,7 +31,7 @@ export function panelCellLabel(cell: string): string {
   return slash >= 0 ? cell.slice(slash + 1) : cell;
 }
 
-export function runningInnerRun(root: CourseNode | null): CourseNode | null {
+export function runningInnerRun(root: CourseLineage | null): CourseLineage | null {
   if (!root) return null;
   return (
     walkCourses(root).find((c) => c.course_kind === "inner" && phaseWalks(c.run_phase)) ?? null

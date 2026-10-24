@@ -1,6 +1,6 @@
 import type {
   ArmReading,
-  CourseNode,
+  CourseLineage,
   LineageNode,
   VerificationMark,
 } from "@/lib/api/types";
@@ -13,7 +13,7 @@ import { readPaired } from "./paired-reading";
 import { nodeKeyOf, splitRetired } from "./lineage-candidates";
 
 // A run's served standing rate against its origin; `null` renders BLANK, never 0.
-export function courseLevel(node: CourseNode): number | null {
+export function courseLevel(node: CourseLineage): number | null {
   const standing = node.run_standing ? readPaired(node.run_standing.vs_origin) : null;
   return standing?.read ? standing.lift.rate_b : null;
 }

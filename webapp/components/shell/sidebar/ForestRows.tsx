@@ -21,7 +21,7 @@ import {
   type RunGroup,
 } from "@/lib/derivations";
 import { encodeCyclePath, nodeAddress, shortFamilyTail, type CyclePath } from "@/lib/ids";
-import type { ArmNode, CourseNode, RunStanding } from "@/lib/api";
+import type { ArmNode, CourseLineage, RunStanding } from "@/lib/api";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { PairedLift } from "@/components/shell/PairedLift";
@@ -166,7 +166,7 @@ function CourseRow({
   run,
   chrome,
 }: {
-  node: CourseNode | null;
+  node: CourseLineage | null;
   path: CyclePath;
   tree: CampaignTree;
   ctx: TreeCtx;
@@ -278,7 +278,7 @@ function CourseRow({
   );
 }
 
-function innerFacts(node: CourseNode | null, cycleId: string): [string, string][] {
+function innerFacts(node: CourseLineage | null, cycleId: string): [string, string][] {
   const facts: [string, string][] = [];
   if (node?.dataset_name) facts.push(["Dataset", node.dataset_name]);
   if (node?.task) facts.push(["Task", node.task]);
@@ -286,7 +286,7 @@ function innerFacts(node: CourseNode | null, cycleId: string): [string, string][
   return facts;
 }
 
-function innerStats(node: CourseNode | null, standing: RunStanding | null) {
+function innerStats(node: CourseLineage | null, standing: RunStanding | null) {
   const stats: RowStat[] = standing ? [accuracyStat(standing, node)] : [];
   if (standing?.stalls_left != null && standing.stalls_left_cap != null) {
     stats.push({ label: "Lives", value: `${standing.stalls_left} / ${standing.stalls_left_cap}` });

@@ -21,7 +21,7 @@ from promptpotter.application.served_dashboard import (
 )
 from promptpotter.domain.cycle_paths import CycleHop, decode_cycle_path
 from promptpotter.domain.export import ExportTier
-from promptpotter.domain.lineage_tree import CourseNode
+from promptpotter.domain.lineage_tree import CourseLineage
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
@@ -149,7 +149,7 @@ def get_cycle_export(
 
 @campaigns_router.get(
     "/campaigns/{campaign_id}/cycles/{cycle_id}/tree",
-    response_model=CourseNode,
+    response_model=CourseLineage,
 )
 def get_lineage_tree(
     request: Request,
@@ -171,7 +171,7 @@ def get_lineage_tree(
     path = (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))
     root = view_cycle(stores, path)
 
-    def build() -> CourseNode:
+    def build() -> CourseLineage:
         selected = parse_lens(lens, allow_abort=True) if lens else None
         replayed = view_cycle(stores, decode_cycle_path(at_cycle)) if at_cycle else root
         return lensed_tree(

@@ -3,17 +3,14 @@ from __future__ import annotations
 from pydantic import Field
 
 from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.pipeline_resolve import (
-    CampaignRunsWith,
-    campaign_runs_with,
-    line_config,
-)
+from promptpotter.application.pipeline_resolve import campaign_runs_with, line_config
 from promptpotter.application.runner.campaign_result import cycle_bench, read_line_spend
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import (
     Campaign,
+    CampaignRunsWith,
     LifecycleFilter,
     LifecycleStatus,
     ceiling_meter,
@@ -26,13 +23,11 @@ from promptpotter.domain.cycle_listing import (
     rounds_line,
 )
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
-from promptpotter.domain.spend import MeteredSpend
+from promptpotter.domain.spend import LifetimeSpend, MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.account_spend import LifetimeSpend, campaign_spend
-from promptpotter.infrastructure.store.dataset_access import definition_version
-from promptpotter.infrastructure.store.read_model import file_sig
+from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 
 
@@ -203,19 +198,6 @@ def _summary(campaign: Campaign, stores: Stores) -> CampaignSummary:
         bench=None if config is None else cycle_bench(stores, campaign, holder, config),
         runs_with=runs_with,
         comparison=comparison_line(campaign.declaration.purpose),
-    )
-
-
-def campaign_list_version(stores: Stores, *, inside: CyclePath) -> tuple[object, ...]:
-    """Stats only: every input a listing reads, so a client holding it is answered unread."""
-    leaf = descend_store(stores, inside)
-    names = sorted({c.dataset_name for c in leaf.campaigns.list_campaigns(lifecycle="all")})
-    return (
-        str(leaf.identity.user_id),
-        leaf.campaigns.version(),
-        leaf.archive.version(),
-        file_sig(leaf.ruler.path),
-        *(definition_version(leaf, name) for name in names),
     )
 
 

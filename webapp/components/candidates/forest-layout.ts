@@ -1,4 +1,4 @@
-import type { ArmElection, ArmNode, CourseNode, LineageDivergence } from "@/lib/api";
+import type { ArmElection, ArmNode, CourseLineage, LineageDivergence } from "@/lib/api";
 import { nodeKeyOf, pathOf } from "@/lib/derivations";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
@@ -33,7 +33,7 @@ export const HEADER_H = 18;
 export const TOP_PAD = HEADER_H + 8;
 export const NODE_R = 3.5;
 
-export type CourseKind = CourseNode["course_kind"];
+export type CourseKind = CourseLineage["course_kind"];
 
 export const KIND_GLYPH: Record<CourseKind, string> = {
   root: "●",
@@ -46,7 +46,7 @@ export const TRIGGER_GLYPH: Record<string, string> = {
   operator_steered: "✎",
 };
 
-export type ForkDirection = NonNullable<CourseNode["fork_direction"]>;
+export type ForkDirection = NonNullable<CourseLineage["fork_direction"]>;
 
 export const DIRECTION_GLYPH: Record<ForkDirection, string> = {
   offshoot: "",
@@ -80,7 +80,7 @@ export function expandedLaneSpan(cands: readonly ArmNode[]): number {
 }
 
 export interface LaneLayout {
-  course: CourseNode;
+  course: CourseLineage;
   coursePathKey: string;
   candidates: ArmNode[];
   expanded: boolean;
@@ -98,7 +98,7 @@ export interface CladogramAnchor {
 }
 
 export function extentKeys(
-  root: CourseNode,
+  root: CourseLineage,
   anchor: CladogramAnchor,
 ): ReadonlySet<string> | null {
   const keys = new Set<string>();
@@ -111,7 +111,7 @@ export function extentKeys(
       }
     }
   };
-  const walk = (course: CourseNode): boolean => {
+  const walk = (course: CourseLineage): boolean => {
     const cands = course.children;
     const keepThrough = (round: number): void => {
       for (const c of cands) if (roundOf(c) <= round) keys.add(nodeKeyOf(c));
@@ -138,7 +138,7 @@ export function extentKeys(
 
 // Lanes key on `nodeKeyOf`, never `course.id`: inner cycle ids repeat across `.inner/` sandboxes.
 export function layout(
-  root: CourseNode,
+  root: CourseLineage,
   expanded: ReadonlySet<string>,
   keep: ReadonlySet<string> | null = null,
 ): {
@@ -150,7 +150,7 @@ export function layout(
   let nextRow = 0;
   let maxCol = 0;
   const visit = (
-    course: CourseNode,
+    course: CourseLineage,
     baseCol: number,
     anchorCandidateId: string | null,
     parentKey: string | null,

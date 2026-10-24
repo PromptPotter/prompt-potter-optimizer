@@ -2,7 +2,7 @@
 
 import { phaseIs, phaseWalks } from "@/lib/run-phase";
 import { panelCellLabel, pathOf } from "@/lib/derivations";
-import type { CourseNode } from "@/lib/api";
+import type { CourseLineage } from "@/lib/api";
 import { PairedLift } from "@/components/shell/PairedLift";
 
 export function PanelCellRow({
@@ -12,9 +12,9 @@ export function PanelCellRow({
   onOpen,
 }: {
   cell: string;
-  run: CourseNode | null;
+  run: CourseLineage | null;
   cached: boolean;
-  onOpen: (run: CourseNode) => void;
+  onOpen: (run: CourseLineage) => void;
 }) {
   const name = panelCellLabel(cell);
 

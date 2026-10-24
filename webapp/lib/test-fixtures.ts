@@ -4,7 +4,7 @@ import type {
   ArmName,
   ArmPanel,
   ArmReading,
-  CourseNode,
+  CourseLineage,
   CurrentRound,
   DashboardCandidate,
   LiveCandidate,
@@ -221,7 +221,7 @@ export function armNode(over: Partial<ArmNode> & Pick<ArmNode, "id">, round = 0)
   };
 }
 
-export function courseNode(over: Partial<CourseNode> & Pick<CourseNode, "id">): CourseNode {
+export function courseLineage(over: Partial<CourseLineage> & Pick<CourseLineage, "id">): CourseLineage {
   return {
     kind: "course",
     label: over.id,

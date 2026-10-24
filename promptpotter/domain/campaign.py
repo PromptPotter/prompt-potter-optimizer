@@ -11,6 +11,7 @@ from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import CellSet, instrument_of
 from promptpotter.domain.pipeline_overlay import node_config_items
+from promptpotter.domain.pipeline_schema import ParamSource
 from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, CeilingMeter, money_axes_only
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -192,6 +193,44 @@ def _pinned(loop: Mapping[str, Any], keys: Mapping[str, Any]) -> dict[str, Any]:
         value = loop[key]
         out[key] = _pinned(value, sub) if isinstance(sub, dict) else value
     return out
+
+
+class RunsWithParam(StrictModel):
+    """One setting a campaign's root course runs with, and the layer that chose it."""
+
+    node: str
+    key: str = Field(description="The config grid's own param key (`NodeConfigParam.key`)")
+    value: Any
+    source: ParamSource
+
+
+class VendorModels(StrictModel):
+    """The models of one vendor that a campaign's root course runs."""
+
+    vendor: str = Field(
+        description="Who TRAINED them: the namespace of the model id, or the bare id where it "
+        "names none. Lowercased, routing suffix dropped."
+    )
+    models: list[str] = Field(
+        description="Full ids, de-duplicated, routing suffix kept: it routes and bills, so it "
+        "names a different run."
+    )
+
+
+class CampaignRunsWith(StrictModel):
+    """What a campaign's root course runs with — the root's pipeline resolution, cut to settings."""
+
+    params: list[RunsWithParam] = Field(
+        description="Scalar settings in active-step order, `model` included; no prompt text"
+    )
+    vendors: list[VendorModels] = Field(
+        description="Every model in `params`, grouped under its vendor in first-seen order"
+    )
+    optimizer: str = Field(description="The optimizer manifest the root course runs")
+    budget_rounds: int | None = Field(
+        description="The DECLARED `budget.rounds`, not the armed one: 0 = origin only, null = "
+        "no rounds axis"
+    )
 
 
 class HeadToHeadRecord(FrozenModel):

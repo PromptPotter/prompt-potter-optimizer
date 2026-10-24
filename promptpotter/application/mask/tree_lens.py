@@ -12,7 +12,7 @@ from promptpotter.application.mask.divergence import (
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import Lens, MaskReading, MaskRecord
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
-from promptpotter.domain.lineage_tree import ArmNode, CourseNode, LineageDivergence
+from promptpotter.domain.lineage_tree import ArmNode, CourseLineage, LineageDivergence
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.infrastructure.store.lineage_queries import build_lineage_tree, rank_moves
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
@@ -39,12 +39,12 @@ def _abort_suppress(variant: str) -> frozenset[str]:
 
 
 def _mask_records(
-    stores: Stores, tree: CourseNode, samples: frozenset[int] | None, lens: Lens | None
+    stores: Stores, tree: CourseLineage, samples: frozenset[int] | None, lens: Lens | None
 ) -> dict[CyclePath, MaskRecord]:
     """Keyed by the course's PATH: one inner campaign id sits in several sibling ``.inner/`` sandboxes."""
     out: dict[CyclePath, MaskRecord] = {}
 
-    def visit(node: CourseNode) -> None:
+    def visit(node: CourseLineage) -> None:
         path = tuple(node.path)
         if path not in out:
             leaf_store, leaf = resolve_cycle_path(stores, path)
@@ -91,7 +91,7 @@ class _Overlay:
                         self.readings[(course, cand.key)] = cand.reading
         self.dimmed: frozenset[tuple[CyclePath, int]] = frozenset(dimmed)
 
-    def apply(self, node: CourseNode) -> CourseNode:
+    def apply(self, node: CourseLineage) -> CourseLineage:
         # Ranked here, not in the tree build: the lens values exist only once this fold stamps them.
         kids, shift = rank_moves([self._arm(k) for k in node.children])
         return node.model_copy(
@@ -133,7 +133,7 @@ def lensed_tree(
     samples: frozenset[int] | None,
     *,
     moment: Moment | None,
-) -> CourseNode:
+) -> CourseLineage:
     tree = build_lineage_tree(stores, path, moment=moment)
     if lens is None and not samples:
         return tree

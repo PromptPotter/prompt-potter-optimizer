@@ -57,6 +57,12 @@ def encode_cycle_path(path: CyclePath) -> str:
     return HOP_SEP.join(f"{hop.campaign_id}{UNIT_SEP}{hop.cycle_id}" for hop in path)
 
 
+def hierarchy_address(inside: CyclePath, campaign_id: str, cycle_id: str | None = None) -> str:
+    if cycle_id is not None:
+        return encode_cycle_path((*inside, CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)))
+    return HOP_SEP.join((*((encode_cycle_path(inside),) if inside else ()), campaign_id))
+
+
 def command_address(path: CyclePath) -> dict[str, str]:
     root, *tail = path
     address = {"campaign_id": root.campaign_id, "cycle_id": root.cycle_id}
