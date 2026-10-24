@@ -1,16 +1,14 @@
 "use client";
 import { useId, useState } from "react";
-import {
-  postCommand,
-  type CampaignSummary,
-} from "@/lib/api";
+import { postCommand, type HierarchyCampaign } from "@/lib/api";
+import { tagValue } from "@/lib/hierarchy";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/workspace";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
 import { Button, Dialog, Menu, MenuItem } from "@/components/ui";
 
 interface Props {
-  campaign: CampaignSummary;
+  campaign: HierarchyCampaign;
   variant?: "row" | "standalone";
 }
 
@@ -26,12 +24,12 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
 
   const runArchive = () =>
     void cmd.run("archive", () =>
-      postCommand("archive-campaign", { campaign_id: campaign.campaign_id }),
+      postCommand("archive-campaign", { campaign_id: campaign.address }),
     );
 
   const runUnarchive = () =>
     void cmd.run("unarchive", () =>
-      postCommand("unarchive-campaign", { campaign_id: campaign.campaign_id }),
+      postCommand("unarchive-campaign", { campaign_id: campaign.address }),
     );
 
   const runRename = () => {
@@ -39,7 +37,7 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
     // `""` is a real value: it clears the label back to the dataset-name fallback.
     void cmd.run("rename", () =>
       postCommand("set-campaign-label", {
-        campaign_id: campaign.campaign_id,
+        campaign_id: campaign.address,
         label: draft.trim(),
       }),
     );
@@ -49,16 +47,16 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
     setConfirmDelete(false);
     void cmd.run(
       "delete",
-      () => postCommand("delete-campaign", { campaign_id: campaign.campaign_id }),
+      () => postCommand("delete-campaign", { campaign_id: campaign.address }),
       // Lets go of the view BEFORE the re-poll rather than discovering it by 404.
       () => {
-        if (viewedCampaignId === campaign.campaign_id) followActive();
+        if (viewedCampaignId === campaign.address) followActive();
       },
     );
   };
 
   const pending = cmd.pending !== null;
-  const archived = campaign.lifecycle_status === "archived";
+  const archived = campaign.facts.lifecycle === "archived";
   const deleteActions: ModalAction[] = [
     { label: "Cancel", onClick: () => setConfirmDelete(false) },
     { label: "Delete", variant: "danger", onClick: runDelete },
@@ -94,7 +92,7 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
               onClick={() => {
                 close();
                 cmd.clear();
-                setDraft(campaign.label);
+                setDraft(campaign.facts.label ?? "");
                 setRenaming(true);
               }}
             >
@@ -151,19 +149,17 @@ export function CampaignMenu({ campaign, variant = "row" }: Props) {
               type="text"
               value={draft}
               maxLength={200}
-              placeholder={campaign.dataset_name}
+              placeholder={tagValue(campaign, "dataset") ?? undefined}
               onChange={(e) => setDraft(e.target.value)}
             />
           </label>
         </form>
-        <p className="campaign-rename-id">{campaign.campaign_id}</p>
+        <p className="campaign-rename-id">{campaign.address}</p>
       </Dialog>
       <Modal
         open={confirmDelete}
         title="Delete this campaign?"
-        message={`This permanently removes "${
-          campaign.label || campaign.campaign_id
-        }" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it hides the campaign from the list and keeps everything on disk, restorable later.)`}
+        message={`This permanently removes "${campaign.label}" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it hides the campaign from the list and keeps everything on disk, restorable later.)`}
         actions={deleteActions}
         onClose={() => setConfirmDelete(false)}
       />

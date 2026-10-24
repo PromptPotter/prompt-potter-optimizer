@@ -13,6 +13,7 @@ import {
   roundsOf,
   tapeOf,
   assertThrowawayWorld,
+  campaigns,
   type Campaign,
 } from "../harness";
 import { STOP_REASON_CATEGORIES, type RunLimits } from "@/lib/api/types.generated";
@@ -32,17 +33,7 @@ let outer: Campaign | null = null;
 
 // By DATASET, never list position: the other spend spec mints into the same world.
 async function findOuter(request: import("@playwright/test").APIRequestContext) {
-  const res = await request.get("/api/v1/campaigns");
-  if (!res.ok()) return null;
-  const rows: Record<string, string>[] = (await res.json()).campaigns ?? [];
-  const row = rows.find((c) => c.dataset_name === DATASET && c.root_cycle_id);
-  return row
-    ? {
-        id: row.campaign_id!,
-        cycleId: row.root_cycle_id!,
-        addr: `#/c/${row.campaign_id}/${row.root_cycle_id!.replace(/^cycle_/, "")}`,
-      }
-    : null;
+  return (await campaigns(request, DATASET))[0] ?? null;
 }
 
 test.afterAll(async ({ request }) => {

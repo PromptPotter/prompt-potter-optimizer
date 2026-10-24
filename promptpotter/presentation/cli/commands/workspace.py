@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
-from promptpotter.application.cycle_listing import (
+from promptpotter.application.cycle_addressing import (
     active_pointer,
     resolve_campaign_id_hint,
     resolve_cycle_id,

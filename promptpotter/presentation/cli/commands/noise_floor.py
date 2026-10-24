@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from promptpotter.application.cycle_listing import resolve_campaign_id, resolve_cycle_id
+from promptpotter.application.cycle_addressing import resolve_campaign_id, resolve_cycle_id
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import PauseCyclePayload

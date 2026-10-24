@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Query
 from pydantic import Field
 
 from promptpotter.application.campaign_config import OptimizationConfig
-from promptpotter.application.cycle_listing import (
-    CyclesResponse,
-    active_pointer,
-    cycle_list_version,
-    list_cycles,
-)
+from promptpotter.application.cycle_addressing import active_pointer
 from promptpotter.application.jobs.machine_status import MachineStatusResponse, machine_status
 from promptpotter.application.pipeline_resolve import (
     OptimizerKnobsResponse,
@@ -19,20 +14,18 @@ from promptpotter.application.pipeline_resolve import (
     optimizer_roster,
     resolve_pipeline_for_optimizer,
 )
-from promptpotter.domain.cycle_paths import decode_cycle_path
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import (
     IdentityDep,
     JobRegistryDep,
     StoresDep,
 )
-from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
 
 active_router = APIRouter()
 
 
 class ActiveSessionResponse(StrictModel):
-    """The tenant's latest launch — not the set of live runs, which is `run_phase` on `/cycles`."""
+    """The tenant's latest launch — not the set of live runs, which is `state.producer` on `/hierarchy`."""
 
     tenant_id: str = Field(
         description="Tenant the pointer belongs to — the caller's own, always known"
@@ -56,27 +49,6 @@ def get_active_session(stores: StoresDep) -> ActiveSessionResponse:
         tenant_id=stores.tenant_id,
         campaign_id=pointer.campaign_id,
         cycle_id=pointer.cycle_id,
-    )
-
-
-@active_router.get("/cycles", response_model=CyclesResponse, tags=["Cycles"])
-def get_cycles(
-    request: Request,
-    stores: StoresDep,
-    descend: str | None = Query(None),
-    campaign: str | None = Query(None),
-    attached: bool = Query(False),
-) -> Response:
-    """Every cycle in one store plus that store's active pointer.
-
-    ``descend`` is the ``~``-joined ``campaign::cycle`` chain of ``.inner/`` sandboxes to enter; absent is the tenant's own tree.
-    The pointer is raw: whether the pointed cycle is live is its entry's ``run_phase``.
-    """
-    inside = decode_cycle_path(descend)
-    return conditional_json(
-        request,
-        (cycle_list_version(stores, inside=inside), campaign, attached),
-        lambda: list_cycles(stores, inside=inside, campaign_id=campaign, attached_only=attached),
     )
 
 

@@ -1,20 +1,22 @@
 import type {
   ArmReading,
-  CourseNode,
+  CourseLineage,
   LineageNode,
   VerificationMark,
 } from "@/lib/api/types";
 import { DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import type { CandidateBar } from "@/lib/types";
 import { fmtLevel } from "@/lib/format";
+import { tagValue } from "@/lib/hierarchy";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
 import { panelCellLabel } from "./inner-panel";
 import { readPaired } from "./paired-reading";
 import { nodeKeyOf, splitRetired } from "./lineage-candidates";
 
 // A run's served standing rate against its origin; `null` renders BLANK, never 0.
-export function courseLevel(node: CourseNode): number | null {
-  const standing = node.run_standing ? readPaired(node.run_standing.vs_origin) : null;
+export function courseLevel(node: CourseLineage): number | null {
+  const served = node.course.facts.standing;
+  const standing = served ? readPaired(served.vs_origin) : null;
   return standing?.read ? standing.lift.rate_b : null;
 }
 
@@ -59,7 +61,9 @@ export function candidateBars({
       return {
         key,
         idx,
-        label: node.task ? panelCellLabel(node.task) : node.dataset_name,
+        label: node.course.facts.task
+          ? panelCellLabel(node.course.facts.task)
+          : (tagValue(node.course, "dataset") ?? node.id),
         node,
         reading: null,
       };

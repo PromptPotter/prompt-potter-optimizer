@@ -1,4 +1,4 @@
-import type { ArmNode, CourseNode, LineageNode } from "@/lib/api";
+import type { ArmNode, CourseLineage, LineageNode } from "@/lib/api";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
 import { encodeCyclePath, nodeAddress, type CyclePath } from "@/lib/ids";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
@@ -26,9 +26,9 @@ export function splitRetired<N extends LineageNode>(
   return { live, retired: [...byBranch].map(([branch, candidates]) => ({ branch, candidates })) };
 }
 
-export function walkCourses(root: CourseNode): CourseNode[] {
-  const out: CourseNode[] = [];
-  const visit = (course: CourseNode): void => {
+export function walkCourses(root: CourseLineage): CourseLineage[] {
+  const out: CourseLineage[] = [];
+  const visit = (course: CourseLineage): void => {
     out.push(course);
     for (const arm of course.children) arm.children.forEach(visit);
   };
@@ -36,7 +36,7 @@ export function walkCourses(root: CourseNode): CourseNode[] {
   return out;
 }
 
-export function countDescendants(root: CourseNode): number {
+export function countDescendants(root: CourseLineage): number {
   return walkCourses(root).length - 1;
 }
 
@@ -52,13 +52,13 @@ export function selectedNodeOf(node: ArmNode, cycleId: string): SelectedCandidat
 
 // `course` is null at a fork's address: a fork is not a node, and its arms are its only trace.
 export interface LineageAddress {
-  course: CourseNode | null;
+  course: CourseLineage | null;
   candidates: ArmNode[];
 }
 export type LineageIndex = ReadonlyMap<string, LineageAddress>;
 
 // Keyed on `path`: a label or bare cycle_id repeats across courses and `.inner/` sandboxes.
-export function indexLineage(root: CourseNode | null): LineageIndex {
+export function indexLineage(root: CourseLineage | null): LineageIndex {
   const index = new Map<string, LineageAddress>();
   if (!root) return index;
   const at = (node: LineageNode): LineageAddress => {
@@ -70,7 +70,7 @@ export function indexLineage(root: CourseNode | null): LineageIndex {
     }
     return entry;
   };
-  const visit = (course: CourseNode): void => {
+  const visit = (course: CourseLineage): void => {
     at(course).course = course;
     for (const arm of course.children) {
       at(arm).candidates.push(arm);
@@ -138,7 +138,7 @@ export interface NodeOverlays {
   thetaByKey: ReadonlyMap<string, number | null>;
 }
 
-export function nodeOverlays(courses: readonly CourseNode[], metric: DisplayMetric): NodeOverlays {
+export function nodeOverlays(courses: readonly CourseLineage[], metric: DisplayMetric): NodeOverlays {
   const valueByKey = new Map<string, number | null>();
   const thetaByKey = new Map<string, number | null>();
   for (const course of courses) {

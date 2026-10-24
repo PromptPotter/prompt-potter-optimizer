@@ -1,4 +1,11 @@
-import type { ArmElection, ArmNode, CourseNode, LineageDivergence } from "@/lib/api";
+import type {
+  ArmElection,
+  ArmNode,
+  CourseKind,
+  CourseLineage,
+  CourseSpawn,
+  LineageDivergence,
+} from "@/lib/api";
 import { nodeKeyOf, pathOf } from "@/lib/derivations";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
@@ -33,8 +40,6 @@ export const HEADER_H = 18;
 export const TOP_PAD = HEADER_H + 8;
 export const NODE_R = 3.5;
 
-export type CourseKind = CourseNode["course_kind"];
-
 export const KIND_GLYPH: Record<CourseKind, string> = {
   root: "●",
   fork: "⑂",
@@ -42,13 +47,15 @@ export const KIND_GLYPH: Record<CourseKind, string> = {
   inner: "◇",
 };
 
-export const TRIGGER_GLYPH: Record<string, string> = {
+export const TRIGGER_GLYPH: Record<CourseSpawn["trigger"], string> = {
   operator_steered: "✎",
+  operator_diag: "",
+  operator_rewind: "",
+  optimizer_rebase: "",
+  scoring_divergence: "",
 };
 
-export type ForkDirection = NonNullable<CourseNode["fork_direction"]>;
-
-export const DIRECTION_GLYPH: Record<ForkDirection, string> = {
+export const DIRECTION_GLYPH: Record<CourseSpawn["direction"], string> = {
   offshoot: "",
   supersede: "↳",
   equivalent: "≡",
@@ -80,7 +87,7 @@ export function expandedLaneSpan(cands: readonly ArmNode[]): number {
 }
 
 export interface LaneLayout {
-  course: CourseNode;
+  course: CourseLineage;
   coursePathKey: string;
   candidates: ArmNode[];
   expanded: boolean;
@@ -98,20 +105,20 @@ export interface CladogramAnchor {
 }
 
 export function extentKeys(
-  root: CourseNode,
+  root: CourseLineage,
   anchor: CladogramAnchor,
 ): ReadonlySet<string> | null {
   const keys = new Set<string>();
   const addMeasurements = (cand: ArmNode): void => {
     for (const child of cand.children) {
-      if (child.course_kind !== "inner") continue;
+      if (child.course.facts.mint !== "inner") continue;
       for (const c of child.children) {
         keys.add(nodeKeyOf(c));
         addMeasurements(c);
       }
     }
   };
-  const walk = (course: CourseNode): boolean => {
+  const walk = (course: CourseLineage): boolean => {
     const cands = course.children;
     const keepThrough = (round: number): void => {
       for (const c of cands) if (roundOf(c) <= round) keys.add(nodeKeyOf(c));
@@ -138,7 +145,7 @@ export function extentKeys(
 
 // Lanes key on `nodeKeyOf`, never `course.id`: inner cycle ids repeat across `.inner/` sandboxes.
 export function layout(
-  root: CourseNode,
+  root: CourseLineage,
   expanded: ReadonlySet<string>,
   keep: ReadonlySet<string> | null = null,
 ): {
@@ -150,7 +157,7 @@ export function layout(
   let nextRow = 0;
   let maxCol = 0;
   const visit = (
-    course: CourseNode,
+    course: CourseLineage,
     baseCol: number,
     anchorCandidateId: string | null,
     parentKey: string | null,
@@ -201,8 +208,7 @@ export interface RoundNodePos {
   isExpanded: boolean;
   isLastInLane: boolean;
   courseKind: CourseKind;
-  trigger: string;
-  forkDirection: ForkDirection | null;
+  spawn: CourseSpawn | null;
   divergence: LineageDivergence | null;
   divergent: boolean;
   retiredBy: string | null;
@@ -250,9 +256,8 @@ function placedNode(
     crown,
     isExpanded,
     isLastInLane: false,
-    courseKind: l.course.course_kind,
-    trigger: l.course.trigger,
-    forkDirection: l.course.fork_direction,
+    courseKind: l.course.course.facts.mint,
+    spawn: l.course.course.facts.spawn,
     divergence: cand.divergence,
     divergent: cand.divergent,
     retiredBy: cand.superseded_by,

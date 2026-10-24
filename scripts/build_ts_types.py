@@ -158,7 +158,7 @@ def _emit_lifecycle_filter() -> str:
     from promptpotter.domain.campaign import LifecycleFilter
 
     members = " | ".join(repr(m) for m in typing.get_args(LifecycleFilter.__value__))
-    note = "`GET /campaigns?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'."
+    note = "`GET /hierarchy?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'."
     return f"// {note}\nexport type LifecycleFilter = {members};"
 
 
@@ -396,7 +396,6 @@ def _emit_label_tables() -> str:
     from promptpotter.application.evidence.subjects import SUBJECT_KIND_LABELS
     from promptpotter.domain.dashboard_rows import SAMPLE_MOVEMENT_LABELS
     from promptpotter.domain.results import ARM_VERDICT_LABELS
-    from promptpotter.domain.run_records import MINT_KIND_LABELS
 
     def table(name: str, owner: str, labels: Mapping[typing.Any, str]) -> str:
         members = " | ".join(repr(str(member)) for member in labels)
@@ -413,7 +412,6 @@ def _emit_label_tables() -> str:
         [
             table("ARM_VERDICT_LABELS", "domain/results.py", ARM_VERDICT_LABELS),
             table("GUARD_STATE_LABELS", "application/evidence/head_to_head.py", GUARD_STATE_LABELS),
-            table("MINT_KIND_LABELS", "domain/run_records.py", MINT_KIND_LABELS),
             table("SAMPLE_MOVEMENT_LABELS", "domain/dashboard_rows.py", SAMPLE_MOVEMENT_LABELS),
             table("SUBJECT_KIND_LABELS", "application/evidence/subjects.py", SUBJECT_KIND_LABELS),
         ]

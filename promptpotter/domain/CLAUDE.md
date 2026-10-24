@@ -50,7 +50,8 @@ The word `legacy` is **never** sanctioned.
   declared order (`render(node)`); the shots ride resolved, as that node's `few_shot_block`,
   because a reader outside the campaign has no demo pool to resolve a key against.
 - `spend.py` — tokens and money, at both arities: `TokenAccount` is ONE call's (or one row's)
-  consumption, `SpendBucket` / `SpendRollup` the same account summed over a cycle. `results.py`
+  consumption, `SpendBucket` / `SpendRollup` the same account summed over a cycle, `UserSpend` /
+  `LifetimeSpend` over an account's or a campaign's whole life, raw and served. `results.py`
   imports `SpendRollup` for `CycleResult.spend` and deliberately does not re-export it. What the
   buckets MEAN is stated on the fields.
   **`TokenAccount` IS the carrier, not a converter** — every client returns one on

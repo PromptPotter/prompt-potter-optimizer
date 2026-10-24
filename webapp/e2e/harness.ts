@@ -4,12 +4,14 @@ import path from "node:path";
 import { test as base, expect, type Page, type APIRequestContext } from "@playwright/test";
 import {
   STOP_REASON_OUTCOMES,
-  type CampaignListResponse,
   type CommandKind,
   type CommandPayloads,
   type DraftListResponse,
+  type HierarchyResponse,
   type ServedRound,
 } from "@/lib/api/types.generated";
+import { tagValue } from "@/lib/hierarchy";
+import { decodeCyclePath } from "@/lib/ids";
 import { isStopReason } from "@/lib/run-phase";
 
 const API = "/api/v1";
@@ -132,16 +134,27 @@ export type Campaign = {
   addr: string;
 };
 
-export async function campaigns(request: APIRequestContext): Promise<Campaign[]> {
-  const res = await request.get(`${API}/campaigns`);
-  expect(res.ok(), `GET ${API}/campaigns → ${res.status()}`).toBeTruthy();
-  const { campaigns: rows } = (await res.json()) as CampaignListResponse;
-  // The `cycle_` prefix is stripped in the address and nowhere else (`lib/address.ts`).
-  return rows.map(({ campaign_id: id, root_cycle_id: cycleId }) => ({
-    id,
-    cycleId,
-    addr: `#/c/${id}/${cycleId.replace(/^cycle_/, "")}`,
-  }));
+export async function campaigns(
+  request: APIRequestContext,
+  dataset?: string,
+): Promise<(Campaign & { dataset: string | null })[]> {
+  const qs = dataset ? `&dataset=${encodeURIComponent(dataset)}` : "";
+  const res = await request.get(`${API}/hierarchy?depth=0${qs}`);
+  expect(res.ok(), `GET ${API}/hierarchy → ${res.status()}`).toBeTruthy();
+  const { entries } = (await res.json()) as HierarchyResponse;
+  return entries.flatMap((c) => {
+    const root = decodeCyclePath(c.facts.root)?.[0];
+    if (!root) return [];
+    // The `cycle_` prefix is stripped in the address and nowhere else (`lib/address.ts`).
+    return [
+      {
+        id: c.address,
+        cycleId: root.cycleId,
+        addr: `#/c/${c.address}/${root.cycleId.replace(/^cycle_/, "")}`,
+        dataset: tagValue(c, "dataset"),
+      },
+    ];
+  });
 }
 
 export type Draft = { draftId: string; slug: string };
@@ -176,11 +189,8 @@ export const E2E_DATASETS = ["email-tagging", "promptpotter-self/e2e"];
 
 /** Not "the world is empty": the spend specs share one workspace, so the second finds the first's campaign. */
 export async function assertThrowawayWorld(request: APIRequestContext) {
-  const res = await request.get(`${API}/campaigns`);
-  expect(res.ok()).toBeTruthy();
-  const rows: Record<string, string>[] = (await res.json()).campaigns ?? [];
-  const foreign = rows
-    .map((c) => c.dataset_name)
+  const foreign = (await campaigns(request))
+    .map((c) => c.dataset)
     .filter((d) => d && !E2E_DATASETS.includes(d));
   expect(
     [...new Set(foreign)],

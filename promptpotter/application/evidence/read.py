@@ -76,7 +76,7 @@ from promptpotter.domain.candidate_diff import (
     flatten_prompts,
     flatten_sp_summary,
 )
-from promptpotter.domain.cycle_listing import CycleIndex
+from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.paired_reading import (
     ArmKey,

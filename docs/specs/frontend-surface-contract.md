@@ -54,7 +54,7 @@ invariants:
                       accepted floor (it's the probe that decides anon vs authed).
   I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: the served
                       producer reading (domain/phases.py::ProducerReading — `producer.attached`
-                      on the dashboard, `producer_attached` on a /cycles row), derived with
+                      on the dashboard, `state.producer.attached` on a /hierarchy course entry), derived with
                       run_phase. A paused cycle whose worker has exited is NOT attached —
                       counting it keeps the jobs dock lit and destroys its all-quiet signal — and
                       stays reachable as a sidebar row wearing its phase. detached means a dead
@@ -66,7 +66,7 @@ invariants:
                       connection state (offline / stale affordance) and MUST NOT impersonate a run
                       phase or unmount run controls while the last-known server phase is running.
                       Every "running" surface — the sidebar-edge jobs dock (and its phone stand-in,
-                      the app bar back-arrow dot), workspace runningCycles — reads this one set AND
+                      the app bar back-arrow dot), the registry''s `running` — reads this one set AND
                       one shared ordering (what needs you first); the dock adds the viewer's own
                       scoring passes from the served machine-status (`mine`). A surface that RENDERS the
                       phase reads the served table TOTAL over RunPhase (`RUN_PHASE_INFO`, generated
@@ -105,7 +105,7 @@ invariants:
                       different fact), and recovers to a live address rather than resting in a
                       dead one. Detection is the address''s OWN authoritative read: list
                       membership is NOT an existence test, because an L4 inner hop is absent
-                      from /cycles and an archived campaign is absent from the active filter
+                      from /hierarchy and an archived campaign is absent from the active filter
                       while both are alive. Archived is not gone. The server side of this is
                       the same rule: `warming_up` means "no wiring declared yet" and a missing cycle
                       dir means GONE, and one route must never answer both with the same body.'
@@ -131,7 +131,7 @@ invariants:
                       (resolve_pipeline_for_draft), which the draft response also carries — so
                       StaticConnectorProvider is a second TRANSPORT of one answer, not a second
                       source, and overlaying anything else into it re-opens this. The campaign
-                      list''s `CampaignSummary.runs_with` is a second TRANSPORT of the same
+                      list''s `CampaignFacts.runs_with` is a second TRANSPORT of the same
                       kind (campaign_runs_with: the root''s two merges, cut to settings), never a
                       second source a row may re-merge or diff. I6 is its
                       sibling — same shape, different question — and neither is a second

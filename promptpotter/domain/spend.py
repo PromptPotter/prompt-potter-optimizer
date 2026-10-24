@@ -4,7 +4,7 @@ import operator
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import reduce
-from typing import TYPE_CHECKING, Literal, get_args
+from typing import TYPE_CHECKING, Literal, NamedTuple, get_args
 
 from pydantic import (
     Field,
@@ -338,6 +338,91 @@ def bill_or_rate_usd(cost_usd: float | None, rate_priced_usd: float | None) -> f
 
 def calls_rate_priced(rate_priced_usd: float) -> bool:
     return rate_priced_usd > 0
+
+
+class UserSpend(NamedTuple):
+    used_usd: float
+    used_tokens: int
+    unpriced_tokens: int
+    unreported_usd: float = 0.0
+    unreported_tokens: int = 0
+    rate_priced_usd: float = 0.0
+
+    @property
+    def sent_usd(self) -> float:
+        return self.used_usd + self.rate_priced_usd
+
+    @property
+    def at_most_usd(self) -> float:
+        return self.sent_usd + self.unreported_usd
+
+    @property
+    def at_most_tokens(self) -> int:
+        return self.used_tokens + self.unreported_tokens
+
+    @property
+    def sends_unreported(self) -> bool:
+        return self.unreported_usd > 0
+
+    def plus(self, other: UserSpend) -> UserSpend:
+        return UserSpend(
+            self.used_usd + other.used_usd,
+            self.used_tokens + other.used_tokens,
+            self.unpriced_tokens + other.unpriced_tokens,
+            self.unreported_usd + other.unreported_usd,
+            self.unreported_tokens + other.unreported_tokens,
+            self.rate_priced_usd + other.rate_priced_usd,
+        )
+
+
+ZERO_SPEND = UserSpend(0.0, 0, 0)
+
+
+class LifetimeSpend(StrictModel):
+    """What an account, or one campaign's share of it, was billed over its whole life."""
+
+    billed_usd: float = Field(
+        description="What the providers REPORTED they billed, over every cycle, fork and "
+        "forwarded inner run, plus what a deleted cycle banked. Never an estimate: a call priced "
+        "off our rate table is `rate_priced_usd`, a send whose bill never came `unreported_usd`."
+    )
+    rate_priced_usd: float = Field(
+        description="What our rate table prices the calls no provider reported a cost for. Not "
+        "spent — an estimate, shown beside `billed_usd` and never added into it. It binds the "
+        "ceiling beside `billed_usd`."
+    )
+    calls_rate_priced: bool = Field(
+        description="Some call was priced at our rate, so there is a `rate_priced_usd` to show "
+        "beside the bill."
+    )
+    bill_is_floor: bool = Field(
+        description="`billed_usd` and `rate_priced_usd` understate, by what `unpriced_tokens` "
+        "cost; the token ceiling is then the binding one."
+    )
+    unpriced_tokens: int = Field(
+        description="Tokens no provider billed and no rate on file prices."
+    )
+    sends_unreported: bool = Field(
+        description="Some send ended with no bill, so up to `unreported_usd` more may have left "
+        "the account than `billed_usd` says."
+    )
+    unreported_usd: float = Field(
+        description="The most that sends which ended with no bill (cancelled, timed out, killed "
+        "with a run) may have cost, at the bounds they were admitted on. Not spent — unknown. It "
+        "binds the ceiling beside `billed_usd`."
+    )
+
+    @classmethod
+    def of(cls, spent: UserSpend) -> LifetimeSpend:
+        return cls(
+            billed_usd=round(spent.used_usd, 6),
+            rate_priced_usd=round(spent.rate_priced_usd, 6),
+            calls_rate_priced=calls_rate_priced(spent.rate_priced_usd),
+            bill_is_floor=bill_is_floor(spent.unpriced_tokens),
+            unpriced_tokens=spent.unpriced_tokens,
+            sends_unreported=spent.sends_unreported,
+            unreported_usd=round(spent.unreported_usd, 6),
+        )
 
 
 class SpendBucket(StrictModel):

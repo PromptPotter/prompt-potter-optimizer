@@ -2,11 +2,11 @@
 import { useMemo, useState } from "react";
 import { Icon, Popover, SegmentedControl, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import type { LifecycleFilter } from "@/lib/api";
+import type { ListedLifecycle } from "@/lib/registry";
 
 interface Props {
-  lifecycleFilter: LifecycleFilter;
-  setLifecycleFilter: (f: LifecycleFilter) => void;
+  listedLifecycle: ListedLifecycle;
+  setListedLifecycle: (f: ListedLifecycle) => void;
   datasetNames: string[];
   datasetFilter: string | null;
   setDatasetFilter: (d: string | null) => void;
@@ -21,7 +21,7 @@ const FILTER_GLYPH = (
   </Icon>
 );
 
-const LIFECYCLE_SEGMENTS: readonly Segment<LifecycleFilter>[] = [
+const LIFECYCLE_SEGMENTS: readonly Segment<ListedLifecycle>[] = [
   { value: "active", label: "Active" },
   {
     value: "archived",
@@ -32,13 +32,13 @@ const LIFECYCLE_SEGMENTS: readonly Segment<LifecycleFilter>[] = [
 ];
 
 export function SidebarFilterPopover({
-  lifecycleFilter,
-  setLifecycleFilter,
+  listedLifecycle,
+  setListedLifecycle,
   datasetNames,
   datasetFilter,
   setDatasetFilter,
 }: Props) {
-  const active = lifecycleFilter === "archived" || datasetFilter != null;
+  const active = listedLifecycle === "archived" || datasetFilter != null;
 
   return (
     <Popover
@@ -60,8 +60,8 @@ export function SidebarFilterPopover({
     >
       {() => (
         <FilterPanel
-          lifecycleFilter={lifecycleFilter}
-          setLifecycleFilter={setLifecycleFilter}
+          listedLifecycle={listedLifecycle}
+          setListedLifecycle={setListedLifecycle}
           datasetNames={datasetNames}
           datasetFilter={datasetFilter}
           setDatasetFilter={setDatasetFilter}
@@ -72,8 +72,8 @@ export function SidebarFilterPopover({
 }
 
 function FilterPanel({
-  lifecycleFilter,
-  setLifecycleFilter,
+  listedLifecycle,
+  setListedLifecycle,
   datasetNames,
   datasetFilter,
   setDatasetFilter,
@@ -91,8 +91,8 @@ function FilterPanel({
       <SegmentedControl
         className="sidebar-filter-lifecycle"
         options={LIFECYCLE_SEGMENTS}
-        value={lifecycleFilter}
-        onChange={setLifecycleFilter}
+        value={listedLifecycle}
+        onChange={setListedLifecycle}
         ariaLabel="Campaign lifecycle"
       />
 

@@ -75,9 +75,10 @@ The decisions the models cannot state:
   have belongs to the pipeline it hands off to, so it carries no config of its own.
 - **`backend_type` is required and is never a `PipelineSchema` field.** The parser drops it, so
   readers take it off the raw overlay. It picks the connector at init (`dataset_access.py::declared_backend_type`
-  raises when absent) and is served on `CampaignSummary.backend_type`. Whether it names the recursion connector — the ONE
+  raises when absent). Whether it names the recursion connector — the ONE
   test for a self-optimizing (L4) campaign — is `runner/inner/tasks.py::is_self_optimization`,
-  served as `self_optimization` so the webapp branches on a bool and never on the name.
+  served as the hierarchy entry's `self_optimization` tag so the webapp branches on a tag and never
+  on the name.
 - **`pipelines` must contain `default`** — the active step order unless a campaign overrides it,
   and the same node may appear in several sequences. **The other names are read too, and this is
   what decides whether a node is drawn at all:** a sequence sharing steps with `default` is an

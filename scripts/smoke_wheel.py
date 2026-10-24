@@ -84,7 +84,7 @@ def main() -> int:
 
     # `openapi()`, not `app.routes`: FastAPI versions disagree on whether an included router flattens.
     served = app.openapi().get("paths") or {}
-    assert "/api/v1/cycles" in served, f"API did not mount its routes: {sorted(served)[:8]}"
+    assert "/api/v1/hierarchy" in served, f"API did not mount its routes: {sorted(served)[:8]}"
 
     # `main.py` mounts behind a bare `.exists()`: a wheel serving a naked API reads as `--no-webapp`.
     if os.environ.get("PROMPTPOTTER_SMOKE_EXPECT_WEBAPP") == "1":
@@ -135,10 +135,10 @@ def main() -> int:
         assert status == 200, f"health answered {status}: {body[:300]!r}"
         assert json.loads(body).get("status") == "healthy", f"health body: {body[:300]!r}"
 
-        status, body, _ = _get(f"{base}/api/v1/campaigns")
-        assert status == 200, f"GET /api/v1/campaigns answered {status}: {body[:300]!r}"
+        status, body, _ = _get(f"{base}/api/v1/hierarchy")
+        assert status == 200, f"GET /api/v1/hierarchy answered {status}: {body[:300]!r}"
         listing = json.loads(body)
-        assert "campaigns" in listing, f"campaign listing off-contract: {body[:300]!r}"
+        assert "entries" in listing, f"hierarchy listing off-contract: {body[:300]!r}"
 
         if os.environ.get("PROMPTPOTTER_SMOKE_EXPECT_WEBAPP") == "1":
             status, body, content_type = _get(f"{base}/")

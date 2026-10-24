@@ -5,7 +5,8 @@ import type { Evidence, SubjectReading } from "@/lib/api";
 import { readingPath } from "@/lib/api/reads";
 import type { CladogramChannel } from "@/components/candidates/Forest";
 import { useCompareSelection } from "@/lib/compare-selection";
-import { compareItems, type RunGroup } from "@/lib/derivations";
+import type { HierarchyEntry } from "@/lib/api";
+import { campaignAt, compareItems } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { encodeCyclePath } from "@/lib/ids";
 import { seriesVar } from "@/lib/theme";
@@ -24,10 +25,10 @@ function channelPoints(subjects: readonly SubjectReading[]): CladogramChannel[] 
 
 export function ChannelCards({
   evidence,
-  runs,
+  byAddress,
 }: {
   evidence: Evidence;
-  runs: ReadonlyMap<string, RunGroup>;
+  byAddress: ReadonlyMap<string, HierarchyEntry>;
 }) {
   // Read off the request, not the response, so a channel that answered nothing still gets a card.
   const { channels } = useCompareSelection();
@@ -53,7 +54,7 @@ export function ChannelCards({
       ownNote={listNote === null}
       points={points}
       spec={evidence.metric.spec}
-      run={runs.get(item.channel.rootCampaignId) ?? null}
+      run={campaignAt(byAddress, item.channel.rootCampaignId)}
       column={rows && { rows, panelHost, order: i }}
     />
   ));

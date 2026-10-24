@@ -205,6 +205,11 @@ class ProducerAlert(FrozenModel):
     title: str
     detail: str
 
+    @classmethod
+    def of(cls, state: ProducerState, *, clocked: str = "") -> ProducerAlert | None:
+        info = PRODUCER_STATE_INFO[state]
+        return cls(title=info.alert, detail=info.alert_detail + clocked) if info.alert else None
+
 
 class ProducerReading(FrozenModel):
     """One cycle's producer as served: its state, its two server-measured clocks and its words."""
@@ -275,11 +280,7 @@ class ProducerReading(FrozenModel):
             else "no progress recorded"
             if silent_s is None
             else f"no progress{clocked}",
-            alert=ProducerAlert(
-                title=info.alert, detail=info.alert_detail + (clocked if wedged else "")
-            )
-            if info.alert
-            else None,
+            alert=ProducerAlert.of(state, clocked=clocked if wedged else ""),
             attached=appending or state in (ProducerState.HELD, ProducerState.CLAIMED),
             appending=appending,
             silent_for_s=silent_s,

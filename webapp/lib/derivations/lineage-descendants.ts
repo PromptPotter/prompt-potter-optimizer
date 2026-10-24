@@ -1,8 +1,8 @@
-import type { CourseNode } from "@/lib/api";
+import type { CourseLineage } from "@/lib/api";
 import { walkCourses } from "./lineage-candidates";
 
 export function descendantsOf(
-  root: CourseNode | null,
+  root: CourseLineage | null,
   seeds: Iterable<string>,
 ): ReadonlySet<string> {
   const out = new Set(seeds);

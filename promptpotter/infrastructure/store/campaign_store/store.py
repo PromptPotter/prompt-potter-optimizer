@@ -19,7 +19,7 @@ from promptpotter.domain.campaign import (
     LifecycleStatus,
     ceiling_meter,
 )
-from promptpotter.domain.cycle_listing import CycleIndex, CycleListEntry, RunStatus
+from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.phases import ErrorRecord, LaunchStage, ProducerState, StopReason
@@ -93,7 +93,6 @@ from promptpotter.infrastructure.store.layout import (
     head_to_head_path,
     inner_sandbox_key,
     root_cycle_id,
-    sibling_kind,
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig
 from promptpotter.infrastructure.store.session_pointer import (
@@ -631,35 +630,13 @@ class CampaignStore:
             return False
         return self._declare_ended(hop, StopReason.PRODUCER_VANISHED)
 
-    def _list_entry(self, cycle_dir: Path, index: CycleIndex) -> CycleListEntry:
-        campaign_id, cycle_id = cycle_dir.parent.parent.name, cycle_dir.name
-        kind = sibling_kind(cycle_id)
-        run = derive_run_state(cycle_dir)
-        campaign = self.load_campaign(campaign_id)
-        return CycleListEntry(
-            campaign_id=campaign_id,
-            cycle_id=cycle_id,
-            parent_cycle_id=index.parent_cycle_id,
-            dataset_name="" if campaign is None else campaign.dataset_name,
-            mint_kind=index.mint_kind,
-            is_root=kind == "root",
-            stop_reason=index.stop_reason,
-            run_phase=run.run_phase,
-            status=RunStatus.of(run.run_phase, index.stop_reason),
-            producer_attached=run.producer.attached,
-            run_admission=run.admission,
-            pause=run.pause,
-            rounds_closed=index.rounds_closed,
-            updated_at=index.updated_at,
-            human_intervened=index.human_intervened,
-        )
+    def enumerate_cycles(self) -> list[tuple[CycleHop, CycleIndex]]:
+        """Every cycle of every campaign in this store whose ledger folds to an index."""
+        return _indexed(self._cycle_dirs())
 
-    def enumerate_cycles(self) -> list[CycleListEntry]:
-        return [
-            self._list_entry(cycle_dir, index)
-            for cycle_dir in self._cycle_dirs()
-            if (index := read_cycle_index(cycle_dir, moment=None)) is not None
-        ]
+    def campaign_cycles(self, campaign_id: str) -> list[tuple[CycleHop, CycleIndex]]:
+        """`enumerate_cycles`, narrowed to one campaign's directory."""
+        return _indexed(self.campaign_cycle_dirs(campaign_id))
 
     def _stub_deletion_blocked(self, hop: CycleHop) -> str | None:
         cycle_dir = self.cycle_dir(hop)
@@ -789,3 +766,11 @@ class CampaignStore:
             ]
             lines.append("")
         write_text(self._layout(hop).optimized_surface, "\n".join(lines))
+
+
+def _indexed(cycle_dirs: list[Path]) -> list[tuple[CycleHop, CycleIndex]]:
+    return [
+        (CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name), index)
+        for cycle_dir in cycle_dirs
+        if (index := read_cycle_index(cycle_dir, moment=None)) is not None
+    ]

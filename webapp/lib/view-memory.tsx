@@ -1,14 +1,13 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
-import { isNodeOpen, nodeKey, type NodeKind } from "@/lib/derivations";
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { ownerOfNodeAddress } from "@/lib/ids";
 
 export const VIEW_MEMORY_KEY = "promptpotter.view.byCampaign";
 
 // Bumping this DROPS every stored record rather than migrating it.
-const RECORD_VERSION = 1;
+const RECORD_VERSION = 2;
 
 const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -18,7 +17,7 @@ const MAX_CAMPAIGNS = 24;
 export interface CampaignView {
   v: number;
   at: number;
-  // Sidebar nodes toggled AWAY from their default (`campaign-forest.ts::isNodeOpen`).
+  // Sidebar rows toggled AWAY from the default their call site passes to `isOpen`.
   toggled: string[];
   // Latches the one-shot reveal, or a sidebar remount re-opens a row the operator collapsed.
   autoExpandedFor: string | null;
@@ -127,8 +126,8 @@ export function useViewMemory(): ViewMemory {
 
 // An ORIGIN spans campaigns, so it owns a record under its own `cycle_<hash>` id (`ownerOfNodeAddress`).
 export interface NodeToggle {
-  isOpen: (kind: NodeKind, path: string) => boolean;
-  toggle: (kind: NodeKind, path: string) => void;
+  isOpen: (key: string, openByDefault: boolean) => boolean;
+  toggle: (key: string) => void;
   autoExpandedFor: (campaignId: string | null) => string | null;
   markAutoExpanded: (campaignId: string, cycleId: string, key: string) => void;
 }
@@ -137,15 +136,15 @@ export function useNodeToggle(): NodeToggle {
   const { viewFor, toggledFor, recordView } = useViewMemory();
 
   const isOpen = useCallback(
-    (kind: NodeKind, path: string) => isNodeOpen(toggledFor(ownerOfNodeAddress(path)), kind, path),
+    (key: string, openByDefault: boolean) =>
+      toggledFor(ownerOfNodeAddress(key)).has(key) ? !openByDefault : openByDefault,
     [toggledFor],
   );
 
   const toggle = useCallback(
-    (kind: NodeKind, path: string) => {
-      const owner = ownerOfNodeAddress(path);
+    (key: string) => {
+      const owner = ownerOfNodeAddress(key);
       if (!owner) return;
-      const key = nodeKey(kind, path);
       const toggled = new Set(toggledFor(owner));
       if (toggled.has(key)) toggled.delete(key);
       else toggled.add(key);

@@ -5,7 +5,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.cycle_listing import active_pointer, resolve_campaign_id_hint
+from promptpotter.application.cycle_addressing import active_pointer, resolve_campaign_id_hint
 from promptpotter.domain.command_kinds import GradeBenchPayload, PauseCyclePayload
 from promptpotter.presentation.cli.commands.launch import ctrl_c_pauses
 from promptpotter.presentation.cli.commands.result import CommandResult

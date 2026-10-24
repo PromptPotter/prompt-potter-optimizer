@@ -6,7 +6,7 @@ from typing import Any
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.loop_commands import read_payload_file
-from promptpotter.application.cycle_listing import resolve_campaign_id_hint
+from promptpotter.application.cycle_addressing import resolve_campaign_id_hint
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,

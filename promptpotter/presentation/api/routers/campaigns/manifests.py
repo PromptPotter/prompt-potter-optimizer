@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated
-
 from fastapi import Query, Request, Response
 from pydantic import Field
 
-from promptpotter.application import campaign_listing
-from promptpotter.application.campaign_listing import CampaignListResponse
 from promptpotter.application.config_map import ConfigMapResponse, campaign_config_map
 from promptpotter.application.datasets.draft_build import (
     DraftCampaignWire,
@@ -27,43 +23,12 @@ from promptpotter.application.pipeline_resolve import (
     fork_preview,
     resolve_pipeline_at,
 )
-from promptpotter.domain.campaign import LifecycleFilter
-from promptpotter.domain.cycle_paths import decode_cycle_path
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import (
-    conditional_json,
     hashed_json,
 )
 from promptpotter.presentation.api.routers.campaigns._router import campaigns_router
-
-
-@campaigns_router.get("/campaigns", response_model=CampaignListResponse)
-def list_campaigns(
-    request: Request,
-    stores: StoresDep,
-    dataset: str | None = Query(default=None, description="Filter to one dataset"),
-    lifecycle: Annotated[
-        LifecycleFilter,
-        Query(
-            description="'active' (default), 'archived' or 'deleted' — the visibility intent; "
-            "or 'all'",
-        ),
-    ] = "active",
-    descend: str | None = Query(None),
-) -> Response:
-    """Every campaign in one store owned by the caller, newest first.
-
-    ``descend`` enters an inner store exactly as on ``GET /cycles``.
-    """
-    inside = decode_cycle_path(descend)
-    return conditional_json(
-        request,
-        (campaign_listing.campaign_list_version(stores, inside=inside), dataset, lifecycle),
-        lambda: campaign_listing.list_campaigns(
-            stores, inside=inside, dataset=dataset, lifecycle=lifecycle
-        ),
-    )
 
 
 class DraftReopenResponse(StrictModel):

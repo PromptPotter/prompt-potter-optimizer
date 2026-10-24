@@ -4,7 +4,8 @@ import type { SubjectReading } from "@/lib/api";
 import { SUBJECT_KIND_LABELS } from "@/lib/api/types.generated";
 import type { CladogramChannel } from "@/components/candidates/Forest";
 import { useCompareSelection } from "@/lib/compare-selection";
-import type { CompareItem, RunGroup } from "@/lib/derivations";
+import type { HierarchyCampaign } from "@/lib/api";
+import type { CompareItem } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { ChannelColumn, type ColumnPlace } from "./ChannelColumn";
 import { ChannelDetail } from "./ChannelDetail";
@@ -24,7 +25,7 @@ export function ChannelCard({
   points: readonly CladogramChannel[];
   spec: { unit: MetricUnit; axis_label: string };
   column: ColumnPlace | null;
-  run: RunGroup | null;
+  run: HierarchyCampaign | null;
 }) {
   const { reading, headline, slot } = item;
   const model = useChannelModel(item, run, spec.unit, column ? "winner" : "own");

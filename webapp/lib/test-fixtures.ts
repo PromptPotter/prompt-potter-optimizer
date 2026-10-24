@@ -1,13 +1,21 @@
 import type {
+  CourseKind,
   ArmElection,
   ArmNode,
   ArmName,
   ArmPanel,
   ArmReading,
-  CourseNode,
+  CourseFacts,
+  CourseLineage,
   CurrentRound,
   DashboardCandidate,
+  HierarchyCampaign,
+  HierarchyCourse,
+  HierarchyState,
+  HierarchyTag,
+  LifetimeSpend,
   LiveCandidate,
+  MeteredSpend,
   Measured,
   NodePrompt,
   OverlapReading,
@@ -221,7 +229,7 @@ export function armNode(over: Partial<ArmNode> & Pick<ArmNode, "id">, round = 0)
   };
 }
 
-export function courseNode(over: Partial<CourseNode> & Pick<CourseNode, "id">): CourseNode {
+export function courseLineage(over: Partial<CourseLineage> & Pick<CourseLineage, "id">): CourseLineage {
   return {
     kind: "course",
     label: over.id,
@@ -229,19 +237,119 @@ export function courseNode(over: Partial<CourseNode> & Pick<CourseNode, "id">): 
     path: [],
     children: [],
     origin_row: null,
-    elects_on: "ability",
-    course_kind: "root",
-    run_phase: "terminal",
-    status: { label: "—", mark: "unknown" },
-    dataset_name: "",
-    trigger: "",
-    fork_direction: null,
-    steered_by: null,
-    task: null,
-    run_standing: null,
+    course: hierarchyCourse({ address: over.id }),
     deletable_stubs: 0,
     lens_criterion: null,
     lens_shift: null,
+    ...over,
+  };
+}
+
+export function meteredSpend(over: Partial<MeteredSpend> = {}): MeteredSpend {
+  return {
+    meter: "bill",
+    metered_usd: 0,
+    metered_tokens: 0,
+    billed_usd: 0,
+    rate_priced_usd: 0,
+    calls_rate_priced: false,
+    rate_known: true,
+    bill_is_floor: false,
+    metered_is_bill: true,
+    incurred_usd: 0,
+    billed_tokens: 0,
+    unpriced_tokens: 0,
+    kinds: {},
+    replay_share: null,
+    ...over,
+  };
+}
+
+export function lifetimeSpend(over: Partial<LifetimeSpend> = {}): LifetimeSpend {
+  return {
+    billed_usd: 0,
+    rate_priced_usd: 0,
+    calls_rate_priced: false,
+    bill_is_floor: false,
+    unpriced_tokens: 0,
+    sends_unreported: false,
+    unreported_usd: 0,
+    ...over,
+  };
+}
+
+export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchyState {
+  return {
+    run_phase: "terminal",
+    status: { label: "—", mark: "unknown" },
+    producer: { state: "absent", label: "", attached: false, appending: false, alert: null },
+    pause: null,
+    admission: { offers: null, refusal: "", skip_refusal: "", lookahead_refusal: "" },
+    stop_reason: null,
+    intervened: false,
+    ...over,
+  };
+}
+
+export function courseTags(mint: CourseKind, dataset?: string): HierarchyTag[] {
+  return [
+    ...(dataset === undefined ? [] : [{ kind: "dataset" as const, value: dataset, label: dataset }]),
+    { kind: "mint", value: mint, label: mint },
+  ];
+}
+
+export function hierarchyCourse(
+  over: Partial<HierarchyCourse> & Pick<HierarchyCourse, "address">,
+  facts: Partial<CourseFacts> = {},
+): HierarchyCourse {
+  return {
+    parent: null,
+    label: over.address,
+    lede: null,
+    caveat: null,
+    tags: courseTags(facts.mint ?? "root"),
+    state: hierarchyState(),
+    stats: [],
+    span: { opened_at: "", last_at: "", closed_at: null },
+    child_count: 0,
+    children: [],
+    level: "course",
+    facts: {
+      mint: "root",
+      spawn: null,
+      task: null,
+      standing: null,
+      rounds_closed: 0,
+      ...facts,
+    },
+    ...over,
+  };
+}
+
+export function hierarchyCampaign(
+  over: Partial<HierarchyCampaign> & Pick<HierarchyCampaign, "address">,
+): HierarchyCampaign {
+  const root = `${over.address}::cycle_root`;
+  return {
+    parent: null,
+    label: over.address,
+    lede: null,
+    caveat: null,
+    tags: [],
+    state: hierarchyState(),
+    stats: [],
+    span: { opened_at: "", last_at: "", closed_at: null },
+    child_count: 0,
+    children: [],
+    level: "campaign",
+    facts: {
+      label: null,
+      root,
+      line: root,
+      lifecycle: "active",
+      spend_lifetime: lifetimeSpend(),
+      runs_with: null,
+    },
     ...over,
   };
 }

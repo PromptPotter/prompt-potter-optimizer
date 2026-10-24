@@ -2,44 +2,49 @@
 import { Fragment, useMemo } from "react";
 import { Menu, MenuItem } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
-import type { OriginGroup, RunGroup } from "@/lib/derivations";
-import { unitDisplayName } from "@/lib/names";
+import type { HierarchyCampaign } from "@/lib/api";
+import { coursesOf } from "@/lib/derivations";
+import { tagValue } from "@/lib/hierarchy";
+import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { useRegistry } from "@/lib/registry";
 import { useWorkspace } from "@/lib/workspace";
 import { CampaignRowLabel, PhaseMark } from "../sidebar/CampaignRowLabel";
 
-function byDataset(origins: OriginGroup[]): [string, RunGroup[]][] {
-  const out = new Map<string, RunGroup[]>();
-  for (const origin of origins) {
-    for (const run of origin.runs) {
-      const arr = out.get(run.campaign.dataset_name) ?? [];
-      arr.push(run);
-      out.set(run.campaign.dataset_name, arr);
-    }
+function byDataset(entries: readonly HierarchyCampaign[]): [string, HierarchyCampaign[]][] {
+  const out = new Map<string, HierarchyCampaign[]>();
+  for (const campaign of entries) {
+    const dataset = tagValue(campaign, "dataset") ?? "";
+    const arr = out.get(dataset) ?? [];
+    arr.push(campaign);
+    out.set(dataset, arr);
   }
   return [...out];
 }
 
 export function CampaignSwitcher() {
   const { campaignId, cycleId, navigate } = useWorkspace();
-  const { forest, cycles, cyclesLoaded, failure } = useRegistry();
+  const { listed, byAddress, loaded, failure } = useRegistry();
   const { status } = useAuth();
-  const groups = useMemo(() => byDataset(forest), [forest]);
+  const groups = useMemo(() => byDataset(listed), [listed]);
+  const go = (address: string, close: () => void) => {
+    const path: CyclePath | null = decodeCyclePath(address);
+    if (path) navigate(path);
+    close();
+  };
 
-  if (failure && cycles.length === 0) {
+  if (failure && listed.length === 0) {
     return <span className="run-switch-err">campaigns: {failure.message}</span>;
   }
-  if (!cyclesLoaded) {
+  if (!loaded) {
     // Anon never loads the workspace: a terminal label, not a perpetual "loading…".
     return (
       <span className="run-switch-note">{status === "unauthed" ? "No campaign" : "loading…"}</span>
     );
   }
-  if (cycles.length === 0) return <span className="run-switch-note">No campaigns yet</span>;
+  if (listed.length === 0) return <span className="run-switch-note">No campaigns yet</span>;
 
-  const selectedKnown = cycles.some(
-    (c) => c.campaign_id === campaignId && c.cycle_id === cycleId,
-  );
+  const selectedKnown =
+    !!campaignId && !!cycleId && byAddress.has(encodeCyclePath([{ campaignId, cycleId }]));
 
   return (
     <Menu
@@ -62,42 +67,26 @@ export function CampaignSwitcher() {
               {cycleId} (not on disk)
             </MenuItem>
           )}
-          {groups.map(([dataset, runs]) => (
+          {groups.map(([dataset, campaigns]) => (
             <div key={dataset} role="group" aria-label={dataset} className="run-switch-group">
               <span className="run-switch-dataset">{dataset}</span>
-              {runs.map((run) => (
-                <Fragment key={run.campaign.campaign_id}>
-                  <MenuItem
-                    onClick={() => {
-                      navigate([
-                        {
-                          campaignId: run.campaign.campaign_id,
-                          cycleId: run.campaign.root_cycle_id,
-                        },
-                      ]);
-                      close();
-                    }}
-                  >
+              {campaigns.map((campaign) => (
+                <Fragment key={campaign.address}>
+                  <MenuItem onClick={() => go(campaign.facts.root, close)}>
                     <span className="run-switch-row">
-                      <CampaignRowLabel run={run} />
+                      <CampaignRowLabel campaign={campaign} />
                     </span>
                   </MenuItem>
-                  {run.branches.map((branch) => (
-                    <MenuItem
-                      key={branch.cycle_id}
-                      onClick={() => {
-                        navigate([
-                          { campaignId: branch.campaign_id, cycleId: branch.cycle_id },
-                        ]);
-                        close();
-                      }}
-                    >
-                      <span className="run-switch-branch">
-                        <PhaseMark status={branch.status} />
-                        {unitDisplayName(branch)}
-                      </span>
-                    </MenuItem>
-                  ))}
+                  {coursesOf(campaign)
+                    .filter((branch) => branch.address !== campaign.facts.root)
+                    .map((branch) => (
+                      <MenuItem key={branch.address} onClick={() => go(branch.address, close)}>
+                        <span className="run-switch-branch">
+                          <PhaseMark status={branch.state.status} />
+                          {branch.label}
+                        </span>
+                      </MenuItem>
+                    ))}
                 </Fragment>
               ))}
             </div>

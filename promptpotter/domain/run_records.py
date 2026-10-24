@@ -4,7 +4,7 @@ import enum
 import os
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal, NamedTuple, Self, get_args
+from typing import Annotated, Any, Literal, NamedTuple, Self
 
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
@@ -730,33 +730,6 @@ if _untraited:
         "direction nobody declared renders as an offshoot, which is a lie half the time."
     )
 del _untraited
-
-
-MintKind = Literal["session", "divergent_resume", "user_fork", "auto_rebase"]
-
-MINT_KIND_LABELS: dict[MintKind, str] = {
-    "session": "Session",
-    "divergent_resume": "divergent resume",
-    "user_fork": "user fork",
-    "auto_rebase": "auto rebase",
-}
-assert MINT_KIND_LABELS.keys() == set(get_args(MintKind))
-
-MINT_KIND_FOR_TRIGGER: dict[ForkTrigger, MintKind] = {
-    ForkTrigger.SCORING_DIVERGENCE: "divergent_resume",
-    ForkTrigger.OPTIMIZER_REBASE: "auto_rebase",
-    ForkTrigger.OPERATOR_DIAG: "user_fork",
-    ForkTrigger.OPERATOR_STEERED: "user_fork",
-    ForkTrigger.OPERATOR_REWIND: "user_fork",
-}
-
-_unbadged = [t for t in ForkTrigger if t not in MINT_KIND_FOR_TRIGGER]
-if _unbadged:
-    raise RuntimeError(
-        f"ForkTrigger members missing from MINT_KIND_FOR_TRIGGER: {_unbadged}. An unbadged "
-        "trigger reads to the operator as a fork they made themselves."
-    )
-del _unbadged
 
 
 class ConfigOverrides(FrozenModel):

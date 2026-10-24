@@ -14,7 +14,7 @@ import {
   pathOf,
 } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
-import type { CellRow, CourseNode } from "@/lib/api";
+import type { CellRow, CourseLineage } from "@/lib/api";
 import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
 import { isSelectedCandidate, selectedCandidateOf, type ArmRow } from "@/lib/types";
@@ -42,7 +42,7 @@ export function MeasurementRun({
     () => (isL4 ? innerPanelIndex(index, viewedPath) : null),
     [isL4, index, viewedPath],
   );
-  const openRun = (run: CourseNode): void => {
+  const openRun = (run: CourseLineage): void => {
     const at = pathOf(run).at(-1);
     if (at) drillInto(at.campaignId, at.cycleId);
   };

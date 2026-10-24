@@ -6,7 +6,7 @@ from typing import get_args
 
 from pydantic import BaseModel
 
-from promptpotter.application.cycle_listing import resolve_campaign_id_hint
+from promptpotter.application.cycle_addressing import resolve_campaign_id_hint
 from promptpotter.application.evidence.head_to_head import (
     GuardDifference,
     GuardState,

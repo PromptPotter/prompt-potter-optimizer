@@ -573,6 +573,9 @@ The read side and the fork-from-divergence write side are [`../operations/mask-p
 
 Open as **Lane C8**: the SAMPLE-SET half, and it is a different substrate rather than a second knob. A scoring mask forks on the existing rails because it re-selects a *candidate* from arms the run measured; a mask that changes which samples a round buys needs a replayable measurement ORDER seeded into the fork, which `CycleSeed` does not carry and `ForkSpec` does not root at. Until it does, a sample-subset mask previews and stops there.
 
+### One served hierarchy
+`campaign → course → round → step → candidate | cell → inner course`, served as ONE entry shape every surface renders. **Decided:** the address is server-minted (`campaign::cycle`, `~` into an inner sandbox — `domain/cycle_paths.py::hierarchy_address`); dataset, optimizer, model, fork, diag and inner are tags, never levels; a fork is an event inside its parent, drawn at its spawn point. Stage 1 (campaign and course) has shipped; stages 2–4 and their contract: [`hierarchy.md`](hierarchy.md).
+
 ### Plus-backlog (opportunistic, unscheduled)
 Hard-Sample Sorter Phase 2/3 · MCP server mode · research extensions.
 

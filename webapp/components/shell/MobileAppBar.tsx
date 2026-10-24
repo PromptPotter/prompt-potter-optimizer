@@ -1,7 +1,7 @@
 "use client";
 import { useAuth } from "@/lib/auth-context";
 import { useIngest } from "@/lib/ingest-flow";
-import { useRegistry } from "@/lib/registry";
+import { useCampaign, useRegistry } from "@/lib/registry";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import { WORKSPACE_LABEL, isWorkspaceTab } from "@/lib/view-tab";
@@ -10,21 +10,18 @@ import s from "./MobileAppBar.module.css";
 
 export function MobileAppBar() {
   const { status, openAuthPrompt } = useAuth();
-  const { campaigns, runningCycles } = useRegistry();
+  const { running: live } = useRegistry();
   const { campaignId, tab, listScreen, showList } = useWorkspace();
   const { openComposer } = useIngest();
   const workspace = isWorkspaceTab(tab);
+  const found = useCampaign(campaignId);
 
   if (listScreen) return null;
 
-  const campaign = workspace ? undefined : campaigns.find((c) => c.campaign_id === campaignId);
-  const title = workspace
-    ? WORKSPACE_LABEL
-    : campaign
-      ? campaign.display_name
-      : "PromptPotter";
+  const campaign = workspace ? null : found;
+  const title = workspace ? WORKSPACE_LABEL : (campaign?.label ?? "PromptPotter");
   const anon = status === "unauthed";
-  const running = runningCycles.length;
+  const running = live.length;
 
   return (
     // `mobile-appbar` is the global marker shell.css keys the ≤bp-md reveal on.

@@ -38,7 +38,7 @@ from pydantic import BaseModel
 
 BASELINE = {
     # Every `.py` under the package.
-    "modules": 449,
+    "modules": 451,
     # Every `__init__.py` among them.
     "init_files": 56,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -77,17 +77,17 @@ BASELINE = {
     # Modules a test run imports: our own, followed through their module-level imports, plus
     # each outside distribution's top name. A test that reaches the server app or an extra
     # moves it as one function does not.
-    "test_reach": 360,
+    "test_reach": 363,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
-    "served_fields": 1642,
+    "served_fields": 1653,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 18,
     # The arms each of those files leaves out: a mirror rotting raises it.
     "p_record_drift": 525,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 180,
+    "p_served": 187,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 11,
     # The rows each of those files leaves out.

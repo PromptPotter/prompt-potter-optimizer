@@ -33,7 +33,8 @@ import {
   type CampaignTab,
   type Tab,
 } from "./view-tab";
-import { useActivePointer, useCampaign, useCycleEntry, useRegistry } from "./registry";
+import { hasTag, tagValue } from "./hierarchy";
+import { useActivePointer, useEntry, useRegistry } from "./registry";
 import { useViewMemory } from "./view-memory";
 
 export interface NavigateOptions {
@@ -92,15 +93,16 @@ export function useMomentAt(path: CyclePath | null): number | null {
   return encodeCyclePath(path) === encodeCyclePath(viewedPath) ? at : null;
 }
 
-// An inner run is absent from `campaigns` and correctly reads false.
+// An inner run is absent from the listing and correctly reads false.
 export function useLeafIsL4(): boolean {
-  return useCampaign(useWorkspace().leafCampaignId)?.self_optimization === true;
+  return hasTag(useEntry(useWorkspace().leafCampaignId), "self_optimization");
 }
 
 // The ROOT hop's dataset; a drilled-in leaf's is `useLeafDatasetName`.
 export function useViewedDatasetName(): string | null {
   const { campaignId, cycleId } = useWorkspace();
-  return useCycleEntry(campaignId, cycleId)?.dataset_name ?? null;
+  const root = campaignId && cycleId ? encodeCyclePath([{ campaignId, cycleId }]) : null;
+  return tagValue(useEntry(root), "dataset");
 }
 
 function urlAddress(): Address | null {
@@ -130,7 +132,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [initialized, setInitialized] = useState(false);
   const [goneAddress, setGoneAddress] = useState<string | null>(null);
 
-  const { cycles } = useRegistry();
+  const { byAddress } = useRegistry();
   const active = useActivePointer();
   const { viewFor, recordView } = useViewMemory();
 
@@ -283,13 +285,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const root = remembered?.[0];
       if (!remembered || !root || root.campaignId !== hop.campaignId) return [path, null];
       if (encodeCyclePath(remembered) === encodeCyclePath(path)) return [path, null];
-      // Inner hops never appear in `/cycles`, so the ROOT hop's existence is the check.
-      const known = cycles.some(
-        (c) => c.campaign_id === root.campaignId && c.cycle_id === root.cycleId,
-      );
+      // Inner hops never appear in `/hierarchy`, so the ROOT hop's existence is the check.
+      const known = byAddress.has(encodeCyclePath([root]));
       return known ? [remembered, mem.viewedCandidateId] : [path, null];
     },
-    [campaignId, viewFor, cycles],
+    [campaignId, viewFor, byAddress],
   );
 
   const navigate = useCallback(

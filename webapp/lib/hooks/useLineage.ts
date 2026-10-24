@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { postCommand } from "@/lib/api";
-import type { CourseNode } from "@/lib/api";
+import type { CourseLineage } from "@/lib/api";
 import {
   primaryMetric,
   countDescendants,
@@ -28,12 +28,12 @@ interface LineageCleanup {
 }
 
 export interface Lineage {
-  tree: CourseNode | null;
+  tree: CourseLineage | null;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
   // The node, not its id: a bare cycle id cannot supply `pathOf` or `nodeKeyOf`.
-  forkedFrom: ReadonlyMap<string, CourseNode>;
+  forkedFrom: ReadonlyMap<string, CourseLineage>;
   expanded: ReadonlySet<string>;
   onLaneActivate: (courseKey: string) => void;
   // The only write path for `showForest`: store and view memory move together.
@@ -118,8 +118,8 @@ export function useLineage({
     [index],
   );
 
-  const forkedFrom = useMemo<ReadonlyMap<string, CourseNode>>(() => {
-    const m = new Map<string, CourseNode>();
+  const forkedFrom = useMemo<ReadonlyMap<string, CourseLineage>>(() => {
+    const m = new Map<string, CourseLineage>();
     // Own-path `candidates`, never `course`: the server dissolves a FORK onto its parent's timeline.
     for (const cand of index.get(viewedKey)?.candidates ?? []) {
       for (const child of cand.children) m.set(cand.id, child);
