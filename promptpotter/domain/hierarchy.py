@@ -17,6 +17,7 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
     StopReason,
+    stop_next_step,
 )
 from promptpotter.domain.results import ArmReading, DisplayMetric, RunStanding
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
@@ -63,18 +64,13 @@ class HierarchyStat(FrozenModel):
     label: str
     value: str = Field(description="The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`.")
     sub: str | None = Field(description="The second line under the value; null where none.")
-    amount: float | None = Field(
-        description="The number `value` words, for a meter's geometry only: never re-worded and "
-        "never re-ranked. Null where `value` words no number."
-    )
 
 
 class HierarchySpan(FrozenModel):
-    """When an entry opened, last moved and closed."""
+    """When an entry opened and last moved."""
 
     opened_at: str
     last_at: str = Field(description="The newest activity under the entry.")
-    closed_at: str | None = Field(description="Null while the entry's run has not ended.")
 
 
 class HierarchyProducer(FrozenModel):
@@ -108,6 +104,11 @@ class HierarchyState(FrozenModel):
     pause: PauseReading | None = Field(description="Why the run reads paused; null otherwise.")
     admission: RunAdmission
     stop_reason: StopReason | None = Field(description="Why the run ended; null while it has not.")
+    next_step: str = Field(
+        description="What the operator does now, as `stop_reason` states it "
+        "(`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. "
+        "Empty while the run has not stopped, or where its reason owes nothing."
+    )
     intervened: bool = Field(
         description="An operator intervened by hand, so the run is no longer purely reproducible."
     )
@@ -124,6 +125,7 @@ class HierarchyState(FrozenModel):
             pause=run.pause,
             admission=run.admission,
             stop_reason=stop,
+            next_step=stop_next_step(stop),
             intervened=index is not None and index.human_intervened,
         )
 
@@ -159,7 +161,6 @@ class CourseSpawn(FrozenModel):
 
     parent: str = Field(description="The address of the course it branched from.")
     at_round: int | None = Field(description="The round it branched at; null where none was named.")
-    at_offset: int = Field(description="The parent ledger's offset the cut was taken at.")
     from_candidate: str | None = Field(
         description="The address of the parent candidate it hangs from: the one its fork record "
         "names, else the reference its first round re-read, else the parent's origin. Served on "
@@ -380,9 +381,9 @@ class StepFacts(FrozenModel):
     )
     gap_before_s: float = Field(
         ge=0,
-        description="Seconds of silence before it: since the newer of the window's previous step "
-        "and its own course's previous step or heartbeat. 0 where neither exists. A heartbeat "
-        "takes no slot of a window, so a long open call never serves one empty.",
+        description="Seconds of silence before it: since the newest step or heartbeat anywhere in "
+        "the family that the window knows of; 0 where none. A heartbeat takes no slot of a "
+        "window, so a long open call never serves one empty.",
     )
     activity: ActivityItem = Field(
         description="The record's reading. A `running` step with no later step on its course is a "

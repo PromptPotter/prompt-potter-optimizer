@@ -38,8 +38,7 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
 the key of a row on every surface; its individual is not, since a repair re-measures one individual on
 two courses. `webapp/lib/ids.ts::courseAddressOf` is the one place a candidate's address is cut back to
 its course. A step's offset is the line index in its course's OWN ledger — immutable, totally
-ordered, and the space `?at=` already speaks — so a step, a moment and a fork's `spawn.at_offset`
-share one axis.
+ordered, and the space `?at=` already speaks — so a step and a moment share one axis.
 
 One minter, `domain/cycle_paths.py::hierarchy_address`, and **a course's address IS its encoded `CyclePath`** (`encode_cycle_path`, `webapp/lib/ids.ts::encodeCyclePath`), so the webapp mints none: it reads `address` and decodes a course's where a route wants typed hops. A cycle directory is never renamed, so a retired branch keeps its address for ever — which is what makes it the key of an open set, a list and an ETag. **A fork is stored as a sibling cycle and served as a child course of its campaign**, its `facts.spawn` naming the event it was born at: the parent course, the round and ledger offset of the cut, the address of the candidate it was cut from, the trigger and the direction (`CycleIndex` + `domain/run_records.py::ForkSpec`).
 

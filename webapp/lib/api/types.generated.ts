@@ -94,13 +94,6 @@ export interface ServedDashboard {
   /** The cycle's phase, derived at the read (`derive_run_state`) — never the
    * runner's own `declared_phase`, which says `running` forever after a kill. */
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
-  /** How the cycle reads: `run_phase` and `stop_reason` as one word and one mark. */
-  status: RunStatus;
-  /** What the operator does now, as the cycle's `stop_reason` states it
-   * (`STOP_REASON_INFO::next_step`) — the sentence the terminal and
-   * `review.md` advise. Empty where the cycle has not stopped, or its reason
-   * states that nothing is owed. */
-  next_step: string;
   /** The cycle's producer, derived with the phase. */
   producer: ProducerReading;
   /** Which run verbs the cycle admits now (`RunState.admission`): the verb the run
@@ -1086,12 +1079,6 @@ export interface DashboardError {
   next_step: string;
 }
 
-/** How a run reads on a row: one word and the mark drawn beside it. */
-export interface RunStatus {
-  label: string;
-  mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
-}
-
 /** One cycle's producer as served: its state, its two server-measured clocks and its words. */
 export interface ProducerReading {
   state: 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'claimed' | 'absent';
@@ -1771,6 +1758,12 @@ export interface DeterminismClamp {
    * systematically, so an unpinned route makes a measurement whose producer
    * nothing can name. `None` (default) lets the gateway re-rank per call. */
   route_order: string[] | null;
+}
+
+/** How a run reads on a row: one word and the mark drawn beside it. */
+export interface RunStatus {
+  label: string;
+  mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
 }
 
 /** The bench set and grader behind a headline; two compare only where every field agrees. */
@@ -2842,9 +2835,6 @@ export interface HierarchyStat {
   value: string;
   /** The second line under the value; null where none. */
   sub: string | null;
-  /** The number `value` words, for a meter's geometry only: never re-worded and
-   * never re-ranked. Null where `value` words no number. */
-  amount: number | null;
 }
 
 /** A course — one cycle's run, root, fork, diag or inner — as one hierarchy entry. */
@@ -3013,6 +3003,11 @@ export interface HierarchyState {
   admission: RunAdmission;
   /** Why the run ended; null while it has not. */
   stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  /** What the operator does now, as `stop_reason` states it
+   * (`STOP_REASON_INFO::next_step`) — the sentence the terminal and
+   * `review.md` advise. Empty while the run has not stopped, or where its
+   * reason owes nothing. */
+  next_step: string;
   /** An operator intervened by hand, so the run is no longer purely reproducible. */
   intervened: boolean;
 }
@@ -3030,13 +3025,11 @@ export interface HierarchyProducer {
   alert: ProducerAlert | null;
 }
 
-/** When an entry opened, last moved and closed. */
+/** When an entry opened and last moved. */
 export interface HierarchySpan {
   opened_at: string;
   /** The newest activity under the entry. */
   last_at: string;
-  /** Null while the entry's run has not ended. */
-  closed_at: string | null;
 }
 
 /** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
@@ -3071,8 +3064,6 @@ export interface CourseSpawn {
   parent: string;
   /** The round it branched at; null where none was named. */
   at_round: number | null;
-  /** The parent ledger's offset the cut was taken at. */
-  at_offset: number;
   /** The address of the parent candidate it hangs from: the one its fork record
    * names, else the reference its first round re-read, else the parent's
    * origin. Served on the subtree read; null in the listing, which reads no
@@ -3223,10 +3214,9 @@ export interface StepFacts {
   /** The record's own time, raised to its file predecessor's when the two invert
    * (records are stamped at construction but appended later). */
   ts: string;
-  /** Seconds of silence before it: since the newer of the window's previous step
-   * and its own course's previous step or heartbeat. 0 where neither exists.
-   * A heartbeat takes no slot of a window, so a long open call never serves
-   * one empty. */
+  /** Seconds of silence before it: since the newest step or heartbeat anywhere in
+   * the family that the window knows of; 0 where none. A heartbeat takes no
+   * slot of a window, so a long open call never serves one empty. */
   gap_before_s: number;
   /** The record's reading. A `running` step with no later step on its course is a
    * call still open. */

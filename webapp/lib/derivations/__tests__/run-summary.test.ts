@@ -4,6 +4,7 @@ import { runSummary } from "../run-summary";
 import {
   armReading,
   dash,
+  hierarchyState,
   pairedReading,
   runStanding,
   servedLabel,
@@ -20,10 +21,14 @@ const arm = (round: number, idx: number, changes_description = "") =>
   });
 
 describe("runSummary", () => {
+  const state = hierarchyState({
+    status: { label: "served out of lives", mark: "failed" },
+    stop_reason: "lives_exhausted",
+    next_step: "Raise the lives and resume.",
+  });
   const finished = dash({
     cycle_id: "cycle_9",
     stop_reason: "lives_exhausted",
-    next_step: "Raise the lives and resume.",
     rounds: [
       summaryRound({ round: 0, candidates: [arm(0, 0)] }),
       summaryRound({ round: 1 }),
@@ -39,19 +44,19 @@ describe("runSummary", () => {
   });
 
   it("snapshots the served winner against its origin, never its own round's level", () => {
-    const s = runSummary(finished);
+    const s = runSummary(finished, state);
     expect(s?.winnerLabel).toBe("C2.2");
     expect(s?.vsOrigin).toBe("50% → 62%");
     expect(s?.changes).toBe("step-by-step thinking style");
   });
 
   it("takes the served count of closed rounds", () => {
-    expect(runSummary(finished)?.rounds).toBe(2);
+    expect(runSummary(finished, state)?.rounds).toBe(2);
   });
 
-  it("carries the served status word, the next step and the cycle it froze verbatim", () => {
-    const s = runSummary(finished);
-    expect(s?.state).toBe(finished.status.label);
+  it("carries the course's served status word and next step, and the cycle it froze", () => {
+    const s = runSummary(finished, state);
+    expect(s?.state).toBe("served out of lives");
     expect(s?.nextStep).toBe("Raise the lives and resume.");
     expect(s?.cycleId).toBe("cycle_9");
   });
@@ -65,6 +70,7 @@ describe("runSummary", () => {
           summaryRound({ round: 1, improved: false, candidates: [arm(1, 0), arm(1, 1)] }),
         ],
       }),
+      state,
     );
     expect(lost?.winnerLabel).toBe("C0");
     expect(lost?.rounds).toBe(1);
@@ -72,8 +78,9 @@ describe("runSummary", () => {
   });
 
   it("returns null without a cycle, and a winner-less summary before round 0 closes", () => {
-    expect(runSummary(null)).toBeNull();
-    const bare = runSummary(dash({}));
+    expect(runSummary(null, state)).toBeNull();
+    expect(runSummary(finished, null)).toBeNull();
+    const bare = runSummary(dash({}), state);
     expect(bare?.winnerLabel).toBeNull();
     expect(bare?.rounds).toBeNull();
   });
