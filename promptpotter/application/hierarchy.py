@@ -16,7 +16,7 @@ from promptpotter.domain.campaign import (
     LifecycleFilter,
     ceiling_meter,
 )
-from promptpotter.domain.cycle_listing import CycleIndex
+from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import (
     CycleHop,
     CyclePath,

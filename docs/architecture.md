@@ -509,8 +509,8 @@ wearing three names. What survives is *not* an entity:
   Workspace: the tenant's latest launch, which `resume` defaults to. It is
   not the live set — several cycles can run at once, each saying so by its
   own `run_phase`.
-- **`mint_kind: "session"`** — the sidebar's label for a *root cycle*
-  (`domain/cycle_listing.py::CycleIndex.mint_kind`). A label, not a container.
+- **`mint: "root"`** — a course entry's `facts.mint` for a *root cycle*
+  (`application/hierarchy.py::course_entry`). A label, not a container.
 
 `new` mints a fresh Campaign + root cycle; `resume` follows the pointer;
 `fork` mints a sibling cycle inside the same campaign. **A fork never switches the optimizer
@@ -520,17 +520,6 @@ an unchanged declaration get distinct `campaign_id`s but share their root
 cycle id (content-addressed) and origin score (the dataset-scoped archive
 cache-hits every sample) — cross-campaign evidence pooling on a declaration
 rides the `measurements/` layer, not campaign identity.
-
-#### `mint_kind` taxonomy
-
-An operator-facing label for WHAT MINTED a cycle, computed
-server-side from the id's own kind plus the fork trigger, used by the webapp
-sidebar: `session` (a session root run — `resume` extends it),
-`divergent_resume` (a `resume --fork-on-divergence` branch),
-`user_fork` (every operator-initiated branch folds into this one kind —
-`domain/run_records.py::MINT_KIND_FOR_TRIGGER` is the table, and it raises at
-import on an unbadged trigger), `auto_rebase` (a branch an optimizer's controller
-requested — potter's L2/L3 rebase; fork trigger `optimizer_rebase`, `issued_by` naming the layer).
 
 #### Three data scopes — campaign / dataset / workspace
 

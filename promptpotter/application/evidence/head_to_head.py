@@ -34,7 +34,7 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
     worked_seconds,
 )
-from promptpotter.domain.cycle_listing import RunStatus
+from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.paired_reading import PairedReading, ReadingState
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel

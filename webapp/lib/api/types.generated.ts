@@ -2489,114 +2489,6 @@ export interface FileContentResponse {
   content: string | null;
 }
 
-export interface CampaignListResponse {
-  /** List of campaign summaries */
-  campaigns: CampaignSummary[];
-  /** Total number of campaigns */
-  total: number;
-}
-
-export interface CampaignSummary {
-  /** Campaign id ({dataset}__{rand6}) — one RUN of an origin */
-  campaign_id: string;
-  /** Dataset this campaign optimizes */
-  dataset_name: string;
-  /** Operator-supplied campaign label */
-  label: string;
-  /** What every surface calls the campaign: its label, else its dataset. */
-  display_name: string;
-  /** The id's `__xxxxxx` tail while it is all that tells one dataset's campaigns
-   * apart; null once the campaign carries a label, or where the id has no
-   * tail. */
-  id_suffix: string | null;
-  /** The campaign's line: the cycle answering for it now and how that cycle stands
-   * — its run state, its standing, its rounds and the budget binding them.
-   * Null while the root cycle is not on disk yet. Its `budget_rounds` is null
-   * where the root config did not resolve. */
-  line: LineStanding | null;
-  /** ISO 8601 creation timestamp */
-  created_at: string;
-  /** The newest activity on any of the campaign's cycles, `created_at` where none
-   * has any. The list is served in this order, newest first. */
-  updated_at: string;
-  /** The campaign's root cycle id — the content address of its origin and its run
-   * declaration together. Campaigns on one origin under one declaration share
-   * it and differ only in the random `campaign_id` suffix, which is what
-   * makes them separate RUNS of it; two arms of a head-to-head never share
-   * one. The sidebar groups the forest by this key. */
-  root_cycle_id: string;
-  /** This campaign optimizes the optimizer itself (L4), answered off the connector
-   * its declaration froze at mint by the connector registry. The one test a
-   * surface draws the 'inner loops' disclosure and the self-optimization
-   * panel variants on. */
-  self_optimization: boolean;
-  /** Operator visibility intent: 'active' (default sidebar), 'archived' (hidden),
-   * 'deleted' (soft-marked, data retained) */
-  lifecycle_status: 'active' | 'archived' | 'deleted';
-  /** This campaign's share of `QuotaStatus.spend_lifetime`: every cycle's ledger,
-   * forks and forwarded L4 inner spend included, plus spend banked when one
-   * of its cycles was deleted. A wider scope than `spend_metered`, which
-   * reads the campaign's line alone. */
-  spend_lifetime: LifetimeSpend;
-  /** The campaign's LINE — the root and every cycle a rebase handed it to — in the
-   * ceiling's meter, by bucket: the bill, or the search's incurred USD for a
-   * controlled arm. Part of `campaign_metered_usd`, which also counts every
-   * other cycle. */
-  spend_metered: MeteredSpend;
-  /** What the campaign's money ceiling counts, in its meter: every cycle's own
-   * spend once, siblings and deleted cycles included. The number a surface
-   * sets beside the campaign's cap. */
-  campaign_metered_usd: number;
-  /** The headline (`architecture.md` § The bench score is not an optimizer's
-   * selection), read off the passes its line's ledgers banked, under the
-   * formula the line runs — whichever cycle rebases handed the line to.
-   * `status` says where it stands and whether its pass may be asked for;
-   * `selected` is null until the line grades its pick. Null where the root
-   * config did not resolve — a manifest this build cannot read. */
-  bench: BenchScore | null;
-  /** What the ROOT course runs with — a second transport of the answer `GET
-   * /campaigns/{id}/pipeline` gives at the root, never a second source. Null
-   * when the root pipeline did not resolve. `budget_rounds` is the DECLARED
-   * `budget.rounds`; 0 means origin only. */
-  runs_with: CampaignRunsWith | null;
-  /** Whether the campaign is a CONTROLLED arm of a head-to-head (its declaration's
-   * `compare` purpose, frozen at mint), as one sentence
-   * (`domain/campaign.py::comparison_line`): an arm reads no other campaign's
-   * measurements, refuses a steer and spends its declared budget; an ordinary
-   * campaign optimizes with everything that helps. */
-  comparison: string;
-}
-
-/** A campaign's line as one value: the cycle that answers for it now, and how that cycle stands. */
-export interface LineStanding {
-  /** The cycle answering for the campaign. */
-  holder: CycleHop;
-  /** The campaign row's word and mark: `Archived` where the campaign is, else the
-   * holder's run state as `run_phase_label` words it. */
-  status: RunStatus;
-  /** The holder's derived run state, as `/cycles` serves. */
-  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
-  producer_attached: boolean;
-  /** Why the holder ended; null while it has not. */
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  /** Where the holder's run stands; null until its round 0 closes. */
-  standing: RunStanding | null;
-  /** Rounds the holder closed AFTER the origin. */
-  rounds_closed: number;
-  /** The `budget.rounds` binding the holder: what its last launch declared with the
-   * standing operator budget laid over, as its dashboard's `run_limits`
-   * reads; before any launch, its campaign's. 0 is origin only; null is no
-   * rounds axis. */
-  budget_rounds: number | null;
-  /** `rounds_closed` against `budget_rounds` as a campaign row prints it
-   * (`rounds_line`). */
-  rounds_line: string;
-  /** What `budget_rounds` says beside a rounds count (`rounds_cap_note`); null
-   * where no rounds axis binds. */
-  rounds_cap_note: string | null;
-  human_intervened: boolean;
-}
-
 /** The caller's open check-ins, most recently edited first. */
 export interface DraftListResponse {
   drafts: DraftSummary[];
@@ -2650,7 +2542,6 @@ export interface DraftCampaignWire {
   /** A count, not the list: a library runs to tens of thousands of entries. */
   candidate_library_size: number;
   created_at: string;
-  updated_at: string;
   /** The pipeline this draft runs. Who may move a node's axes is
    * `node_config_schema`'s answer alone. */
   active_steps: string[];
@@ -3151,7 +3042,7 @@ export interface WorkspaceStorageEntry {
   reports_bytes: number;
 }
 
-/** The tenant's latest launch — not the set of live runs, which is `run_phase` on `/cycles`. */
+/** The tenant's latest launch — not the set of live runs, which is `state.producer` on `/hierarchy`. */
 export interface ActiveSessionResponse {
   /** Tenant the pointer belongs to — the caller's own, always known */
   tenant_id: string;
@@ -3159,54 +3050,6 @@ export interface ActiveSessionResponse {
   campaign_id: string | null;
   /** Cycle of the latest launch; null when no session is active. */
   cycle_id: string | null;
-}
-
-export interface CyclesResponse {
-  tenant_id: string;
-  /** Active cycle per active_session.json; null when no session is active. */
-  active_cycle_id: string | null;
-  cycles: CycleListEntry[];
-}
-
-export interface CycleListEntry {
-  /** Campaign the cycle belongs to */
-  campaign_id: string;
-  cycle_id: string;
-  /** Immediate parent for siblings (forks/diag); null for roots. Sidebar uses this
-   * to nest siblings. */
-  parent_cycle_id: string | null;
-  dataset_name: string;
-  mint_kind: 'session' | 'divergent_resume' | 'user_fork' | 'auto_rebase';
-  is_root: boolean;
-  /** Why the cycle ended; null while it has not. Label, outcome and next step
-   * derive from the one STOP_REASON_INFO table — never re-mapped per surface. */
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  /** The single run-state value (RunPhase). Computed once by derive_run_state from
-   * lifecycle + control flags + freshness; every picker dot and badge reads
-   * this, none re-derive it. 'terminal' pairs with `stop_reason` for the
-   * reason label. */
-  run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
-  /** A process holds this cycle (`ProducerReading.attached`, derived with
-   * `run_phase`): running, holding for the operator, or running out a pause.
-   * What the dock counts as in flight. */
-  producer_attached: boolean;
-  /** How the cycle reads on a row: `run_phase` and `stop_reason` as one word and
-   * one mark, so no surface words a phase itself. */
-  status: RunStatus;
-  /** Which run verbs this cycle admits now, derived with `run_phase` — what the
-   * dispatcher refuses on, so a listing never offers a verb the cycle would
-   * decline. */
-  run_admission: RunAdmission;
-  /** Why the cycle reads `paused` — what caused it, who asked and what the operator
-   * does next (`RunState.pause`); null in every other phase. */
-  pause: PauseReading | null;
-  /** Rounds this cycle has closed AFTER the origin — the unit a rounds cap counts. */
-  rounds_closed: number;
-  updated_at: string;
-  /** True once an operator manually intervened (e.g. skip-searchpoint); the cycle
-   * is babysat and no longer purely reproducible. Drives the 'babysat' badge;
-   * orthogonal to run_phase. */
-  human_intervened: boolean;
 }
 
 export interface MachineStatusResponse {
@@ -3259,8 +3102,9 @@ export interface MachineSlot {
   /** WHAT holds the slot, by `kind`: a `campaign_launch` or a `scoring_pass` (a
    * paid verb outside any run). */
   holder: CampaignLaunch | ScoringPass;
-  /** The cycle the job holds, which `/cycles` lists with its run phase — `scoring`
-   * for a pass on it; null for a fresh mint and a pass scoring no cycle. */
+  /** The cycle the job holds, which `/hierarchy` serves as a course entry with its
+   * run phase — `scoring` for a pass on it; null for a fresh mint and a pass
+   * scoring no cycle. */
   cycle: CycleHop | null;
   /** user_id of the account whose job holds the slot */
   user: string;
@@ -4409,7 +4253,7 @@ export type ProducerState = 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'cl
 // The fine-grained activity axis, `dashboard.json::state` (domain/phases.py::DashboardState).
 export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
 
-// `GET /campaigns?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'.
+// `GET /hierarchy?lifecycle=` (domain/campaign.py::LifecycleFilter); absent = 'active'.
 export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
@@ -4740,14 +4584,6 @@ export const GUARD_STATE_LABELS: Record<'controlled' | 'uncontrolled' | 'differs
   'controlled': "controlled",
   'uncontrolled': "not controlled",
   'differs': "differs",
-};
-
-// Mirror of domain/run_records.py::MINT_KIND_LABELS — the single wording.
-export const MINT_KIND_LABELS: Record<'session' | 'divergent_resume' | 'user_fork' | 'auto_rebase', string> = {
-  'session': "Session",
-  'divergent_resume': "divergent resume",
-  'user_fork': "user fork",
-  'auto_rebase': "auto rebase",
 };
 
 // Mirror of domain/dashboard_rows.py::SAMPLE_MOVEMENT_LABELS — the single wording.

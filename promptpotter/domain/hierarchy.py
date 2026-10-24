@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
-from promptpotter.domain.cycle_listing import CycleIndex, RunStatus
+from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.phases import (
     PauseReading,
     ProducerAlert,

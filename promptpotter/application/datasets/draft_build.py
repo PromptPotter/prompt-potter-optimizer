@@ -88,7 +88,6 @@ class DraftCampaignWire(StrictModel):
         description="A count, not the list: a library runs to tens of thousands of entries."
     )
     created_at: str
-    updated_at: str
     active_steps: list[str] = Field(
         description="The pipeline this draft runs. Who may move a node's axes is "
         "`node_config_schema`'s answer alone."
@@ -256,7 +255,6 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         origin_prompts={node: dict(fields) for node, fields in draft.origin_prompts.items()},
         candidate_library_size=len(draft.candidate_library),
         created_at=draft.created_at,
-        updated_at=draft.updated_at,
         active_steps=draft.active_steps(),
         pipeline_view=resolution.view,
         node_config_schema=resolution.node_config_schema,

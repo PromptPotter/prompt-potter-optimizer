@@ -3,8 +3,8 @@
 > **Scope.** The two top levels of the one hierarchy `campaign → course → round → step → candidate | cell → inner course`.
 > Stage 1 ships ONE served entry shape for campaign and course, minted in ONE module with ONE run-state
 > derivation, and every surface that lists, switches, docks or heads a run renders it directly. Stages
-> 2–4 EXTEND it (§ 10) and reshape nothing. The arc's record is the **One served hierarchy** bullet
-> under [`roadmap.md`](roadmap.md) § Captured — pending triage; this file is the contract. A
+> 2–4 EXTEND it (§ 10) and reshape nothing. The arc's record is
+> [`roadmap.md`](roadmap.md) § One served hierarchy; this file is the contract. A
 > `<!-- target: … -->` is a probe a later group arms by renaming it `probe:` in the commit that makes it hold.
 >
 > **Binding, from the operator (2026-10-24):** one hierarchy, no adapter layer; "eliminate as much code
@@ -14,8 +14,7 @@
 > moment) → run card (the same card, one layer down, at a chosen moment) → compare channel → time lane.
 > On-disk data stays READABLE until 2026-10-26; served shapes and code change freely now.
 >
-> **This file is committed by the builder group whose commit makes its probes true (§ 9, group 3).**
-> Until then it rides the working tree uncommitted, which `git ls-files` keeps out of `doc-claims`.
+> **Stage 1 has shipped (§ 9, groups 1a–3); every probe in this file holds.**
 
 ## 0. Direction — the cost of the next change
 
@@ -183,7 +182,7 @@ mint record (below). <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpo
 It stands where five models each re-packaged the same `RunState` today (`CycleListEntry`,
 `LineStanding`, `CourseLineage`, `ServedDashboard`, `HeadToHeadRow`); after stage 1 `RunStatus.of` has three
 callers — this constructor, the dashboard (stage 4 folds it) and the head-to-head row.
-<!-- target: git grep -cE "RunStatus\.of\(" -- promptpotter == 3 -->
+<!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 3 -->
 **A campaign entry's `state` IS its line course's**, chosen by `CampaignStore.line_holder` and served
 again under the course's own address: a campaign "runs" when its line runs, which is what the sidebar
 mark has always meant. One builder words both, so they cannot disagree.
@@ -252,7 +251,7 @@ is what makes the address the key of an open set, a React list and, in stage 2, 
 | domain | `domain/hierarchy.py` | § 1 — the models and `HierarchyState.of` |
 | domain | `domain/campaign.py` | `CampaignRunsWith`, `RunsWithParam`, `VendorModels` — beside `RunDeclaration`, so their producer (`application/pipeline_resolve.py`) does not import the served-entry module |
 | domain | `domain/spend.py` | `UserSpend`, `ZERO_SPEND`, `LifetimeSpend` — domain facts `CampaignFacts` holds, so `domain/` imports no upper layer |
-| domain | `domain/cycle_listing.py` | `CycleIndex.open_rounds` and `CycleIndex.elects_on`, folded in the one standing scan `read_cycle_index` already runs |
+| domain | `domain/cycle_index.py` | `CycleIndex.open_rounds` and `CycleIndex.elects_on`, folded in the one standing scan `read_cycle_index` already runs |
 | domain | `domain/cycle_paths.py` | `hierarchy_address` |
 | application | `application/hierarchy.py` | `course_entry(stores, inside, campaign, cycle_dir, index, *, moment, runs_with, config)` · `campaign_entry(stores, inside, campaign, *, depth)` · `list_hierarchy(stores, *, inside, dataset, lifecycle, campaign_id, attached_only, depth)` · `hierarchy_version(stores, *, inside)` |
 | presentation | `presentation/api/routers/hierarchy.py` | `GET /hierarchy` |
@@ -371,14 +370,14 @@ recorded as decided.
 `application/campaign_listing.py` whole; `list_cycles`, `CyclesResponse`, the cycle-list version and
 `CycleListEntry`, `LineStanding`, `rounds_line`, `rounds_cap_note`, `CampaignSummary`,
 `CampaignListResponse`, `total`, `campaign_metered_usd`, `id_suffix`, `comparison`, `display_name`;
-`CampaignStore._list_entry` (`enumerate_cycles` yields `(cycle_dir, CycleIndex)`); `_course_scalars`
+`CampaignStore._list_entry` (`enumerate_cycles` yields `(CycleHop, CycleIndex)`); `_course_scalars`
 and the course half of the tree's course model; the two list routes; `webapp/lib/derivations/campaign-forest.ts`,
 `campaign-summary.ts` and its test, `lib/names.ts`; `useCampaign`, `useCycleEntry`, `forest`,
 `runningCycles`, `innerStats`, `innerFacts`, `byDataset`'s input shape, `RunGroup`, `OriginGroup`,
 `NodeKind`, `nodeKey`, `MintKind`, `LineageNode`'s course half. `campaign_list_version` goes in group
 1a, its body moved whole into `hierarchy_version`.
-<!-- target: git grep -cE "class (CycleListEntry|LineStanding|CampaignSummary|CampaignListResponse|CyclesResponse)\b" -- promptpotter == 0 -->
-<!-- target: git grep -cE "def (list_cycles|cycle_list_version|campaign_list_version)\(" -- promptpotter == 0 -->
+<!-- probe: git grep -cE "class (CycleListEntry|LineStanding|CampaignSummary|CampaignListResponse|CyclesResponse)\b" -- promptpotter == 0 -->
+<!-- probe: git grep -cE "def (list_cycles|cycle_list_version|campaign_list_version)\(" -- promptpotter == 0 -->
 
 **Renamed**, each with its doc row in the same commit: `application/cycle_listing.py` →
 `application/cycle_addressing.py` (what is left: the active pointer and the four resolvers the CLI
@@ -396,7 +395,7 @@ in group 1a (the hierarchy models, the envelope listed under both level variants
 deleted models' in group 3; `p_served` 180 → 197 in group 1a — the new entry fields have no webapp
 reader until group 2, which brings it back down, and a `facts` field still unread after group 2 is
 deleted there — group 2 ends at 201 (three `RunStanding` fields wait on stage 4's chip row, the
-draft's two `updated_at` on group 3) and group 3 lands at or below 192; `test_reach` 360 → 362 in group 1a (the § 3 journey imports `application/hierarchy.py`);
+draft's two `updated_at` on group 3) and group 3 lands at 187 (`served_fields` 1653); `test_reach` 360 → 362 in group 1a (the § 3 journey imports `application/hierarchy.py`);
 `test_files` 6, `test_functions` 25, `claude_md` 21, `deferred_imports` 7 unchanged.
 
 ## 8. Tests

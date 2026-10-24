@@ -7,7 +7,7 @@ from typing import NamedTuple
 
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_listing import CycleIndex, CycleListEntry
+from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath, encode_cycle_path
 from promptpotter.domain.hierarchy import HierarchyCourse
 from promptpotter.domain.lineage_tree import (
@@ -77,7 +77,7 @@ class _Reads:
     def __init__(self, *, moment: Moment | None, courses: Mapping[str, HierarchyCourse]) -> None:
         self.moment = moment
         self.courses = courses
-        self._cycles: dict[Path, list[CycleListEntry]] = {}
+        self._cycles: dict[Path, list[tuple[CycleHop, CycleIndex]]] = {}
         self._campaigns: dict[tuple[Path, str], Campaign | None] = {}
         # Keyed on the full identity: a cycle_id is a content hash, so campaigns and inner cells repeat it.
         self.seen: set[tuple[Path, str, str]] = set()
@@ -86,7 +86,7 @@ class _Reads:
     def row(self) -> int:
         return next(self._rows)
 
-    def cycles(self, stores: Stores) -> list[CycleListEntry]:
+    def cycles(self, stores: Stores) -> list[tuple[CycleHop, CycleIndex]]:
         if (key := stores.base_dir) not in self._cycles:
             self._cycles[key] = stores.campaigns.enumerate_cycles()
         return self._cycles[key]
@@ -175,12 +175,9 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
     leaf = path[-1]
     reads.seen.add((stores.base_dir, leaf.campaign_id, leaf.cycle_id))
     out: list[FamilyCourse] = []
-    for entry in reads.cycles(stores):
-        if entry.parent_cycle_id != leaf.cycle_id:
+    for hop, index in reads.cycles(stores):
+        if index.parent_cycle_id != leaf.cycle_id or hop.campaign_id != leaf.campaign_id:
             continue
-        if entry.campaign_id != leaf.campaign_id:
-            continue
-        hop = CycleHop(campaign_id=entry.campaign_id, cycle_id=entry.cycle_id)
         if (key := (stores.base_dir, hop.campaign_id, hop.cycle_id)) in reads.seen:
             continue
         reads.seen.add(key)
@@ -195,11 +192,10 @@ def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[Famil
 
     sandbox = inner_sandbox_store(stores, leaf.campaign_id, leaf.cycle_id)
     if sandbox is not None:
-        for entry in reads.cycles(sandbox):
+        for hop, index in reads.cycles(sandbox):
             # A course whose campaign does not load has no entry, so it is no course of the tree.
-            if entry.parent_cycle_id or reads.campaign(sandbox, entry.campaign_id) is None:
+            if index.parent_cycle_id or reads.campaign(sandbox, hop.campaign_id) is None:
                 continue
-            hop = CycleHop(campaign_id=entry.campaign_id, cycle_id=entry.cycle_id)
             if (key := (sandbox.base_dir, hop.campaign_id, hop.cycle_id)) in reads.seen:
                 continue
             reads.seen.add(key)

@@ -43,7 +43,7 @@ interface TreeAddressing {
   viewedAddress: string | null;
   viewedMask: TreeMask | null;
   viewedMoment: TreeMoment | null;
-  // Campaigns whose every `/cycles` row is terminal: read once, re-asked only by an invalidation.
+  // Campaigns whose every course entry is settled: read once, re-asked only by an invalidation.
   resting: ReadonlySet<string>;
 }
 

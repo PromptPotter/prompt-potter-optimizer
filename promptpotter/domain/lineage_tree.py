@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from promptpotter.domain.cycle_listing import RunStatus
+from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.hierarchy import CourseKind, HierarchyCourse
 from promptpotter.domain.opt_search_point import Variation
