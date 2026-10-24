@@ -60,7 +60,7 @@ reading: its rows are in that version. `head_to_head.json` beside them is the ev
 One workspace per optimizer, `<home>/<optimizer>/`, because the measurement archive and the δ ruler
 pool across the campaigns of one workspace — a shared one lets one optimizer's run move another's
 decisions. Each campaign is a child process, as many at once as free memory holds
-(`scripts/gate.py::RamBudget`), never past the core count. In each workspace:
+(`scripts/gate.py::RamBudget`), never past the core count or `OFFLINE_RUN_CHILDREN_MAX`. In each workspace:
 
 | Path | What it is |
 |---|---|

@@ -33,6 +33,7 @@ from processes import (
     git,
     metered,
     open_job,
+    queue_behind_siblings,
     run,
 )
 
@@ -47,74 +48,31 @@ _NEXT_WORKER_MB = 80
 # Each lane's heaviest check at full width (offline-run; a cold next-build): below their sum, in turn.
 _PY_LANE_MB = 1200
 _WEB_LANE_MB = 3700
-# A check's child inherits the reading, so one gate sizes every fan-out from one number.
-_FREE_MB = "PROMPTPOTTER_GATE_FREE_MB"
+# Past these, free memory is no reason to widen: concurrent processes were killed for low memory.
+OFFLINE_RUN_CHILDREN_MAX = 8
+NEXT_WORKERS_MAX = 4
 
 
 @dataclass(frozen=True)
 class RamBudget:
-    """Free memory, read off the box once per gate: what every fan-out the gate starts is sized by."""
+    """Free memory, read off the box when a fan-out starts: what that fan-out is sized by."""
 
     free_mb: int
 
     @classmethod
     def read(cls) -> RamBudget:
-        inherited = os.environ.get(_FREE_MB)
-        return cls(int(inherited) if inherited else free_mb())
+        return cls(free_mb())
 
     def lanes_overlap(self) -> bool:
         return self.free_mb >= _PY_LANE_MB + _WEB_LANE_MB
 
     def offline_run_children(self, tasks: int) -> int:
-        return max(2, min(self.free_mb // _OFFLINE_RUN_CHILD_MB, tasks, os.cpu_count() or 2))
+        fit = self.free_mb // _OFFLINE_RUN_CHILD_MB
+        return max(2, min(fit, tasks, os.cpu_count() or 2, OFFLINE_RUN_CHILDREN_MAX))
 
     def next_workers(self) -> int:
-        return max(1, min(self.free_mb // _NEXT_WORKER_MB, (os.cpu_count() or 2) - 1))
-
-
-def _locked(fd: int) -> bool:
-    # Byte 0 is the lock; the holder's name is written after it, where a waiter can read it.
-    os.lseek(fd, 0, os.SEEK_SET)
-    try:
-        if sys.platform == "win32":
-            import msvcrt
-
-            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        return False
-    return True
-
-
-def _queue_behind_siblings(label: str) -> None:
-    """One gate per clone at a time, every worktree's included: an OS lock, dropped when we exit."""
-    rc, common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
-    if rc:  # no clone, so no sibling
-        return
-    path = Path(common).parent / ".gate_cache" / "gate.lock"
-    path.parent.mkdir(exist_ok=True)
-    # Never closed: the process holds the lock to its end, whichever way it ends.
-    fd = os.open(path, os.O_RDWR | os.O_CREAT)
-    # No timeout: a whole gate legitimately holds it for many minutes, and a dead holder's lock
-    # is gone with its process, so only a hung live gate blocks — re-named on a beat until killed.
-    began = time.monotonic()
-    said: tuple[str | None, float] = (None, 0.0)
-    while not _locked(fd):
-        with path.open("rb") as held:
-            held.seek(1)
-            holder = held.read().decode(errors="replace") or "a sibling gate"
-        waited = time.monotonic() - began
-        if holder != said[0] or waited - said[1] >= 60:
-            print(f"gate: waiting on {holder} ({waited / 60:.0f} min so far)", flush=True)
-            said = holder, waited
-        time.sleep(2)
-    os.ftruncate(fd, 1)
-    os.lseek(fd, 1, os.SEEK_SET)
-    since = time.strftime("%H:%M:%S")
-    os.write(fd, f"gate[{label}] in {REPO}, pid {os.getpid()}, since {since}".encode())
+        fit = self.free_mb // _NEXT_WORKER_MB
+        return max(1, min(fit, (os.cpu_count() or 2) - 1, NEXT_WORKERS_MAX))
 
 
 _LINTED = (".ts", ".tsx", ".js", ".jsx", ".mjs")
@@ -1470,10 +1428,8 @@ def main() -> int:
         _reexec_pinned()
     label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
     # The pre-commit set is light and holds a commit open, so it never waits; one CI runner, one gate.
-    if not (args.staged or os.environ.get("CI")):
-        _queue_behind_siblings(label)
+    queue_behind_siblings(f"gate[{label}]", exempt=bool(args.staged or os.environ.get("CI")))
     budget = RamBudget.read()
-    os.environ[_FREE_MB] = str(budget.free_mb)
 
     # `--staged` checks less than any key names, so it neither reads nor records a green.
     store = None if args.staged else LastGreen.open()

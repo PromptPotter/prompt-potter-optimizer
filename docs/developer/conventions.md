@@ -186,13 +186,16 @@ helpers used by one caller **in the same file**.
 - **A foreground command gets 30 s.** Anything that needs longer — the gate, a build, a
   campaign — is backgrounded and its notification awaited, never given a longer foreground
   timeout or wrapped in `timeout N` (root `CLAUDE.md` `<wall-clock>`).
-- **The gate is sized by memory, never by cores alone, and sibling gates queue.** It reads free
-  memory once (`scripts/gate.py::RamBudget`) and every fan-out it starts sizes from that one
-  reading: the offline run's children, Next's build workers, and whether the two lanes run side by
-  side or in turn. Each figure the budget divides by is measured by hand off the per-check job peak
-  the gate prints, a per-unit figure as its slope across widths; when one moves, re-measure, never
-  guess. A gate in any worktree of the clone waits on an OS lock under the MAIN tree's
-  `.gate_cache/` and says whose gate it waits on; `--staged` and CI never wait.
+- **Heavy work is sized by memory, never by cores alone, and sibling jobs queue.** Each fan-out
+  reads free memory (`scripts/gate.py::RamBudget`) when it starts: the offline run's children
+  (at most `OFFLINE_RUN_CHILDREN_MAX`), Next's build workers (at most `NEXT_WORKERS_MAX`), and
+  whether the two lanes run side by side or in turn. Each figure the budget divides by is measured
+  by hand off the per-check job peak the gate prints, a per-unit figure as its slope across
+  widths; when one moves, re-measure, never guess. A gate, a by-hand `scripts/offline_run.py` or a
+  `scripts/tests_owning.py --run`, in any worktree of the clone, waits on the one OS lock
+  (`scripts/processes.py::queue_behind_siblings`) under the MAIN tree's `.gate_cache/` and says
+  whose job it waits on; what a holder starts inherits it and never queues; `--staged` and CI
+  never wait.
 - **A campaign launch is backgrounded and SUPERVISED, never fired and left** —
   stdout to a log under `.scratch/`. Which autonomy mode may launch one without
   asking is root [`CLAUDE.md`](../../CLAUDE.md) § Working principles.

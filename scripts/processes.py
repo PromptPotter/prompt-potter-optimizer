@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -182,6 +183,59 @@ def run(argv: Sequence[str], cwd: Path, *, input: str | None = None, **extra_env
 
 def git(*args: str, input: str | None = None) -> Outcome:
     return run(["git", *args], REPO, input=input)
+
+
+def _locked(fd: int) -> bool:
+    # Byte 0 is the lock; the holder's name is written after it, where a waiter can read it.
+    os.lseek(fd, 0, os.SEEK_SET)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+# Exported by the process that holds (or is exempt from) the lock, so the heavy work it starts
+# does not queue behind its own parent.
+_HELD = "PROMPTPOTTER_HEAVY_LOCK_HELD"
+
+
+def queue_behind_siblings(label: str, *, exempt: bool = False) -> None:
+    """One heavy job per clone at a time, every worktree's included: an OS lock, dropped when we exit."""
+    if os.environ.get(_HELD):
+        return
+    os.environ[_HELD] = label
+    rc, common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if exempt or rc:  # no clone, so no sibling
+        return
+    path = Path(common).parent / ".gate_cache" / "gate.lock"
+    path.parent.mkdir(exist_ok=True)
+    # Never closed: the process holds the lock to its end, whichever way it ends.
+    fd = os.open(path, os.O_RDWR | os.O_CREAT)
+    # No timeout: a whole gate legitimately holds it for many minutes, and a dead holder's lock
+    # is gone with its process, so only a hung live holder blocks — re-named on a beat until killed.
+    began = time.monotonic()
+    said: tuple[str | None, float] = (None, 0.0)
+    while not _locked(fd):
+        with path.open("rb") as held:
+            held.seek(1)
+            holder = held.read().decode(errors="replace") or "a sibling"
+        waited = time.monotonic() - began
+        if holder != said[0] or waited - said[1] >= 60:
+            print(f"{label}: waiting on {holder} ({waited / 60:.0f} min so far)", flush=True)
+            said = holder, waited
+        time.sleep(2)
+    os.ftruncate(fd, 1)
+    os.lseek(fd, 1, os.SEEK_SET)
+    since = time.strftime("%H:%M:%S")
+    os.write(fd, f"{label} in {REPO}, pid {os.getpid()}, since {since}".encode())
 
 
 def free_mb() -> int:

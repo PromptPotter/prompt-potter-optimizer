@@ -39,7 +39,7 @@ from offline_world import (
     draw,
     install_network,
 )
-from processes import end_children_with_this_process
+from processes import end_children_with_this_process, queue_behind_siblings
 
 from promptpotter.application import optimizers
 from promptpotter.application.campaign_config import (
@@ -1053,6 +1053,7 @@ def main() -> int:
         print(f"offline run: unchanged since green -- {home}")
         return 0
     stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run}
+    queue_behind_siblings("offline_run")
     claim_home(home, stamp)
     end_children_with_this_process()
     complete_registries()

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from last_green import file_digest
-from processes import REPO, git, peak_mb
+from processes import REPO, git, peak_mb, queue_behind_siblings
 
 PACKAGE = "promptpotter"
 TESTS = "tests"
@@ -364,6 +364,7 @@ def main(argv: list[str]) -> int:
     if not run:
         print("\n".join([EVERY_TEST] if nodes is None else nodes))
         return 0
+    queue_behind_siblings("tests_owning")
     if nodes is None:
         return _record(pytest_args)
     if not nodes:
