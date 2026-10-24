@@ -7,7 +7,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleStream, useTimeRay } from "@/lib/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
-import { useViewedLineage } from "@/lib/lineage";
+import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
 import { armAt, rayHead, raySteps, type RayStep } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 
@@ -16,6 +16,7 @@ export const TimeRay = memo(function TimeRay() {
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
   const { dash } = useCycleStream();
+  const course = useViewedCourse();
   const { pick } = useSelectNode();
   const { steps: served, loaded, failed, hasMore, loadOlder } = useTimeRay();
 
@@ -30,19 +31,19 @@ export const TimeRay = memo(function TimeRay() {
   }, [steps.length, at]);
 
   const waitingOn = dash?.waiting_on ?? null;
-  const runPhase = dash?.run_phase ?? null;
-  const status = dash?.status ?? null;
+  // The phase and its word are the course's, one value; only the clocked producer is the dashboard's.
+  const state = course?.state ?? null;
   const producer = dash?.producer ?? null;
   const head = useMemo(
     () =>
       rayHead(
         steps,
         served,
-        runPhase && status && producer ? { run_phase: runPhase, status, producer } : null,
+        state && producer ? { run_phase: state.run_phase, status: state.status, producer } : null,
         rootKey,
         waitingOn,
       ),
-    [steps, served, runPhase, status, producer, rootKey, waitingOn],
+    [steps, served, state, producer, rootKey, waitingOn],
   );
 
   if (!viewedPath || (!loaded && steps.length === 0)) return null;

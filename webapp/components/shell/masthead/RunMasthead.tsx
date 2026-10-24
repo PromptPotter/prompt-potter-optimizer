@@ -19,6 +19,7 @@ import { fmtAgo, shortId, shortModel } from "@/lib/format";
 import { tagValue } from "@/lib/hierarchy";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
+import { useViewedCourse } from "@/lib/lineage";
 import { measuringArm, useCycleStream } from "@/lib/poll";
 import { useCampaign } from "@/lib/registry";
 import { statusTone } from "@/lib/run-phase";
@@ -29,6 +30,7 @@ export function RunMasthead() {
   const { campaignId, leafCycleId, viewedPath, following, followActive } = useWorkspace();
 
   const { dash } = useCycleStream();
+  const course = useViewedCourse();
   const served = useServedCriterion();
 
   const campaign = useCampaign(campaignId);
@@ -36,7 +38,7 @@ export function RunMasthead() {
   const runsWith = campaign?.facts.runs_with ?? null;
   const innerLeaf = viewedPath && viewedPath.length > 1 ? pathLeaf(viewedPath) : null;
 
-  const status = dash?.status ?? null;
+  const status = course?.state.status ?? null;
   const phaseLabel = status ? status.label : "—";
   const phaseTone = status && statusTone(status);
   const phaseBody = (

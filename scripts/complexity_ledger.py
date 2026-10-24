@@ -80,7 +80,7 @@ BASELINE = {
     "test_reach": 364,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
-    "served_fields": 1659,
+    "served_fields": 1658,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 18,

@@ -17,6 +17,7 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
     StopReason,
+    stop_next_step,
 )
 from promptpotter.domain.results import ArmReading, DisplayMetric, RunStanding
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
@@ -108,6 +109,11 @@ class HierarchyState(FrozenModel):
     pause: PauseReading | None = Field(description="Why the run reads paused; null otherwise.")
     admission: RunAdmission
     stop_reason: StopReason | None = Field(description="Why the run ended; null while it has not.")
+    next_step: str = Field(
+        description="What the operator does now, as `stop_reason` states it "
+        "(`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. "
+        "Empty while the run has not stopped, or where its reason owes nothing."
+    )
     intervened: bool = Field(
         description="An operator intervened by hand, so the run is no longer purely reproducible."
     )
@@ -124,6 +130,7 @@ class HierarchyState(FrozenModel):
             pause=run.pause,
             admission=run.admission,
             stop_reason=stop,
+            next_step=stop_next_step(stop),
             intervened=index is not None and index.human_intervened,
         )
 

@@ -7804,6 +7804,11 @@
             "title": "Intervened",
             "type": "boolean"
           },
+          "next_step": {
+            "description": "What the operator does now, as `stop_reason` states it (`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. Empty while the run has not stopped, or where its reason owes nothing.",
+            "title": "Next Step",
+            "type": "string"
+          },
           "pause": {
             "anyOf": [
               {
@@ -7843,6 +7848,7 @@
           "pause",
           "admission",
           "stop_reason",
+          "next_step",
           "intervened"
         ],
         "title": "HierarchyState",
@@ -14111,11 +14117,6 @@
               }
             ]
           },
-          "next_step": {
-            "description": "What the operator does now, as the cycle's `stop_reason` states it (`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. Empty where the cycle has not stopped, or its reason states that nothing is owed.",
-            "title": "Next Step",
-            "type": "string"
-          },
           "observed": {
             "anyOf": [
               {
@@ -14287,10 +14288,6 @@
             "title": "State Since",
             "type": "string"
           },
-          "status": {
-            "$ref": "#/components/schemas/RunStatus",
-            "description": "How the cycle reads: `run_phase` and `stop_reason` as one word and one mark."
-          },
           "stop_reason": {
             "anyOf": [
               {
@@ -14356,8 +14353,6 @@
           "campaign_id",
           "cycle_id",
           "run_phase",
-          "status",
-          "next_step",
           "producer",
           "run_admission",
           "pause",

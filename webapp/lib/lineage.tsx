@@ -4,9 +4,15 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api";
 import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
-import type { HierarchyCampaign } from "@/lib/api/types";
+import type { HierarchyCampaign, HierarchyCourse } from "@/lib/api/types";
 import { phaseIs } from "@/lib/run-phase";
-import { candidatesAtPath, coursesOf, indexLineage, type LineageIndex } from "@/lib/derivations";
+import {
+  candidatesAtPath,
+  courseAt,
+  coursesOf,
+  indexLineage,
+  type LineageIndex,
+} from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
@@ -168,6 +174,13 @@ export function useViewedLineage(): ViewedLineage {
   const ctx = useContext(ViewedLineageContext);
   if (ctx === null) throw new Error("useLineage* must be used within a LineageProvider");
   return ctx;
+}
+
+// The viewed leaf's course entry: where a surface reads the run's state word and next step.
+export function useViewedCourse(): HierarchyCourse | null {
+  const { index } = useViewedLineage();
+  const { viewedPath } = useWorkspace();
+  return useMemo(() => courseAt(index, viewedPath), [index, viewedPath]);
 }
 
 // A sidebar row's campaign, by its address.
