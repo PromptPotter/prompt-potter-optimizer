@@ -20,6 +20,8 @@ from promptpotter.domain.ruler import (
     CellScopes,
     DeltaRuler,
     LevelSeries,
+    RulerOwn,
+    RulerReach,
     RulerRow,
     RulerScope,
     RulerStamp,
@@ -68,24 +70,24 @@ class JudgingRuler(NamedTuple):
 def judging_ruler(
     store: RulerStore,
     scope: RulerScope,
-    version: int,
+    reach: RulerReach,
     judged: Collection[str],
     *,
     objective_id: str,
     n_min: int,
     enable_2pl: bool,
 ) -> JudgingRuler:
-    """The ONE anchoring fit: the tenant ruler at *version* less every row of an individual the
-    reading judges, so no election reads a δ its own arms moved."""
-    rows = store.rows(scope, version)
+    """The ONE anchoring fit: the tenant ruler within *reach* less every row of *judged*, the
+    parent line, so no election reads a δ the individual it judges against moved."""
+    rows = store.rows(scope, reach)
     excluded = tuple(sorted({address for address, _, _ in rows} & set(judged)))
     held = [Observation(a, key, y) for a, key, y in rows if a not in excluded]
-    key = ("judging_ruler", store.path, scope, version, excluded, n_min, enable_2pl)
+    key = ("judging_ruler", store.path, scope, reach, excluded, n_min, enable_2pl)
     # A version is a prefix of an append-only file, so its fit never moves under the key.
     ruler = (
         derived(
             key,
-            sig=version,
+            sig=reach.version,
             compute=lambda: calibrate_delta_ruler(held, n_min, enable_2pl=enable_2pl),
         )
         if held
@@ -93,7 +95,8 @@ def judging_ruler(
     )
     stamp = RulerStamp(
         id=ruler.anchor_id if ruler is not None else flat_ruler_id(objective_id),
-        version=version,
+        version=reach.version,
+        own=reach.own,
         scope=scope,
         excluded=excluded,
     )
@@ -107,7 +110,7 @@ def restamped(
     return judging_ruler(
         store,
         stamp.scope,
-        stamp.version,
+        stamp.reach,
         stamp.excluded,
         objective_id=stamp.scope.scorer,
         n_min=n_min,
@@ -195,7 +198,7 @@ def parent_line(rounds: Sequence[RoundResult]) -> set[str]:
 @dataclass
 class DifficultyView:
     """The δ scale an election reads: the tenant ruler at the version its clock names, less the
-    rows of the individuals it judges. A round's own cells fold in after its election."""
+    rows of the parent line. A round's own cells fold in before its election (`link`)."""
 
     session: Session
     n_min: int
@@ -220,18 +223,13 @@ class DifficultyView:
     def stamp(self) -> RulerStamp:
         return self.judging.stamp
 
-    def _read(self, version: int, judged: Collection[str]) -> JudgingRuler:
-        return _session_ruler(self.session, version, judged, self.n_min, self.enable_2pl)
+    def _read(self, reach: RulerReach, judged: Collection[str]) -> JudgingRuler:
+        return _session_ruler(self.session, reach, judged, self.n_min, self.enable_2pl)
 
     def open_round(self, rounds: Sequence[RoundResult]) -> None:
         """At the round's open, before its draw: the parent line is what the round judges so far."""
         self.judged = frozenset(parent_line(rounds))
         self.judging = self._read(ruler_clock(self.session), self.judged)
-
-    def judge(self, addresses: Iterable[str]) -> None:
-        """At measure start, before a cell is bought: the round's arms and their parents join."""
-        self.judged = self.judged | frozenset(addresses)
-        self.judging = self._read(self.stamp.version, self.judged)
 
     def ruler_of(self, stamp: RulerStamp | None) -> DeltaRuler | None:
         """None for an unelected round."""
@@ -250,18 +248,29 @@ class DifficultyView:
         )
 
     def fold(self, rr: RoundResult) -> None:
-        """After the election, so the round's cells reach the NEXT version and never its own."""
-        session = self.session
-        sheets = [
+        """Round 0's, after it adopts the origin: its cells reach round 1's draw."""
+        self._fold(
             (arm.sp_hash, rr.rows(key))
             for key, arm in rr.arms.items()
             if isinstance(arm, Concluded) and arm.sp_hash
-        ]
+        )
+
+    def link(self, sheets: Iterable[tuple[str, CellSheet]]) -> None:
+        """After the round's walks and before its election: its arms' cells join the fit their θ is
+        read on, so every cell the round bought carries a δ and θ reads them all."""
+        self._fold(sheets)
+        self.judging = self._read(ruler_clock(self.session), self.judged)
+
+    def _fold(self, sheets: Iterable[tuple[str, CellSheet]]) -> None:
+        session = self.session
+        assert session.campaign_id, "an election runs inside a campaign"
         session.store.ruler.fold(
             session_ruler_scope(session),
             ruler_rows(
                 session.store, sheets, session.state.scoring.require_partition().admitted_keys
             ),
+            campaign=session.campaign_id,
+            own=ruler_clock(session).own,
         )
 
     @cached_property
@@ -301,24 +310,27 @@ def _ended_on(rounds: Sequence[RoundResult]) -> tuple[dict[int, str], dict[str, 
     return ended, {i: walks.sheet(i, RoleScope.DECISION) for i in set(ended.values())}
 
 
-def ruler_clock(session: Session) -> int:
-    """The ruler version a round opening now reads under its task's memory scope."""
+def ruler_clock(session: Session) -> RulerReach:
+    """The ruler lines a round opening now reads under its task's memory scope."""
     match scope := memory_scope():
         case OpenAt():
-            return session.store.ruler.version()
-        case ArmOf(ruler_version=version) | CellOf(ruler_version=version):
-            return version
+            return RulerReach(version=session.store.ruler.version(), own=None)
+        case ArmOf(walks=walks, ruler_version=frozen):
+            own = RulerOwn(campaign=walks.campaign_id, since=frozen)
+            return RulerReach(version=session.store.ruler.version(), own=own)
+        case CellOf(ruler=reach):
+            return reach
         case _:
             assert_never(scope)
 
 
 def _session_ruler(
-    session: Session, version: int, judged: Collection[str], n_min: int, enable_2pl: bool
+    session: Session, reach: RulerReach, judged: Collection[str], n_min: int, enable_2pl: bool
 ) -> JudgingRuler:
     return judging_ruler(
         session.store.ruler,
         session_ruler_scope(session),
-        version,
+        reach,
         judged,
         objective_id=session.state.scoring.require_scorer().id,
         n_min=n_min,

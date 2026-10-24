@@ -20,7 +20,7 @@ from promptpotter.application.embedded_run import open_session, run_campaign
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
-from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
+from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.application.scoring.sample_measurement import (
     attempt_bounds,
     cell_billing,
@@ -85,7 +85,7 @@ async def run_bbeh_campaign(
     already saved to disk by the loop's finalizer; the test-eval / export
     phase is skipped because the user signalled stop.
     """
-    label_match = SCORING_FUNCTIONS["label_match"]
+    label_match = MATCHERS["label_match"].score
     tasks = sorted(test_by_task.keys())
     train_norm = _normalize(train_pool)
     test_norm_by_task = {t: _normalize(v) for t, v in test_by_task.items()}

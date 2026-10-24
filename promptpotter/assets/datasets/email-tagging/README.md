@@ -24,7 +24,7 @@ running TermNorm backend.
 ## Scoring
 
 `label_match(predicted, ground_truth)`. The answer-format contract is the live string
-`matchers.py::EXTRACTION_NOTES`, already fed to the prompt by the origin resolver — read it there,
+`matchers.py::MATCHERS`' `note`, already fed to the prompt by the origin resolver — read it there,
 not from a paraphrase.
 
 ## Follow-ups (not in this pilot)

@@ -542,6 +542,8 @@ class Scorer:
 
     id: str
     per_cell: str | None
+    # The one matcher ``per_sample`` calls, which decides what a prediction's answer is.
+    matcher: str | None
     fitness: Callable[[MeasuredCell], float]
     # Reads the cell WITH its fitness: every shipped composite names it.
     objective: Callable[[MeasuredCell, float], float] | None

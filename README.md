@@ -304,7 +304,7 @@ Every cycle writes a per-round digest to `log.md`. Verbatim, from the round repl
 - composite_fitness: `0.4237`
 - ability θ: `+0.308` (ruler 5cd26f22e62708a4, 68 cells, 1PL)
 - overlap: 34 shared cells, +16 measured: C0 41.2%  →  C1.2 44.1%  →  C4.1 52.9%
-- verdict: C4.1 won on θ lift +0.216 = +0.072 over the parent + 0.144 parent selection bias (θ +0.293 vs parent +0.221, se 0.196); runner-up C4.2 at +0.149
+- verdict: C4.1 won on θ lift +0.072 (θ +0.293 vs parent +0.221, se 0.196); runner-up C4.2 at +0.005
 - cost: **$0.0311** (optimizer $0.0048 c23% ·w4384 · backend $0.0137 c17% · bench $0.0127 c37%)
 
 P(best) trajectory:
@@ -313,7 +313,7 @@ P(best) trajectory:
   a2169d009a ▂▂   15.8%
 ```
 
-A percentage in a round banner is an **in-campaign reading, computed on the rows that selected the winner** — not a held-out result, and a level should never be compared across rounds. A round is won on θ, not on the accuracy column, and the verdict line keeps the lift over the parent apart from the parent's selection bias instead of adding them up quietly. Which figures are clean, which are biased upward, and what we do about it: [`benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md).
+A percentage in a round banner is an **in-campaign reading, computed on the rows that selected the winner** — not a held-out result, and a level should never be compared across rounds. A round is won on θ, not on the accuracy column, and the parent is never re-read on the cells that crowned it, so the lift is not measured against its luck. Which figures are clean, which are biased upward, and what we do about it: [`benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md).
 
 </details>
 

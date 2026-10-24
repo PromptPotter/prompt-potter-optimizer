@@ -24,7 +24,7 @@ from promptpotter.application.datasets.origin_readiness import (
     save_checkin_draft,
 )
 from promptpotter.application.jobs.quota import paid_call
-from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
+from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
@@ -85,9 +85,8 @@ def build_origin_consultation(draft: DraftCampaign, message: str | None = None) 
             "target_column": draft.column_ground_truth,
             "labels": list(answer_space),
         }
-    extraction_note = extraction_note_for_scoring(draft.scoring_matcher)
-    if extraction_note:
-        state["answer_extraction_requirement"] = extraction_note
+    if (matcher := MATCHERS.get(draft.scoring_matcher)) and matcher.note:
+        state["answer_extraction_requirement"] = matcher.note
     user_content = (
         "DRAFT-CAMPAIGN ORIGIN to resolve. Propose values for the OPEN gaps "
         "below, each with cited evidence; write a plain-language "

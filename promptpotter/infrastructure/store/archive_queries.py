@@ -18,6 +18,7 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
+    from promptpotter.domain.ruler import RulerReach
     from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer
     from promptpotter.domain.scoring import MeasuredCell, WalkedCell
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -39,17 +40,18 @@ class OpenAt(NamedTuple):
 
 
 class ArmOf(NamedTuple):
-    """Compare: its campaign's walks alone, on the ruler version its head-to-head froze at open."""
+    """Compare: its campaign's walks alone, and the ruler its head-to-head froze at open plus its
+    own campaign's lines since."""
 
     walks: CampaignWalks
     ruler_version: int
 
 
 class CellOf(NamedTuple):
-    """An L4 cell remembers its campaign's walks alone and reads its spawner's round version."""
+    """An L4 cell remembers its campaign's walks alone and reads its spawner's round reach."""
 
     walks: CampaignWalks
-    ruler_version: int
+    ruler: RulerReach
 
 
 type MemoryScope = OpenAt | ArmOf | CellOf

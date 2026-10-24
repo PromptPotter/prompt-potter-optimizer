@@ -12,7 +12,6 @@ from promptpotter.application.scoring.selection import (
     cells_read,
     elimination_p_best_bounds,
     paired_p_best,
-    priors_covering,
 )
 from promptpotter.domain.scoring import NO_RESULT, is_answer_collapsed
 from promptpotter.domain.validators import StopSignal
@@ -156,17 +155,24 @@ class PoBBCheck:
         )
         if read < self.n_min:
             return None
-        fit = paired_p_best(results, self.priors_by_sample, self.ruler)
+        fit = paired_p_best(results, self.priors_by_sample, self.ruler, min_shared=self.n_min)
         if fit is None:
             return None
         leader = min(fit.p_better, key=lambda k: fit.p_better[k])
+        own = dict(zip(fit.cells, fit.grades, strict=True))
 
         paired_breakdown: dict[ArmKey, dict[str, float]] = {
             pid: {
                 "p_better": float(p_better),
                 # The graded cells the fit read, never `n`, which counts errored rows too.
-                "n_paired": float(len(fit.cells)),
-                "n_discordant": float(sum(discordant_counts(fit.grades, fit.priors[pid]))),
+                "n_paired": float(len(fit.priors[pid])),
+                "n_discordant": float(
+                    sum(
+                        discordant_counts(
+                            [own[c] for c in fit.priors[pid]], list(fit.priors[pid].values())
+                        )
+                    )
+                ),
             }
             for pid, p_better in fit.p_better.items()
         }
@@ -219,7 +225,8 @@ class PoBBCheck:
         grades = _graded(measured)
         cells = list(grades)
         said = {cell.facts.predicted for cell in measured}
-        priors = priors_covering(self.priors_by_sample, cells)
+        # A prior's absent cells are read worst-case by the bounds, as `check` reads it on shared ones.
+        priors = dict(self.priors_by_sample)
         pending = {
             pid: _graded(rows)
             for pid, rows in (unresolved or {}).items()

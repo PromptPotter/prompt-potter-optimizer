@@ -101,7 +101,7 @@ def _warn_if_labels_have_no_ranker(
         return
     if connector is not None and connector.answer_key:
         return
-    if any(n.emits_ranking and n.output_keys for n in schema.nodes):
+    if schema.emits_ranking:
         return
     logger.warning(
         "The pipeline has no terminal ranker — no node emits a ranked list, so every sample will "

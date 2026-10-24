@@ -957,6 +957,12 @@ class PipelineSchema(FrozenModel):
                 out.setdefault(leaf.node, set()).add(leaf.key)
         return out
 
+    @property
+    @shapes_optimizer_prompt
+    def emits_ranking(self) -> bool:
+        """Some node of the chain ranks AND maps that ranking into what a cell carries."""
+        return any(node.emits_ranking and node.output_keys for node in self.nodes)
+
     @shapes_optimizer_prompt
     def prompt_nodes(self) -> list[PipelineNode]:
         """The chain's prompt-bearing nodes, in chain order: every one renders its own prompt."""

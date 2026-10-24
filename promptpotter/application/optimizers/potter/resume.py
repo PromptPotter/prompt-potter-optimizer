@@ -39,14 +39,12 @@ def _replay_round_winner(
     round_data = ctx.round_data
     arms = [ArmKey(str(key)) for key in inputs_ref["arms"]]
     coverage_floor = int(inputs_ref["coverage_floor"])
-    # `parent_bias` is read, never re-derived: a function of the round HISTORY this replay does not hold.
     winner, _ = elect_round_winner(
         arms,
         {key: round_data.rows(key) for key in arms},
         round_data.rows(ArmKey(str(inputs_ref["parent"]))),
         coverage_floor,
         ctx.ruler,
-        parent_bias=float(inputs_ref["parent_bias"]),
     )
     return winner
 
@@ -63,7 +61,9 @@ def _pobb_replay_snapshot(
         ArmKey(pid): {str(cell): float(grade) for cell, grade in grades.items()}
         for pid, grades in data["prior_histories"].items()
     }
-    fit = paired_p_best([rows[cell] for cell in cells], priors, ctx.ruler)
+    fit = paired_p_best(
+        [rows[cell] for cell in cells], priors, ctx.ruler, min_shared=int(inputs_ref["n_min"])
+    )
     return None if fit is None else fit.p_best
 
 

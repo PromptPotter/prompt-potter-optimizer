@@ -54,6 +54,7 @@ if TYPE_CHECKING:
         Adapter,
         Controller,
         Eliminator,
+        MintFacts,
         NodeMember,
         OptimizerRuntime,
         Proposer,
@@ -64,7 +65,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pool import Access
     from promptpotter.domain.results import DisplayMetric
-    from promptpotter.domain.sample import Sample
 
 shapes_optimizer_prompt(__name__)
 
@@ -365,8 +365,8 @@ class SelectedOptimizer:
             )
         return draw.access(self.reached_knobs(member, draw.knobs))
 
-    def pool_refusals(self, *, demo: Sequence[Sample] | None) -> list[str]:
-        """Why a pool seeds nothing its readers may draw: at load with no *demo*, before a mint with the partition."""
+    def pool_refusals(self, *, mint: MintFacts | None) -> list[str]:
+        """Why a pool seeds nothing its readers may draw: at load with no *mint*, before a mint with its facts."""
         refused: list[str] = []
         for initializer in self.plan.initializers:
             closed = any(
@@ -375,7 +375,7 @@ class SelectedOptimizer:
                 for pool in member.draws
                 if pool in initializer.writes
             )
-            if why := initializer.refusal(self, closed=closed, demo=demo):
+            if why := initializer.refusal(self, closed=closed, mint=mint):
                 refused.append(why)
         return refused
 
@@ -602,7 +602,7 @@ def _select(
         if declared_node.kind in MEMBER_KINDS or declared_node.name in optimizers.registered():
             selected.knobs(declared_node.name)
     _refuse_unknown_llm_keys(selected)
-    if refused := selected.pool_refusals(demo=None):
+    if refused := selected.pool_refusals(mint=None):
         raise ValueError("; ".join(refused))
     return selected
 

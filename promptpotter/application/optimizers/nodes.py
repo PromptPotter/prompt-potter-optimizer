@@ -17,6 +17,7 @@ from typing import (
     Any,
     ClassVar,
     Literal,
+    NamedTuple,
     Protocol,
     cast,
     runtime_checkable,
@@ -53,6 +54,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.phases import StopReason
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Access, Pool
     from promptpotter.domain.results import (
         ArmFit,
@@ -717,6 +719,15 @@ class OperatorSeat:
         self.consults: frozenset[type] = frozenset(type(p) for p in proposers)
 
 
+class MintFacts(NamedTuple):
+    """What a pool is refused against before a mint, and nothing at load knows."""
+
+    demo: Sequence[Sample]
+    schema: PipelineSchema
+    # The cell's matcher, as `matchers.py::matcher_of` reads the per-sample formula.
+    matcher: str | None
+
+
 @runtime_checkable
 class Initializer(NodeMember, Protocol):
     """A manifest's `run_init` walk: each writes its pool once, before round 0's adapters read it."""
@@ -731,9 +742,9 @@ class Initializer(NodeMember, Protocol):
     def active(self, selected: SelectedOptimizer) -> list[str]: ...
 
     def refusal(
-        self, selected: SelectedOptimizer, *, closed: bool, demo: Sequence[Sample] | None
+        self, selected: SelectedOptimizer, *, closed: bool, mint: MintFacts | None
     ) -> str | None:
-        """At load with ``demo`` ``None``, again before the mint with the partition."""
+        """At load with ``mint`` ``None``, again before the mint."""
         ...
 
     def initialize(self, ctx: NodeContext[Any]) -> None: ...

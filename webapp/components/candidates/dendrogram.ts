@@ -53,7 +53,7 @@ export interface DendroRow {
 }
 
 export function roundOf(bar: CandidateBar): number {
-  return bar.arm?.reading.arm.round ?? 0;
+  return bar.reading?.arm.round ?? 0;
 }
 
 export function dendroRow(bar: CandidateBar): DendroRow {
@@ -63,8 +63,8 @@ export function dendroRow(bar: CandidateBar): DendroRow {
     label: bar.label,
     candidate_id: bar.node.id,
     is_selected: bar.reading?.election.selected ?? false,
-    crown: bar.arm?.reading.election.crown ?? null,
-    is_fork: bar.arm != null && bar.arm.fork !== null,
+    crown: bar.reading?.election.crown ?? null,
+    is_fork: bar.reading !== null && bar.node.fork !== null,
   };
 }
 

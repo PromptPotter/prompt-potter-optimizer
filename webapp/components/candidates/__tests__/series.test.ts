@@ -7,12 +7,12 @@ import {
   type SeriesCtx,
 } from "../series";
 import type { VerifyReading } from "@/lib/api/types";
-import type { CandidateBar } from "@/lib/types";
+import type { ArmBar, CandidateBar } from "@/lib/types";
 import { armNode, armReading, ownLevel } from "@/lib/test-fixtures";
 
 function bar(
   reading: Parameters<typeof armReading>[0] = {},
-  over: Partial<CandidateBar> = {},
+  over: Partial<ArmBar> = {},
 ): CandidateBar {
   const node = armNode({ id: "a", label: "C1.1", reading: armReading(reading) }, 1);
   return {
@@ -20,10 +20,8 @@ function bar(
     idx: 0,
     label: node.label,
     node,
-    arm: node,
     reading: node.reading,
     source: "history",
-    level: node.reading.own?.accuracy?.value ?? null,
     overlap: null,
     benchPass: null,
     ...over,

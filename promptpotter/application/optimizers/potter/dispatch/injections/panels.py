@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import math
 import re
+import zlib
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise, zip_longest
 from typing import Any, NamedTuple
 
+from promptpotter.application.intelligence.rasch import expected_score_gain
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ANSWER_LABEL_STEM,
     ANSWER_TALLY_ROWS,
+    DEGENERATE_TRACE_CAP,
     INNER_NARRATIVE_CAP,
+    LOOP_NOVELTY,
     LOST_CELL_MIN,
     MEMORY_FIELD_CAP,
     MEMORY_ROUND_CAP,
@@ -21,9 +26,9 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     MISS_QUERY_CAP,
     MISS_ROWS_CAP,
     MISS_STEP_CAP,
+    MISS_TIED_CAP,
     NEAR_MISS_RENDER_CAP,
     NODE_FAILURE_RENDER_CAP,
-    PRECISION_ARM_ROWS,
     SAMPLE_RENDER_CAP,
     TRANSCRIPT_PREDICTED_CAP,
     TRANSCRIPT_QUERY_CAP,
@@ -36,11 +41,10 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
 )
 from promptpotter.application.optimizers.potter.escalation.state import ExplorationBudget
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
-from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
+from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
-from promptpotter.application.views.render.primitives import fmt_pct
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
     candidate_delta,
@@ -52,19 +56,21 @@ from promptpotter.domain.candidate_diff import (
 from promptpotter.domain.connector import MeasuredUnit, unit_count, unit_plural
 from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
-from promptpotter.domain.paired_reading import ArmKey, PairedReading
+from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading
 from promptpotter.domain.results import (
+    ROUND_ADVANCE_INFO,
     Concluded,
     Cut,
     Measured,
     RoundResult,
     ScoreSummary,
     arm_elimination,
+    overlap_line,
+    triggered_rates,
 )
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.scoring import (
-    ROW_GRADES,
     CellSheet,
     GradedCell,
     all_verifier_graded,
@@ -74,7 +80,7 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.shared.composite import render_composite_fitness_block
-from promptpotter.shared.statistics import min_detectable_effect, paired_mean_t
+from promptpotter.shared.statistics import min_detectable_effect
 
 
 @signal(
@@ -138,20 +144,17 @@ def _r_evidence_health(b: InjectionBundle) -> list[Item]:
 def _r_diagnostics(b: InjectionBundle) -> list[Item]:
     sections: list[Item] = []
     cs = b.cycle_slice
-    # No accuracy pair here: it would be a second copy of the EVOLUTION column.
-    status: list[str] = [f"STATUS: round {cs.round_num}"]
-    if cs.l1_stall_depth > 0:
-        status.append(f"  L1 stall: {cs.l1_stall_depth} rounds")
-    for tag, layer in (("L2", cs.ladder.l2), ("L3", cs.ladder.l3)):
-        if layer.fires > 0:
-            status.append(f"  {tag} fired: {layer.fires}x (stall: {layer.stall_count})")
-    sections.append(Item("\n".join(status)))
+    # The round number is `budget_state`'s, the L1 stall EVOLUTION's: each said once.
+    if fires := [
+        f"{tag} fired {layer.fires}x (stall {layer.stall_count})"
+        for tag, layer in (("L2", cs.ladder.l2), ("L3", cs.ladder.l3))
+        if layer.fires > 0
+    ]:
+        sections.append(Item("STATUS: " + " · ".join(fires)))
 
     d = b.digest.diagnostics
     if d is None:
-        return sections
-    if d.anomalies:
-        sections.append(Item("ANOMALIES:\n  " + "\n  ".join(d.anomalies)))
+        return [*sections, *_evolution(b)]
     parts: list[str] = []
 
     miss_samples = (
@@ -188,12 +191,6 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
             )
         parts.append("\n".join(nm_lines))
 
-    if d.cross_candidate_diff:
-        parts.append(
-            "MISSED OPPORTUNITIES (queries other candidates solved but winner missed):\n"
-            + "\n".join(d.cross_candidate_diff)
-        )
-
     if parts:
         sections.extend(Item(p, trusted=False) for p in parts)
 
@@ -226,25 +223,73 @@ def _r_diagnostics(b: InjectionBundle) -> list[Item]:
     if (yielded := b.digest.l1_yield) is not None and yielded != 1.0:
         sections.append(Item(f"POPULATION: yield={yielded:.2f}"))
 
-    if len(d.evolution_rows) > 1:
-        line = f"TREND: {d.trend}"
-        if d.trend_description:
-            line += f" — {d.trend_description}"
-        sections.append(Item(line))
-        tbl = [
-            "EVOLUTION (last rounds — acc is on THAT round's own cells, so its Δ is not a change;",
-            "elected is the column that compares):",
-            "  round  elected  acc      Δ       degraded",
-        ]
-        for row in d.evolution_rows[-5:]:
-            tbl.append(
-                f"  {row.round:>5}  {'yes' if row.elected else 'no':>7}  "
-                f"{fmt_pct(row.accuracy):>6}  {fmt_pct(row.delta, '{:+.1%}'):>6}  "
-                f"{row.degraded:>5}"
-            )
-        sections.append(Item("\n".join(tbl)))
+    return [*sections, *_evolution(b)]
 
-    return sections
+
+_SIDE_VERDICT: dict[LiftSide, str] = {
+    "above": "separated above",
+    "below": "separated BELOW",
+    "spans": "NOT separated",
+}
+
+
+def _evolution(b: InjectionBundle) -> list[Item]:
+    """On the origin panel's fixed rows, never a round's own accuracy: its cells move every round."""
+    rounds = [rr for rr in b.measured_rounds if rr.round > 0]
+    if not rounds:
+        return []
+    labels = " · ".join(
+        f"r{rr.round} {ROUND_ADVANCE_INFO[rr.overlap.advance].label}" for rr in rounds[-5:]
+    )
+    lines = [
+        f"EVOLUTION — L1 stall: {b.cycle_slice.l1_stall_depth} rounds since the best-so-far line "
+        f"last advanced on the origin panel.\n  {labels}"
+    ]
+    line, overlap = next(
+        (
+            (line, rr.overlap)
+            for rr in reversed(b.measured_rounds)
+            if (line := overlap_line(rr.overlap))
+        ),
+        ([], None),
+    )
+    if overlap is None:
+        return [Item("\n".join(lines))]
+    n = len(overlap.positions)
+    lines.append(
+        f"  origin panel, {n} fixed rows: "
+        + " → ".join(f"{m.arm.label} {m.rate:.0%}" for m in line)
+    )
+    if (headline := overlap.lead.headline) is not None:
+        est = headline.estimate
+        lines.append(
+            f"  standing pick vs C0: lift [{est.ci_lo:+.2f}, {est.ci_hi:+.2f}], "
+            f"{_SIDE_VERDICT[est.side]}"
+        )
+    if (parent_line := _vs_parent(overlap.vs_parent)) is not None:
+        lines.append(parent_line)
+    if triggered := triggered_rates(overlap):
+        lines.append(
+            "  read, never adopted: " + ", ".join(f"{m.arm.label} {m.rate:.0%}" for m in triggered)
+        )
+    return [Item("\n".join(lines))]
+
+
+def _vs_parent(reading: PairedReading | None) -> str | None:
+    lift = None if reading is None else reading.on_whole_set
+    if reading is None or lift is None or reading.a is None or reading.b is None:
+        return None
+    pick, parent = reading.b.address.arm, reading.a.address.arm
+    if pick is None or parent is None:
+        return None
+    est, flips = lift.estimate, lift.flips
+    moved = (
+        f"lift [{est.ci_lo:+.2f}, {est.ci_hi:+.2f}]"
+        if flips is None
+        else f"of {flips.gained + flips.lost + flips.unchanged} rows, wins {flips.gained} the "
+        f"parent missed and misses {flips.lost} it won"
+    )
+    return f"  {pick.label} vs its parent {parent.label}: {moved}, {_SIDE_VERDICT[est.side]}"
 
 
 _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
@@ -346,20 +391,21 @@ def _edges_at_line(text: str, cap: int, head_frac: float = 0.55) -> str:
     return f"{head}\n[…middle elided]\n{tail}"
 
 
-@signal(
-    "sample_transcripts",
-    kind=InjectionKind.MEASUREMENT,
-    char_cap=None,
-    citable=True,
-)
-def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
+class _TranscriptPlan(NamedTuple):
+    shown: list[GradedCell]
+    losses: dict[str, _Loss]
+    misses: int
+    lost: int
+
+
+def _transcript_plan(b: InjectionBundle) -> _TranscriptPlan | None:
     if _inner_narrated(b):
-        return []
+        return None
     lost = _repeatedly_lost(_edits(b))
     lost_keys = {key for key, _ in lost}
     rows = [r for r in _misses(b) if r.key not in lost_keys]
     if not rows and not lost:
-        return []
+        return None
     # Rotated by round: the pool's order froze at round 0, so freshness alone serves one head forever.
     latest = b.digest.latest_sample_keys
     fresh = [r for r in rows if r.key in latest]
@@ -367,16 +413,40 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
     if fresh:
         off = (b.cycle_slice.round_num * TRANSCRIPT_RENDER_CAP) % len(fresh)
         fresh = fresh[off:] + fresh[:off]
-    losses = dict(lost)
-    misses = fresh + stale
     losing = [loss.run for _, loss in lost if loss.run is not None]
-    pool = [r for pair in zip_longest(misses, losing) for r in pair if r is not None]
+    pool = [r for pair in zip_longest(fresh + stale, losing) for r in pair if r is not None]
+    return _TranscriptPlan(pool[:TRANSCRIPT_RENDER_CAP], dict(lost), len(rows), len(lost))
+
+
+def _looping(trace: str) -> bool:
+    if len(trace) <= DEGENERATE_TRACE_CAP:
+        return False
+    half = len(trace) // 2
+    added = len(zlib.compress(trace.encode())) - len(zlib.compress(trace[:half].encode()))
+    return added / (len(trace) - half) < LOOP_NOVELTY
+
+
+def _trace_excerpt(trace: str) -> str:
+    if _looping(trace):
+        return "[looping — head and tail only]\n" + _edges_at_line(trace, DEGENERATE_TRACE_CAP)
+    return _edges_at_line(trace, TRANSCRIPT_REASONING_CAP)
+
+
+@signal(
+    "sample_transcripts",
+    kind=InjectionKind.MEASUREMENT,
+    char_cap=None,
+    citable=True,
+)
+def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
+    if (plan := _transcript_plan(b)) is None:
+        return []
     unit = unit_plural(b.measured_unit)
     pools = [
         text
         for n, text in (
-            (len(lost), f"{len(lost)} {unit} the parent's run hit that edits keep missing"),
-            (len(rows), f"{len(rows)} {unit} the parent still misses"),
+            (plan.lost, f"{plan.lost} {unit} the parent's run hit that edits keep missing"),
+            (plan.misses, f"{plan.misses} {unit} the parent still misses"),
         )
         if n
     ]
@@ -386,17 +456,17 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
         "reasoning step, not just the label):"
     )
     sections = [Item(header)]
-    for r in pool[:TRANSCRIPT_RENDER_CAP]:
+    for r in plan.shown:
         parts = [
             f"[#{b.slot_of[r.key]}] QUERY:\n{_head_at_line(r.facts.query, TRANSCRIPT_QUERY_CAP)}"
         ]
-        if (loss := losses.get(r.key)) is not None:
+        if (loss := plan.losses.get(r.key)) is not None:
             parts.append(
                 f"THE PARENT'S RUN HIT THIS — {loss.lost} of {loss.tried} edits missed it; "
                 f"this is {loss.by}'s run."
             )
         if trace := r.facts.pipeline.reasoning_trace:
-            parts.append(f"MODEL REASONING:\n{_edges_at_line(trace, TRANSCRIPT_REASONING_CAP)}")
+            parts.append(f"MODEL REASONING:\n{_trace_excerpt(trace)}")
         if r.facts.verifier_graded:
             parts.append(f"VERIFIER SCORE: {r.grade.fitness}")
         else:
@@ -405,7 +475,7 @@ def _r_sample_transcripts(b: InjectionBundle) -> list[Item]:
             parts.append(f"PREDICTED: {predicted}\nGROUND TRUTH: {gt}")
         if verdict := _judge_verdict(r):
             parts.append(verdict)
-        sections.append(Item("\n".join(parts), trusted=False))
+        sections.append(Item("\n".join(parts), trusted=False, quotes=frozenset({r.key})))
     return sections
 
 
@@ -575,10 +645,6 @@ def _labelled(cells: Iterable[GradedCell]) -> list[GradedCell]:
     return [c for c in cells if c.facts.ground_truth]
 
 
-def _truth_labels(cells: Iterable[GradedCell]) -> Counter[str] | None:
-    return enumerable_truth_labels(_labelled(cells))
-
-
 def _constant_answer(truth: Counter[str]) -> tuple[str, float]:
     label, n = truth.most_common(1)[0]
     return label, n / sum(truth.values())
@@ -653,18 +719,86 @@ def _cluster_rows(b: InjectionBundle) -> frozenset[int]:
     return frozenset(i for c in critique.get("failure_highlights") or [] for i in c["sample_ids"])
 
 
+def _words(text: str) -> tuple[str, ...]:
+    return tuple(re.findall(r"\w+", text.lower()))
+
+
+def _contains(outer: tuple[str, ...], inner: tuple[str, ...]) -> bool:
+    n = len(inner)
+    return any(outer[i : i + n] == inner for i in range(len(outer) - n + 1))
+
+
+def _span_answer(b: InjectionBundle) -> Callable[[str], str] | None:
+    """The span the matcher scores, where an extent can miss: a label answer has none to overlap."""
+    matcher = b.cycle_slice.matcher
+    if matcher is None or _no_labels(b) or enumerable_truth_labels(b.trajectory_results):
+        return None
+    return MATCHERS[matcher].answer
+
+
+def _span_near_miss(answer: Callable[[str], str] | None, cell: GradedCell) -> bool:
+    """The answer and the truth share a contiguous word span: the reasoning landed, the extent did not."""
+    if answer is None:
+        return False
+    said, true = _words(answer(cell.facts.predicted)), _words(cell.facts.ground_truth)
+    if not said or not true:
+        return False
+    return _contains(said, true) if len(said) >= len(true) else _contains(true, said)
+
+
+def _tied_deltas(ordered: Sequence[tuple[float | None, GradedCell]]) -> frozenset[float]:
+    """A continuous fit produces no ties, so a δ shared by several cells is the ruler's prior."""
+    return frozenset(d for d, n in Counter(d for d, _ in ordered if d is not None).items() if n > 1)
+
+
 def _shown_misses(b: InjectionBundle) -> list[tuple[float | None, GradedCell]]:
-    """Unclustered, the ``MISS_ROWS_CAP`` easiest; once a critique clustered them, the rows its clusters span."""
+    """Tied and uncarried rows are capped: with no order among them, more repeat the claim."""
     ordered = _ordered_misses(b)
     if clustered := _cluster_rows(b):
         return [(d, r) for d, r in ordered if b.slot_of[r.key] in clustered]
-    return ordered[:MISS_ROWS_CAP]
+    answer = _span_answer(b)
+    near = [(d, r) for d, r in ordered if _span_near_miss(answer, r)]
+    near_keys = {r.key for _, r in near}
+    tied = _tied_deltas(ordered)
+    rest = [(d, r) for d, r in ordered if r.key not in near_keys]
+    read = [(d, r) for d, r in rest if d is not None and d not in tied]
+    pinned = [(d, r) for d, r in rest if d is not None and d in tied][:MISS_TIED_CAP]
+    uncarried = [(d, r) for d, r in rest if d is None]
+    if b.ruler is not None:
+        uncarried = uncarried[:MISS_TIED_CAP]
+    return [*near, *read, *pinned, *uncarried][:MISS_ROWS_CAP]
 
 
 def _last_step(trace: str, cap: int) -> str:
-    """The tail: a trace's wrong step is usually its conclusion, and the transcript panel shows the head."""
+    """The tail: a trace's wrong step is usually its conclusion."""
     text = " ".join(trace.split())
     return text if len(text) <= cap else "…" + text[-cap:]
+
+
+def _miss_row(
+    b: InjectionBundle,
+    r: GradedCell,
+    delta: float | None,
+    tied: frozenset[float],
+    *,
+    verifier: bool,
+) -> Item:
+    row = (
+        f"  [#{b.slot_of[r.key]}] "
+        + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
+        + f" | {_query_stem(r, MISS_QUERY_CAP)}"
+        + (
+            _verifier_outcome(r)
+            if verifier
+            else f" | said: {r.facts.predicted[:MISS_PREDICTED_CAP]}"
+            f" | true: {r.facts.ground_truth[:MISS_GT_CAP]}"
+        )
+    )
+    if not (trace := r.facts.pipeline.reasoning_trace):
+        return Item(row, trusted=False)
+    # A row whose transcript is PLACED is not stepped twice; one the budget dropped keeps its step.
+    stepped = f"{row} | last step: {_last_step(trace, MISS_STEP_CAP)}"
+    return Item(stepped, trusted=False, if_quoted=(r.key, row))
 
 
 @signal(
@@ -691,55 +825,32 @@ def _r_failing_samples(b: InjectionBundle) -> list[Item]:
                 "round — treat its score as ABSENT, not as a failure."
             )
         ]
-    graded = [d for d, _ in _ordered_misses(b) if d is not None]
-    # A δ shared by a run of cells is the ruler's prior, not a reading: a tie carries no order.
-    tied = {d for d, n in Counter(graded).items() if n > 1}
+    ordered = _ordered_misses(b)
+    tied = _tied_deltas(ordered)
     shown = _shown_misses(b)
+    clustered = bool(_cluster_rows(b))
+    answer = None if clustered else _span_answer(b)
+    near = sum(1 for _, r in shown if _span_near_miss(answer, r))
     # One row per miss, never a tally by label: a cluster is a MECHANISM, and only the stem and
     # the last step can show one.
-    rows_out = [
-        Item(
-            f"  [#{b.slot_of[r.key]}] "
-            + ("δ=?" if delta is None else ("δ=tied" if delta in tied else f"δ={delta:+.2f}"))
-            + f" | {_query_stem(r, MISS_QUERY_CAP)}"
-            + (
-                _verifier_outcome(r)
-                if verifier
-                else f" | said: {r.facts.predicted[:MISS_PREDICTED_CAP]}"
-                f" | true: {r.facts.ground_truth[:MISS_GT_CAP]}"
-            )
-            + (
-                f" | last step: {_last_step(trace, MISS_STEP_CAP)}"
-                if (trace := r.facts.pipeline.reasoning_trace)
-                else ""
-            ),
-            trusted=False,
-        )
-        for delta, r in shown
-    ]
+    rows_out = [_miss_row(b, r, delta, tied, verifier=verifier) for delta, r in shown]
     held = (
         ""
         if len(shown) == len(rows)
         else f", the {len(shown)} the critique clustered shown"
-        if _cluster_rows(b)
-        else f", the {len(shown)} easiest shown"
+        if clustered
+        else f", {len(shown)} shown"
     )
+    order = [f"first the {near} whose answer overlaps the truth's span"] if near else []
+    if any(d is not None for d, _ in ordered):
+        order.append("easiest first on the cycle's fixed δ")
+        if tied:
+            order.append("δ=tied rows share the ruler's prior, no order")
+    else:
+        order.append("the difficulty ruler is still cold, so unordered")
     header = (
-        f"FAILING SAMPLES ({len(rows)} still unsolved{held} — latest outcome per {b.measured_unit} "
-        "across the configurations tried so far, not one round's score; "
-        + (
-            "difficulty δ from the cycle's fixed ruler; easiest first — the top rows are the "
-            "winnable ones"
-            if graded
-            else "the difficulty ruler is still cold, so these are unordered"
-        )
-        + (
-            ". `δ=tied` is the ruler's prior, not a reading of that cell — those rows carry no "
-            "order among themselves and no claim that any is winnable"
-            if tied
-            else ""
-        )
-        + "):"
+        f"FAILING SAMPLES ({len(rows)} still unsolved{held} — latest outcome per "
+        f"{b.measured_unit} across every configuration tried; {'; '.join(order)}):"
     )
     out = [Item(header), *rows_out]
     if errored:
@@ -946,174 +1057,56 @@ def _edit_row(edit: _Edit, unit: MeasuredUnit, slot_of: Mapping[str, int], *, ch
     return f"{cand.label} {scored} · {mutation}{cells}"
 
 
-@signal(
-    "origin_strengths",
-    kind=InjectionKind.MEASUREMENT,
-    char_cap=None,
-    citable=True,
-)
-def _r_origin_strengths(b: InjectionBundle) -> list[Item]:
-    rows = b.origin_per_sample.cells
-    if not rows:
-        return []
-    acc = compute_accuracy(results=rows)
-    if acc is None:
-        return []
-    if (truth := _truth_labels(rows)) is not None:
-        fits = [ROW_GRADES["fitness"].read(r) for r in scoreable_rows(rows)]
-        _, floor = _constant_answer(truth)
-        ci_lo = paired_mean_t(fits, [floor] * len(fits))[1]
-        if ci_lo is None or ci_lo <= 0.0:
-            return []
-    return [
-        Item(
-            f"ORIGIN STRENGTHS: origin scores {acc:.0%} across "
-            f"{unit_count(len(rows), b.measured_unit)} "
-            "— preserve the parent scaffolding earning that."
-        )
-    ]
-
-
-@signal(
-    "archive_top_runs",
-    kind=InjectionKind.MEASUREMENT,
-    char_cap=None,
-    citable=True,
-)
-def _r_archive_top_runs(b: InjectionBundle) -> list[Item]:
-    if b.axes is None:
-        return []
-    runs = b.axes.top_runs(3)
-    if not runs:
-        return []
-    lines = [f"HISTORICAL BEST (top {len(runs)} runs across the dataset's archive):"]
-    for i, r in enumerate(runs, 1):
-        lines.append(
-            f"  #{i}  acc={r.accuracy:.1%}  comp={r.composite:.3f}  n={r.total}  run={r.individual}"
-        )
-    return [Item("\n".join(lines))]
-
-
-@signal(
-    "rare_hit_samples",
-    kind=InjectionKind.MEASUREMENT,
-    char_cap=None,
-    citable=True,
-)
-def _r_rare_hit_samples(b: InjectionBundle) -> list[Item]:
-    if b.axes is None:
-        return []
-    rare = b.axes.sample_index.rare_hit_samples(max_hits=3, min_observations=10)
-    cracked = [row for row in rare if row[2] > 0]
-    if not cracked:
-        return []
-    header = "RARE-HIT SAMPLES (cracked by ≤3 of ≥10 attempts — replicate the unlock pattern):"
-    rows = [
-        Item(
-            # No `[#id]` mark: an archive intractable is no row of this round's clusters.
-            f"  sample {sid}: {query}… → {hits}/{total} hit by "
-            + ", ".join(pointer[:24] for pointer in cracked_by[:2]),
-            trusted=False,
-        )
-        for sid, query, hits, total, cracked_by in cracked
-    ]
-    return [Item(header), *rows]
-
-
 @signal("measurand", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
 def _r_measurand(b: InjectionBundle) -> list[Item]:
     fitness = b.digest.composite_fitness
     if fitness is None:
         return []
+    theta = ""
+    if (a := b.digest.ability) is not None:
+        se = f" ±{a.se:.3f}" if a.se is not None else ""
+        theta = (
+            f"; frontier θ {a.theta:+.3f}{se} ({a.scale(named=False)} — each "
+            f"{b.measured_unit}'s latest cell, whoever measured it)"
+        )
+    if not _theta_fit_on_formula(b):
+        # The cell formula IS the grade, so a fitness block would restate the θ line's input.
+        return [
+            Item(
+                f"ELECTION — a round is won on θ lift over the parent by an arm winning more "
+                f"shared cells than it loses{theta}. Round fitness {fitness:.3f}."
+            )
+        ]
     body = render_composite_fitness_block(
         fitness, b.digest.evaluators, b.cycle_slice.composite_formula
     )
     lines = [
-        "ELECTION — a round is won on θ lift over the parent, and θ is fit on each cell's "
-        "composite under the formula below, not on accuracy."
-        if _theta_fit_on_formula(b)
-        else "ELECTION — a round is won on θ lift over the parent, and on nothing else."
+        f"ELECTION — a round is won on θ lift over the parent by an arm winning more shared cells "
+        f"than it loses, θ fit on each cell's composite under the formula below, not on "
+        f"accuracy{theta}.",
+        "REPORTED FITNESS — the headline number and the degradation scale:",
+        *(f"  {ln}" for ln in body),
     ]
-    if (a := b.digest.ability) is not None:
-        lines.append(f"  this round: θ {a.theta:+.3f}  ({a.scale(named=False)})")
-    lines.append("REPORTED FITNESS — the headline number and the degradation scale:")
-    lines.extend(f"  {ln}" for ln in body)
     return [Item("\n".join(lines))]
-
-
-@signal("precision", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
-def _r_precision(b: InjectionBundle) -> list[Item]:
-    d = b.digest
-    rows: list[str] = []
-    if (a := d.ability) is not None and a.se is not None:
-        rows.append(f"ability θ {a.theta:+.3f} ±{a.se:.3f}  ({a.scale(named=False)})")
-    for arm in d.arms[:PRECISION_ARM_ROWS]:
-        if arm.mean_fitness_ci_lo is None or arm.mean_fitness_ci_hi is None:
-            continue
-        rows.append(
-            f"{arm.label} accuracy in [{arm.mean_fitness_ci_lo:.3f}, {arm.mean_fitness_ci_hi:.3f}]"
-            f" on {arm.scored_samples}/{arm.expected_samples} {unit_plural(b.measured_unit)}"
-        )
-    if not rows:
-        return []
-    return [
-        Item(
-            "PRECISION — what those numbers are known to within:\n"
-            + "\n".join(f"  {r}" for r in rows)
-        )
-    ]
 
 
 @signal("detectable_move", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
 def _r_detectable_move(b: InjectionBundle) -> list[Item]:
-    se = b.digest.ability.se if b.digest.ability is not None else None
-    if se is None or se <= 0.0:
+    a = b.digest.ability
+    n = len(b.digest.latest_sample_keys)
+    if a is None or a.se is None or a.se <= 0.0 or not n:
         return []
     # A contrast against the parent, so both arms' error enters; equal precision is assumed.
-    contrast_se = se * (2.0**0.5)
-    mde = min_detectable_effect(contrast_se)
+    mde = min_detectable_effect(a.se * math.sqrt(2.0))
+    ruler = None if b.ruler is None else b.ruler.entries()
+    rows = max(1, round(expected_score_gain(a.theta, mde, b.digest.latest_sample_keys, ruler)))
     return [
         Item(
-            "DETECTABLE MOVE — the bar this round can actually clear:\n"
-            f"  an edit must move ability by at least {mde:+.3f} logits to separate from the parent "
-            f"(contrast se {contrast_se:.3f}, 95%/80%). Anything smaller is inside the noise however "
-            "the column reads, so prefer one edit with a large expected effect to several small ones."
+            f"DETECTABLE MOVE — an edit must win ≈{rows} more of this round's {n} "
+            f"{unit_plural(b.measured_unit)} than the parent to separate from it (95%/80%); "
+            "smaller is noise, so prefer one large-effect edit to several small ones."
         )
     ]
-
-
-@signal("sample_provenance", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
-def _r_sample_provenance(b: InjectionBundle) -> list[Item]:
-    d, cs = b.digest, b.cycle_slice
-    n = len(d.latest_sample_keys)
-    if not n:
-        return []
-    unit = b.measured_unit
-    budget = f" of a {cs.sp_budget_round}-{unit} budget" if cs.sp_budget_round else ""
-    rows = [f"{unit_count(n, unit)} graded this round{budget}"]
-    if cs.subset_mode == "adaptive":
-        rows.append(
-            "chosen ADAPTIVELY — the acquisition re-picks each round by information gain, so two "
-            "consecutive rounds are two different exams and their raw rates are not a series"
-        )
-    elif cs.subset_mode == "frozen":
-        rows.append("FROZEN — every round is graded on the same campaign-start prefix")
-    if d.prev_sample_keys:
-        rows.append(f"{len(d.latest_sample_keys & d.prev_sample_keys)} also graded last round")
-    # A collapse has no rate to read, so "graded on a harder prefix" is false of it.
-    stopped = ("eliminated", "broken")
-    if cut := [a for a in d.arms if a.cut in stopped and a.gate != EliminationGate.COLLAPSED]:
-        stops = ", ".join(f"{a.label} at {a.scored_samples}/{a.expected_samples}" for a in cut[:4])
-        rows.append(
-            f"stopped early: {stops} — a cut arm was graded on a harder prefix, so its rate says "
-            "where it stopped, not how good it is"
-        )
-    if gone := [a for a in d.arms if a.gate == EliminationGate.COLLAPSED]:
-        stops = ", ".join(f"{a.label} at {a.scored_samples}/{a.expected_samples}" for a in gone[:4])
-        rows.append(
-            f"stopped answering: {stops} — one label for every {unit}, so there is no rate to read"
-        )
-    return [Item("SAMPLE — what chose these rows:\n" + "\n".join(f"  {r}" for r in rows))]
 
 
 @signal("confounds", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
@@ -1180,12 +1173,8 @@ def _r_confounds(b: InjectionBundle) -> list[Item]:
 @signal("budget_state", kind=InjectionKind.DERIVED, char_cap=None, citable=False)
 def _r_budget_state(b: InjectionBundle) -> list[Item]:
     cs = b.cycle_slice
-    parts: list[str] = []
-    if cs.budget_rounds:
-        parts.append(f"round {cs.round_num} of {cs.budget_rounds}")
+    parts = [f"ROUND {cs.round_num}" + (f" of {cs.budget_rounds}" if cs.budget_rounds else "")]
     if cs.spend_budget_usd:
         used = f"${cs.spend_used_usd:.2f}" if cs.spend_used_usd is not None else "?"
-        parts.append(f"cap {used} of ${cs.spend_budget_usd:.2f}")
-    if not parts:
-        return []
-    return [Item("BUDGET: " + " · ".join(parts))]
+        parts.append(f"spend {used} of ${cs.spend_budget_usd:.2f}")
+    return [Item(" · ".join(parts))]

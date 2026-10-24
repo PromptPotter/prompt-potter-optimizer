@@ -18,7 +18,7 @@ from promptpotter.application.datasets.tabular_ingest import candidate_library_f
 from promptpotter.application.optimizer_manifest import resolve_optimizer
 from promptpotter.application.pipeline_resolve import draft_pipeline
 from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
-from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
+from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -56,10 +56,10 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             )
         changes["slug"] = patch.slug
 
-    if patch.scoring_matcher is not None and patch.scoring_matcher not in SCORING_FUNCTIONS:
+    if patch.scoring_matcher is not None and patch.scoring_matcher not in MATCHERS:
         raise PayloadInvalidError(
             f"patch.scoring_matcher {patch.scoring_matcher!r} is not one of the matchers "
-            f"{sorted(SCORING_FUNCTIONS)}."
+            f"{sorted(MATCHERS)}."
         )
     if patch.connector is not None and not (
         (chosen := connectors.registered().get(patch.connector)) and chosen.serves_uploads

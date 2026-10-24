@@ -3,7 +3,7 @@ import type {
   ArmNode,
   ArmReading,
   BenchPassProgress,
-  LineageNode,
+  CourseNode,
 } from "@/lib/api/types";
 
 export type CandidateSource = "history" | "inflight";
@@ -19,20 +19,30 @@ export interface ArmRow {
   reading: ArmReading;
 }
 
-export interface CandidateBar {
+interface BarBase {
   // `nodeKeyOf(node)`
   key: string;
   idx: number;
   label: string;
-  node: LineageNode;
-  // Null on a course bar, as is `reading`.
-  arm: ArmNode | null;
-  reading: ArmReading | null;
+}
+
+// One bar of the candidates chart. `node` is the served tree row and the ONE reference to it;
+// everything an arm measured or decided is read off `reading`, the half chosen for this row.
+export interface ArmBar extends BarBase {
+  node: ArmNode;
+  // `node.reading` once its walk is decided, else the live row — WHOLE, never field by field.
+  reading: ArmReading;
   source: CandidateSource;
-  // An arm's `reading.own`, a course's served `run_standing`; `null` renders BLANK, never 0.
-  level: number | null;
   // Null unless this bar answered the WHOLE shared basis.
   overlap: { rate: number | null; n: number } | null;
   // served: `dash.bench_pass`; a finished pass is `reading.bench`.
   benchPass: BenchPassProgress | null;
 }
+
+// A run drawn as a bar: no arm, so no reading — its level is the served `run_standing`.
+export interface CourseBar extends BarBase {
+  node: CourseNode;
+  reading: null;
+}
+
+export type CandidateBar = ArmBar | CourseBar;

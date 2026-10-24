@@ -188,12 +188,7 @@ async def repair_incomplete_rounds(
         # The headline is the head arm's own: re-keying its rows moves it, never a second write.
         mended = t.model_copy(update={"cells": cells, "folds": folds}) if cells != t.cells else t
         if mended is not t:
-            diagnostics = compute_round_diagnostics(
-                mended,
-                [*(p for p in corrected if p.round < t.round), mended],
-                session.pipeline_schema,
-                session.bank.slot_of,
-            )
+            diagnostics = compute_round_diagnostics(mended, session.pipeline_schema)
             corrected[slot] = mended.model_copy(update={"diagnostics": diagnostics})
     return corrected
 

@@ -37,7 +37,11 @@ def _fence_runs(items: list[Item]) -> int:
     )
 
 
-def _emit(items: list[Item], *, produced: int) -> str:
+def _text(item: Item, quoted: frozenset[str]) -> str:
+    return item.if_quoted[1] if item.if_quoted and item.if_quoted[0] in quoted else item.text
+
+
+def _emit(items: list[Item], *, produced: int, quoted: frozenset[str]) -> str:
     if not items:
         return ""
     parts: list[str] = []
@@ -51,9 +55,9 @@ def _emit(items: list[Item], *, produced: int) -> str:
     for item in items:
         if item.trusted:
             flush()
-            parts.append(item.text)
+            parts.append(_text(item, quoted))
         else:
-            run.append(item.text)
+            run.append(_text(item, quoted))
     flush()
     if (dropped := produced - len(items)) > 0:
         # What was DROPPED, not "N of M": a panel's items include its header.
@@ -119,8 +123,13 @@ def select(
     spent = 0
     serve([n for n in order if n not in mandatory], bounded=True)
 
+    # Charged at the long form above, so a substitution only ever frees budget.
+    quoted = frozenset(row for items in taken.values() for item in items for row in item.quotes)
     # EVERY name in the layout gets an entry, silent ones as "": the caller indexes by placeholder.
-    out = {name: _emit(taken.get(name, []), produced=len(pools.get(name, []))) for name in order}
+    out = {
+        name: _emit(taken.get(name, []), produced=len(pools.get(name, [])), quoted=quoted)
+        for name in order
+    }
     coverage = {
         name: PanelCoverage(
             produced=len(pools.get(name, [])),

@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable, Mapping
 from types import SimpleNamespace
 from typing import Any, Literal, NamedTuple
 
-from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
+from promptpotter.application.scoring.formula.matchers import MATCHERS, matcher_of
 from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
@@ -98,9 +98,7 @@ _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
 )
 
 
-_CALLABLE_NAMES: frozenset[str] = frozenset(SAFE_BUILTINS["__builtins__"]) | frozenset(
-    SCORING_FUNCTIONS
-)
+_CALLABLE_NAMES: frozenset[str] = frozenset(SAFE_BUILTINS["__builtins__"]) | frozenset(MATCHERS)
 
 
 def _helper_arguments(tree: ast.AST) -> set[int]:
@@ -109,7 +107,7 @@ def _helper_arguments(tree: ast.AST) -> set[int]:
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id in SCORING_FUNCTIONS
+        and node.func.id in MATCHERS
         for arg in (*node.args, *(kw.value for kw in node.keywords))
     }
 
@@ -356,7 +354,7 @@ def cell_namespace(facts: MeasuredCell) -> dict[str, Any]:
         "error": facts.error,
         "predicted": facts.predicted,
         "ground_truth": facts.ground_truth,
-        **SCORING_FUNCTIONS,
+        **{name: m.score for name, m in MATCHERS.items()},
     }
     if facts.n_candidates is not None:
         ns["n_candidates"] = facts.n_candidates
@@ -382,7 +380,7 @@ CELL_INTRINSIC_NAMES: frozenset[str] = frozenset(
         "n_candidates",
         "input_tokens",
         "output_tokens",
-        *SCORING_FUNCTIONS,
+        *MATCHERS,
     }
 )
 """A ``pipeline_data`` key colliding with one of these is SILENTLY dropped by ``cell_namespace``'s splat."""
@@ -455,6 +453,7 @@ def compile_scorer(
         _refuse_label_formula(per_sample, compiled.names, source="per_sample scoring formula")
 
     scorer_id = auto_scorer_id(per_sample, per_cell, judge_instrument=judge_instrument)
+    matcher = matcher_of(per_sample)
 
     def _fitness(facts: MeasuredCell) -> float:
         query = facts.query[:80]
@@ -462,7 +461,9 @@ def compile_scorer(
         return clamp_unit_score(value, formula=per_sample, subject=f"query {query!r}")
 
     if not per_cell:
-        return Scorer(id=scorer_id, per_cell=None, fitness=_fitness, objective=None)
+        return Scorer(
+            id=scorer_id, per_cell=None, matcher=matcher, fitness=_fitness, objective=None
+        )
 
     composite = compile_expression(per_cell, source="per_cell scoring formula")
     if verifier_graded:
@@ -482,7 +483,9 @@ def compile_scorer(
         # Written as a step from `charged`, so a solved cell returns its composite bit-for-bit.
         return charged + MISS_COST_SHARE * (solved - charged)
 
-    return Scorer(id=scorer_id, per_cell=per_cell, fitness=_fitness, objective=_objective)
+    return Scorer(
+        id=scorer_id, per_cell=per_cell, matcher=matcher, fitness=_fitness, objective=_objective
+    )
 
 
 def auto_scorer_id(

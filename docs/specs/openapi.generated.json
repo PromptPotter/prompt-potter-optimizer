@@ -1200,7 +1200,7 @@
                 "type": "null"
               }
             ],
-            "description": "Its individual's rate on the origin panel, as the newest overlap reading holds it: the one level two arms of different rounds may be differenced on. Null off the best-so-far line, and where it does not hold the whole panel."
+            "description": "Its individual's rate on the origin panel, as the newest overlap reading holds it: the one level two arms of different rounds may be differenced on. Null for an arm neither on the best-so-far line nor triggered, and where it does not hold the whole panel."
           },
           "own": {
             "anyOf": [
@@ -11121,12 +11121,33 @@
             },
             "title": "Positions",
             "type": "array"
+          },
+          "triggered": {
+            "description": "Every arm off the line a `PanelTrigger` fired for this cycle, by first walk. It moves no `advance`.",
+            "items": {
+              "$ref": "#/components/schemas/TriggeredReading"
+            },
+            "title": "Triggered",
+            "type": "array"
+          },
+          "vs_parent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairedReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The standing pick (`b`) over the pick before it on the line (`a`), on the same panel: the cells it gained and lost against its own parent. Null where that parent is C0, which `lead` reads, or where the line went unread. It moves no `advance`."
           }
         },
         "required": [
           "positions",
           "lead",
           "earlier",
+          "triggered",
+          "vs_parent",
           "advance"
         ],
         "title": "OverlapReading",
@@ -11416,6 +11437,14 @@
         ],
         "title": "PanelPrecision",
         "type": "object"
+      },
+      "PanelTrigger": {
+        "description": "Why an arm off the line is read on the origin panel: a monitoring call, never a verdict.",
+        "enum": [
+          "n_min"
+        ],
+        "title": "PanelTrigger",
+        "type": "string"
       },
       "ParamIntent": {
         "additionalProperties": false,
@@ -12740,6 +12769,27 @@
         "title": "RoundView",
         "type": "object"
       },
+      "RulerOwn": {
+        "additionalProperties": false,
+        "description": "A compare arm's reach past its head-to-head's freeze: its own campaign's lines alone, which\nis what a fresh run of itself would read.",
+        "properties": {
+          "campaign": {
+            "title": "Campaign",
+            "type": "string"
+          },
+          "since": {
+            "minimum": 0.0,
+            "title": "Since",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "campaign",
+          "since"
+        ],
+        "title": "RulerOwn",
+        "type": "object"
+      },
       "RulerScope": {
         "additionalProperties": false,
         "description": "What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale only through\ncells they share, and two datasets share none, so a δ is never compared across datasets.",
@@ -12762,7 +12812,7 @@
       },
       "RulerStamp": {
         "additionalProperties": false,
-        "description": "The δ scale a reading was taken on: the tenant ruler at ``version`` less the rows of\n``excluded``, the judged individuals it held. A cold stamp's ``id`` is flat.",
+        "description": "The δ scale a reading was taken on: the tenant ruler at ``version`` (narrowed by ``own``)\nless the rows of ``excluded``, the parent line it held. A cold stamp's ``id`` is flat.",
         "properties": {
           "excluded": {
             "items": {
@@ -12774,6 +12824,16 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "own": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RulerOwn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "scope": {
             "$ref": "#/components/schemas/RulerScope"
@@ -12787,6 +12847,7 @@
         "required": [
           "id",
           "version",
+          "own",
           "scope",
           "excluded"
         ],
@@ -15543,6 +15604,25 @@
           "source"
         ],
         "title": "Treatment",
+        "type": "object"
+      },
+      "TriggeredReading": {
+        "additionalProperties": false,
+        "description": "Fired once, re-read every round the panel reads: a later cut or lost election takes none back.",
+        "properties": {
+          "reading": {
+            "$ref": "#/components/schemas/PairedReading",
+            "description": "The arm (`b`) over C0 (`a`) on the origin panel."
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/PanelTrigger"
+          }
+        },
+        "required": [
+          "trigger",
+          "reading"
+        ],
+        "title": "TriggeredReading",
         "type": "object"
       },
       "UnarchiveCampaignPayload": {

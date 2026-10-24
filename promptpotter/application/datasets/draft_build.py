@@ -22,7 +22,7 @@ from promptpotter.application.pipeline_resolve import (
     draft_config,
     resolve_pipeline_for_draft,
 )
-from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
+from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
@@ -243,7 +243,7 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         n_samples=draft.n_samples,
         connector=draft.connector,
         scoring_matcher=draft.scoring_matcher,
-        scoring_matchers=sorted(SCORING_FUNCTIONS),
+        scoring_matchers=sorted(MATCHERS),
         scoring_dials=draft.scoring_dials,
         optimization_overrides=_wire_overrides(draft),
         optimizer_setup=resolution.optimizer_setup,

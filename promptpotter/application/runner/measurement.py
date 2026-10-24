@@ -106,8 +106,6 @@ async def measure_population(
     selector: Selector,
 ) -> MeasuredRound:
     cycle = ctx.cycle
-    # Before a cell is bought, so PoBB cuts on the scale the election reads.
-    cycle.difficulty.judge(_judged(cycle, population))
     arms, rows, cut = await _walk_population(
         ctx, population, panel, eliminator, keep_cut=selector.elects_partial
     )
@@ -133,6 +131,13 @@ async def measure_population(
         if not cells or not any(readable(key, held) for key in rows):
             raise StopLoop(cut)
     parent = await rescore_parent(ctx, cells, role=MeasurementRole.PARENT)
+    # Every cell the round bought joins the δ fit before a θ is read: a ruler carrying only cells
+    # from earlier rounds reads each arm on the handful it shares with them.
+    cycle.difficulty.link(
+        [(arm.sp_hash, rows[key]) for key, arm in arms.items() if arm.sp_hash]
+        + [(parent.state.sp_hash, parent.rows)]
+    )
+    ruler = cycle.difficulty.ruler
     # Never in a `finally`: an unwound round did not score. Round 0's is `round.py::emit_origin_round`.
     cycle.session.state.control.spend_sample_lookahead()
     # The shared anchor's single-draw noise is correlated across arms, so it favours none.
@@ -187,24 +192,6 @@ async def measure_population(
         coverage_floor=coverage_floor,
         cut=cut,
     )
-
-
-def _judged(cycle: Cycle, population: Proposals) -> set[str]:
-    """The round's arms and every parent they name, by archive address."""
-    schema = cycle.session.pipeline_schema
-    known = {
-        arm.individual.id: arm.sp_hash
-        for rr in cycle.rounds
-        for arm in rr.arms.values()
-        if isinstance(arm, Concluded)
-    }
-    held = {ind.id: cycle.points.job(ind).sp_hash(schema) for ind in population.individuals}
-    parents = {
-        known.get(pid) or held.get(pid)
-        for ind in population.individuals
-        for pid in ind.lineage.parent_ids
-    }
-    return {*held.values(), *(address for address in parents if address)}
 
 
 async def _reference_readings(

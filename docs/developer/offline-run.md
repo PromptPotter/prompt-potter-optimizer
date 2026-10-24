@@ -40,8 +40,8 @@ capo by default) of one head-to-head, one of them after a foreign campaign on th
 origin differs — the one layout that puts several optimizers' campaigns in ONE workspace, so the
 webapp's Compare tab can read them together. It fails
 unless a skip on an arm is refused, an arm searches its prompt's fields alone, each arm's memory
-holds only runs it filed, and every election of every arm read the one ruler version its
-head-to-head froze at open. Whether the foreign campaign moved the arms' decisions is printed as a
+holds only runs it filed, and every election of every arm read its head-to-head's freeze plus
+its own lines. Whether the foreign campaign moved the arms' decisions is printed as a
 reading: its rows are in that version. `head_to_head.json` beside them is the evidence read of all three.
 
 ## Why it cannot be mistaken for a real run

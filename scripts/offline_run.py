@@ -67,6 +67,7 @@ from promptpotter.domain.campaign import Arm, Compare, Optimize, Purpose
 from promptpotter.domain.command_kinds import SkipSearchpointPayload
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
+from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
@@ -662,13 +663,14 @@ async def run_controlled(
     for name, (cycle, cid) in arms.items():
         hop = CycleHop(campaign_id=cid, cycle_id=cycle.name)
         standing = stores.campaigns.standing_rounds(hop, moment=None).rounds.values()
-        read = {None if (s := r.close.ruler) is None else s.version for r in standing}
-        if read != {record.ruler_version}:
+        own = RulerOwn(campaign=cid, since=record.ruler_version)
+        read = {None if (s := r.close.ruler) is None else s.own for r in standing}
+        if read != {own}:
             raise SystemExit(
-                f"offline run: arm {name} read ruler versions {sorted(read, key=str)}, its head-to-head "
-                f"froze {record.ruler_version}"
+                f"offline run: arm {name} read ruler reaches {read}, its head-to-head froze "
+                f"{record.ruler_version} for {cid}"
             )
-        print(f"arm {name}: every election read the ruler its head-to-head froze")
+        print(f"arm {name}: every election read its head-to-head's freeze plus its own lines")
     ev = subject_evidence(stores, [SubjectSpec("campaign", c) for c in subjects])
     table = ev.head_to_head
     assert table is not None

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_schema import NodeRole
-from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import PipelineData, extract_item_label, is_verifier_graded
 from promptpotter.shared.answer_text import text_list_items, text_list_rank
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -35,10 +34,6 @@ def find_rank(items: list[Any], ground_truth: str) -> int | None:
         if extract_item_label(c) == ground_truth:
             return i + 1
     return None
-
-
-def count_degraded_samples(results: Iterable[GradedCell]) -> int:
-    return sum(1 for cell in results if is_degraded(cell.facts))
 
 
 def judge_readings(facts: MeasuredCell) -> list[tuple[str, str, str]]:

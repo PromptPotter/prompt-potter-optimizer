@@ -204,20 +204,19 @@ class PoBBRace(CatchUpPool):
             "prior_arms": self._check.prior_keys,
             "queries_scored": context["queries_scored"],
             "round_num": round_num,
+            # The fewest shared cells a prior is read on, which the replay's fit needs too.
+            "n_min": int(self._check.n_min),
         }
         data: dict[str, Any] = {}
         if fit is not None:
             inputs["recorded_p_best"] = context["p_best"]
             # Each cell by its `Sample.key`: a replay re-fits from this JSON record.
-            cells = fit.cells
             data = {
                 "p_best": context["p_best"],
                 "leader": context["leader"],
                 "paired_breakdown": signal.paired_breakdown,
-                "candidate_cells": cells,
-                "prior_histories": {
-                    pid: dict(zip(cells, grades, strict=True)) for pid, grades in fit.priors.items()
-                },
+                "candidate_cells": fit.cells,
+                "prior_histories": {pid: dict(grades) for pid, grades in fit.priors.items()},
             }
         check = self._check
         if gate is EliminationGate.LOCK_IN:
@@ -226,7 +225,7 @@ class PoBBRace(CatchUpPool):
         else:
             kind = PotterCheckpointKind.ELIMINATION_CUT
             # WHICH gate cut it, so the replayer re-derives the rule that fired.
-            inputs |= {"gate": gate, "n_min": int(check.n_min)}
+            inputs["gate"] = gate
             if gate is EliminationGate.EPSILON:
                 inputs["epsilon"] = context["epsilon"]
         self._ctx.decide(kind, inputs, True, data=data)

@@ -82,6 +82,8 @@ export function unreadOverlap(over: Partial<OverlapReading> = {}): OverlapReadin
       beside: [],
     },
     earlier: [],
+    triggered: [],
+    vs_parent: null,
     advance: "held",
     ...over,
   };

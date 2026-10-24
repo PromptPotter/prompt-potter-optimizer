@@ -27,6 +27,7 @@ from promptpotter.shared.measurement_context import enter_instrument_mode
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign import Purpose
+    from promptpotter.domain.ruler import RulerReach
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.shared.identity import IdentityContext
 
@@ -44,8 +45,8 @@ class InnerSpawnContext:
     enclosing: tuple[Path, ...]
     # What the spawner is FOR: each cell declares it, so withholds what the spawner would.
     purpose: Purpose
-    # The tenant ruler version the spawner's open round reads, which every cell it spawns reads too.
-    ruler_version: int
+    # The tenant ruler lines the spawner's open round reads, which every cell it spawns reads too.
+    ruler: RulerReach
     # Resolved ONCE at publish: a per-cell read lets an edit split one run's cells.
     cells: InnerCells | None = None
 
@@ -91,7 +92,7 @@ def publish_inner_spawn_context(session: Session) -> None:
                 session.store.campaigns.cycle_dir(session.hop),
             ),
             purpose=session.purpose,
-            ruler_version=ruler_clock(session),
+            ruler=ruler_clock(session),
             cells=cells,
         )
     )
@@ -116,18 +117,18 @@ def inner_cells() -> InnerCells | None:
     return None if ctx is None else ctx.cells
 
 
-def pin_inner_ruler(version: int) -> None:
-    """At each outer round's open, so every cell the round spawns reads the version it reads."""
+def pin_inner_ruler(reach: RulerReach) -> None:
+    """At each outer round's open, so every cell the round spawns reads the lines it reads."""
     ctx = inner_spawn_context()
-    if ctx is not None and ctx.ruler_version != version:
-        _INNER_SPAWN.set(replace(ctx, ruler_version=version))
+    if ctx is not None and ctx.ruler != reach:
+        _INNER_SPAWN.set(replace(ctx, ruler=reach))
 
 
 def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_id: str) -> None:
     """The archive stays the cell's CACHE, and MEMORY only for its campaign's walks."""
     # Before the cell's run binds its own round, so this still reads the spawner's.
     enter_instrument_mode(spawned_in=current_round())
-    bind_memory_scope(CellOf(CampaignWalks(campaigns, campaign_id), ctx.ruler_version))
+    bind_memory_scope(CellOf(CampaignWalks(campaigns, campaign_id), ctx.ruler))
 
 
 def retarget_inner_spawn(session: Session) -> None:

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import overlap_line
+from promptpotter.domain.results import LineRate, overlap_line, triggered_rates
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
@@ -36,15 +36,22 @@ def overlap_series(overlap: OverlapReading) -> str:
     line = overlap_line(overlap)
     if not line:
         return ""
-    arms = "  →  ".join(f"{m.arm.label} {m.rate:.1%} (n={m.n})" for m in line)
+    triggered = triggered_rates(overlap)
+
+    def rate(m: LineRate) -> str:
+        return f"{m.arm.label} {m.rate:.1%} (n={m.n})"
+
     lead = overlap.lead
+    readings = (*overlap.earlier, lead, *(t.reading for t in overlap.triggered))
     bought = sum(
         member.bought
-        for member in (lead.a, *(pick.b for pick in (*overlap.earlier, lead)))
+        for member in (lead.a, *(reading.b for reading in readings))
         if member is not None
     )
     paid = f", +{bought} measured" if bought else ""
-    return f"origin panel of {len(overlap.positions)}{paid}: {arms}"
+    arms = "  →  ".join(map(rate, line))
+    side = f"  ·  triggered: {', '.join(map(rate, triggered))}" if triggered else ""
+    return f"origin panel of {len(overlap.positions)}{paid}: {arms}{side}"
 
 
 def fmt_ci(lower: float | None, upper: float | None, *, spec: str) -> str:

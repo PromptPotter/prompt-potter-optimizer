@@ -81,7 +81,7 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect
 from promptpotter.application.optimizers.gepa.state import ParetoScores
-from promptpotter.application.optimizers.nodes import Panel, Proposals
+from promptpotter.application.optimizers.nodes import MintFacts, Panel, Proposals
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
@@ -152,7 +152,7 @@ from promptpotter.domain.pipeline_schema import (
     description_key,
     narrowing_of,
 )
-from promptpotter.domain.pool import EARNED_SOURCE
+from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.results import PointContext
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
@@ -369,9 +369,32 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         resolve_optimizer("potter", {"block_pool": earned_only, "l1_generate": closed}, gate="off")
     stray_shot = ManifestNodeOverlay(config={"active": ["not-a-sample-key"]})
     named = resolve_optimizer("capo", {"demo_pool": stray_shot}, gate="off")
-    assert named.pool_refusals(demo=[Sample(id=1, query="q", ground_truth="a")]), (
-        "a demo pool naming a key its partition lacks reached a mint"
+    unranked = parse_pipeline_response(
+        {
+            "nodes": {"solve": {"type": "llm", "config": {"model": "m"}}},
+            "pipelines": {"default": ["solve"]},
+        }
     )
+    assert named.pool_refusals(
+        mint=MintFacts([Sample(id=1, query="q", ground_truth="a")], unranked, None)
+    ), "a demo pool naming a key its partition lacks reached a mint"
+    # A block presuming what the run lacks is noise in its prompt: naming one refuses the mint.
+    ranks = entry_id(
+        "task_intent", "Your task is to identify the single best match from the candidates."
+    )
+    last_line = entry_id(
+        "answer_format", "Show your reasoning, then state the final answer clearly on its own line."
+    )
+    for path, matcher, admitted in (
+        (ranks, "label_match", False),
+        (last_line, "list_rr", False),
+        (last_line, "label_match", True),
+    ):
+        picked = resolve_optimizer(
+            "potter", {"block_pool": ManifestNodeOverlay(config={"active": [path]})}, gate="off"
+        )
+        refused = picked.pool_refusals(mint=MintFacts((), unranked, matcher))
+        assert (not refused) == admitted, f"{path} under {matcher}: admission missed a presumption"
 
     # The determinism clamp outranks every other layer and keys the bank.
     reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")
@@ -1602,9 +1625,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
                 new_samples=[(sid, f"claim {sid}", "TRUE") for sid in held],
             )
         )
-    assert not index.rare_hit_samples() and not index.records(), (
-        "a held-out row reached the index the optimizer's panels read"
-    )
+    assert not index.records(), "a held-out row reached the index the optimizer's panels read"
 
     # The check-in model reads no held-out row.
     checkin_bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(40)]

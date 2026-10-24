@@ -51,14 +51,36 @@ class RulerFold(FrozenModel):
 
     scope: RulerScope
     rows: list[RulerRow]
+    # The campaign whose election folded it: a compare arm reads its own lines past the freeze.
+    campaign: str
+
+
+class RulerOwn(FrozenModel):
+    """A compare arm's reach past its head-to-head's freeze: its own campaign's lines alone, which
+    is what a fresh run of itself would read."""
+
+    campaign: str
+    since: int = Field(ge=0)
+
+
+class RulerReach(FrozenModel):
+    """Which lines a fit reads: every line before ``version``, except past ``own.since`` only
+    ``own.campaign``'s."""
+
+    version: int = Field(ge=0)
+    own: RulerOwn | None
+
+    def holds(self, line: int, fold: RulerFold) -> bool:
+        return self.own is None or line < self.own.since or fold.campaign == self.own.campaign
 
 
 class RulerStamp(FrozenModel):
-    """The δ scale a reading was taken on: the tenant ruler at ``version`` less the rows of
-    ``excluded``, the judged individuals it held. A cold stamp's ``id`` is flat."""
+    """The δ scale a reading was taken on: the tenant ruler at ``version`` (narrowed by ``own``)
+    less the rows of ``excluded``, the parent line it held. A cold stamp's ``id`` is flat."""
 
     id: str
     version: int = Field(ge=0)
+    own: RulerOwn | None
     scope: RulerScope
     # Archive addresses, sorted; only those the version held, so one scale is one stamp.
     excluded: tuple[str, ...]
@@ -66,6 +88,10 @@ class RulerStamp(FrozenModel):
     @property
     def cold(self) -> bool:
         return is_flat_ruler_id(self.id)
+
+    @property
+    def reach(self) -> RulerReach:
+        return RulerReach(version=self.version, own=self.own)
 
 
 # A cold id carries the OBJECTIVE: flat δ depends on no fit, so nothing else separates two readings.
@@ -193,6 +219,7 @@ def is_flat_ruler_id(value: str) -> bool:
     return value.startswith(_FLAT_PREFIX)
 
 
+@shapes_optimizer_prompt
 def ruler_entry(value: RulerEntry) -> tuple[float, float]:
     if isinstance(value, tuple):
         return float(value[0]), float(value[1])

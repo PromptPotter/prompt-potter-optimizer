@@ -545,6 +545,19 @@ class LivesReading(FrozenModel):
         return cls(bar=lives_bar(left, cap), label=lives_label(left, cap), spent=left <= 0)
 
 
+class PanelTrigger(StrEnum):
+    """Why an arm off the line is read on the origin panel: a monitoring call, never a verdict."""
+
+    N_MIN = "n_min"
+
+
+class TriggeredReading(FrozenModel):
+    """Fired once, re-read every round the panel reads: a later cut or lost election takes none back."""
+
+    trigger: PanelTrigger
+    reading: PairedReading = Field(description="The arm (`b`) over C0 (`a`) on the origin panel.")
+
+
 class OverlapReading(FrozenModel):
     """The best-so-far line on the ORIGIN PANEL: each pick paired with C0 on one set of cells."""
 
@@ -558,6 +571,15 @@ class OverlapReading(FrozenModel):
     earlier: tuple[PairedReading, ...] = Field(
         description="Each earlier pick on the line over C0 on the same panel, oldest first."
     )
+    triggered: tuple[TriggeredReading, ...] = Field(
+        description="Every arm off the line a `PanelTrigger` fired for this cycle, by first walk. "
+        "It moves no `advance`."
+    )
+    vs_parent: PairedReading | None = Field(
+        description="The standing pick (`b`) over the pick before it on the line (`a`), on the "
+        "same panel: the cells it gained and lost against its own parent. Null where that parent "
+        "is C0, which `lead` reads, or where the line went unread. It moves no `advance`."
+    )
     advance: RoundAdvance
 
     @classmethod
@@ -569,18 +591,28 @@ class OverlapReading(FrozenModel):
         positions: Sequence[int],
         lead: PairedReading,
         earlier: Sequence[PairedReading],
+        triggered: Sequence[TriggeredReading],
+        vs_parent: PairedReading | None,
     ) -> OverlapReading:
         return cls(
             positions=tuple(positions),
             lead=lead,
             earlier=tuple(earlier),
+            triggered=tuple(triggered),
+            vs_parent=vs_parent,
             advance=round_advance(round_num, improved, lead, earlier),
         )
 
     @classmethod
     def unpaired(cls, state: ReadingState, round_num: int, improved: bool) -> OverlapReading:
         return cls.of(
-            round_num, improved, positions=(), lead=PairedReading.unread(state), earlier=()
+            round_num,
+            improved,
+            positions=(),
+            lead=PairedReading.unread(state),
+            earlier=(),
+            triggered=(),
+            vs_parent=None,
         )
 
 
@@ -592,16 +624,41 @@ class LineRate(FrozenModel):
     n: int = Field(description="How many of the panel's cells it holds scoreable.")
 
 
+@shapes_optimizer_prompt
 def overlap_line(overlap: OverlapReading) -> list[LineRate]:
-    """C0 is on the lead's reading of it: rates set side by side must be one pair's."""
-    lead = overlap.lead
-    if lead.headline is None or lead.a is None or lead.a.address.arm is None:
+    """C0 is on the lead's reading of it, before any pick on the first triggered one's: rates set
+    side by side must be one pair's."""
+    anchor = next(
+        (
+            reading
+            for reading in (overlap.lead, *(t.reading for t in overlap.triggered))
+            if reading.headline is not None and reading.a is not None
+        ),
+        None,
+    )
+    if (
+        anchor is None
+        or anchor.headline is None
+        or anchor.a is None
+        or anchor.a.address.arm is None
+    ):
         return []
-    line = [LineRate(arm=lead.a.address.arm, rate=lead.headline.rate_a, n=lead.a.n)]
-    for pick in (*overlap.earlier, lead):
+    line = [LineRate(arm=anchor.a.address.arm, rate=anchor.headline.rate_a, n=anchor.a.n)]
+    for pick in (*overlap.earlier, overlap.lead):
         if pick.headline is not None and pick.b is not None and pick.b.address.arm is not None:
             line.append(LineRate(arm=pick.b.address.arm, rate=pick.headline.rate_b, n=pick.b.n))
     return line
+
+
+@shapes_optimizer_prompt
+def triggered_rates(overlap: OverlapReading) -> list[LineRate]:
+    return [
+        LineRate(arm=arm, rate=headline.rate_b, n=b.n)
+        for t in overlap.triggered
+        if (headline := t.reading.headline) is not None
+        and (b := t.reading.b) is not None
+        and (arm := b.address.arm) is not None
+    ]
 
 
 class LineStep(NamedTuple):
@@ -1593,8 +1650,9 @@ class ArmReading(FrozenModel):
     )
     on_origin_panel: LineRate | None = Field(
         description="Its individual's rate on the origin panel, as the newest overlap reading "
-        "holds it: the one level two arms of different rounds may be differenced on. Null off "
-        "the best-so-far line, and where it does not hold the whole panel."
+        "holds it: the one level two arms of different rounds may be differenced on. Null for an "
+        "arm neither on the best-so-far line nor triggered, and where it does not hold the whole "
+        "panel."
     )
 
     @classmethod
@@ -1659,7 +1717,8 @@ def line_by_individual(overlap: OverlapReading | None) -> dict[str, LineRate]:
     if overlap is None:
         return {}
     whole = len(overlap.positions)
-    return {r.arm.key: r for r in overlap_line(overlap) if r.n == whole}
+    rates = (*triggered_rates(overlap), *overlap_line(overlap))
+    return {r.arm.key: r for r in rates if r.n == whole}
 
 
 class DiagnosticRunRecord(FrozenModel):

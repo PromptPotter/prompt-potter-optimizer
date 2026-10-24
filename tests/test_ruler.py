@@ -63,6 +63,8 @@ from promptpotter.domain.results import ArmSlot, CycleResult, RoundResult, origi
 from promptpotter.domain.ruler import (
     CellScopes,
     DeltaRuler,
+    RulerOwn,
+    RulerReach,
     RulerScope,
     RulerStamp,
     ThetaCaveat,
@@ -72,7 +74,13 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import GradedCell, Scorer
-from promptpotter.infrastructure.store.archive_queries import CellOf, OpenAt, bind_memory_scope
+from promptpotter.infrastructure.store.archive_queries import (
+    ArmOf,
+    CampaignWalks,
+    CellOf,
+    OpenAt,
+    bind_memory_scope,
+)
 from promptpotter.infrastructure.store.dataset_access import read_dataset_definition
 from promptpotter.infrastructure.store.ruler_store import RulerStore
 from promptpotter.infrastructure.store.stores import Stores, build_stores
@@ -246,38 +254,54 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     race = [Observation(*row) for row in race_rows]
     store, scope = RulerStore(tmp_path), RulerScope(scorer="acc", dataset="ds")
     opened = store.version()
-    for folded in (foreign, foreign, race_rows):
-        store.fold(scope, folded)
+    arm, stranger = RulerOwn(campaign="arm", since=opened), RulerOwn(campaign="x", since=opened)
+    for folded, by, own in (
+        (foreign, "else", None),
+        (foreign, "else", None),
+        (race_rows, "arm", arm),
+    ):
+        store.fold(scope, folded, campaign=by, own=own)
     assert store.version() == opened + 2, "a re-fold of rows already held ticked the version"
     other = [(f"g{arm}", s.key, float(s.id % 2)) for arm in range(3) for s in pool40]
-    store.fold(RulerScope(scorer="acc", dataset="other"), other)
+    store.fold(RulerScope(scorer="acc", dataset="other"), other, campaign="else", own=None)
 
-    def judging(version: int, judged: set[str]) -> Any:
+    def judging(own: RulerOwn | None, judged: set[str]) -> Any:
+        reach = RulerReach(version=store.version(), own=own)
         return judging_ruler(
-            store, scope, version, judged, objective_id="acc", n_min=4, enable_2pl=False
+            store, scope, reach, judged, objective_id="acc", n_min=4, enable_2pl=False
         )
 
     outside = calibrate_delta_ruler([Observation(*row) for row in foreign], 4, enable_2pl=False)
-    optimizing = judging(store.version(), {"c0-address", "child", "never-measured"})
+    optimizing = judging(None, {"c0-address", "child", "never-measured"})
     assert outside is not None and optimizing.ruler is not None
     assert optimizing.ruler.anchor_id == outside.anchor_id, (
         "the judged arms' rows, or another dataset's, entered the scale that judges them"
     )
     assert optimizing.stamp.excluded == ("c0-address", "child"), "one scale, two stamps"
-    compared = judging(opened, set())
-    assert compared.ruler is None and compared.stamp.cold, (
-        "an arm read rows folded after its head-to-head opened"
+    foreign_arm = judging(stranger, set())
+    assert foreign_arm.ruler is None and foreign_arm.stamp.cold, (
+        "an arm read another campaign's rows folded after its head-to-head opened"
     )
+    on_race = calibrate_delta_ruler(race, 4, enable_2pl=False)
+    compared = judging(arm, set())
+    assert on_race is not None and compared.ruler is not None, (
+        "an arm's own elections never reached its ruler, so it draws one frozen subset forever"
+    )
+    assert compared.ruler.anchor_id == on_race.anchor_id and compared.stamp.own == arm
     share = len(c0_hits) / len(pool40)
 
     def c0_share(ruler: DeltaRuler | None) -> float:
         drawn = select_round_subset(pool40, race, 8, ruler=ruler, worth={})
         return sum(s.key in c0_hits for s in drawn) / len(drawn)
 
-    assert c0_share(compared.ruler) <= share, "a parent's known hits were over-drawn on an arm"
+    assert c0_share(foreign_arm.ruler) <= share, "a parent's known hits were over-drawn on an arm"
     assert c0_share(optimizing.ruler) <= share, "a parent's known hits were over-drawn"
-    on_race = calibrate_delta_ruler(race, 4, enable_2pl=False)
     assert c0_share(on_race) > share, "guard: a scale fit on the race must over-draw its hits"
+    # Another campaign's identical rows past the freeze are not the arm's: its fold still lands.
+    store.fold(scope, foreign, campaign="arm", own=arm)
+    assert store.version() == opened + 4, (
+        "an arm's rows were dropped as held by a line it never reads"
+    )
 
     # Drawn: every `easy` cell on the `small` model outprices the rest; rank alone buys only those.
     pool = [
@@ -415,7 +439,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     # Traced: every round's ended-on individual re-read on ONE scale, whatever its election read.
     bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(12)]
-    scorer = Scorer(id="acc", per_cell=None, fitness=lambda _row: 0.0, objective=None)
+    scorer = Scorer(id="acc", per_cell=None, matcher=None, fitness=lambda _row: 0.0, objective=None)
 
     solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False)], name="ds")
 
@@ -424,7 +448,13 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     ) -> list[Any]:
         session = loop_session(stores, solve, drawn, scorer=scorer)
         opened = judging_ruler(
-            stores.ruler, scope, 0, (), objective_id="acc", n_min=4, enable_2pl=False
+            stores.ruler,
+            scope,
+            RulerReach(version=0, own=None),
+            (),
+            objective_id="acc",
+            n_min=4,
+            enable_2pl=False,
         )
         view = DifficultyView(session, 4, False, frozenset(), opened)
 
@@ -442,7 +472,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     def closed(n: int, walked: dict[str, list[float]], pick: str | None, ended_on: str) -> Any:
         # Each election reads its own version; the series must read none of them.
-        stamp = RulerStamp(id=f"v{n}", version=n, scope=scope, excluded=())
+        stamp = RulerStamp(id=f"v{n}", version=n, own=None, scope=scope, excluded=())
         return round_result(
             n,
             arms={ArmKey(k): arm_state(k) for k in walked},
@@ -458,7 +488,12 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     # Graded, never binary: tied δ would pin most cells to the prior.
     warmed = workspace(tmp_path / "series")
     tenant = warmed.ruler
-    tenant.fold(scope, [(f"f{arm}", s.key, (s.id + 0.5) / 12) for arm in range(8) for s in bank])
+    tenant.fold(
+        scope,
+        [(f"f{arm}", s.key, (s.id + 0.5) / 12) for arm in range(8) for s in bank],
+        campaign="else",
+        own=None,
+    )
     frozen = tenant.version()
     run = [
         closed(0, {"o": hits["o"]}, "o", "o"),
@@ -467,7 +502,10 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     for rr in run:
         # After its election, as `DifficultyView.fold` banks a round.
         tenant.fold(
-            scope, [(k, c.key, c.grade.objective) for k, sh in rr.cells.items() for c in sh]
+            scope,
+            [(k, c.key, c.grade.objective) for k, sh in rr.cells.items() for c in sh],
+            campaign="run",
+            own=None,
         )
     run += [
         closed(2, {"b": hits["b"], "a": hits["a"]}, None, "a"),
@@ -495,12 +533,22 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     assert line.stamp == forked.stamp and line.stamp.excluded == ("a", "b", "o"), (
         "two lines of one family read their levels on two scales"
     )
-    [pinned] = series_of(CellOf(walks=None, ruler_version=frozen), warmed, [run])  # type: ignore[arg-type]
+    pin = RulerReach(version=frozen, own=None)
+    [pinned] = series_of(CellOf(walks=None, ruler=pin), warmed, [run])  # type: ignore[arg-type]
     assert pinned.stamp.version == frozen and pinned.stamp.excluded == (), (
         "an inner cell's series read past the version its outer round opened on"
     )
+    [own, other] = (
+        series_of(ArmOf(CampaignWalks(None, c), frozen), warmed, [run])[0]  # type: ignore[arg-type]
+        for c in ("run", "x")
+    )
+    assert own.stamp.excluded == ("a", "o") and other.stamp.excluded == (), (
+        "an arm read another arm's lines past the freeze, or never its own"
+    )
     lone = workspace(tmp_path / "lone")
-    lone.ruler.fold(scope, [("f0", s.key, (s.id + 1) / 16) for s in bank])
+    lone.ruler.fold(
+        scope, [("f0", s.key, (s.id + 1) / 16) for s in bank], campaign="else", own=None
+    )
     [cold] = series_of(OpenAt(), lone, [run])
     assert cold.stamp.cold and cold.caveat is ThetaCaveat.COLD_RULER and cold.plateau() is None, (
         "a series on no δ scale read as one that differences"
@@ -528,7 +576,9 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
                 )
             },
             election=election(
-                k, ended_on=k, ruler=RulerStamp(id=f"v{n}", version=n, scope=scope, excluded=())
+                k,
+                ended_on=k,
+                ruler=RulerStamp(id=f"v{n}", version=n, own=None, scope=scope, excluded=()),
             ),
         )
         for n, k in ((0, "o"), (1, "a"))

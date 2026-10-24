@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-import math
 import os
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
@@ -75,6 +74,7 @@ from promptpotter.application.optimizers.gepa.members import MinibatchGate
 from promptpotter.application.optimizers.gepa.state import MinibatchBar, MinibatchBars
 from promptpotter.application.optimizers.nodes import Panel, Proposals, ReadArm, RoundContext
 from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle
+from promptpotter.application.optimizers.potter.dispatch.injections.panels import _vs_parent
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     coerce_l1_layout,
@@ -135,7 +135,7 @@ from promptpotter.application.scoring.formula.compiler import (
     parse_dials,
     realize_dials,
 )
-from promptpotter.application.scoring.formula.matchers import SCORING_FUNCTIONS
+from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.application.scoring.metrics import compute_composite_fitness, fold_cells
 from promptpotter.application.scoring.paired import (
     MemberRows,
@@ -148,10 +148,10 @@ from promptpotter.application.scoring.search_point_scorer import score_search_po
 from promptpotter.application.scoring.selection import (
     cells_read,
     closest_to_bar,
+    crowning_cells,
     elect_round_winner,
     elimination_p_best,
     level_band,
-    parent_selection_bias,
     readable_lifts,
 )
 from promptpotter.config.paths import optimizers_root
@@ -186,7 +186,6 @@ from promptpotter.domain.phases import CampaignPhase, StopLoop, StopReason, Walk
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNode
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import (
-    ArmFit,
     ArmSlot,
     Cut,
     CutKind,
@@ -194,15 +193,18 @@ from promptpotter.domain.results import (
     InRunCells,
     Measured,
     OverlapReading,
+    PanelTrigger,
     PointContext,
     RoundAdvance,
     RoundResult,
     RunStanding,
+    TriggeredReading,
     VerifyPass,
     VerifyStrategy,
     individual_cells,
     is_floor_pinned,
     is_leader_eligible,
+    line_by_individual,
     merge_known_outcomes,
     order_floor,
     round_advance,
@@ -371,7 +373,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Each matcher grades an answer against its gold.
-    matcher = SCORING_FUNCTIONS
+    matcher = {name: m.score for name, m in MATCHERS.items()}
     for match, args, expected in (
         (
             matcher["blocksworld_plan_match"],
@@ -1018,7 +1020,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         sheet(measurement(i, float(i < 20)) for i in range(40)),
         4,
         ruler,
-        parent_bias=0.0,
     )
     assert winner_id == "able_on_hard", "a round winner elects by ability, not subset accuracy"
     assert abilities.theta["able_on_hard"] > abilities.theta["weak_on_easy"]
@@ -1027,7 +1028,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     flat = _ruler(dict.fromkeys(range(28), 0.0))
     half = sheet(measurements([1.0] * 14 + [0.0] * 14))
     deep = sheet(measurements([1.0] * 21 + [0.0] * 7))
-    shallow = sheet(measurements([1.0] * 5 + [0.0]))
+    shallow = sheet(measurements([1.0] * 5 + [0.0], range(14, 20)))
     ab = candidate_abilities({"deep": deep, "shallow": shallow}, half, flat)
     p = {c: p_exceeds(ab.theta[c], ab.theta_se[c], *ab.bar[c]) for c in ("deep", "shallow")}
     assert ab.theta["shallow"] > ab.theta["deep"], "the thin arm's POINT lift is the larger"
@@ -1035,51 +1036,46 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     assert p["deep"] > p["shallow"], "so it demonstrated less"
     deep_key, shallow_key = ArmKey("deep"), ArmKey("shallow")
     thin_arms = {deep_key: deep, shallow_key: shallow}
-    assert (
-        elect_round_winner(list(thin_arms), thin_arms, half, 6, flat, parent_bias=0.0)[0] == "deep"
-    ), "a thin arm won"
-    assert (
-        elect_round_winner([shallow_key], {shallow_key: shallow}, half, 6, flat, parent_bias=0.0)[0]
-        == "shallow"
-    ), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
-
-    # The bar is what the parent can do, not the draw that crowned it.
-    def won(*, se: float | None, electable: int) -> RoundResult:
-        fit = {ArmKey("c0"): ArmFit(theta=0.5, theta_se=se)}
-        return round_result(1, selected="c0", voted={"electable": electable, "fit": fit})
-
-    unelected = round_result(1, improved=False)
-    root_pi = 1 / math.sqrt(math.pi)
-    for se, abs_tol in ((1.0, 5e-5), (0.25, 2e-5)):
-        assert parent_selection_bias([won(se=se, electable=2)]) == pytest.approx(
-            se * root_pi, abs=abs_tol
-        ), "E[max of two standard normals] is 1/√π"
-    assert parent_selection_bias([won(se=0.9, electable=1)]) == 0.0, "a LONE arm has no curse"
-    assert parent_selection_bias([round_result(1, selected="c0")]) == 0.0, (
-        "a defaulted `electable_count` clamps to one arm"
+    assert elect_round_winner(list(thin_arms), thin_arms, half, 6, flat)[0] == "deep", (
+        "a thin arm won"
     )
-    assert parent_selection_bias([won(se=1.0, electable=99)]) == pytest.approx(
-        parent_selection_bias([won(se=1.0, electable=6)])
-    ), "the widest entry stands for any wider round"
-    assert parent_selection_bias(
-        [won(se=0.40, electable=6), unelected, won(se=0.10, electable=2), unelected]
-    ) == pytest.approx(0.10 * root_pi, abs=2e-5), "a HELD round crowned nobody and is walked PAST"
-    for rounds in ([unelected, unelected], [], [won(se=None, electable=4)]):
-        assert parent_selection_bias(rounds) == 0.0, "nothing crowned on a read SE: no curse"
-    parent = sheet(measurements([1.0] * 15 + [0.0] * 13))
-    trailing = sheet(measurements([1.0] * 13 + [0.0] * 15))
-    leading = sheet(measurements([1.0] * 17 + [0.0] * 11))
-    tie = sheet(measurements([1.0] * 15 + [0.0] * 13))
-    trailing_lift = theta_lift_over_parent(candidate_abilities({"c": trailing}, parent, flat), "c")
-    assert trailing_lift is not None and trailing_lift < 0.0
-    for bias in (0.0, parent_selection_bias([won(se=5.0, electable=6)])):
-        for challenger, elected in ((trailing, None), (tie, None), (leading, "c")):
-            assert (
-                elect_round_winner(
-                    [ArmKey("c")], {ArmKey("c"): challenger}, parent, 6, flat, parent_bias=bias
-                )[0]
-                == elected
-            ), f"the credit {bias:.2f} reorders admitted arms; it never admits one"
+    assert elect_round_winner([shallow_key], {shallow_key: shallow}, half, 6, flat)[0] == (
+        "shallow"
+    ), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
+    behind = sheet(measurements([1.0] * 4 + [0.0] * 2))
+    behind_lift = theta_lift_over_parent(candidate_abilities({"b": behind}, half, flat), "b")
+    assert behind_lift is not None and behind_lift > 0.0
+    assert elect_round_winner([ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat)[0] is None, (
+        "a θ lift over the parent's whole panel never crowns an arm that LOST the cells it shares"
+    )
+    swapped = sheet(measurement(i, float(0 < i < 20 or i == 20)) for i in range(40))
+    assert (
+        elect_round_winner(
+            [ArmKey("s")],
+            {ArmKey("s"): swapped},
+            sheet(measurement(i, float(i < 20)) for i in range(40)),
+            4,
+            ruler,
+        )[0]
+        is None
+    ), "one cell won and one lost is a tie, whatever the δ weighting or the fit's last digit"
+
+    # The bar is what the parent can do, not the draw that crowned it: no later race reads those cells.
+    crowned_on = sheet(measurements([1.0] * 4, range(30, 34)))
+
+    def won(electable: int) -> RoundResult:
+        return round_result(
+            1,
+            selected="c0",
+            voted={"electable": electable},
+            cells={ArmKey("c0"): crowned_on},
+        )
+
+    assert crowning_cells([won(2), round_result(2, improved=False)], "c0") == {
+        cell.key for cell in crowned_on
+    }, "a parent's cells stay out of every race it judges, a HELD round's included"
+    assert not crowning_cells([won(2)], "c1"), "an ancestor's are its child's own measurements"
+    assert not crowning_cells([won(1)], "c0"), "a LONE arm was never picked over another"
 
     # A held round leads on the arm nearest the bar admission reads, over the readable arms.
     twenty = sheet(measurements([1.0] * 20 + [0.0] * 8))
@@ -1089,18 +1085,17 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         deep_key: sheet(measurements([1.0] * 18 + [0.0] * 10)),  # further off, on the whole panel
         ArmKey("thin"): sheet(measurements([1.0] * 3)),  # the highest θ, under the floor
     }
-    held_id, held_abilities = elect_round_winner(list(arms), arms, twenty, 6, flat, parent_bias=0.3)
-    reads = readable_lifts(list(arms), 6, held_abilities, 0.3)
+    held_id, held_abilities = elect_round_winner(list(arms), arms, twenty, 6, flat)
+    reads = readable_lifts(list(arms), 6, held_abilities)
     assert held_id is None, "no arm cleared the bar"
     assert held_abilities.theta["thin"] > held_abilities.bar["thin"][0], (
         "the floor, not θ, bars thin"
     )
     assert set(reads) == {"near", "deep"}, "an arm under the floor is not readable"
-    assert reads[deep_key][0] < reads[near_key][0] <= 0.0
-    assert sum(reads[deep_key]) > sum(reads[near_key]), "the credit orders them the other way"
-    assert closest_to_bar(reads) == "near", "the lead is named on the raw θ lift"
+    assert reads[deep_key] < reads[near_key] <= 0.0
+    assert closest_to_bar(reads) == "near", "the lead is named on the θ lift"
     cold = candidate_abilities({"off": sheet(measurements([1.0] * 8, range(26, 34)))}, twenty, None)
-    assert cold.cells["off"] == 2 and not readable_lifts([ArmKey("off")], 6, cold, 0.0), (
+    assert cold.cells["off"] == 2 and not readable_lifts([ArmKey("off")], 6, cold), (
         "cold, the floor counts the cells θ was READ on — those shared with the parent"
     )
     warm = candidate_abilities({"off": sheet(measurements([1.0] * 8, range(24, 32)))}, half, flat)
@@ -1219,7 +1214,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 f"{case}: a retained parent is ONE arm, its re-read folded into its own cells"
             )
             folded: list[Any] = []
-            monkeypatch.setattr(session.store.ruler, "fold", lambda _s, got: folded.extend(got))
+            monkeypatch.setattr(
+                session.store.ruler, "fold", lambda _s, got, **_: folded.extend(got)
+            )
             cycle.difficulty.fold(closed)
             parent_arm = closed.arms[parent]
             assert isinstance(parent_arm, Cut | Measured), f"{case}: the parent never concluded"
@@ -1485,12 +1482,16 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         crowned = picked.election.selected
         assert crowned is not None
         [bar] = [picked.rows(key) for key in picked.arms if key not in picked.panel]
-        cold = candidate_abilities({crowned: picked.rows(crowned)}, bar, None)
+        linked = cycle.difficulty.ruler_of(picked.election.ruler)
+        assert linked is not None and set(linked.delta) >= {
+            cell.key for cell in picked.rows(crowned).scoreable
+        }, "the round's own cells join the δ fit before its election, so θ reads every one"
+        read = candidate_abilities({crowned: picked.rows(crowned)}, bar, linked)
         fit = picked.fit(crowned)
         assert fit is not None and (fit.theta, fit.theta_se) == (
-            cold.theta[crowned],
-            cold.theta_se[crowned],
-        ), "a cold ruler still reads a θ, and an arm carries the one an election takes of its rows"
+            read.theta[crowned],
+            read.theta_se[crowned],
+        ), "an arm carries the θ the election takes of its rows, on the scale it stamped"
         assert target_tripped(cycle, fold.accuracy) is StopReason.TARGET_HIT
         origin = cycle.origin_round.origin.individual
         origin_pass = asyncio.run(
@@ -2090,6 +2091,7 @@ def _line_read(
     *picks: tuple[str, Sequence[float | None]],
     c0: Sequence[float | None],
     ids: dict[str, str] | None = None,
+    triggered: Sequence[tuple[str, Sequence[float | None]]] = (),
 ) -> OverlapReading:
     bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(len(c0))]
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
@@ -2110,19 +2112,31 @@ def _line_read(
             address=MemberAddress(path=(hop,), individual_id=arm.key, arm=arm, pass_role=None),
         )
 
-    readings = [
-        _read_pair(
-            member("C0", c0),
+    def read(
+        label: str, grades: Sequence[float | None], under: tuple[str, Sequence[float | None]]
+    ) -> PairedReading:
+        return _read_pair(
+            member(*under),
             member(label, grades),
             bank,
             scope=RoleScope.REPORT,
             measurands=grade_measurands("s"),
             spec=ROUND_LIFT_SPEC,
         )
-        for label, grades in picks
-    ]
+
+    origin = ("C0", c0)
+    readings = [read(label, grades, origin) for label, grades in picks]
     return OverlapReading.of(
-        round_num, improved, positions=range(len(c0)), lead=readings[-1], earlier=readings[:-1]
+        round_num,
+        improved,
+        positions=range(len(c0)),
+        lead=readings[-1],
+        earlier=readings[:-1],
+        triggered=[
+            TriggeredReading(trigger=PanelTrigger.N_MIN, reading=read(label, grades, origin))
+            for label, grades in triggered
+        ],
+        vs_parent=read(*picks[-1], picks[-2]) if len(picks) >= 2 else None,
     )
 
 
@@ -2362,6 +2376,11 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         RoundAdvance.NOT_SEPARATED,
         RoundAdvance.NOT_SEPARATED,
     ]
+    watched = _line_read(
+        2, True, ("C2.1", _TIED_PANEL), c0=_C0_PANEL, triggered=[("C2.2", _CLEAN_PANEL)]
+    )
+    assert watched.advance is RoundAdvance.NOT_SEPARATED, "a triggered arm is read, never adopted"
+    assert line_by_individual(watched)["c2.2"].rate == 1.0, "and served beside the line"
     assert observed([line.advance for line in lines]).l1_stall_count == 2, (
         "a round that crowned a winner and resolved NOTHING advances L1 patience"
     )
@@ -2383,6 +2402,8 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             instrument_id=lead.instrument_id,
         ),
         earlier=(),
+        triggered=(),
+        vs_parent=None,
     )
     assert stopped.advance is RoundAdvance.UNREAD
     rounds = [
@@ -2410,6 +2431,11 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     assert (short.advance, whole.advance) == (RoundAdvance.NOT_SEPARATED, RoundAdvance.ADVANCED), (
         "against an earlier pick the holed one is a rate over another exam: it tops nobody"
     )
+    told = _vs_parent(whole.vs_parent) or ""
+    assert told.startswith("  C2.1 vs its parent C1.1") and told.endswith("NOT separated"), (
+        "the generator was told a pick's move over C0, or five flips read as separated"
+    )
+    assert _vs_parent(lines[0].vs_parent) is None, "a first pick's parent is C0, read once"
     # No pair to read stands alone; a pair owed, refused or not landed is no evidence.
     alone, no_evidence = RoundAdvance.ADVANCED_UNPAIRED, RoundAdvance.UNREAD
     promoted_on = {

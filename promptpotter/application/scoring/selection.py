@@ -4,9 +4,11 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.intelligence.rasch import (
+    FIT_SLACK,
     candidate_abilities,
     fit_theta,
     graded_response,
+    responses_of,
     theta_bounds_given_delta,
     theta_cells,
     theta_lift_over_parent,
@@ -53,63 +55,37 @@ def cells_read(
     return len(theta_cells(scored, parent, ruler) if elects_on == "ability" else scored)
 
 
-# E[max of k standard normals], k = 1..6; the last entry stands for any wider round.
-_EXPECTED_MAX_Z: tuple[float, ...] = (0.0, 0.0, 0.5642, 0.8463, 1.0294, 1.1630, 1.2672)
-assert _EXPECTED_MAX_Z[:2] == (0.0, 0.0) and list(_EXPECTED_MAX_Z) == sorted(_EXPECTED_MAX_Z), (
-    "a lone arm carries no curse, and a wider round never a smaller one"
-)
-
-
-def parent_selection_bias(rounds: Sequence[RoundResult]) -> float:
-    """A winner is the MAX over its round's arms, so its θ carries the largest noise draw; corrects the BAR only."""
-    for rr in reversed(rounds):
-        election = rr.election
-        if election is None or election.selected is None:
-            continue
-        winner = rr.fit(election.selected)
-        se = winner.theta_se if winner else None
-        if not se:
-            return 0.0
-        k = min(max(election.electable, 1), len(_EXPECTED_MAX_Z) - 1)
-        # ONE arm's SE, not the paired √2 one: θ̂_parent is common to all k comparisons.
-        return _EXPECTED_MAX_Z[k] * se
-    return 0.0
-
-
-def lift_over_bar(
-    abilities: RoundAbilities, key: ArmKey, parent_bias: float
-) -> tuple[float, float] | None:
-    """``(θ lift, bias credit)``; the credit scales by SE_parent/SE_arm, a flat one favouring the noisiest arm."""
-    lift = theta_lift_over_parent(abilities, key)
-    if lift is None:
-        return None
-    se_parent = abilities.bar[key][1]
-    se_cand = abilities.theta_se.get(key) or 0.0
-    return lift, parent_bias * (min(1.0, se_parent / se_cand) if se_parent and se_cand else 1.0)
+def crowning_cells(rounds: Sequence[RoundResult], parent: str) -> frozenset[str]:
+    """The cells *parent* won its race on: its rows there are the max over k noisy arms, so a race
+    drawn onto them replays the luck that crowned it. An ancestor's are the parent's own measurements,
+    and a lone arm was never picked over one."""
+    return frozenset(
+        cell.key
+        for rr in rounds
+        if (election := rr.election) is not None
+        and election.selected == parent
+        and election.electable > 1
+        for cell in rr.rows(election.selected)
+    )
 
 
 def readable_lifts(
-    keys: Sequence[ArmKey],
-    coverage_floor: int,
-    abilities: RoundAbilities,
-    parent_bias: float,
-) -> dict[ArmKey, tuple[float, float]]:
-    reads: dict[ArmKey, tuple[float, float]] = {}
+    keys: Sequence[ArmKey], coverage_floor: int, abilities: RoundAbilities
+) -> dict[ArmKey, float]:
+    reads: dict[ArmKey, float] = {}
     for key in keys:
         # PoBB's `n_min` IS this floor: both count `theta_cells`.
         if abilities.cells.get(key, 0) < coverage_floor:
             continue
-        read = lift_over_bar(abilities, key, parent_bias)
-        if read is not None:
-            reads[key] = read
+        lift = theta_lift_over_parent(abilities, key)
+        if lift is not None:
+            reads[key] = lift
     return reads
 
 
-def closest_to_bar(
-    reads: Mapping[ArmKey, tuple[float, float]], *, beside: ArmKey | None = None
-) -> ArmKey | None:
-    """On the raw θ lift ADMISSION takes, never lift plus credit; the first walked holds a tie."""
-    return max((key for key in reads if key != beside), key=lambda k: reads[k][0], default=None)
+def closest_to_bar(reads: Mapping[ArmKey, float], *, beside: ArmKey | None = None) -> ArmKey | None:
+    """On the θ lift ADMISSION takes; the first walked holds a tie."""
+    return max((key for key in reads if key != beside), key=lambda k: reads[k], default=None)
 
 
 def elect_round_winner(
@@ -118,10 +94,9 @@ def elect_round_winner(
     parent_results: CellSheet,
     coverage_floor: int,
     ruler: DeltaRuler | None,
-    *,
-    parent_bias: float,
 ) -> tuple[ArmKey | None, RoundAbilities]:
-    """ADMISSION is raw θ strictly above the parent's; the RANK is ``P(θ_cand > θ_parent)``, which PoBB cuts on."""
+    """ADMISSION is raw θ above the parent's by more than a fit resolves AND more cells won than
+    lost against it; the RANK is ``P(θ_cand > θ_parent)``, which PoBB cuts on."""
 
     abilities = candidate_abilities(
         {key: rows[key] for key in keys if key in rows},
@@ -129,18 +104,22 @@ def elect_round_winner(
         ruler,
     )
 
+    parent = responses_of(parent_results)
     best_rank: tuple[float, int] = (0.0, 0)
     winner: ArmKey | None = None
-    reads = readable_lifts(keys, coverage_floor, abilities, parent_bias)
-    for key, read in reads.items():
+    reads = readable_lifts(keys, coverage_floor, abilities)
+    for key, lift in reads.items():
         # No SE margin: subtracting one turns a wide-posterior gain negative; uncertainty is the RANK's.
-        if read[0] <= 0.0:
+        if lift <= FIT_SLACK:
             continue
-        theta_parent, se_parent = abilities.bar[key]
-        # The bar is what the parent can DO, not the draw that crowned it (`parent_selection_bias`).
-        p_better = p_exceeds(
-            abilities.theta[key], abilities.theta_se[key], theta_parent - parent_bias, se_parent
-        )
+        # A θ lift the paired cells contradict is the prior's or the δ weighting's, never the arm's.
+        own = responses_of(rows[key])
+        shared = [k for k in own if k in parent]
+        wins, losses = discordant_counts([own[k] for k in shared], [parent[k] for k in shared])
+        if wins <= losses:
+            continue
+        # The bar is read off no cell that crowned the parent: the draw leaves out `crowning_cells`.
+        p_better = p_exceeds(abilities.theta[key], abilities.theta_se[key], *abilities.bar[key])
         rank = (p_better, abilities.cells[key])
         if rank > best_rank:
             best_rank = rank
@@ -178,16 +157,11 @@ def elimination_p_best(
     return min(per_prior.values()), per_prior
 
 
-def priors_covering[P: Mapping[str, float]](
-    priors: Mapping[ArmKey, P], cells: Collection[str]
-) -> dict[ArmKey, P]:
-    return {pid: grades for pid, grades in priors.items() if all(c in grades for c in cells)}
-
-
 class PairedPosterior(NamedTuple):
     cells: list[str]
     grades: list[float]
-    priors: dict[ArmKey, list[float]]
+    # Each prior's grades on the cells it shares with the candidate: the pairs its θ was read on.
+    priors: dict[ArmKey, dict[str, float]]
     p_best: float
     p_better: dict[ArmKey, float]
 
@@ -196,18 +170,27 @@ def paired_p_best(
     rows: Sequence[GradedCell],
     priors: Mapping[ArmKey, Mapping[str, float]],
     ruler: DeltaRuler | None,
+    *,
+    min_shared: int,
 ) -> PairedPosterior | None:
-    """Over rows carrying a verdict only: a backend error is no evidence of inability."""
+    """Over rows carrying a verdict only: a backend error is no evidence of inability. A prior is
+    read on the cells it shares with the candidate, so a parent still catching up is a prior."""
     graded = [cell for cell in rows if cell.scored]
-    cells = [cell.key for cell in graded]
+    own = {cell.key: graded_response(cell) for cell in graded}
     paired = {
-        pid: [grades[c] for c in cells] for pid, grades in priors_covering(priors, cells).items()
+        pid: shared
+        for pid, grades in priors.items()
+        if len(shared := {c: grades[c] for c in own if c in grades}) >= max(min_shared, 1)
     }
-    if not graded or not paired:
+    if not paired:
         return None
-    own = [graded_response(cell) for cell in graded]
-    p_best, p_better = elimination_p_best(own, paired, cells, ruler)
-    return PairedPosterior(cells, own, paired, p_best, p_better)
+    p_better = {
+        pid: elimination_p_best(
+            [own[c] for c in shared], {pid: list(shared.values())}, list(shared), ruler
+        )[0]
+        for pid, shared in paired.items()
+    }
+    return PairedPosterior(list(own), list(own.values()), paired, min(p_better.values()), p_better)
 
 
 def _capped(p: float, bound: float) -> float:

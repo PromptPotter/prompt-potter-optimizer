@@ -13,7 +13,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.pool import EARNED_SOURCE, Access, PoolEntry
-from promptpotter.domain.results import CutKind, RoundResult
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.sample import Sample
@@ -25,7 +25,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
-    from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
     from promptpotter.application.runner.inner.tasks import InnerCells
 
 # Every optimizer's source digest hashes this module: its constants decide what a prompt receives.
@@ -69,13 +68,16 @@ LAYOUT_SCHEMA_INSTRUCTION = (
 
 
 AXES_ENUM_PREVIEW = 4
-PRECISION_ARM_ROWS = 3
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
 TRANSCRIPT_RENDER_CAP = 3
 TRANSCRIPT_QUERY_CAP = 1200
 TRANSCRIPT_REASONING_CAP = 2200
 TRANSCRIPT_PREDICTED_CAP = 60
+# Compressed bytes per char a trace's second half adds to its first; below it the trace loops.
+# Archived traces of 600+ chars: each sampled below 0.05 repeats itself, a reasoned one adds ~0.19.
+LOOP_NOVELTY = 0.05
+DEGENERATE_TRACE_CAP = 600
 INNER_NARRATIVE_CAP = 1150
 MISS_QUERY_CAP = 100
 MISS_PREDICTED_CAP = 60
@@ -84,6 +86,8 @@ MISS_NOTE_CAP = 120
 MISS_STEP_CAP = 160
 # The panel is mandatory on the critique, so this is what bounds its prompt on a dataset of any size.
 MISS_ROWS_CAP = 40
+# Rows on a δ the ruler hands several cells carry no order among themselves, so a few stand for all.
+MISS_TIED_CAP = 5
 MEMORY_ROUND_CAP = 4
 MEMORY_FIELD_CAP = 2
 MEMORY_VALUE_CAP = 90
@@ -129,7 +133,7 @@ class _Injection:
 
 @dataclass(frozen=True)
 class CycleSlice:
-    # No accuracy: the EVOLUTION column (`RoundDiagnostics.evolution_rows`) is a prompt's one series.
+    # No accuracy: the origin panel's fixed rows are a prompt's one comparable series.
     round_num: int
     # Closed rounds since the last advance, which no fire resets — never the ladder's pacing count.
     l1_stall_depth: int
@@ -137,27 +141,11 @@ class CycleSlice:
     exploration_budget: str
     pipeline_params: dict[str, dict[str, Any]] = field(default_factory=dict)
     composite_formula: str | None = None
-    # `frozen` | `adaptive`, resolved once: a renderer deriving it disagrees with the sampler.
-    subset_mode: str | None = None
-    sp_budget_round: int | None = None
+    matcher: str | None = None
     budget_rounds: int | None = None
     spend_budget_usd: float | None = None
     # What the cap has counted — a FLOOR while unpriced tokens are outstanding, never "spent".
     spend_used_usd: float | None = None
-
-
-@dataclass(frozen=True)
-class ArmDigest:
-    """Deliberately not the arm's state: a panel that can reach a rival's whole prompt will quote it."""
-
-    label: str
-    mean_fitness_ci_lo: float | None
-    mean_fitness_ci_hi: float | None
-    scored_samples: int
-    expected_samples: int
-    # `None`: measured, the panel run out or locked in.
-    cut: CutKind | None
-    gate: EliminationGate | None
 
 
 @dataclass(frozen=True)
@@ -176,7 +164,6 @@ class RoundDigest:
     composite_fitness: float | None = None
     evaluators: dict[str, float] = field(default_factory=dict)
     ability: AbilityReading | None = None
-    arms: tuple[ArmDigest, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -248,6 +235,10 @@ class Item:
 
     text: str
     trusted: bool = True
+    # The rows this item quotes whole.
+    quotes: frozenset[str] = frozenset()
+    # `(row, text)`: what this item says instead once a placed item, in any panel, quotes that row.
+    if_quoted: tuple[str, str] | None = None
 
 
 Renderer = Callable[[InjectionBundle], list[Item]]

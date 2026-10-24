@@ -24,9 +24,14 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
 )
 from promptpotter.domain.results import (
+    Cut,
     InRunCells,
     LineStep,
+    Measured,
     OverlapReading,
+    PanelTrigger,
+    TriggeredReading,
+    arm_name,
     best_line,
     measured_cells,
     origin_panel,
@@ -34,7 +39,7 @@ from promptpotter.domain.results import (
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.domain.results import RoundResult
@@ -78,9 +83,19 @@ async def measure_overlap(
             positions=panel,
             lead=pairs.absent(state, origin, ordered[-1], held, keep, bought),
             earlier=(),
+            triggered=(),
+            vs_parent=None,
         )
 
-    if len(ordered) < 2:
+    on_line = {s.opt_sp.id for s in ordered}
+    fired = [
+        (step, trigger)
+        for step, trigger in panel_triggers(
+            cycle.rounds, cycle.config.optimization.elimination_n_min
+        )
+        if step.opt_sp.id not in on_line
+    ]
+    if len(ordered) < 2 and not fired:
         return not_read(ReadingState.SAME_INDIVIDUAL, {}), {}
     if not panel:
         logger.info(
@@ -103,6 +118,18 @@ async def measure_overlap(
                 {cid: fresh_cells(rows) for cid, rows in bought.items()},
             ), {}
         bought[step.opt_sp.id] = fresh
+    held_whole: list[tuple[LineStep, PanelTrigger]] = []
+    stopped: list[tuple[LineStep, PanelTrigger]] = []
+    for step, trigger in fired:
+        gaps = sorted(keep - pairs.measured(pairs.cells_of(step, held)))
+        fresh = await _measure_gaps(cycle, gaps, scoring_pool, step=step) if gaps else None
+        # Monitoring, never the line's claim: an arm short of the set reads as stopped, the line stands.
+        if gaps and fresh is None:
+            stopped.append((step, trigger))
+            continue
+        if fresh is not None:
+            bought[step.opt_sp.id] = fresh
+        held_whole.append((step, trigger))
 
     # Read again off the round as it will CLOSE, so what was bought joins by the one read.
     closing = round_result.model_copy(update={"overlap_results": bought})
@@ -115,10 +142,49 @@ async def measure_overlap(
         round_result.round,
         round_result.improved,
         positions=panel,
-        lead=readings[-1],
+        lead=readings[-1]
+        if readings
+        else pairs.absent(ReadingState.SAME_INDIVIDUAL, c0, c0, held, keep, paid),
         earlier=readings[:-1],
+        triggered=[
+            *(
+                TriggeredReading(
+                    trigger=trigger, reading=pairs.read(c0, step, topped_up, keep, paid)
+                )
+                for step, trigger in held_whole
+            ),
+            *(
+                TriggeredReading(
+                    trigger=trigger,
+                    reading=pairs.absent(ReadingState.PASS_STOPPED, c0, step, held, keep, paid),
+                )
+                for step, trigger in stopped
+            ),
+        ],
+        vs_parent=pairs.read(picks[-2], picks[-1], topped_up, keep, paid)
+        if len(picks) >= 2
+        else None,
     )
     return reading, bought
+
+
+def panel_triggers(
+    rounds: Sequence[RoundResult], n_min: int
+) -> list[tuple[LineStep, PanelTrigger]]:
+    """Every walked arm of the cycle a trigger fired for, by first walk; a parent re-read is no walk."""
+    fired: dict[str, tuple[LineStep, PanelTrigger]] = {}
+    for rr in rounds:
+        for key, arm in rr.arms.items():
+            if (
+                not isinstance(arm, Cut | Measured)
+                or arm.role is MeasurementRole.PARENT
+                or arm.individual.id in fired
+            ):
+                continue
+            if len(measured_cells(rr.rows(key))) >= n_min:
+                step = LineStep(arm=arm_name(key, arm, rr.round), opt_sp=arm.individual)
+                fired[arm.individual.id] = (step, PanelTrigger.N_MIN)
+    return list(fired.values())
 
 
 class _OriginPanelPairs:
@@ -141,15 +207,15 @@ class _OriginPanelPairs:
 
     def read(
         self,
-        c0: LineStep,
-        pick: LineStep,
+        a: LineStep,
+        b: LineStep,
         held: InRunCells,
         panel: set[int],
         paid: dict[str, int],
     ) -> PairedReading:
         return read_pair(
-            a=self._member(c0, held, paid),
-            b=self._member(pick, held, paid),
+            a=self._member(a, held, paid),
+            b=self._member(b, held, paid),
             cell_set=CellSetName.ORIGIN_PANEL,
             cells=[self._key_of[sid] for sid in panel],
             masked=False,

@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable, Mapping, Sequence
-from typing import Annotated, Any, ClassVar, cast
+from collections.abc import Callable, Mapping
+from typing import Annotated, Any
 
 from pydantic import (
     BeforeValidator,
     Field,
     WithJsonSchema,
     create_model,
-    model_validator,
 )
 
 from promptpotter.application.bench.llm_call import OptimizerResponseModel
@@ -23,8 +22,6 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     layout_json_schema,
 )
-from promptpotter.domain.candidate_diff import candidate_delta
-from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 shapes_optimizer_prompt(__name__)
@@ -84,7 +81,7 @@ class VariantEvidenceGrounding(OptimizerResponseModel):
 
 
 class L1Variant(OptimizerResponseModel):
-    """Slot keys stay loose so a backend-specific node name never fails the parse; an all-empty variant re-asks, costing no slot."""
+    """Slot keys stay loose so a backend-specific node name never fails the parse; a no-op variant parses, and `l1_invariants` drops that arm alone."""
 
     # Field order is GENERATION order; optional at the PARSE boundary only, REQUIRED on the wire (`l1_wire_schema.py`).
     evidence_grounding: VariantEvidenceGrounding | None = None
@@ -122,64 +119,14 @@ class L1Variant(OptimizerResponseModel):
         Field(max_length=VARIANT_PROSE_MAX)
     )
 
-    # Bound per round on the SUBCLASS `build_l1_response_model` mints; empty here, convicting only a blank variant.
-    parent_prompts: ClassVar[Mapping[str, Mapping[str, str]]] = {}
-    parent_params: ClassVar[Mapping[str, Any]] = {}
-    parent_shots: ClassVar[Mapping[str, tuple[int, ...]]] = {}
-
-    @model_validator(mode="after")
-    def _reject_empty_mutation(self) -> L1Variant:
-        # Raised HERE so the message rides the schema-repair retry; `l1_invariants` can only drop the arm.
-        cls = type(self)
-        fields = {
-            node: {**cls.parent_prompts.get(node, {}), **self.prompt_fields_updates.get(node, {})}
-            for node in cls.parent_prompts.keys() | self.prompt_fields_updates.keys()
-        }
-        shots = {**cls.parent_shots, **{node: tuple(ids) for node, ids in self.shots.items()}}
-        child = _wire_prompts(fields, shots)
-        parent = _wire_prompts(cls.parent_prompts, cls.parent_shots)
-        if not candidate_delta(child, parent, self.pipeline_overlay, cls.parent_params):
-            raise ValueError(
-                "this variant mutates nothing: pipeline_overlay, prompt_fields_updates or "
-                "shots must carry a value that DIFFERS from the current one. Describing a "
-                "change in changes_description is not making one, and an empty string or the "
-                "field's current text is not an edit. Emit the new text."
-            )
-        return self
-
-
-def _wire_prompts(
-    fields: Mapping[str, Mapping[str, str]], shots: Mapping[str, Sequence[int]]
-) -> dict[str, NodePrompt]:
-    """Shots as their wire ids: the no-op test compares the ids it was shown, never a pool row."""
-    return {
-        node: NodePrompt(
-            fields=dict(fields.get(node, {})), shots=[f"#{i}" for i in shots.get(node, ())]
-        )
-        for node in fields.keys() | shots.keys()
-    }
-
 
 class L1GenerateOutput(OptimizerResponseModel):
     variants: list[L1Variant]
 
 
-def build_l1_response_model(
-    field_names: Mapping[str, str],
-    *,
-    parent_prompts: Mapping[str, Mapping[str, str]],
-    parent_params: Mapping[str, Any],
-    parent_shots: Mapping[str, Sequence[int]],
-) -> type[L1GenerateOutput]:
+def build_l1_response_model(field_names: Mapping[str, str]) -> type[L1GenerateOutput]:
     """``populate_by_name`` stays OFF: the original key must fail, never half-apply a rename."""
-    variant = cast(
-        "type[L1Variant]",
-        create_model("L1Variant", __base__=_renamed_variant(tuple(sorted(field_names.items())))),
-    )
-    # ClassVars, so the parent's own text never becomes a field the wire schema advertises.
-    variant.parent_prompts = {node: dict(fields) for node, fields in parent_prompts.items()}
-    variant.parent_params = dict(parent_params)
-    variant.parent_shots = {node: tuple(ids) for node, ids in parent_shots.items()}
+    variant = _renamed_variant(tuple(sorted(field_names.items())))
     # `__class_getitem__` builds `list[variant]` as a VALUE; the subscript form is a type expression mypy rejects.
     variants_field: Any = (list.__class_getitem__(variant), ...)
     return create_model("L1GenerateOutput", __base__=L1GenerateOutput, variants=variants_field)

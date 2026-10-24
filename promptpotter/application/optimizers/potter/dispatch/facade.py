@@ -13,7 +13,6 @@ from promptpotter.application.bench.node_context import Bounds, Frontier, Lineag
 from promptpotter.application.optimizers.nodes import AccessKnob, CountKnob
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
-    ArmDigest,
     CycleSlice,
     InjectionBundle,
     Item,
@@ -38,7 +37,6 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import (
 )
 from promptpotter.application.optimizers.potter.escalation.state import exploration_budget
 from promptpotter.application.optimizers.potter.knobs import (
-    AdaptiveQueueKnobs,
     EscalationKnobs,
     L1GenerateKnobs,
 )
@@ -52,7 +50,7 @@ from promptpotter.domain import ruler
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.pool import BlockPool, DemoPool
-from promptpotter.domain.results import Cut, Measured, arm_elimination, rounds_without_advance
+from promptpotter.domain.results import rounds_without_advance
 from promptpotter.infrastructure.llm.telemetry import (
     emit_round_warning,
     reset_cycle_ledger,
@@ -245,24 +243,6 @@ def node_packages(bundle: InjectionBundle) -> dict[str, str]:
     return out
 
 
-def _arm_digests(latest_round: RoundResult) -> tuple[ArmDigest, ...]:
-    """Ranked as the round ranked them, so a panel quoting "the leader" and the election never disagree."""
-    return tuple(
-        ArmDigest(
-            label=c.label,
-            mean_fitness_ci_lo=None if fold is None else fold.mean_fitness_ci_lo,
-            mean_fitness_ci_hi=None if fold is None else fold.mean_fitness_ci_hi,
-            scored_samples=0 if fold is None else fold.walked,
-            expected_samples=c.expected_samples,
-            cut=c.kind if isinstance(c, Cut) else None,
-            gate=elimination.context.get("gate") if (elimination := arm_elimination(c)) else None,
-        )
-        for key, c in latest_round.panel.items()
-        if isinstance(c, Cut | Measured)
-        for fold in (latest_round.folds.get(key),)
-    )
-
-
 def _sample_keys(round_result: RoundResult) -> frozenset[str]:
     return frozenset(cell.key for cell in round_result.results)
 
@@ -304,7 +284,6 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
     readout = ctx.recall(L1Readout, latest_round.round)
     health, latest_fold = latest_round.health, latest_round.fold
 
-    queue = ctx.knobs_of(AdaptiveQueueKnobs)
     escalation = ctx.knobs_of(EscalationKnobs)
     generate = ctx.knobs_of(L1GenerateKnobs)
     stall_depth = rounds_without_advance(rounds)
@@ -315,11 +294,7 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
         exploration_budget=exploration_budget(stall_depth, escalation.l1_patience).value,
         pipeline_params=dict(frontier.parent_point.pipeline_params),
         composite_formula=target.cell_formula,
-        # A cold ruler forces the frozen prefix however the knob is set, so the knob alone misreports round 0.
-        subset_mode=(
-            "adaptive" if queue.per_round_resubset and difficulty.ruler is not None else "frozen"
-        ),
-        sp_budget_round=queue.sp_budget_round,
+        matcher=target.matcher,
         budget_rounds=bounds.budget_rounds,
         # Both this cycle's: its share of the campaign's ceiling, and what it has metered of it.
         spend_budget_usd=bounds.spend_cap_usd(),
@@ -347,7 +322,6 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
             composite_fitness=None if latest_fold is None else latest_fold.composite_fitness,
             evaluators={} if latest_fold is None else dict(latest_fold.evaluators),
             ability=difficulty.scale.frontier(trajectory_results),
-            arms=_arm_digests(latest_round),
         ),
         axes=ruler_read.axes,
         origin_per_sample=origin_per_sample,

@@ -24,7 +24,8 @@
         "id": "persona.analytical-system",
         "text": "You are a precise, analytical system that evaluates candidates methodically.",
         "source": "PromptPotter",
-        "level": "target"
+        "level": "target",
+        "presumes": ["ranking"]
       },
       {
         "id": "persona.careful-assistant",
@@ -37,6 +38,7 @@
         "text": "You are a specialist who evaluates candidates based on domain-specific criteria and professional standards.",
         "source": "PromptWizard",
         "level": "target",
+        "presumes": ["ranking"],
         "source_paper": "PromptWizard",
         "source_url": "https://arxiv.org/abs/2405.18369",
         "year": 2024
@@ -69,19 +71,22 @@
         "id": "task_intent.single-best-match",
         "text": "Your task is to identify the single best match from the candidates.",
         "source": "PromptPotter",
-        "level": "target"
+        "level": "target",
+        "presumes": ["ranking"]
       },
       {
         "id": "task_intent.rank-by-match",
         "text": "Rank candidates by how well they match the concept described.",
         "source": "PromptPotter",
-        "level": "target"
+        "level": "target",
+        "presumes": ["ranking"]
       },
       {
         "id": "task_intent.semantic-equivalence",
         "text": "Evaluate each candidate for semantic equivalence to the query concept, considering domain context.",
         "source": "PromptPotter",
-        "level": "target"
+        "level": "target",
+        "presumes": ["ranking"]
       }
     ],
     "thinking_style": [
@@ -114,7 +119,8 @@
         "id": "thinking_style.concept-then-candidates",
         "text": "First understand the core concept, then evaluate each candidate against it.",
         "source": "PromptPotter",
-        "level": "target"
+        "level": "target",
+        "presumes": ["ranking"]
       },
       {
         "id": "thinking_style.devise-experiment",
@@ -509,19 +515,22 @@
         "text": "Show your reasoning, then state the final answer clearly on its own line.",
         "source": "PromptPotter",
         "level": "target",
+        "presumes": ["last_line_answer"],
         "notes": "task-agnostic default"
       },
       {
         "id": "answer_format.rank-all",
         "text": "Rank all candidates from most to least relevant.",
         "source": "PromptPotter",
-        "level": "target"
+        "level": "target",
+        "presumes": ["ranking"]
       },
       {
         "id": "answer_format.single-best-match",
         "text": "Return only the single best match.",
         "source": "PromptPotter",
-        "level": "target"
+        "level": "target",
+        "presumes": ["ranking"]
       }
     ],
     "problem_description": [

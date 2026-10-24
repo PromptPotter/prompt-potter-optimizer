@@ -43,9 +43,13 @@ is invalid and says nothing.
 3. **Fencing withholds; it never biases.** Under control, a withheld input is replaced by an input
    paid inside the declaration identically for every arm, or by the mechanism's cold form — never
    by an estimate from the arms under test.
-4. **A quantity that judges a race is never estimated from that race**, under either purpose. Optimize
-   admits more data; it does not admit the parent's own rows into the scale its children are
-   judged on.
+4. **The individual a race is judged against never shapes the scale it is judged on**, under either
+   purpose: the parent line's rows stay out of the δ fit. The race's own arms do enter it, jointly
+   and before the election, because a scale carrying none of the cells the round bought reads each
+   arm on the handful earlier rounds happened to share, and a shared δ favours no arm over
+   another. Optimize admits more data; it does not admit the parent's own rows into the scale its
+   children are judged on. (Amended 2026-10-23 by the operator, after a race read on its prior
+   cells alone stopped compounding.)
 5. **The cache is not memory.** Replaying a paid cell by its content is the same measurement,
    priced, and is admitted under both purposes.
 6. **Every reading carries the purpose it came from**, and a controlled and an uncontrolled reading
@@ -54,8 +58,8 @@ is invalid and says nothing.
 ## Consequences
 
 - A memory read goes through the run's scope (`archive_queries.py::bind_memory_scope`), and the δ
-  ruler a race is judged on leaves out the rows of the individuals it judges
-  (`bench/difficulty.py::judging_ruler`).
+  ruler a race is judged on leaves out the parent line's rows (`bench/difficulty.py::judging_ruler`)
+  and links in the round's own cells before its election (`DifficultyView.link`).
 - A head-to-head result from a mechanism that violated decision 3 or 4 is not a comparison.
 - The optimize purpose can grow richer without touching what a controlled arm reads.
 

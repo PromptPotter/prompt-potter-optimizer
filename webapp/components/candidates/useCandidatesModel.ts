@@ -97,12 +97,12 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
   const onSelect = useCallback(
     (v: CandidateBar | null) => {
       // A course bar is no arm: there is nothing to inspect.
-      if (!v?.arm || !leafCycleId) {
+      if (!v?.reading || !leafCycleId) {
         setSelectionForCandidate(null);
         return;
       }
       setSelectionForCandidate(
-        selectedCandidateOf(leafCycleId, roundOf(v), v.arm.reading.arm.key, v.label),
+        selectedCandidateOf(leafCycleId, roundOf(v), v.reading.arm.key, v.label),
       );
     },
     [setSelectionForCandidate, leafCycleId],
@@ -120,8 +120,8 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
     () =>
       views.find(
         (v) =>
-          v.arm !== null &&
-          isSelectedCandidate(selectedCandidate, leafCycleId, roundOf(v), v.arm.reading.arm.key),
+          v.reading !== null &&
+          isSelectedCandidate(selectedCandidate, leafCycleId, roundOf(v), v.reading.arm.key),
       )?.key ?? null,
     [views, selectedCandidate, leafCycleId],
   );
@@ -149,8 +149,7 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
     if (!isLive || measuring === null) return null;
     // `findLastIndex`: a fork's timeline also holds the parent's arm of that key, earlier on it.
     const idx = views.findLastIndex(
-      (v) =>
-        v.arm?.reading.arm.key === measuring.key && v.arm.reading.arm.round === measuring.round,
+      (v) => v.reading?.arm.key === measuring.key && v.reading.arm.round === measuring.round,
     );
     return idx >= 0 ? idx : null;
   }, [isLive, measuring, views]);

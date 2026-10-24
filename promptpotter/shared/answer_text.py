@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+# Whole: every matcher's answer span is read here, and a span reaches the prompt.
+shapes_optimizer_prompt(__name__)
 
 
 def truncate(s: str, max_len: int, ellipsis: str = "…") -> str:
@@ -17,12 +19,9 @@ GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
 NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
 BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")
 _BOLD_RE = re.compile(r"\*\*([^*]+?)\*\*")
-_LIST_ITEM_RE: Annotated[re.Pattern[str], shapes_optimizer_prompt] = re.compile(
-    r"^\s*(?:\d+\s*[.)]|[-*•])\s*"
-)
+_LIST_ITEM_RE = re.compile(r"^\s*(?:\d+\s*[.)]|[-*•])\s*")
 
 
-@shapes_optimizer_prompt
 def text_list_items(text: str) -> list[str]:
     out: list[str] = []
     for raw in text.splitlines():
@@ -32,7 +31,6 @@ def text_list_items(text: str) -> list[str]:
     return out
 
 
-@shapes_optimizer_prompt
 def text_list_rank(text: str, item: str) -> int | None:
     want = item.strip().lower().strip(".")
     if not want:

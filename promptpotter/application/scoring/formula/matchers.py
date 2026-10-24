@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import string
 from collections.abc import Callable
-from typing import Annotated, Any
+from typing import NamedTuple
 
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.shared.answer_text import (
     extract_boxed_number,
     extract_gsm8k_number,
@@ -15,9 +17,13 @@ from promptpotter.shared.answer_text import (
     extract_last_boxed,
     extract_plan_block,
     extract_solution,
+    text_list_items,
     text_list_rank,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+
+# Whole: a matcher's answer span and note reach the prompt, and both sit in its one entry.
+shapes_optimizer_prompt(__name__)
 
 
 def _gsm8k_match(predicted: str, ground_truth: str) -> float:
@@ -250,61 +256,100 @@ def _blocksworld_plan_match(predicted: str, ground_truth: str) -> float:
     return 1.0 if all(below.get(top) == under for top, under in gold["goal"]) else 0.0
 
 
-SCORING_FUNCTIONS: dict[str, Callable[..., Any]] = {
-    "rr": _rr,
-    "gsm8k_match": _gsm8k_match,
-    "aime_match": _aime_match,
-    "label_match": _label_match,
-    "em_match": _em_match,
-    "math_match": _math_match,
-    "list_rr": _list_rr,
-    "meeting_plan_match": _meeting_plan_match,
-    "blocksworld_plan_match": _blocksworld_plan_match,
-}
+def _number_answer(read: Callable[[str], float | None]) -> Callable[[str], str]:
+    def answer(text: str) -> str:
+        n = read(text)
+        if n is None:
+            return text.strip()
+        return str(int(n)) if n.is_integer() else str(n)
+
+    return answer
 
 
-# Told to the origin check-in, not gated; a matcher comparing the raw text carries no entry.
-EXTRACTION_NOTES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
-    "label_match": (
+def _list_answer(text: str) -> str:
+    items = text_list_items(text)
+    return " | ".join(items) if items else text
+
+
+def _math_answer(text: str) -> str:
+    boxed = extract_last_boxed(text)
+    return boxed if boxed is not None else extract_last_bold(text)
+
+
+class Matcher(NamedTuple):
+    score: Callable[..., float]
+    # The span `score` reads off a reply, as one string; `None` where it reads no answer text.
+    answer: Callable[[str], str] | None
+    # Told to the prompt, never gated; `""` where it compares the raw text.
+    note: str
+    # What a prompt block may presume of a reply this matcher reads.
+    admits: frozenset[Presumption]
+
+
+_LAST_LINE = frozenset({Presumption.LAST_LINE_ANSWER})
+
+MATCHERS: dict[str, Matcher] = {
+    "rr": Matcher(_rr, None, "", frozenset()),
+    "gsm8k_match": Matcher(
+        _gsm8k_match,
+        _number_answer(extract_gsm8k_number),
+        "Scoring reads the answer from the '#### N' field (else the last number in "
+        "the text). End with the final number on its own line as '#### 42'.",
+        _LAST_LINE,
+    ),
+    "aime_match": Matcher(
+        _aime_match,
+        _number_answer(extract_boxed_number),
+        "Scoring reads the final integer from the last \\boxed{N} (else the last "
+        "number in the text). Put the answer in \\boxed{} on the last line — e.g. "
+        "\\boxed{42}.",
+        _LAST_LINE,
+    ),
+    "label_match": Matcher(
+        _label_match,
+        extract_last_bold,
         "Scoring matches the answer after taking the LAST bolded span (the "
         "last **…** run) of the output, lowercased. Commit the final answer on its "
         "own last line wrapped in double asterisks — e.g. **TRUE**. With "
         "chain-of-thought, an unbolded answer leaves the label buried in the "
-        "reasoning and scores as a miss; the bold lets scoring isolate it."
+        "reasoning and scores as a miss; the bold lets scoring isolate it.",
+        _LAST_LINE,
     ),
-    "em_match": (
+    "em_match": Matcher(
+        _em_match,
+        extract_last_bold,
         "Scoring takes the LAST bolded span (the last **…** run) of the output and "
         "compares it to the gold answer after SQuAD normalization — lowercased, "
         "punctuation and the articles a/an/the removed, whitespace collapsed. Commit the "
         "final answer on its own last line wrapped in double asterisks, as the shortest "
         "span that answers the question — e.g. **Arthur's Magazine** — a sentence around "
-        "it, or any extra word, scores as a miss."
+        "it, or any extra word, scores as a miss.",
+        _LAST_LINE,
     ),
-    "math_match": (
+    "math_match": Matcher(
+        _math_match,
+        _math_answer,
         "Scoring reads the answer from the LAST \\boxed{…} in the output (else the last "
         "bolded span) and compares it to the gold answer after normalising LaTeX spacing, "
         "\\left/\\right, \\dfrac, \\text{} wrappers, degree and dollar signs. Put the final "
         "answer alone in \\boxed{} on the last line, in the simplest exact form the problem "
         "asks for — e.g. \\boxed{\\frac{3}{4}} or \\boxed{44} — no units, no words and no "
-        "equals sign inside the box."
+        "equals sign inside the box.",
+        _LAST_LINE,
     ),
-    "aime_match": (
-        "Scoring reads the final integer from the last \\boxed{N} (else the last "
-        "number in the text). Put the answer in \\boxed{} on the last line — e.g. "
-        "\\boxed{42}."
-    ),
-    "gsm8k_match": (
-        "Scoring reads the answer from the '#### N' field (else the last number in "
-        "the text). End with the final number on its own line as '#### 42'."
-    ),
-    "list_rr": (
+    "list_rr": Matcher(
+        _list_rr,
+        _list_answer,
         "Scoring reads an ORDERED LIST, one item per line, and looks for the held-out "
         "item in it — earlier scores higher. Emit only the list: one item per line, "
         "nothing before or after it, no commentary on the same line. Bullets and '1.' "
         "numbering are stripped, so they neither help nor hurt; prose wrapped around "
-        "the list makes its own line an item and pushes the real ones down."
+        "the list makes its own line an item and pushes the real ones down.",
+        frozenset(),
     ),
-    "meeting_plan_match": (
+    "meeting_plan_match": Matcher(
+        _meeting_plan_match,
+        extract_solution,
         "Scoring reads the itinerary after the LAST 'SOLUTION:' in the output, splits it into "
         "sentences at periods and replays it with the official NaturalPlan checker, which accepts "
         "only 'You start at X at 9:00AM.', 'You travel to Y in N minutes and arrive at 9:20AM.', "
@@ -312,20 +357,33 @@ EXTRACTION_NOTES: Annotated[dict[str, str], shapes_optimizer_prompt] = {
         "travel takes the matrix's minutes, a meeting counts only at the friend's location inside "
         "their window for at least their minimum, each friend once, and the replay stops at the "
         "first sentence that breaks a rule. The answer scores when the friends validly met equal "
-        "the gold plan's count, so end with 'SOLUTION:' and the itinerary alone."
+        "the gold plan's count, so end with 'SOLUTION:' and the itinerary alone.",
+        frozenset(),
     ),
-    "blocksworld_plan_match": (
+    "blocksworld_plan_match": Matcher(
+        _blocksworld_plan_match,
+        extract_plan_block,
         "Scoring reads the lines between the LAST '[PLAN]' line and '[PLAN END]', one action per "
         "line in PlanBench's wording — 'pick up the red block', 'unstack the red block from on top "
         "of the blue block', 'put down the red block', 'stack the red block on top of the blue "
         "block' — and simulates them from the initial conditions. A line in any other form, or an "
         "action whose preconditions do not hold, scores the plan as a miss; the plan scores a hit "
         "only when every goal fact holds at the end. Finish with '[PLAN]', the actions, then "
-        "'[PLAN END]', with nothing else between the markers."
+        "'[PLAN END]', with nothing else between the markers.",
+        frozenset(),
     ),
 }
 
 
-@shapes_optimizer_prompt
-def extraction_note_for_scoring(scoring: str) -> str:
-    return " ".join(note for name, note in EXTRACTION_NOTES.items() if name in scoring)
+def matcher_of(per_sample: str | None) -> str | None:
+    """The one matcher a per-sample formula calls; ``None`` where it calls none, or several."""
+    if not per_sample:
+        return None
+    called = {
+        node.func.id
+        for node in ast.walk(ast.parse(per_sample, mode="eval"))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in MATCHERS
+    }
+    return called.pop() if len(called) == 1 else None

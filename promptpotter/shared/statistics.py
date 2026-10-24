@@ -17,6 +17,7 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 def logistic(x: float) -> float: ...
 @overload
 def logistic(x: NDArray[np.float64]) -> NDArray[np.float64]: ...
+@shapes_optimizer_prompt
 def logistic(x: float | NDArray[np.float64]) -> float | NDArray[np.float64]:
     p: float | NDArray[np.float64] = 1.0 / (1.0 + np.exp(-np.clip(x, -50, 50)))
     return p

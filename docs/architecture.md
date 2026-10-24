@@ -224,8 +224,8 @@ What controlled switches, one site each: the SEARCH is the prompt's own fields
 (`application/jobs/mint.py::_prompt_axes_only` — every other axis the dataset opens is held at its origin value, so
 no arm is graded on a sampling or reasoning setting a rival could not move); MEMORY is the arm's own line
 (`infrastructure/store/archive_queries.py::ArmOf` — the sample and axis indexes, earned blocks), the fold is
-neither read nor written, and every arm's election reads the tenant δ ruler at the ONE version its
-head-to-head froze at open, less the rows of the individuals it judges
+neither read nor written, and every arm's election reads the tenant δ ruler at the version its
+head-to-head froze at open plus its own campaign's lines since, less the rows of the parent line
 (`application/bench/difficulty.py::judging_ruler`), while the CACHE still replays any cell,
 priced; the check-in never re-runs; the bench pass is the
 launch's own (`application/jobs/mint.py::declare` turns a `manual` arm's trigger to `at_end`, on its manifest); fork and skip commands are refused 409 (`commands/dispatcher.py`); the ceiling meters the
@@ -291,7 +291,7 @@ The start definitions the whole loop depends on. Say "origin", never "baseline".
 
 **The origin arrives incomplete; check-in completes it and gates it.** The operator supplies what they have, and it is not a whole origin until the **required inputs** that pipeline declares are resolved: query/target column map, dataset binding, and any node-type-raised dependency such as a `candidate_source` node's candidate library. Origin is therefore **per-pipeline** — different backends require different inputs. Once it clears both gates it is the **parent of round 1's candidates**; round 0 is not something C0 parents, round 0 *is* C0, measured.
 
-**Check-in** is the process that produces a complete origin from a raw upload, and it is the bench's, not an optimizer's: its node is a bench asset, so every optimizer starts from the same resolved origin. One LLM resolver node (`application/datasets/origin_resolve.py`) *proposes* the column map, the decomposed Layer-1 prompt fields — including an `answer_format` satisfying the **scorer's** extraction contract, since the chosen matcher rather than the backend reads the final answer (`application/scoring/formula/matchers.py::EXTRACTION_NOTES`) — and the 7-field `task_context`.
+**Check-in** is the process that produces a complete origin from a raw upload, and it is the bench's, not an optimizer's: its node is a bench asset, so every optimizer starts from the same resolved origin. One LLM resolver node (`application/datasets/origin_resolve.py`) *proposes* the column map, the decomposed Layer-1 prompt fields — including an `answer_format` satisfying the **scorer's** extraction contract, since the chosen matcher rather than the backend reads the final answer (each `application/scoring/formula/matchers.py::MATCHERS` entry's `note`) — and the 7-field `task_context`.
 
 A deterministic, no-LLM **readiness gate** (`origin_readiness.py`) *gates*: mint is blocked until query + ground_truth + framing are CONFIRMED and every active LLM node owns a model. The check-in nudges the operator until the spec is complete, then stores it as the per-pipeline origin under `projects/{tenant}/datasets/{label}/`. Dependencies are dropped in place here and committed alongside the origin, not chased at init.
 
@@ -1020,12 +1020,13 @@ the PR description.
   times to a subset-invariant fit. `panel` means "proposed in THIS round".
 
 - **One tenant δ ruler, one clock** (`infrastructure/store/ruler_store.py::RulerStore`, rooted at
-  the TENANT, never the archive home) — every θ is read on it. An election reads the version its
-  round opened on less every row of the individuals it judges
-  (`application/bench/difficulty.py::judging_ruler`), and its round's cells fold in after it, so no quantity
-  that judges a race is estimated from that race
+  the TENANT, never the archive home) — every θ is read on it. A round's cells fold in
+  before its election (`DifficultyView.link`), which reads that version less every row of the parent
+  line (`application/bench/difficulty.py::judging_ruler`), so the individual a race is judged
+  against never shapes its scale
   ([`adr/0009-optimize-or-compare.md`](adr/0009-optimize-or-compare.md) #4); a controlled arm reads
-  the version its head-to-head froze at open. Every reading carries its `RulerStamp`, and a
+  the version its head-to-head froze at open plus its own campaign's lines since (`RulerReach`) —
+  what a fresh run of itself would hold. Every reading carries its `RulerStamp`, and a
   cycle's levels are ONE `LevelSeries` fit once per close (`RoundClosedRecord.level_series`).
   A per-site ruler, an in-run extension or a fit over the race's own parent is the cut this
   forbids.

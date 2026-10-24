@@ -1,4 +1,4 @@
-import type { ArmReading, BenchPassProgress, LineageNode } from "@/lib/api/types";
+import type { ArmReading, BenchPassProgress, CourseNode, LineageNode } from "@/lib/api/types";
 import { DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import type { CandidateBar } from "@/lib/types";
 import { fmtLevel } from "@/lib/format";
@@ -7,10 +7,20 @@ import { panelCellLabel } from "./inner-panel";
 import { readPaired } from "./paired-reading";
 import { nodeKeyOf, splitRetired } from "./lineage-candidates";
 
-// A course bar's served standing rate is an accuracy, so it is blank under the other metrics.
+// A run's served standing rate against its origin; `null` renders BLANK, never 0.
+export function courseLevel(node: CourseNode): number | null {
+  const standing = node.run_standing ? readPaired(node.run_standing.vs_origin) : null;
+  return standing?.read ? standing.lift.rate_b : null;
+}
+
+// A course bar's standing rate is an accuracy, so it is blank under the other metrics.
 export function barLevel(metric: DisplayMetric, bar: CandidateBar): number | null {
   if (bar.reading) return metricLevel(metric, bar.reading);
-  return metric === "accuracy" ? bar.level : null;
+  return metric === "accuracy" ? courseLevel(bar.node) : null;
+}
+
+export function barStarted(bar: CandidateBar): boolean {
+  return barLevel("accuracy", bar) != null;
 }
 
 export function barValueLabel(metric: DisplayMetric, bar: CandidateBar): string {
@@ -39,24 +49,17 @@ export function candidateBars({
   return splitRetired(nodes).live.map<CandidateBar>((node, idx) => {
     const key = nodeKeyOf(node);
     if (node.kind === "course") {
-      const standing = node.run_standing ? readPaired(node.run_standing.vs_origin) : null;
       return {
         key,
         idx,
         label: node.task ? panelCellLabel(node.task) : node.dataset_name,
         node,
-        arm: null,
         reading: null,
-        source: "history",
-        level: standing?.read ? standing.lift.rate_b : null,
-        overlap: null,
-        benchPass: null,
       };
     }
     // ONE half per bar: the tree serves `proposed`/`measuring` until the arm's walk is decided on the ledger.
     const decided = node.reading.state === "cut" || node.reading.state === "measured";
     const live = decided ? undefined : inflightByKey.get(node.reading.arm.key);
-    const reading = live ?? node.reading;
     // Both are served null short of the WHOLE basis: a rate over a shorter denominator sat another exam.
     const onLine = node.reading.on_origin_panel;
     const overlap =
@@ -70,10 +73,8 @@ export function candidateBars({
       idx,
       label: node.label,
       node,
-      arm: node,
-      reading,
+      reading: live ?? node.reading,
       source: live ? "inflight" : "history",
-      level: reading.own?.accuracy?.value ?? null,
       overlap,
       benchPass: benchPass?.arm === node.reading.arm.key ? benchPass : null,
     };

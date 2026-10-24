@@ -52,7 +52,7 @@ BASELINE = {
     # Leaves of `OptSearchPoint` — what a run is handed.
     "opt_search_point_fields": 10,
     # Leaves of `CycleResult` — what a run produces.
-    "cycle_result_fields": 672,
+    "cycle_result_fields": 825,
     # Parameters annotated `Any`.
     "any_params": 46,
     # `dict[str, Any]` maps declared in `domain/`.
@@ -60,7 +60,7 @@ BASELINE = {
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 8,
     # Injections the optimizers' runtimes price — each a block an optimizer prompt can carry.
-    "injections": 34,
+    "injections": 29,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
     # transition written as a branch beside the tables was policy the count could not see.
     "escalation_rules": 12,
@@ -77,17 +77,17 @@ BASELINE = {
     # Modules a test run imports: our own, followed through their module-level imports, plus
     # each outside distribution's top name. A test that reaches the server app or an extra
     # moves it as one function does not.
-    "test_reach": 356,
+    "test_reach": 358,
     # Every property of every schema the generated contract offers the browser. A command body IS
     # its payload model, so every payload's fields are declared here.
-    "served_fields": 1640,
+    "served_fields": 1647,
     # The rows below price a CHANGE in the sites it touches, read off code.
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 18,
     # The arms each of those files leaves out: a mirror rotting raises it.
     "p_record_drift": 525,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 177,
+    "p_served": 180,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 11,
     # The rows each of those files leaves out.
@@ -96,7 +96,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes; each `CycleRead` alike.
     "p_member": 309,
     # Places a test reaches a private name of the package: an import, an attribute, a patch target.
-    "test_private_reach": 9,
+    "test_private_reach": 11,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"

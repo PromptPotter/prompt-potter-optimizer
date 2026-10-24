@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { barsAreCourses, candidateBars } from "../candidate-views";
-import type { ArmNode, ArmReading, BenchPassProgress, CourseNode, ForkStamp } from "@/lib/api";
+import { barLevel, barsAreCourses, candidateBars } from "../candidate-views";
+import type {
+  ArmNode,
+  ArmReading,
+  BenchPassProgress,
+  CourseNode,
+  ForkStamp,
+} from "@/lib/api";
 import {
   armNode,
   armReading,
@@ -45,8 +51,8 @@ describe("the half choice — the tree's, once its walk is decided", () => {
       inflightByKey: new Map([["a", armReading({ own: ownLevel(0.2) })]]),
     });
     expect(bars[0]?.reading).toBe(tree.reading);
-    expect(bars[0]?.level).toBe(0.7);
-    expect(bars[0]?.source).toBe("history");
+    expect(barLevel("accuracy", bars[0]!)).toBe(0.7);
+    expect(bars[0]).toMatchObject({ source: "history" });
   });
 
   it("takes the WHOLE live reading while the tree's walk is undecided — never field by field", () => {
@@ -58,7 +64,8 @@ describe("the half choice — the tree's, once its walk is decided", () => {
     });
     // A bar and its whisker can never come from two different polling clocks.
     expect(bars[0]?.reading).toBe(live);
-    expect(bars[0]).toMatchObject({ source: "inflight", level: 0.4 });
+    expect(bars[0]).toMatchObject({ source: "inflight" });
+    expect(barLevel("accuracy", bars[0]!)).toBe(0.4);
   });
 
   it("keeps a decided arm's blank over a live row", () => {
@@ -69,8 +76,8 @@ describe("the half choice — the tree's, once its walk is decided", () => {
       inflightByKey: new Map([["a", armReading({ own: ownLevel(0.3) })]]),
     });
     expect(bars[0]?.reading).toBe(tree.reading);
-    expect(bars[0]?.level).toBeNull();
-    expect(bars[0]?.source).toBe("history");
+    expect(barLevel("accuracy", bars[0]!)).toBeNull();
+    expect(bars[0]).toMatchObject({ source: "history" });
   });
 
   it("joins the live half on the arm's key, never a label", () => {
@@ -85,7 +92,8 @@ describe("the half choice — the tree's, once its walk is decided", () => {
       viewedNode: course([forked]),
       inflightByKey: new Map([["f", live]]),
     });
-    expect(bars[0]).toMatchObject({ label: "C1.2", source: "inflight", level: 0.4 });
+    expect(bars[0]).toMatchObject({ label: "C1.2", source: "inflight" });
+    expect(barLevel("accuracy", bars[0]!)).toBe(0.4);
   });
 });
 
@@ -98,13 +106,15 @@ describe("course bars carry no verdict", () => {
 
   it("draws a run at its selection's served rate against its origin, blank where no pair was read", () => {
     const bars = candidateBars({ ...EMPTY, viewedNode: runs });
-    expect(bars.map((b) => b.level)).toEqual([0.6, 0.3, null]);
+    expect(bars.map((b) => barLevel("accuracy", b))).toEqual([0.6, 0.3, null]);
+    expect(bars.map((b) => barLevel("composite", b))).toEqual([null, null, null]);
     expect(bars.map((b) => b.label)).toEqual(["justlogic", "seed-2", "justlogic"]);
   });
 
-  it("holds no arm, no reading and no basis — a run is not a scored row", () => {
+  it("holds no reading and no basis — a run is not a scored row", () => {
     const bars = candidateBars({ ...EMPTY, viewedNode: runs, sampleSet: [1, 2] });
-    expect(bars[0]).toMatchObject({ arm: null, reading: null, overlap: null, benchPass: null });
+    expect(bars[0]).toMatchObject({ reading: null, node: { kind: "course" } });
+    expect(bars[0] && "overlap" in bars[0]).toBe(false);
   });
 
   it("is what barsAreCourses reports, and a fork keeps its own key", () => {
@@ -138,7 +148,8 @@ describe("the overlap channel — drawn only on the WHOLE basis", () => {
 
   it("re-bases on a picked sample set and leaves the level alone", () => {
     const bars = candidateBars({ ...EMPTY, viewedNode: onPanel(20), sampleSet: [1, 2, 3, 4, 5, 6] });
-    expect(bars[0]).toMatchObject({ level: 0.7, overlap: { rate: 0.5, n: 6 } });
+    expect(bars[0]).toMatchObject({ overlap: { rate: 0.5, n: 6 } });
+    expect(barLevel("accuracy", bars[0]!)).toBe(0.7);
   });
 
   it("blanks a candidate served no rate on the picked set", () => {
@@ -148,12 +159,13 @@ describe("the overlap channel — drawn only on the WHOLE basis", () => {
       sampleSet: [1, 2, 3, 4, 5, 6, 7, 8],
     });
     // 6 of 8 is a different exam from 8 of 8, so the server holds the rate back.
-    expect(bars[0]).toMatchObject({ level: 0.7, overlap: null });
+    expect(bars[0]).toMatchObject({ overlap: null });
+    expect(barLevel("accuracy", bars[0]!)).toBe(0.7);
   });
 
   it("draws the SERVED origin-panel rate as it came", () => {
     const bars = candidateBars({ ...EMPTY, viewedNode: onPanel(20) });
-    expect(bars[0]?.overlap).toEqual({ rate: 0.55, n: 20 });
+    expect(bars[0]).toMatchObject({ overlap: { rate: 0.55, n: 20 } });
   });
 });
 
@@ -168,7 +180,7 @@ it("drops the tail a supersede cut retired — one round of three, never six", (
       arm("new2", "C10.2"),
     ]),
   });
-  expect(bars.map((b) => b.arm?.id)).toEqual(["new1", "new2"]);
+  expect(bars.map((b) => b.node.id)).toEqual(["new1", "new2"]);
   // `idx` numbers the bars actually drawn — it is the join to the dendrogram beneath them.
   expect(bars.map((b) => b.idx)).toEqual([0, 1]);
 });
@@ -189,5 +201,5 @@ it("marks the bench pass in flight on the arm it grades, and no other", () => {
     viewedNode: course([arm("a", "C1.1"), arm("b", "C1.2")]),
     benchPass: pass,
   });
-  expect(bars.map((b) => b.benchPass)).toEqual([null, pass]);
+  expect(bars.map((b) => b.reading && b.benchPass)).toEqual([null, pass]);
 });

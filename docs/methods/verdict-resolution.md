@@ -234,11 +234,15 @@ BAR it reads that column against does not currently test anything, so a crowned 
 evidence than the word "winner" implies. Treat any claim that rests on "this round improved" as
 provisional, and say so rather than passing it on.
 
-- **The bar is a bare point estimate.** `selection.py::elect_round_winner` admits on a raw θ
-  lift over the parent above zero — the earned `parent_selection_bias` credit only reorders
-  admitted arms, and the winner's own selection bias never washes out because `rescore_parent`
-  replays its cached rows — with no interval and no multiplicity correction — and `RoundResult.improved` reads any selection past round 0 as a promotion. With three arms,
-  P(at least one positive | every arm identical to the parent) is **0.875 per round**.
+- **The bar is a point estimate with a sign floor.** `selection.py::elect_round_winner` admits on
+  a raw θ lift over the parent above `rasch.py::FIT_SLACK` AND more of the cells the arm shares
+  with the parent won than lost — so a lift the fit's last digit or the δ weighting made, on cells
+  the arm did no better on, keeps the parent. A pick's rows on the cells it won its race on are
+  the max over its round's arms, and `rescore_parent` replays them, so the draw never puts those
+  cells in a later race (`selection.py::crowning_cells`): the parent's bar is read on cells no
+  election chose it by, and needs no credit for its own winner's curse. There is still no
+  interval and no multiplicity correction, and `RoundResult.improved` reads any selection past round 0 as a promotion: with
+  three arms identical to the parent, one still clears a one-cell net win most rounds.
 - **Separability is read against C0, not the parent.** One round's interval over its parent
   spans 0 for almost any real edit at panel width, so a round closes `advanced` (`domain/results.py::round_advance`) only where
   its pick leads C0 on the origin panel by an interval clear of 0 and tops every earlier pick
@@ -269,19 +273,20 @@ the tenant ruler (below), so redesigning it now would be tuning to noise. **The 
 re-read separability on a run that used it, and only then choose a bar** — not to tighten one now.
 
 **One ruler, one clock.** The tenant holds ONE δ ruler (`ruler.jsonl`, `infrastructure/store/ruler_store.py`),
-keyed by sample content and versioned by a tick: each election's grade-A search rows fold in AFTER
-it, so a round never reads its own cells. An election reads the version stamped at its round's
-open, less every row of the individuals it judges — the parent line and that round's arms
-(`bench/difficulty.py::judging_ruler`, the one anchoring fit). Fit on its own arms' rows, a run's
+keyed by sample content and versioned by a tick: a round's grade-A search rows fold in once its
+walks end and BEFORE its election (`DifficultyView.link`), so θ reads every cell the round bought.
+An election reads that version less every row of the parent line
+(`bench/difficulty.py::judging_ruler`, the one anchoring fit). Fit on the parent's rows, a run's
 δ would be its parent's hit pattern: the panel would draw the parent's known hits and θ would
-favour the parent every round. Earlier losers, other campaigns and other optimizers do feed it.
+favour the parent every round. The round's arms, earlier losers, other campaigns and other
+optimizers do feed it.
 
 **The clock is the task's memory scope** (`archive_queries.py::MemoryScope`). An optimizing run
 reads the head at each round's open (`OpenAt`), so its election scale moves round to round. Its θ
 LEVELS do not: each close re-reads every round on one stamp (`LevelSeries`), banked once and read
 by every surface, so two levels difference wherever the series' `caveat` is null. An arm of a head-to-head reads
-the ONE version its head-to-head froze at open (`ArmOf`, `HeadToHeadRecord.ruler_version`), so
-no arm reads another's rows and every arm reads the same scale. An L4 inner cell reads the version
+the version its head-to-head froze at open plus its own campaign's lines since (`ArmOf`,
+`RulerReach`), so no arm reads another's rows and each warms as a fresh run of itself would. An L4 inner cell reads the version
 its outer round opened on (`CellOf`), so every candidate measured against a cell reads one scale
 and the origin level genuinely cancels in `variant − origin`.
 
@@ -385,7 +390,7 @@ Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
 
 **On by default — but warm-gated.** `mechanisms.selection.per_round_resubset` (default `True`):
 while the δ ruler is still cold the subset stays frozen to the campaign-start prefix
-(`bank[:budget]`), thawing to adaptive once the ruler locks — which a comparing arm's never does. Off → that frozen prefix for the whole
+(`bank[:budget]`), thawing to adaptive once the ruler locks. Off → that frozen prefix for the whole
 campaign, so the sample set is fixed across rounds and accuracies are directly comparable.
 
 ---

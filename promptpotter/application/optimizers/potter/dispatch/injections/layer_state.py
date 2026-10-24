@@ -63,12 +63,8 @@ def _r_l3_to_l2_note(b: InjectionBundle) -> list[Item]:
 
 
 _TARGET_PROMPT_HEADER = (
-    "CURRENT PROMPTS — the text an override REPLACES, field by field. Per node, its sections "
-    "concatenate VERBATIM in this order to form that node's prompt, with the operator's "
-    "upstream and downstream framing spliced around problem_description and the output schema's field "
-    "descriptions sent beside it; a field you do not name is carried "
-    "forward unchanged, so restating one field's text — or that framing — inside another ships "
-    "it twice."
+    "CURRENT PROMPTS — each node's fields, concatenated verbatim in this order; the operator's "
+    "upstream/downstream framing is spliced around problem_description."
 )
 
 
@@ -275,26 +271,14 @@ def _r_skill_tiers(b: InjectionBundle) -> list[Item]:
 
 
 _REBASE_CAPABILITY_TEXT = (
-    "FORK PROPOSAL (rare escape hatch). If the current subtree is genuinely "
-    "exhausted — multiple stall rounds in this lineage with no lift, and refining "
-    "this trajectory cannot recover — you may emit "
-    'fork_proposal = {"reason": "<1-2 sentences>"}. '
-    "You judge WHETHER to rewind, not where to: the engine selects the ancestor "
-    "round by UCB over the lineage statistics (each ancestor's mean ability against "
-    "how little it has been explored), then mints a sibling cycle there and "
-    f"auto-continues optimization. Capped at {MAX_AUTO_REBASES} rebases per session. "
-    "Default: omit — a fork costs a whole cycle."
+    'FORK PROPOSAL — fork_proposal = {"reason": "<1-2 sentences>"} only when this lineage is '
+    "exhausted (stalled, refining cannot recover); you judge WHETHER, the engine picks the "
+    f"ancestor round. At most {MAX_AUTO_REBASES} per session; default omit — it costs a cycle."
 )
 
 _SCHEMA_RENAME_UNLOCK_TEXT = (
-    " On that same fork_proposal you may set unlock_schema_field_rename = true, which "
-    "lets the fork's L1 RENAME a field on the optimizer's own output schema (today it "
-    "may only rewrite each field's description). The name is the strongest lever — the "
-    "model has priors about what belongs under a key, so the name steers before a single "
-    "token of the value is written — and it is the only one that can break the parser. "
-    "Request it ONLY when the panels show the search stalling on what a field is FOR "
-    "rather than on what it says: a field whose name misdescribes the content it should "
-    "hold. Otherwise omit it — describe the field, do not rename it."
+    " It may set unlock_schema_field_rename = true, letting the fork's L1 RENAME an output-schema "
+    "field — only when the search stalls on what a field is FOR, not what it says."
 )
 
 
@@ -317,20 +301,14 @@ def _r_rebase_capability(b: InjectionBundle) -> list[Item]:
 
 
 _TERMINATE_CAPABILITY_TEXT = (
-    "TERMINATE PROPOSAL — stop the whole cycle by emitting terminate_proposal = "
-    '{"reason": "<1-2 sentences naming what the operator must fix>"}; the cycle halts, the '
-    "operator fixes it and resumes. Rare: use it ONLY for a fault no framing nudge or replan "
-    "can recover — an unrecoverable upstream/backend fault — never for a hard task or a "
-    "stalled-but-healthy search (rewind or keep refining for those). Default: omit."
+    'TERMINATE PROPOSAL — terminate_proposal = {"reason": "<what the operator must fix>"} halts '
+    "the cycle; only for a backend fault no prompt move recovers, never a hard task or a "
+    "healthy stall. Default omit."
 )
 
 _TERMINATE_STARVED_TEXT = (
-    " THIS ROUND, EVALUATE IT FIRST, BEFORE ANY REFINEMENT: '{node}' failed across ~all of this "
-    "round's {unit} (a backend quota or rate-limit exhausted), so the measurement itself is "
-    "unreliable and this round's failure clusters — critique.failure_highlights and the "
-    "axis-memory cluster, often a downstream matcher — are CASCADE NOISE from that dead node, "
-    "not real targets. Do NOT chase them with a refinement: no framing nudge recovers a starved "
-    "backend, and another round just burns spend on noise. TERMINATE NOW, naming that node."
+    " THIS ROUND IT APPLIES: '{node}' failed on ~all {unit} (quota or rate limit), so every "
+    "failure cluster is cascade noise from it — terminate now, naming that node."
 )
 
 

@@ -115,7 +115,7 @@ def _make_replay_verdict(
         ruler = judging_ruler(
             session.store.ruler,
             scope,
-            read.version,
+            read.reach,
             read.excluded,
             objective_id=scorer.id,
             n_min=opt.elimination_n_min,

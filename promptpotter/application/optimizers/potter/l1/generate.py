@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.llm_call import run_optimizer_node
-from promptpotter.application.bench.node_context import Frontier, Lineage
+from promptpotter.application.bench.node_context import Lineage
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
@@ -115,17 +115,9 @@ async def l1_generate(
         if pipeline_schema
         else None
     )
-    parent_point = ctx.read(Frontier).parent_point
     # The wire speaks the DEMO POOL panel's ids; an individual holds sample keys.
     key_of = {s.id: s.key for s in bundle.demo_pool}
-    response_model = build_l1_response_model(
-        effective_l1_field_names(),
-        parent_prompts={node: p.fields for node, p in opt_sp.prompts.items()},
-        parent_params=parent_point.pipeline_params,
-        parent_shots={
-            node: [bundle.slot_of[k] for k in p.shots] for node, p in opt_sp.prompts.items()
-        },
-    )
+    response_model = build_l1_response_model(effective_l1_field_names())
     try:
         generated, _prompt, _repairs = await run_optimizer_node(
             template_name="l1_generate",

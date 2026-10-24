@@ -3,10 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
-
-# The ELECTION series classified (did the round clear the parent), not a trajectory of readings.
-TrendClass = Literal["healthy", "plateau", "ceiling"]
 
 
 @dataclass(frozen=True)
@@ -17,19 +13,6 @@ class NearMiss:
     ground_truth: str = ""
     rank: int = 0
     predicted: str = ""
-
-
-@dataclass(frozen=True)
-class EvolutionRow:
-    """Only ``elected`` compares across rows; ``accuracy`` is relative to its round's subset."""
-
-    round: int = 0
-    # ``None``, with ``delta``, where the round measured nothing readable: a gap, not a flat stretch.
-    accuracy: float | None = None
-    delta: float | None = None
-    degraded: int = 0
-    n_candidates: int = 0
-    elected: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,12 +40,5 @@ class RoundDiagnostics:
     # No `terminal_node` tally: the deepest node REACHED reads as that node failing en masse.
     error_rate: float = 0.0
     warning_rate: float = 0.0
-
-    evolution_rows: list[EvolutionRow] = field(default_factory=list)
-    trend: TrendClass = "healthy"
-    trend_description: str = ""
-    anomalies: list[str] = field(default_factory=list)
-
-    cross_candidate_diff: list[str] = field(default_factory=list)
 
     samples: list[SampleDiag] = field(default_factory=list)

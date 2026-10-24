@@ -2,7 +2,7 @@
 
 import type { MeasuredUnit } from "@/lib/api/types";
 import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
-import { barLevel, type DisplayMetric } from "@/lib/derivations";
+import { barLevel, barStarted, type DisplayMetric } from "@/lib/derivations";
 import { fmtNum, unitCount } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 
@@ -52,10 +52,13 @@ const metricInk =
   (ctx: SeriesCtx): string =>
     metricInkToken(m, ctx.electedMetric);
 
-const benchLevel = (v: CandidateBar): number | null =>
-  v.benchPass ? v.benchPass.accuracy : (v.reading?.bench?.level?.value ?? null);
+const benchLevel = (v: CandidateBar): number | null => {
+  if (!v.reading) return null;
+  return v.benchPass ? v.benchPass.accuracy : (v.reading.bench?.level?.value ?? null);
+};
 
-const hasBench = (v: CandidateBar): boolean => v.benchPass != null || v.reading?.bench != null;
+const hasBench = (v: CandidateBar): boolean =>
+  v.reading !== null && (v.benchPass != null || v.reading.bench != null);
 
 // Array order is draw order.
 export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
@@ -103,9 +106,9 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     kind: "bar",
     axis: "y",
     gap: "floor-when-started",
-    valueOf: (v) => v.arm?.lens_value ?? null,
+    valueOf: (v) => (v.reading ? v.node.lens_value : null),
     applies: (c) => c.showMask,
-    tip: (v) => `masked: ${fmtNum(v.arm?.lens_value)}`,
+    tip: (v) => `masked: ${fmtNum(v.reading ? v.node.lens_value : null)}`,
   },
   {
     key: "overlap",
@@ -116,10 +119,11 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     kind: "bar",
     axis: "y",
     gap: "sparse",
-    valueOf: (v) => v.overlap?.rate ?? null,
-    applies: (c) => c.showOverlap && c.views.some((v) => v.overlap?.rate != null),
+    valueOf: (v) => (v.reading ? (v.overlap?.rate ?? null) : null),
+    applies: (c) =>
+      c.showOverlap && c.views.some((v) => v.reading !== null && v.overlap?.rate != null),
     tip: (v, c) =>
-      v.overlap?.rate == null
+      !v.reading || v.overlap?.rate == null
         ? "overlap: not read on the whole set"
         : `overlap: ${fmtNum(v.overlap.rate)}${v.overlap.n ? ` on ${unitCount(v.overlap.n, c.unit)} shared` : ""}`,
   },
@@ -156,7 +160,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     tip: (v, c) => {
       const level = benchLevel(v);
       const at = level == null ? "—" : fmtNum(level);
-      if (v.benchPass)
+      if (v.reading && v.benchPass)
         return `bench: ${at} so far · ${v.benchPass.scored} of ${unitCount(v.benchPass.rows, c.unit)} held out`;
       const b = v.reading?.bench;
       return b == null ? "bench: —" : `bench: ${at} on ${unitCount(b.n, c.unit)} held out`;
@@ -199,7 +203,7 @@ export function seriesColumn(
   return views.map((v) => {
     const raw = spec.valueOf(v);
     if (raw != null) return raw;
-    return spec.gap === "floor-when-started" && v.level != null ? 0 : null;
+    return spec.gap === "floor-when-started" && barStarted(v) ? 0 : null;
   });
 }
 
@@ -227,7 +231,7 @@ export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
   }
   if (ctx.views.some(hasBench)) {
     const edge = (side: "ci_lo" | "ci_hi") => (v: CandidateBar) =>
-      v.benchPass ? null : (v.reading?.bench?.level?.[side] ?? null);
+      !v.reading || v.benchPass ? null : (v.reading.bench?.level?.[side] ?? null);
     bands.push({
       anchor: "bench",
       lo: ctx.views.map(edge("ci_lo")),

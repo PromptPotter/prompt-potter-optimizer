@@ -1,23 +1,14 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.scoring.row_diagnostics import (
-    count_degraded_samples,
-    extract_sample_diagnostics,
-)
+from promptpotter.application.scoring.row_diagnostics import extract_sample_diagnostics
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
-from promptpotter.domain.round_diagnostics import (
-    EvolutionRow,
-    NearMiss,
-    RoundDiagnostics,
-    SampleDiag,
-    TrendClass,
-)
+from promptpotter.domain.round_diagnostics import NearMiss, RoundDiagnostics, SampleDiag
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -31,24 +22,15 @@ logger = logging.getLogger(__name__)
 
 _RANK_BUCKET_KEYS: tuple[str, ...] = ("1", "2-5", "6-10", "11-20", "not_found")
 _TOP_K_LEVELS: tuple[int, ...] = (1, 3, 5, 10)
-_PLATEAU_DELTA: float = 0.01
-_PLATEAU_FLAG_THRESHOLD: int = 2
 
 
 def compute_round_diagnostics(
-    round_result: RoundResult,
-    rounds_history: list[RoundResult],
-    pipeline_schema: PipelineSchema | None,
-    slot_of: Mapping[str, int],
+    round_result: RoundResult, pipeline_schema: PipelineSchema | None
 ) -> RoundDiagnostics:
-    """*rounds_history* MUST hold *round_result* as its LAST element."""
     results = round_result.results.cells
 
     rank_buckets, top_k, near_misses, n_valid = _rank_analysis(results)
     error_rate, warning_rate = _pipeline_health(results)
-    evolution_rows, anomalies = _evolution(rounds_history)
-    trend, trend_desc = _trend(rounds_history)
-    diff_lines = _cross_candidate_diff(round_result, slot_of)
     samples = _sample_diagnostics(results, pipeline_schema)
 
     return RoundDiagnostics(
@@ -58,11 +40,6 @@ def compute_round_diagnostics(
         n_valid=n_valid,
         error_rate=error_rate,
         warning_rate=warning_rate,
-        evolution_rows=evolution_rows,
-        trend=trend,
-        trend_description=trend_desc,
-        anomalies=anomalies,
-        cross_candidate_diff=diff_lines,
         samples=samples,
     )
 
@@ -116,79 +93,6 @@ def _pipeline_health(results: Sequence[GradedCell]) -> tuple[float, float]:
         if r.facts.errored:
             error_count += 1
     return error_count / total, warning_count / total
-
-
-def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], list[str]]:
-    if not rounds:
-        return [], []
-    rows: list[EvolutionRow] = []
-    plateau_run = 0
-    max_plateau = 0
-    prev_acc: float | None = None
-    for r in rounds:
-        accuracy = None if r.fold is None else r.fold.accuracy
-        # An unreadable round breaks the series: a 0.0 delta would count as a flat round below.
-        delta = (accuracy - prev_acc) if prev_acc is not None and accuracy is not None else None
-        rows.append(
-            EvolutionRow(
-                round=r.round,
-                accuracy=accuracy,
-                delta=delta,
-                degraded=count_degraded_samples(r.results),
-                n_candidates=len(r.panel),
-                elected=bool(r.improved),
-            )
-        )
-        plateau_run = plateau_run + 1 if delta is not None and abs(delta) < _PLATEAU_DELTA else 0
-        max_plateau = max(max_plateau, plateau_run)
-        prev_acc = accuracy
-
-    anomalies: list[str] = []
-    if max_plateau >= _PLATEAU_FLAG_THRESHOLD:
-        anomalies.append(
-            f"[MEDIUM] plateau_signal: {max_plateau} consecutive rounds with "
-            f"<{_PLATEAU_DELTA:.0%} improvement."
-        )
-    return rows, anomalies
-
-
-def _trend(rounds: list[RoundResult]) -> tuple[TrendClass, str]:
-    """Elections, never the accuracy series: subsets are re-picked at the leader's θ, so accuracy drifts."""
-    if len(rounds) < 3:
-        return "healthy", "Too few rounds to classify"
-    elected = [bool(r.improved) for r in rounds]
-    total = sum(elected)
-    recent = elected[-5:]
-    if not total:
-        return (
-            "plateau",
-            f"No round has elected — 0 of {len(rounds)} cleared the parent",
-        )
-    since = len(elected) - 1 - max(i for i, won in enumerate(elected) if won)
-    if sum(recent) >= len(recent) * 0.5:
-        return (
-            "healthy",
-            f"Electing — {sum(recent)}/{len(recent)} recent rounds cleared the parent",
-        )
-    if since >= 5:
-        return "ceiling", f"{since} rounds since the last election ({total} in total)"
-    return "plateau", f"{since} rounds since the last election ({total} in total)"
-
-
-def _cross_candidate_diff(round_result: RoundResult, slot_of: Mapping[str, int]) -> list[str]:
-    winner_results = round_result.results
-    panel = round_result.panel
-    if not winner_results or len(panel) < 2:
-        return []
-
-    winner_misses = {r.key for r in winner_results if not r.hit}
-    solvers: dict[str, int] = {}
-    for key in panel:
-        for r in round_result.rows(key):
-            if r.key in winner_misses and r.hit:
-                solvers[r.key] = solvers.get(r.key, 0) + 1
-    ranked = sorted(solvers.items(), key=lambda kv: -kv[1])
-    return [f"  #{slot_of[key]} — solved by {n} other candidate(s)" for key, n in ranked[:5]]
 
 
 def _sample_diagnostics(

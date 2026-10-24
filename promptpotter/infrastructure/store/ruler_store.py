@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.ruler import RulerFold, RulerRow, RulerScope
+from promptpotter.domain.ruler import RulerFold, RulerOwn, RulerReach, RulerRow, RulerScope
 from promptpotter.infrastructure.store.read_model import LineIndex, append_row
 
 
@@ -35,19 +35,23 @@ class RulerStore:
     def version(self) -> int:
         return len(self._folds())
 
-    def rows(self, scope: RulerScope, version: int) -> list[RulerRow]:
-        """Each individual's LAST answer to a cell up to *version*, so a re-measured parent is one row per cell."""
+    def rows(self, scope: RulerScope, reach: RulerReach) -> list[RulerRow]:
+        """Each individual's LAST answer to a cell within *reach*, so a re-measured parent is one row per cell."""
         last: dict[tuple[str, str], RulerRow] = {}
-        for fold in self._folds()[:version]:
-            if fold is None or fold.scope != scope:
+        for line, fold in enumerate(self._folds()[: reach.version]):
+            if fold is None or fold.scope != scope or not reach.holds(line, fold):
                 continue
             for row in fold.rows:
                 last[(row[0], row[1])] = row
         return list(last.values())
 
-    def fold(self, scope: RulerScope, rows: Iterable[RulerRow]) -> None:
-        """Only what moves the ruler: a re-closed round or a re-measured parent ticks no version."""
-        now = {(a, key): y for a, key, y in self.rows(scope, len(self._folds()))}
+    def fold(
+        self, scope: RulerScope, rows: Iterable[RulerRow], *, campaign: str, own: RulerOwn | None
+    ) -> None:
+        """Only what moves the ruler the folding run reads: a re-closed round or a re-measured
+        parent ticks no version."""
+        reach = RulerReach(version=self.version(), own=own)
+        now = {(a, key): y for a, key, y in self.rows(scope, reach)}
         held = list(
             {(a, key): (a, key, y) for a, key, y in rows if now.get((a, key)) != y}.values()
         )
@@ -55,5 +59,5 @@ class RulerStore:
             return
         append_row(
             self.path,
-            RulerFold(scope=scope, rows=held).model_dump(mode="json"),
+            RulerFold(scope=scope, rows=held, campaign=campaign).model_dump(mode="json"),
         )

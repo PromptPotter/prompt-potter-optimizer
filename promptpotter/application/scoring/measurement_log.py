@@ -51,7 +51,7 @@ from promptpotter.domain.results import (
     arm_name,
     individual_cells,
 )
-from promptpotter.domain.ruler import RulerScope
+from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import (
     CellSheet,
@@ -311,19 +311,19 @@ def _resolve_scope_artifact(
     n_min, enable_2pl = knobs.elimination_n_min, knobs.enable_2pl_graduation
 
     scope = RulerScope(scorer=scorer.id, dataset=name)
-    version = stores.ruler.version()
+    reach = RulerReach(version=stores.ruler.version(), own=None)
 
     def build() -> HardSamples:
         observations = [
             Observation(address, key, y)
-            for address, key, y in stores.ruler.rows(scope, version)
+            for address, key, y in stores.ruler.rows(scope, reach)
             if key in bank.slot_of
         ]
         # No election reads this scale, so it judges no one.
         judging = judging_ruler(
             stores.ruler,
             scope,
-            version,
+            reach,
             (),
             objective_id=scorer.id,
             n_min=n_min,
@@ -341,7 +341,7 @@ def _resolve_scope_artifact(
         )
 
     key = ("dataset_hard_samples", stores.ruler.path, scope, bank.dataset_hash, n_min, enable_2pl)
-    held = derived(key, sig=version, compute=build)
+    held = derived(key, sig=reach.version, compute=build)
     return build() if held is None else held
 
 

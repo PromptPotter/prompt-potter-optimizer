@@ -104,14 +104,6 @@ class AxisImpact:
     sample_count: int = 0
 
 
-@dataclass
-class RunRecord:
-    individual: str
-    accuracy: float
-    composite: float
-    total: int
-
-
 @shapes_optimizer_prompt
 def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
     out = {k: v for k, v in items if v}
@@ -151,7 +143,6 @@ class AxisIndex:
             lambda: defaultdict(list),
         )
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
-        self._top_runs: list[RunRecord] = []
         self._flips: list[dict[str, Any]] = []
         self._folded: int | None = None
 
@@ -345,39 +336,7 @@ class AxisIndex:
         for entry, reading in self.sample_index.runs:
             self._fold_entry(self._axis_values, entry, reading)
         self._recompute_failure_group_correlations()
-        self._refresh_top_runs(self.sample_index.runs)
         self._folded = self.sample_index.generation
-
-    def _refresh_top_runs(self, entries: list[tuple[ArchiveEntry, CellFold]], k: int = 10) -> None:
-        """Only the modal ``total`` is kept: an 8/20 composite is not comparable with a 20/20 one."""
-        all_totals = [scores.total for _, scores in entries if scores.total > 1]
-        if not all_totals:
-            self._top_runs = []
-            return
-        modal_total = Counter(all_totals).most_common(1)[0][0]
-
-        scored: list[RunRecord] = []
-        for entry, scores in entries:
-            total = scores.total
-            if total != modal_total:
-                continue
-            # An absence is not a measurement: a configuration that read no cell never enters at 0%.
-            accuracy, composite = scores.accuracy, scores.composite_fitness
-            if accuracy is None or composite is None:
-                continue
-            scored.append(
-                RunRecord(
-                    individual=entry.individual,
-                    accuracy=accuracy,
-                    composite=composite,
-                    total=total,
-                )
-            )
-        scored.sort(key=lambda r: (-r.composite, -r.accuracy))
-        self._top_runs = scored[:k]
-
-    def top_runs(self, k: int = 3) -> list[RunRecord]:
-        return self._top_runs[:k]
 
     @staticmethod
     def _fold_entry(

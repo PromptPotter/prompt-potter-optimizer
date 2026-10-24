@@ -71,7 +71,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         # Room for two whole transcripts behind the frame.
         discretionary_chars=11_000,
         caller_extras=frozenset({"n_variants"}),
-        extras=frozenset({"diagnostics", "axis_memory", "archive_top_runs", "rare_hit_samples"}),
+        extras=frozenset({"diagnostics", "axis_memory"}),
         mandatory=L1_MANDATORY,
         floor=L1Layout(
             # The one floor placement ahead of `VOLATILE_SLOT`, free because it is prefix-stable.
@@ -80,10 +80,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "rendered_prompt",
                 "pipeline_param_catalogue",
                 "measurand",
-                "precision",
                 "detectable_move",
                 "confounds",
-                "sample_provenance",
                 "block_pool",
                 "demo_pool",
                 "plan",
@@ -94,7 +92,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "mutation_memory",
                 "l1_wounds",
                 "escalation_panel",
-                "origin_strengths",
                 "budget_state",
                 "sample_transcripts",
             ],
@@ -104,22 +101,13 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     "l1_critique": NodeLayoutSpec(
         # Every miss is admitted ahead of this, so it decides only how many transcripts fit beside them.
         discretionary_chars=7_500,
-        extras=frozenset(
-            {
-                "precision",
-                "detectable_move",
-                "sample_provenance",
-                "axis_memory",
-                "archive_top_runs",
-                "origin_strengths",
-            }
-        ),
+        extras=frozenset({"measurand", "detectable_move", "axis_memory"}),
         # The matched pair a cluster's rows come from, one silent where the other fires: a marked row always renders.
         mandatory=frozenset({"diagnostics", "failing_samples", "inner_narratives"}),
         floor=L1Layout(
             problem_description=[
-                "measurand",
                 "confounds",
+                "budget_state",
                 "evidence_health",
                 "diagnostics",
                 "mutation_memory",
@@ -127,14 +115,13 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "failing_samples",
                 "inner_narratives",
                 "l1_wounds",
-                "rare_hit_samples",
             ],
         ),
     ),
     # `task_context` is off the floor (L2 cannot write the framing); the directives are mandatory so no L4 edit severs the channel.
     "l2_context": NodeLayoutSpec(
         discretionary_chars=5_500,
-        extras=frozenset({"task_context", "precision"}),
+        extras=frozenset({"task_context"}),
         mandatory=frozenset(
             {
                 "critique",
@@ -156,8 +143,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "evidence_health",
                 "guard_breaches",
                 "axis_memory",
-                "archive_top_runs",
-                "rare_hit_samples",
                 "critique",
                 "l1_overrides",
                 "l1_layout",
@@ -170,7 +155,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     ),
     "l3_plan": NodeLayoutSpec(
         discretionary_chars=6_400,
-        extras=frozenset({"task_context", "archive_top_runs", "precision"}),
+        extras=frozenset({"task_context"}),
         mandatory=frozenset(
             {
                 "plan",

@@ -16,7 +16,7 @@ from promptpotter.domain.ruler import (
     ruler_entry,
 )
 from promptpotter.domain.scoring import is_hit
-from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.statistics import logistic
 
 if TYPE_CHECKING:
@@ -300,14 +300,27 @@ def _fit_one(
     return theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9)))
 
 
+@shapes_optimizer_prompt
 def _cell_parameters(keys: Collection[str], delta: Ruler | None) -> dict[str, tuple[float, float]]:
     if delta is None:
         return dict.fromkeys(keys, (0.0, 1.0))
     return {key: ruler_entry(delta[key]) for key in keys if key in delta}
 
 
+@shapes_optimizer_prompt
+def expected_score_gain(
+    theta: float, move: float, keys: Collection[str], delta: Ruler | None
+) -> float:
+    """Expected extra score over *keys* were θ to rise by *move*; a cell off the ruler adds none."""
+    params = _cell_parameters(keys, delta)
+    if not params:
+        return 0.0
+    d, a = (np.array([p[k] for p in params.values()], dtype=np.float64) for k in (0, 1))
+    return float(np.sum(logistic(a * (theta + move - d)) - logistic(a * (theta - d))))
+
+
 # The Newton fit stops within `tol` of its root, so two fits are never compared tighter than this.
-_FIT_SLACK = 1e-3
+FIT_SLACK = 1e-3
 
 
 def theta_bounds_given_delta(
@@ -325,7 +338,7 @@ def theta_bounds_given_delta(
             raise ValueError("theta_bounds_given_delta: no cell on the ruler to bound θ over")
         return fitted[0]
 
-    low, high = fit(0.0) - _FIT_SLACK, fit(1.0) + _FIT_SLACK
+    low, high = fit(0.0) - FIT_SLACK, fit(1.0) + FIT_SLACK
 
     d, a = (np.array([params[s][k] for s in params], dtype=np.float64) for k in (0, 1))
     p = logistic(a * (np.clip(d, low, high) - d))

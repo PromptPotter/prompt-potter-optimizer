@@ -13,7 +13,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     signal,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
-from promptpotter.application.scoring.formula.matchers import extraction_note_for_scoring
+from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
@@ -44,9 +44,9 @@ def _schema_description_block(
     return lines
 
 
-def _schema_toggle_block(formula: str | None) -> list[str]:
+def _schema_toggle_block(matcher: str | None) -> list[str]:
     """The only channel a precondition on an axis WITH a menu reaches L1; split across two rounds, the first scores a mechanical zero."""
-    note = extraction_note_for_scoring(formula or "")
+    note = "" if matcher is None else MATCHERS[matcher].note
     lines = [
         f"    {SCHEMA_TOGGLE_PARAM}={ANSWER_AS_TEXT} REMOVES the output schema from the call: "
         f"{SCHEMA_DESCRIPTION_PREFIX}* then reach nothing, and the answer has to be findable "
@@ -106,7 +106,7 @@ def _r_pipeline_param_catalogue(b: InjectionBundle) -> list[Item]:
             lines.extend(_schema_description_block(node, described, current))
         # Only where the other arm is reachable: the cost of a move nobody can make is prompt mass.
         if ANSWER_AS_JSON in (schema.param_options(node, SCHEMA_TOGGLE_PARAM) or ()):
-            lines.extend(_schema_toggle_block(b.cycle_slice.composite_formula))
+            lines.extend(_schema_toggle_block(b.cycle_slice.matcher))
     return [Item("\n".join(lines))]
 
 

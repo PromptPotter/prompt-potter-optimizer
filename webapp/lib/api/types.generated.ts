@@ -482,8 +482,8 @@ export interface ArmReading {
   verify: VerifyReading | null;
   /** Its individual's rate on the origin panel, as the newest overlap reading holds
    * it: the one level two arms of different rounds may be differenced on.
-   * Null off the best-so-far line, and where it does not hold the whole
-   * panel. */
+   * Null for an arm neither on the best-so-far line nor triggered, and where
+   * it does not hold the whole panel. */
   on_origin_panel: LineRate | null;
 }
 
@@ -621,7 +621,22 @@ export interface OverlapReading {
   lead: PairedReading;
   /** Each earlier pick on the line over C0 on the same panel, oldest first. */
   earlier: PairedReading[];
+  /** Every arm off the line a `PanelTrigger` fired for this cycle, by first walk.
+   * It moves no `advance`. */
+  triggered: TriggeredReading[];
+  /** The standing pick (`b`) over the pick before it on the line (`a`), on the same
+   * panel: the cells it gained and lost against its own parent. Null where
+   * that parent is C0, which `lead` reads, or where the line went unread. It
+   * moves no `advance`. */
+  vs_parent: PairedReading | null;
   advance: 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
+}
+
+/** Fired once, re-read every round the panel reads: a later cut or lost election takes none back. */
+export interface TriggeredReading {
+  trigger: 'n_min';
+  /** The arm (`b`) over C0 (`a`) on the origin panel. */
+  reading: PairedReading;
 }
 
 /** How sharply each cell was measured, against how far apart the cells landed. */
@@ -654,12 +669,19 @@ export interface AbilityReading {
   pinned_share: number | null;
 }
 
-/** The δ scale a reading was taken on: the tenant ruler at ``version`` less the rows of */
+/** The δ scale a reading was taken on: the tenant ruler at ``version`` (narrowed by ``own``) */
 export interface RulerStamp {
   id: string;
   version: number;
+  own: RulerOwn | null;
   scope: RulerScope;
   excluded: string[];
+}
+
+/** A compare arm's reach past its head-to-head's freeze: its own campaign's lines alone, which */
+export interface RulerOwn {
+  campaign: string;
+  since: number;
 }
 
 /** What one δ scale spans: one scorer's cells on ONE dataset. Arms link a scale only through */

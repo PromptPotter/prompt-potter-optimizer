@@ -281,6 +281,10 @@ class Target(CycleRead):
         return formula
 
     @property
+    def matcher(self) -> str | None:
+        return self._cycle.session.state.scoring.require_scorer().matcher
+
+    @property
     def inner_cells(self) -> InnerCells | None:
         """The cells an L4 outer's arms are measured on; ``None`` off the recursion."""
         return inner_cells()

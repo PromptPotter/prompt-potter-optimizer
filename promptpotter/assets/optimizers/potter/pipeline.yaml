@@ -80,7 +80,7 @@ nodes:
       lock_in_n_min: 8
       epsilon_elimination: true
       leader_lock_in: false
-  # The next parent: the strictly positive θ lift over the parent (`elect_round_winner`).
+  # The next parent: a θ lift over the parent its paired cells agree with (`elect_round_winner`).
   theta_election:
     type: selector
     config: {}
@@ -208,9 +208,9 @@ resolved_prompts:
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
         - "evidence_grounding": {field, citation}. citation is the shortest verbatim span that pins the cited entry, <=160c.
         - "targets_rows": the rows this variant's edit must hold for, as `[#id]` ids — at least 2, all from ONE cluster of the CRITIQUE panel where it lists clusters, else rows of one panel that fail the same way. Two variants share a cluster only as two DIFFERENT mechanisms for it.
-        - The delta slots, carrying ONLY what changes: omit a field you keep, since an empty string or the current text is no edit.
+        - The delta slots, carrying ONLY what changes: omit a field you keep (a variant changing nothing is rejected mechanically).
           * "pipeline_overlay": nested {node: {param: value}}, as its schema description states.
-          * "prompt_fields_updates": nested {node: {field: new full text}}, over the prompt fields its schema offers per node.
+          * "prompt_fields_updates": nested {node: {field: new full text}}, over the prompt fields its schema offers per node. The text REPLACES the field whole; a field you omit carries forward, so never restate another field's text or the framing inside one.
         - "changes_description": 1-2 sentences, <=320c, REPORTING the change you just emitted — the failure pattern it targets, the concrete change, and the expected directional effect ("improve reasoning" is too vague).
   l1_critique/1:
     persona: You are a pipeline evaluation analyst.

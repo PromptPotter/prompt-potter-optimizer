@@ -49,12 +49,12 @@ export function FitnessRankSummary({
       )}
       <div style={{ marginTop: 6 }}>
         candidates: {views.map((b, i) => {
-          const move = b.arm?.lens_rank_move;
+          const move = b.reading ? b.node.lens_rank_move : null;
           const mark = move ? MOVE_MARK[move] : { glyph: "—", cls: "rank-flat" };
           return (
             <span key={b.key}>
               {i > 0 && " · "}
-              {b.label} {fmtNum(b.reading?.own?.composite?.value ?? null, 3)}→{fmtNum(b.arm?.lens_value ?? null, 3)}{" "}
+              {b.label} {fmtNum(b.reading?.own?.composite?.value ?? null, 3)}→{fmtNum(b.reading ? b.node.lens_value : null, 3)}{" "}
               <span className={mark.cls}>{mark.glyph}</span>
             </span>
           );

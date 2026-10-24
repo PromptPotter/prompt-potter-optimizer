@@ -96,6 +96,7 @@ from promptpotter.application.optimizers.potter.resume import (
 )
 from promptpotter.application.optimizers.potter.validators.l3_output import l3_plan_breaches
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
+from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.application.views.render.primitives import fmt_fitness, fmt_pct
 from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.dashboard_rows import OptimizerLimit
@@ -200,15 +201,19 @@ class AdaptiveQueue(nodes.Member):
         ruler = ctx.read(Ruler)
         view = ruler.difficulty
         knobs = ctx.knobs
-        rounds = ctx.read(Lineage).rounds
+        lineage = ctx.read(Lineage)
+        rounds = lineage.rounds
+        # A race read on cells that crowned its parent re-reads the parent's luck as its ability.
+        crowned = crowning_cells(rounds, lineage.parent.id)
+        pool = [s for s in pool if s.key not in crowned]
         readings = _origin_readings(rounds, ruler.slot_of)
         worth = information_per_price(readings)
         own = build_observations(list(rounds))
         n_min = ctx.read(Bounds).elimination_n_min
 
         def pick(stratum: list[Sample], budget: int) -> list[Sample]:
-            # Purpose reaches the draw through the ruler alone: every arm of a head-to-head reads
-            # the one version it froze at open.
+            # Purpose reaches the draw through the ruler alone: an arm of a head-to-head reads the
+            # version it froze at open plus its own campaign's lines, so a compare arm warms too.
             if not knobs.per_round_resubset or view.ruler is None:
                 # On a COLD ruler a re-picked subset is difficulty-blind; freezing warms it fastest.
                 return select_round_subset(stratum, [], budget, worth=worth)

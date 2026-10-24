@@ -601,6 +601,7 @@ def election(
         "ruler": RulerStamp(
             id=flat_ruler_id("acc"),
             version=0,
+            own=None,
             scope=RulerScope(scorer="acc", dataset="ds"),
             excluded=(),
         ),
@@ -708,6 +709,7 @@ def level_series(
     stamp = RulerStamp(
         id=flat_ruler_id("acc") if cold else "warm",
         version=1,
+        own=None,
         scope=RulerScope(scorer="acc", dataset="ds"),
         excluded=(),
     )

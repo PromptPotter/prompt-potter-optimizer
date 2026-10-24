@@ -12,6 +12,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import random
 import sys
 import types
 from pathlib import Path
@@ -45,10 +46,12 @@ from promptpotter.application.maintenance.archive_maintenance import purge_cold_
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     CycleSlice,
     InjectionBundle,
+    Item,
     RoundDigest,
 )
 from promptpotter.application.optimizers.potter.dispatch.compose import SECTION_SEP, select
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub
+from promptpotter.application.optimizers.potter.dispatch.injections.panels import _looping
 from promptpotter.application.optimizers.potter.dispatch.layout import unplaceable_edit
 from promptpotter.application.optimizers.potter.dispatch.prompts import load_optimizer_prompt
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
@@ -347,6 +350,25 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         picked, _ = select(fenced, order, budget)
         body = SECTION_SEP.join(picked[n] for n in order)
         assert body.count(_FENCE) == body.count(_FENCE_END), f"budget {budget} left a fence open"
+    # A miss row sheds the step a PLACED transcript quotes whole; an unplaced one leaves it standing.
+    miss = Item("[#7] miss, last step: so B", trusted=False, if_quoted=("7", "[#7] miss"))
+    whole = Item("transcript of 7 " + "x" * 5000, trusted=False, quotes=frozenset({"7"}))
+    for budget, step_shown in ((100_000, False), (1000, True)):
+        picked, _ = select(
+            {"failing_samples": [miss], "sample_transcripts": [whole]},
+            ["failing_samples", "sample_transcripts"],
+            budget,
+        )
+        assert ("last step" in picked["failing_samples"]) is step_shown, (
+            f"budget {budget}: a row's step was dropped for a transcript the prompt never carried"
+        )
+    # A loop is a second half adding nothing: a repeated opening that then reasons is not one.
+    rng = random.Random(0)
+    words = [f"w{i}" for i in range(300)]
+    reasoning = " ".join(rng.choice(words) for _ in range(400))
+    stuck = "Wait, let me re-check the clause. "
+    assert _looping(reasoning[:1000] + stuck * 40), "a trace looping to its end read as reasoning"
+    assert not _looping(stuck * 15 + reasoning), "a repeated opening hid the reasoning after it"
 
     # The site's records open to the token alone, and retention spares a keyed row.
     records = SiteRecordStore(tmp_path / "site_records")

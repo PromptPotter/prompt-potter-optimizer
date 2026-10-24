@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Literal
 
 from promptpotter.domain.strict_model import FrozenModel
+
+
+class Presumption(StrEnum):
+    """What a block's text takes for granted of the run it lands in; a run lacking one makes it noise."""
+
+    # Candidates to rank: some node of the chain emits a ranking.
+    RANKING = "ranking"
+    # The reply's last line is read as its answer: the cell's matcher extracts it there.
+    LAST_LINE_ANSWER = "last_line_answer"
 
 
 class PromptBlock(FrozenModel):
@@ -13,6 +23,7 @@ class PromptBlock(FrozenModel):
     source: str
     level: Literal["target", "optimizer"] | None = None
     role: str | None = None
+    presumes: frozenset[Presumption] = frozenset()
     technique_family: str | None = None
     source_paper: str | None = None
     source_url: str | None = None

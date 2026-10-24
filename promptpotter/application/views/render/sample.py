@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from promptpotter.application.scoring.formula.matchers import MATCHERS, matcher_of
 from promptpotter.application.views.render.primitives import (
     DIM,
     RED,
@@ -12,15 +13,6 @@ from promptpotter.application.views.render.primitives import (
 from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.results_health import is_deprecated, terminal_node
 from promptpotter.domain.scoring import is_hit
-from promptpotter.shared.answer_text import (
-    extract_boxed_number,
-    extract_gsm8k_number,
-    extract_last_bold,
-    extract_last_boxed,
-    extract_plan_block,
-    extract_solution,
-    text_list_items,
-)
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import Grade, MeasuredCell
@@ -42,51 +34,12 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def _extract_gsm8k_display(text: str) -> str:
-    n = extract_gsm8k_number(text or "")
-    if n is None:
-        return (text or "").strip()
-    return str(int(n)) if n.is_integer() else str(n)
-
-
-def _extract_boxed_display(text: str) -> str:
-    # The shared AIME extractor, so the shown answer IS the value `_aime_match` matched.
-    n = extract_boxed_number(text or "")
-    if n is None:
-        return (text or "").strip()
-    return str(int(n)) if n.is_integer() else str(n)
-
-
-def _extract_list_display(text: str) -> str:
-    items = text_list_items(text or "")
-    return " | ".join(items) if items else (text or "")
-
-
-def _extract_math_display(text: str) -> str:
-    boxed = extract_last_boxed(text or "")
-    return boxed if boxed is not None else extract_last_bold(text or "")
-
-
-DISPLAY_EXTRACTORS: dict[str, Any] = {
-    "label_match": extract_last_bold,
-    "em_match": extract_last_bold,
-    "gsm8k_match": _extract_gsm8k_display,
-    "aime_match": _extract_boxed_display,
-    "math_match": _extract_math_display,
-    "list_rr": _extract_list_display,
-    "meeting_plan_match": extract_solution,
-    "blocksworld_plan_match": extract_plan_block,
-}
-
-
 def extract_display_answer(predicted: str, formula: str | None) -> str:
     """Single-line is the CONTRACT: a multi-line answer splits the row of every one-line readout."""
     text = predicted or ""
-    if formula:
-        for name, extractor in DISPLAY_EXTRACTORS.items():
-            if name in formula:
-                return _one_line(str(extractor(text)))
-    return _one_line(text)
+    matcher = matcher_of(formula)
+    answer = None if matcher is None else MATCHERS[matcher].answer
+    return _one_line(text if answer is None else answer(text))
 
 
 def fmt_query_result(

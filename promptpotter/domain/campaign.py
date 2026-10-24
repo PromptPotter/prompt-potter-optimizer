@@ -202,7 +202,7 @@ class HeadToHeadRecord(FrozenModel):
     created_at: str
     origin: str
     shared: SharedPart
-    # The tenant ruler's version at open: every arm's election reads it, so no arm reads another's.
+    # The tenant ruler's version at open: every arm reads it plus its own lines, never another arm's.
     ruler_version: int = Field(ge=0)
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -97,7 +97,6 @@ def _origin_round(
     optimizer_state: OptimizerState | None,
     elects_on: DisplayMetric,
     schema: PipelineSchema,
-    slot_of: Mapping[str, int],
 ) -> RoundResult:
     key, arm, results = origin_arm.key, origin_arm.state, origin_arm.rows
     # An abort pads no error rows onto the tail.
@@ -125,9 +124,7 @@ def _origin_round(
     if not results:
         return origin
     # Without them round 1 opens blind to the origin's per-sample failure pattern.
-    return origin.model_copy(
-        update={"diagnostics": compute_round_diagnostics(origin, [origin], schema, slot_of)}
-    )
+    return origin.model_copy(update={"diagnostics": compute_round_diagnostics(origin, schema)})
 
 
 def _assert_overlay_preserved(
@@ -194,7 +191,6 @@ class Cycle:
             optimizer_state=None,
             elects_on=selected.elects_on,
             schema=schema,
-            slot_of=session.bank.slot_of,
         )
         return cls(
             session=session,
@@ -242,7 +238,6 @@ class Cycle:
             optimizer_state=optimizer_state,
             elects_on=election.elects_on,
             schema=self.session.pipeline_schema,
-            slot_of=self.session.bank.slot_of,
         )
 
     def restamp_origin_round(self, parent: ReadArm) -> None:

@@ -13,7 +13,6 @@ from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
@@ -53,7 +52,6 @@ class SampleIndex:
         self._introduced: set[int] = set()
         self._samples: dict[int, Sample] = {}
         self._hits: dict[int, list[bool]] = defaultdict(list)
-        self._hit_configs: dict[int, list[str]] = defaultdict(list)
         self._failure_modes: dict[int, list[str]] = defaultdict(list)
         self._degradation_counts: dict[int, int] = defaultdict(int)
         self._cache_records: list[SampleRecord] | None = None
@@ -90,7 +88,6 @@ class SampleIndex:
 
     def replay_row(self, row: SampleFoldRow) -> None:
         """The SOLE mutation path, so a row derived now and one read off disk cannot disagree."""
-        pointer = row.sp
         admitted = self._admitted
 
         for sid, query, ground_truth in row.new_samples:
@@ -102,8 +99,6 @@ class SampleIndex:
             if admitted is not None and sid not in admitted:
                 continue
             self._hits[sid].append(hit)
-            if hit and pointer:
-                self._hit_configs[sid].append(pointer)
             if degraded:
                 self._degradation_counts[sid] += 1
             if failure_mode is not None:
@@ -181,28 +176,6 @@ class SampleIndex:
                 records.append(r)
         records.sort(key=lambda r: r.hit_rate)
         return records
-
-    @shapes_optimizer_prompt
-    def rare_hit_samples(
-        self,
-        *,
-        max_hits: int = 3,
-        min_observations: int = 10,
-    ) -> list[tuple[int, str, int, int, list[str]]]:
-        """``min_observations`` filters out the cold start, where every sample looks rare."""
-        out: list[tuple[int, str, int, int, list[str]]] = []
-        for sid, hits in self._hits.items():
-            total = len(hits)
-            if total < min_observations:
-                continue
-            hit_count = sum(1 for h in hits if h)
-            if hit_count > max_hits:
-                continue
-            sample = self._samples.get(sid)
-            query = (sample.query if sample else "").replace("\n", " ").strip()[:60]
-            out.append((sid, query, hit_count, total, list(self._hit_configs.get(sid, []))))
-        out.sort(key=lambda t: (t[2], -t[3]))
-        return out
 
     def failure_clusters(self, max_clusters: int = 5) -> list[FailureCluster]:
         mode_samples: dict[str, list[int]] = defaultdict(list)

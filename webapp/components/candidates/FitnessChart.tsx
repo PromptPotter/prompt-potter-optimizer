@@ -357,7 +357,7 @@ export const FitnessChart = memo(function FitnessChart({
   }, [views, selectedKey, themeVersion]);
 
   const parentIdx = useMemo(() => {
-    const idx = views.findIndex((v) => v.arm?.stands);
+    const idx = views.findIndex((v) => v.reading !== null && v.node.stands);
     return idx >= 0 ? idx : null;
   }, [views]);
 
@@ -527,7 +527,7 @@ export const FitnessChart = memo(function FitnessChart({
                 `accuracy lift vs parent ${fmtSigned(lift.value)} [${fmtSigned(lift.ci_lo)}, ${fmtSigned(lift.ci_hi)}]${flat}`,
               );
             }
-            if (bar?.arm && !bar.arm.reading.election.held) {
+            if (bar?.reading && !bar.reading.election.held) {
               lines.push("no election yet — nothing crowned in this round");
             }
             return lines.join("\n");

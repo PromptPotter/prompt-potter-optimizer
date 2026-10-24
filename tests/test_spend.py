@@ -129,6 +129,7 @@ from promptpotter.domain.pipeline_schema import (
     WebSpendBound,
 )
 from promptpotter.domain.results import CutKind, RescoreCount
+from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     BankedSubject,
@@ -633,7 +634,7 @@ class _CutAfter:
         return StopSignal(self.name, "eliminated", {"queries_scored": len(results)})
 
 
-_HIT = Scorer(id="hit", per_cell=None, fitness=lambda _row: 1.0, objective=None)
+_HIT = Scorer(id="hit", per_cell=None, matcher=None, fitness=lambda _row: 1.0, objective=None)
 
 
 def _searching(usd_per_query: float) -> Any:
@@ -1142,7 +1143,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
             enclosing=(),
             cells=panel.resolve_cells(build_stores(default_identity(), projects_root=inner)),
             purpose=Optimize(),
-            ruler_version=0,
+            ruler=RulerReach(version=0, own=None),
         )
     )
     token = telemetry.set_cycle_ledger(CycleEventLog(inner / "outer.jsonl"))

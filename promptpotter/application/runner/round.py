@@ -219,12 +219,7 @@ def _round_result(
         # Until `measure_overlap` lands, after every pick this round makes.
         overlap=OverlapReading.unpaired(ReadingState.PENDING, ctx.round_num, winner is not None),
     )
-    diagnostics = compute_round_diagnostics(
-        elected_round,
-        [*cycle.rounds, elected_round],
-        cycle.session.pipeline_schema,
-        cycle.session.bank.slot_of,
-    )
+    diagnostics = compute_round_diagnostics(elected_round, cycle.session.pipeline_schema)
     return elected_round.model_copy(update={"diagnostics": diagnostics})
 
 
@@ -432,7 +427,7 @@ async def execute_round(
 
     # Before the draw, which reads the scale the election will, and before an arm spawns a cell.
     cycle.difficulty.open_round(cycle.rounds)
-    pin_inner_ruler(cycle.difficulty.stamp.version)
+    pin_inner_ruler(cycle.difficulty.stamp.reach)
     panel = plan.sampler.draw(NodeContext(ctx, plan.sampler), pool)
     opening = announce_opening(ctx, plan.walk(cycle.population))
     population = await propose_population(ctx, plan, panel)
@@ -464,7 +459,6 @@ async def execute_round(
     assert round_result.election is not None
     callbacks.on_election(round_num, round_result.election)
     cycle.absorb_round(round_result)
-    cycle.difficulty.fold(round_result)
 
     overlap = asyncio.create_task(measure_overlap(cycle, round_result, pool))
     try:
@@ -498,7 +492,7 @@ async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) ->
         )
     round_result = cycle.origin_round
 
-    # As `execute_round` does: the election and its fold land before the close.
+    # The origin's cells fold after the election that adopted it, and before the close.
     assert round_result.election is not None, "round 0 elects the origin it adopted"
     cb.on_election(0, round_result.election)
     cycle.difficulty.fold(round_result)
