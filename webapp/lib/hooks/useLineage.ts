@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { postCommand } from "@/lib/api";
-import type { HierarchyCampaign, HierarchyCourse } from "@/lib/api";
+import type { HierarchyCourse, SubtreeCampaign } from "@/lib/api";
 import {
   candidatesAtPath,
   courseAt,
@@ -29,7 +29,7 @@ interface LineageCleanup {
 }
 
 export interface Lineage {
-  tree: HierarchyCampaign | null;
+  tree: SubtreeCampaign | null;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
@@ -113,7 +113,7 @@ export function useLineage({
     const m = new Map<string, HierarchyCourse>();
     const own = new Set(candidatesAtPath(index, path).map((c) => c.address));
     for (const course of index.courses) {
-      const from = course.facts.spawn?.from_candidate;
+      const from = course.facts.from_candidate;
       if (from && own.has(from)) m.set(from, course);
     }
     return m;

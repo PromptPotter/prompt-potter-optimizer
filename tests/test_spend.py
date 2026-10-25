@@ -115,7 +115,7 @@ from promptpotter.domain.command_kinds import ChangeRunLimitsPayload, DiscardDra
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.l4.proxies import inner_cell_facts
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, RunSource
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     PauseCause,
@@ -1568,10 +1568,10 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
                 trigger=ForkTrigger.OPERATOR_REWIND,
                 reason="",
                 issued_by=SYSTEM_PRINCIPAL,
-                from_round=1,
+                from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
             ),
             cut=CycleEventLog.open(CycleDir(root_dir)).next_offset,
-            from_round=1,
+            cut_round=1,
         )
     fork_a, fork_b, fork_c = forks
     # The jobs dir every reader attaches to, with room for every fork.
@@ -2816,10 +2816,13 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         fork,
         root_dir,
         ForkSpec(
-            trigger=ForkTrigger.OPERATOR_REWIND, reason="", issued_by=SYSTEM_PRINCIPAL, from_round=1
+            trigger=ForkTrigger.OPERATOR_REWIND,
+            reason="",
+            issued_by=SYSTEM_PRINCIPAL,
+            from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
         ),
         cut=CycleEventLog.open(CycleDir(root_dir)).next_offset,
-        from_round=1,
+        cut_round=1,
     )
     bill(root, 0.1)
     bill(fork, 0.3)

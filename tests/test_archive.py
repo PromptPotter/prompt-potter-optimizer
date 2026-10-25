@@ -24,6 +24,7 @@ from factories import (
     arm_walk,
     close_round,
     election,
+    inner_sandbox,
     loop_session,
     measurement,
     measurements,
@@ -44,6 +45,7 @@ from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    fork_edge,
     mint_operator_fork,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
@@ -56,9 +58,9 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.cycle_reads import open_family_ray
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.hierarchy_subtree import (
-    entries_under,
     hierarchy_subtree,
     subtree_course,
+    subtree_version,
 )
 from promptpotter.application.initialization import loop_start
 from promptpotter.application.maintenance import restamp
@@ -66,6 +68,8 @@ from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
     restore_measurement_archive,
 )
+from promptpotter.application.mask.divergence import VerdictOutcome, find_divergences
+from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.optimizers.nodes import (
     MeasuredRound,
     Panel,
@@ -89,11 +93,22 @@ from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.command_kinds import DeleteCampaignPayload
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, hierarchy_address
-from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyCourse
+from promptpotter.domain.cycle_paths import (
+    CycleDir,
+    CycleHop,
+    candidate_address,
+    hierarchy_address,
+)
+from promptpotter.domain.hierarchy import (
+    HierarchyCandidate,
+    HierarchyRound,
+    SubtreeCampaign,
+    SubtreeCourse,
+    entries_under,
+)
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
-from promptpotter.domain.paired_reading import ArmKey, ReadingState
+from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import (
@@ -101,6 +116,8 @@ from promptpotter.domain.results import (
     OverlapReading,
     PointContext,
     RoundResult,
+    line_reference,
+    walked_slot,
 )
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
@@ -115,6 +132,7 @@ from promptpotter.domain.run_records import (
     ResumeCheckpointRecord,
     RoundEnteredRecord,
     RunPhaseRecord,
+    SpawnedBy,
 )
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
@@ -144,7 +162,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
     standing,
 )
 from promptpotter.infrastructure.store.read_model import append_row
-from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
 from promptpotter.shared.errors import LedgerUnreadableError, PayloadInvalidError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
@@ -644,7 +662,7 @@ def _minted(stores: Stores, cycle_id: str) -> tuple[CycleHop, CycleEventLog]:
 
 
 def _mint_sibling(
-    store: Any, parent: CycleHop, cycle_id: str, spec: ForkSpec, *, from_round: int
+    store: Any, parent: CycleHop, cycle_id: str, spec: ForkSpec, *, cut_round: int
 ) -> CycleHop:
     """The mint record alone, cut at the parent's head: what `mint_fork` writes for a sibling."""
     child = parent.model_copy(update={"cycle_id": cycle_id})
@@ -654,7 +672,7 @@ def _mint_sibling(
         parent_dir,
         spec,
         cut=CycleEventLog.open(CycleDir(parent_dir)).next_offset,
-        from_round=from_round,
+        cut_round=cut_round,
     )
     return child
 
@@ -1043,10 +1061,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         trigger=ForkTrigger.OPERATOR_STEERED,
         reason="",
         issued_by=SYSTEM_PRINCIPAL,
-        from_round=1,
-        from_candidate_id="c1",
+        from_candidate=RoundArm(round=1, arm=ArmKey("c1")),
     )
-    _mint_sibling(store, inheriting, fork, spec, from_round=0)
+    _mint_sibling(store, inheriting, fork, spec, cut_round=0)
     session = loop_session(
         stores,
         solving,
@@ -1078,9 +1095,13 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     )
 
     # An applied scenario forks at its round, keeps the parent's holdout and carries its criterion.
-    scenario, _ = _minted(stores, "cycle_applyscenario")
+    scenario, scenario_log = _minted(stores, "cycle_applyscenario")
     stores.campaigns.create_campaign(
         minted_campaign(scenario, owner_user_id=str(stores.identity.user_id))
+    )
+    scenario_rounds: list[RoundResult] = []
+    scenario_pick = ArmKey(
+        [_emit_round(closing, scenario_log, scenario_rounds, f"s{n}") for n in range(2)][-1]
     )
     bank = [Sample(id=n, query=f"q{n}", ground_truth="g") for n in range(4)]
     drawn = partition_bank(bank, DatasetSplit(bench=0), seed=0).record(dataset_hash="bank")
@@ -1102,7 +1123,11 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         "a redrawn holdout reads the fork's bench lift on rows its parent never held out"
     )
     # OPERATOR_REWIND is the rebase branch, the one that lifts rounds 0..N-1.
-    assert (index.fork.trigger, index.fork.from_round) == (ForkTrigger.OPERATOR_REWIND, 2)
+    assert (index.fork.trigger, index.cut_round, index.fork.from_candidate) == (
+        ForkTrigger.OPERATOR_REWIND,
+        2,
+        RoundArm(round=1, arm=scenario_pick),
+    ), "a rewind's record names another arm than the pick its parent's line stood on"
     seed = store.read_cycle_seed(applied)
     assert seed is not None
     base = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
@@ -1126,9 +1151,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             trigger=ForkTrigger.OPERATOR_REWIND,
             reason="",
             issued_by=SYSTEM_PRINCIPAL,
-            from_round=3,
+            from_candidate=RoundArm(round=2, arm=ArmKey(prefix[2])),
         ),
-        from_round=3,
+        cut_round=3,
     )
 
     def candidates(hop: CycleHop) -> list[str]:
@@ -1198,19 +1223,35 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         "the campaign's line stayed on the cycle a supersede retired"
     )
     [line_course] = [c for c in listed.children if c.address == listed.facts.line]
-    assert isinstance(line_course, HierarchyCourse) and line_course.facts.standing is not None, (
-        "guard"
+    assert line_course.facts.standing is not None, "guard"
+    held_label = READING_STATE_INFO[ReadingState.HELD_ELSEWHERE].label
+    for course in listed.children:
+        graded = [s.value for s in course.stats if s.key == "bench"]
+        assert (graded == [held_label]) is (course is not line_course), (
+            "the bench graded a course that does not hold the line, or the line's read held elsewhere"
+        )
+    assert listed.stats[1:] == line_course.stats[1:], "the campaign's bench is not its line's"
+    [lift] = [s for s in line_course.stats if s.key == "lift"]
+    assert ("θ" in (lift.sub or "")) is (line_course.facts.elects_on == "ability"), (
+        "a lift column read beside a round won on θ does not say so, or says it where none was"
+    )
+    # The bench chip grades archive rows, so a regrade at rest must answer the next ask with a body.
+    validator = subtree_version(stores, listed.address)
+    _file(stores.archive, [_row("q_regraded")], dataset_hash="regradeds")
+    assert subtree_version(stores, listed.address) != validator, (
+        "an archive write left the subtree's validator standing: its BENCH chip goes stale behind a 304"
     )
     picked = line_course.facts.standing.selection
     assert picked is not None, "guard"
     [line_drawn] = [
         e
         for e in entries_under(hierarchy_subtree(stores, listed.address, None, None, moment=None))
-        if isinstance(e, HierarchyCourse) and e.address == listed.facts.line
+        if isinstance(e, SubtreeCourse) and e.address == listed.facts.line
     ]
     line_stood = [
         e
         for rnd in line_drawn.children
+        if isinstance(rnd, HierarchyRound)
         for e in rnd.children
         if isinstance(e, HierarchyCandidate) and e.facts.stands
     ]
@@ -1220,6 +1261,378 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert line_course.facts.standing.changes == line_stood[0].facts.reading.changes_description, (
         "the course's standing names another pick's change than the candidate it stands"
     )
+
+    # ONE line resolver over a fork-of-a-fork-of-a-fork: every (course, round) reads off the course
+    # owning it, as the mint records say. The trunk crowns o, a, z; the kid cuts it at 2 and holds;
+    # the grand cuts the kid at 3 and crowns x; the great cuts the grand at 4; a steer takes the kid
+    # back to C0, another the grand to b, an arm of the trunk's round 1 never crowned; rewinds re-run
+    # the grand's round 1 and its round 3.
+    family = CycleHop(campaign_id="family__20260101-000000", cycle_id="cycle_family")
+    stores.campaigns.create_campaign(
+        minted_campaign(
+            family,
+            config=CampaignConfig(
+                optimization=OptimizationConfig(degradation_threshold=0.4),
+                scoring="label_match(predicted, ground_truth)",
+            ),
+            owner_user_id=str(stores.identity.user_id),
+        )
+    )
+    stores.campaigns.mint_cycle(family)
+
+    def ident(name: str) -> str:
+        return prompted(instruction=name).id
+
+    # One row per round closed, in ledger order: a course's first row mints it off `parent`, cut at
+    # `cut` (a steer names the candidate it starts from); every row closes one round on it.
+    rows: list[tuple[str, str, int, tuple[int, str] | None, list[str], str | None, str | None]] = [
+        # course, parent, cut, steered from, arms, crown, reference
+        ("family", "", 0, None, ["o"], "o", None),
+        ("family", "", 0, None, ["a", "b"], "a", "o"),
+        ("kid", "family", 2, None, ["y"], None, "a"),
+        ("family", "", 0, None, ["a", "z"], "z", None),
+        ("grand", "kid", 3, None, ["x"], "x", "a"),
+        ("great", "grand", 4, None, ["v"], "v", "x"),
+        ("steered", "kid", 0, (0, "o"), ["s"], "s", None),
+        ("rewound", "grand", 1, None, ["w"], "w", "o"),
+        ("redone", "grand", 3, None, ["q"], "q", "a"),
+        ("branched", "grand", 0, (1, "b"), ["p"], "p", None),
+        ("rerun", "grand", 0, (3, "a"), ["r"], "r", None),
+        ("relift", "grand", 0, (1, "o"), ["l"], "l", None),
+        ("mended", "grand", 3, None, ["m"], "m", "a"),
+        # A supersede fork of a supersede fork, cut below where every course above it was cut.
+        ("carried", "rewound", 2, None, ["d"], "d", "w"),
+        # A course already minted, cut again: `--from` in place, re-running round 1 after the fork.
+        ("rewound", "", 1, None, ["k"], "k", "o"),
+        # Two supersede forks of one course, the second cut above where the first branched, then the
+        # course re-run in place under both: the first still retires what the second stands on.
+        ("rival", "kid", 0, (0, "o"), ["c"], "c", None),
+        ("rival", "", 0, None, ["e", "f"], "e", "c"),
+        ("first", "rival", 1, None, ["i"], "i", "c"),
+        ("first", "", 0, None, ["n"], "n", "i"),
+        ("rival", "", 0, None, ["g"], "g", "e"),
+        ("second", "rival", 3, None, ["h"], "h", "g"),
+        ("rival", "", 2, None, ["j"], "j", "e"),
+        # An arm re-run away that only an offshoot's read holds, and no line stands on.
+        ("steered", "", 0, None, ["t"], "t", "s"),
+        ("glance", "steered", 0, (0, "s"), ["u"], "u", None),
+        ("steered", "", 1, None, ["t2"], "t2", "s"),
+        # Re-run in place BELOW an arm a cut still holds: that arm reads the line it ran on.
+        ("steered", "", 0, None, ["t3"], "t3", "t2"),
+        ("peek", "steered", 0, (2, "t3"), ["u2"], "u2", None),
+        ("steered", "", 1, None, ["t4"], "t4", "s"),
+    ]
+    restated_at_mint = {"mended": [1]}
+    hops, line_of = {"family": family}, {"family": list[RoundResult]()}
+    for row_course, row_parent, row_cut, row_named, row_picks, row_crown, row_reference in rows:
+        if row_course in hops and row_cut:
+            store.rewind_to_round(hops[row_course], row_cut - 1)
+            del line_of[row_course][row_cut:]
+        if row_course not in hops:
+            spec = ForkSpec(
+                trigger=ForkTrigger.OPERATOR_STEERED if row_named else ForkTrigger.OPERATOR_REWIND,
+                reason="",
+                issued_by=SYSTEM_PRINCIPAL,
+                # The one resolution `mint_fork` writes: the named arm, else the line's pick.
+                from_candidate=fork_edge(
+                    store.standing_rounds(hops[row_parent], moment=None),
+                    row_cut,
+                    None
+                    if row_named is None
+                    else RoundArm(round=row_named[0], arm=ArmKey(ident(row_named[1]))),
+                ),
+            )
+            hops[row_course] = _mint_sibling(
+                store, hops[row_parent], f"cycle_family_{row_course}", spec, cut_round=row_cut
+            )
+            line_of[row_course] = line_of[row_parent][:row_cut]
+            # A repair restates a lifted round WHOLE at its mint, so the round is the fork's own.
+            for r in restated_at_mint.get(row_course, ()):
+                lifted = store.standing_rounds(hops[row_course], moment=None).rounds[r].close
+                store.restate_round(hops[row_course], lifted.restated(lifted.optimizer_state))
+        line, n = line_of[row_course], len(line_of[row_course])
+        arms = {
+            ArmKey(ident(p)): arm_state(p, slot=ArmSlot(round=n, idx=i, total=len(row_picks)))
+            for i, p in enumerate(row_picks)
+        }
+        reference = None
+        if row_reference is not None:
+            arms[ArmKey(ident(row_reference))] = arm_state(
+                row_reference,
+                slot=walked_slot(line, ArmKey(ident(row_reference))),
+                role=MeasurementRole.PARENT,
+            )
+            reference = line_reference(line)
+            assert reference.arm == ident(row_reference), (
+                f"guard: a row re-reads off {row_course}'s line"
+            )
+        row_ended = row_crown or row_reference or row_picks[0]
+        line.append(
+            _round(
+                round=n,
+                arms=arms,
+                election=election(
+                    None if row_crown is None else ident(row_crown),
+                    ended_on=ident(row_ended),
+                    reference=reference,
+                ),
+            )
+        )
+        close_round(
+            CycleEventLog.open(CycleDir(store.cycle_dir(hops[row_course]))), line, cycle=closing
+        )
+    restamp = walked_slot(line_of["family"], ArmKey(ident("a")))
+    assert restamp is not None and restamp.round == 2, (
+        "a re-read stamps a walk other than its latest"
+    )
+    # Each course by its first row, in mint order.
+    (
+        kid,
+        grand,
+        great,
+        steered,
+        rewound,
+        redone,
+        branched,
+        rerun,
+        relift,
+        mended,
+        carried,
+        rival,
+        first,
+        second,
+        glance,
+        peek,
+    ) = (hops[n] for n in list(dict.fromkeys(row[0] for row in rows))[1:])
+    # A round still measuring: its re-read is announced, and nothing has elected or closed.
+    live = len(line_of["peek"])
+    CycleEventLog.open(CycleDir(store.cycle_dir(peek))).append(
+        ArmRecord(
+            round=live,
+            arm=ArmKey(ident("u2")),
+            state=arm_state(
+                "u2", slot=ArmSlot(round=0, idx=0, total=1), role=MeasurementRole.PARENT
+            ),
+        )
+    )
+    (inner_sandbox(stores, family.campaign_id, family.cycle_id) / stores.tenant_id).mkdir()
+    sandbox = inner_sandbox_store(stores, family.campaign_id, family.cycle_id)
+    assert sandbox is not None, "guard"
+    asks = {
+        "reread": (grand, 3, "a", MeasurementRole.PARENT),
+        "again": (family, 2, "a", MeasurementRole.PANEL),
+        "own": (grand, 3, "x", MeasurementRole.PANEL),
+        # A pass beside the draw, of the very individual round 3 re-read: no arm asked it.
+        "overlap": (grand, 3, "a", MeasurementRole.OVERLAP),
+        # Asked by an arm its course has since re-run away: it is still the candidate that ran it.
+        "unrun": (rewound, 1, "w", MeasurementRole.PANEL),
+        # Asked by a re-read whose round has not elected yet.
+        "live": (peek, live, "u2", MeasurementRole.PARENT),
+    }
+    for name, (asker, rnd, pick, role) in asks.items():
+        spawned = CycleHop(campaign_id=f"{name}__20260101-000000", cycle_id=f"cycle_{name}")
+        sandbox.campaigns.create_campaign(minted_campaign(spawned))
+        sandbox.campaigns.mint_cycle(spawned)
+        sandbox.campaigns.record_spawned(
+            spawned,
+            SpawnedBy(
+                round=rnd,
+                individual_id=ident(pick),
+                role=role,
+                cycle_id=asker.cycle_id,
+                task=f"t/{name}",
+            ),
+        )
+    tree = hierarchy_subtree(
+        stores, hierarchy_address((), family.campaign_id), None, None, moment=None
+    )
+
+    def course_of(hop: CycleHop) -> str:
+        return hierarchy_address((), hop.campaign_id, hop.cycle_id)
+
+    hung = {
+        name: e.parent
+        for e in entries_under(tree)
+        if isinstance(e, SubtreeCampaign)
+        for name in asks
+        if f"{name}__" in e.address
+    }
+
+    def at(hop: CycleHop, rnd: int, name: str) -> str:
+        return candidate_address(course_of(hop), rnd, ArmKey(ident(name)))
+
+    o, first_pick, b, x = (
+        at(family, 0, "o"),
+        at(family, 1, "a"),
+        at(family, 1, "b"),
+        at(grand, 3, "x"),
+    )
+    assert hung == {
+        "reread": first_pick,
+        "again": at(family, 2, "a"),
+        "own": x,
+        "overlap": course_of(grand),
+        "unrun": at(rewound, 1, "w"),
+        "live": at(peek, 0, "u2"),
+    }, "an inner run hung on a candidate other than the one its spawn record names"
+
+    # The bugs reviews found are rows here: the grand's cut round drawn twice, the steer's
+    # inherited anchor lost, the rewind's round 1 re-read off the wrong course's picks, and a
+    # retirement that is anything but "off the fork's line, within its reach".
+    head = [(0, [o]), (1, [first_pick])]
+    crownless: tuple[int, list[str]] = (2, [])
+    lines = {
+        o: [(0, [o])],
+        first_pick: head,
+        b: [(0, [o]), (1, [b])],
+        **{c: [*head, (2, [c])] for c in (at(family, 2, "a"), at(family, 2, "z"), at(kid, 2, "y"))},
+        x: [*head, crownless, (3, [x])],
+        at(great, 4, "v"): [*head, crownless, (3, [x]), (4, [at(great, 4, "v")])],
+        at(steered, 0, "s"): [(0, [at(steered, 0, "s")])],
+        at(rewound, 1, "w"): [(0, [o]), (1, [at(rewound, 1, "w")])],
+        at(rewound, 1, "k"): [(0, [o]), (1, [at(rewound, 1, "k")])],
+        # Its parent re-ran round 1 in place after the cut; the fork's line still stands on w.
+        at(carried, 2, "d"): [(0, [o]), (1, [at(rewound, 1, "w")]), (2, [at(carried, 2, "d")])],
+        at(redone, 3, "q"): [*head, crownless, (3, [at(redone, 3, "q")])],
+        at(branched, 0, "p"): [(0, [at(branched, 0, "p")])],
+        at(rerun, 0, "r"): [(0, [at(rerun, 0, "r")])],
+        at(relift, 0, "l"): [(0, [at(relift, 0, "l")])],
+        # The restated round 1 is the repair's own, whole: its arms are copies on its own line.
+        **{c: [(0, [o]), (1, [c]), crownless] for c in (at(mended, 1, "a"), at(mended, 1, "b"))},
+        at(mended, 3, "m"): [
+            (0, [o]),
+            (1, [at(mended, 1, "a")]),
+            crownless,
+            (3, [at(mended, 3, "m")]),
+        ],
+        at(rival, 0, "c"): [(0, [at(rival, 0, "c")])],
+        **{n: [(0, [at(rival, 0, "c")]), (1, [n])] for n in (at(rival, 1, "e"), at(rival, 1, "f"))},
+        at(first, 1, "i"): [(0, [at(rival, 0, "c")]), (1, [at(first, 1, "i")])],
+        at(first, 2, "n"): [
+            (0, [at(rival, 0, "c")]),
+            (1, [at(first, 1, "i")]),
+            (2, [at(first, 2, "n")]),
+        ],
+        # Each read on the line it ran on: g on the rival's round 1 as the second's cut found it.
+        **{
+            n: [(0, [at(rival, 0, "c")]), (1, [at(rival, 1, "e")]), (2, [n])]
+            for n in (at(rival, 2, "g"), at(rival, 2, "j"))
+        },
+        at(second, 3, "h"): [
+            (0, [at(rival, 0, "c")]),
+            (1, [at(rival, 1, "e")]),
+            (2, [at(rival, 2, "g")]),
+            (3, [at(second, 3, "h")]),
+        ],
+        **{
+            n: [(0, [at(steered, 0, "s")]), (1, [n])]
+            for n in (at(steered, 1, "t"), at(steered, 1, "t2"), at(steered, 1, "t4"))
+        },
+        at(steered, 2, "t3"): [
+            (0, [at(steered, 0, "s")]),
+            (1, [at(steered, 1, "t2")]),
+            (2, [at(steered, 2, "t3")]),
+        ],
+        at(glance, 0, "u"): [(0, [at(glance, 0, "u")])],
+        at(peek, 0, "u2"): [(0, [at(peek, 0, "u2")])],
+    }
+    assert {
+        e.address: [(s.round, s.candidates) for s in e.facts.main_line]
+        for e in entries_under(tree)
+        if isinstance(e, HierarchyCandidate)
+    } == lines, "a candidate's line reads a round off a course that does not own it"
+    courses = {e.address: e for e in entries_under(tree) if isinstance(e, SubtreeCourse)}
+    hangs = {
+        family: (None, o, {0: None, 1: o, 2: None}),
+        kid: (first_pick, o, {2: first_pick}),
+        grand: (first_pick, o, {3: first_pick}),
+        great: (x, o, {4: x}),
+        # Round 2 lists only t3, re-run away: it re-read nothing its head still holds.
+        steered: (o, at(steered, 0, "s"), {0: None, 1: at(steered, 0, "s"), 2: None}),
+        rewound: (o, o, {1: o}),
+        redone: (first_pick, o, {3: first_pick}),
+        branched: (b, at(branched, 0, "p"), {0: None}),
+        # A steer naming a round's re-read hangs from the candidate that round re-read, lifted or not.
+        rerun: (first_pick, at(rerun, 0, "r"), {0: None}),
+        relift: (o, at(relift, 0, "l"), {0: None}),
+        # It hangs from the parent line's arm; each re-read is its own round's, off its own crowns.
+        mended: (first_pick, o, {1: o, 3: at(mended, 1, "a")}),
+        carried: (at(rewound, 1, "w"), o, {2: at(rewound, 1, "w")}),
+        rival: (o, at(rival, 0, "c"), {0: None, 1: at(rival, 0, "c"), 2: at(rival, 1, "e")}),
+        first: (at(rival, 0, "c"), at(rival, 0, "c"), {1: at(rival, 0, "c"), 2: at(first, 1, "i")}),
+        # Cut on g, which its parent has since re-run away: the cut still names g.
+        second: (at(rival, 2, "g"), at(rival, 0, "c"), {3: at(rival, 2, "g")}),
+        glance: (at(steered, 0, "s"), at(glance, 0, "u"), {0: None}),
+        # The live round names its re-read only once it elects.
+        peek: (at(steered, 2, "t3"), at(peek, 0, "u2"), {0: None, live: None}),
+    }
+    for hop, (cut_from, starts, references) in hangs.items():
+        course = courses[course_of(hop)]
+        assert (course.facts.from_candidate, course.facts.origin) == (cut_from, starts), (
+            f"{hop.cycle_id} hangs from, or starts at, a candidate its mint record does not name"
+        )
+        assert {
+            rnd.facts.round: rnd.facts.reference
+            for rnd in course.children
+            if isinstance(rnd, HierarchyRound)
+        } == references, f"{hop.cycle_id} names a re-read its line did not stand on"
+    by_addr = {e.address: e for e in entries_under(tree) if isinstance(e, HierarchyCandidate)}
+    assert {
+        address: tag.value
+        for address, e in by_addr.items()
+        if (tag := e.tag("superseded")) is not None
+    } == {
+        # Off the line of ANY supersede fork the line passed through that reached it, named by the
+        # lowest cut, the nearest link of a tie: the rewind takes the trunk's round 1 off its line,
+        # `kid` its round 2 though `carried`, cut from `kid` at the same round, reached it too.
+        **dict.fromkeys((at(family, 1, n) for n in "ab"), course_of(rewound)),
+        **dict.fromkeys((at(family, 2, n) for n in "az"), course_of(kid)),
+        at(kid, 2, "y"): course_of(carried),
+        x: course_of(mended),
+        at(rewound, 1, "k"): course_of(carried),
+        # The second's line stands on g, and the first still retires it.
+        **dict.fromkeys(
+            (at(rival, r, n) for r, n in ((1, "e"), (1, "f"), (2, "g"), (2, "j"))), course_of(first)
+        ),
+        # Re-run away by their own course, whether or not a line stands on them.
+        at(rewound, 1, "w"): course_of(rewound),
+        **dict.fromkeys(
+            (at(steered, r, n) for r, n in ((1, "t"), (1, "t2"), (2, "t3"))), course_of(steered)
+        ),
+    }, "a cut retires an arm on its line, one past the reach of its branch, or names another cut"
+    on_a_line, on_none = (
+        "Rewound: its course re-ran this round in place after a fork was cut from it. It stays as "
+        "the record of what ran" + tail
+        for tail in (", and a fork's line stands on it.", ".")
+    )
+    assert {addr: by_addr[addr].lede for addr in (at(rewound, 1, "w"), at(steered, 1, "t"))} == {
+        at(rewound, 1, "w"): on_a_line,
+        at(steered, 1, "t"): on_none,
+    }, "a rewound arm says a fork's line stands on it where none does, or hides one that does"
+    # The mask reads the same lines: a lifted round keeps the crown its parent elected, and a
+    # parting dims every fork whose start was proposed past it, a steer from a later arm included.
+    mask = load_mask_record(stores, family.campaign_id, lens=None)
+    crowned = {
+        c.cycle_id: {
+            r.round: next((m.key for m in r.candidates if m.is_selected), None) for r in c.rounds
+        }
+        for c in mask.cycles
+    }
+    assert crowned[great.cycle_id] == {
+        0: ident("o"),
+        1: ident("a"),
+        2: None,
+        3: ident("x"),
+        4: ident("v"),
+    }, "the mask crowns a lifted round other than where its parent elected it"
+    parted = find_divergences(
+        mask,
+        lambda rnd: VerdictOutcome(diverged=(rnd.cycle_id, rnd.round) == (grand.cycle_id, 0)),
+    )
+    # `relift` named round 1's re-read of o, which its mint records as o: proposed AT the parting.
+    assert {cid for cid, _ in parted.divergent} == {
+        h.cycle_id for h in (grand, great, rewound, redone, branched, rerun, mended, carried)
+    }, "a parting dims a fork rooted before it, or keeps one proposed past it"
 
     # The operator's `--from` rewinds the line's first cycle; a rebase's fork stands on its own cut.
     rewinds: list[int | None] = []

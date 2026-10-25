@@ -42,19 +42,20 @@ export function JobsDock() {
   };
   const openUsage = () => openAccount("usage");
 
-  const labelFor = (c: HierarchyCourse) => {
+  // Served words only: the campaign the job belongs to, then which course of it — none for its root.
+  const wordsOf = (c: HierarchyCourse): [string, string | null] => {
     const campaign = c.parent === null ? undefined : byAddress.get(c.parent);
-    if (!campaign) return c.label;
-    return campaign.level === "campaign" && campaign.facts.root === c.address
-      ? campaign.label
-      : `${campaign.label} · ${c.label}`;
+    if (campaign?.level !== "campaign") return [c.label, null];
+    return [campaign.label, campaign.facts.root === c.address ? null : c.label];
   };
 
   if (n === 1) {
     const c = running[0];
     const p = passes[0];
     if (c) {
-      const label = labelFor(c);
+      const label = wordsOf(c)
+        .filter((w) => w !== null)
+        .join(", ");
       return (
         <div className="jobs-dock">
           <button
@@ -123,7 +124,10 @@ export function JobsDock() {
                     <span className="phase-dot" aria-hidden="true" />
                     {r.state.status.label}
                   </span>
-                  <span className="jobs-dock-item-label">{labelFor(r)}</span>
+                  <span className="jobs-dock-item-label">{wordsOf(r)[0]}</span>
+                  {wordsOf(r)[1] !== null && (
+                    <span className="jobs-dock-item-course">{wordsOf(r)[1]}</span>
+                  )}
                 </span>
               </MenuCheck>
             ))}

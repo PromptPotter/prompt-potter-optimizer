@@ -21,6 +21,7 @@ import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest, type CladogramCtx } from "./Forest";
 import { ROOMY } from "./forest-layout";
 import { useLineage } from "@/lib/hooks/useLineage";
+import { useViewedCourse } from "@/lib/lineage";
 
 export function ForestCard() {
   const { dash } = useCycleStream();
@@ -42,6 +43,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
     navigate,
   } = useWorkspace();
   const { candidate, setSelectionForCandidate } = useSelection();
+  const selection = useViewedCourse()?.facts.standing?.selection ?? null;
   const {
     tree,
     valueByKey,
@@ -152,9 +154,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
                   ) : (
                     <span>{shortFamilyTail(parentId) || parentId}</span>
                   )}
-                  {dash.run_standing?.selection
-                    ? ` · selection ${dash.run_standing.selection.label}`
-                    : ""}
+                  {selection ? ` · selection ${selection.label}` : ""}
                   {" · no new rounds yet"}
                 </>
               ) : (

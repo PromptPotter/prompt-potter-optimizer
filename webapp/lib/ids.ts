@@ -23,9 +23,9 @@ export function shortFamilyTail(cycleId: string): string {
 }
 
 // A cycle_id is unique only within its campaign, so pickers key on the pair.
-export const UNIT_SEP = CYCLE_PATH_UNIT_SEP;
+const UNIT_SEP = CYCLE_PATH_UNIT_SEP;
 
-export function unitKey(campaignId: string, cycleId: string): string {
+function unitKey(campaignId: string, cycleId: string): string {
   return `${campaignId}${UNIT_SEP}${cycleId}`;
 }
 

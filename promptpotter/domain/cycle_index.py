@@ -37,6 +37,7 @@ class CycleIndex(FrozenModel):
     # The mint record's own address (`CycleMintedRecord.parent`).
     parent: str | None = None
     forked_at_offset: int | None = None
+    cut_round: int | None = None
     fork: ForkSpec | None = None
     spawned_by: SpawnedBy | None = None
     scorer_cell_formula: str | None = None

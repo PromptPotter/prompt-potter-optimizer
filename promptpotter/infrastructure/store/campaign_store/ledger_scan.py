@@ -600,9 +600,12 @@ class _Standing:
                     self._cells.setdefault((rnd, arm_key), {})
                 held.rounds[rnd] = StandingRound(record, offset)
             case RoundRestatedRecord():
-                self._arms.close(record, record.remeasured)
-                for arm_key in record.remeasured:
-                    self._cells[rnd, arm_key] = {c[0]: c for c in record.cells.arms[arm_key]}
+                # A restatement is its round WHOLE, so the ledger holding it owns every arm.
+                self._arms.close(record, record.arms)
+                for arm_key in record.arms:
+                    self._cells[rnd, arm_key] = {
+                        c[0]: c for c in record.cells.arms.get(arm_key, ())
+                    }
                 held.rounds[rnd] = StandingRound(record, offset)
             case RoundProposedRecord() if record.submitted:
                 held.submitted[rnd] = record

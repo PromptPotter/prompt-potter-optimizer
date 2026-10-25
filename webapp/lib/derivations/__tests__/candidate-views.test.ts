@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { barLevel, barsAreCourses, candidateBars } from "../candidate-views";
-import type { ArmReading, CourseFacts, HierarchyCandidate, HierarchyCourse, VerificationMark } from "@/lib/api";
+import type {
+  ArmReading,
+  CourseFacts,
+  HierarchyCandidate,
+  SubtreeCourse,
+  VerificationMark,
+} from "@/lib/api";
 import { encodeCyclePath } from "@/lib/ids";
 import {
   armReading,
   courseTags,
-  hierarchyCampaign,
+  subtreeCampaign,
   hierarchyCandidate,
-  hierarchyCourse,
+  subtreeCourse,
   ownLevel,
   pairedReading,
   roundsOf,
@@ -47,14 +53,18 @@ const arm = (
   );
 
 const course = (kids: HierarchyCandidate[]) =>
-  hierarchyCourse({ address: C, label: "root", children: roundsOf(C, kids) });
-const runsUnder = (runs: HierarchyCourse[]) =>
-  arm("a", "C1.1", {}, {}, { children: [hierarchyCampaign({ address: `${C}~inner__1`, children: runs })] });
-const run = (id: string, facts: Partial<CourseFacts>) =>
-  hierarchyCourse(
+  subtreeCourse({ address: C, label: "root", children: roundsOf(C, kids) });
+const runsUnder = (runs: SubtreeCourse[]) =>
+  arm("a", "C1.1", {}, {}, {
+    children: [subtreeCampaign({ address: `${C}~inner__1`, children: runs })],
+  });
+// `label` as the server words a course measuring a task: the task's own name.
+const run = (id: string, facts: Partial<CourseFacts>, label?: string) =>
+  subtreeCourse(
     {
       address: encodeCyclePath([...OUTER, { campaignId: "inner__1", cycleId: id }]),
       tags: courseTags("inner", "justlogic"),
+      ...(label === undefined ? {} : { label }),
     },
     { mint: "inner", ...facts },
   );
@@ -112,7 +122,7 @@ describe("the half choice — the tree's, once its walk is decided", () => {
 describe("course bars carry no verdict", () => {
   const runs = runsUnder([
     run("r1", { standing: standsAt(0.6) }),
-    run("r2", { task: "justlogic/seed-2", standing: standsAt(0.3) }),
+    run("r2", { task: "justlogic/seed-2", standing: standsAt(0.3) }, "seed-2"),
     run("r3", { standing: runStanding(0, "C0") }),
   ]);
 

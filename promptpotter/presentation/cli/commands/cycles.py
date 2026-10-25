@@ -16,7 +16,6 @@ def _line(course: HierarchyCourse, *, active: bool) -> str:
     return (
         f"{course.address}  {state.run_phase.value}  {state.status.label}"
         + (f"  {rounds}" if rounds else "")
-        + f"  {state.producer.label}"
         + (
             f"  paused by {state.pause.cause.value}"
             + (f": {state.pause.detail}" if state.pause.detail else "")
@@ -57,7 +56,6 @@ async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
         _line(course, active=course.address == active)
         for campaign in listing.entries
         for course in campaign.children
-        if isinstance(course, HierarchyCourse)
     ]
     return CommandResult(
         data=listing.model_dump(mode="json"),

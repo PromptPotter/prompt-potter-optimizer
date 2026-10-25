@@ -44,6 +44,7 @@ from promptpotter.domain.results import (
     Proposed,
     merge_known_outcomes,
     round_document_digest,
+    walked_slot,
 )
 from promptpotter.domain.run_records import LLMCallRecord, RoundProposedRecord
 from promptpotter.domain.scoring import CellSheet
@@ -119,7 +120,7 @@ async def measure_as_parent(
     # A panel arm keeps its panel state: a read of it adds only its cells' records.
     announce = walking is None or walking.arm.state.role == MeasurementRole.PARENT
     arm = measuring(
-        Proposed(role=role, slot=cycle.first_slot(key), individual=individual),
+        Proposed(role=role, slot=walked_slot(cycle.rounds, key), individual=individual),
         sp,
         session.pipeline_schema,
         expected=len(asked),

@@ -49,7 +49,6 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     MAX_AUTO_REBASES,
     CycleSeed,
-    ForkSpec,
     RebaseRequest,
 )
 from promptpotter.domain.sample import Sample
@@ -254,12 +253,10 @@ def _mint_and_rebase_fork(
         campaign_store=session.store.campaigns,
         parent=parent,
         fork_from_round=rebase_req.fork_from_round,
-        payload=ForkSpec(
-            trigger=rebase_req.trigger,
-            reason=rebase_req.reason,
-            issued_by=rebase_req.issued_by,
-            seed=seed,
-        ),
+        trigger=rebase_req.trigger,
+        reason=rebase_req.reason,
+        issued_by=rebase_req.issued_by,
+        seed=seed,
     )
     session = session.bound(
         CycleHop(campaign_id=parent.campaign_id, cycle_id=new_cycle_id), purpose=session.purpose

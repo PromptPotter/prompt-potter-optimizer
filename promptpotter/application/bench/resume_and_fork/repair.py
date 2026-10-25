@@ -9,11 +9,10 @@ from promptpotter.application.bench.round_analysis import compute_round_diagnost
 from promptpotter.application.run_callbacks import stated_line
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.results import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.run_records import (
     ForkDirection,
-    ForkSpec,
     ForkTrigger,
     RoundRestatedRecord,
 )
@@ -54,7 +53,7 @@ class RepairCut(NamedTuple):
 
     rounds: list[int]
     resume_at: int
-    edge: str | None  # None ⇒ it leaves from the course root
+    edge: RoundArm | None  # None ⇒ no arm before it, so the fork stands on its line's pick
     # Only what the BRANCH CARRIES (edge → end of the cut round); it regenerates the later ones.
     retirements: list[tuple[int, ArmKey]]
 
@@ -73,7 +72,7 @@ def repair_cut(prior: list[RoundResult]) -> RepairCut:
         for key in t.panel:
             cutting = cutting or key == diverged
             if not cutting:
-                edge = key
+                edge = RoundArm(round=t.round, arm=key)
             elif carrying:
                 retirements.append((t.round, key))
         carrying = False
@@ -105,9 +104,7 @@ def _rebank_on_branch(
         anchors = closes[t.round].close.anchors
         offset = campaign_store.restate_round(
             branch,
-            RoundRestatedRecord.of(
-                line, slot_of, series, standing, anchors, remeasured=keys[t.round]
-            ),
+            RoundRestatedRecord.of(line, slot_of, series, standing, anchors),
         )
         # The restatement MOVES the document's address; the retired one re-folds to the holed round.
         restated[t.round] = t.model_copy(update={"at_offset": offset})
@@ -246,16 +243,17 @@ async def apply_correction(
     ]
     if not repaired:
         return None
-    repair_spec = ForkSpec(
+    # Read before the branch exists to displace it.
+    carried = campaign_store.round_proposals(hop, cut.resume_at)
+    repair_target = mint_fork(
+        campaign_store,
+        hop,
+        cut.resume_at,
         trigger=ForkTrigger.SCORING_DIVERGENCE,
         reason=f"repair:round_{cut.rounds[0]}",
         issued_by=SYSTEM_PRINCIPAL,
-        from_round=cut.rounds[0],
-        from_candidate_id=cut.edge,
+        named=cut.edge,
     )
-    # Read before the branch exists to displace it.
-    carried = campaign_store.round_proposals(hop, cut.resume_at)
-    repair_target = mint_fork(campaign_store, hop, cut.resume_at, repair_spec)
     logger.warning(
         "Round(s) %s do not re-derive from their own rows; branched → %s from %s, and this cycle "
         "keeps them exactly as they ran. Everything after that candidate retires with it; its "
@@ -263,7 +261,7 @@ async def apply_correction(
         "correction reaches anything is graded once it lands.",
         ", ".join(str(r) for r in cut.rounds),
         repair_target,
-        cut.edge or "the course root",
+        "its line's pick" if cut.edge is None else f"{cut.edge.arm} of round {cut.edge.round}",
     )
     logger.warning(
         "Resume corrected round(s) %s in memory; measuring what the correction reached "

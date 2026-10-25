@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from typing import Annotated, Literal
 
 from pydantic import Field
@@ -10,13 +11,9 @@ from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.phases import (
     PauseReading,
-    ProducerAlert,
-    ProducerReading,
-    ProducerState,
     RunAdmission,
     RunPhase,
     RunState,
-    StopReason,
     stop_next_step,
 )
 from promptpotter.domain.results import ArmReading, DisplayMetric, RunStanding
@@ -73,39 +70,16 @@ class HierarchySpan(FrozenModel):
     last_at: str = Field(description="The newest activity under the entry.")
 
 
-class HierarchyProducer(FrozenModel):
-    """A cycle's producer as a listing serves it: what a write moves, never a clock."""
-
-    state: ProducerState
-    label: str = Field(description="The state as a walking run's head reads it.")
-    attached: bool = Field(description="A process holds this cycle, running or launching it.")
-    appending: bool = Field(description="That process is walking the loop.")
-    alert: ProducerAlert | None = Field(
-        description="What this state raises on its own; how long it has, the dashboard says."
-    )
-
-    @classmethod
-    def of(cls, reading: ProducerReading) -> HierarchyProducer:
-        return cls(
-            state=reading.state,
-            label=reading.label,
-            attached=reading.attached,
-            appending=reading.appending,
-            alert=ProducerAlert.of(reading.state),
-        )
-
-
 class HierarchyState(FrozenModel):
-    """A run's state as one value: the phase, its word and mark, the producer and the verbs."""
+    """A run's state as one value: the phase, its word and mark, whether it is held, the verbs."""
 
     run_phase: RunPhase
     status: RunStatus
-    producer: HierarchyProducer
+    attached: bool = Field(description="A process holds this cycle, running or launching it.")
     pause: PauseReading | None = Field(description="Why the run reads paused; null otherwise.")
     admission: RunAdmission
-    stop_reason: StopReason | None = Field(description="Why the run ended; null while it has not.")
     next_step: str = Field(
-        description="What the operator does now, as `stop_reason` states it "
+        description="What the operator does now, as the run's stop reason states it "
         "(`STOP_REASON_INFO::next_step`) — the sentence the terminal and `review.md` advise. "
         "Empty while the run has not stopped, or where its reason owes nothing."
     )
@@ -121,10 +95,9 @@ class HierarchyState(FrozenModel):
         return cls(
             run_phase=run.run_phase,
             status=RunStatus.of(run.run_phase, stop, lifecycle=lifecycle),
-            producer=HierarchyProducer.of(run.producer),
+            attached=run.producer.attached,
             pause=run.pause,
             admission=run.admission,
-            stop_reason=stop,
             next_step=stop_next_step(stop),
             intervened=index is not None and index.human_intervened,
         )
@@ -149,28 +122,19 @@ class CampaignFacts(FrozenModel):
     runs_with: CampaignRunsWith | None = Field(
         description="What the root course runs with; null where its pipeline did not resolve."
     )
-    deletable_stubs: int | None = Field(
-        description="How many cycles `cleanup-empty-cycles` deletes here now "
-        "(`CampaignStore.deletable_stubs`, the command's own list). Counted on the subtree read "
-        "only — every sibling's ledger is scanned per fork — so null in the listing."
-    )
 
 
 class CourseSpawn(FrozenModel):
     """Where a fork was born on its parent's time line: the cut, as an event."""
 
     parent: str = Field(description="The address of the course it branched from.")
-    at_round: int | None = Field(description="The round it branched at; null where none was named.")
-    from_candidate: str | None = Field(
-        description="The address of the parent candidate it hangs from: the one its fork record "
-        "names, else the reference its first round re-read, else the parent's origin. Served on "
-        "the subtree read; null in the listing, which reads no candidate."
+    cut_round: int = Field(
+        description="The first round it ran itself: every round below it is its parent line's."
     )
     trigger: ForkTrigger
     direction: ForkDirection = Field(
         description="Which side of the cut the run continues on, measured or implied by `trigger`."
     )
-    reason: str
     issued_by: str = Field(description="Who cut it, as its fork record names them.")
 
 
@@ -184,11 +148,24 @@ class CourseFacts(FrozenModel):
     task: str | None = Field(description="The outer panel cell an L4 inner course measures.")
     standing: RunStanding | None = Field(description="Null before round 0 closes.")
     rounds_closed: int = Field(description="Rounds closed AFTER the origin.")
-    origin: str | None = Field(
-        description="The address of the arm the course's standing is paired against: its own "
-        "round-0 candidate, else its spawn parent's origin. Served on the subtree read; null in "
-        "the listing."
+    elects_on: DisplayMetric | None = Field(
+        description="The column the course's newest election elected on; null before its first. "
+        "`ability`: its rounds are won on θ, not on accuracy."
     )
+
+
+class SubtreeCampaignFacts(CampaignFacts):
+    """What only the subtree read knows: it scans every sibling's ledger."""
+
+    deletable_stubs: int = Field(
+        description="How many cycles `cleanup-empty-cycles` deletes here now "
+        "(`CampaignStore.deletable_stubs`, the command's own list)."
+    )
+
+
+class SubtreeCourseFacts(CourseFacts):
+    """What only the subtree read knows: it reads every candidate, under the request's lens."""
+
     lens_criterion: str | None = Field(
         description="The `per_cell` formula this course was read under for the request's lens — "
         "a `dials:` lens realized against this campaign's anchors, a `score:` one as given. What a "
@@ -197,6 +174,16 @@ class CourseFacts(FrozenModel):
     lens_shift: LensShift | None = Field(
         description="How the request's lens reorders this course's candidates. Null without a "
         "lens, and where it ranked none of them."
+    )
+
+    origin: str | None = Field(
+        description="The address of the arm the course's standing is paired against: the "
+        "round-0 pick its line holds, whichever course ran it. Null on a branch cut at round 0 "
+        "before it measured its own."
+    )
+    from_candidate: str | None = Field(
+        description="The address of the candidate a fork hangs from: the arm its mint record "
+        "names, on the course of its parent's line that ran it. Null on a root."
     )
 
 
@@ -243,8 +230,9 @@ class RoundFacts(FrozenModel):
     )
     reference: str | None = Field(
         description="The address of the candidate the round measured its arms against — the "
-        "individual its `parent`-role arm re-read, in this course or up its spawn chain. Never a "
-        "child of the round: a reference is not re-listed. Null at round 0 and where none was read."
+        "individual its `parent`-role arm re-read, as the pick this course's line stood on going "
+        "into the round. Never a child of the round: a reference is not re-listed. Null at round "
+        "0, where none was read, and where the re-read individual is not the line's pick."
     )
 
 
@@ -279,8 +267,8 @@ class CandidateFacts(FrozenModel):
         "stand."
     )
     main_line: list[MainLineStep] = Field(
-        description="The main line to THIS candidate, origin first: the spawn anchor's line up to "
-        "where its course branched, each elected round of its course before it with the "
+        description="The main line to THIS candidate, origin first: the line of the candidate its "
+        "course hangs from (a fork's from-candidate, an inner course's host) up to the cut, each elected round of its course before it with the "
         "candidates crowned, then this candidate, then any later round that crowned nobody up to "
         "the next crown. Read off crowns, never `parent_ids`."
     )
@@ -310,7 +298,7 @@ class CandidateFacts(FrozenModel):
     )
 
 
-class _HierarchyEntry(FrozenModel):
+class _HierarchyNode(FrozenModel):
     address: str = Field(
         description="Server-minted and stable: the key of every row and every open set. A "
         "course's is its `CyclePath` on the wire (`encodeCyclePath`)."
@@ -319,15 +307,16 @@ class _HierarchyEntry(FrozenModel):
         description="The hierarchy parent's address; a top-level campaign's is null, an inner "
         "one's the outer course it sits under."
     )
+
+
+class _HierarchyEntry(_HierarchyNode):
+    """A level a row or a card renders: worded, tagged and counted by the server."""
+
     label: str = Field(description="The display name.")
     lede: str | None = Field(description="The one sentence under the title: the selection line.")
     caveat: str | None = Field(description="What could not be read; null where all was.")
     tags: list[HierarchyTag]
     stats: list[HierarchyStat] = Field(description="Server-ordered; `stats[0]` is the headline.")
-    children: list[HierarchyEntry] = Field(
-        description="A listing serves a campaign's courses to `?depth=` and nothing under them; "
-        "the subtree read serves every level, courses root first, candidates in slot order."
-    )
 
     def tag(self, kind: TagKind) -> HierarchyTag | None:
         return next((t for t in self.tags if t.kind == kind), None)
@@ -340,25 +329,21 @@ class _RunEntry(_HierarchyEntry):
     span: HierarchySpan
 
 
-class HierarchyCampaign(_RunEntry):
-    """A campaign as one hierarchy entry: its state and line stats are its line course's."""
-
-    level: Literal["campaign"] = "campaign"
-    facts: CampaignFacts
-
-
 class HierarchyCourse(_RunEntry):
-    """A course — one cycle's run, root, fork, diag or inner — as one hierarchy entry."""
+    """A course — one cycle's run, root, fork, diag or inner — as the listing serves it."""
 
     level: Literal["course"] = "course"
     facts: CourseFacts
 
 
-class HierarchyRound(_HierarchyEntry):
-    """One round of a course's own ledger; its children are the candidates it proposed."""
+class HierarchyCampaign(_RunEntry):
+    """A campaign as the listing serves it: its state and line stats are its line course's."""
 
-    level: Literal["round"] = "round"
-    facts: RoundFacts
+    level: Literal["campaign"] = "campaign"
+    facts: CampaignFacts
+    children: Sequence[HierarchyCourse] = Field(
+        description="Its courses to `?depth=`, root first; none at depth 0."
+    )
 
 
 class HierarchyCandidate(_HierarchyEntry):
@@ -366,6 +351,34 @@ class HierarchyCandidate(_HierarchyEntry):
 
     level: Literal["candidate"] = "candidate"
     facts: CandidateFacts
+    children: list[SubtreeCampaign]
+
+
+class HierarchyRound(_HierarchyNode):
+    """One round of a course's own ledger; its children are the candidates it proposed."""
+
+    level: Literal["round"] = "round"
+    facts: RoundFacts
+    children: list[HierarchyCandidate] = Field(description="In slot order.")
+
+
+class SubtreeCourse(HierarchyCourse):
+    """A course as the subtree read serves it: its rounds under it."""
+
+    facts: SubtreeCourseFacts
+    children: list[Annotated[HierarchyRound | SubtreeCampaign, Field(discriminator="level")]] = (
+        Field(
+            description="Its rounds in round order, then any inner campaign its sandbox holds "
+            "that no candidate's spawn stamp names — that one says so in its `caveat`."
+        )
+    )
+
+
+class SubtreeCampaign(HierarchyCampaign):
+    """A campaign as the subtree read serves it: every level under it."""
+
+    facts: SubtreeCampaignFacts
+    children: Sequence[SubtreeCourse] = Field(description="Its courses, root first.")
 
 
 class StepFacts(FrozenModel):
@@ -391,7 +404,7 @@ class StepFacts(FrozenModel):
     )
 
 
-class HierarchyStep(_HierarchyEntry):
+class HierarchyStep(_HierarchyNode):
     """One ledger record that reads as a line, under its own course; served in a window only."""
 
     level: Literal["step"] = "step"
@@ -410,9 +423,15 @@ class HierarchySteps(FrozenModel):
 
 
 HierarchyEntry = Annotated[
-    HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate,
+    SubtreeCampaign | SubtreeCourse | HierarchyRound | HierarchyCandidate,
     Field(discriminator="level"),
 ]
+
+
+def entries_under(entry: HierarchyEntry) -> Iterator[HierarchyEntry]:
+    yield entry
+    for child in entry.children:
+        yield from entries_under(child)
 
 
 class HierarchyResponse(StrictModel):

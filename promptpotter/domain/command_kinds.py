@@ -422,6 +422,11 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
                 "keep_rounds at round 0 lifts no round to continue from; a run that starts over "
                 "at the origin is a diag run"
             )
+        if self.keep_rounds and self.candidate_id:
+            raise ValueError(
+                "keep_rounds re-runs round `round` from where its line stood going into it, so it "
+                "names no candidate; fork without keep_rounds to start from one"
+            )
         if self.keep_rounds and self.seed.origin_prompts:
             raise ValueError(
                 "keep_rounds lifts the parent's round 0 as its origin, so the seed must not "

@@ -210,6 +210,7 @@
 .jobs-dock-row{display:flex;align-items:center;gap:var(--space-8);min-width:0}
 .jobs-dock-row .phase-chip{flex-shrink:0;font-size:var(--text-xs)}
 .jobs-dock-item-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jobs-dock-item-course{color:var(--color-text-secondary);font-size:var(--text-sm);white-space:nowrap}
 .phase-chip{display:inline-flex;align-items:center;gap:var(--space-6);font-weight:600;font-size:var(--text-sm);color:var(--color-text-primary);white-space:nowrap}
 .phase-dot{width:8px;height:8px;border-radius:50%;background:var(--color-text-secondary)}
 .tone-live .phase-dot,.tone-success .phase-dot{background:var(--color-success)}

@@ -479,7 +479,7 @@ class CampaignStore:
             self._append(hop, CycleMintedRecord())
 
     def mint_fork_cycle(
-        self, child: CycleHop, parent_dir: Path, spec: ForkSpec, *, cut: int, from_round: int
+        self, child: CycleHop, parent_dir: Path, spec: ForkSpec, *, cut: int, cut_round: int
     ) -> None:
         """*parent_dir* may lie in another tree: the record names it by path, never by id."""
         self._append(
@@ -487,10 +487,11 @@ class CampaignStore:
             CycleMintedRecord(
                 parent=parent_address(self.cycle_dir(child), parent_dir),
                 forked_at_offset=cut,
+                cut_round=cut_round,
                 fork=spec.model_copy(update={"seed": None}),
             ),
         )
-        self._append(child, RoundEnteredRecord(round=from_round, rewound=True))
+        self._append(child, RoundEnteredRecord(round=cut_round, rewound=True))
 
     def grade_fork(self, hop: CycleHop, direction: ForkDirection) -> None:
         self._append(hop, ForkGradedRecord(direction=direction))

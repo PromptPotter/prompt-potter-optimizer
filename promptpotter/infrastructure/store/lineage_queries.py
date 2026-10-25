@@ -6,7 +6,7 @@ from typing import NamedTuple
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.results import (
     ArmElection,
     ArmReading,
@@ -147,16 +147,12 @@ class CourseArm(NamedTuple):
     reading: ArmReading
 
 
-class CourseRound(NamedTuple):
-    round: int
-    election: Election | None
-    # The individual the round's `parent`-role arm re-read; null where it read none.
-    reference: ArmKey | None
-
-
 class CourseRead(NamedTuple):
     arms: list[CourseArm]
-    rounds: list[CourseRound]
+    # Every round it holds a record of, by its election: `None` for one that elected nothing.
+    rounds: dict[int, Election | None]
+    # Each `parent`-role arm by (round, key): the candidate its first record names it re-reading.
+    rereads: dict[tuple[int, ArmKey], RoundArm]
 
 
 def _course_spans(
@@ -201,13 +197,14 @@ def read_course(
         return None if held is None else held.close.election
 
     arms: list[CourseArm] = []
-    references: dict[int, ArmKey] = {}
+    rereads: dict[tuple[int, ArmKey], RoundArm] = {}
     for (rnd, key), held in sorted(
         standing.arms.items(),
         key=lambda kv: (kv[0][0], 0 if kv[1].state.slot is None else kv[1].state.slot.idx),
     ):
         if held.state.role == MeasurementRole.PARENT:
-            references.setdefault(rnd, key)
+            if (slot := held.state.slot) is not None:
+                rereads[rnd, key] = RoundArm(round=slot.round, arm=key)
             continue
         election = election_of(rnd)
         reading = ArmReading.of(
@@ -237,6 +234,4 @@ def read_course(
             )
         )
     numbers = sorted({rnd for rnd, _ in standing.arms} | set(standing.rounds))
-    return CourseRead(
-        arms, [CourseRound(rnd, election_of(rnd), references.get(rnd)) for rnd in numbers]
-    )
+    return CourseRead(arms, {rnd: election_of(rnd) for rnd in numbers}, rereads)

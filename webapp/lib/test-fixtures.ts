@@ -5,12 +5,12 @@ import type {
   ArmPanel,
   ArmReading,
   CandidateFacts,
-  CourseFacts,
   CurrentRound,
   DashboardCandidate,
-  HierarchyCampaign,
+  SubtreeCampaign,
   HierarchyCandidate,
-  HierarchyCourse,
+  SubtreeCourse,
+  SubtreeCourseFacts,
   HierarchyRound,
   HierarchyState,
   HierarchyStep,
@@ -30,7 +30,7 @@ import type {
   StepFacts,
 } from "@/lib/api/types";
 
-// The envelope every level wears, empty; each builder lays its level's own fields over it.
+// The envelope every rendered level wears, empty; each builder lays its level's own fields over it.
 function envelope(): {
   lede: null;
   caveat: null;
@@ -41,13 +41,11 @@ function envelope(): {
   return { lede: null, caveat: null, tags: [], stats: [], children: [] };
 }
 
-// A step as served: its address and label are the server's, minted from its course and facts.
+// A step as served: its address is the server's, minted from its course and offset.
 export function hierarchyStep(parent: string, facts: StepFacts): HierarchyStep {
   return {
-    ...envelope(),
     address: `${parent}/@${facts.offset}`,
     parent,
-    label: facts.activity.label,
     level: "step",
     facts,
   };
@@ -260,10 +258,8 @@ export function roundsOf(
   return [...byRound]
     .sort(([x], [y]) => x - y)
     .map(([round, children]) => ({
-      ...envelope(),
       address: `${course}/r${round}`,
       parent: course,
-      label: `Round ${round}`,
       children,
       level: "round",
       facts: { round, elects_on: "ability", reference: null },
@@ -279,10 +275,9 @@ export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchySta
   return {
     run_phase: "terminal",
     status: { label: "—", mark: "unknown" },
-    producer: { state: "absent", label: "", attached: false, appending: false, alert: null },
+    attached: false,
     pause: null,
     admission: { offers: null, refusal: "", skip_refusal: "", lookahead_refusal: "" },
-    stop_reason: null,
     next_step: "",
     intervened: false,
     ...over,
@@ -296,10 +291,10 @@ export function courseTags(mint: CourseKind, dataset?: string): HierarchyTag[] {
   ];
 }
 
-export function hierarchyCourse(
-  over: Partial<HierarchyCourse> & Pick<HierarchyCourse, "address">,
-  facts: Partial<CourseFacts> = {},
-): HierarchyCourse {
+export function subtreeCourse(
+  over: Partial<SubtreeCourse> & Pick<SubtreeCourse, "address">,
+  facts: Partial<SubtreeCourseFacts> = {},
+): SubtreeCourse {
   return {
     ...envelope(),
     parent: null,
@@ -308,24 +303,27 @@ export function hierarchyCourse(
     state: hierarchyState(),
     span: { opened_at: "", last_at: "" },
     level: "course",
+    children: [],
     facts: {
       mint: "root",
       spawn: null,
       task: null,
       standing: null,
       rounds_closed: 0,
-      origin: null,
+      elects_on: "ability",
       lens_criterion: null,
       lens_shift: null,
+      origin: null,
+      from_candidate: null,
       ...facts,
     },
     ...over,
   };
 }
 
-export function hierarchyCampaign(
-  over: Partial<HierarchyCampaign> & Pick<HierarchyCampaign, "address">,
-): HierarchyCampaign {
+export function subtreeCampaign(
+  over: Partial<SubtreeCampaign> & Pick<SubtreeCampaign, "address">,
+): SubtreeCampaign {
   const root = `${over.address}::cycle_root`;
   return {
     ...envelope(),
@@ -334,6 +332,7 @@ export function hierarchyCampaign(
     state: hierarchyState(),
     span: { opened_at: "", last_at: "" },
     level: "campaign",
+    children: [],
     facts: {
       label: null,
       root,
@@ -349,7 +348,7 @@ export function hierarchyCampaign(
         unreported_usd: 0,
       },
       runs_with: null,
-      deletable_stubs: null,
+      deletable_stubs: 0,
     },
     ...over,
   };
@@ -447,7 +446,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     stop_reason: null,
     round: 0,
     measuring_arm: null,
-    run_standing: null,
     rounds: [],
     overlap_line_round: null,
     overlap_line_n: null,
@@ -457,7 +455,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     composite_fitness_weights: null,
     composite_fitness_anchors: null,
     display_metric: "accuracy",
-    elects_on: "ability",
     degraded_count: 0,
     error_count: 0,
     backend_retry_count: 0,
@@ -480,7 +477,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     lookahead_explained: "",
     waiting_on: null,
     producer: producerReading(),
-    run_admission: {
+    admission: {
       offers: "pause",
       refusal: "",
       skip_refusal: "",

@@ -1,20 +1,19 @@
 // Keyed on `reading.arm.label`: the joined rows come from the leaf's `dashboard.json`.
 
-import type { HierarchyCourse } from "@/lib/api";
+import type { SubtreeCourse } from "@/lib/api";
 import type { CyclePath } from "@/lib/ids";
 import { phaseWalks } from "@/lib/run-phase";
-import { candidatesAtPath, childNodes, type LineageIndex } from "./lineage-candidates";
+import { candidatesAtPath, type LineageIndex } from "./lineage-candidates";
 
 export function innerPanelIndex(
   index: LineageIndex,
   path: CyclePath | null,
-): ReadonlyMap<string, HierarchyCourse> {
-  const m = new Map<string, HierarchyCourse>();
+): ReadonlyMap<string, SubtreeCourse> {
+  const m = new Map<string, SubtreeCourse>();
   for (const cand of candidatesAtPath(index, path)) {
-    for (const run of childNodes(cand)) {
+    for (const run of cand.children.flatMap((c) => c.children)) {
       // No `task` means an interrupted mint; a wrong join is worse than an absent one.
-      const task = run.level === "course" ? run.facts.task : null;
-      if (run.level === "course" && task) m.set(panelCellKey(cand.facts.reading.arm.label, task), run);
+      if (run.facts.task) m.set(panelCellKey(cand.facts.reading.arm.label, run.facts.task), run);
     }
   }
   return m;
@@ -32,7 +31,7 @@ export function panelCellLabel(cell: string): string {
   return slash >= 0 ? cell.slice(slash + 1) : cell;
 }
 
-export function runningInnerRun(index: LineageIndex): HierarchyCourse | null {
+export function runningInnerRun(index: LineageIndex): SubtreeCourse | null {
   return (
     index.courses.find((c) => c.facts.mint === "inner" && phaseWalks(c.state.run_phase)) ?? null
   );

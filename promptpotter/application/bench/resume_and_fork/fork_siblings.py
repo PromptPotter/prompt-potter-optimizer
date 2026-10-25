@@ -14,10 +14,11 @@ from promptpotter.application.bench.resume_and_fork.decisions import (
 from promptpotter.application.campaign_config import effective_config
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
+    FORK_TRAITS,
     BenchCheckpointKind,
     ForkDirection,
     ForkSpec,
@@ -31,11 +32,14 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError, graceful
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import acting_principal
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import CycleSeed
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.infrastructure.store.stores import Stores
+    from promptpotter.shared.identity import Principal
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +82,7 @@ def _fork_sibling_setup(
         parent_dir,
         payload,
         cut=CycleEventLog.open(CycleDir(parent_dir)).next_offset,
-        from_round=from_round,
+        cut_round=from_round,
     )
     if payload.seed is not None:
         # Without its own record a rebase's config unlock silently re-locks on the fork's first `resume`.
@@ -125,19 +129,55 @@ def _sibling_id(campaign_store: CampaignStore, parent: CycleHop, payload: ForkSp
     return f"{root_cycle_id(parent.cycle_id)}_fork_{_fork_suffix(parent.cycle_id, 'operator')}"
 
 
+def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) -> RoundArm:
+    """The parent CANDIDATE a fork branches from: *named* — a round's re-read named as the
+    candidate it re-read — else the pick the parent's line stood on going into *cut_round*, its
+    origin for a cut lifting no round."""
+    if named is not None:
+        arm = standing.arms.get((named.round, named.arm))
+        if arm is None:
+            raise PayloadInvalidError(f"round {named.round} of the parent holds no arm {named.arm}")
+        if arm.state.refused:
+            raise PayloadInvalidError(
+                f"{arm.state.label} of round {named.round} is a refused proposal, keyed by its "
+                "slot: it measured no individual to fork from"
+            )
+        if arm.state.role is not MeasurementRole.PARENT:
+            return named
+        if (slot := arm.state.slot) is None:
+            raise PayloadInvalidError(
+                f"round {named.round} re-read {named.arm}, which no round of the parent walked: "
+                "name the candidate itself"
+            )
+        return RoundArm(round=slot.round, arm=named.arm)
+    crowns = [
+        RoundArm(round=r, arm=picked)
+        for r, held in standing.rounds.items()
+        if r < max(cut_round, 1)
+        and held.close.election is not None
+        and (picked := held.close.election.selected) is not None
+    ]
+    if not crowns:
+        raise ConflictError("the parent's line stands on no elected candidate to branch from")
+    return max(crowns, key=lambda c: c.round)
+
+
 def mint_fork(
     campaign_store: CampaignStore,
     parent: CycleHop,
     fork_from_round: int,
-    payload: ForkSpec,
+    *,
+    trigger: ForkTrigger,
+    reason: str,
+    issued_by: Principal,
+    named: RoundArm | None = None,
+    seed: CycleSeed | None = None,
 ) -> str:
-    """``fork_from_round`` is MECHANICAL (parent rounds lifted); ``ForkSpec.from_round`` is PROVENANCE."""
-    if payload.from_round is None:
-        payload = payload.model_copy(update={"from_round": fork_from_round})
+    """``fork_from_round`` is how many parent rounds the cut lifts, recorded as its ``cut_round``."""
     # A cut continuing no scale branches from the origin and lifts no parent round.
-    if not payload.traits.continues_scale and fork_from_round != 0:
+    if not FORK_TRAITS[trigger].continues_scale and fork_from_round != 0:
         raise ValueError(
-            f"mint_fork({payload.trigger.value}) branches from the origin and lifts no parent "
+            f"mint_fork({trigger.value}) branches from the origin and lifts no parent "
             f"round, so fork_from_round must be 0; got {fork_from_round}"
         )
     if campaign_store.read_bank_partition(parent) is None:
@@ -145,6 +185,10 @@ def mint_fork(
             f"cycle {parent.cycle_id} holds no drawn partition over its chain, "
             "so no fork can stand on it"
         )
+    edge = fork_edge(campaign_store.standing_rounds(parent, moment=None), fork_from_round, named)
+    payload = ForkSpec(
+        trigger=trigger, reason=reason, issued_by=issued_by, from_candidate=edge, seed=seed
+    )
     child = parent.model_copy(update={"cycle_id": _sibling_id(campaign_store, parent, payload)})
     _fork_sibling_setup(
         campaign_store,
@@ -186,11 +230,9 @@ def mint_diag_sibling(*, stores: Stores, hop: CycleHop) -> str:
         stores.campaigns,
         hop,
         0,
-        ForkSpec(
-            trigger=ForkTrigger.OPERATOR_DIAG,
-            reason="diag-sibling BFS exploration",
-            issued_by=acting_principal(stores.identity),
-        ),
+        trigger=ForkTrigger.OPERATOR_DIAG,
+        reason="diag-sibling BFS exploration",
+        issued_by=acting_principal(stores.identity),
     )
 
 
@@ -210,19 +252,10 @@ def mint_operator_fork(
         # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.
         caps = fork_remainder(stores, hop).under(seed.config_overrides)
         seed = seed.model_copy(update={"config_overrides": caps})
-    standing = stores.campaigns.standing_rounds(hop, moment=None)
-    if from_candidate_id:
-        named = standing.arms.get((from_round, ArmKey(from_candidate_id)))
-        if named is not None and named.state.refused:
-            raise PayloadInvalidError(
-                f"{named.state.label} of round {from_round} is a refused proposal, keyed by its "
-                "slot: it measured no individual to fork from"
-            )
-    elif not keep_rounds:
-        origin_round = standing.rounds.get(0)
-        if origin_round is not None and origin_round.close.head is not None:
-            from_candidate_id = origin_round.close.origin.individual.id
-    spec = ForkSpec(
+    return mint_fork(
+        stores.campaigns,
+        hop,
+        from_round if keep_rounds else 0,
         trigger=ForkTrigger.OPERATOR_REWIND if keep_rounds else ForkTrigger.OPERATOR_STEERED,
         reason=reason
         or (
@@ -231,13 +264,8 @@ def mint_operator_fork(
             else f"operator-steered fork from {hop.cycle_id}"
         ),
         issued_by=acting_principal(stores.identity),
-        from_round=from_round,
-        from_candidate_id=from_candidate_id or None,
+        named=RoundArm(round=from_round, arm=ArmKey(from_candidate_id))
+        if from_candidate_id
+        else None,
         seed=seed,
-    )
-    return mint_fork(
-        stores.campaigns,
-        hop,
-        from_round if keep_rounds else 0,
-        spec,
     )

@@ -25,7 +25,7 @@ active_router = APIRouter()
 
 
 class ActiveSessionResponse(StrictModel):
-    """The tenant's latest launch — not the set of live runs, which is `state.producer` on `/hierarchy`."""
+    """The tenant's latest launch — not the set of live runs, which is `state.attached` on `/hierarchy`."""
 
     tenant_id: str = Field(
         description="Tenant the pointer belongs to — the caller's own, always known"

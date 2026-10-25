@@ -106,7 +106,6 @@ class DashboardFacts(StrictModel):
     round: int = 0
     # The arm the oldest open cell is walked for; ``None`` between walks and on a pass of no arm.
     measuring_arm: ArmName | None = None
-    run_standing: RunStanding | None = None
 
     rounds: list[RoundSummary] = Field(default_factory=list)
 
@@ -119,7 +118,6 @@ class DashboardFacts(StrictModel):
     )
     composite_fitness_formula: str | None = None
     display_metric: DisplayMetric
-    elects_on: DisplayMetric
 
     degraded_count: int = 0
     error_count: int = 0
@@ -173,6 +171,9 @@ class DashboardFacts(StrictModel):
 class LiveDashboardState(DashboardFacts):
     # Says "running" forever after a kill: the answer is ``ServedDashboard.run_phase``.
     declared_phase: RunPhase = RunPhase.RUNNING
+    # The course entry serves both (`CourseFacts.standing` / `elects_on`); the file keeps them.
+    run_standing: RunStanding | None = None
+    elects_on: DisplayMetric
 
     current_position: int | None = None
     # The last close's; served only as each `ServedRound`'s readings of it.

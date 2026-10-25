@@ -15,7 +15,7 @@ from promptpotter.application.views.render.primitives import fmt_pct
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
-from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyCourse, HierarchyRound
+from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyRound, SubtreeCourse
 from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading
 from promptpotter.domain.results import VERIFY_STRATEGY_LABELS
 from promptpotter.domain.treatment import Treatment
@@ -71,7 +71,7 @@ class ExportFiles:
 
 def export_files(
     tier: ExportTier,
-    course: HierarchyCourse,
+    course: SubtreeCourse,
     provenance: Provenance,
     *,
     unit: MeasuredUnit,
@@ -141,33 +141,26 @@ def provenance_lines(p: Provenance, kind: str) -> list[str]:
     ]
 
 
-def _live(course: HierarchyCourse) -> list[HierarchyCandidate]:
+def _live(course: SubtreeCourse) -> list[HierarchyCandidate]:
     """The live side of each supersede cut: a retired tail doubles its round."""
     return [
         c
         for rnd in course.children
+        if isinstance(rnd, HierarchyRound)
         for c in rnd.children
-        if isinstance(c, HierarchyCandidate) and c.tag("superseded") is None
+        if c.tag("superseded") is None
     ]
 
 
-def chat_text(course: HierarchyCourse, unit: MeasuredUnit) -> str:
+def chat_text(course: SubtreeCourse, unit: MeasuredUnit) -> str:
     """One block per candidate in round order, every number a served one under its served name."""
     arms = _live(course)
     label_of: dict[str, str] = {}
     for c in arms:
         label_of.setdefault(c.facts.individual, c.label)
-    elects_on = next(
-        (
-            rnd.facts.elects_on
-            for rnd in course.children
-            if isinstance(rnd, HierarchyRound) and rnd.facts.elects_on is not None
-        ),
-        None,
-    )
     lines = [
         f"candidates of {course.label} · {len(arms)} rows · elected on "
-        f"{elects_on or '—'} · in round order"
+        f"{course.facts.elects_on or '—'} · in round order"
     ]
     for c in arms:
         lines += ["", *_arm_lines(c, label_of, unit)]
@@ -289,7 +282,7 @@ _CYCLE_ADDRESS: dict[str, Any] = {
 }
 
 
-def candidate_records(course: HierarchyCourse) -> list[dict[str, Any]]:
+def candidate_records(course: SubtreeCourse) -> list[dict[str, Any]]:
     """One flat record per candidate, its reading keyed by the names the API serves it under."""
     return [
         {
@@ -306,7 +299,7 @@ def candidate_records(course: HierarchyCourse) -> list[dict[str, Any]]:
     ]
 
 
-def candidates_jsonl(course: HierarchyCourse) -> str:
+def candidates_jsonl(course: SubtreeCourse) -> str:
     return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in candidate_records(course))
 
 

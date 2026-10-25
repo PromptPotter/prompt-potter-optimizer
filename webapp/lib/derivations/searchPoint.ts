@@ -1,6 +1,13 @@
 import { liveCandidate, liveCandidates, roundOf } from "@/lib/poll";
 import type { ServedDashboard } from "@/lib/api";
-import type { ArmName, ArmReading, CellRow, HierarchyCandidate, NodePrompt } from "@/lib/api/types";
+import type {
+  ArmName,
+  ArmReading,
+  CellRow,
+  HierarchyCandidate,
+  NodePrompt,
+  RunStanding,
+} from "@/lib/api/types";
 import type { ArmRow, RoundView, SelectedCandidate } from "@/lib/types";
 import { armSearchpoint, type ArmSearchpoint } from "./candidateSearchPoint";
 import { rowAt } from "./round-candidates";
@@ -129,11 +136,7 @@ export function candidateObserveConfig(
   return rowConfig(armSearchpoint(doc, key), display, nodeId);
 }
 
-export type ObserveTarget = Pick<ArmName, "key" | "round" | "label">;
-
-function bestObserveTarget(dash: ServedDashboard | null): ObserveTarget | null {
-  return dash?.run_standing?.selection ?? null;
-}
+type ObserveTarget = Pick<ArmName, "key" | "round" | "label">;
 
 // Served `leading` is the arm the selector read the round off, so a held round still has one.
 function roundObserveTarget(dash: ServedDashboard | null, round: number): ObserveTarget | null {
@@ -190,6 +193,7 @@ function subjectTitle(state: ObserveState, target: ObserveTarget, inFlight: bool
 
 export function resolveObserveSubject(
   dash: ServedDashboard | null,
+  standing: RunStanding | null,
   isLive: boolean,
   selection: ObserveSelection,
 ): ObserveSubject {
@@ -199,7 +203,7 @@ export function resolveObserveSubject(
   const inFlight = isLive && latest?.round === roundOf(dash);
   const picked = selection.candidate;
   const targets: Record<ObserveState, ObserveTarget | null> = {
-    best: bestObserveTarget(dash),
+    best: standing?.selection ?? null,
     latest,
     round: selection.round != null ? roundObserveTarget(dash, selection.round) : null,
     selected: picked ? { key: picked.arm, round: picked.round, label: picked.label } : null,

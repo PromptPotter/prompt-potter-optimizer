@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { descendantsOf } from "../lineage-descendants";
 import { EMPTY_LINEAGE, indexLineage, mainLineOf } from "../lineage-candidates";
-import type { CourseKind, HierarchyCandidate, HierarchyCourse } from "@/lib/api";
+import type { CourseKind, HierarchyCandidate, SubtreeCourse } from "@/lib/api";
 import {
-  hierarchyCampaign,
+  subtreeCampaign,
   hierarchyCandidate,
-  hierarchyCourse,
+  subtreeCourse,
   roundsOf,
   supersededTag,
 } from "@/lib/test-fixtures";
@@ -15,9 +15,9 @@ const FORK = "camp__aaaaaa::cyc_root_fork";
 const INNER = `${C}~inner__1::cyc_inner`;
 
 const course = (address: string, cands: HierarchyCandidate[], mint: CourseKind = "root") =>
-  hierarchyCourse({ address, children: roundsOf(address, cands) }, { mint });
-const campaign = (address: string, courses: HierarchyCourse[]) =>
-  hierarchyCampaign({ address, children: courses });
+  subtreeCourse({ address, children: roundsOf(address, cands) }, { mint });
+const campaign = (address: string, courses: SubtreeCourse[]) =>
+  subtreeCampaign({ address, children: courses });
 
 // A missed descendant fails SILENTLY: a channel keeps rendering a measurement an edit invalidated.
 function family() {

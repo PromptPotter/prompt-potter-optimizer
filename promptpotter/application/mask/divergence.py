@@ -163,8 +163,8 @@ def _walk(
     for child in sorted(children.get(cycle.cycle_id, []), key=lambda c: c.cycle_id):
         rooted_after = (
             div_round is not None
-            and child.fork_from_round is not None
-            and child.fork_from_round >= div_round
+            and child.branch_round is not None
+            and child.branch_round > div_round
         )
         if rooted_after:
             _mark_subtree_divergent(child, children, divergent)

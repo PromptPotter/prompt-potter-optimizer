@@ -16,7 +16,7 @@ from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import OptimizerState
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -233,7 +233,7 @@ class RoundStatement(RoundOutcome):
         """This round holding *optimizer_state*: what a member banks once the round has closed."""
         body = {name: getattr(self, name) for name in RoundStatement.model_fields}
         del body["timestamp"]
-        return RoundRestatedRecord(**body | {"optimizer_state": optimizer_state}, remeasured=[])
+        return RoundRestatedRecord(**body | {"optimizer_state": optimizer_state})
 
 
 class RoundClosedRecord(RoundStatement):
@@ -243,11 +243,10 @@ class RoundClosedRecord(RoundStatement):
 
 
 class RoundRestatedRecord(RoundStatement):
-    """A closed round stated again, never a close: it moves no clock and announces nothing."""
+    """A closed round stated again, never a close: it moves no clock and announces nothing. It is
+    the round WHOLE, so a repair's restatement makes its ledger the owner of every arm in it."""
 
     record_type: Literal["round_restated"] = "round_restated"
-    # The arms a repair re-measured onto this ledger, which names them itself from here on.
-    remeasured: list[ArmKey]
 
 
 class RoundProposedRecord(FrozenModel):
@@ -951,8 +950,9 @@ class ForkSpec(FrozenModel):
     trigger: ForkTrigger
     reason: str
     issued_by: Principal
-    from_round: int | None = None
-    from_candidate_id: str | None = None
+    # The parent arm the fork branches from, resolved at the mint (`fork_siblings.py::fork_edge`):
+    # the one its caller named, else the pick the parent's line stood on going into the cut round.
+    from_candidate: RoundArm
     seed: CycleSeed | None = None
     # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_TRAITS`).
     direction: ForkDirection | None = None
@@ -967,7 +967,9 @@ class ForkSpec(FrozenModel):
 
 
 class SpawnedBy(StrictModel):
-    """The outer work-item an L4 inner cycle was spawned to measure."""
+    """The outer work-item an L4 inner cycle was spawned to measure. Where `role` is an arm's,
+    `cycle_id`, `round` and `individual_id` are that arm's address, which places the run under
+    the candidate that asked for it with no search."""
 
     round: int | None = Field(
         default=None,
@@ -978,13 +980,25 @@ class SpawnedBy(StrictModel):
         description="The outer individual's `OptSearchPoint.id` — stable across rounds, and the "
         "outer ARM's key where `role` is an arm's. Null outside a measured pass.",
     )
-    role: str | None = Field(
+    role: MeasurementRole | None = Field(
         default=None,
-        description="WHY this cell ran (`MeasurementRole`). A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass.",
+        description="WHY this cell ran. A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass.",
+    )
+    cycle_id: str | None = Field(
+        default=None,
+        description="The outer cycle whose pass spawned it — the asker, which a fork moves off "
+        "the cycle owning the sandbox. Null outside a measured pass.",
     )
     task: str = Field(
         description="The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The individual does NOT identify a run: every task runs for every individual, so one individual's spawns are as many as the panel has cells and are told apart only by this.",
     )
+
+    @property
+    def arm(self) -> RoundArm | None:
+        """The outer arm that asked, where an arm's pass did; any other pass names none."""
+        if self.role not in ARM_ROLES or self.round is None or self.individual_id is None:
+            return None
+        return RoundArm(round=self.round, arm=ArmKey(self.individual_id))
 
 
 class CycleMintedRecord(FrozenModel):
@@ -995,14 +1009,18 @@ class CycleMintedRecord(FrozenModel):
     # for a sibling in this campaign, a longer path for a cycle in another tree.
     parent: str | None = None
     forked_at_offset: int | None = None
+    # The first round the fork runs itself: every round below it is its parent's line's.
+    cut_round: int | None = None
     fork: ForkSpec | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @model_validator(mode="after")
     def _fork_is_whole(self) -> CycleMintedRecord:
-        parts = (self.parent, self.forked_at_offset, self.fork)
+        parts = (self.parent, self.forked_at_offset, self.cut_round, self.fork)
         if any(p is None for p in parts) and any(p is not None for p in parts):
-            raise ValueError("a fork carries its parent, forked_at_offset and fork together")
+            raise ValueError(
+                "a fork carries its parent, forked_at_offset, cut_round and fork together"
+            )
         return self
 
     def parent_cycle_dir(self, cycle_dir: Path) -> Path | None:

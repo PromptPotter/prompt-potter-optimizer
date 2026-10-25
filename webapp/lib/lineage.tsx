@@ -4,9 +4,9 @@
 import { createContext, useContext, useMemo, useState } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api";
 import { ABORT_LENS_LABELS, SCORE_LENS_LABELS } from "@/lib/api/types.generated";
-import type { HierarchyCampaign, HierarchyCourse } from "@/lib/api/types";
+import type { SubtreeCampaign, SubtreeCourse } from "@/lib/api/types";
 import { phaseIs } from "@/lib/run-phase";
-import { courseAt, coursesOf, indexLineage, type LineageIndex } from "@/lib/derivations";
+import { courseAt, indexLineage, type LineageIndex } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import { useScoringMaskSeed } from "@/lib/hooks/useServedCriterion";
@@ -21,7 +21,7 @@ const POLL_MS = 5000;
 const LENS_LABELS: Record<string, string> = { ...SCORE_LENS_LABELS, ...ABORT_LENS_LABELS };
 
 export interface CampaignTree {
-  root: HierarchyCampaign | null;
+  root: SubtreeCampaign | null;
   loaded: boolean;
   failed: boolean;
 }
@@ -29,7 +29,7 @@ export interface CampaignTree {
 const EMPTY: CampaignTree = { root: null, loaded: false, failed: false };
 
 export interface ViewedLineage {
-  tree: HierarchyCampaign | null;
+  tree: SubtreeCampaign | null;
   index: LineageIndex;
   // "" (off), "score:<formula>", or "abort:<variant>"; the open scoring-mask panel overrides it.
   lens: string;
@@ -116,8 +116,8 @@ export function LineageProvider({
         entries
           .filter(
             (e) =>
-              coursesOf(e).length > 0 &&
-              coursesOf(e).every((c) => phaseIs(c.state.run_phase, "settled")),
+              e.children.length > 0 &&
+              e.children.every((c) => phaseIs(c.state.run_phase, "settled")),
           )
           .map((e) => e.address),
       ),
@@ -172,7 +172,7 @@ export function useViewedLineage(): ViewedLineage {
 
 // The viewed leaf's course entry: its `state` is the one word and next step every surface reads.
 // That state is the head's under any mask or moment, so the last landing's stands across a re-key.
-export function useViewedCourse(): HierarchyCourse | null {
+export function useViewedCourse(): SubtreeCourse | null {
   const { index } = useViewedLineage();
   const { viewedPath } = useWorkspace();
   const landed = useMemo(() => courseAt(index, viewedPath), [index, viewedPath]);

@@ -2,13 +2,13 @@ import type {
   ArmElection,
   CourseKind,
   CourseSpawn,
-  HierarchyCampaign,
   HierarchyCandidate,
-  HierarchyCourse,
   LineageDivergence,
   RoundFacts,
+  SubtreeCampaign,
+  SubtreeCourse,
 } from "@/lib/api";
-import { childNodes, coursesOf, tagValue } from "@/lib/derivations";
+import { candidatesOf, tagValue } from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
 import { pathOfAddress } from "@/lib/ids";
 
@@ -82,11 +82,8 @@ function pickWinner(cands: readonly HierarchyCandidate[]): HierarchyCandidate | 
   return cands.find((c) => c.facts.reading.election.selected) ?? null;
 }
 
-const candidatesOf = (course: HierarchyCourse): HierarchyCandidate[] =>
-  childNodes(course) as HierarchyCandidate[];
-
-const innerCourses = (cand: HierarchyCandidate): HierarchyCourse[] =>
-  childNodes(cand) as HierarchyCourse[];
+const innerCourses = (cand: HierarchyCandidate): SubtreeCourse[] =>
+  cand.children.flatMap((c) => c.children);
 
 export function expandedLaneSpan(cands: readonly HierarchyCandidate[]): number {
   let max = 1;
@@ -97,7 +94,7 @@ export function expandedLaneSpan(cands: readonly HierarchyCandidate[]): number {
 }
 
 export interface LaneLayout {
-  course: HierarchyCourse;
+  course: SubtreeCourse;
   // The course's address, which is its `CyclePath` on the wire.
   coursePathKey: string;
   candidates: HierarchyCandidate[];
@@ -123,11 +120,11 @@ export interface CladogramAnchor {
 // The chain that PRODUCED the anchor: its course to its round, each course above cut where the next
 // hangs off (a fork at its spawn candidate, an inner campaign at its spawner), the seed runs whole.
 export function extentKeys(
-  root: HierarchyCampaign,
+  root: SubtreeCampaign,
   anchor: CladogramAnchor,
 ): ReadonlySet<string> | null {
   const keys = new Set<string>();
-  const keepThrough = (course: HierarchyCourse, round: number): void => {
+  const keepThrough = (course: SubtreeCourse, round: number): void => {
     for (const c of candidatesOf(course)) if (roundOf(c) <= round) keys.add(c.address);
   };
   const addMeasurements = (cand: HierarchyCandidate): void => {
@@ -139,17 +136,28 @@ export function extentKeys(
       }
     }
   };
-  const walkCampaign = (campaign: HierarchyCampaign): boolean => {
-    const courses = coursesOf(campaign);
+  const walkCampaign = (campaign: SubtreeCampaign): boolean => {
+    const courses = campaign.children;
     const byAddress = new Map(courses.map((c) => [c.address, c]));
-    const cutUpward = (course: HierarchyCourse): void => {
+    const held = new Map(
+      courses.flatMap((c) => candidatesOf(c).map((cand) => [cand.address, [c, cand]] as const)),
+    );
+    // A fork that lifted rounds stands on its parent's line below its cut; one that lifted none
+    // stands on its from-candidate alone, wherever on the parent's line that ran.
+    const cutUpward = (course: SubtreeCourse): void => {
       const spawn = course.facts.spawn;
       const parent = spawn ? byAddress.get(spawn.parent) : undefined;
       if (!spawn || !parent) return;
-      const from = candidatesOf(parent).find((c) => c.address === spawn.from_candidate);
-      if (from) keepThrough(parent, roundOf(from));
-      else if (spawn.at_round !== null) keepThrough(parent, spawn.at_round);
-      cutUpward(parent);
+      if (spawn.cut_round > 0) {
+        keepThrough(parent, spawn.cut_round - 1);
+        cutUpward(parent);
+        return;
+      }
+      const from = course.facts.from_candidate;
+      const hung = from === null ? undefined : held.get(from);
+      if (!hung) return;
+      keepThrough(hung[0], roundOf(hung[1]));
+      cutUpward(hung[0]);
     };
     for (const course of courses) {
       const cands = candidatesOf(course);
@@ -164,12 +172,19 @@ export function extentKeys(
         return true;
       }
       for (const cand of cands) {
-        const holds = cand.children.some((c) => c.level === "campaign" && walkCampaign(c));
+        const holds = cand.children.some(walkCampaign);
         if (holds) {
           keepThrough(course, roundOf(cand));
           cutUpward(course);
           return true;
         }
+      }
+      // An inner run no candidate claims hangs off the course itself: its lane is kept, no round.
+      const unplaced = course.children.filter((c) => c.level === "campaign");
+      if (unplaced.some(walkCampaign)) {
+        keys.add(course.address);
+        cutUpward(course);
+        return true;
       }
     }
     return false;
@@ -179,7 +194,7 @@ export function extentKeys(
 
 // Lanes key on the course address, never a cycle id: inner cycle ids repeat across `.inner/` sandboxes.
 export function layout(
-  root: HierarchyCampaign,
+  root: SubtreeCampaign,
   expanded: ReadonlySet<string>,
   keep: ReadonlySet<string> | null = null,
 ): {
@@ -191,14 +206,14 @@ export function layout(
   let nextRow = 0;
   let maxCol = 0;
   const visitCourse = (
-    course: HierarchyCourse,
+    course: SubtreeCourse,
     baseCol: number,
     anchor: string | null,
     parentKey: string | null,
   ): void => {
     const key = course.address;
     const cands = candidatesOf(course).filter((c) => keep === null || keep.has(c.address));
-    if (keep !== null && cands.length === 0) return;
+    if (keep !== null && cands.length === 0 && !keep.has(key)) return;
     const isExpanded = expanded.has(key);
     const laneSpan = isExpanded ? expandedLaneSpan(cands) : 1;
     const laneOffset = nextRow;
@@ -227,22 +242,24 @@ export function layout(
     });
     for (const cand of cands) {
       for (const inner of cand.children) {
-        if (inner.level === "campaign") {
-          visitCampaign(inner, baseCol + roundOf(cand) + 1, cand.address, key);
-        }
+        visitCampaign(inner, baseCol + roundOf(cand) + 1, cand.address, key);
       }
+    }
+    // An inner campaign no candidate holds hangs from the course itself, its caveat saying why.
+    for (const inner of course.children) {
+      if (inner.level === "campaign") visitCampaign(inner, baseCol, null, key);
     }
   };
   // A fork shares its parent's round axis and hangs at its spawn candidate.
   const visitCampaign = (
-    campaign: HierarchyCampaign,
+    campaign: SubtreeCampaign,
     baseCol: number,
     anchor: string | null,
     parentKey: string | null,
   ): void => {
-    for (const course of coursesOf(campaign)) {
+    for (const course of campaign.children) {
       const spawn = course.facts.spawn;
-      if (spawn) visitCourse(course, baseCol, spawn.from_candidate, spawn.parent);
+      if (spawn) visitCourse(course, baseCol, course.facts.from_candidate, spawn.parent);
       else visitCourse(course, baseCol, anchor, parentKey);
     }
   };

@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import { groupByRoot, runningCourses } from "@/lib/derivations";
 import type { HierarchyCampaign } from "@/lib/api";
 import { dockPriority } from "@/lib/run-phase";
-import { hierarchyCampaign, hierarchyCourse, hierarchyState } from "@/lib/test-fixtures";
+import { subtreeCampaign, subtreeCourse, hierarchyState } from "@/lib/test-fixtures";
 
 function rootedAt(address: string, rootCycle: string): HierarchyCampaign {
-  const c = hierarchyCampaign({ address });
+  const c = subtreeCampaign({ address });
   return { ...c, facts: { ...c.facts, root: `${address}::${rootCycle}` } };
 }
 
@@ -28,15 +28,15 @@ describe("runningCourses", () => {
     const attached = (run_phase: "running" | "paused" | "queued") =>
       hierarchyState({
         run_phase,
-        producer: { state: "live", label: "", attached: true, appending: true, alert: null },
+        attached: true,
       });
     const campaign = {
-      ...hierarchyCampaign({ address: "camp_a" }),
+      ...subtreeCampaign({ address: "camp_a" }),
       children: [
-        hierarchyCourse({ address: "camp_a::cycle_1", state: attached("paused") }),
-        hierarchyCourse({ address: "camp_a::cycle_2" }),
-        hierarchyCourse({ address: "camp_a::cycle_3", state: attached("running") }),
-        hierarchyCourse({ address: "camp_a::cycle_4", state: attached("queued") }),
+        subtreeCourse({ address: "camp_a::cycle_1", state: attached("paused") }),
+        subtreeCourse({ address: "camp_a::cycle_2" }),
+        subtreeCourse({ address: "camp_a::cycle_3", state: attached("running") }),
+        subtreeCourse({ address: "camp_a::cycle_4", state: attached("queued") }),
       ],
     };
     const running = runningCourses([campaign]);

@@ -42,7 +42,7 @@ def get_hierarchy(
     ] = "active",
     campaign: str | None = Query(default=None, description="Filter to one campaign id"),
     attached: bool = Query(False, description="Keep only the courses a producer holds"),
-    depth: int = Query(1, ge=0, description="0 serves campaigns alone, 1 their courses"),
+    depth: int = Query(1, ge=0, le=1, description="0 serves campaigns alone, 1 their courses"),
 ) -> Response:
     """Every campaign in one store the caller owns, as hierarchy entries, each with its courses.
 
@@ -107,10 +107,9 @@ def get_hierarchy_subtree(
     ``samples`` is a comma-separated sample-id mask; with neither, the subtree is the raw read. 404 where
     no entry stands at ``address``.
     """
-    masked = bool(lens or samples)
     return conditional_json(
         request,
-        (subtree_version(stores, address, masked=masked), address, lens, samples, at, at_cycle),
+        (subtree_version(stores, address), address, lens, samples, at, at_cycle),
         lambda: hierarchy_subtree(
             stores,
             address,

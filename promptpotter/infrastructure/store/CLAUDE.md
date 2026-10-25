@@ -22,29 +22,33 @@ The `CycleDir` / `WorkspaceDir` write-target newtypes live in `domain/cycle_path
 
 `write_standing_budget`/`read_standing_budget` carry the operator's standing cycle axes (`StandingBudgetRecord`, last-wins), scanned physically so a fork never inherits it; its money axes are the campaign's (`Campaign.standing_budget`). The record is the ONE store of those axes: a launch reads it and so does a run in flight (`runtime_flags.py::standing_budget`, an incremental fold), so there is no mirror file. A run's reservation and its share of the campaign's ceiling are its JOB's (`application/jobs/registry.py::Job`), which its book reads live. `metered_spend` is what a campaign's ceiling counts, each cycle's OWN appends once. **A command for a running loop is read the same way** — `runtime_flags.py::standing_controls`, the fold of the cycle's own `CommandRecord`s and acks (`infrastructure/store/campaign_store/ledger_scan.py::Controls`) — so a cycle's `.runtime` holds no control file and no lifecycle flag.
 
-**A cycle's own facts are ledger records too, and `index.json` is their fold.** Its mint (`CycleMintedRecord` — parent, cut offset and `ForkSpec` for a fork), a launch's claim on it and that claim's release, its ending (the last `RunPhaseRecord` `terminal`), its result (`CycleFinalRecord`), a supersede, a measured fork direction, an operator intervention and an L4 spawn are each one append; `projections/cycle_index.py::read_cycle_index` is the ONE reading of them (`CampaignStore.load`), and `write_cycle_index` the file's one writer. Nothing reads the file, and `ledger_chain` finds a fork's parent on the mint record, never in it.
+**A cycle's own facts are ledger records too, and `index.json` is their fold.** Its mint (`CycleMintedRecord` — parent, cut offset, cut round and `ForkSpec` for a fork), a launch's claim on it and that claim's release, its ending (the last `RunPhaseRecord` `terminal`), its result (`CycleFinalRecord`), a supersede, a measured fork direction, an operator intervention and an L4 spawn are each one append; `projections/cycle_index.py::read_cycle_index` is the ONE reading of them (`CampaignStore.load`), and `write_cycle_index` the file's one writer. Nothing reads the file, and `ledger_chain` finds a fork's parent on the mint record, never in it.
 
 ## The lineage tree — every course drawn where it spawned
 
 `application/hierarchy_subtree.py::hierarchy_subtree` serves the genealogy as the hierarchy's own
 entries: campaign → course → round → candidate → inner campaign, at any depth, so L5+ needs no new
-tier. **A fork IS a course**, hung off its parent at `CourseFacts.spawn` (`from_candidate`, the
-candidate it was cut from), and every candidate keeps the label its own course minted — `C{round}.{n}`
+tier. **A fork IS a course**, hung off its parent at `CourseFacts.spawn` and `SubtreeCourseFacts.from_candidate`, the
+candidate it was cut from, and every candidate keeps the label its own course minted — `C{round}.{n}`
 is a position in a course's PRIVATE counter, so nothing is renumbered and nothing is folded onto
-another course's timeline. A candidate's address, `{course}/r{n}/{arm_key}`, is the key.
+another course's timeline. A candidate's address, `{course}/r{n}/{arm_key}`, is the key. **A course's line is ONE resolution, pure over recorded facts** (`_Read.owner`): each read of a course — its head, or the course as its ledger stood at a fork's mint offset, read as the `Moment` a step at that offset names — names the ONE read owning each round. A round the course stated is its own, a repair's restatement included, since a `RoundRestatedRecord` is the round whole; one below its mint record's `cut_round` is its parent's as of that cut, so a `--from` in place after the cut moves no fork's line. Every name resolves to an address on that line, never a search: the re-read a round's line stood on is `Election.reference` (a `RoundArm` the runner writes), every re-read the candidate its own arm's `slot` names from its first record — so a round still measuring places its re-reads — a cut's anchor `ForkSpec.from_candidate` (`fork_edge` turns a named re-read into that candidate), and an inner run's host one lookup into `_Course.ran`, every arm the course ran. Each candidate keeps the read it came from, so an arm re-run away reads the line it ran on.
 
 Three bounds — get them wrong and the tree lies without erroring:
 
-- **A cut retires only as far as the branch actually GOT** — `_retired` reads the branch's
-  own reach back rather than asserting the future. A branch that died retires nothing. A retired
-  candidate stays on its course as the record of what ran, tagged `superseded` with the address
-  of the course that took its place, and loses its crown.
+- **A cut retires only as far as the branch actually GOT** — a candidate's status (`live` ·
+  `rewound` · `retired(by)`, `_status`) is derived after every line is resolved, so no fork writes
+  it and no order of forks changes it. It is retired iff it is off the line of ANY supersede fork
+  the line passed through that reached its round (a branch that died reaches none), named by the
+  lowest cut, a tie by the nearest link and then the newest fork; else rewound where only a read as of a cut still holds it. A retired or rewound
+  candidate stays on its course as the record of what ran, tagged `superseded` with the course
+  that took its place — its own, for a rewind — and loses its crown.
 - **Identity outranks position.** A repair re-measures without re-minting, so two candidates on
   two courses can share an `individual`; `answers_for_id` marks the ONE a remembered id resolves
   to — the first live, measured one, else the first.
-- **An inner run hangs under the candidate that SPAWNED it** (`spawned_by`'s round and
-  individual), searched on its own course first, then its campaign's other courses: a fork's
-  inner runs land in the parent's sandbox.
+- **An inner run hangs under the candidate that SPAWNED it**: `SpawnedBy` records the asking
+  cycle, round and arm when the run is launched, so the tree looks it up and never searches. A pass
+  outside a round's arms (a diagnostic, a grade) names no arm and hangs under its asking course, or
+  the course owning its sandbox, its caveat saying so — a campaign is always served.
 
 **A round fact lands on the record that OWNS it.** Everything
 `elect_round_winner` stamps rides `ElectionRecord` — the crown, each arm's θ and its matched-parent

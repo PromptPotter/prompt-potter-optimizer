@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.application import optimizers
@@ -13,13 +14,15 @@ from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import Lens, MaskReading, MaskRecord
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, decode_cycle_path
 from promptpotter.domain.hierarchy import (
-    HierarchyCampaign,
     HierarchyCandidate,
-    HierarchyCourse,
     HierarchyEntry,
+    HierarchyRound,
     LensShift,
     LineageDivergence,
     RankMove,
+    SubtreeCampaign,
+    SubtreeCourse,
+    entries_under,
 )
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
@@ -44,26 +47,16 @@ def _abort_suppress(variant: str) -> frozenset[str]:
     return variants[variant]
 
 
-def _courses(entry: HierarchyEntry) -> list[HierarchyCourse]:
-    out = [entry] if isinstance(entry, HierarchyCourse) else []
-    for child in entry.children:
-        out += _courses(child)
-    return out
-
-
-def _candidates(entry: HierarchyEntry) -> list[HierarchyCandidate]:
-    """A course's own: its rounds' candidates, never an inner campaign's under them."""
-    return [c for rnd in entry.children for c in rnd.children if isinstance(c, HierarchyCandidate)]
-
-
 def _mask_records(
-    stores: Stores, root: HierarchyCampaign, samples: frozenset[int] | None, lens: Lens | None
+    stores: Stores, root: SubtreeCampaign, samples: frozenset[int] | None, lens: Lens | None
 ) -> dict[CyclePath, MaskRecord]:
     """One per campaign, keyed by a course's PATH: one inner campaign id sits in several sibling
     ``.inner/`` sandboxes, so the sandbox the path names is half its identity."""
     out: dict[CyclePath, MaskRecord] = {}
     seen: set[tuple[CyclePath, str]] = set()
-    for course in _courses(root):
+    for course in entries_under(root):
+        if not isinstance(course, SubtreeCourse):
+            continue
         path = decode_cycle_path(course.address)
         if (campaign := (path[:-1], path[-1].campaign_id)) in seen:
             continue
@@ -90,38 +83,29 @@ def _rank_moves(
 ) -> tuple[dict[str, RankMove | None], LensShift | None]:
     by_composite = _ranks({k.address: v for k in kids if (v := _composite(k)) is not None})
     by_lens = _ranks({k.address: v for k in kids if (v := k.facts.lens_value) is not None})
-    moves: dict[str, RankMove | None] = {}
-    for k in kids:
-        before, after = by_composite.get(k.address), by_lens.get(k.address)
-        moves[k.address] = (
-            None
-            if before is None or after is None
-            else "up"
-            if after < before
-            else "down"
-            if after > before
-            else "unchanged"
-        )
+    moves = {k.address: _move(by_composite.get(k.address), by_lens.get(k.address)) for k in kids}
     if not by_lens:
         return moves, None
     live = {k.address for k in kids if k.tag("superseded") is None}
-
-    def first(ranks: dict[str, int]) -> str | None:
-        top = next((address for address, rank in ranks.items() if rank == 1), None)
-        return top if top in live else None
-
-    top_composite = next((a for a, r in by_composite.items() if r == 1), None)
-    top_lens = next((a for a, r in by_lens.items() if r == 1), None)
-    return moves, LensShift(
-        top_composite=first(by_composite),
-        top_lens=first(by_lens),
-        top_changed=top_composite is not None
-        and top_lens is not None
-        and top_composite != top_lens,
-        moved_up=sum(moves[a] == "up" for a in live),
-        moved_down=sum(moves[a] == "down" for a in live),
-        unchanged=sum(moves[a] == "unchanged" for a in live),
+    top_composite, top_lens = (
+        min(r, key=r.__getitem__, default=None) for r in (by_composite, by_lens)
     )
+    tally = Counter(moves[a] for a in live)
+    return moves, LensShift(
+        top_composite=top_composite if top_composite in live else None,
+        top_lens=top_lens if top_lens in live else None,
+        top_changed=None not in (top_composite, top_lens) and top_composite != top_lens,
+        moved_up=tally["up"],
+        moved_down=tally["down"],
+        unchanged=tally["unchanged"],
+    )
+
+
+_MOVE: dict[int, RankMove] = {-1: "up", 0: "unchanged", 1: "down"}
+
+
+def _move(before: int | None, after: int | None) -> RankMove | None:
+    return None if before is None or after is None else _MOVE[(after > before) - (after < before)]
 
 
 class _Overlay:
@@ -159,10 +143,16 @@ class _Overlay:
         self.dimmed: frozenset[tuple[CyclePath, int]] = frozenset(dimmed)
 
     def apply(self, entry: HierarchyEntry) -> HierarchyEntry:
-        if not isinstance(entry, HierarchyCourse):
+        if not isinstance(entry, SubtreeCourse):
             return entry.model_copy(update={"children": [self.apply(c) for c in entry.children]})
         path = decode_cycle_path(entry.address)
-        read = {c.address: self._candidate(path, c) for c in _candidates(entry)}
+        # The course's own candidates, never an inner campaign's under them.
+        read = {
+            c.address: self._candidate(path, c)
+            for rnd in entry.children
+            if isinstance(rnd, HierarchyRound)
+            for c in rnd.children
+        }
         # Ranked here, not in the build: the lens values exist only once this fold stamps them.
         moves, shift = _rank_moves(list(read.values()))
         moved = {
@@ -175,6 +165,8 @@ class _Overlay:
             update={
                 "children": [
                     rnd.model_copy(update={"children": [moved[c.address] for c in rnd.children]})
+                    if isinstance(rnd, HierarchyRound)
+                    else self.apply(rnd)
                     for rnd in entry.children
                 ],
                 "facts": entry.facts.model_copy(
@@ -212,23 +204,29 @@ class _Overlay:
         )
 
 
+def read_samples(lens: Lens | None, samples: frozenset[int] | None) -> frozenset[int] | None:
+    """The sample mask a lens reads under: an abort lens reads the firing log, so the full set."""
+    return None if lens is not None and lens.kind == "abort" else samples
+
+
 def lensed(
     stores: Stores,
-    root: HierarchyCampaign,
+    root: SubtreeCampaign,
     lens: Lens | None,
     samples: frozenset[int] | None,
-) -> HierarchyCampaign:
+) -> SubtreeCampaign:
     """The subtree as the request's lens and sample mask read it."""
-    if lens is not None and lens.kind == "abort":
-        # An abort lens reads the firing log, not a score, so it loads the full set.
-        verdict, samples = make_abort_verdict(_abort_suppress(lens.body)), None
-    else:
-        verdict = make_scoring_verdict()
+    samples = read_samples(lens, samples)
+    verdict = (
+        make_abort_verdict(_abort_suppress(lens.body))
+        if lens is not None and lens.kind == "abort"
+        else make_scoring_verdict()
+    )
     overlay = _Overlay(
         _mask_records(stores, root, samples, lens),
         verdict,
         subset_size=len(samples) if samples else None,
     )
     out = overlay.apply(root)
-    assert isinstance(out, HierarchyCampaign)
+    assert isinstance(out, SubtreeCampaign)
     return out

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HierarchyCampaign, HierarchyCourse } from "@/lib/api";
+import type { SubtreeCampaign, SubtreeCourse } from "@/lib/api";
 import {
   armAt,
   candidatesAtPath,
@@ -11,9 +11,9 @@ import {
 import { encodeCyclePath, pathLeaf, pathOfAddress, type CyclePath } from "@/lib/ids";
 import {
   courseTags,
-  hierarchyCampaign,
+  subtreeCampaign,
   hierarchyCandidate,
-  hierarchyCourse,
+  subtreeCourse,
   roundsOf,
 } from "@/lib/test-fixtures";
 
@@ -22,12 +22,12 @@ const FORK: CyclePath = [{ campaignId: "demo__aaaaaa", cycleId: "cycle_root_fork
 const R = encodeCyclePath(ROOT);
 const F = encodeCyclePath(FORK);
 
-const innerRun = (outer: CyclePath, cycleId: string, task: string | null): HierarchyCampaign => {
+const innerRun = (outer: CyclePath, cycleId: string, task: string | null): SubtreeCampaign => {
   const campaignId = `inner__${cycleId}`;
-  return hierarchyCampaign({
+  return subtreeCampaign({
     address: `${encodeCyclePath(outer)}~${campaignId}`,
     children: [
-      hierarchyCourse(
+      subtreeCourse(
         { address: encodeCyclePath([...outer, { campaignId, cycleId }]), tags: courseTags("inner") },
         { mint: "inner", task },
       ),
@@ -36,7 +36,7 @@ const innerRun = (outer: CyclePath, cycleId: string, task: string | null): Hiera
 };
 
 // Both courses mint a C1.1: a fork's cells join on its own course's labels.
-function tree(task: string | null = "justlogic-d234/seed-0"): HierarchyCampaign {
+function tree(task: string | null = "justlogic-d234/seed-0"): SubtreeCampaign {
   const root = [
     hierarchyCandidate(R, { id: "root-c0", label: "C0" }, { children: [innerRun(ROOT, "inner_a", task)] }),
     hierarchyCandidate(
@@ -52,17 +52,17 @@ function tree(task: string | null = "justlogic-d234/seed-0"): HierarchyCampaign 
       { children: [innerRun(FORK, "inner_c", task)] },
     ),
   ];
-  return hierarchyCampaign({
+  return subtreeCampaign({
     address: "demo__aaaaaa",
     children: [
-      hierarchyCourse({ address: R, children: roundsOf(R, root) }),
-      hierarchyCourse({ address: F, children: roundsOf(F, fork) }, { mint: "fork" }),
+      subtreeCourse({ address: R, children: roundsOf(R, root) }),
+      subtreeCourse({ address: F, children: roundsOf(F, fork) }, { mint: "fork" }),
     ],
   });
 }
 
 const index = (task?: string | null) => indexLineage(tree(task));
-const cycleOf = (run: HierarchyCourse | undefined) =>
+const cycleOf = (run: SubtreeCourse | undefined) =>
   run && pathLeaf(pathOfAddress(run.address)).cycleId;
 
 describe("candidatesAtPath", () => {

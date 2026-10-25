@@ -21,7 +21,7 @@ import { isSelectedCandidate, selectedCandidateOf } from "@/lib/types";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "@/lib/hooks/useLineage";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
-import { useViewedLineage } from "@/lib/lineage";
+import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
 import type { CandidateBar } from "@/lib/types";
 import { roundOf } from "./dendrogram";
 
@@ -56,9 +56,8 @@ export function useCandidatesModel(dash: ServedDashboard) {
     showCache,
   } = useCandidatesState();
   const electedMetric = dash.display_metric;
-  const wonOnTheta = dash.elects_on === "ability";
-
   const overlay = useViewedLineage();
+  const wonOnTheta = useViewedCourse()?.facts.elects_on === "ability";
   const { lens, setLens, maskActive, maskLabel, scoringMaskActive } = overlay;
   const { history, overlap, sampleUniverse, viewedNode, areCourses, views, floorPinned } =
     useCandidateBars(overlay.index);

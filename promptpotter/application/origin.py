@@ -99,22 +99,19 @@ def try_inherit_fork_origin(
     if index is None or index.fork is None or index.parent_cycle_id is None:
         return None
     parent = index.parent_cycle_id
-    from_round = index.fork.from_round
-    from_candidate_id = index.fork.from_candidate_id
-    if from_round is None or from_candidate_id is None:
-        return None
+    named = index.fork.from_candidate
 
     parent_round = closed_round(
         session.store,
         session.hop,
-        from_round,
+        named.round,
         session.state.scoring.require_scorer(),
         # The fork's chain at its mint, its first record: the parent as cut, before any own close.
         moment=Moment(store.ledger(session.hop), 0),
     )
     if parent_round is None:
         return None
-    key = ArmKey(from_candidate_id)
+    key = named.arm
     cand = parent_round.arms.get(key)
     fold = parent_round.folds.get(key)
     if not isinstance(cand, Concluded) or fold is None:
@@ -129,9 +126,9 @@ def try_inherit_fork_origin(
         "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
         "acc=%s, %d per-sample rows — skipping origin re-score, straight to L1",
         session.cycle_id,
-        from_candidate_id,
+        key,
         parent,
-        from_round,
+        named.round,
         fold.accuracy,
         len(inherited_results),
     )

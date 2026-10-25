@@ -6,7 +6,7 @@ import type {
   VerificationMark,
 } from "@/lib/api/types";
 
-export type CandidateSource = "history" | "inflight";
+type CandidateSource = "history" | "inflight";
 
 export type ThetaCaveat = NonNullable<ArmAbility["caveat"]>;
 
@@ -40,8 +40,8 @@ export interface ArmBar extends BarBase {
   bench: VerificationMark | null;
 }
 
-// A run drawn as a bar: no arm, so no reading — its level is the served `run_standing`.
-export interface CourseBar extends BarBase {
+// A run drawn as a bar: no arm, so no reading — its level is its course's served `facts.standing`.
+interface CourseBar extends BarBase {
   node: HierarchyCourse;
   reading: null;
 }
