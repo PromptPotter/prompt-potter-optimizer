@@ -2,8 +2,7 @@
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/chat-foundation.md`): never hide them.
 import { useEffect, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";
-import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
-import { useCycleStream } from "@/lib/poll";
+import { useViewedCourse } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 import { entryAlone } from "@/lib/derivations";
 import { useIngest } from "@/lib/ingest-flow";
@@ -20,29 +19,22 @@ import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";
 
 export function ChatPane() {
   const { datasetName } = useHardSamples();
-  const { dash } = useCycleStream();
-  const { viewedPath, cycleId, leafCycleId, at } = useWorkspace();
+  const { viewedPath, cycleId, leafCycleId } = useWorkspace();
   const { composing } = useIngest();
   const thread = useThread<HierarchyCourse>();
 
   const course = useViewedCourse();
-  const { maskLabel } = useViewedLineage();
 
-  // The served `attached`, NOT `isLive`, which is false at the gate.
-  const attached = dash?.producer.attached === true;
-  // The course entry is frozen whole on its own detach, so the ending is one served read.
+  // The served `attached`, NOT `isLive`, which is false at the gate. The course entry is frozen
+  // whole on its own detach, so the ending is one served read.
   const liveCourse = course?.state.attached ? course.address : null;
   const [prevLiveCourse, setPrevLiveCourse] = useState(liveCourse);
   if (liveCourse !== prevLiveCourse) {
     setPrevLiveCourse(liveCourse);
     // The identity check stops a course switch filing another course under this one's ending.
     if (prevLiveCourse && !liveCourse && course?.address === prevLiveCourse) {
-      // A mask or a moment re-reads the stats; the frozen item says which, never passes as the record.
-      const readUnder = maskLabel || (at !== null ? "a past moment" : "");
-      thread.appendRun(course.address, {
-        ...entryAlone(course),
-        caveat: readUnder ? `Read under ${readUnder}` : course.caveat,
-      });
+      // Read under a mask or a moment, the served caveat already names which.
+      thread.appendRun(course.address, entryAlone(course));
     }
   }
 
@@ -57,7 +49,7 @@ export function ChatPane() {
         <LiveSegment
           notices={live.notices}
           status={live.status}
-          listening={live.connected && attached}
+          listening={live.connected && liveCourse !== null}
           decision={live.decision}
           lives={course?.facts.standing?.lives ?? null}
         />

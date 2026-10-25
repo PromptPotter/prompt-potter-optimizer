@@ -65,6 +65,22 @@ The arc's method is the session protocol in memory (`feedback_arc_of_arcs_loop`)
   The cut is also by PROPOSAL round, not by line position: Compare on a pick that later rounds held
   hides those rounds whole. Root: an extent is the served line (`main_line`, through the round the
   line last stood on the anchor), the client walk dies, and every channel and `clip` reads it.
+- **The dashboard still carries the bench; the course entry is one read short of owning it.**
+  `ServedDashboard.bench_score` stays because the course's Bench stat lacks `status`, `vs_origin`
+  and `cost.lift_per_usd` (read by `TrendChart`, `BenchAction`, `useRemoteModel`); `BenchAction`
+  gates Grade on the dashboard poll while the chip reads the course, so they can disagree for one
+  poll. In order: serve those three on the course stat → every reader moves → `bench_score` dies.
+  The chip formats by unit while `BenchScore.line` prints `.3f` levels: one formatter needs
+  `LevelUnit` moved below `domain/bench.py`, which `results.py` imports.
+- **A round's reference is recorded at SELECT, so a measuring round serves `RoundFacts.reference`
+  null.** Root: record it at round entry. Blocker: a repair fork's restated rounds carry no
+  round-entry record, so the restatement must write one first.
+- **Hierarchy reads that pay twice or take two facts that must agree:** an inner campaign's root
+  index is read in `_inner` (its `spawned_by`) and again in `campaign_courses`; `campaign_entry`
+  takes `held` and `moment` separately though one decides the other; `export_cycle` builds the
+  whole top campaign's subtree to read one course's standing.
+- **A round-0 fork whose parent's round 0 elected nobody is refused** (`ConflictError`) for both a
+  resume-divergence fork and a diag sibling, where the origin is the only candidate it could hang on.
 - **The dev loop serializes where it need not.** Sibling gates queue whole runs (a `gate --py` waited
   9 min behind two others before its own 5); `next-build` peaks near 4 GB; a builder spends ~100k
   tokens of tool output, most of it whole-file reads and whole-tree content greps; Turbopack
