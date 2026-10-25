@@ -22,36 +22,35 @@ import { useWorkspace } from "./workspace";
 // The CONNECTION's state, never the run's — that is the served `dash.producer`.
 export type StatusKind = "connected" | "loading" | "idle" | "offline" | "gone";
 
-export type DashboardSnapshot = ServedDashboard;
 
 // Stable reference: a fresh `[]` per poll drives the candidates card into a setState loop.
 const NO_ROWS: LiveCandidate[] = Object.freeze([] as LiveCandidate[]) as LiveCandidate[];
 
-export function liveCandidates(dash: DashboardSnapshot | null): LiveCandidate[] {
+export function liveCandidates(dash: ServedDashboard | null): LiveCandidate[] {
   return dash?.current_round.candidates ?? NO_ROWS;
 }
 
 export function liveCandidate(
-  dash: DashboardSnapshot | null,
+  dash: ServedDashboard | null,
   key: string | null,
 ): LiveCandidate | null {
   if (!key) return null;
   return liveCandidates(dash).find((c) => c.reading.arm.key === key) ?? null;
 }
 
-export function isMeasuring(dash: DashboardSnapshot | null): boolean {
+export function isMeasuring(dash: ServedDashboard | null): boolean {
   const cr = dash?.current_round;
   return cr?.measurement_node != null && cr.active_node === cr.measurement_node;
 }
 
 // The served `dash.measuring_arm` goes stale between rounds.
-export function measuringArm(dash: DashboardSnapshot | null): ArmName | null {
+export function measuringArm(dash: ServedDashboard | null): ArmName | null {
   if (!dash || !isMeasuring(dash)) return null;
   return dash.measuring_arm;
 }
 
 export interface CycleStreamState {
-  dash: DashboardSnapshot | null;
+  dash: ServedDashboard | null;
   status: StatusKind;
   statusText: string;
   statusHint: string;
@@ -90,7 +89,7 @@ export interface TimeRayState {
   loadOlder: () => void;
 }
 
-export function roundOf(dash: DashboardSnapshot | null): number | null {
+export function roundOf(dash: ServedDashboard | null): number | null {
   return dash?.current_round.round ?? null;
 }
 
@@ -106,7 +105,7 @@ export function useCycleStream(): CycleStreamState {
 
 const StreamedAddressContext = createContext<string | null>(null);
 
-export function useDashboardAt(path: CyclePath | null): DashboardSnapshot | null {
+export function useDashboardAt(path: CyclePath | null): ServedDashboard | null {
   const streamed = useContext(StreamedAddressContext);
   const { dash } = useCycleStream();
   return path !== null && streamed !== null && encodeCyclePath(path) === streamed ? dash : null;
@@ -136,7 +135,7 @@ function useDashboard(path: CyclePath | null, unit: string | null, intervalMs: n
   const body = shownData(read);
   const landed = body && !isWarming(body) ? body : null;
   // The last snapshot this unit showed, so moving the viewed moment does not blank the page.
-  const [shown, setShown] = useState<{ unit: string | null; dash: DashboardSnapshot | null }>({
+  const [shown, setShown] = useState<{ unit: string | null; dash: ServedDashboard | null }>({
     unit,
     dash: null,
   });

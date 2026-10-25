@@ -2,12 +2,12 @@
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/chat-foundation.md`): never hide them.
 import { useEffect, useRef, useState } from "react";
 import { useHardSamples } from "@/lib/hard-samples";
-import { useViewedRunState } from "@/lib/lineage";
+import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useIngest } from "@/lib/ingest-flow";
 import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
-import { runSummary, type RunSummary } from "@/lib/derivations";
+import type { HierarchyCourse } from "@/lib/api";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
 import { useSelection } from "@/lib/SelectionContext";
@@ -20,30 +20,35 @@ import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";
 export function ChatPane() {
   const { datasetName } = useHardSamples();
   const { dash } = useCycleStream();
-  const { viewedPath, cycleId, leafCycleId } = useWorkspace();
+  const { viewedPath, cycleId, leafCycleId, at } = useWorkspace();
   const { composing } = useIngest();
-  const thread = useThread<RunSummary>();
+  const thread = useThread<HierarchyCourse>();
 
-  const runState = useViewedRunState();
+  const course = useViewedCourse();
+  const { maskLabel } = useViewedLineage();
 
   // The served `attached`, NOT `isLive`, which is false at the gate.
   const attached = dash?.producer.attached === true;
-  // Frozen off the COURSE's detach, so the ending's word and next step are that same read's; keyed
-  // on the leaf, the cycle the dashboard and so the frozen numbers are.
-  const liveCycleKey = leafCycleId && runState?.producer.attached ? leafCycleId : null;
-  const [prevLiveCycle, setPrevLiveCycle] = useState(liveCycleKey);
-  if (liveCycleKey !== prevLiveCycle) {
-    setPrevLiveCycle(liveCycleKey);
-    const ended = runSummary(dash, runState);
-    // The identity check stops a cycle switch filing the new cycle's numbers under the old one's ending.
-    if (prevLiveCycle && !liveCycleKey && ended?.cycleId === prevLiveCycle) {
-      thread.appendRun(ended.cycleId, ended);
+  // The course entry is frozen whole on its own detach, so the ending is one served read.
+  const liveCourse = course?.state.producer.attached ? course.address : null;
+  const [prevLiveCourse, setPrevLiveCourse] = useState(liveCourse);
+  if (liveCourse !== prevLiveCourse) {
+    setPrevLiveCourse(liveCourse);
+    // The identity check stops a course switch filing another course under this one's ending.
+    if (prevLiveCourse && !liveCourse && course?.address === prevLiveCourse) {
+      // A mask or a moment re-reads the stats; the frozen item says which, never passes as the record.
+      const readUnder = maskLabel || (at !== null ? "a past moment" : "");
+      thread.appendRun(course.address, {
+        ...course,
+        children: [],
+        caveat: readUnder ? `Read under ${readUnder}` : course.caveat,
+      });
     }
   }
 
   const live = useCycleEvents(viewedPath);
   // `composing` drops both, so a fresh thread is not drawn over the bound cycle's run.
-  const mounted: ThreadItem<RunSummary>[] = [];
+  const mounted: ThreadItem<HierarchyCourse>[] = [];
   if (!composing && leafCycleId) {
     mounted.push({
       id: "live",
@@ -67,7 +72,7 @@ export function ChatPane() {
     });
   }
   const ingestItems = useIngestItems(thread.items.length === 0 && mounted.length === 0);
-  const items: ThreadItem<RunSummary>[] = [
+  const items: ThreadItem<HierarchyCourse>[] = [
     ...ingestItems.head,
     ...thread.items,
     ...ingestItems.tail,
@@ -105,7 +110,7 @@ export function ChatPane() {
       <div className="chat-grid">
         <div className="chat-panel">
           <div className="ingest-conversation">
-            <Thread items={items} renderRun={(summary) => <RunSummaryItem summary={summary} />} />
+            <Thread items={items} renderRun={(course) => <RunSummaryItem course={course} />} />
             <IngestComposer />
           </div>
         </div>

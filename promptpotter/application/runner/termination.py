@@ -140,7 +140,7 @@ def standing_tripped(cycle: Cycle, standing: RunStanding) -> StopReason | None:
         and fold.composite_fitness >= 1.0
     ):
         return StopReason.PERFECT
-    if standing.stalls_left == 0:
+    if standing.lives is not None and standing.lives.spent:
         return StopReason.LIVES_EXHAUSTED
     patience = cycle.config.optimization.convergence_patience
     if patience is not None and standing.rounds_without_advance >= patience:

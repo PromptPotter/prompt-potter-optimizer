@@ -45,7 +45,7 @@ def get_cycle_dashboard(
 
     The path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.
     Honors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.
-    ``at`` is an offset in the LEAF cycle's own ledger, the address a ray item carries: the state as of that line.
+    ``at`` is an offset in the LEAF cycle's own ledger, the moment a hierarchy step's ``facts.offset`` carries: the state as of that line.
     """
     cycle = view_cycle(
         stores, (CycleHop(campaign_id=campaign_id, cycle_id=cycle_id), *decode_cycle_path(descend))

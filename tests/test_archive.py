@@ -53,6 +53,7 @@ from promptpotter.application.campaign_config import (
     apply_config_overrides,
 )
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.cycle_reads import open_family_ray
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.hierarchy_subtree import (
     entries_under,
@@ -1146,6 +1147,19 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert stood.crowns == {0: prefix[0], 1: mine[0]}
     assert candidates(displaced) == prefix, "the fork's rounds displaced its parent's own"
 
+    # A step's silence is the family's, wherever a window happens to cut the ray.
+    def gaps(limit: int) -> dict[str, float]:
+        ray = open_family_ray(stores, (fork_hop,), limit=limit, before=None).window()
+        return {step.address: step.facts.gap_before_s for step in ray.steps}
+
+    whole = gaps(10_000)
+    assert len(whole) > 2, "guard"
+    for limit in (1, 2, len(whole) - 1):
+        windowed = gaps(limit)
+        assert len(windowed) == limit and {s: whole[s] for s in windowed} == windowed, (
+            f"a {limit}-step window re-measured the silence before its first step"
+        )
+
     # A supersede ends its parent only where no producer holds it: a holder declares its own stop.
     def ended(hop: CycleHop) -> StopReason | None:
         index = store.load(hop, moment=None)
@@ -1203,6 +1217,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert [(e.facts.reading.arm.round, e.facts.reading.arm.key) for e in line_stood] == [
         (picked.round, picked.key)
     ], "the subtree stands a candidate on the line other than the one its index selected"
+    assert line_course.facts.standing.changes == line_stood[0].facts.reading.changes_description, (
+        "the course's standing names another pick's change than the candidate it stands"
+    )
 
     # The operator's `--from` rewinds the line's first cycle; a rebase's fork stands on its own cut.
     rewinds: list[int | None] = []

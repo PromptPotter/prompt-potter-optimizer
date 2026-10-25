@@ -6,7 +6,7 @@ import type {
   LineageNode,
 } from "@/lib/api";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
-import { tagValue } from "@/lib/hierarchy";
+import { tagValue } from "./hierarchy";
 import { courseAddressOf, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
 import { coursesOf } from "./hierarchy";
@@ -76,13 +76,13 @@ export function courseAt(index: LineageIndex, path: CyclePath | null): Hierarchy
   return entry?.level === "course" ? entry : null;
 }
 
-export function courseOf(index: LineageIndex, node: LineageNode): HierarchyCourse | null {
+function courseOf(index: LineageIndex, node: LineageNode): HierarchyCourse | null {
   if (node.level === "course") return node;
   const entry = index.byAddress.get(courseAddressOf(node.address));
   return entry?.level === "course" ? entry : null;
 }
 
-export function candidateAt(index: LineageIndex, address: string | null): HierarchyCandidate | null {
+function candidateAt(index: LineageIndex, address: string | null): HierarchyCandidate | null {
   const entry = address ? index.byAddress.get(address) : undefined;
   return entry?.level === "candidate" ? entry : null;
 }
@@ -92,7 +92,7 @@ export function candidatesAtPath(index: LineageIndex, path: CyclePath | null): H
   return course ? (childNodes(course) as HierarchyCandidate[]) : [];
 }
 
-export function armOfId(index: LineageIndex, id: string): HierarchyCandidate | null {
+function armOfId(index: LineageIndex, id: string): HierarchyCandidate | null {
   return index.candidates.find((c) => c.facts.individual === id && c.facts.answers_for_id) ?? null;
 }
 

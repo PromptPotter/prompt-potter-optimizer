@@ -7,7 +7,7 @@ import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleStream, useTimeRay } from "@/lib/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
-import { useViewedLineage, useViewedRunState } from "@/lib/lineage";
+import { useViewedLineage, useViewedCourse } from "@/lib/lineage";
 import { armAt, rayHead, raySteps, type RayStep } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 
@@ -16,7 +16,7 @@ export const TimeRay = memo(function TimeRay() {
   const { setSelectionForRound } = useSelection();
   const { index } = useViewedLineage();
   const { dash } = useCycleStream();
-  const state = useViewedRunState();
+  const state = useViewedCourse()?.state ?? null;
   const { pick } = useSelectNode();
   const { steps: served, loaded, failed, hasMore, loadOlder } = useTimeRay();
 

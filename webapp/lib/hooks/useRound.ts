@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
+import type { ServedDashboard } from "@/lib/api";
 import { roundRead } from "../api";
 import { groupByRound, roundCandidates } from "../derivations";
 import type { CyclePath } from "../ids";
-import { roundOf, useDashboardAt, type DashboardSnapshot } from "../poll";
+import { roundOf, useDashboardAt } from "../poll";
 import type { ArmRow, RoundView } from "../types";
 import { useMomentAt } from "../workspace";
 import { readyData, useRead, type ReadFailure } from "./useRead";
@@ -19,7 +20,7 @@ export interface RoundState {
 }
 
 // Not `round_axis.completed`: it drops the empty rounds that closed before measuring yet have a file.
-export function isRoundUnfiled(dash: DashboardSnapshot | null, round: number | null): boolean {
+export function isRoundUnfiled(dash: ServedDashboard | null, round: number | null): boolean {
   const filed = (dash?.rounds ?? []).some((r) => r.round === round);
   return round != null && round === roundOf(dash) && !filed;
 }

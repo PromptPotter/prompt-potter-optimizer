@@ -378,5 +378,4 @@
 .hsp-full{margin-top:var(--space-4)}
 
 .chat-msg.run-summary-item{max-width:100%;width:100%;align-self:stretch;display:flex;flex-direction:column;gap:var(--space-4)}
-.run-summary-changes{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
-.run-summary-next{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
+.run-summary-line{margin:0;font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}

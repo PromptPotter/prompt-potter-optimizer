@@ -6,20 +6,20 @@ import { PairedLift } from "@/components/shell/PairedLift";
 import { CriterionLine } from "@/components/shell/scoring/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import {
-  benchReading,
   budgetAxis,
   capLines,
   fmtLift,
   ratePricedText,
   readSpend,
   spendHeadline,
+  tagValue,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
-import { fmtAgo, shortId, shortModel } from "@/lib/format";
-import { tagValue } from "@/lib/hierarchy";
+import { fmtAgo, fmtLevel, shortId, shortModel } from "@/lib/format";
+import { DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
-import { useViewedRunState } from "@/lib/lineage";
+import { useViewedCourse } from "@/lib/lineage";
 import { measuringArm, useCycleStream } from "@/lib/poll";
 import { useCampaign } from "@/lib/registry";
 import { statusTone } from "@/lib/run-phase";
@@ -30,7 +30,7 @@ export function RunMasthead() {
   const { campaignId, leafCycleId, viewedPath, following, followActive } = useWorkspace();
 
   const { dash } = useCycleStream();
-  const runState = useViewedRunState();
+  const runState = useViewedCourse()?.state ?? null;
   const served = useServedCriterion();
 
   const campaign = useCampaign(campaignId);
@@ -49,7 +49,7 @@ export function RunMasthead() {
   );
 
   const best = dash?.run_standing ?? null;
-  const bench = benchReading(dash?.bench_score);
+  const bench = dash?.bench_score ?? null;
   const round = dash?.round_axis.position ?? null;
   const roundsCap = dash ? budgetAxis(dash.run_limits.budget, "rounds") : null;
   const position = measuringArm(dash)?.label ?? (round != null ? `R${round}` : "—");
@@ -140,9 +140,9 @@ export function RunMasthead() {
           {/* Ahead of the chip it fills: an ungraded bench's reason runs the row past the viewport. */}
           {viewedPath && !innerLeaf && <BenchAction path={viewedPath} />}
           <span className="chip">
-            <span className="chip-lbl">{bench.label}</span>
-            {bench.value}
-            {bench.sub && <span className="chip-of"> {bench.sub}</span>}
+            <span className="chip-lbl">Bench</span>
+            {bench ? fmtLevel(DISPLAY_METRIC_UNITS[bench.headline], bench.selected?.level?.value) : "—"}
+            {bench?.line && <span className="chip-of"> {bench.line}</span>}
           </span>
           <span className="chip">
             <span className="chip-lbl">Rounds</span>

@@ -187,8 +187,8 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
   served time are layout; wording a number, ordering stats or deriving a state is not, and none
   survives in `webapp/lib/derivations` for an entry.
   <!-- probe: git grep -cE "buildForest|RunGroup|OriginGroup|campaignCard|courseStats|unitDisplayName|campaignLineParts" -- webapp == 0 -->
-- **A tag is asked with two predicates**, `hasTag(entry, kind)` and `tagValue(entry, kind)`
-  (`webapp/lib/hierarchy.ts`), and a bool served beside a tag is the duplicate this forbids. **One
+- **A tag is asked through one module**, `hasTag` / `tagValue` / `tagLabel(entry, kind)`
+  (`webapp/lib/derivations/hierarchy.ts`), and a bool served beside a tag is the duplicate this forbids. **One
   declared exception, `mint`**: code branches on a course's kind exhaustively, a tag's value is an
   untyped string, so the course builder mints the kind once and serves it twice — typed as
   `facts.mint`, worded as the tag. Code reads the fact; the tag is worn.
@@ -202,15 +202,16 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
 - **A run's word is the course's; the dashboard read is run CONTROL.** The state word and the next
   step (`HierarchyState.status` / `next_step`) ride the course entry alone, worded with the campaign's
   lifecycle, and the masthead, `OptimizerCard`, the time ray's head and the chat's frozen `run` item read
-  them through `lib/lineage.tsx::useViewedRunState`. The state is built off the HEAD index under any
+  them off `lib/lineage.tsx::useViewedCourse`. The state is built off the HEAD index under any
   moment, so it is one value under every mask and moment, and the hook keeps the last landing's
   across a re-key rather than blanking. The dashboard keeps what control acts on and what
   only the head measures: `run_phase` (its 2 s poll invalidates every slower read on a change),
   `run_admission` and `pause` (a verb's admission moves with the producer, not only the phase), the
   clocked `producer`, spend metering, limits and the walk. `run_standing` and `bench_score` stay too —
-  banked in `dashboard.json`, and the course's `standing` is served under the request's lens. The chat
-  freezes its `run` item on the COURSE's detach, so the word and next step it keeps are one read's.
-  <!-- probe: git grep -cE "dash\??\.(status|next_step)\b" -- webapp == 0 -->
+  banked in `dashboard.json`, and the course's `standing` is served under the request's lens. The chat's
+  `run` item IS the course entry, frozen whole on its own detach and worded by nothing in the browser;
+  read under a mask or a moment, its `caveat` names which, so it never passes as the record.
+  `ServedDashboard` declares neither field, so a dashboard read of either is a type error.
   Run state is read at the head always: a moment replays the record, never a process.
 - **A campaign is always served.** A line course with no `CycleIndex` yet still lists its campaign,
   its state from `HierarchyState.of(run, None, …)`, its line stats absent and its `caveat` saying so —
@@ -240,9 +241,9 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
   selection) choosing between copies of one measurement. Parallel candidates carry no order mark — a
   round's arms walk concurrently, so any sequence among them is one the ledger interleaved; time order
   is a step's offset.
-- **A retired candidate stays on its course**, tagged `superseded` with the address of the course that
-  took its place (`hierarchy_subtree.py::_retired`, reading back only as far as the branch got), with no
-  crown and the verdict `retired`. The webapp keys every row on `address`.
+- **What a cut retires, and which copy an id answers to** — owned by
+  [`store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree; the webapp
+  renders the served `superseded` tag and verdict as they come and keys every row on `address`.
   <!-- probe: git grep -cE "nodeKeyOf|nodeAddress|ownerOfNodeAddress" -- webapp == 0 -->
 - **The sidebar draws campaign → course → candidate → inner campaign**, rounds flattened (they are the
   forest's columns), and a campaign with one course elides that course's row: a round row would add a
@@ -261,6 +262,12 @@ route argument, and a `facts` field no reader names is deleted (`scripts/complex
   chronology shape. **A served field has a reader or is not served**: no span carries offsets or a close
   time, no spawn its cut offset and no stat a raw amount, because a step's `facts.offset` is the
   moment a surface picks and every stat is worded on the server.
+- **Every level wears the whole envelope; a step's is empty.** `HierarchyStep` serves `lede`,
+  `caveat`, `tags`, `stats` and `children` as null and empty rather than leaving them off. That
+  is decided on the next change: a renamed envelope field is one edit to `_HierarchyEntry` and its
+  readers, never one per level; a new level declares only its `facts`; and a reader walks any
+  entry without asking which level it holds. Per-level optional fields would put each of those
+  decisions on every level.
   <!-- probe: git grep -cE "class (RayItem|RayResponse)\b" -- promptpotter == 0 -->
 
 ## The two blocking gates

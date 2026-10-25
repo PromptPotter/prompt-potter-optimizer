@@ -1,11 +1,11 @@
 import type { Budget, KindSpend, MeteredSpend } from "@/lib/api/types";
+import type { ServedDashboard } from "@/lib/api";
 import {
   CEILING_METER_LABELS,
   RATE_PRICED_LABEL,
   SPEND_KINDS,
   type SpendKind,
 } from "@/lib/api/types.generated";
-import type { DashboardSnapshot } from "@/lib/poll";
 import { fmtPct0, fmtTokens, fmtUsd } from "@/lib/format";
 
 export interface SpendLine {
@@ -94,7 +94,7 @@ export function budgetAxis(budget: Budget, axis: keyof Budget): number | null {
   return value === undefined ? null : value;
 }
 
-export function readSpend(dash: DashboardSnapshot | null): SpendView {
+export function readSpend(dash: ServedDashboard | null): SpendView {
   const metered = dash?.spend_metered ?? null;
   const budget = dash?.run_limits.budget;
   const share = dash?.allotment ?? null;
@@ -116,7 +116,7 @@ export interface RoundCost {
 }
 
 // Served in round order, and an object's integer keys enumerate ascending besides.
-export function roundCosts(dash: DashboardSnapshot | null): RoundCost[] {
+export function roundCosts(dash: ServedDashboard | null): RoundCost[] {
   const by = dash?.spend_metered_by_round;
   if (!by) return [];
   const out: RoundCost[] = [];

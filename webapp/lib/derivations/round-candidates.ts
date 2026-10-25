@@ -1,4 +1,5 @@
-import { liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
+import { liveCandidates, roundOf } from "@/lib/poll";
+import type { ServedDashboard } from "@/lib/api";
 import type { ArmReading } from "@/lib/api/types";
 import type { ArmRow, RoundCandidates, RoundView } from "@/lib/types";
 
@@ -6,7 +7,7 @@ export function scoreboardReading(doc: RoundView | null, key: string): ArmReadin
   return doc?.scoreboard.find((r) => r.reading.arm.key === key)?.reading ?? null;
 }
 
-export function roundCandidates(dash: DashboardSnapshot | null): ArmRow[] {
+export function roundCandidates(dash: ServedDashboard | null): ArmRow[] {
   const out: ArmRow[] = [];
 
   for (const r of dash?.rounds ?? []) {
@@ -27,7 +28,7 @@ export function roundCandidates(dash: DashboardSnapshot | null): ArmRow[] {
 }
 
 // The first row the arm stands on: the round it was first walked in.
-export function rowAt(dash: DashboardSnapshot | null, key: string): ArmRow | null {
+export function rowAt(dash: ServedDashboard | null, key: string): ArmRow | null {
   return roundCandidates(dash).find(({ reading }) => reading.arm.key === key) ?? null;
 }
 

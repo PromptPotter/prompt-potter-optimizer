@@ -5,8 +5,6 @@ import type { ActivityItem, HierarchyStep, ProducerReading } from "@/lib/api/typ
 import type { RunPhase, RunStatus } from "@/lib/api/types.generated";
 import { hierarchyStep, producerReading as producer } from "@/lib/test-fixtures";
 
-type ProducerState = ProducerReading["state"];
-
 const ROOT = "camp::cycle_root";
 const INNER = "camp::cycle_root~inner::cycle_in";
 
@@ -125,32 +123,27 @@ describe("rayHead", () => {
     expect(rayHead(raySteps(items, ROOT), items, null, ROOT, null)).toBeNull();
   });
 
-  const RUNNING_HEAD: Record<ProducerState, [boolean, string]> = {
-    live: [false, "Round 2"],
-    idle: [false, "no recent step"],
-    held: [false, "no recent step"],
-    silent: [false, "no recent step"],
-    absent: [false, "no recent step"],
-    claimed: [false, "no recent step"],
-    wedged: [true, "no progress recorded"],
-  };
-
-  it.each(Object.entries(RUNNING_HEAD) as [ProducerState, [boolean, string]][])(
-    "reads the head of a running cycle under a %s producer",
-    (state, [wedged, detail]) => {
-      const read = head([round(0, 1, 0), round(30, 2, 1)], "running", producer(state));
-      expect([read.wedged, read.detail]).toEqual([wedged, detail]);
-    },
-  );
+  it("names the newest step only while the served producer is stepping", () => {
+    const items = [round(0, 1, 0), round(30, 2, 1)];
+    const stepping = head(items, "running", producer({ state: "live", stepping: true }));
+    expect([stepping.wedged, stepping.detail]).toEqual([false, "Round 2"]);
+    const quiet = head(items, "running", producer({ state: "idle" }));
+    expect([quiet.wedged, quiet.detail]).toEqual([false, "no recent step"]);
+  });
 
   it("reads wedged off the served reading, in the server's own sentence", () => {
     const stalled = "no progress for 6m";
-    const read = head([round(0, 1, 0)], "running", producer("wedged", { stalled }));
+    const read = head([round(0, 1, 0)], "running", producer({ state: "wedged", label: "Wedged", stalled }));
     expect([read.wedged, read.label, read.detail]).toEqual([true, "Wedged", stalled]);
   });
 
   it("heads an open cell with the producer's served word and its served clock", () => {
-    const measuring = producer("idle", { label: "served measuring", silent_for_s: 400, open_for_s: 261 });
+    const measuring = producer({
+      state: "idle",
+      label: "served measuring",
+      silent_for_s: 400,
+      open_for_s: 261,
+    });
     const read = head([round(0, 1, 0)], "running", measuring, RUNNING, "C1.1 · sample 12");
     expect(read.label).toBe("served measuring");
     expect(read.detail).toBe("C1.1 · sample 12 · open 4m");
@@ -158,7 +151,7 @@ describe("rayHead", () => {
 
   it("reads waiting-on-a-child when the root opened a call and the newest event is below", () => {
     const start = item({ ts: at(10), offset: 1, activity: read({ kind: "running" }) });
-    const waiting = producer("live", { label_on_child: "served waiting" });
+    const waiting = producer({ state: "live", label_on_child: "served waiting" });
     const got = head([round(0, 1, 0), start, innerRound(20, 1, 0)], "running", waiting);
     expect([got.label, got.tone]).toEqual(["served waiting", "quiet"]);
     expect(got.target?.[got.target.length - 1]?.cycleId).toBe("cycle_in");
@@ -168,22 +161,27 @@ describe("rayHead", () => {
     const start = item({ ts: at(10), offset: 1, activity: read({ kind: "running" }) });
     const done = item({ ts: at(15), offset: 2, activity: read({ kind: "done" }) });
     const items = [round(0, 1, 0), start, done, innerRound(20, 1, 0)];
-    expect(head(items, "running", producer("live")).label).toBe("Running");
+    const live = producer({ state: "live", label: "Running" });
+    expect(head(items, "running", live).label).toBe("Running");
   });
 
   it("defers to the server for every state the server owns", () => {
     const items = [round(0, 1, 0)];
     expect(
-      head(items, "terminal", producer("absent"), { label: "served ending", mark: "failed" }),
+      head(items, "terminal", producer(), { label: "served ending", mark: "failed" }),
     ).toMatchObject({ label: "served ending", tone: "danger" });
     expect(
-      head(items, "terminal", producer("absent"), { label: "served ending", mark: "success" }).tone,
+      head(items, "terminal", producer(), { label: "served ending", mark: "success" }).tone,
     ).toBe("success");
     expect(
-      head(items, "gate", producer("held"), { label: "served gate", mark: "gate" }),
+      head(items, "gate", producer({ state: "held", attached: true }), {
+        label: "served gate",
+        mark: "gate",
+      }),
     ).toMatchObject({ label: "served gate", tone: "attention" });
-    expect(head(items, "paused", producer("absent")).detail).toBe("resumable");
-    expect(head(items, "paused", producer("live")).detail).toBe("stopping at its next checkpoint");
+    expect(head(items, "paused", producer()).detail).toBe("resumable");
+    const attached = producer({ state: "live", attached: true });
+    expect(head(items, "paused", attached).detail).toBe("stopping at its next checkpoint");
   });
 });
 

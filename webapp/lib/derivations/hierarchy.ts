@@ -1,4 +1,4 @@
-import type { HierarchyCampaign, HierarchyCourse, HierarchyEntry } from "@/lib/api";
+import type { HierarchyCampaign, HierarchyCourse, HierarchyEntry, HierarchyTag } from "@/lib/api";
 import { decodeCyclePath } from "@/lib/ids";
 import { dockPriority } from "@/lib/run-phase";
 
@@ -37,4 +37,20 @@ export function runningCourses(entries: readonly HierarchyCampaign[]): Hierarchy
     .flatMap(coursesOf)
     .filter((c) => c.state.producer.attached)
     .sort((a, b) => dockPriority(a.state.run_phase) - dockPriority(b.state.run_phase));
+}
+
+interface Tagged {
+  tags: readonly HierarchyTag[];
+}
+
+export function hasTag(entry: Tagged | null, kind: HierarchyTag["kind"]): boolean {
+  return entry?.tags.some((t) => t.kind === kind) ?? false;
+}
+
+export function tagValue(entry: Tagged | null, kind: HierarchyTag["kind"]): string | null {
+  return entry?.tags.find((t) => t.kind === kind)?.value ?? null;
+}
+
+export function tagLabel(entry: Tagged | null, kind: HierarchyTag["kind"]): string | null {
+  return entry?.tags.find((t) => t.kind === kind)?.label ?? null;
 }

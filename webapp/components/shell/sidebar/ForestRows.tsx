@@ -2,16 +2,18 @@
 
 import { type ReactNode, useMemo } from "react";
 import { cx } from "@/lib/cx";
-import { hasTag, tagLabel, tagValue } from "@/lib/hierarchy";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import {
   childNodes,
   coursesOf,
   groupByRoot,
+  hasTag,
   panelCellLabel,
-  splitRetired,
   type RetiredGroup,
   type RootGroup,
+  splitRetired,
+  tagLabel,
+  tagValue,
 } from "@/lib/derivations";
 import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
 import type { HierarchyCampaign, HierarchyCandidate, HierarchyCourse } from "@/lib/api";

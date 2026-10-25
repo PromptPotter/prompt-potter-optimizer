@@ -14,10 +14,9 @@ import type {
   HierarchyRound,
   HierarchyState,
   HierarchyStep,
+  HierarchyStat,
   HierarchyTag,
-  LifetimeSpend,
   LiveCandidate,
-  MeteredSpend,
   Measured,
   NodePrompt,
   OverlapReading,
@@ -31,17 +30,24 @@ import type {
   StepFacts,
 } from "@/lib/api/types";
 
+// The envelope every level wears, empty; each builder lays its level's own fields over it.
+function envelope(): {
+  lede: null;
+  caveat: null;
+  tags: HierarchyTag[];
+  stats: HierarchyStat[];
+  children: never[];
+} {
+  return { lede: null, caveat: null, tags: [], stats: [], children: [] };
+}
+
 // A step as served: its address and label are the server's, minted from its course and facts.
 export function hierarchyStep(parent: string, facts: StepFacts): HierarchyStep {
   return {
+    ...envelope(),
     address: `${parent}/@${facts.offset}`,
     parent,
     label: facts.activity.label,
-    lede: null,
-    caveat: null,
-    tags: [],
-    stats: [],
-    children: [],
     level: "step",
     facts,
   };
@@ -124,11 +130,10 @@ export function runStanding(
   const origin = { round: 0, label: "C0", key: "c0" };
   return {
     rounds_without_advance: 0,
-    stalls_left: null,
-    stalls_left_cap: null,
     lives: null,
     selection: round === 0 ? origin : { round, label, key: label },
     parent: round === 0 ? null : origin,
+    changes: "",
     vs_origin: {
       ...unreadOverlap().lead,
       state: round === 0 ? "same_individual" : "not_held",
@@ -136,37 +141,25 @@ export function runStanding(
     rounds_closed: round,
     improved: 0,
     advanced: 0,
-    selection_line: `${round === 0 ? "C0" : label} (round ${round}) — served wording`,
     ...over,
   };
 }
 
-// Mirrors what the server derives from `state` (`ProducerReading.of`).
-export function producerReading(
-  state: ProducerReading["state"],
-  served: Partial<Omit<ProducerReading, "state">> = {},
-): ProducerReading {
+// No producer, every reading off: a test sets the served fields its case reads, never derives them.
+export function producerReading(over: Partial<ProducerReading> = {}): ProducerReading {
   return {
-    state,
-    label: state === "wedged" ? "Wedged" : state === "claimed" ? "Starting" : "Running",
-    label_on_child: "Waiting",
-    stepping: state === "live",
-    stalled: state === "wedged" ? "no progress recorded" : "",
-    alert:
-      state === "wedged"
-        ? { title: "Run wedged", detail: "heartbeats only" }
-        : state === "silent"
-          ? {
-              title: "Run went silent",
-              detail: "its producer is gone — Start relaunches from the last closed round",
-            }
-          : null,
-    attached: state !== "silent" && state !== "absent",
-    appending: state === "live" || state === "idle" || state === "wedged",
+    state: "absent",
+    label: "",
+    label_on_child: "",
+    stepping: false,
+    stalled: "",
+    alert: null,
+    attached: false,
+    appending: false,
     silent_for_s: null,
     open_for_s: null,
     call_holds: false,
-    ...served,
+    ...over,
   };
 }
 
@@ -228,14 +221,10 @@ export function hierarchyCandidate(
     facts.reading ?? armReading({ arm: { round, label, key }, election: { held: true } });
   const { arm } = reading;
   return {
+    ...envelope(),
     address: `${course}/r${arm.round}/${arm.key}`,
     parent: `${course}/r${arm.round}`,
     label: arm.label,
-    lede: null,
-    caveat: null,
-    tags: [],
-    stats: [],
-    children: [],
     level: "candidate",
     ...over,
     facts: {
@@ -271,13 +260,10 @@ export function roundsOf(
   return [...byRound]
     .sort(([x], [y]) => x - y)
     .map(([round, children]) => ({
+      ...envelope(),
       address: `${course}/r${round}`,
       parent: course,
       label: `Round ${round}`,
-      lede: null,
-      caveat: null,
-      tags: [],
-      stats: [],
       children,
       level: "round",
       facts: { round, elects_on: "ability", reference: null },
@@ -288,38 +274,6 @@ export function supersededTag(branch: string): HierarchyTag {
   return { kind: "superseded", value: branch, label: "retired" };
 }
 
-export function meteredSpend(over: Partial<MeteredSpend> = {}): MeteredSpend {
-  return {
-    meter: "bill",
-    metered_usd: 0,
-    metered_tokens: 0,
-    billed_usd: 0,
-    rate_priced_usd: 0,
-    calls_rate_priced: false,
-    rate_known: true,
-    bill_is_floor: false,
-    metered_is_bill: true,
-    incurred_usd: 0,
-    billed_tokens: 0,
-    unpriced_tokens: 0,
-    kinds: {},
-    replay_share: null,
-    ...over,
-  };
-}
-
-export function lifetimeSpend(over: Partial<LifetimeSpend> = {}): LifetimeSpend {
-  return {
-    billed_usd: 0,
-    rate_priced_usd: 0,
-    calls_rate_priced: false,
-    bill_is_floor: false,
-    unpriced_tokens: 0,
-    sends_unreported: false,
-    unreported_usd: 0,
-    ...over,
-  };
-}
 
 export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchyState {
   return {
@@ -347,15 +301,12 @@ export function hierarchyCourse(
   facts: Partial<CourseFacts> = {},
 ): HierarchyCourse {
   return {
+    ...envelope(),
     parent: null,
     label: over.address,
-    lede: null,
-    caveat: null,
     tags: courseTags(facts.mint ?? "root"),
     state: hierarchyState(),
-    stats: [],
     span: { opened_at: "", last_at: "" },
-    children: [],
     level: "course",
     facts: {
       mint: "root",
@@ -377,22 +328,26 @@ export function hierarchyCampaign(
 ): HierarchyCampaign {
   const root = `${over.address}::cycle_root`;
   return {
+    ...envelope(),
     parent: null,
     label: over.address,
-    lede: null,
-    caveat: null,
-    tags: [],
     state: hierarchyState(),
-    stats: [],
     span: { opened_at: "", last_at: "" },
-    children: [],
     level: "campaign",
     facts: {
       label: null,
       root,
       line: root,
       lifecycle: "active",
-      spend_lifetime: lifetimeSpend(),
+      spend_lifetime: {
+        billed_usd: 0,
+        rate_priced_usd: 0,
+        calls_rate_priced: false,
+        bill_is_floor: false,
+        unpriced_tokens: 0,
+        sends_unreported: false,
+        unreported_usd: 0,
+      },
       runs_with: null,
       deletable_stubs: null,
     },
@@ -524,7 +479,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     lookahead_unavailable: "",
     lookahead_explained: "",
     waiting_on: null,
-    producer: producerReading("absent"),
+    producer: producerReading(),
     run_admission: {
       offers: "pause",
       refusal: "",

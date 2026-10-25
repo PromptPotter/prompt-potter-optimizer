@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ServedDashboard } from "@/lib/api";
 import {
   candidateObserveConfig,
   liveCandidateObserveConfig,
@@ -9,7 +10,6 @@ import {
   type ObserveSelection,
   type ObserveSubject,
 } from "../searchPoint";
-import type { DashboardSnapshot } from "@/lib/poll";
 import type { ArmName, LiveCandidate, ServedRound } from "@/lib/api/types";
 import {
   armReading,
@@ -39,7 +39,7 @@ const live = (
 // One prompt node's instruction, as `OptSearchPoint.prompts` serves it.
 const p = (instruction: string, node = "llm_only") => ({ [node]: { fields: { instruction }, shots: [] } });
 
-const liveDash = (candidates: (Partial<LiveCandidate> & { label: string })[]): DashboardSnapshot =>
+const liveDash = (candidates: (Partial<LiveCandidate> & { label: string })[]): ServedDashboard =>
   dash({
     current_round: currentRound({
       round: 1,
@@ -183,7 +183,7 @@ const NO_PICK: ObserveSelection = { candidate: null, round: null, observe: null 
 const asked = (observe: ObserveSelection["observe"]): ObserveSelection => ({ ...NO_PICK, observe });
 
 describe("resolveObserveSubject — best", () => {
-  const best = (snap: DashboardSnapshot | null) => resolveObserveSubject(snap, false, asked("best"));
+  const best = (snap: ServedDashboard | null) => resolveObserveSubject(snap, false, asked("best"));
 
   it("takes the served winner, not the newest crown it could find itself", () => {
     const s = best(
@@ -317,7 +317,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
   });
 
   it("selected: a closed pick and an in-flight pick both find their row", () => {
-    const pick = (snap: DashboardSnapshot, live: boolean, round: number, arm: string, label: string) =>
+    const pick = (snap: ServedDashboard, live: boolean, round: number, arm: string, label: string) =>
       resolveObserveSubject(snap, live, { candidate: { round, arm, label }, round, observe: null });
     const past = pick(closed, false, 1, "r1c0", "C1.1");
     expect(past.state).toBe("selected");

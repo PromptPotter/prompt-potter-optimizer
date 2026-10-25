@@ -5,9 +5,8 @@ import type { DisplayMetric } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, pathOfAddress, shortFamilyTail } from "@/lib/ids";
-import { fmtPaired } from "@/lib/derivations";
+import { fmtPaired, tagValue } from "@/lib/derivations";
 import type { CourseKind, CourseSpawn, HierarchyCampaign, HierarchyCourse } from "@/lib/api";
-import { tagValue } from "@/lib/hierarchy";
 import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
   DIRECTION_GLYPH,

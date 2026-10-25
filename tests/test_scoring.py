@@ -2632,7 +2632,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             ]
             set_line(cycle, line)
             standing = RunStanding.after(line, lives=lives.bank)
-            return standing.stalls_left, standing_tripped(cycle, standing)
+            return stalls_left(line, lives.bank), standing_tripped(cycle, standing)
 
         held, promoted, uncompared = (False, 2), (True, 2), (False, 0)
         assert stop_after(held) == (1, None)

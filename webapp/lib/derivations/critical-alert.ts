@@ -1,5 +1,6 @@
 import type { MachineNotice } from "@/lib/api/types";
-import type { DashboardSnapshot, StatusKind } from "@/lib/poll";
+import type { ServedDashboard } from "@/lib/api";
+import type { StatusKind } from "@/lib/poll";
 
 export interface CriticalAlert {
   severity: "critical" | "warn" | "info";
@@ -12,7 +13,7 @@ interface Args {
   bannerStatus: StatusKind;
   bannerText: string;
   bannerHint?: string;
-  dash: DashboardSnapshot | null;
+  dash: ServedDashboard | null;
   connectorDown?: boolean;
   connectorName?: string | null;
   connectorDetail?: string | null;

@@ -25,7 +25,7 @@ one origin, no hand-written loader. A registered benchmark skips all of it and u
    space deterministically. A pure checklist gate (no LLM) blocks mint until query +
    ground_truth + framing are all CONFIRMED and every active LLM node owns a model —
    no individual prompt field is gated (the optimizer evolves them).
-5. The origin lands as **round 0 / C0** in the lineage tree.
+5. The origin lands as **round 0 / C0** in the lineage forest.
 6. Select · modify · start. The optimizer picker chooses which optimizer proposes and its node
    knobs (`optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`). Mint writes the
    tenant dataset + campaign + cycle and runs from round 0.

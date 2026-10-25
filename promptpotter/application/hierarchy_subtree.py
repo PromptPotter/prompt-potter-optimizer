@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-from promptpotter.application.hierarchy import campaign_entry, lift_stat
+from promptpotter.application.hierarchy import campaign_entry, lift_stat, superseded_tag
 from promptpotter.application.mask.record import Lens
 from promptpotter.application.mask.tree_lens import lensed
 from promptpotter.domain.campaign import Campaign
@@ -421,13 +421,7 @@ class _Build:
         verdict = arm_verdict(reading, retired=retired)
         tags = [HierarchyTag(kind="verdict", value=verdict, label=ARM_VERDICT_LABELS[verdict])]
         if c.retired_by is not None:
-            tags.append(
-                HierarchyTag(
-                    kind="superseded",
-                    value=c.retired_by,
-                    label=f"retired → {c.retired_by.rpartition(UNIT_SEP)[2].rpartition('_')[2][:6]}",
-                )
-            )
+            tags.append(superseded_tag(c.retired_by))
         caveat = None if reading.ability is None else reading.ability.caveat
         lineage = c.arm.state.individual.lineage
         facts = CandidateFacts(

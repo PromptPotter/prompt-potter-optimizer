@@ -4,25 +4,30 @@ import { activeSeries, type SeriesCtx } from "./series";
 import { type PlotGeometry, geomEqual } from "./FitnessChart";
 import { setCandidatesState, useCandidatesState } from "@/lib/candidates-store";
 import { useCandidateBars } from "./useCandidateBars";
-import { measuringArm, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { measuringArm, useCycleStream } from "@/lib/poll";
 import { subjectKey, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
-import type { HierarchyCourse } from "@/lib/api";
-import { courseAt, type DisplayMetric } from "@/lib/derivations";
-import { pathOfAddress } from "@/lib/ids";
+import type { HierarchyCourse, ServedDashboard } from "@/lib/api";
+import {
+  candidatesAtPath,
+  courseAt,
+  type DisplayMetric,
+  type LineageIndex,
+} from "@/lib/derivations";
+import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { isSelectedCandidate, selectedCandidateOf } from "@/lib/types";
 import { useWorkspace } from "@/lib/workspace";
 import { useLineage } from "@/lib/hooks/useLineage";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
-import { useViewedLineage, divergenceRoundsFor } from "@/lib/lineage";
+import { useViewedLineage } from "@/lib/lineage";
 import type { CandidateBar } from "@/lib/types";
 import { roundOf } from "./dendrogram";
 
 export type CandidatesModel = ReturnType<typeof useCandidatesModel>;
 
-export function useCandidatesModel(dash: DashboardSnapshot) {
+export function useCandidatesModel(dash: ServedDashboard) {
   const { isLive } = useCycleStream();
   const unit = dash.measured_unit;
   const {
@@ -266,4 +271,20 @@ export function useCandidatesModel(dash: DashboardSnapshot) {
     compareDisabled: !compareKey || !campaignId,
     toggleCompare,
   };
+}
+
+// served: `divergence` rides the round's WINNER; `divergent` every candidate of a counterfactual round.
+function divergenceRoundsFor(
+  index: LineageIndex,
+  path: CyclePath | null,
+): { points: ReadonlySet<number>; subtree: ReadonlySet<number> } {
+  const points = new Set<number>();
+  const subtree = new Set<number>();
+  // Addressed, not scanned: inner cycle ids repeat across sandboxes.
+  for (const cand of candidatesAtPath(index, path)) {
+    const { round } = cand.facts.reading.arm;
+    if (cand.facts.divergence) points.add(round);
+    if (cand.facts.divergent) subtree.add(round);
+  }
+  return { points, subtree };
 }

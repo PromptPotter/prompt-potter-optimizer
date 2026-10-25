@@ -1,4 +1,5 @@
-import { liveCandidates, type DashboardSnapshot } from "@/lib/poll";
+import { liveCandidates } from "@/lib/poll";
+import type { ServedDashboard } from "@/lib/api";
 import type { ValidationFailure } from "@/lib/api/types";
 import type { RoundView } from "@/lib/types";
 
@@ -22,7 +23,7 @@ export function candidateVerdicts(doc: RoundView | null): Map<string, CandidateV
   return out;
 }
 
-export function liveCandidateVerdicts(dash: DashboardSnapshot | null): Map<string, CandidateVerdict> {
+export function liveCandidateVerdicts(dash: ServedDashboard | null): Map<string, CandidateVerdict> {
   return new Map(
     liveCandidates(dash).map((c) => [
       c.reading.arm.key,
