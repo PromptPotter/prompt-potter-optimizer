@@ -102,12 +102,13 @@ OUTER_SAMPLE_WALL_S_PER_ROUND = 600.0
 Overrides = dict[str, dict[str, Any]]
 
 
-def _spawn_provenance(round_num: int | None, query: str) -> dict[str, Any]:
+def _spawn_provenance(ctx: InnerSpawnContext, round_num: int | None, query: str) -> dict[str, Any]:
     cand = measured_pass()
     return {
         "round": round_num,
         "individual_id": cand.individual_id if cand else None,
-        "role": cand.role.value if cand else None,
+        "role": cand.role if cand else None,
+        "cycle_id": ctx.enclosing[-1].name if cand else None,
         "task": query,
     }
 
@@ -510,7 +511,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     cell = _resolve_inner_cell(sample, payload)
     minted: list[CycleHop] = []
     # Captured in the OUTER task: the inner task's context copy rebinds the round.
-    spawned_by = _spawn_provenance(current_round(), query)
+    spawned_by = _spawn_provenance(cell.ctx, current_round(), query)
 
     # Awaited DIRECTLY, never under `asyncio.shield`/`wait`, which orphan it to keep billing.
     # The context binds no OUTER candidate, or inner optimizer calls bill under the outer cell's role.

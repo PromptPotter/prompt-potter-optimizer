@@ -9,7 +9,6 @@ import type { CandidateBar } from "@/lib/types";
 import { fmtLevel } from "@/lib/format";
 import { tagValue } from "./hierarchy";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
-import { panelCellLabel } from "./inner-panel";
 import { readPaired } from "./paired-reading";
 import { childNodes, splitRetired } from "./lineage-candidates";
 
@@ -61,9 +60,7 @@ export function candidateBars({
       return {
         key,
         idx,
-        label: node.facts.task
-          ? panelCellLabel(node.facts.task)
-          : (tagValue(node, "dataset") ?? node.label),
+        label: node.facts.task ? node.label : (tagValue(node, "dataset") ?? node.label),
         node,
         reading: null,
       };

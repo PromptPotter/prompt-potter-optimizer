@@ -6,7 +6,7 @@ import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, pathOfAddress, shortFamilyTail } from "@/lib/ids";
 import { fmtPaired, tagValue } from "@/lib/derivations";
-import type { CourseKind, CourseSpawn, HierarchyCampaign, HierarchyCourse } from "@/lib/api";
+import type { CourseKind, CourseSpawn, HierarchyCourse, SubtreeCampaign } from "@/lib/api";
 import { DISPLAY_METRIC_LABELS, DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import {
   DIRECTION_GLYPH,
@@ -179,7 +179,7 @@ export function Forest({
   ctx,
   d,
 }: {
-  tree: HierarchyCampaign;
+  tree: SubtreeCampaign;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
   metric: DisplayMetric;
@@ -225,10 +225,7 @@ export function Forest({
   const height = TOP_PAD + totalLaneRows * LANE_H + 8;
   const width = d.leftPad + (maxCol + 1) * d.colW + d.rightPad;
 
-  const headerCols: number[] = [];
-  for (let c = 1; d.leftPad + c * d.colW <= width - d.rightPad + d.colW / 2; c += 1) {
-    headerCols.push(c);
-  }
+  const headerCols = Array.from({ length: maxCol }, (_, i) => i + 1);
 
   const laneList = [...laneByKey.values()];
   const bandTop = (l: LaneLayout): number => TOP_PAD + l.laneOffset * LANE_H - LANE_H / 2 + 2;

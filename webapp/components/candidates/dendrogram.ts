@@ -7,7 +7,7 @@ export const FIRST_ROW_Y = 16;
 export const ROW_H = 9;
 export const BOTTOM_PAD = 4;
 
-export interface DendroNode {
+interface DendroNode {
   key: string;
   address: string;
   round: number;
@@ -19,13 +19,13 @@ export interface DendroNode {
   y: number;
 }
 
-export interface DendroStub {
+interface DendroStub {
   xf: number;
   y1: number;
   y2: number;
 }
 
-export interface DendroBracket {
+interface DendroBracket {
   round: number;
   x1f: number;
   x2f: number;

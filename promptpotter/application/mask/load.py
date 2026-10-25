@@ -33,7 +33,7 @@ from promptpotter.domain.results import (
     is_electable,
     measured_cells,
 )
-from promptpotter.domain.run_records import ConfigOverrides, ResumeCheckpointRecord
+from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import (
     CellSheet,
     GradedCell,
@@ -41,8 +41,11 @@ from promptpotter.domain.scoring import (
     anchored_criterion_dials,
 )
 from promptpotter.infrastructure.ledger import ledger_chain
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    StandingRounds,
+    scan_standing_rounds,
+)
+from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.judges.registry import judge_instrument
@@ -77,8 +80,9 @@ def read_rows(sheet: CellSheet, scorer: Scorer) -> MaskReading | None:
     )
 
 
-def _cycle_edge(index: CycleIndex) -> tuple[str | None, int | None]:
-    return index.parent_cycle_id, None if index.fork is None else index.fork.from_round
+def _branch_round(index: CycleIndex) -> int | None:
+    """The parent round a fork's start was proposed in: its cut, or for one lifting none its arm's."""
+    return None if index.fork is None else index.cut_round or index.fork.from_candidate.round
 
 
 def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
@@ -96,12 +100,11 @@ def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
         lines.append(rounds)
     cycles: list[SpineCycle] = []
     for (cid, index, own), series in zip(edges, difficulty.level_series(lines), strict=True):
-        parent, from_round = _cycle_edge(index)
         cycles.append(
             SpineCycle(
                 cycle_id=cid,
-                parent_cycle_id=parent,
-                fork_from_round=from_round,
+                parent_cycle_id=index.parent_cycle_id,
+                cut_round=index.cut_round,
                 theta_by_round={
                     rnd: None if (level := series.level(rnd)) is None else level.theta
                     for rnd in series.rounds
@@ -181,45 +184,24 @@ def load_mask_record(
     if campaign is None:
         raise NotFoundError(f"Campaign '{campaign_id}' not found")
 
+    # Each cycle's WHOLE line off its chain: a lifted round is crowned where its parent ran it.
     files: dict[str, dict[int, RoundResult]] = {}
-    edges: dict[str, tuple[str | None, int | None]] = {}
-    crowns: dict[str, dict[int, ArmKey]] = {}
-    decisions: dict[str, dict[int, list[ResumeCheckpointRecord]]] = {}
+    indexes: dict[str, CycleIndex] = {}
+    lines: dict[str, StandingRounds] = {}
     for hop, index in stores.campaigns.campaign_cycles(campaign_id):
         cid = hop.cycle_id
-        cdir = cycle_dir_for(stores.base_dir, hop)
-        edges[cid] = _cycle_edge(index)
-        decisions[cid] = (
-            scan_standing_rounds(ledger_chain(CycleDir(cdir), moment=None)).decisions
-            if with_replay
-            else {}
+        indexes[cid] = index
+        lines[cid] = scan_standing_rounds(
+            ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None)
         )
-        # Off the cycle's OWN elections; a round a fork lifted is crowned where its parent ran it.
-        crowns[cid] = scan_standing_rounds([LedgerSpan(CycleLayout(cdir).ledger)]).crowns
         own = scorer_of(resolve_campaign_config(stores, campaign, hop), verifier_graded=False)
         files[cid] = {
             closed.round: closed for closed in closed_rounds(stores, hop, own, moment=None)
         }
 
-    # Parents before children, so a fork inherits its branch-point winner.
-    order: list[str] = []
-    seen: set[str] = set()
-
-    def _order(cid: str) -> None:
-        if cid in seen:
-            return
-        parent = edges.get(cid, (None, None))[0]
-        if parent in files and parent not in seen:
-            _order(parent)
-        seen.add(cid)
-        order.append(cid)
-
-    for cid in files:
-        _order(cid)
-
     formula = lens.body if lens is not None and lens.kind == "score" else None
     if lens is not None and lens.kind == "dials":
-        root = next((cid for cid in order if edges[cid][0] not in files), None)
+        root = next((cid for cid in files if indexes[cid].parent_cycle_id not in files), None)
         origin_file = files[root].get(0) if root is not None else None
         origin_rows = [
             cell for sheet in (origin_file.cells if origin_file else {}).values() for cell in sheet
@@ -230,14 +212,11 @@ def load_mask_record(
         )
     overrides = lens_overrides(formula)
 
-    # ROWS, never a reading: a fork grades its branch-point winner under the formula in effect HERE.
-    winner_at: dict[tuple[str, int], CellSheet | None] = {}
     cycles: list[MaskCycle] = []
-    for cid in order:
-        parent, from_round = edges.get(cid, (None, None))
+    for cid, index in indexes.items():
+        # ROWS, never a reading: a fork grades its line's winners under the formula in effect HERE.
         carried: CellSheet | None = None
-        if parent is not None and from_round is not None:
-            carried = winner_at.get((parent, from_round))
+        crowns = lines[cid].crowns
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
         scorer = scorer_of(
             apply_config_overrides(resolve_campaign_config(stores, campaign, hop), overrides),
@@ -254,7 +233,7 @@ def load_mask_record(
         rounds: list[MaskRound] = []
         for rn in sorted(files[cid]):
             round_file = files[cid][rn]
-            crowned = crowns.get(cid, {}).get(rn, "")
+            crowned = crowns.get(rn, "")
             candidates = [
                 _mask_candidate(key, arm, sheet, scorer, crowned)
                 for key, arm, sheet in _arm_rows(round_file, keys)
@@ -267,16 +246,18 @@ def load_mask_record(
                     candidates=candidates,
                     parent=None if parent_rows is None else read_rows(parent_rows, scorer),
                     round_data=round_file if with_replay else None,
-                    decisions=decisions.get(cid, {}).get(rn, []),
+                    decisions=lines[cid].decisions.get(rn, []) if with_replay else [],
                 )
             )
             won = round_file.rows(ArmKey(crowned)) if crowned else None
             if won:
                 carried = won
-            winner_at[(cid, rn)] = carried
         cycles.append(
             MaskCycle(
-                cycle_id=cid, parent_cycle_id=parent, fork_from_round=from_round, rounds=rounds
+                cycle_id=cid,
+                parent_cycle_id=index.parent_cycle_id,
+                branch_round=_branch_round(index),
+                rounds=rounds,
             )
         )
     return MaskRecord(cycles=cycles, criterion=formula)

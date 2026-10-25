@@ -1,6 +1,5 @@
 import type { APIRequestContext } from "@playwright/test";
-import type { HierarchyCourse, HierarchyEntry } from "@/lib/api";
-import { panelCellLabel } from "@/lib/derivations";
+import type { HierarchyCourse, SubtreeEntry } from "@/lib/api";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { test, expect, open, campaigns } from "../harness";
 
@@ -13,9 +12,9 @@ const hashOf = (path: CyclePath) =>
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // The name the tree row draws for a cell (`ForestRows`), so the walk clicks what the operator reads.
-const rowName = (c: HierarchyCourse) => panelCellLabel(c.facts.task ?? "");
+const rowName = (c: HierarchyCourse) => c.label;
 
-function cellsOf(n: HierarchyEntry, out: HierarchyCourse[] = []): HierarchyCourse[] {
+function cellsOf(n: SubtreeEntry, out: HierarchyCourse[] = []): HierarchyCourse[] {
   if (n.level === "course" && n.facts.task && pathOfAddress(n.address).length === 2) out.push(n);
   for (const c of n.children) cellsOf(c, out);
   return out;
@@ -26,7 +25,7 @@ async function outerServing(request: APIRequestContext): Promise<Found | null> {
   for (const c of await campaigns(request)) {
     const res = await request.get(`${API}/hierarchy/${encodeURIComponent(c.id)}`);
     if (!res.ok()) continue;
-    const cells = cellsOf((await res.json()) as HierarchyEntry);
+    const cells = cellsOf((await res.json()) as SubtreeEntry);
     // Two arms measure one task, so a name may draw several rows: any of them is a correct landing.
     const first = cells[0];
     if (first) {

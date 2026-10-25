@@ -20,7 +20,6 @@ from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.results import (
     ArmFit,
-    ArmSlot,
     Broken,
     Concluded,
     Cut,
@@ -110,6 +109,7 @@ def _origin_round(
             selected=key,
             leading=key,
             ended_on=key,
+            reference=None,
             electable=0,
             fit=fit,
             elects_on=elects_on,
@@ -374,14 +374,3 @@ class Cycle:
             self._sibling_failures = _sibling_runtime_failures(self.session)
         own = (rf for rr in self.rounds[1:] for rf in _cut_failures(rr))
         return _distinct([*self._sibling_failures, *own])
-
-    def first_slot(self, key: ArmKey) -> ArmSlot | None:
-        """Where *key* was first walked as an arm; ``None`` for one no round of this cycle walked."""
-        return next(
-            (
-                arm.slot
-                for rr in self.rounds
-                if (arm := rr.arms.get(key)) is not None and arm.slot is not None
-            ),
-            None,
-        )

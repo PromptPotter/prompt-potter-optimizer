@@ -5,7 +5,7 @@ import { barLevel, barStarted, type DisplayMetric } from "@/lib/derivations";
 import { fmtNum, fmtPct0, unitCount } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 
-export type SeriesKey =
+type SeriesKey =
   | "accuracy"
   | "ability"
   | "composite"

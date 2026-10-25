@@ -10,6 +10,7 @@ import {
   type HierarchyEntry,
 } from "@/lib/api";
 import { SummaryBlock } from "@/components/shell/SummaryBlock";
+import { entryAlone } from "@/lib/derivations";
 import { fmtAgo, fmtBytes, fmtDateTime, fmtValue } from "@/lib/format";
 
 // A knob moving several estimands is listed under each, so the path dedupes it.
@@ -98,7 +99,8 @@ function EntryBody({ entry }: { entry: HierarchyEntry }) {
       <SummaryBlock
         facts={entry}
         lede={entry.lede ? <p className="rowhover-lede">{entry.lede}</p> : null}
-        actions={<CopyButton title="Copy this entry as JSON" data={entry} />}
+        // The served entry alone, one shape whatever the card has opened: a program reads it.
+        actions={<CopyButton title="Copy this entry as JSON" data={entryAlone(entry)} />}
       />
       {entry.caveat && <div className="rowhover-caveat">{entry.caveat}</div>}
       <Facts facts={facts} />

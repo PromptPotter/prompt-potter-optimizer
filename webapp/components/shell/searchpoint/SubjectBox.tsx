@@ -1,4 +1,5 @@
 "use client";
+import { useViewedCourse } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useOrigin } from "@/lib/hooks/useOrigin";
@@ -26,6 +27,7 @@ export function SubjectBox() {
   const { point, reading } = subject;
   const shown = useSearchpointRead(point);
   const origin = useOrigin();
+  const standing = useViewedCourse()?.facts.standing ?? null;
 
   const cfg = shown.cfg;
   const evidence = useOriginEvidence(point);
@@ -59,8 +61,8 @@ export function SubjectBox() {
           title="Copy this searchpoint"
         />
       </div>
-      {subject.state === "best" && dash.run_standing ? (
-        <WinnerStanding standing={dash.run_standing} />
+      {subject.state === "best" && standing ? (
+        <WinnerStanding standing={standing} />
       ) : null}
       <RoundFacts reading={reading} />
       {cfg ? (

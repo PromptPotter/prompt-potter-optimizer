@@ -54,7 +54,7 @@ invariants:
                       accepted floor (it's the probe that decides anon vs authed).
   I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: the served
                       producer reading (domain/phases.py::ProducerReading — `producer.attached`
-                      on the dashboard, `state.producer.attached` on a /hierarchy course entry), derived with
+                      on the dashboard, `state.attached` on a /hierarchy course entry), derived with
                       run_phase. A paused cycle whose worker has exited is NOT attached —
                       counting it keeps the jobs dock lit and destroys its all-quiet signal — and
                       stays reachable as a sidebar row wearing its phase. detached means a dead
@@ -71,7 +71,7 @@ invariants:
                       scoring passes from the served machine-status (`mine`). A surface that RENDERS the
                       phase reads the served table TOTAL over RunPhase (`RUN_PHASE_INFO`, generated
                       from `domain/phases.py`), and the verb it offers is the served
-                      `run_admission` the dispatcher refuses on:
+                      `admission` the dispatcher refuses on:
                       testing `=== "running"` renders half the vocabulary as nothing, so
                       a gate-held run — blocked on the operator, first in that ordering — reads as
                       an idle sidebar row. `isLive` (poll.tsx) is NOT this answer and never
@@ -172,102 +172,60 @@ invariants:
 
 **Every surface that lists, switches, docks or heads a run renders ONE served entry shape** —
 `domain/hierarchy.py::HierarchyEntry`, minted by `application/hierarchy.py` alone and read by
-`GET /hierarchy` (the webapp's `lib/registry.tsx`, the `cycles` verb). An envelope every level
-shares (`address`, `parent`, `label`, `lede`, `caveat`, `tags`, `stats`, `children`)
-plus `facts` per level, discriminated on `level`. A generic row, hover card, switcher entry or dock chip
-reads the envelope and never opens `facts`; `facts` are typed inputs for a level-specific pane or a
-route argument, and a `facts` field no reader names is deleted (`scripts/complexity_ledger.py::BASELINE`
-`p_served` is the ratchet). The address grammar is
+`GET /hierarchy` (the webapp's `lib/registry.tsx`, the `cycles` verb), discriminated on `level`.
+A level a row or a card renders — campaign, course, candidate — wears the envelope (`label`,
+`lede`, `caveat`, `tags`, `stats`); a round and a step are nodes (`address`, `parent`, `facts`),
+since an envelope nothing renders is an empty field on every poll and every generated type. A
+level that gains a row moves under `_HierarchyEntry`. A generic row, hover card, switcher entry or
+dock chip reads the envelope and never opens `facts`, and a `facts` field no reader names is
+deleted (`scripts/complexity_ledger.py::BASELINE` `p_served` is the ratchet). The address grammar is
 [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § The hierarchy address.
 
-- **Tags and stats are the rendering, worded on the server, in served order.** The θ clause on an
-  accuracy stat, the "≥" on a floored bill and the "of 10" on a rounds count are worded at one site each.
+- **Tags and stats are the rendering, worded on the server, in served order**, each clause at one
+  site; `stats[0]` is the row's headline. Grouping, filtering on a tag and formatting a time are
+  layout; wording a number, ordering stats or deriving a state survives nowhere in
+  `webapp/lib/derivations`.
   <!-- probe: git grep -cE "rounds are won on" -- promptpotter/application/hierarchy.py == 1 -->
-  `stats[0]` is the row's headline. Grouping served rows, filtering on a served tag and formatting a
-  served time are layout; wording a number, ordering stats or deriving a state is not, and none
-  survives in `webapp/lib/derivations` for an entry.
   <!-- probe: git grep -cE "buildForest|RunGroup|OriginGroup|campaignCard|courseStats|unitDisplayName|campaignLineParts" -- webapp == 0 -->
-- **A tag is asked through one module**, `hasTag` / `tagValue` / `tagLabel(entry, kind)`
-  (`webapp/lib/derivations/hierarchy.ts`), and a bool served beside a tag is the duplicate this forbids. **One
-  declared exception, `mint`**: code branches on a course's kind exhaustively, a tag's value is an
-  untyped string, so the course builder mints the kind once and serves it twice — typed as
-  `facts.mint`, worded as the tag. Code reads the fact; the tag is worn.
+- **One declared tag exception, `mint`**: code branches on a course's kind exhaustively and a tag's
+  value is an untyped string, so the kind is served twice — typed as `facts.mint`, worded as the tag.
   <!-- probe: git grep -cE "tagValue\(.*mint" -- webapp == 0 -->
-- **One run-state derivation.** `HierarchyState.of` packages `derive_run_state` for a served entry,
-  once per course and once more for a line course with no mint record.
+- **One run-state derivation.** `HierarchyState.of` packages `derive_run_state`, once per course and
+  once for a line course with no mint record; a campaign's `state` IS its line course's.
+  `RunStatus.of`'s other caller is `evidence/head_to_head.py`, whose subject is an arm.
   <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpotter == 2 -->
-  A campaign's `state` IS its line course's (`CampaignStore.line_holder`), so the two cannot disagree.
-  `RunStatus.of` has two callers: that one, and `evidence/head_to_head.py`, whose subject is an arm.
   <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 2 -->
-- **A run's word is the course's; the dashboard read is run CONTROL.** The state word and the next
-  step (`HierarchyState.status` / `next_step`) ride the course entry alone, worded with the campaign's
-  lifecycle, and the masthead, `OptimizerCard`, the time ray's head and the chat's frozen `run` item read
-  them off `lib/lineage.tsx::useViewedCourse`. The state is built off the HEAD index under any
-  moment, so it is one value under every mask and moment, and the hook keeps the last landing's
-  across a re-key rather than blanking. The dashboard keeps what control acts on and what
-  only the head measures: `run_phase` (its 2 s poll invalidates every slower read on a change),
-  `run_admission` and `pause` (a verb's admission moves with the producer, not only the phase), the
-  clocked `producer`, spend metering, limits and the walk. `run_standing` and `bench_score` stay too —
-  banked in `dashboard.json`, and the course's `standing` is served under the request's lens. The chat's
-  `run` item IS the course entry, frozen whole on its own detach and worded by nothing in the browser;
-  read under a mask or a moment, its `caveat` names which, so it never passes as the record.
-  `ServedDashboard` declares neither field, so a dashboard read of either is a type error.
-  Run state is read at the head always: a moment replays the record, never a process.
-- **A campaign is always served.** A line course with no `CycleIndex` yet still lists its campaign,
-  its state from `HierarchyState.of(run, None, …)`, its line stats absent and its `caveat` saying so —
-  dropping it would be a campaign the operator owns and no listing shows, with nothing raised.
-- **The producer is served without its clocks** (`HierarchyProducer`). The listing answers 304 on
-  a version that moves on writes and on the producer's beat edge, so a seconds count would freeze
-  at the last 200; durations stay on the dashboard read, which polls the viewed cycle.
-- **One poll.** The registry is one `hierarchyRead()` over every lifecycle; the sidebar's filter is
-  layout over `facts.lifecycle`, so an address resolves whatever the filter lists.
+- **A run's word is the course's; the dashboard read is run CONTROL.** `status` and `next_step`
+  ride the course entry alone (`lib/lineage.tsx::useViewedCourse`), built off the HEAD index under
+  any moment or mask, so they are one value everywhere. `ServedDashboard` declares neither; it keeps
+  what control acts on and only the head measures — `run_phase`, `admission`, `pause`, the clocked
+  producer, spend, limits, the walk. Read under a lens, a sample set or a moment, every course
+  carries a `caveat` naming which (`hierarchy_subtree.py::_read_under`). The listing serves
+  `attached` and no clock: it answers 304 between writes, so a seconds count would freeze.
+- **A campaign is always served**: one whose line course has no `CycleIndex` yet lists with its
+  `caveat` saying so, never dropped.
+- **One poll**, over every lifecycle; the sidebar's filter is layout over `facts.lifecycle`.
   <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/registry.tsx == 1 -->
-- **The genealogy is the same entry, read deep.** `GET /hierarchy/{address}?lens=&samples=&at=&at_cycle=`
-  (`application/hierarchy_subtree.py::hierarchy_subtree`) serves the subtree at any address: a
-  course's children are its rounds, a round's its candidates in `ArmSlot` order, a candidate's the
-  inner campaigns it spawned, bounded at `lineage_queries.py::MAX_COURSE_DEPTH`. There is no second
-  genealogy route and no client fold.
+- **The genealogy is the same entry, read deep** — `GET /hierarchy/{address}?lens=&samples=&at=&at_cycle=`,
+  bounded at `lineage_queries.py::MAX_COURSE_DEPTH`; no second genealogy route, no client fold. How a
+  fork, a cut and a retained individual are drawn — owned by
+  [`store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree; the webapp
+  renders the served tags and keys every row on `address`.
   <!-- probe: git grep -cE "\}/tree" -- promptpotter/presentation == 0 -->
   <!-- probe: git grep -cE "def (build_lineage_tree|family_course_entries|lensed_tree|_fold_contributions)\(" -- promptpotter == 0 -->
-- **A fork is DRAWN at its spawn, never folded.** Every course serves its own rounds and candidates
-  under the labels its own counter minted; the forest hangs a fork's lane at `spawn.from_candidate`.
-  Folding was the one place the server rewrote another course's identity — labels renumbered, a replayed
-  C0 dropped, runs grafted — so a fork's replayed C0 is an honest candidate of its own lane: it measured
-  the origin individual again.
   <!-- probe: git grep -cE "class (ArmNode|CourseLineage|ForkStamp)\b" -- promptpotter == 0 -->
-- **A retained individual is a REFERENCE, never re-listed.** A round names the candidate it measures
-  against by `RoundFacts.reference`, in its course or up the spawn chain. One individual, one row per
-  round that PROPOSED it: a re-listed copy would leave every pointer (`answers_for_id`, `main_line`, a
-  selection) choosing between copies of one measurement. Parallel candidates carry no order mark — a
-  round's arms walk concurrently, so any sequence among them is one the ledger interleaved; time order
-  is a step's offset.
-- **What a cut retires, and which copy an id answers to** — owned by
-  [`store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The lineage tree; the webapp
-  renders the served `superseded` tag and verdict as they come and keys every row on `address`.
   <!-- probe: git grep -cE "nodeKeyOf|nodeAddress|ownerOfNodeAddress" -- webapp == 0 -->
-- **The sidebar draws campaign → course → candidate → inner campaign**, rounds flattened (they are the
-  forest's columns), and a campaign with one course elides that course's row: a round row would add a
-  click per round to reach every candidate.
-- **`deletable_stubs` is counted on the subtree read alone** and null in the listing:
-  `CampaignStore.deletable_stubs` scans every sibling's ledger, the cost the 10 s listing poll must not
-  pay. Null says "not counted at this depth", never zero.
-- **A course's chronology is its STEPS, served in a window and never as `children`.**
-  `GET /hierarchy/{course}/@?limit=&before=` (`HierarchySteps`, built by
-  `family_ray_queries.py::build_family_ray`) merges the course, its forks and its inner runs by time,
-  newest-first windows served oldest-first, paged back by `cursor_prev`. A course's `children` stay its
-  rounds: thousands of records would ride every subtree poll. A step's `parent` is its own course, not
-  a round, because one ledger interleaves a round's walk with its neighbours' open and close. A bare
-  heartbeat is no step and takes no slot of a window — it is the gap it shortens, which the next
-  step's `gap_before_s` carries — so a long open call never serves an empty window. There is no second
-  chronology shape. **A served field has a reader or is not served**: no span carries offsets or a close
-  time, no spawn its cut offset and no stat a raw amount, because a step's `facts.offset` is the
-  moment a surface picks and every stat is worded on the server.
-- **Every level wears the whole envelope; a step's is empty.** `HierarchyStep` serves `lede`,
-  `caveat`, `tags`, `stats` and `children` as null and empty rather than leaving them off. That
-  is decided on the next change: a renamed envelope field is one edit to `_HierarchyEntry` and its
-  readers, never one per level; a new level declares only its `facts`; and a reader walks any
-  entry without asking which level it holds. Per-level optional fields would put each of those
-  decisions on every level.
+- **The sidebar draws campaign → course → candidate → inner campaign**, rounds flattened into the
+  forest's columns, and a campaign with one course elides that course's row.
+- **What only the subtree reads is a subtree TYPE, never a null in the listing** —
+  `SubtreeCampaign` / `SubtreeCourse` carry what the 10 s poll must not pay for
+  (`CampaignStore.deletable_stubs` scans every sibling's ledger); a listing null would read as "none".
+  <!-- probe: git grep -cE "deletable_stubs" -- promptpotter/application/hierarchy.py == 0 -->
+- **A course's chronology is its STEPS, in a window and never as `children`** —
+  `GET /hierarchy/{course}/@?limit=&before=` (`family_ray_queries.py::build_family_ray`), its forks and
+  inner runs merged by time and paged back by `cursor_prev`. A step's `parent` is its course, since one
+  ledger interleaves neighbouring rounds; a bare heartbeat is no step but the gap the next one's
+  `gap_before_s` carries, so a long open call never serves an empty window.
   <!-- probe: git grep -cE "class (RayItem|RayResponse)\b" -- promptpotter == 0 -->
 
 ## The two blocking gates

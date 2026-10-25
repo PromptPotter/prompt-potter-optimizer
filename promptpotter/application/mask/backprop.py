@@ -29,7 +29,7 @@ class NodeStats:
 
 
 def _canonical_rounds(cycle: SpineCycle) -> list[int]:
-    cut = cycle.fork_from_round
+    cut = cycle.cut_round
     rounds = sorted(cycle.theta_by_round)
     if cycle.parent_cycle_id is None or cut is None:
         return rounds
@@ -39,7 +39,7 @@ def _canonical_rounds(cycle: SpineCycle) -> list[int]:
 def _parent_of(cycle: SpineCycle, rnd: int, first_round: int) -> NodeKey | None:
     if rnd > first_round:
         return (cycle.cycle_id, rnd - 1)
-    cut = cycle.fork_from_round
+    cut = cycle.cut_round
     if cycle.parent_cycle_id is None or cut is None or cut <= 0:
         return None  # a root, or a fork-at-offset-0 sibling: nothing above it
     return (cycle.parent_cycle_id, cut - 1)

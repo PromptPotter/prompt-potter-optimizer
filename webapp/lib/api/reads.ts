@@ -22,7 +22,7 @@ import type {
   FilesResponse,
   ForkPreviewResponse,
   HardSamplesScope,
-  HierarchyEntry,
+  SubtreeEntry,
   HierarchyResponse,
   MachineStatusResponse,
   OptimizerKnobsResponse,
@@ -366,7 +366,7 @@ export function subtreeRead(
   address: string,
   mask: SubtreeMask | null,
   moment: SubtreeMoment | null = null,
-): ReadDescriptor<HierarchyEntry> {
+): ReadDescriptor<SubtreeEntry> {
   const params = new URLSearchParams();
   if (mask?.lens) params.set("lens", mask.lens);
   if (mask?.samples && mask.samples.length > 0) params.set("samples", mask.samples.join(","));

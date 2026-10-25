@@ -59,6 +59,12 @@ Closed by the operator after its review-repair wave; what it could not reach sta
 The arc's method is the session protocol in memory (`feedback_arc_of_arcs_loop`), not this file.
 **Rides with:** the next arc's first builder wave, after its cold recon and premise hunt.
 
+- **The cladogram re-derives fork lineage the server already resolves.**
+  `webapp/components/candidates/forest-layout.ts::extentKeys` walks spawn cuts and from-candidates
+  on the client (a second `resolve_line`), while each `HierarchyCandidate` serves its `main_line`.
+  The cut is also by PROPOSAL round, not by line position: Compare on a pick that later rounds held
+  hides those rounds whole. Root: an extent is the served line (`main_line`, through the round the
+  line last stood on the anchor), the client walk dies, and every channel and `clip` reads it.
 - **The dev loop serializes where it need not.** Sibling gates queue whole runs (a `gate --py` waited
   9 min behind two others before its own 5); `next-build` peaks near 4 GB; a builder spends ~100k
   tokens of tool output, most of it whole-file reads and whole-tree content greps; Turbopack
@@ -245,7 +251,7 @@ means it stands.
   stands.
 - Four seams a pre-reshape hunt named are owed a re-read against the code: the poll store carries
   fields nothing reads (`webapp/lib/poll.tsx::CycleStreamState`); the browser picks the best pointer
-  (`webapp/lib/derivations/searchPoint.ts::bestObserveTarget`, `webapp/lib/hooks/useCompareWithOrigin.ts`);
+  (`webapp/lib/hooks/useCompareWithOrigin.ts`);
   spend is summed and zero-filled in the browser (`webapp/lib/derivations/spend.ts::readSpend`); a
   terminal fork builds its own overlay rather than dispatching `fork-cycle`
   (`presentation/cli/commands/resume_command.py::_steer_overlay`). Action: re-read each, then take

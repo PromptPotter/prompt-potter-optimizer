@@ -4,11 +4,9 @@ import { type ReactNode, useMemo } from "react";
 import { cx } from "@/lib/cx";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
 import {
-  childNodes,
-  coursesOf,
+  candidatesOf,
   groupByRoot,
   hasTag,
-  panelCellLabel,
   type RetiredGroup,
   type RootGroup,
   splitRetired,
@@ -16,10 +14,14 @@ import {
   tagValue,
 } from "@/lib/derivations";
 import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
-import type { HierarchyCampaign, HierarchyCandidate, HierarchyCourse } from "@/lib/api";
+import type {
+  HierarchyCampaign,
+  HierarchyCandidate,
+  SubtreeCampaign,
+  SubtreeCourse,
+} from "@/lib/api";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
-import { PairedLift } from "@/components/shell/PairedLift";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
@@ -159,11 +161,11 @@ function CampaignBody({
   tree,
   ctx,
 }: {
-  body: HierarchyCampaign | null;
+  body: SubtreeCampaign | null;
   tree: CampaignTree;
   ctx: TreeCtx;
 }) {
-  const courses = body ? coursesOf(body) : [];
+  const courses = body ? body.children : [];
   return (
     <ul className="unit-library-children">
       {!tree.loaded && !tree.failed && <li className="inner-library-empty">Loading…</li>}
@@ -193,7 +195,7 @@ function CourseRow({
   holdsLine,
   ctx,
 }: {
-  course: HierarchyCourse;
+  course: SubtreeCourse;
   holdsLine: boolean;
   ctx: TreeCtx;
 }) {
@@ -227,8 +229,9 @@ function CourseRow({
   );
 }
 
-function CourseBody({ course, ctx }: { course: HierarchyCourse; ctx: TreeCtx }) {
-  const rows = childNodes(course) as HierarchyCandidate[];
+function CourseBody({ course, ctx }: { course: SubtreeCourse; ctx: TreeCtx }) {
+  const rows = candidatesOf(course);
+  const unplaced = course.children.filter((c): c is SubtreeCampaign => c.level === "campaign");
   const { live, retired } = splitRetired(rows);
   return (
     <>
@@ -241,6 +244,11 @@ function CourseBody({ course, ctx }: { course: HierarchyCourse; ctx: TreeCtx }) 
       {retired.map((group) => (
         <li key={group.branch}>
           <RetiredGroupRow course={course} group={group} ctx={ctx} />
+        </li>
+      ))}
+      {unplaced.map((campaign) => (
+        <li key={campaign.address}>
+          <InnerCampaignRow campaign={campaign} ctx={ctx} />
         </li>
       ))}
     </>
@@ -262,16 +270,14 @@ function Twist({ open, onClick }: { open: boolean; onClick: () => void }) {
   );
 }
 
-function CourseRowLabel({ course }: { course: HierarchyCourse }) {
-  const { task, standing } = course.facts;
+function CourseRowLabel({ course }: { course: SubtreeCourse }) {
+  const lift = course.stats.find((s) => s.key === "lift");
   return (
     <span className="unit-library-row">
-      <span className="unit-library-name">
-        {task ? panelCellLabel(task) : course.label}
-      </span>
+      <span className="unit-library-name">{course.label}</span>
       <span className="unit-library-meta unit-library-meta-marked">
         <PhaseMark status={course.state.status} />
-        <span>{standing ? <PairedLift reading={standing.vs_origin} unread="label" /> : "—"}</span>
+        <span title={lift?.value}>{lift ? lift.value : "—"}</span>
       </span>
     </span>
   );
@@ -282,7 +288,7 @@ function RetiredGroupRow({
   group,
   ctx,
 }: {
-  course: HierarchyCourse;
+  course: SubtreeCourse;
   group: RetiredGroup;
   ctx: TreeCtx;
 }) {
@@ -307,7 +313,7 @@ function RetiredGroupRow({
 }
 
 function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx }) {
-  const inner = cand.children.filter((c): c is HierarchyCampaign => c.level === "campaign");
+  const inner = cand.children;
   const open = ctx.isNodeOpen(cand.address, true);
   const { isPicked, pick } = useSelectNode({ resume: true });
   const selected = isPicked(cand);
@@ -352,7 +358,7 @@ function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx })
 
 const LOADED: CampaignTree = { root: null, loaded: true, failed: false };
 
-function InnerCampaignRow({ campaign, ctx }: { campaign: HierarchyCampaign; ctx: TreeCtx }) {
+function InnerCampaignRow({ campaign, ctx }: { campaign: SubtreeCampaign; ctx: TreeCtx }) {
   const { navigate } = useWorkspace();
   const open = ctx.isNodeOpen(campaign.address, true);
   const rootPath = pathOfAddress(campaign.facts.root);

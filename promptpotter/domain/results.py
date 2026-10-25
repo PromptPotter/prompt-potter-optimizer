@@ -29,6 +29,7 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
     ReadingState,
     ReadingStateKind,
+    RoundArm,
 )
 from promptpotter.domain.phases import ErrorRecord, StopReason
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
@@ -139,7 +140,7 @@ ArmRole = Literal[MeasurementRole.ORIGIN, MeasurementRole.PANEL, MeasurementRole
 
 
 class ArmSlot(FrozenModel):
-    """Where an individual was first walked as an arm: the ``idx``-th of its round's ``total``."""
+    """Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its round's ``total``."""
 
     round: int
     idx: int
@@ -181,7 +182,8 @@ class _Arm(FrozenModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     role: ArmRole
-    # Its FIRST walk as an arm; ``None``: a reference no round of this cycle walked as an arm.
+    # Its walk as a proposal — for a re-read, the latest walk it re-reads; ``None``: a reference no
+    # round of this cycle walked as an arm.
     slot: ArmSlot | None
     individual: OptSearchPoint
     overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -942,6 +944,9 @@ class Election(FrozenModel):
         "selected; on a held round the retained parent, re-read on this round's cells as its "
         "reference arm — never the leading challenger."
     )
+    # The candidate the round's arms were read against, by the round that crowned it: `null` at
+    # round 0, which re-reads nothing. Written here, so no reader re-derives a line to find it.
+    reference: RoundArm | None
     # Arms that entered the election. Zero says the proposer made no testable variant, not a stall.
     electable: int
     fit: dict[ArmKey, ArmFit] = Field(default_factory=dict)
@@ -951,6 +956,16 @@ class Election(FrozenModel):
     verdict_reason: str | None = None
     # The δ scale the election read, whether or not a θ was fit on it.
     ruler: RulerStamp
+
+
+def line_reference(rounds: Sequence[RoundOutcome]) -> RoundArm:
+    """The candidate a line of *rounds* stands on, by the round that crowned it: what the next
+    round re-reads."""
+    return next(
+        RoundArm(round=rr.round, arm=picked)
+        for rr in reversed(rounds)
+        if rr.election is not None and (picked := rr.election.selected) is not None
+    )
 
 
 class RoundOutcome(FrozenModel):
@@ -1079,7 +1094,7 @@ class RoundOutcome(FrozenModel):
 
 
 def arm_name(key: ArmKey, arm: ArmState, round_num: int) -> ArmName:
-    """An arm by its FIRST walk; a parent no round of the cycle walked is the one *round_num* read."""
+    """An arm by its slot; a parent no round of the cycle walked is the one *round_num* read."""
     if arm.slot is None:
         return ArmName(key=key, round=round_num, label=arm.label)
     return ArmName(key=key, round=arm.slot.round, label=arm.slot.label)
@@ -1326,6 +1341,21 @@ def measured_arm(rounds: Sequence[RoundOutcome], individual_id: str) -> Conclude
         if isinstance(arm, Concluded):
             return arm
     raise KeyError(f"no closed round measured individual {individual_id}")
+
+
+def walked_slot(rounds: Sequence[RoundOutcome], key: ArmKey) -> ArmSlot | None:
+    """The candidate a re-read of *key* reads: its latest walk as a proposal, as `measured_arm`
+    reads it; ``None`` for one no round walked."""
+    return next(
+        (
+            arm.slot
+            for rr in reversed(rounds)
+            if (arm := rr.arms.get(key)) is not None
+            and arm.slot is not None
+            and arm.role != MeasurementRole.PARENT
+        ),
+        None,
+    )
 
 
 class CycleResult(StrictModel):
@@ -1601,7 +1631,7 @@ class ArmReading(FrozenModel):
     Each part lands when its fact exists, so an arm in flight is this type with fewer parts set.
     """
 
-    arm: ArmName = Field(description="THE key, and where the arm was first walked.")
+    arm: ArmName = Field(description="THE key, and where the arm was walked.")
     role: ArmRole = Field(
         description="What the arm IS in this round: its origin, one of its proposals, or a "
         "`parent` re-read on its cells as a reference — never one of the round's proposals, "

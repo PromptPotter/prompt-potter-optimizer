@@ -5,6 +5,7 @@ import { useHardSamples } from "@/lib/hard-samples";
 import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
+import { entryAlone } from "@/lib/derivations";
 import { useIngest } from "@/lib/ingest-flow";
 import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
 import type { HierarchyCourse } from "@/lib/api";
@@ -30,7 +31,7 @@ export function ChatPane() {
   // The served `attached`, NOT `isLive`, which is false at the gate.
   const attached = dash?.producer.attached === true;
   // The course entry is frozen whole on its own detach, so the ending is one served read.
-  const liveCourse = course?.state.producer.attached ? course.address : null;
+  const liveCourse = course?.state.attached ? course.address : null;
   const [prevLiveCourse, setPrevLiveCourse] = useState(liveCourse);
   if (liveCourse !== prevLiveCourse) {
     setPrevLiveCourse(liveCourse);
@@ -39,8 +40,7 @@ export function ChatPane() {
       // A mask or a moment re-reads the stats; the frozen item says which, never passes as the record.
       const readUnder = maskLabel || (at !== null ? "a past moment" : "");
       thread.appendRun(course.address, {
-        ...course,
-        children: [],
+        ...entryAlone(course),
         caveat: readUnder ? `Read under ${readUnder}` : course.caveat,
       });
     }
@@ -59,7 +59,7 @@ export function ChatPane() {
           status={live.status}
           listening={live.connected && attached}
           decision={live.decision}
-          lives={dash?.run_standing?.lives ?? null}
+          lives={course?.facts.standing?.lives ?? null}
         />
       ),
     });

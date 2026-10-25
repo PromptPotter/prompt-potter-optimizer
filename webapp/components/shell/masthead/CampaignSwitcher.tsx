@@ -3,7 +3,7 @@ import { Fragment, useMemo } from "react";
 import { Menu, MenuItem } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
 import type { HierarchyCampaign } from "@/lib/api";
-import { coursesOf, tagValue } from "@/lib/derivations";
+import { tagValue } from "@/lib/derivations";
 import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { useRegistry } from "@/lib/registry";
 import { useWorkspace } from "@/lib/workspace";
@@ -76,7 +76,7 @@ export function CampaignSwitcher() {
                       <CampaignRowLabel campaign={campaign} />
                     </span>
                   </MenuItem>
-                  {coursesOf(campaign)
+                  {campaign.children
                     .filter((branch) => branch.address !== campaign.facts.root)
                     .map((branch) => (
                       <MenuItem key={branch.address} onClick={() => go(branch.address, close)}>

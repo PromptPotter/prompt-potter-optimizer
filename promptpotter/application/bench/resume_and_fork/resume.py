@@ -15,7 +15,7 @@ from promptpotter.application.pipeline_resolve import defaults_drift
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import round_document_digest
-from promptpotter.domain.run_records import ForkSpec, ForkTrigger
+from promptpotter.domain.run_records import ForkTrigger
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 
@@ -147,11 +147,9 @@ async def resume_with_divergence_check(
                 campaign_store,
                 hop,
                 div.round_num,
-                ForkSpec(
-                    trigger=ForkTrigger.SCORING_DIVERGENCE,
-                    reason=f"resume_divergence:{div.kind}",
-                    issued_by=SYSTEM_PRINCIPAL,
-                ),
+                trigger=ForkTrigger.SCORING_DIVERGENCE,
+                reason=f"resume_divergence:{div.kind}",
+                issued_by=SYSTEM_PRINCIPAL,
             )
             if div.round_num == 0:
                 cycle.reopen_origin()

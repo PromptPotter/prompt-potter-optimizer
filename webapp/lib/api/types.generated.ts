@@ -51,7 +51,6 @@ export interface ServedDashboard {
   stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
   measuring_arm: ArmName | null;
-  run_standing: RunStanding | null;
   rounds: ServedRound[];
   bench_score: BenchScore | null;
   /** Each arm's latest verify and held-out bench pass on this cycle's ledger, in
@@ -59,7 +58,6 @@ export interface ServedDashboard {
   verification: VerificationMark[];
   composite_fitness_formula: string | null;
   display_metric: 'accuracy' | 'composite' | 'ability';
-  elects_on: 'accuracy' | 'composite' | 'ability';
   degraded_count: number;
   error_count: number;
   backend_retry_count: number;
@@ -99,7 +97,7 @@ export interface ServedDashboard {
   /** Which run verbs the cycle admits now (`RunState.admission`): the verb the run
    * control offers or the sentence where it offers none, and each verb's
    * refusal — the same answer the dispatcher refuses on. */
-  run_admission: RunAdmission;
+  admission: RunAdmission;
   /** Why the cycle reads `paused` — what caused it, the stop it was left on and
    * what the operator does next (`RunState.pause`); null in every other
    * phase. */
@@ -162,57 +160,209 @@ export interface ServedDashboard {
   round_axis: RoundAxis;
 }
 
-/** One arm of the run: its key, and where it was first walked. */
+/** One arm of the run: its key, and where it was walked (a re-read: its latest walk). */
 export interface ArmName {
   /** THE join: the individual's content id, or the slot hash of a proposal rejected
    * before it cost a cell. */
   key: string;
-  /** The round the arm was first walked in; 0 is the origin. */
+  /** The round the arm was walked in; 0 is the origin. */
   round: number;
-  /** `C0` or `C{round}.{n}`, off the slot it was first walked in: a display name,
-   * never a join. */
+  /** `C0` or `C{round}.{n}`, off the slot it was walked in: a display name, never a
+   * join. */
   label: string;
 }
 
-/** Where the run stands after a round: its selection, over whom, and how it reads against C0. */
-export interface RunStanding {
-  rounds_without_advance: number;
-  /** The life bank after this round: the pips and their words, as the readout
-   * prints them. Null where the campaign banks no lives
-   * (`optimization.lives`). */
-  lives: LivesReading | null;
-  /** The optimizer's declared pick (`declared_selection`), as the arm it was first
-   * measured as: the origin until a round selects. Null before round 0
-   * closes. */
-  selection: ArmName | null;
-  /** The pick `selection` was promoted over. Null while it is the origin. */
-  parent: ArmName | null;
-  /** What `selection` changed, in its proposer's words (its lineage's
-   * `changes_description`). Empty while it is the origin, which changed
-   * nothing. */
-  changes: string;
-  /** `selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap
-   * reading of that pair. The state says why where there is none:
-   * `same_individual` while the selection is the origin. */
-  vs_origin: PairedReading;
-  /** Rounds closed AFTER the origin — the unit a rounds cap counts. */
-  rounds_closed: number;
-  /** Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no
-   * interval), so it is the promotion clock and never a result; read
-   * `advanced`. */
-  improved: number;
-  /** Of those, how many closed `advanced`: their pick separated from C0 on the
-   * origin panel — the verdict clock. Never summed with `improved`. */
-  advanced: number;
+/** A closed round as a dashboard serves it: the banked summary plus every reading derived from it. */
+export interface ServedRound {
+  round: number;
+  /** The ONE arm this round is read off, as its selector named it and never re-
+   * ranked: the selection where the round selected, on a held round the
+   * challenger `verdict_reason` names as its best, at round 0 the origin.
+   * `panel_precision` is measured on it. Null where the selector could read
+   * no arm. */
+  leading: ArmName | null;
+  /** The arm the election crowned; null on a round that held. */
+  selected: ArmName | null;
+  accuracy: number | null;
+  composite_fitness: number | null;
+  total: number;
+  bench: BenchReading | null;
+  improved: boolean | null;
+  verdict_reason: string | null;
+  candidates: DashboardCandidate[];
+  selection: number[];
+  health: RoundHealth | null;
+  /** The alert a `critical` `health` raises, worded
+   * (`results_health.py::critical_health_title`); null on every other grade. */
+  health_alert: string | null;
+  overlap: OverlapReading;
+  panel_precision: PanelPrecision | null;
+  optimizer_facts: OptimizerFact[];
+  /** `overlap` as its members and rates, C0 first; empty where the lead was not
+   * read. */
+  overlap_line: LineRate[];
+  /** Which lever `panel_precision` calls for, null where it is. Beside the reading
+   * and not on it: `PanelPrecision` is hashed into the L4 estimator's
+   * identity. */
+  panel_precision_verdict: 'noise' | 'spread' | null;
+  /** How each sample of `selection` moved against the round before it that measured
+   * any, position for position with `selection` (`sample_movements`). */
+  selection_movement: ('new' | 'readded' | 'gained' | 'lost' | 'kept')[];
+  /** This round's level on the cycle's `LevelSeries`, the one two rounds may
+   * difference: null where `series_reading` carries a caveat. */
+  level: AbilityReading | null;
+  /** That level as read, under the caveat that withholds it, for a surface that
+   * shows θ under its caveat; null where no scored cell sits on the scale. */
+  series_reading: SeriesReading | null;
 }
 
-/** A run's life bank as every surface shows it. Built by :meth:`of` alone. */
-export interface LivesReading {
-  /** One ♥ per banked life, one ♡ per spent one; 💀 on an empty bank. */
-  bar: string;
-  label: string;
-  /** The bank is empty: the run stops after this round. */
-  spent: boolean;
+/** One individual's bench pass, read under a named scorer. */
+export interface BenchReading {
+  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
+   * 1. */
+  accuracy: BandedValue | null;
+  /** Under the reading scorer's formula, which charges cost and length — so it is
+   * never the change in the hit rate. */
+  composite: BandedValue | null;
+  /** Rows carrying a verdict — a miss the prompt caused included: the population
+   * both columns are read over. */
+  n: number;
+  /** The round whose selection this is; 0 is the origin. */
+  round: number;
+  /** The searchpoint scored — the archive's `prompt_fields_id`. */
+  sp_hash: string;
+  /** Which column the headline reads. */
+  headline: 'accuracy' | 'composite';
+  /** The headline: this reading in its `headline` column, chosen here so no surface
+   * selects a column of its own. Stamped by :meth:`read` alone. */
+  level: BandedValue | null;
+}
+
+export interface BandedValue {
+  value: number;
+  /** The 95% band on `value`, drawn from the same per-row values; both bounds are
+   * `None` below two rows, which have no spread. */
+  ci_lo: number | null;
+  ci_hi: number | null;
+}
+
+/** One candidate as `dashboard.json` serves it, the same shape live or closed. */
+export interface DashboardCandidate {
+  reading: ArmReading;
+}
+
+/** One arm of one round, read: the one carrier every surface that lists or ranks arms embeds. */
+export interface ArmReading {
+  /** THE key, and where the arm was walked. */
+  arm: ArmName;
+  /** What the arm IS in this round: its origin, one of its proposals, or a `parent`
+   * re-read on its cells as a reference — never one of the round's proposals,
+   * whatever round `arm` names. */
+  role: 'origin' | 'panel' | 'parent';
+  /** The archive address of this arm's measurements (`prompt_fields_id`). Not a
+   * key: a re-proposed configuration shares it across rounds. Empty before it
+   * is measured. */
+  sp_hash: string;
+  changes_description: string;
+  /** Where the arm's walk stands: proposed, being measured, or ended — cut short
+   * against it, or measured. */
+  state: 'proposed' | 'measuring' | 'cut' | 'measured';
+  /** How its walk ended short of its panel: cut against it (`invalid` refused it
+   * before a cell), or `locked_in` — settled FOR it by the eliminator. Null
+   * on a walk still running and one that ran its panel. */
+  end: 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in' | null;
+  /** `end` names a stop of its walk, for it or against it: false on an `invalid`
+   * arm, which never started one. */
+  walked_short: boolean;
+  /** The arm's own level on its round's cells: accuracy with the band the gateway
+   * folds per cell, the composite beside it, over `n` rows carrying a
+   * verdict. Null before the first row is graded, and on an `invalid` arm,
+   * which holds no cell. */
+  own: OwnLevel | null;
+  panel: ArmPanel;
+  /** What measuring it consumed, the BACKEND bucket alone, replayed rows excluded;
+   * null until its score report folds an account. */
+  tokens: TokenAccount | null;
+  /** The provider's prefix-cache reading of `tokens.input`; null beside a null
+   * `tokens`. */
+  prefix: PrefixReading | null;
+  /** Null outside the round's election fit. */
+  ability: ArmAbility | null;
+  /** This arm (`b`) over the individual it was judged against (`a`), on the cells
+   * both scored. Null on the origin and until the election stamps it. */
+  vs_reference: PairedReading | null;
+  election: ArmElection;
+  /** This arm's individual on the held-out bench set; null unless a pass graded it. */
+  bench: BenchReading | null;
+  /** Its last `verify` pass, on search cells its rounds never bought. */
+  verify: VerifyReading | null;
+  /** Its individual's rate on the origin panel, as the newest overlap reading holds
+   * it: the one level two arms of different rounds may be differenced on.
+   * Null for an arm neither on the best-so-far line nor triggered, and where
+   * it does not hold the whole panel. */
+  on_origin_panel: LineRate | null;
+}
+
+/** One individual's own level on one set of rows, in both columns; never one side of a pair. */
+export interface OwnLevel {
+  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
+   * 1. */
+  accuracy: BandedValue | null;
+  /** Under the reading scorer's formula, which charges cost and length — so it is
+   * never the change in the hit rate. */
+  composite: BandedValue | null;
+  /** Rows carrying a verdict — a miss the prompt caused included: the population
+   * both columns are read over. */
+  n: number;
+}
+
+/** The cells one arm's walk holds of the panel its round asked of it. */
+export interface ArmPanel {
+  /** Cells the walk holds. Null on an arm with no score report — never measured,
+   * which is not a walk of zero cells. */
+  scored: number | null;
+  /** The walk's length; null until its first cell announces it. */
+  expected: number | null;
+  /** Of `scored`, how many were replayed from the archive rather than measured.
+   * Null on an arm never measured. */
+  cached: number | null;
+  /** `cached` over `scored`. Null where either is, and on a walk holding no cell. */
+  cached_share: number | null;
+  /** Stopped short of its round's panel (`panel_cuts`): under its own `expected`,
+   * or, for a panel arm, under the fullest panel a panel arm of its round
+   * reached. */
+  cut: boolean;
+}
+
+/** What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint. */
+export interface TokenAccount {
+  input: number;
+  output: number;
+  reasoning: number;
+  cache_read: number | null;
+  cache_write: number;
+}
+
+/** A provider's prefix-cache discount as every surface reads it, served whole. */
+export interface PrefixReading {
+  state: 'discounted' | 'cold' | 'unreported' | 'replayed';
+  /** Null on `unreported` and `replayed`. */
+  share: number | null;
+  /** `c39%` / `c0%` / `c?`, and empty on a replay, whose line already carries 📖. */
+  badge: string;
+}
+
+/** One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale. */
+export interface ArmAbility {
+  theta: number | null;
+  se: number | null;
+  /** Lower bound of the 95% interval on `theta` (`ruler.py::theta_band`); null
+   * where `theta` or `se` is. */
+  ci_lo: number | null;
+  /** Upper bound of the same interval. */
+  ci_hi: number | null;
+  /** Why `theta` is not this arm's ability, of the ARM's own scope. */
+  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** One pair of addressed individuals read on one cell set. */
@@ -344,199 +494,6 @@ export interface TestFamily {
   n_tests: number;
   method: 'holm';
   p_adjusted: number;
-}
-
-/** A closed round as a dashboard serves it: the banked summary plus every reading derived from it. */
-export interface ServedRound {
-  round: number;
-  /** The ONE arm this round is read off, as its selector named it and never re-
-   * ranked: the selection where the round selected, on a held round the
-   * challenger `verdict_reason` names as its best, at round 0 the origin.
-   * `panel_precision` is measured on it. Null where the selector could read
-   * no arm. */
-  leading: ArmName | null;
-  /** The arm the election crowned; null on a round that held. */
-  selected: ArmName | null;
-  accuracy: number | null;
-  composite_fitness: number | null;
-  total: number;
-  bench: BenchReading | null;
-  improved: boolean | null;
-  verdict_reason: string | null;
-  candidates: DashboardCandidate[];
-  selection: number[];
-  health: RoundHealth | null;
-  /** The alert a `critical` `health` raises, worded
-   * (`results_health.py::critical_health_title`); null on every other grade. */
-  health_alert: string | null;
-  overlap: OverlapReading;
-  panel_precision: PanelPrecision | null;
-  optimizer_facts: OptimizerFact[];
-  /** `overlap` as its members and rates, C0 first; empty where the lead was not
-   * read. */
-  overlap_line: LineRate[];
-  /** Which lever `panel_precision` calls for, null where it is. Beside the reading
-   * and not on it: `PanelPrecision` is hashed into the L4 estimator's
-   * identity. */
-  panel_precision_verdict: 'noise' | 'spread' | null;
-  /** How each sample of `selection` moved against the round before it that measured
-   * any, position for position with `selection` (`sample_movements`). */
-  selection_movement: ('new' | 'readded' | 'gained' | 'lost' | 'kept')[];
-  /** This round's level on the cycle's `LevelSeries`, the one two rounds may
-   * difference: null where `series_reading` carries a caveat. */
-  level: AbilityReading | null;
-  /** That level as read, under the caveat that withholds it, for a surface that
-   * shows θ under its caveat; null where no scored cell sits on the scale. */
-  series_reading: SeriesReading | null;
-}
-
-/** One individual's bench pass, read under a named scorer. */
-export interface BenchReading {
-  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
-   * 1. */
-  accuracy: BandedValue | null;
-  /** Under the reading scorer's formula, which charges cost and length — so it is
-   * never the change in the hit rate. */
-  composite: BandedValue | null;
-  /** Rows carrying a verdict — a miss the prompt caused included: the population
-   * both columns are read over. */
-  n: number;
-  /** The round whose selection this is; 0 is the origin. */
-  round: number;
-  /** The searchpoint scored — the archive's `prompt_fields_id`. */
-  sp_hash: string;
-  /** Which column the headline reads. */
-  headline: 'accuracy' | 'composite';
-  /** The headline: this reading in its `headline` column, chosen here so no surface
-   * selects a column of its own. Stamped by :meth:`read` alone. */
-  level: BandedValue | null;
-}
-
-export interface BandedValue {
-  value: number;
-  /** The 95% band on `value`, drawn from the same per-row values; both bounds are
-   * `None` below two rows, which have no spread. */
-  ci_lo: number | null;
-  ci_hi: number | null;
-}
-
-/** One candidate as `dashboard.json` serves it, the same shape live or closed. */
-export interface DashboardCandidate {
-  reading: ArmReading;
-}
-
-/** One arm of one round, read: the one carrier every surface that lists or ranks arms embeds. */
-export interface ArmReading {
-  /** THE key, and where the arm was first walked. */
-  arm: ArmName;
-  /** What the arm IS in this round: its origin, one of its proposals, or a `parent`
-   * re-read on its cells as a reference — never one of the round's proposals,
-   * whatever round `arm` names. */
-  role: 'origin' | 'panel' | 'parent';
-  /** The archive address of this arm's measurements (`prompt_fields_id`). Not a
-   * key: a re-proposed configuration shares it across rounds. Empty before it
-   * is measured. */
-  sp_hash: string;
-  changes_description: string;
-  /** Where the arm's walk stands: proposed, being measured, or ended — cut short
-   * against it, or measured. */
-  state: 'proposed' | 'measuring' | 'cut' | 'measured';
-  /** How its walk ended short of its panel: cut against it (`invalid` refused it
-   * before a cell), or `locked_in` — settled FOR it by the eliminator. Null
-   * on a walk still running and one that ran its panel. */
-  end: 'invalid' | 'skipped' | 'broken' | 'eliminated' | 'locked_in' | null;
-  /** `end` names a stop of its walk, for it or against it: false on an `invalid`
-   * arm, which never started one. */
-  walked_short: boolean;
-  /** The arm's own level on its round's cells: accuracy with the band the gateway
-   * folds per cell, the composite beside it, over `n` rows carrying a
-   * verdict. Null before the first row is graded, and on an `invalid` arm,
-   * which holds no cell. */
-  own: OwnLevel | null;
-  panel: ArmPanel;
-  /** What measuring it consumed, the BACKEND bucket alone, replayed rows excluded;
-   * null until its score report folds an account. */
-  tokens: TokenAccount | null;
-  /** The provider's prefix-cache reading of `tokens.input`; null beside a null
-   * `tokens`. */
-  prefix: PrefixReading | null;
-  /** Null outside the round's election fit. */
-  ability: ArmAbility | null;
-  /** This arm (`b`) over the individual it was judged against (`a`), on the cells
-   * both scored. Null on the origin and until the election stamps it. */
-  vs_reference: PairedReading | null;
-  election: ArmElection;
-  /** This arm's individual on the held-out bench set; null unless a pass graded it. */
-  bench: BenchReading | null;
-  /** Its last `verify` pass, on search cells its rounds never bought. */
-  verify: VerifyReading | null;
-  /** Its individual's rate on the origin panel, as the newest overlap reading holds
-   * it: the one level two arms of different rounds may be differenced on.
-   * Null for an arm neither on the best-so-far line nor triggered, and where
-   * it does not hold the whole panel. */
-  on_origin_panel: LineRate | null;
-}
-
-/** One individual's own level on one set of rows, in both columns; never one side of a pair. */
-export interface OwnLevel {
-  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
-   * 1. */
-  accuracy: BandedValue | null;
-  /** Under the reading scorer's formula, which charges cost and length — so it is
-   * never the change in the hit rate. */
-  composite: BandedValue | null;
-  /** Rows carrying a verdict — a miss the prompt caused included: the population
-   * both columns are read over. */
-  n: number;
-}
-
-/** The cells one arm's walk holds of the panel its round asked of it. */
-export interface ArmPanel {
-  /** Cells the walk holds. Null on an arm with no score report — never measured,
-   * which is not a walk of zero cells. */
-  scored: number | null;
-  /** The walk's length; null until its first cell announces it. */
-  expected: number | null;
-  /** Of `scored`, how many were replayed from the archive rather than measured.
-   * Null on an arm never measured. */
-  cached: number | null;
-  /** `cached` over `scored`. Null where either is, and on a walk holding no cell. */
-  cached_share: number | null;
-  /** Stopped short of its round's panel (`panel_cuts`): under its own `expected`,
-   * or, for a panel arm, under the fullest panel a panel arm of its round
-   * reached. */
-  cut: boolean;
-}
-
-/** What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint. */
-export interface TokenAccount {
-  input: number;
-  output: number;
-  reasoning: number;
-  cache_read: number | null;
-  cache_write: number;
-}
-
-/** A provider's prefix-cache discount as every surface reads it, served whole. */
-export interface PrefixReading {
-  state: 'discounted' | 'cold' | 'unreported' | 'replayed';
-  /** Null on `unreported` and `replayed`. */
-  share: number | null;
-  /** `c39%` / `c0%` / `c?`, and empty on a replay, whose line already carries 📖. */
-  badge: string;
-}
-
-/** One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale. */
-export interface ArmAbility {
-  theta: number | null;
-  se: number | null;
-  /** Lower bound of the 95% interval on `theta` (`ruler.py::theta_band`); null
-   * where `theta` or `se` is. */
-  ci_lo: number | null;
-  /** Upper bound of the same interval. */
-  ci_hi: number | null;
-  /** Why `theta` is not this arm's ability, of the ARM's own scope. */
-  caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** What one arm's round decided about it. Built by :meth:`of` alone. */
@@ -1212,7 +1169,7 @@ export interface WarmingDashboard {
   cycle_id: string;
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   producer: ProducerReading;
-  run_admission: RunAdmission;
+  admission: RunAdmission;
   pause: PauseReading | null;
 }
 
@@ -1241,7 +1198,7 @@ export interface Proposed {
   state: 'proposed';
 }
 
-/** Where an individual was first walked as an arm: the ``idx``-th of its round's ``total``. */
+/** Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its round's ``total``. */
 export interface ArmSlot {
   round: number;
   idx: number;
@@ -1424,11 +1381,18 @@ export interface Election {
    * selected; on a held round the retained parent, re-read on this round's
    * cells as its reference arm — never the leading challenger. */
   ended_on: string;
+  reference: RoundArm | null;
   electable: number;
   fit: Record<string, ArmFit>;
   elects_on: 'accuracy' | 'composite' | 'ability';
   verdict_reason: string | null;
   ruler: RulerStamp;
+}
+
+/** One arm of one round, by its record's own address: an id alone names no candidate, since a */
+export interface RoundArm {
+  round: number;
+  arm: string;
 }
 
 /** What the election read of one arm: θ lives here and nowhere else. */
@@ -2563,7 +2527,7 @@ export interface WorkspaceStorageEntry {
   reports_bytes: number;
 }
 
-/** The tenant's latest launch — not the set of live runs, which is `state.producer` on `/hierarchy`. */
+/** The tenant's latest launch — not the set of live runs, which is `state.attached` on `/hierarchy`. */
 export interface ActiveSessionResponse {
   /** Tenant the pointer belongs to — the caller's own, always known */
   tenant_id: string;
@@ -2788,7 +2752,7 @@ export interface HierarchyResponse {
   entries: HierarchyCampaign[];
 }
 
-/** A campaign as one hierarchy entry: its state and line stats are its line course's. */
+/** A campaign as the listing serves it: its state and line stats are its line course's. */
 export interface HierarchyCampaign {
   /** Server-minted and stable: the key of every row and every open set. A course's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
@@ -2805,14 +2769,12 @@ export interface HierarchyCampaign {
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
   stats: HierarchyStat[];
-  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
-   * subtree read serves every level, courses root first, candidates in slot
-   * order. */
-  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
   state: HierarchyState;
   span: HierarchySpan;
   level: 'campaign';
   facts: CampaignFacts;
+  /** Its courses to `?depth=`, root first; none at depth 0. */
+  children: HierarchyCourse[];
 }
 
 /** One chip an entry wears, worded by the server. */
@@ -2835,173 +2797,16 @@ export interface HierarchyStat {
   sub: string | null;
 }
 
-/** A course — one cycle's run, root, fork, diag or inner — as one hierarchy entry. */
-export interface HierarchyCourse {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
-  /** What could not be read; null where all was. */
-  caveat: string | null;
-  tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
-  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
-   * subtree read serves every level, courses root first, candidates in slot
-   * order. */
-  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
-  state: HierarchyState;
-  span: HierarchySpan;
-  level: 'course';
-  facts: CourseFacts;
-}
-
-/** One round of a course's own ledger; its children are the candidates it proposed. */
-export interface HierarchyRound {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
-  /** What could not be read; null where all was. */
-  caveat: string | null;
-  tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
-  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
-   * subtree read serves every level, courses root first, candidates in slot
-   * order. */
-  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
-  level: 'round';
-  facts: RoundFacts;
-}
-
-/** One candidate a round proposed; its children are the inner campaigns it spawned. */
-export interface HierarchyCandidate {
-  /** Server-minted and stable: the key of every row and every open set. A course's
-   * is its `CyclePath` on the wire (`encodeCyclePath`). */
-  address: string;
-  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
-   * the outer course it sits under. */
-  parent: string | null;
-  /** The display name. */
-  label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
-  /** What could not be read; null where all was. */
-  caveat: string | null;
-  tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
-  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
-   * subtree read serves every level, courses root first, candidates in slot
-   * order. */
-  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
-  level: 'candidate';
-  facts: CandidateFacts;
-}
-
-/** One arm a round proposed; everything measured or decided about it is its `reading`. */
-export interface CandidateFacts {
-  /** `OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one
-   * individual again. */
-  individual: string;
-  /** Every individual this one derives from — one for a mutation, several for a
-   * crossover; empty only at an origin. */
-  parent_ids: string[];
-  /** The variation nodes that wrote this individual, in the order they ran. Empty
-   * on an origin. */
-  variations: Variation[];
-  /** `reading.arm` is the key every per-cycle document of this course speaks;
-   * `reading.sp_hash` joins to the archive rows. A retired candidate's
-   * election wears no crown: the course that took its place re-asks it. */
-  reading: ArmReading;
-  /** The newest crowned live candidate of its course — the parent the next round
-   * mutates from. At most one per course. */
-  stands: boolean;
-  /** The newest candidate its course proposed. */
-  course_latest: boolean;
-  /** The ONE candidate across the subtree a remembered individual id resolves to:
-   * the live one where a supersede left the individual on two, the first
-   * where several stand. */
-  answers_for_id: boolean;
-  /** The main line to THIS candidate, origin first: the spawn anchor's line up to
-   * where its course branched, each elected round of its course before it
-   * with the candidates crowned, then this candidate, then any later round
-   * that crowned nobody up to the next crown. Read off crowns, never
-   * `parent_ids`. */
-  main_line: MainLineStep[];
-  /** This candidate's composite fitness under the request's `score:` lens. Null
-   * without a lens, or where no row carries a verdict under it. */
-  lens_value: number | null;
-  /** Which way the lens moved this candidate among its course's: its position by
-   * `lens_value` against its position by the reading's composite. Null
-   * without a lens, or where either value is. */
-  lens_rank_move: 'up' | 'down' | 'unchanged' | null;
-  /** Accuracy over the request's `samples=` subset, served only where this
-   * candidate carries a scoreable verdict for ALL of it. Null without a
-   * `samples=` mask. */
-  sample_set_accuracy: number | null;
-  /** How many of the `samples=` subset this candidate carries a scoreable verdict
-   * for. Null without a `samples=` mask. */
-  sample_set_n: number | null;
-  /** Set on a closed round's crowned candidate where the request's lens would have
-   * elected someone else. */
-  divergence: LineageDivergence | null;
-  /** Inside the counterfactual below a divergence — the client dims it. */
-  divergent: boolean;
-}
-
-/** One round on the main line to a candidate. */
-export interface MainLineStep {
-  round: number;
-  /** The addresses of the candidates the round's election crowned; at the
-   * candidate's own round, the candidate. Empty: the election crowned nobody. */
-  candidates: string[];
-}
-
-/** Where an alternative criterion would have elected someone else, on the candidate it names. */
-export interface LineageDivergence {
-  /** The individual the masked criterion would have elected instead (measured, so
-   * nameable); null when the round would simply have held on origin. */
-  alternative_candidate_id: string | null;
-}
-
-/** A round's typed facts: what its election declared and what it measured against. */
-export interface RoundFacts {
-  round: number;
-  /** The column the round's election elected on (`Election.elects_on`); null on a
-   * round never elected. `ability`: the round is won on θ, not on accuracy. */
-  elects_on: 'accuracy' | 'composite' | 'ability' | null;
-  /** The address of the candidate the round measured its arms against — the
-   * individual its `parent`-role arm re-read, in this course or up its spawn
-   * chain. Never a child of the round: a reference is not re-listed. Null at
-   * round 0 and where none was read. */
-  reference: string | null;
-}
-
-/** A run's state as one value: the phase, its word and mark, the producer and the verbs. */
+/** A run's state as one value: the phase, its word and mark, whether it is held, the verbs. */
 export interface HierarchyState {
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   status: RunStatus;
-  producer: HierarchyProducer;
+  /** A process holds this cycle, running or launching it. */
+  attached: boolean;
   /** Why the run reads paused; null otherwise. */
   pause: PauseReading | null;
   admission: RunAdmission;
-  /** Why the run ended; null while it has not. */
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  /** What the operator does now, as `stop_reason` states it
+  /** What the operator does now, as the run's stop reason states it
    * (`STOP_REASON_INFO::next_step`) — the sentence the terminal and
    * `review.md` advise. Empty while the run has not stopped, or where its
    * reason owes nothing. */
@@ -3010,83 +2815,11 @@ export interface HierarchyState {
   intervened: boolean;
 }
 
-/** A cycle's producer as a listing serves it: what a write moves, never a clock. */
-export interface HierarchyProducer {
-  state: 'live' | 'idle' | 'wedged' | 'held' | 'silent' | 'claimed' | 'absent';
-  /** The state as a walking run's head reads it. */
-  label: string;
-  /** A process holds this cycle, running or launching it. */
-  attached: boolean;
-  /** That process is walking the loop. */
-  appending: boolean;
-  /** What this state raises on its own; how long it has, the dashboard says. */
-  alert: ProducerAlert | null;
-}
-
 /** When an entry opened and last moved. */
 export interface HierarchySpan {
   opened_at: string;
   /** The newest activity under the entry. */
   last_at: string;
-}
-
-/** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
-export interface CourseFacts {
-  /** How the course was minted; the `mint` tag renders it. */
-  mint: 'root' | 'fork' | 'diag' | 'inner';
-  /** Null on a root, and on a cycle cut from another tree. */
-  spawn: CourseSpawn | null;
-  /** The outer panel cell an L4 inner course measures. */
-  task: string | null;
-  /** Null before round 0 closes. */
-  standing: RunStanding | null;
-  /** Rounds closed AFTER the origin. */
-  rounds_closed: number;
-  /** The address of the arm the course's standing is paired against: its own
-   * round-0 candidate, else its spawn parent's origin. Served on the subtree
-   * read; null in the listing. */
-  origin: string | null;
-  /** The `per_cell` formula this course was read under for the request's lens — a
-   * `dials:` lens realized against this campaign's anchors, a `score:` one as
-   * given. What a fork applying the lens carries as `scoring.per_cell`. Null
-   * without one. */
-  lens_criterion: string | null;
-  /** How the request's lens reorders this course's candidates. Null without a lens,
-   * and where it ranked none of them. */
-  lens_shift: LensShift | null;
-}
-
-/** Where a fork was born on its parent's time line: the cut, as an event. */
-export interface CourseSpawn {
-  /** The address of the course it branched from. */
-  parent: string;
-  /** The round it branched at; null where none was named. */
-  at_round: number | null;
-  /** The address of the parent candidate it hangs from: the one its fork record
-   * names, else the reference its first round re-read, else the parent's
-   * origin. Served on the subtree read; null in the listing, which reads no
-   * candidate. */
-  from_candidate: string | null;
-  trigger: 'operator_diag' | 'operator_rewind' | 'operator_steered' | 'optimizer_rebase' | 'scoring_divergence';
-  /** Which side of the cut the run continues on, measured or implied by `trigger`. */
-  direction: 'offshoot' | 'supersede' | 'equivalent';
-  reason: string;
-  /** Who cut it, as its fork record names them. */
-  issued_by: string;
-}
-
-/** What the request's lens did to one course's candidate ordering. */
-export interface LensShift {
-  /** The address of the candidate ranked first by composite; null where that
-   * candidate is retired. */
-  top_composite: string | null;
-  /** The same, ranked by `lens_value`. */
-  top_lens: string | null;
-  /** The lens ranks another candidate first. */
-  top_changed: boolean;
-  moved_up: number;
-  moved_down: number;
-  unchanged: number;
 }
 
 /** A campaign's typed facts, for a pane or a route argument; its rows read the envelope. */
@@ -3104,11 +2837,6 @@ export interface CampaignFacts {
   spend_lifetime: LifetimeSpend;
   /** What the root course runs with; null where its pipeline did not resolve. */
   runs_with: CampaignRunsWith | null;
-  /** How many cycles `cleanup-empty-cycles` deletes here now
-   * (`CampaignStore.deletable_stubs`, the command's own list). Counted on the
-   * subtree read only — every sibling's ledger is scanned per fork — so null
-   * in the listing. */
-  deletable_stubs: number | null;
 }
 
 /** What an account, or one campaign's share of it, was billed over its whole life. */
@@ -3171,6 +2899,100 @@ export interface VendorModels {
   models: string[];
 }
 
+/** A course — one cycle's run, root, fork, diag or inner — as the listing serves it. */
+export interface HierarchyCourse {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'course';
+  facts: CourseFacts;
+}
+
+/** A course's typed facts, for a pane or a route argument; its rows read the envelope. */
+export interface CourseFacts {
+  /** How the course was minted; the `mint` tag renders it. */
+  mint: 'root' | 'fork' | 'diag' | 'inner';
+  /** Null on a root, and on a cycle cut from another tree. */
+  spawn: CourseSpawn | null;
+  /** The outer panel cell an L4 inner course measures. */
+  task: string | null;
+  /** Null before round 0 closes. */
+  standing: RunStanding | null;
+  /** Rounds closed AFTER the origin. */
+  rounds_closed: number;
+  /** The column the course's newest election elected on; null before its first.
+   * `ability`: its rounds are won on θ, not on accuracy. */
+  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+}
+
+/** Where a fork was born on its parent's time line: the cut, as an event. */
+export interface CourseSpawn {
+  /** The address of the course it branched from. */
+  parent: string;
+  /** The first round it ran itself: every round below it is its parent line's. */
+  cut_round: number;
+  trigger: 'operator_diag' | 'operator_rewind' | 'operator_steered' | 'optimizer_rebase' | 'scoring_divergence';
+  /** Which side of the cut the run continues on, measured or implied by `trigger`. */
+  direction: 'offshoot' | 'supersede' | 'equivalent';
+  /** Who cut it, as its fork record names them. */
+  issued_by: string;
+}
+
+/** Where the run stands after a round: its selection, over whom, and how it reads against C0. */
+export interface RunStanding {
+  rounds_without_advance: number;
+  /** The life bank after this round: the pips and their words, as the readout
+   * prints them. Null where the campaign banks no lives
+   * (`optimization.lives`). */
+  lives: LivesReading | null;
+  /** The optimizer's declared pick (`declared_selection`), as the arm it was first
+   * measured as: the origin until a round selects. Null before round 0
+   * closes. */
+  selection: ArmName | null;
+  /** The pick `selection` was promoted over. Null while it is the origin. */
+  parent: ArmName | null;
+  /** What `selection` changed, in its proposer's words (its lineage's
+   * `changes_description`). Empty while it is the origin, which changed
+   * nothing. */
+  changes: string;
+  /** `selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap
+   * reading of that pair. The state says why where there is none:
+   * `same_individual` while the selection is the origin. */
+  vs_origin: PairedReading;
+  /** Rounds closed AFTER the origin — the unit a rounds cap counts. */
+  rounds_closed: number;
+  /** Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no
+   * interval), so it is the promotion clock and never a result; read
+   * `advanced`. */
+  improved: number;
+  /** Of those, how many closed `advanced`: their pick separated from C0 on the
+   * origin panel — the verdict clock. Never summed with `improved`. */
+  advanced: number;
+}
+
+/** A run's life bank as every surface shows it. Built by :meth:`of` alone. */
+export interface LivesReading {
+  /** One ♥ per banked life, one ♡ per spent one; 💀 on an empty bank. */
+  bar: string;
+  label: string;
+  /** The bank is empty: the run stops after this round. */
+  spent: boolean;
+}
+
 /** One window of a family's chronology, oldest-first: a course, its forks and inner runs. */
 export interface HierarchySteps {
   steps: HierarchyStep[];
@@ -3186,19 +3008,6 @@ export interface HierarchyStep {
   address: string;
   /** The course whose own ledger holds the record. */
   parent: string;
-  /** The display name. */
-  label: string;
-  /** The one sentence under the title: the selection line. */
-  lede: string | null;
-  /** What could not be read; null where all was. */
-  caveat: string | null;
-  tags: HierarchyTag[];
-  /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
-  /** A listing serves a campaign's courses to `?depth=` and nothing under them; the
-   * subtree read serves every level, courses root first, candidates in slot
-   * order. */
-  children: (HierarchyCampaign | HierarchyCourse | HierarchyRound | HierarchyCandidate)[];
   level: 'step';
   facts: StepFacts;
 }
@@ -3219,6 +3028,239 @@ export interface StepFacts {
   /** The record's reading. A `running` step with no later step on its course is a
    * call still open. */
   activity: ActivityItem;
+}
+
+/** A campaign as the subtree read serves it: every level under it. */
+export interface SubtreeCampaign {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'campaign';
+  facts: SubtreeCampaignFacts;
+  /** Its courses, root first. */
+  children: SubtreeCourse[];
+}
+
+/** What only the subtree read knows: it scans every sibling's ledger. */
+export interface SubtreeCampaignFacts {
+  /** The operator's own name for it; null where none was given, and the envelope's
+   * `label` falls back to the dataset. */
+  label: string | null;
+  /** The root course's address. */
+  root: string;
+  /** The address of the course holding the line now: the root, or the fork a
+   * supersede handed it to. */
+  line: string;
+  lifecycle: 'active' | 'archived' | 'deleted';
+  /** Every cycle's bill, forks, forwarded inner spend and deleted cycles included. */
+  spend_lifetime: LifetimeSpend;
+  /** What the root course runs with; null where its pipeline did not resolve. */
+  runs_with: CampaignRunsWith | null;
+  /** How many cycles `cleanup-empty-cycles` deletes here now
+   * (`CampaignStore.deletable_stubs`, the command's own list). */
+  deletable_stubs: number;
+}
+
+/** A course as the subtree read serves it: its rounds under it. */
+export interface SubtreeCourse {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  state: HierarchyState;
+  span: HierarchySpan;
+  level: 'course';
+  facts: SubtreeCourseFacts;
+  /** Its rounds in round order, then any inner campaign its sandbox holds that no
+   * candidate's spawn stamp names — that one says so in its `caveat`. */
+  children: (HierarchyRound | SubtreeCampaign)[];
+}
+
+/** What only the subtree read knows: it reads every candidate, under the request's lens. */
+export interface SubtreeCourseFacts {
+  /** How the course was minted; the `mint` tag renders it. */
+  mint: 'root' | 'fork' | 'diag' | 'inner';
+  /** Null on a root, and on a cycle cut from another tree. */
+  spawn: CourseSpawn | null;
+  /** The outer panel cell an L4 inner course measures. */
+  task: string | null;
+  /** Null before round 0 closes. */
+  standing: RunStanding | null;
+  /** Rounds closed AFTER the origin. */
+  rounds_closed: number;
+  /** The column the course's newest election elected on; null before its first.
+   * `ability`: its rounds are won on θ, not on accuracy. */
+  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+  /** The `per_cell` formula this course was read under for the request's lens — a
+   * `dials:` lens realized against this campaign's anchors, a `score:` one as
+   * given. What a fork applying the lens carries as `scoring.per_cell`. Null
+   * without one. */
+  lens_criterion: string | null;
+  /** How the request's lens reorders this course's candidates. Null without a lens,
+   * and where it ranked none of them. */
+  lens_shift: LensShift | null;
+  /** The address of the arm the course's standing is paired against: the round-0
+   * pick its line holds, whichever course ran it. Null on a branch cut at
+   * round 0 before it measured its own. */
+  origin: string | null;
+  /** The address of the candidate a fork hangs from: the arm its mint record names,
+   * on the course of its parent's line that ran it. Null on a root. */
+  from_candidate: string | null;
+}
+
+/** What the request's lens did to one course's candidate ordering. */
+export interface LensShift {
+  /** The address of the candidate ranked first by composite; null where that
+   * candidate is retired. */
+  top_composite: string | null;
+  /** The same, ranked by `lens_value`. */
+  top_lens: string | null;
+  /** The lens ranks another candidate first. */
+  top_changed: boolean;
+  moved_up: number;
+  moved_down: number;
+  unchanged: number;
+}
+
+/** One round of a course's own ledger; its children are the candidates it proposed. */
+export interface HierarchyRound {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  level: 'round';
+  facts: RoundFacts;
+  /** In slot order. */
+  children: HierarchyCandidate[];
+}
+
+/** A round's typed facts: what its election declared and what it measured against. */
+export interface RoundFacts {
+  round: number;
+  /** The column the round's election elected on (`Election.elects_on`); null on a
+   * round never elected. `ability`: the round is won on θ, not on accuracy. */
+  elects_on: 'accuracy' | 'composite' | 'ability' | null;
+  /** The address of the candidate the round measured its arms against — the
+   * individual its `parent`-role arm re-read, as the pick this course's line
+   * stood on going into the round. Never a child of the round: a reference is
+   * not re-listed. Null at round 0, where none was read, and where the re-
+   * read individual is not the line's pick. */
+  reference: string | null;
+}
+
+/** One candidate a round proposed; its children are the inner campaigns it spawned. */
+export interface HierarchyCandidate {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: HierarchyStat[];
+  level: 'candidate';
+  facts: CandidateFacts;
+  children: SubtreeCampaign[];
+}
+
+/** One arm a round proposed; everything measured or decided about it is its `reading`. */
+export interface CandidateFacts {
+  /** `OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one
+   * individual again. */
+  individual: string;
+  /** Every individual this one derives from — one for a mutation, several for a
+   * crossover; empty only at an origin. */
+  parent_ids: string[];
+  /** The variation nodes that wrote this individual, in the order they ran. Empty
+   * on an origin. */
+  variations: Variation[];
+  /** `reading.arm` is the key every per-cycle document of this course speaks;
+   * `reading.sp_hash` joins to the archive rows. A retired candidate's
+   * election wears no crown: the course that took its place re-asks it. */
+  reading: ArmReading;
+  /** The newest crowned live candidate of its course — the parent the next round
+   * mutates from. At most one per course. */
+  stands: boolean;
+  /** The newest candidate its course proposed. */
+  course_latest: boolean;
+  /** The ONE candidate across the subtree a remembered individual id resolves to:
+   * the live one where a supersede left the individual on two, the first
+   * where several stand. */
+  answers_for_id: boolean;
+  /** The main line to THIS candidate, origin first: the line of the candidate its
+   * course hangs from (a fork's from-candidate, an inner course's host) up to
+   * the cut, each elected round of its course before it with the candidates
+   * crowned, then this candidate, then any later round that crowned nobody up
+   * to the next crown. Read off crowns, never `parent_ids`. */
+  main_line: MainLineStep[];
+  /** This candidate's composite fitness under the request's `score:` lens. Null
+   * without a lens, or where no row carries a verdict under it. */
+  lens_value: number | null;
+  /** Which way the lens moved this candidate among its course's: its position by
+   * `lens_value` against its position by the reading's composite. Null
+   * without a lens, or where either value is. */
+  lens_rank_move: 'up' | 'down' | 'unchanged' | null;
+  /** Accuracy over the request's `samples=` subset, served only where this
+   * candidate carries a scoreable verdict for ALL of it. Null without a
+   * `samples=` mask. */
+  sample_set_accuracy: number | null;
+  /** How many of the `samples=` subset this candidate carries a scoreable verdict
+   * for. Null without a `samples=` mask. */
+  sample_set_n: number | null;
+  /** Set on a closed round's crowned candidate where the request's lens would have
+   * elected someone else. */
+  divergence: LineageDivergence | null;
+  /** Inside the counterfactual below a divergence — the client dims it. */
+  divergent: boolean;
+}
+
+/** One round on the main line to a candidate. */
+export interface MainLineStep {
+  round: number;
+  /** The addresses of the candidates the round's election crowned; at the
+   * candidate's own round, the candidate. Empty: the election crowned nobody. */
+  candidates: string[];
+}
+
+/** Where an alternative criterion would have elected someone else, on the candidate it names. */
+export interface LineageDivergence {
+  /** The individual the masked criterion would have elected instead (measured, so
+   * nameable); null when the round would simply have held on origin. */
+  alternative_candidate_id: string | null;
 }
 
 export interface DatasetIndexResponse {

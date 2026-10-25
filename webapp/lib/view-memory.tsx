@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useMemo, type ReactNode } from 
 import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { ownerOfAddress } from "@/lib/ids";
 
-export const VIEW_MEMORY_KEY = "promptpotter.view.byCampaign";
+const VIEW_MEMORY_KEY = "promptpotter.view.byCampaign";
 
 // Bumping this DROPS every stored record rather than migrating it.
 const RECORD_VERSION = 2;

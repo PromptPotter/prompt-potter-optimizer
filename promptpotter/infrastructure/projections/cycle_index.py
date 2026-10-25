@@ -34,6 +34,7 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
         updated_at=facts.updated_at,
         parent=minted.parent,
         forked_at_offset=minted.forked_at_offset,
+        cut_round=minted.cut_round,
         fork=facts.fork,
         spawned_by=facts.spawned_by,
         scorer_cell_formula=scan_cell_formula(chain),

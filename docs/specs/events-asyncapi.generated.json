@@ -520,7 +520,7 @@
       },
       "ArmName": {
         "additionalProperties": false,
-        "description": "One arm of the run: its key, and where it was first walked.",
+        "description": "One arm of the run: its key, and where it was walked (a re-read: its latest walk).",
         "properties": {
           "key": {
             "description": "THE join: the individual's content id, or the slot hash of a proposal rejected before it cost a cell.",
@@ -528,12 +528,12 @@
             "type": "string"
           },
           "label": {
-            "description": "`C0` or `C{round}.{n}`, off the slot it was first walked in: a display name, never a join.",
+            "description": "`C0` or `C{round}.{n}`, off the slot it was walked in: a display name, never a join.",
             "title": "Label",
             "type": "string"
           },
           "round": {
-            "description": "The round the arm was first walked in; 0 is the origin.",
+            "description": "The round the arm was walked in; 0 is the origin.",
             "title": "Round",
             "type": "integer"
           }
@@ -631,7 +631,7 @@
           },
           "arm": {
             "$ref": "#/components/schemas/ArmName",
-            "description": "THE key, and where the arm was first walked."
+            "description": "THE key, and where the arm was walked."
           },
           "bench": {
             "anyOf": [
@@ -855,7 +855,7 @@
       },
       "ArmSlot": {
         "additionalProperties": false,
-        "description": "Where an individual was first walked as an arm: the ``idx``-th of its round's ``total``.",
+        "description": "Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its round's ``total``.",
         "properties": {
           "idx": {
             "title": "Idx",
@@ -2330,6 +2330,18 @@
         "additionalProperties": false,
         "description": "One per cycle's own ledger, after only the lines it adopted; a chain is walked off it alone.",
         "properties": {
+          "cut_round": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cut Round"
+          },
           "fork": {
             "anyOf": [
               {
@@ -3032,6 +3044,16 @@
             "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
             "title": "Leading"
           },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoundArm"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "ruler": {
             "$ref": "#/components/schemas/RulerStamp"
           },
@@ -3063,6 +3085,7 @@
           "selected",
           "leading",
           "ended_on",
+          "reference",
           "electable",
           "elects_on",
           "ruler"
@@ -3117,6 +3140,16 @@
             "title": "Record Type",
             "type": "string"
           },
+          "reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoundArm"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "round": {
             "title": "Round",
             "type": "integer"
@@ -3156,6 +3189,7 @@
           "selected",
           "leading",
           "ended_on",
+          "reference",
           "electable",
           "elects_on",
           "ruler",
@@ -3485,29 +3519,8 @@
             ],
             "default": null
           },
-          "from_candidate_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "From Candidate Id"
-          },
-          "from_round": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "From Round"
+          "from_candidate": {
+            "$ref": "#/components/schemas/RoundArm"
           },
           "issued_by": {
             "$ref": "#/components/schemas/Principal"
@@ -3534,7 +3547,8 @@
         "required": [
           "trigger",
           "reason",
-          "issued_by"
+          "issued_by",
+          "from_candidate"
         ],
         "title": "ForkSpec",
         "type": "object"
@@ -6138,6 +6152,26 @@
         "title": "RoundAdvance",
         "type": "string"
       },
+      "RoundArm": {
+        "additionalProperties": false,
+        "description": "One arm of one round, by its record's own address: an id alone names no candidate, since a\nlater round can propose the same individual again.",
+        "properties": {
+          "arm": {
+            "title": "Arm",
+            "type": "string"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "round",
+          "arm"
+        ],
+        "title": "RoundArm",
+        "type": "object"
+      },
       "RoundCells": {
         "additionalProperties": false,
         "description": "A :class:`RoundResult`'s rows as archive addresses, in walk order.",
@@ -6565,7 +6599,7 @@
       },
       "RoundRestatedRecord": {
         "additionalProperties": false,
-        "description": "A closed round stated again, never a close: it moves no clock and announces nothing.",
+        "description": "A closed round stated again, never a close: it moves no clock and announces nothing. It is\nthe round WHOLE, so a repair's restatement makes its ledger the owner of every arm in it.",
         "properties": {
           "anchors": {
             "$ref": "#/components/schemas/ViewAnchors"
@@ -6680,13 +6714,6 @@
             "title": "Record Type",
             "type": "string"
           },
-          "remeasured": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Remeasured",
-            "type": "array"
-          },
           "round": {
             "title": "Round",
             "type": "integer"
@@ -6710,8 +6737,7 @@
           "level_series",
           "run_standing",
           "panel_precision",
-          "anchors",
-          "remeasured"
+          "anchors"
         ],
         "title": "RoundRestatedRecord",
         "type": "object"
@@ -7881,8 +7907,21 @@
       },
       "SpawnedBy": {
         "additionalProperties": false,
-        "description": "The outer work-item an L4 inner cycle was spawned to measure.",
+        "description": "The outer work-item an L4 inner cycle was spawned to measure. Where `role` is an arm's,\n`cycle_id`, `round` and `individual_id` are that arm's address, which places the run under\nthe candidate that asked for it with no search.",
         "properties": {
+          "cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The outer cycle whose pass spawned it — the asker, which a fork moves off the cycle owning the sandbox. Null outside a measured pass.",
+            "title": "Cycle Id"
+          },
           "individual_id": {
             "anyOf": [
               {
@@ -7899,15 +7938,14 @@
           "role": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/MeasurementRole"
               },
               {
                 "type": "null"
               }
             ],
             "default": null,
-            "description": "WHY this cell ran (`MeasurementRole`). A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass.",
-            "title": "Role"
+            "description": "WHY this cell ran. A backfill is spawned outside the round's shared order to fill a paired comparison, and reading one as the individual's own panel cell makes a repaired round unreproducible. Null outside a measured pass."
           },
           "round": {
             "anyOf": [

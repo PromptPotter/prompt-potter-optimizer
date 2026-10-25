@@ -1,13 +1,14 @@
 "use client";
 import { memo } from "react";
 import { useCycleStream } from "@/lib/poll";
+import { useViewedCourse } from "@/lib/lineage";
 import { fmtSecs } from "@/lib/format";
 import { Hearts } from "@/components/ui";
 
 export const TopStrip = memo(function TopStrip() {
   const { dash } = useCycleStream();
   const lastQuery = dash?.last_query_elapsed_s ?? null;
-  const lives = dash?.run_standing?.lives ?? null;
+  const lives = useViewedCourse()?.facts.standing?.lives ?? null;
 
   return (
     <div className="topstrip">

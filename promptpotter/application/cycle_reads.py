@@ -143,15 +143,16 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
     dash = served_dashboard(cycle.stores, hop)
     # A cycle that declared no wiring yet has no arm, so no count needs its unit.
     unit: MeasuredUnit = "sample"
-    standing, offset = None, None
+    offset = None
     if not isinstance(dash, WarmingDashboard):
-        unit, standing, offset = dash.measured_unit, dash.run_standing, dash.at_offset
+        unit, offset = dash.measured_unit, dash.at_offset
+    course = subtree_course(stores, path)
+    standing = course.facts.standing
     selection = None if standing is None else standing.selection
     round_view = (
         None if selection is None else served_round(cycle.stores, hop, selection.round, moment=None)
     )
     arm = None if round_view is None or selection is None else round_view.arms.get(selection.key)
-    course = subtree_course(stores, path)
     models = (
         {}
         if arm is None

@@ -29,7 +29,7 @@ export function useRunControl(): RunControl | null {
   const [pausing, setPausing] = useState(false);
 
   const runPhase = dash?.run_phase;
-  const admission = dash?.run_admission;
+  const admission = dash?.admission;
   const action = admission?.offers ?? null;
   const pause = dash?.pause ?? null;
 

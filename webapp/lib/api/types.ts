@@ -180,12 +180,15 @@ export type {
   HierarchyCandidate,
   HierarchyCourse,
   HierarchyRound,
-  HierarchyProducer,
   HierarchyResponse,
   HierarchySpan,
   HierarchyStat,
   HierarchyState,
   HierarchyTag,
+  SubtreeCampaign,
+  SubtreeCampaignFacts,
+  SubtreeCourse,
+  SubtreeCourseFacts,
 } from "./types.generated";
 
 import type {
@@ -197,13 +200,20 @@ import type {
   HierarchyCampaign,
   HierarchyCandidate,
   HierarchyCourse,
+  HierarchyRound,
   ServedDashboard,
+  SubtreeCampaign,
+  SubtreeCourse,
 } from "./types.generated";
 
 // What the forest and a bar draw: a run, or one candidate of one. Narrow on `level` once.
-export type LineageNode = HierarchyCourse | HierarchyCandidate;
+export type LineageNode = SubtreeCourse | HierarchyCandidate;
 
-export type HierarchyEntry = HierarchyCampaign["children"][number];
+// Any entry a row or a card renders, the listing's or a subtree's: each `Subtree*` type extends its
+// listing one. A round is a node of the tree, never a row.
+export type HierarchyEntry = HierarchyCampaign | HierarchyCourse | HierarchyCandidate;
+// served: `domain/hierarchy.py::HierarchyEntry` — what `GET /hierarchy/{address}` answers.
+export type SubtreeEntry = SubtreeCampaign | SubtreeCourse | HierarchyRound | HierarchyCandidate;
 export type CourseKind = CourseFacts["mint"];
 
 export type DraftPatch = Partial<EditDraftPatch>;

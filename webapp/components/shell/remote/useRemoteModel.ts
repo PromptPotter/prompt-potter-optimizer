@@ -37,8 +37,8 @@ export function useRemoteModel() {
   // No `settled` gate: a verb is still offered there, and this gates `RunControlButton`'s only mount.
   if (!dash) return null;
   const terminal = phaseIs(dash.run_phase, "settled");
-  const skipRefusal = dash.run_admission.skip_refusal;
-  const armRefusal = dash.run_admission.lookahead_refusal;
+  const skipRefusal = dash.admission.skip_refusal;
+  const armRefusal = dash.admission.lookahead_refusal;
 
   const innerHop = innerRun ? pathOfAddress(innerRun.address).at(-1) : undefined;
 

@@ -199,12 +199,6 @@ def build_family_ray(
         HierarchyStep(
             address=step_address(key, row.offset),
             parent=key,
-            label=row.activity.label,
-            lede=None,
-            caveat=None,
-            tags=[],
-            stats=[],
-            children=[],
             facts=StepFacts(
                 offset=row.offset,
                 ts=row.ts,

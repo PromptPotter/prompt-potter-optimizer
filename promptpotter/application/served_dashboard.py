@@ -62,7 +62,7 @@ class WarmingDashboard(StrictModel):
     cycle_id: str
     run_phase: RunPhase
     producer: ProducerReading
-    run_admission: RunAdmission
+    admission: RunAdmission
     pause: PauseReading | None
 
 
@@ -165,7 +165,7 @@ class ServedDashboard(DashboardFacts):
         "runner's own `declared_phase`, which says `running` forever after a kill."
     )
     producer: ProducerReading = Field(description="The cycle's producer, derived with the phase.")
-    run_admission: RunAdmission = Field(
+    admission: RunAdmission = Field(
         description="Which run verbs the cycle admits now (`RunState.admission`): the verb the "
         "run control offers or the sentence where it offers none, and each verb's refusal — the "
         "same answer the dispatcher refuses on."
@@ -383,7 +383,7 @@ def _serve(
         cycle_id=hop.cycle_id,
         run_phase=run.run_phase,
         producer=run.producer,
-        run_admission=run.admission,
+        admission=run.admission,
         pause=run.pause,
         overlap_line_round=None if line_round is None else line_round.round,
         overlap_line_n=None if line_round is None else len(line_round.overlap.positions),
@@ -438,7 +438,7 @@ def served_dashboard(
             cycle_id=hop.cycle_id,
             run_phase=run.run_phase,
             producer=run.producer,
-            run_admission=run.admission,
+            admission=run.admission,
             pause=run.pause,
         )
     if at is not None:

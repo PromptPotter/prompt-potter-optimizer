@@ -8,7 +8,7 @@ import {
   type HierarchyCourse,
   type HierarchyEntry,
 } from "./api";
-import { campaignAt, coursesOf, runningCourses } from "./derivations/hierarchy";
+import { campaignAt, runningCourses } from "./derivations/hierarchy";
 import { shownData, useRead, type ReadFailure } from "./hooks/useRead";
 
 interface Registry {
@@ -51,7 +51,7 @@ export function RegistryProvider({ children }: { children: ReactNode }) {
     const m = new Map<string, HierarchyEntry>();
     for (const campaign of entries) {
       m.set(campaign.address, campaign);
-      for (const course of coursesOf(campaign)) m.set(course.address, course);
+      for (const course of campaign.children) m.set(course.address, course);
     }
     return m;
   }, [entries]);

@@ -7,7 +7,7 @@ import sys
 import textwrap
 import types
 import typing
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from fastapi.routing import APIRoute
 from processes import REPO
@@ -76,7 +76,7 @@ def _emit_type(annotation: typing.Any) -> str:
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
 
-    if origin in (typing.Required, typing.NotRequired):
+    if origin in (typing.Required, typing.NotRequired, typing.Annotated):
         return _emit_type(args[0])
 
     if origin in (typing.Union, types.UnionType):
@@ -90,7 +90,7 @@ def _emit_type(annotation: typing.Any) -> str:
         # `json.dumps` for a non-string: a Python `True` is not a TypeScript literal.
         return " | ".join(repr(v) if isinstance(v, str) else json.dumps(v) for v in values)
 
-    if origin in (list, set, frozenset):
+    if origin in (list, set, frozenset, Sequence):
         (inner,) = args
         return _array_of(inner)
 

@@ -82,11 +82,11 @@ class MaskRound(FrozenModel):
 
 
 class MaskCycle(FrozenModel):
-    """``fork_from_round`` is in PARENT coordinates, even when the fork restarts its own numbering."""
+    """``rounds`` is the cycle's whole line; ``branch_round`` the parent round its start was proposed in."""
 
     cycle_id: str
     parent_cycle_id: str | None = None
-    fork_from_round: int | None = None
+    branch_round: int | None = None
     rounds: list[MaskRound] = Field(default_factory=list)
 
 
@@ -101,7 +101,7 @@ class SpineCycle(FrozenModel):
 
     cycle_id: str
     parent_cycle_id: str | None = None
-    fork_from_round: int | None = None
+    cut_round: int | None = None
     # Subset-invariant, so it alone averages up a lineage whose rounds scored different subsets.
     # Every round the cycle closed is a node; ``None`` where its level does not difference.
     theta_by_round: dict[int, float | None]

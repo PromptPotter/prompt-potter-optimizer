@@ -1,15 +1,14 @@
 import type {
-  HierarchyCampaign,
   HierarchyCandidate,
-  HierarchyCourse,
-  HierarchyEntry,
   LineageNode,
+  SubtreeCampaign,
+  SubtreeCourse,
+  SubtreeEntry,
 } from "@/lib/api";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
 import { tagValue } from "./hierarchy";
 import { courseAddressOf, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
-import { coursesOf } from "./hierarchy";
 
 export interface RetiredGroup {
   // The address of the course that took the tail's place.
@@ -32,14 +31,11 @@ export function splitRetired<N extends LineageNode>(
   return { live, retired: [...byBranch].map(([branch, candidates]) => ({ branch, candidates })) };
 }
 
-// A course's own candidates, round by round in slot order; a candidate's inner courses.
+// A course's own candidates, round by round in slot order, then the inner courses it holds
+// unplaced; a candidate's inner courses.
 export function childNodes(node: LineageNode): LineageNode[] {
-  if (node.level === "course") {
-    return node.children.flatMap((rnd) =>
-      rnd.children.filter((c): c is HierarchyCandidate => c.level === "candidate"),
-    );
-  }
-  return node.children.flatMap((c) => (c.level === "campaign" ? coursesOf(c) : []));
+  if (node.level === "course") return node.children.flatMap<LineageNode>((c) => c.children);
+  return node.children.flatMap((c) => c.children);
 }
 
 export function selectedNodeOf(node: HierarchyCandidate, cycleId: string): SelectedCandidate {
@@ -48,21 +44,21 @@ export function selectedNodeOf(node: HierarchyCandidate, cycleId: string): Selec
 }
 
 export interface LineageIndex {
-  byAddress: ReadonlyMap<string, HierarchyEntry>;
+  byAddress: ReadonlyMap<string, SubtreeCampaign | SubtreeCourse | HierarchyCandidate>;
   // Every course at any depth, a campaign's root first.
-  courses: readonly HierarchyCourse[];
+  courses: readonly SubtreeCourse[];
   candidates: readonly HierarchyCandidate[];
 }
 
 export const EMPTY_LINEAGE: LineageIndex = { byAddress: new Map(), courses: [], candidates: [] };
 
-export function indexLineage(root: HierarchyCampaign | null): LineageIndex {
+export function indexLineage(root: SubtreeCampaign | null): LineageIndex {
   if (!root) return EMPTY_LINEAGE;
-  const byAddress = new Map<string, HierarchyEntry>();
-  const courses: HierarchyCourse[] = [];
+  const byAddress = new Map<string, SubtreeCampaign | SubtreeCourse | HierarchyCandidate>();
+  const courses: SubtreeCourse[] = [];
   const candidates: HierarchyCandidate[] = [];
-  const visit = (entry: HierarchyEntry): void => {
-    byAddress.set(entry.address, entry);
+  const visit = (entry: SubtreeEntry): void => {
+    if (entry.level !== "round") byAddress.set(entry.address, entry);
     if (entry.level === "course") courses.push(entry);
     if (entry.level === "candidate") candidates.push(entry);
     entry.children.forEach(visit);
@@ -71,12 +67,12 @@ export function indexLineage(root: HierarchyCampaign | null): LineageIndex {
   return { byAddress, courses, candidates };
 }
 
-export function courseAt(index: LineageIndex, path: CyclePath | null): HierarchyCourse | null {
+export function courseAt(index: LineageIndex, path: CyclePath | null): SubtreeCourse | null {
   const entry = path ? index.byAddress.get(encodeCyclePath(path)) : undefined;
   return entry?.level === "course" ? entry : null;
 }
 
-function courseOf(index: LineageIndex, node: LineageNode): HierarchyCourse | null {
+function courseOf(index: LineageIndex, node: LineageNode): SubtreeCourse | null {
   if (node.level === "course") return node;
   const entry = index.byAddress.get(courseAddressOf(node.address));
   return entry?.level === "course" ? entry : null;
@@ -89,7 +85,12 @@ function candidateAt(index: LineageIndex, address: string | null): HierarchyCand
 
 export function candidatesAtPath(index: LineageIndex, path: CyclePath | null): HierarchyCandidate[] {
   const course = courseAt(index, path);
-  return course ? (childNodes(course) as HierarchyCandidate[]) : [];
+  return course ? candidatesOf(course) : [];
+}
+
+// A course's candidates, round by round in slot order; not the inner campaigns it holds unplaced.
+export function candidatesOf(course: SubtreeCourse): HierarchyCandidate[] {
+  return course.children.flatMap((c) => (c.level === "round" ? c.children : []));
 }
 
 function armOfId(index: LineageIndex, id: string): HierarchyCandidate | null {

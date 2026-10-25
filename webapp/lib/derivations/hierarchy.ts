@@ -28,15 +28,19 @@ export function campaignAt(
   return entry?.level === "campaign" ? entry : null;
 }
 
-export function coursesOf(campaign: HierarchyCampaign): HierarchyCourse[] {
-  return campaign.children.filter((c): c is HierarchyCourse => c.level === "course");
-}
-
 export function runningCourses(entries: readonly HierarchyCampaign[]): HierarchyCourse[] {
   return entries
-    .flatMap(coursesOf)
-    .filter((c) => c.state.producer.attached)
+    .flatMap((campaign) => campaign.children)
+    .filter((c) => c.state.attached)
     .sort((a, b) => dockPriority(a.state.run_phase) - dockPriority(b.state.run_phase));
+}
+
+// An entry without the entries under it: what a frozen item or a copy holds of one row.
+export function entryAlone<E extends object>(entry: E): Omit<E, "children"> {
+  return Object.fromEntries(Object.entries(entry).filter(([k]) => k !== "children")) as Omit<
+    E,
+    "children"
+  >;
 }
 
 interface Tagged {

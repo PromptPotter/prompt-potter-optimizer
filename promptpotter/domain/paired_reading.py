@@ -164,16 +164,24 @@ def interval_side(
 ArmKey = NewType("ArmKey", str)
 
 
+class RoundArm(FrozenModel):
+    """One arm of one round, by its record's own address: an id alone names no candidate, since a
+    later round can propose the same individual again."""
+
+    round: int
+    arm: ArmKey
+
+
 class ArmName(FrozenModel):
-    """One arm of the run: its key, and where it was first walked."""
+    """One arm of the run: its key, and where it was walked (a re-read: its latest walk)."""
 
     key: ArmKey = Field(
         description="THE join: the individual's content id, or the slot hash of a proposal "
         "rejected before it cost a cell."
     )
-    round: int = Field(description="The round the arm was first walked in; 0 is the origin.")
+    round: int = Field(description="The round the arm was walked in; 0 is the origin.")
     label: str = Field(
-        description="`C0` or `C{round}.{n}`, off the slot it was first walked in: a display "
+        description="`C0` or `C{round}.{n}`, off the slot it was walked in: a display "
         "name, never a join."
     )
 
