@@ -59,9 +59,9 @@ To strip this down to a generic chat + tool-activity app, remove:
   origin-gate verb `LiveSegment` fires; keep `LiveSegment`'s button rendering and point it at
   your own gated commands.
 - **The run card** — `components/chat/RunCard.tsx` (the Round row's
-  `<TrendChart density="glyph" />` and the dashboard link live there) plus the derivation it
-  reads, `lib/derivations/run-summary.ts`. Keep the `run` item kind and hand
-  `Thread` a `renderRun` for your own task summary.
+  `<TrendChart density="glyph" />` and the dashboard link live there, and `RunSummaryItem`, which
+  renders the frozen course entry). Keep the `run` item kind and hand `Thread` a `renderRun`
+  for your own task summary.
 - **The optimize row** of `ingest/ComposerTools.tsx` and the `useRunControl` behind it — move
   the Tools popover and its coming-soon rows, which are the generic composer's, beside
   `Composer.tsx`, and re-point that one row at your own long-running task's pause/start.

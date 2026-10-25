@@ -4,14 +4,14 @@
 import { IngestComposer, useIngestItems } from "./IngestConversation";
 import { useIngest } from "@/lib/ingest-flow";
 import { useThread } from "@/lib/chat/thread";
-import type { RunSummary } from "@/lib/derivations";
+import type { HierarchyCourse } from "@/lib/api";
 import { Thread } from "@/components/chat/Thread";
 import { RunSummaryItem } from "@/components/chat/RunCard";
 import { Button, Dialog, IconClose, SignInPrompt } from "@/components/ui";
 
 export function IngestPane() {
   const { flow, collection, closeComposer: onClose } = useIngest();
-  const thread = useThread<RunSummary>();
+  const thread = useThread<HierarchyCourse>();
   const ingestItems = useIngestItems(thread.items.length === 0);
 
   const body =
@@ -19,7 +19,7 @@ export function IngestPane() {
       <div className="ingest-conversation">
         <Thread
           items={[...ingestItems.head, ...thread.items, ...ingestItems.tail]}
-          renderRun={(summary) => <RunSummaryItem summary={summary} />}
+          renderRun={(course) => <RunSummaryItem course={course} />}
         />
         <IngestComposer />
       </div>

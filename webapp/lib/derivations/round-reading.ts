@@ -1,5 +1,5 @@
 import type { OptimizerFact } from "@/lib/api/types";
-import type { DashboardSnapshot } from "@/lib/poll";
+import type { ServedDashboard } from "@/lib/api";
 
 export interface RoundReading {
   round: number;
@@ -9,7 +9,7 @@ export interface RoundReading {
   facts: OptimizerFact[];
 }
 
-export function roundReading(dash: DashboardSnapshot | null, round: number): RoundReading | null {
+export function roundReading(dash: ServedDashboard | null, round: number): RoundReading | null {
   if (!dash?.round_axis.completed.includes(round)) return null;
   const r = dash.rounds.find((x) => x.round === round);
   if (!r) return null;

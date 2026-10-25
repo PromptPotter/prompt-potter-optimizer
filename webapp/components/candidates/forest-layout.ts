@@ -8,8 +8,7 @@ import type {
   LineageDivergence,
   RoundFacts,
 } from "@/lib/api";
-import { childNodes, coursesOf } from "@/lib/derivations";
-import { tagValue } from "@/lib/hierarchy";
+import { childNodes, coursesOf, tagValue } from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
 import { pathOfAddress } from "@/lib/ids";
 

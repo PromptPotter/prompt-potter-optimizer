@@ -13274,6 +13274,11 @@
             "title": "Advanced",
             "type": "integer"
           },
+          "changes": {
+            "description": "What `selection` changed, in its proposer's words (its lineage's `changes_description`). Empty while it is the origin, which changed nothing.",
+            "title": "Changes",
+            "type": "string"
+          },
           "improved": {
             "description": "Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no interval), so it is the promotion clock and never a result; read `advanced`.",
             "title": "Improved",
@@ -13288,7 +13293,7 @@
                 "type": "null"
               }
             ],
-            "description": "`stalls_left` of `stalls_left_cap`, read: the pips and their words, as the readout prints them. Null where the campaign banks no lives."
+            "description": "The life bank after this round: the pips and their words, as the readout prints them. Null where the campaign banks no lives (`optimization.lives`)."
           },
           "parent": {
             "anyOf": [
@@ -13321,33 +13326,6 @@
             ],
             "description": "The optimizer's declared pick (`declared_selection`), as the arm it was first measured as: the origin until a round selects. Null before round 0 closes."
           },
-          "selection_line": {
-            "description": "The ONE text reading of the selection: who, and both rates on the origin panel — or the reason there is no pair. Never the selection's rate alone. The readout, `log.md`, the activity feed and every screen print this. Stamped by the two constructors alone.",
-            "title": "Selection Line",
-            "type": "string"
-          },
-          "stalls_left": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stalls Left"
-          },
-          "stalls_left_cap": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stalls Left Cap"
-          },
           "vs_origin": {
             "$ref": "#/components/schemas/PairedReading",
             "description": "`selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap reading of that pair. The state says why where there is none: `same_individual` while the selection is the origin."
@@ -13355,16 +13333,14 @@
         },
         "required": [
           "rounds_without_advance",
-          "stalls_left",
-          "stalls_left_cap",
           "lives",
           "selection",
           "parent",
+          "changes",
           "vs_origin",
           "rounds_closed",
           "improved",
-          "advanced",
-          "selection_line"
+          "advanced"
         ],
         "title": "RunStanding",
         "type": "object"
@@ -17030,7 +17006,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/dashboard": {
       "get": {
-        "description": "Live telemetry for the viewed cycle: the fold of its own ledger chain.\n\nThe path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.\nHonors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.\n``at`` is an offset in the LEAF cycle's own ledger, the address a ray item carries: the state as of that line.",
+        "description": "Live telemetry for the viewed cycle: the fold of its own ledger chain.\n\nThe path ids address the root cycle; ``descend`` walks ``.inner/`` sandboxes one ``campaign::cycle`` hop at a time.\nHonors ``If-Modified-Since`` with a 304; a cycle with no declared wiring answers ``warming_up`` at 200, an absent one 404.\n``at`` is an offset in the LEAF cycle's own ledger, the moment a hierarchy step's ``facts.offset`` carries: the state as of that line.",
         "operationId": "get_cycle_dashboard_api_v1_campaigns__campaign_id__cycles__cycle_id__dashboard_get",
         "parameters": [
           {

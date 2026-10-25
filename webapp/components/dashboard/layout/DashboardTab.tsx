@@ -5,7 +5,7 @@ import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
 import { useCandidatesState } from "@/lib/candidates-store";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useSelection } from "@/lib/SelectionContext";
-import { hasTag } from "@/lib/hierarchy";
+import { hasTag } from "@/lib/derivations";
 import { useEntry } from "@/lib/registry";
 import { useWorkspace } from "@/lib/workspace";
 import { RunErrorBanner } from "./RunErrorBanner";

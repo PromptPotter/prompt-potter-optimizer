@@ -1,7 +1,7 @@
 "use client";
 import { useId, useState } from "react";
 import { postCommand, type HierarchyCampaign } from "@/lib/api";
-import { tagValue } from "@/lib/hierarchy";
+import { tagValue } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/workspace";
 import { Modal, type ModalAction } from "@/components/shell/Modal";

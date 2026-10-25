@@ -103,8 +103,13 @@ export function ChannelColumn({
             {run ? (
               <SummaryBlock
                 dense
-                facts={{ ...run, tags: [{ label: shortId(run.address) }, ...run.tags] }}
-                actions={close}
+                facts={run}
+                actions={
+                  <>
+                    <span className="summary-block-tag">{shortId(run.address)}</span>
+                    {close}
+                  </>
+                }
               />
             ) : (
               <span className="cmp-channel-name">

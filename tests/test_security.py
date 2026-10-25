@@ -71,7 +71,13 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phases import PauseCause, ProducerState, RunPhase, StopReason
+from promptpotter.domain.phases import (
+    PauseCause,
+    ProducerAlert,
+    ProducerState,
+    RunPhase,
+    StopReason,
+)
 from promptpotter.domain.pipeline_overlay import (
     permitted_models_from_narrowing,
     steers_disallowed_model,
@@ -942,6 +948,10 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
     release_cycle(cycle_dir)
     ended = derive_run_state(cycle_dir)
     assert (ended.run_phase, ended.producer.state) == (RunPhase.TERMINAL, ProducerState.ABSENT)
+    # Only a producer that stopped appending while it still owes the run raises an alert.
+    for state in ProducerState:
+        raises = state in {ProducerState.WEDGED, ProducerState.SILENT}
+        assert (ProducerAlert.of(state, clocked="") is not None) == raises, f"{state}: {raises}"
 
     # Reclaim spares a sandbox whose owner cycle still exists, terminal or not, and one with no
     # `owner.json`: its key is a hash, so no owner derives from it.

@@ -1,7 +1,8 @@
 // Seeds from the RESOLVED config: fork init layers it onto the dataset overlay (`entry.py`), so a sparse seed resets untouched params.
 
 import type { NodePrompt } from "@/lib/api/types";
-import { liveCandidate, type DashboardSnapshot } from "@/lib/poll";
+import type { ServedDashboard } from "@/lib/api";
+import { liveCandidate } from "@/lib/poll";
 import type { RoundView } from "@/lib/types";
 
 export interface CandidateSearchPoint {
@@ -56,7 +57,7 @@ export function candidateSearchPoint(
 }
 
 export function liveCandidateSearchPoint(
-  dash: DashboardSnapshot | null,
+  dash: ServedDashboard | null,
   key: string | null,
 ): CandidateSearchPoint | null {
   const entry = liveCandidate(dash, key);

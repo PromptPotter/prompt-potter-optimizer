@@ -1206,12 +1206,9 @@ class RunStanding(FrozenModel):
     """Where the run stands after a round: its selection, over whom, and how it reads against C0."""
 
     rounds_without_advance: int
-    # ``None`` where the campaign banks no lives (`optimization.lives`).
-    stalls_left: int | None
-    stalls_left_cap: int | None
     lives: LivesReading | None = Field(
-        description="`stalls_left` of `stalls_left_cap`, read: the pips and their words, as the "
-        "readout prints them. Null where the campaign banks no lives."
+        description="The life bank after this round: the pips and their words, as the readout "
+        "prints them. Null where the campaign banks no lives (`optimization.lives`)."
     )
     selection: ArmName | None = Field(
         description="The optimizer's declared pick (`declared_selection`), as the arm it was "
@@ -1219,6 +1216,10 @@ class RunStanding(FrozenModel):
     )
     parent: ArmName | None = Field(
         description="The pick `selection` was promoted over. Null while it is the origin."
+    )
+    changes: str = Field(
+        description="What `selection` changed, in its proposer's words (its lineage's "
+        "`changes_description`). Empty while it is the origin, which changed nothing."
     )
     vs_origin: PairedReading = Field(
         description="`selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap "
@@ -1236,33 +1237,25 @@ class RunStanding(FrozenModel):
         description="Of those, how many closed `advanced`: their pick separated from C0 on the "
         "origin panel — the verdict clock. Never summed with `improved`."
     )
-    selection_line: str = Field(
-        description="The ONE text reading of the selection: who, and both rates on the origin "
-        "panel — or the reason there is no pair. Never the selection's rate alone. The readout, "
-        "`log.md`, the activity feed and every screen print this. Stamped by the two "
-        "constructors alone."
-    )
 
-    @model_validator(mode="after")
-    def _line_words_the_selection(self) -> Self:
-        if self.selection_line != _selection_line(self.selection, self.vs_origin):
-            raise ValueError("a standing's selection_line is the wording of its own selection")
-        return self
+    @property
+    def selection_line(self) -> str:
+        """The ONE text reading of the selection: who, and both rates on the origin panel — or
+        the reason there is no pair. Never the selection's rate alone; derived, never served."""
+        return _selection_line(self.selection, self.vs_origin)
 
     @classmethod
     def opening(cls, lives: tuple[int, int] | None) -> RunStanding:
         return cls(
             rounds_without_advance=0,
-            stalls_left=None if lives is None else stalls_left([], lives),
-            stalls_left_cap=None if lives is None else lives[1],
             lives=None if lives is None else LivesReading.of(stalls_left([], lives), lives[1]),
             selection=None,
             parent=None,
-            vs_origin=(unread := PairedReading.unread(ReadingState.NO_SELECTION)),
+            changes="",
+            vs_origin=PairedReading.unread(ReadingState.NO_SELECTION),
             rounds_closed=0,
             improved=0,
             advanced=0,
-            selection_line=_selection_line(None, unread),
         )
 
     @classmethod
@@ -1292,16 +1285,16 @@ class RunStanding(FrozenModel):
         after_origin = [rr for rr in rounds if rr.round > 0]
         return cls(
             rounds_without_advance=rounds_without_advance(rounds),
-            stalls_left=None if lives is None else stalls_left(rounds, lives),
-            stalls_left_cap=None if lives is None else lives[1],
             lives=None if lives is None else LivesReading.of(stalls_left(rounds, lives), lives[1]),
             selection=arms[chosen],
             parent=arms[before[-1]] if before else None,
+            changes=""
+            if vs_origin.state is ReadingState.SAME_INDIVIDUAL
+            else declared.arms[chosen].changes_description,
             vs_origin=vs_origin,
             rounds_closed=closed_after_origin([rr.round for rr in rounds]),
             improved=sum(1 for rr in after_origin if rr.improved),
             advanced=sum(1 for rr in after_origin if rr.overlap.advance is RoundAdvance.ADVANCED),
-            selection_line=_selection_line(arms[chosen], vs_origin),
         )
 
 

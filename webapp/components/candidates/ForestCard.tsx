@@ -1,5 +1,6 @@
 "use client";
 import { useMemo } from "react";
+import type { ServedDashboard } from "@/lib/api";
 import {
   Badge,
   CardFrame,
@@ -10,7 +11,7 @@ import {
   ToolbarSpacer,
 } from "@/components/ui";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
-import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { isSelectedCandidate } from "@/lib/types";
@@ -33,7 +34,7 @@ export function ForestCard() {
   return <ReadForestCard dash={dash} />;
 }
 
-function ReadForestCard({ dash }: { dash: DashboardSnapshot }) {
+function ReadForestCard({ dash }: { dash: ServedDashboard }) {
   const {
     campaignId,
     cycleId,

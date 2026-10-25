@@ -125,7 +125,7 @@ def _read_curated(
     return tail.rows[-keep:], tail.total > keep
 
 
-def encode_ray_cursor(key: RayCursor) -> str:
+def _encode_ray_cursor(key: RayCursor) -> str:
     blob = json.dumps(list(key), separators=(",", ":")).encode()
     return base64.urlsafe_b64encode(blob).decode()
 
@@ -216,5 +216,5 @@ def build_family_ray(
     ]
     return HierarchySteps(
         steps=steps,
-        cursor_prev=encode_ray_cursor(pool[0][0]) if truncated and pool else None,
+        cursor_prev=_encode_ray_cursor(pool[0][0]) if truncated and pool else None,
     )

@@ -1,16 +1,14 @@
 import { describe, expect, it } from "vitest";
+import type { ServedDashboard } from "@/lib/api";
 import { criticalAlert } from "../critical-alert";
-import type { ProducerReading, RoundHealth } from "@/lib/api/types";
-import type { DashboardSnapshot } from "@/lib/poll";
+import type { RoundHealth } from "@/lib/api/types";
 import { dash as dashboard, health, producerReading, summaryRound } from "@/lib/test-fixtures";
-
-type ProducerState = ProducerReading["state"];
 
 const base = {
   bannerStatus: "connected" as const,
   bannerText: "",
   bannerHint: undefined,
-  dash: null as DashboardSnapshot | null,
+  dash: null as ServedDashboard | null,
 };
 
 describe("criticalAlert", () => {
@@ -74,27 +72,9 @@ describe("criticalAlert", () => {
     expect(criticalAlert({ ...base, bannerStatus: "loading" })).toBeNull();
   });
 
-  const PRODUCER_ALERT: Record<ProducerState, string | null> = {
-    live: null,
-    idle: null,
-    held: null,
-    absent: null,
-    claimed: null,
-    silent: "Run went silent",
-    wedged: "Run wedged",
-  };
-
-  it.each(Object.entries(PRODUCER_ALERT) as [ProducerState, string | null][])(
-    "reads a %s producer off the served state alone",
-    (state, title) => {
-      const dash = dashboard({ producer: producerReading(state, { silent_for_s: 600 }) });
-      expect(criticalAlert({ ...base, dash })?.title ?? null).toBe(title);
-    },
-  );
-
   it("raises the served producer alert verbatim", () => {
     const alert = { title: "Run wedged", detail: "heartbeats only for 10m" };
-    const dash = dashboard({ producer: producerReading("wedged", { alert }) });
+    const dash = dashboard({ producer: producerReading({ state: "wedged", alert }) });
     expect(criticalAlert({ ...base, dash })).toEqual({ severity: "warn", ...alert });
   });
 

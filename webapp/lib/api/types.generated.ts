@@ -177,10 +177,9 @@ export interface ArmName {
 /** Where the run stands after a round: its selection, over whom, and how it reads against C0. */
 export interface RunStanding {
   rounds_without_advance: number;
-  stalls_left: number | null;
-  stalls_left_cap: number | null;
-  /** `stalls_left` of `stalls_left_cap`, read: the pips and their words, as the
-   * readout prints them. Null where the campaign banks no lives. */
+  /** The life bank after this round: the pips and their words, as the readout
+   * prints them. Null where the campaign banks no lives
+   * (`optimization.lives`). */
   lives: LivesReading | null;
   /** The optimizer's declared pick (`declared_selection`), as the arm it was first
    * measured as: the origin until a round selects. Null before round 0
@@ -188,6 +187,10 @@ export interface RunStanding {
   selection: ArmName | null;
   /** The pick `selection` was promoted over. Null while it is the origin. */
   parent: ArmName | null;
+  /** What `selection` changed, in its proposer's words (its lineage's
+   * `changes_description`). Empty while it is the origin, which changed
+   * nothing. */
+  changes: string;
   /** `selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap
    * reading of that pair. The state says why where there is none:
    * `same_individual` while the selection is the origin. */
@@ -201,11 +204,6 @@ export interface RunStanding {
   /** Of those, how many closed `advanced`: their pick separated from C0 on the
    * origin panel — the verdict clock. Never summed with `improved`. */
   advanced: number;
-  /** The ONE text reading of the selection: who, and both rates on the origin panel
-   * — or the reason there is no pair. Never the selection's rate alone. The
-   * readout, `log.md`, the activity feed and every screen print this. Stamped
-   * by the two constructors alone. */
-  selection_line: string;
 }
 
 /** A run's life bank as every surface shows it. Built by :meth:`of` alone. */

@@ -2,7 +2,15 @@ import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import type { HeadToHeadRow, MeteredSpend } from "@/lib/api";
 import type { LiftEstimate } from "@/lib/api/types";
 import { GuardBadge } from "@/components/shell/GuardBadge";
-import { liftOf, readPaired, cycleSpendStat, type LineStep } from "@/lib/derivations";
+import { CEILING_METER_LABELS } from "@/lib/api/types.generated";
+import {
+  liftOf,
+  meteredBucketsLine,
+  ratePricedText,
+  readPaired,
+  spendHeadline,
+  type LineStep,
+} from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import {
   sideTone,
@@ -11,6 +19,7 @@ import {
   fmtMetricValue,
   fmtPct0,
   fmtSigned,
+  fmtUsd,
 } from "@/lib/format";
 import { Badge } from "@/components/ui";
 
@@ -108,11 +117,15 @@ export function benchLead(row: HeadToHeadRow | null): {
 
 export function SpentReading({ metered }: { metered: MeteredSpend | null }) {
   if (metered === null) return "—";
-  const { value, sub } = cycleSpendStat(metered);
+  const priced = ratePricedText(metered.rate_priced_usd, metered.calls_rate_priced);
+  const sub =
+    `${priced ? `${priced} · ` : ""}Incurred ${fmtUsd(metered.incurred_usd)} · ` +
+    `Counted here against the campaign cap ${fmtUsd(metered.metered_usd)} ` +
+    `${CEILING_METER_LABELS[metered.meter]}: ${meteredBucketsLine(metered)}`;
   return (
     <span className="cmp-metric">
-      {value}
-      <span className="cmp-metric-band" title={sub ?? undefined}>
+      {spendHeadline(metered)}
+      <span className="cmp-metric-band" title={sub}>
         {sub}
       </span>
     </span>

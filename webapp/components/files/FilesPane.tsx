@@ -1,16 +1,17 @@
 "use client";
 import { useState } from "react";
+import type { ServedDashboard } from "@/lib/api";
 import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 import { StorageCakes } from "./StorageCakes";
-import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { useCycleStream } from "@/lib/poll";
 
 interface Props {
   campaignId: string | null;
   cycleId: string | null;
 }
 
-function RawJsonCard({ dash }: { dash: DashboardSnapshot | null }) {
+function RawJsonCard({ dash }: { dash: ServedDashboard | null }) {
   return (
     <div className="card raw-card">
       <details>

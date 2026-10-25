@@ -1,4 +1,5 @@
-import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { useCycleStream } from "@/lib/poll";
+import type { ServedDashboard } from "@/lib/api";
 import { fmtNum, fmtClock } from "@/lib/format";
 import { useOrigin } from "@/lib/hooks/useOrigin";
 import { cx } from "@/lib/cx";
@@ -119,7 +120,7 @@ export function LiveStateCard() {
   );
 }
 
-function RaceCatchUpLog({ dash }: { dash: DashboardSnapshot | null }) {
+function RaceCatchUpLog({ dash }: { dash: ServedDashboard | null }) {
   const log = dash?.catch_up_log;
   if (!log || log.length === 0) return null;
   return (
@@ -143,7 +144,7 @@ function RaceCatchUpLog({ dash }: { dash: DashboardSnapshot | null }) {
   );
 }
 
-function BackendWarnings({ dash }: { dash: DashboardSnapshot | null }) {
+function BackendWarnings({ dash }: { dash: ServedDashboard | null }) {
   const warnings = dash?.recent_backend_warnings;
   if (!warnings || warnings.length === 0) return null;
   return (

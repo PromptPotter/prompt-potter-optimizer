@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { SignInPrompt } from "@/components/ui";
 import { useAuth } from "@/lib/auth-context";
-import { tagValue } from "@/lib/hierarchy";
+import { tagValue } from "@/lib/derivations";
 import { useActivePointer, useRegistry } from "@/lib/registry";
 import { useShowCandidates } from "@/lib/tree-prefs";
 import { useNodeToggle } from "@/lib/view-memory";

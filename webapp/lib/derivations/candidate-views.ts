@@ -7,14 +7,14 @@ import type {
 import { DISPLAY_METRIC_UNITS } from "@/lib/api/types.generated";
 import type { CandidateBar } from "@/lib/types";
 import { fmtLevel } from "@/lib/format";
-import { tagValue } from "@/lib/hierarchy";
+import { tagValue } from "./hierarchy";
 import { metricLevel, type DisplayMetric } from "./headline-stats";
 import { panelCellLabel } from "./inner-panel";
 import { readPaired } from "./paired-reading";
 import { childNodes, splitRetired } from "./lineage-candidates";
 
 // A run's served standing rate against its origin; `null` renders BLANK, never 0.
-export function courseLevel(node: HierarchyCourse): number | null {
+function courseLevel(node: HierarchyCourse): number | null {
   const served = node.facts.standing;
   const standing = served ? readPaired(served.vs_origin) : null;
   return standing?.read ? standing.lift.rate_b : null;

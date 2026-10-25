@@ -20,6 +20,7 @@ from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import (
     CycleHop,
     CyclePath,
+    decode_cycle_path,
     encode_cycle_path,
     hierarchy_address,
 )
@@ -38,7 +39,6 @@ from promptpotter.domain.hierarchy import (
     StatKey,
 )
 from promptpotter.domain.paired_reading import READING_STATE_INFO, MeasurandUnit, PairedReading
-from promptpotter.domain.results import RunStanding
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
@@ -63,6 +63,13 @@ _UNMINTED = "Its line course has no mint record, so its rounds and standing are 
 
 def _course_label(mint: CourseKind, cycle_id: str) -> str:
     return f"{_MINT_WORDS[mint]} ·{cycle_id.rpartition('_')[2][:6]}"
+
+
+def superseded_tag(successor: str) -> HierarchyTag:
+    """Worn by a retired course or candidate: the course that took its place, named as its card."""
+    cycle_id = decode_cycle_path(successor)[-1].cycle_id
+    label = f"retired by {_course_label(sibling_kind(cycle_id), cycle_id)}"
+    return HierarchyTag(kind="superseded", value=successor, label=label)
 
 
 def _rate_priced(spent: LifetimeSpend | MeteredSpend) -> str | None:
@@ -125,16 +132,6 @@ def lift_stat(
     )
 
 
-def _accuracy_stat(standing: RunStanding, *, on_theta: bool) -> HierarchyStat:
-    return lift_stat(
-        "accuracy",
-        "Lift vs origin",
-        standing.vs_origin,
-        "origin",
-        notes=[_THETA_CLAUSE] if on_theta else [],
-    )
-
-
 def _line_stats(index: CycleIndex, cap: int | None, *, on_theta: bool) -> list[HierarchyStat]:
     rounds = _rounds_stat(index.rounds_closed, cap)
     standing = index.standing
@@ -152,7 +149,14 @@ def _line_stats(index: CycleIndex, cap: int | None, *, on_theta: bool) -> list[H
             )
         ]
     )
-    return [rounds, _accuracy_stat(standing, on_theta=on_theta), *lives]
+    lift = lift_stat(
+        "accuracy",
+        "Lift vs origin",
+        standing.vs_origin,
+        "origin",
+        notes=[_THETA_CLAUSE] if on_theta else [],
+    )
+    return [rounds, lift, *lives]
 
 
 def _bench_stat(bench: BenchScore) -> HierarchyStat:
@@ -205,13 +209,7 @@ def course_entry(
         HierarchyTag(kind="mint", value=mint, label=_MINT_WORDS[mint]),
     ]
     if (successor := index.superseded_by) is not None:
-        tags.append(
-            HierarchyTag(
-                kind="superseded",
-                value=hierarchy_address(inside, hop.campaign_id, successor),
-                label=f"retired by {_course_label(sibling_kind(successor), successor)}",
-            )
-        )
+        tags.append(superseded_tag(hierarchy_address(inside, hop.campaign_id, successor)))
     fork, parent_id, cut = index.fork, index.parent_cycle_id, index.forked_at_offset
     spawn = (
         None

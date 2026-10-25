@@ -1,4 +1,5 @@
-import { liveCandidate, liveCandidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
+import { liveCandidate, liveCandidates, roundOf } from "@/lib/poll";
+import type { ServedDashboard } from "@/lib/api";
 import type { ArmName, ArmReading, CellRow, HierarchyCandidate, NodePrompt } from "@/lib/api/types";
 import type { ArmRow, RoundView, SelectedCandidate } from "@/lib/types";
 import { armSearchpoint, type ArmSearchpoint } from "./candidateSearchPoint";
@@ -101,7 +102,7 @@ function rowConfig(
 
 // The served list orders the latest-seeded row last.
 export function liveObserveConfig(
-  dash: DashboardSnapshot | null,
+  dash: ServedDashboard | null,
   nodeId?: string | null,
 ): ObserveConfig | null {
   const latest = liveCandidates(dash).at(-1);
@@ -110,7 +111,7 @@ export function liveObserveConfig(
 }
 
 export function liveCandidateObserveConfig(
-  dash: DashboardSnapshot | null,
+  dash: ServedDashboard | null,
   key: string | null,
   nodeId?: string | null,
 ): ObserveConfig | null {
@@ -130,12 +131,12 @@ export function candidateObserveConfig(
 
 export type ObserveTarget = Pick<ArmName, "key" | "round" | "label">;
 
-function bestObserveTarget(dash: DashboardSnapshot | null): ObserveTarget | null {
+function bestObserveTarget(dash: ServedDashboard | null): ObserveTarget | null {
   return dash?.run_standing?.selection ?? null;
 }
 
 // Served `leading` is the arm the selector read the round off, so a held round still has one.
-function roundObserveTarget(dash: DashboardSnapshot | null, round: number): ObserveTarget | null {
+function roundObserveTarget(dash: ServedDashboard | null, round: number): ObserveTarget | null {
   if (!dash?.round_axis.completed.includes(round)) return null;
   return dash.rounds.find((x) => x.round === round)?.leading ?? null;
 }
@@ -145,12 +146,12 @@ export interface ObservePoint extends ObserveTarget {
   row: ArmRow | null;
 }
 
-function pointAt(dash: DashboardSnapshot | null, target: ObserveTarget, title: string): ObservePoint {
+function pointAt(dash: ServedDashboard | null, target: ObserveTarget, title: string): ObservePoint {
   return { ...target, title, row: rowAt(dash, target.key) };
 }
 
 export function originPoint(
-  dash: DashboardSnapshot | null,
+  dash: ServedDashboard | null,
   origin: HierarchyCandidate | null,
 ): ObservePoint | null {
   if (!origin) return null;
@@ -188,7 +189,7 @@ function subjectTitle(state: ObserveState, target: ObserveTarget, inFlight: bool
 }
 
 export function resolveObserveSubject(
-  dash: DashboardSnapshot | null,
+  dash: ServedDashboard | null,
   isLive: boolean,
   selection: ObserveSelection,
 ): ObserveSubject {

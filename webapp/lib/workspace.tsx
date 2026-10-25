@@ -33,7 +33,7 @@ import {
   type CampaignTab,
   type Tab,
 } from "./view-tab";
-import { hasTag, tagValue } from "./hierarchy";
+import { hasTag, tagValue } from "./derivations/hierarchy";
 import { useActivePointer, useEntry, useRegistry } from "./registry";
 import { useViewMemory } from "./view-memory";
 

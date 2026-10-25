@@ -1,5 +1,6 @@
 "use client";
 import type { CSSProperties } from "react";
+import type { ServedDashboard } from "@/lib/api";
 import { FitnessChart } from "./FitnessChart";
 import { DendrogramStrip } from "./DendrogramStrip";
 import { ThetaCaveatNotice } from "./AbilityInfo";
@@ -12,7 +13,7 @@ import { setScoringMask } from "@/lib/scoring-mask";
 import { FitnessRankSummary } from "./FitnessRankSummary";
 import { SampleSetControl } from "./SampleSetControl";
 import { cx } from "@/lib/cx";
-import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
+import { useCycleStream } from "@/lib/poll";
 
 function ForestToggle({ model: m }: { model: CandidatesModel }) {
   const { showForest, totalDescendants } = m;
@@ -71,7 +72,7 @@ export function CandidatesCard() {
   return <ReadCandidatesCard dash={dash} />;
 }
 
-function ReadCandidatesCard({ dash }: { dash: DashboardSnapshot }) {
+function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
   const m = useCandidatesModel(dash);
   const { views, maskOpen, viewedCandidateId, areCourses, wonOnTheta } = m;
 
