@@ -67,16 +67,7 @@ function GroupRow({
   return (
     <>
       <div className={`unit-library-family ${className}`}>
-        <button
-          type="button"
-          className="unit-library-twist"
-          onClick={() => ctx.toggleNode(addr)}
-          aria-label={open ? "Collapse" : "Expand"}
-          aria-expanded={open}
-          tabIndex={-1}
-        >
-          {open ? "▼" : "▶"}
-        </button>
+        <Twist open={open} onClick={() => ctx.toggleNode(addr)} />
         <span className="unit-library-item origin-label" title={title}>
           <span className="unit-library-row">
             <span className="unit-library-name">{name}</span>
@@ -189,7 +180,7 @@ function CampaignBody({
       ) : (
         courses.map((course) => (
           <li key={course.address}>
-            <CourseRow course={course} ctx={ctx} />
+            <CourseRow course={course} holdsLine={course.address === body?.facts.line} ctx={ctx} />
           </li>
         ))
       )}
@@ -197,14 +188,21 @@ function CampaignBody({
   );
 }
 
-function CourseRow({ course, ctx }: { course: HierarchyCourse; ctx: TreeCtx }) {
+function CourseRow({
+  course,
+  holdsLine,
+  ctx,
+}: {
+  course: HierarchyCourse;
+  holdsLine: boolean;
+  ctx: TreeCtx;
+}) {
   const { navigate } = useWorkspace();
   const path = pathOfAddress(course.address);
-  const open = ctx.isNodeOpen(course.address, true);
-  const selected =
-    ctx.viewedPath != null &&
-    encodeCyclePath(ctx.viewedPath) === course.address &&
-    ctx.viewedCandidateId == null;
+  const viewed = ctx.viewedPath != null && encodeCyclePath(ctx.viewedPath) === course.address;
+  // Every course open stacks each fork's whole roster on a phone: the line and the viewed one open.
+  const open = ctx.isNodeOpen(course.address, holdsLine || viewed);
+  const selected = viewed && ctx.viewedCandidateId == null;
   return (
     <>
       <RowHoverCard card={course}>

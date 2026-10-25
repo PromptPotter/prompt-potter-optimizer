@@ -34,7 +34,6 @@
   .remote-control > *{flex:0 0 auto}
   /* Measure under touch emulation: `pointer:coarse` does not match in a desktop browser. */
   .shell:has(> .remote-control){--remote-dock-h:64px}
-  .shell.mobile-list:has(> .remote-control) .unit-library-list,
   .shell.mobile-list:has(> .remote-control) .sidebar-footer{
     padding-bottom:calc(var(--remote-dock-h) + env(safe-area-inset-bottom,0px));
   }

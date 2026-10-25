@@ -42,6 +42,7 @@ from offline_world import (
 from processes import end_children_with_this_process, queue_behind_siblings
 
 from promptpotter.application import optimizers
+from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_operator_fork
 from promptpotter.application.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -69,6 +70,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_records import CycleSeed
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
@@ -413,6 +415,11 @@ def edited_proposer(config: CampaignConfig) -> dict[str, dict[str, Any]]:
     return {node: {"problem_description": f"{held.problem_description}\n\nEdited on resume."}}
 
 
+def closed_a_round(stores: Stores, hop: CycleHop) -> bool:
+    ledger = CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
+    return any(r.get("record_type") == "round_closed" for r in _jsonl(ledger))
+
+
 def forked_at_init(stores: Stores, parent: CycleHop, fork: CycleHop) -> None:
     if fork == parent:
         raise SystemExit("offline run: a diverged resume ran on in the cycle it diverged from")
@@ -429,10 +436,32 @@ def forked_at_init(stores: Stores, parent: CycleHop, fork: CycleHop) -> None:
     last = layout.readout.read_text(encoding="utf-8").rstrip().splitlines()[-1]
     if fork.cycle_id not in last:
         raise SystemExit(f"offline run: the parent's readout ends {last!r}, naming no fork")
-    closed = CycleLayout(stores.campaigns.cycle_dir(fork)).ledger
-    if not any(r.get("record_type") == "round_closed" for r in _jsonl(closed)):
+    if not closed_a_round(stores, fork):
         raise SystemExit("offline run: the fork closed no round of its own")
     print(f"diverged at run init: {parent.cycle_id} REBASED onto {fork.cycle_id}, which ran on")
+
+
+async def forked_twice(stores: Stores, fork: CycleHop, rounds: int) -> None:
+    """An operator fork off the divergence fork, then one off that: one campaign, four courses."""
+    # Each cut leaves the fork a round of its own to close under the campaign's rounds cap.
+    for from_round in (rounds - 2, rounds - 1):
+        cycle_id = mint_operator_fork(
+            stores=stores, hop=fork, from_round=from_round, seed=CycleSeed(), keep_rounds=True
+        )
+        fork = CycleHop(campaign_id=fork.campaign_id, cycle_id=cycle_id)
+        session, result = await run_campaign(
+            await rebound_session(stores, fork),
+            readout_sink=print,
+            budget=Budget(),
+            mode=RunMode(),
+        )
+        await session.backend_client.aclose()
+        ended = stop_reason_outcome(result.stop_reason).exit_code or session.hop != fork
+        if ended or not closed_a_round(stores, fork):
+            raise SystemExit(
+                f"offline run: the fork from round {from_round} ended {result.stop_reason}"
+            )
+    print(f"forked twice: {fork.cycle_id} is a fork of a fork")
 
 
 async def rebound_session(stores: Stores, hop: CycleHop) -> Session:
@@ -495,9 +524,10 @@ async def run_one(
                 budget=Budget(),
                 mode=RunMode(fork_on_divergence=diverge),
             )
+            if diverge:
+                forked_at_init(stores, paused, session.hop)
+                await forked_twice(stores, session.hop, rounds)
         await session.backend_client.aclose()
-        if diverge:
-            forked_at_init(stores, paused, session.hop)
     if stop_reason_outcome(result.stop_reason).exit_code:
         raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}")
     beside = sorted(

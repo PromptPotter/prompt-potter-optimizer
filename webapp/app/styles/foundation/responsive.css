@@ -86,6 +86,8 @@
   .rotate-prompt-card .rotate-icon{width:48px;height:48px;color:var(--color-accent);animation:rotate-hint 2.4s ease-in-out infinite}
   .rotate-prompt-card .rotate-title{font-size:var(--text-xl);font-weight:600;color:var(--color-text-primary)}
   .rotate-prompt-card .rotate-body{font-size:var(--text-md);max-width:280px;line-height:1.5}
+  /* 60vh sizes a whole pane; inside a card row it is half a phone screen of nothing. */
+  .run-card .rotate-prompt-card{min-height:0;padding:var(--space-16) var(--space-12)}
 }
 @keyframes rotate-hint{
   0%,100%{transform:rotate(0deg)}
