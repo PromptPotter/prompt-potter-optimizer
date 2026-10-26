@@ -225,7 +225,7 @@ not backend-supplied.
 - **Who may claim the box is DECLARED, never inferred.** The claim marker `maybe_claim_default`
   writes is what names the box's own tenant — the workspace a terminal run and a browser session
   share — and entitlement can no longer stand in front of it now
-  that everyone is entitled — so `auth.py::_is_declared_host_admin` reads `Settings.HOST_ADMIN_EMAIL`,
+  that everyone is entitled — so `presentation/api/routers/auth.py::_is_declared_host_admin` reads `Settings.HOST_ADMIN_EMAIL`,
   and `HOST_ADMIN_ISSUER` too where that is set (empty accepts any issuer, so no deployed box
   changes until an operator sets it). An email is a CLAIM a provider makes and two providers are
   wired, so the address alone would let whichever has the weaker email handling assert the declared
@@ -370,7 +370,7 @@ With `ADMIN_BOT_PASSPHRASE` set, prefix **every** message with it — it is not 
 
 ### New accounts into your CRM (optional)
 
-Set `N8N_SIGNUP_WEBHOOK_URL` in the same env file and the app POSTs `{email, name, use_case, signup_source, account_count}` the first time a new account calls `/auth/me`. Unset, nothing is sent; the forward is best-effort and never fails a sign-in (`admin_bot.py::forward_new_account_to_crm`).
+Set `N8N_SIGNUP_WEBHOOK_URL` in the same env file and the app POSTs `{email, name, use_case, signup_source, account_count}` the first time a new account calls `/auth/me`. Unset, nothing is sent; the forward is best-effort and never fails a sign-in (`presentation/admin_bot.py::forward_new_account_to_crm`).
 
 **Copy the path from the workflow's webhook node, not from its file name** — the two drift, and a `POST`-only webhook answers *"not registered"* to the browser GET you would naturally test it with, so a wrong path and a live-but-unreachable one look identical. Confirm with the receiving side's own API rather than by probing the URL.
 

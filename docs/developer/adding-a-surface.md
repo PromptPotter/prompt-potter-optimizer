@@ -112,7 +112,7 @@ reconstructor to keep in sync**.
 1. Add the field to the `*View` model in `domain/phase_views.py`.
 2. Set it where the view is built — its builder in `application/views/ingress.py`,
    or the call site that constructs a trivial one.
-3. Render it in `application/views/render/` (`ansi.py::to_text` /
+3. Render it in `application/views/render/` (`application/views/render/ansi.py::to_text` /
    `markdown.py::to_markdown`) and/or
    read it where the fact is surfaced — `LiveDashboardProjection._handle_phase`
    matches on the typed view.

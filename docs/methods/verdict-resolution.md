@@ -385,7 +385,7 @@ shuffles each stratum on the round's seeded `NodeContext.rng`, so a resume redra
 `elimination_n_min` ruler cells, drawn as blindly, lead the shuffle: they are the cells a warm θ
 is read on (`rasch.py::theta_cells`), so they are what PoBB's gates and the election's coverage
 floor count, and the round order walks them first (§ The round order).
-`adaptive_queue_mechanism.py::covered_prefix` then fronts one cell per shared `source_pin` level,
+`application/intelligence/adaptive_queue_mechanism.py::covered_prefix` then fronts one cell per shared `source_pin` level,
 so no draw narrows to one dataset or one model. Where the parent misses is the round ORDER's
 business, never the draw's.
 
