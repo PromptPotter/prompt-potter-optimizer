@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import time
@@ -7,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from promptpotter import connectors
 from promptpotter.application.account import (
     block_email,
     blocked_emails,
@@ -20,11 +22,13 @@ from promptpotter.application.account import (
 )
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
+from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.quota import overrun
-from promptpotter.application.views.trail import trail_notes, trail_rows
+from promptpotter.application.views.trail import trail_fields, trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.spend import RATE_PRICED_LABEL
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
@@ -240,15 +244,29 @@ def forward_new_account_to_crm(
     return True
 
 
-def forward_trail_to_briefing() -> bool:
-    """What every account did in the last day, sent OUT for the operator's briefing to print.
+async def _backends_down() -> dict[str, str]:
+    """Every backend SERVICE the launch gate found unreachable, mapped to why. An in-process one
+    starts per cell, so a container runtime this box lacks is its choice, not an outage."""
+    down = {}
+    for name, connector in connectors.registered().items():
+        if connector.execution != "remote_http":
+            continue
+        if isinstance(refused := await probe_backend(name), BackendUnreachableError):
+            down[name] = str(refused)
+    return down
 
-    Sent whole each time: the receiver keeps the newest, so a missed send costs freshness only.
+
+def forward_trail_to_briefing() -> bool:
+    """What every account did in the last day, and which backends are down, sent OUT to n8n.
+
+    Sent whole each time: the receiver keeps the newest, so a missed send costs freshness only,
+    and a send that stops arriving is itself the box going quiet.
     """
     url = settings.N8N_TRAIL_WEBHOOK_URL.get_secret_value().strip()
     if not url:
         return False
     trails, unreadable = trails_since(DEFAULT_PROJECTS_ROOT, time.time() - _TRAIL_WINDOW_H * 3600)
+    down = asyncio.run(_backends_down())
     try:
         with httpx.Client(timeout=10, verify=tls_context()) as client:
             resp = client.post(
@@ -259,8 +277,11 @@ def forward_trail_to_briefing() -> bool:
                 json={
                     "as_of": utcnow_iso(),
                     "window_hours": _TRAIL_WINDOW_H,
-                    "accounts": [{"who": who, "rows": trail_rows(trail)} for who, trail in trails],
+                    "accounts": [
+                        {"who": account.who, "lines": trail_fields(account)} for account in trails
+                    ],
                     "unreadable": unreadable,
+                    "backends_down": down,
                 },
             )
     except httpx.HTTPError:
