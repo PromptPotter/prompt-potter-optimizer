@@ -268,10 +268,8 @@ def _campaigns_on_origin(session: Session) -> list[str]:
         return []
     return sorted(
         other.campaign_id
-        for campaign_dir in campaigns.iter_campaign_dirs()
-        if (other := campaigns.load_campaign(campaign_dir.name)) is not None
-        and other.campaign_id != own.campaign_id
-        and other.root_content_hash == own.root_content_hash
+        for other in campaigns.list_campaigns(lifecycle="all")
+        if other.campaign_id != own.campaign_id and other.root_content_hash == own.root_content_hash
     )
 
 
@@ -279,10 +277,7 @@ def _banked_instruments(session: Session) -> list[str]:
     campaigns = session.store.campaigns
     dataset_name = session.measured_dataset
     banked: list[str] = []
-    for campaign_dir in campaigns.iter_campaign_dirs():
-        campaign = campaigns.load_campaign(campaign_dir.name)
-        if campaign is None or campaign.dataset_name != dataset_name:
-            continue
+    for campaign in campaigns.list_campaigns(dataset_name, lifecycle="all"):
         origin = campaigns.standing_rounds(campaign.root_hop, moment=None).rounds.get(0)
         instrument = (
             None

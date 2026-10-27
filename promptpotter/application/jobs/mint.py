@@ -291,9 +291,8 @@ def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
             )
     taken = [
         other.campaign_id
-        for campaign_dir in campaigns.iter_campaign_dirs()
-        if (other := campaigns.load_campaign(campaign_dir.name)) is not None
-        and other.declaration.purpose == Compare(arm=request)
+        for other in campaigns.list_campaigns(lifecycle="all")
+        if other.declaration.purpose == Compare(arm=request)
     ]
     if taken:
         raise ConflictError(
