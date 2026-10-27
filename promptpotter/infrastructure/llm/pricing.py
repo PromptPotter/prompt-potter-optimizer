@@ -13,7 +13,7 @@ import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from promptpotter.config.paths import user_data_root
 from promptpotter.infrastructure.store.io import read_json_optional, write_text
@@ -250,7 +250,7 @@ OPENROUTER_ENDPOINTS_URL = "https://openrouter.ai/api/v1/models/{model}/endpoint
 
 # OpenRouter's routing shortcuts: a different ORDER over the same hosts, so the same ceiling.
 _ROUTE_SORTS = frozenset({"nitro", "floor"})
-_ROUTE_MEMO: dict[str, tuple[float, RateCeiling]] = {}
+_ROUTE_MEMO: dict[str, tuple[float, RateCeiling | None]] = {}
 _OUTAGE_MEMO_S = 60.0
 _ROUTE_OUTAGE: dict[str, tuple[float, str]] = {}
 
@@ -265,9 +265,19 @@ class PriceListUnreachableError(SendRefusedError):
 async def rate_ceiling(
     model: str, provider: str, *, hosts: tuple[str, ...] | None = None
 ) -> RateCeiling | None:
+    """Off the event loop only where a gateway's price list must be FETCHED."""
+    key = _route_model(model) if provider.lower() == "openrouter" else None
+    if key is not None and _remembered(_memo_key(key, hosts)) is _MISS:
+        return await asyncio.to_thread(route_ceiling, model, provider, hosts=hosts)
+    return route_ceiling(model, provider, hosts=hosts)
+
+
+def route_ceiling(
+    model: str, provider: str, *, hosts: tuple[str, ...] | None = None
+) -> RateCeiling | None:
     """A gateway's ceiling is its DEAREST eligible host: whichever answers bills within the hold."""
     if provider.lower() == "openrouter":
-        return await _openrouter_ceiling(model, hosts)
+        return _openrouter_ceiling(model, hosts)
     rate = lookup_rate(model, provider)
     if rate is None:
         return None
@@ -277,30 +287,55 @@ async def rate_ceiling(
     )
 
 
+def route_priced(model: str, provider: str, *, hosts: tuple[str, ...] | None = None) -> bool | None:
+    """Whether a dollar ceiling can hold a send on this route: the spend book's own question, asked
+    before anything is sent. ``None`` while the price list is unreachable — an outage, not a verdict."""
+    try:
+        return route_ceiling(model, provider, hosts=hosts) is not None
+    except PriceListUnreachableError:
+        return None
+
+
 def _route_model(model: str) -> str | None:
     """``None`` for a suffix that changes what the call BUYS (``:online`` adds priced search)."""
     base, _, suffix = model.strip().lower().partition(":")
     return base if not suffix or suffix in _ROUTE_SORTS else None
 
 
-async def _openrouter_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeiling | None:
-    key = _route_model(model)
-    if key is None:
-        return None
-    memo_key = f"{key}@{','.join(pinned)}" if pinned else key
+_MISS = object()
+
+
+def _memo_key(key: str, pinned: tuple[str, ...] | None) -> str:
+    return f"{key}@{','.join(pinned)}" if pinned else key
+
+
+def _remembered(memo_key: str) -> RateCeiling | None | object:
+    """``_MISS`` where only a fetch answers; a remembered outage raises."""
     memo = _ROUTE_MEMO.get(memo_key)
-    if memo is not None and time.time() - memo[0] < _TTL_SECONDS:
+    # An unpriced answer is re-asked sooner: a host listing the model later prices it.
+    if memo is not None and time.time() - memo[0] < (
+        _TTL_SECONDS if memo[1] is not None else _OUTAGE_MEMO_S
+    ):
         return memo[1]
     outage = _ROUTE_OUTAGE.get(memo_key)
     if outage is not None and time.time() - outage[0] < _OUTAGE_MEMO_S:
         raise PriceListUnreachableError(outage[1])
+    return _MISS
+
+
+def _openrouter_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeiling | None:
+    key = _route_model(model)
+    if key is None:
+        return None
+    memo_key = _memo_key(key, pinned)
+    if (hit := _remembered(memo_key)) is not _MISS:
+        return cast("RateCeiling | None", hit)
     try:
-        ceiling = await asyncio.to_thread(_fetch_route_ceiling, key, pinned)
+        ceiling = _fetch_route_ceiling(key, pinned)
     except PriceListUnreachableError as exc:
         _ROUTE_OUTAGE[memo_key] = (time.time(), str(exc))
         raise
-    if ceiling is not None:
-        _ROUTE_MEMO[memo_key] = (time.time(), ceiling)
+    _ROUTE_MEMO[memo_key] = (time.time(), ceiling)
     return ceiling
 
 

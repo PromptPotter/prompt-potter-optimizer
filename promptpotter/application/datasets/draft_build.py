@@ -19,7 +19,6 @@ from promptpotter.application.datasets.origin_readiness import OriginReadiness, 
 from promptpotter.application.jobs.quota import launch_usd_bound
 from promptpotter.application.pipeline_resolve import (
     OptimizerSetup,
-    draft_config,
     resolve_pipeline_for_draft,
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
@@ -269,11 +268,7 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         ],
         readiness=origin_readiness(draft),
         recap=_recap(draft),
-        setup_schema=setup_schema(
-            draft,
-            inherited_usd=draft_config(stores, draft).optimization.budget.usd,
-            launch_usd=launch_usd_bound(stores),
-        ),
+        setup_schema=setup_schema(draft, launch_usd=launch_usd_bound(stores)),
     )
 
 
@@ -301,26 +296,20 @@ def _column(draft: DraftCampaign, field_key: str, title: str) -> dict[str, Any]:
     }
 
 
-def _usd_cap(
-    budget: dict[str, Any], inherited: float | None, launch: float | None
-) -> dict[str, Any]:
-    """Bounded at what admission takes; a dataset cap above it would be refused whole, so the
-    account's bound is offered in its place."""
+def _usd_cap(budget: dict[str, Any], launch: float | None) -> dict[str, Any]:
+    """Bounded at what admission takes, never defaulted to it: a default below the campaign's own
+    ceiling is a clamp, and a clamped run halts mid-campaign."""
     field = _field(budget, "usd", "Spend cap in USD")
     if launch is None:
         return field
-    offered = {"default": launch} if inherited is None or inherited > launch else {}
     return {
         **field,
         "maximum": launch,
         "description": f"This account launches at up to ${launch:.2f}.",
-        **offered,
     }
 
 
-def setup_schema(
-    draft: DraftCampaign, *, inherited_usd: float | None, launch_usd: float | None
-) -> dict[str, Any]:
+def setup_schema(draft: DraftCampaign, *, launch_usd: float | None) -> dict[str, Any]:
     patch = EditDraftPatch.model_json_schema()
     overrides = OptimizationOverrides.model_json_schema()
     budget = Budget.model_json_schema()
@@ -367,7 +356,7 @@ def setup_schema(
                         "binds underneath; whichever cap trips first stops the run.",
                         "writeOnly": True,
                         "properties": {
-                            "usd": _usd_cap(budget, inherited_usd, launch_usd),
+                            "usd": _usd_cap(budget, launch_usd),
                             "tokens": _field(budget, "tokens", "Token cap"),
                             "wall_clock_s": _field(
                                 budget, "wall_clock_s", "Wall-clock cap in seconds"

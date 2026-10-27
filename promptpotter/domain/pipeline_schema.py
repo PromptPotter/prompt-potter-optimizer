@@ -743,7 +743,7 @@ class PipelineSchema(FrozenModel):
                     unset = str((field or {}).get("description") or "")
                 elif kind == "model":
                     # The CATALOGUE, never the permitted set: narrowing must not shrink `options`.
-                    options = list(model_menu or self.available_models)
+                    options = list(self.available_models if model_menu is None else model_menu)
                     permitted = self.model_options(n)
                     stated = _narrowing_stated(
                         permitted,
@@ -800,7 +800,7 @@ class PipelineSchema(FrozenModel):
                 )
             if n.name == model_carrier and self.available_models:
                 # The node never DECLARED a model: plain configuration, so `never_axis` stays empty.
-                menu = list(model_menu or self.available_models)
+                menu = list(self.available_models if model_menu is None else model_menu)
                 allowed = self.model_options(n)
                 params.append(
                     NodeConfigParam(

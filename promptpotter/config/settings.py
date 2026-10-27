@@ -108,9 +108,6 @@ class Settings(BaseSettings):
     # LIFETIME total over the account's whole ledger, not per day; the box's operator is exempt.
     FREE_TIER_SPEND_CAP_USD: float = 0.30
 
-    # What ONE metered launch may declare, so no single run takes the whole grant.
-    FREE_TIER_LAUNCH_STEP_USD: float = 0.03
-
     # Sized ABOVE what the USD cap buys on the cheapest model: re-derive it whenever that cap moves.
     FREE_TIER_TOKEN_CAP: int = 5_000_000
 

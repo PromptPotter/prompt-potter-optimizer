@@ -46,7 +46,7 @@ BASELINE = {
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     "config_leaf_fields": 90,
     # `Settings` fields — what the environment can set.
-    "settings_env": 43,
+    "settings_env": 42,
     # The upper-case constants `config/settings.py` exports.
     "settings_const": 3,
     # Leaves of `OptSearchPoint` — what a run is handed.

@@ -28,6 +28,8 @@ from promptpotter.application.preflight import (
     check_search_split_holds_round,
     refuse_below_reasoning_floor,
     refuse_unfit_pipeline,
+    refuse_unpriced,
+    unpriced_routes,
 )
 from promptpotter.application.run_observers import declare_run_wiring
 from promptpotter.application.runner.campaign_ids import (
@@ -98,6 +100,7 @@ def refuse_unrunnable(
     if pools := select_optimizer(campaign_config.optimization).pool_refusals(mint=mint):
         raise PayloadInvalidError("; ".join(pools), code="optimizer_overlay")
     refuse_below_reasoning_floor(campaign_config, pipeline_params)
+    refuse_unpriced(unpriced_routes(campaign_config, pipeline_params, schema))
     return partition
 
 
