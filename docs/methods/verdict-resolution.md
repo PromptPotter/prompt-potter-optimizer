@@ -373,7 +373,25 @@ Together they are a **Knowledge Gradient** acquisition — the one-step Bayesian
 would measuring `(c, s)` shift our point estimate of the best candidate?", closed-form for Bernoulli
 observations under Laplace.
 
-## The between-round draw — blind, so the election reads the pool
+**The between-round pick spends the two terms separately, not summed** — no swap thresholds.
+`select_round_subset` (`intelligence/rasch.py`) ranks the whole bank on term 1 alone
+(`promptpotter/application/intelligence/adaptive_queue_mechanism.py::decision_information_gain`) against the best θ among the arms in this race, so
+*exploit* falls out of the ranking (samples on the contested band `δ_s ≈ leader θ` sort to the
+top). Where cells differ in price, term 1 is weighted by `information_per_price`, read off the
+ORIGIN's rows so no arm under test moves a cell's rank. *Explore* is a reserved tail rather than a
+term: `_with_ruler_learning` gives the last few slots to the cells δ is least sure of, which holds
+the band open; `_with_stratum_cover` then fronts one cell per shared `source_pin` level, so a
+priced draw cannot narrow to one dataset or one model; and `_with_anchor_block` swaps
+already-anchored cells into the tail until the next ruler extension has enough to equate against.
+Those `elimination_n_min` anchored cells are the cells a warm θ is read on (`rasch.py::theta_cells`),
+so they are what PoBB's gates and the election's coverage floor count, and the round order walks
+them first (§ The round order).
+Summed, `delta_learning_gain` dominated — an unmeasured sample carries the population `σ_δ`, so
+unmeasured samples outranked measured ones and tied with each other, draining the bank in stored
+order. Term 1 still overstates what a draw buys for ONE arm, because δ is fit across arms; weighting
+it by a cell's own separation history is the obvious repair and ranks at chance on banked rounds —
+the width a round can read is set by how far apart the arms are, not by which cells are drawn.
+Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
 
 **No acquisition term chooses a round's cells.** The election reads the round's rows, so they must
 be the rows the held-out bench would read: a draw ranked on the leader's θ, or priced on the
@@ -385,7 +403,7 @@ shuffles each stratum on the round's seeded `NodeContext.rng`, so a resume redra
 `elimination_n_min` ruler cells, drawn as blindly, lead the shuffle: they are the cells a warm θ
 is read on (`rasch.py::theta_cells`), so they are what PoBB's gates and the election's coverage
 floor count, and the round order walks them first (§ The round order).
-`adaptive_queue_mechanism.py::covered_prefix` then fronts one cell per shared `source_pin` level,
+`application/intelligence/adaptive_queue_mechanism.py::covered_prefix` then fronts one cell per shared `source_pin` level,
 so no draw narrows to one dataset or one model. Where the parent misses is the round ORDER's
 business, never the draw's.
 
