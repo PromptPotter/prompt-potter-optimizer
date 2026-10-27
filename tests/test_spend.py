@@ -2146,8 +2146,20 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     # A backend cell is never sent again while it may still bill.
     cell_ledger = CycleEventLog(tmp_path / "termnorm.jsonl")
     billed_step = {
-        "step_tokens": {"n": {"attempts": 3, "input": 10, "output": 5, "cost_usd": 0.001}}
+        "step_tokens": {
+            "n": {
+                "attempts": 3,
+                "unreported_attempts": 2,
+                "input": 10,
+                "output": 5,
+                "cost_usd": 0.001,
+            }
+        }
     }
+    # A repaired node's resend is IN its sums: holding it again halted runs short of their cap.
+    repaired = {"step_tokens": {"n": {"attempts": 2, "input": 10, "output": 5, "cost_usd": 0.001}}}
+    bill, _ = cell_billing(pipeline_schema([]), {}, {"n": SendBound(40, 20, 0.004)})(repaired)
+    assert bill is not None and bill.unknown is None, "an answered attempt was held as unreported"
     attempt = SendBound(input_tokens=40, output_tokens=20, usd=0.004)
     deadline = {
         "detail": {"error_code": "llm_timeout", "retryable": False, "message": "no reply in 164s"},
@@ -2380,7 +2392,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             return await agent.run_query(
                 Sample(id=sample_id, query="q", ground_truth=None),
                 bound=whole,
-                billed=lambda _data, _refused: (None, None),
+                billed=lambda _data: (None, None),
             )
 
     async def cancel_mid_episode() -> None:
