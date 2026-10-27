@@ -31,6 +31,7 @@ from promptpotter.application.jobs.mint import (
     relabel_minted,
     resolve_cycle_plan,
 )
+from promptpotter.application.jobs.quota import on_free_tier
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP
 from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
 from promptpotter.domain.campaign import Optimize
@@ -98,7 +99,13 @@ class CheckinStart:
 def _refuse_unrunnable_upload(stores: Stores, draft: DraftCampaign, source: dict[str, Any]) -> None:
     """Before the dataset lands, so a refused Start takes no slug and its retry is a Start like the first."""
     params, _rows, schema = draft_pipeline(stores, draft)
-    refuse_unrunnable(draft_config(stores, draft), cut_bank(stores, source), params, schema)
+    refuse_unrunnable(
+        draft_config(stores, draft),
+        cut_bank(stores, source),
+        params,
+        schema,
+        free=on_free_tier(stores),
+    )
 
 
 async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:

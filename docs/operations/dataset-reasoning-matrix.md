@@ -156,7 +156,7 @@ No one model is the development model for every kind of run on a dataset. Two th
 - **An ablation needs room to fall.** Use a model that gets most questions right, so a removed section it needed shows as a miss. On the twelve questions `mimo` already misses every hard one, so a removal can only show damage on the seven easier ones; `glm` gets eleven right, so nearly every question can show it.
 - **A reported comparison uses neither rule.** It runs on the model the published rows used, or the operator's pick.
 
-**What the role may cost (operator, 2026-10-24).** The bar is the list OUTPUT price per M tokens, because input is small on every role: a **prompt** target below $0.10, an **agent** target below $0.30, the **optimizer** below $0.60. A target is paid on every row of every arm, so its bar is the tightest. Read prices off `https://openrouter.ai/api/v1/models` before calling a model cheap — `mimo-v2.6-flash` at $0.28 out is an agent target, never a prompt target.
+**What the role may cost (operator, 2026-10-24).** The bar is the list OUTPUT price per M tokens, because input is small on every role: a **prompt** target below $0.10 (the free tier admits only the models and rungs `promptpotter/assets/free_tier.yaml` lists), an **agent** target below $0.30, the **optimizer** below $0.60. A target is paid on every row of every arm, so its bar is the tightest. Read prices off `https://openrouter.ai/api/v1/models` before calling a model cheap — `mimo-v2.6-flash` at $0.28 out is an agent target, never a prompt target.
 
 ## Per-sample timings understate wall-clock
 
