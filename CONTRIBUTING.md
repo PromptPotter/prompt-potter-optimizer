@@ -6,7 +6,7 @@ This page only routes: the rules live in the documents it links. Everyone here f
 ## Before you write code
 
 - **A bug or a feature idea:** open an [issue](https://github.com/PromptPotter/prompt-potter-optimizer/issues) first. For anything larger than a fix, agreeing on the shape there saves a rewrite later.
-- **Where things live:** the [developer guide](docs/developer/README.md) draws the engine's four seams on one page, and [architecture](docs/architecture.md) is the map every change is placed on.
+- **Where things live:** the [developer guide](docs/developer/README.md) indexes the pages on how the engine is wired, and [architecture](docs/architecture.md) is the map every change is placed on.
 - **How code is written here:** [conventions](docs/developer/conventions.md).
 
 ## Set up and check

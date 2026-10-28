@@ -161,7 +161,7 @@ def fork_cycle(
     stores = dispatcher.stores
     campaign_config = resolve_campaign_config(stores, campaign, None)
     seed = parse_cycle_seed(payload.seed, campaign_config, stores, campaign, hop)
-    # ADR-0005 §4 babysit: a steer outside what the node permits; `fork-preview` asks the same call.
+    # The babysit act (decisions.md § 0005): a steer outside what the node permits; `fork-preview` asks the same call.
     disallowed = steers_disallowed_model(campaign_config.optimizer_narrowing, seed.pipeline_overlay)
     if disallowed and not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP):
         logger.warning(

@@ -1,93 +1,44 @@
 # BBEH Competitor Comparison
 
-Head-to-head benchmark of **PromptPotter vs CAPO vs DSPy optimizers** on BBEH (Big-Bench Extra Hard).
-**This directory owns the head-to-head protocol** — split, seed, metric and export schema. Nothing
-else may restate them.
+The uncontrolled reference arm: **PromptPotter vs CAPO vs DSPy optimizers** on BBEH (Big-Bench
+Extra Hard), each peer run its own way. The controlled arm is `new --arm` —
+[`../../specs/roadmap.md`](../../specs/roadmap.md) § The bench (M13).
 
 ## The protocol
 
 | Variable | Value |
 |---|---|
 | Dataset | BBEH mini — 460 examples, 20/task, 23 tasks |
-| Split | Per task: `TRAIN_PER_TASK` train, `TEST_PER_TASK` test, shuffled under `SPLIT_SEED` — the constants in `shared_config.py`, which is the executable owner |
+| Split | Per task `TRAIN_PER_TASK` / `TEST_PER_TASK` under `SPLIT_SEED` — `shared_config.py` is the executable owner |
 | Metric | Exact match (case-insensitive), macro-averaged across the 23 tasks |
 | Export | `shared_config.py::export_results`, one schema for every method |
-| Budget | **Unpinned — the second hole in this protocol, beside the model.** See below |
-| Opponents | CAPO (promptolution) is the fixed opponent; GEPA / MIPROv2 / BootstrapFewShot ride the same DSPy notebook behind `RUN_*` flags |
+| Opponents | CAPO (promptolution); GEPA / MIPROv2 / BootstrapFewShot behind `RUN_*` flags in the DSPy notebook |
 
-Every method is scored on the **same held-out rows**. PromptPotter pools the per-task train halves
-into one list because it optimizes a single global prompt; the peers keep them per task. That changes
-how the prompt is *searched*, never what it is *scored on*.
+Every method is scored on the same held-out rows. PromptPotter pools the per-task train halves into
+one global prompt (`optimized_prompts = {"__global__": winner}`); the peers search per task. Its
+hyperparameters are unmeasured starting points, tagged in `config.note`.
 
-The wider non-mini evaluation (~4,060 rows) is deliberately deferred — it costs a full re-run of
-every peer optimizer and buys nothing before a release worth spending it on.
+**Three blockers — no number from here is published until each is closed:**
 
-**Optimization budget is not yet held constant, and for this project it is not a nuisance variable.**
-Every method here spends a different currency by default — CAPO takes a token budget, the DSPy
-optimizers take trial counts, PromptPotter takes rounds × variants under PoBB — so a comparison that
-pins only the model still lets one method buy its win. The field's convention is to match the budget
-explicitly and say so. Two things follow. Match it: pick one currency the harness can express for
-every method (spent tokens is the honest one, since it is what a user pays) and hold it. Then
-**report it as a dimension rather than a constant** — the claim this project actually makes is
-fitness *per dollar*, so a result at a single budget hides the axis the argument lives on, and a
-curve over budget is the stronger form of the same experiment.
-
-> ⚠️ **The model is not yet held constant, and no number may be published until it is.** The peers
-> call `gpt-oss-120b` via Groq (`shared_config.py::MODEL_ID`); PromptPotter calls whatever
-> the tenant definition `bbeh/dataset.yaml::pipeline.available_models` admits (its `campaign`
-> section pins no model). Reconcile the two before comparing. The runner stamps the model it
-> actually reached into the results file (`shared_config.py::export_results`, `model=`), so a
-> mismatch shows in the output.
-
-## Notebooks
-
-| Notebook | Methods | Framework | Runtime |
-|---|---|---|---|
-| `bbeh_capo.ipynb` | CAPO | [promptolution](https://github.com/automl/promptolution) | Colab |
-| `bbeh_dspy.ipynb` | GEPA, MIPROv2, BootstrapFewShot | [DSPy](https://github.com/stanfordnlp/dspy) | Colab |
-| [`../../../notebooks/bbeh_potter.ipynb`](../../../notebooks/bbeh_potter.ipynb) | L1/L2/L3 critique-guided loop | PromptPotter (this repo) | **Local** |
-
-Both Colab notebooks open with a `%%writefile shared_config.py` cell, because Colab has no checkout
-to import from. **That cell must stay byte-equivalent to `shared_config.py` in this directory** — when
-they drift, the peers and PromptPotter silently measure different things, which is exactly how the
-split diverged before. `bbeh_dspy.ipynb` has a flags cell to toggle `RUN_GEPA` / `RUN_MIPRO` /
-`RUN_BOOTSTRAP`.
-
-> ⚠️ **The rule is already broken, and nothing caught it.** Both notebooks do
-> `from shared_config import (… exact_match, export_results)`, and this directory's
-> `shared_config.py` defines **no `exact_match` at all** — it exists only inside each notebook's
-> own `%%writefile` cell, where it compares whole strings. PromptPotter grades with
-> `matchers.py::_label_match` — the last bold span, then BBEH's own `fuzzy_match` rules — so on a
-> chain-of-thought benchmark the two graders differ in a direction that favours us. The drift is not the finding; **the rule being unenforceable is** —
-> it is asserted in prose against a cell no check reads, so it will drift again. Recount before
-> quoting any number produced by these notebooks.
-
-**What replaces this protocol for the controlled arm — owned by
-[`../../specs/roadmap.md`](../../specs/roadmap.md) § The optimizer plug point.** Owed HERE: the
-notebooks are kept, not deleted, as the *uncontrolled reference arm* — what a peer scores when it
-runs its own way is the number that shows what holding the harness constant was worth.
+- **The model.** The peers call `gpt-oss-120b` via Groq (`shared_config.py::MODEL_ID`); PromptPotter
+  calls whatever `bbeh/dataset.yaml::pipeline.available_models` admits. The runner stamps the model
+  it reached into the results file, so a mismatch shows.
+- **The budget.** CAPO spends tokens, DSPy trials, PromptPotter rounds × variants. Match it in spent
+  tokens, and report it as a dimension rather than a constant — the claim is fitness per dollar.
+- **The grader.** The notebooks' `exact_match` lives only in their `%%writefile shared_config.py`
+  cells and compares whole strings; PromptPotter grades with `matchers.py::_label_match` (last bold
+  span, then BBEH's `fuzzy_match`), which favours us on chain-of-thought. The cells are meant to
+  match `shared_config.py` byte for byte and nothing checks it.
 
 ## How to run
 
-**CAPO / DSPy (Colab):** open in Colab → add `GROQ_API_KEY` to Colab Secrets → toggle optimizer flags
-(DSPy only) → Run All → download the `results_*.json` outputs.
-
-**PromptPotter (local)** — it runs against this repo, not Colab, because it needs a backend on
-localhost that a Colab runtime cannot reach:
-
-1. `pip install -e ".[dev,jupyter]"` from the repo root, plus `pip install datasets`
-2. `.env` at the repo root with `GROQ_API_KEY`
-3. Boot a TermNorm backend exposing the `llm_only` pipeline at `http://127.0.0.1:8000`
-4. Run `notebooks/bbeh_potter.ipynb`; `results_potter.json` lands next to it
-
-**One global campaign, not one per task** — a single winner is optimized across the pooled train
-split, then evaluated per task, and the export carries `optimized_prompts = {"__global__": winner}`.
-Hyperparameters are **unmeasured starting points** (pre-sweep), tagged in `config.note` so a
-downstream table cannot misread them as tuned.
+| Notebook | Methods | Runtime |
+|---|---|---|
+| `bbeh_capo.ipynb` | CAPO ([promptolution](https://github.com/automl/promptolution)) | Colab: `GROQ_API_KEY` in Secrets → Run All → download `results_*.json` |
+| `bbeh_dspy.ipynb` | GEPA, MIPROv2, BootstrapFewShot ([DSPy](https://github.com/stanfordnlp/dspy)) | Colab, as above; toggle the `RUN_*` flags |
+| [`../../../notebooks/bbeh_potter.ipynb`](../../../notebooks/bbeh_potter.ipynb) | PromptPotter | Local: `pip install -e ".[dev,jupyter]" datasets`, `GROQ_API_KEY` in `.env`, a TermNorm backend with `llm_only` on `:8000`; `results_potter.json` lands beside it |
 
 ## References
 
-- BBEH: [arXiv:2502.19187](https://arxiv.org/abs/2502.19187) (ACL 2025)
-- CAPO/promptolution: [arXiv:2512.02840](https://arxiv.org/abs/2512.02840)
-- GEPA: [arXiv:2507.19457](https://arxiv.org/abs/2507.19457) · MIPROv2: [arXiv:2406.11695](https://arxiv.org/abs/2406.11695)
-- BootstrapFewShot: [DSPy docs](https://dspy.ai/api/optimizers/BootstrapFewShotWithRandomSearch/)
+- BBEH: [arXiv:2502.19187](https://arxiv.org/abs/2502.19187) · CAPO: [arXiv:2512.02840](https://arxiv.org/abs/2512.02840)
+- GEPA: [arXiv:2507.19457](https://arxiv.org/abs/2507.19457) · MIPROv2: [arXiv:2406.11695](https://arxiv.org/abs/2406.11695) · [BootstrapFewShot](https://dspy.ai/api/optimizers/BootstrapFewShotWithRandomSearch/)

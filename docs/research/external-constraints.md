@@ -224,7 +224,7 @@ Beyond ranked items 1 and 2:
   - Reuse the inherited `evaluate_prompt()` / `call_model()`.
 
   This decides the shape of "PromptPotter reachable through Opik": a `BaseOptimizer` subclass.
-  Which repo it lives in is [`../specs/roadmap.md`](../specs/roadmap.md) § Application radius's.
+  Which repo it lives in is [`../specs/roadmap.md`](../specs/roadmap.md) § What PromptPotter emits.
 - **DSPy's optimizer interface** was read in source (`dspy/teleprompt/teleprompt.py`,
   `gepa/gepa.py`):
   - The base class is `Teleprompter`, with `compile(self, student: Module, *, trainset,

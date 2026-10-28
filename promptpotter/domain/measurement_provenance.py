@@ -28,7 +28,7 @@ class RunSource(enum.StrEnum):
 
 
 REUSABLE_MIN_GRADE = "B"
-"""Floor for serving a banked answer back as a cache hit: every consumer excludes ``C`` (ADR-0005)."""
+"""Floor for serving a banked answer back as a cache hit: every consumer excludes ``C`` (decisions.md § 0005)."""
 
 _GRADE_RANK = {grade: rank for rank, grade in enumerate(reversed(MEASUREMENT_GRADES), start=1)}
 

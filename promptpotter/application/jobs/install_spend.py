@@ -1,4 +1,4 @@
-"""The operator-admin read (ADR-0004), never an inbound API route; a ``Stores`` is one tenant's, hence the root."""
+"""The operator-admin read (decisions.md § 0004), never an inbound API route; a ``Stores`` is one tenant's, hence the root."""
 
 from __future__ import annotations
 

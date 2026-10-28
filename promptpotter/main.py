@@ -255,7 +255,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Tokens never appear past this boundary (ADR-0002): downstream code sees only IdentityContext.
+# Tokens never appear past this boundary (decisions.md § 0002): downstream code sees only IdentityContext.
 install_oidc_middleware(app)
 
 

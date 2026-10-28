@@ -1,211 +1,136 @@
 # Variation and pools — every optimizer's features as switchable members
 
 > Read [`../architecture.md`](../architecture.md) § Bench and optimizer first. The stage order is
-> [`roadmap.md`](roadmap.md) § Variation and pools; this page is the contract those stages build.
+> [`roadmap.md`](roadmap.md) § Variation and pools; why one loop with shared members is
+> [`decisions.md` § 0007](../decisions.md#0007--one-loop-shared-members). Below § Vocabulary this page
+> is the current PROPOSAL; the stage that builds a part re-derives it with the fewest new concepts.
 
-**The bench is also a laboratory for evolving prompts.** Crossover, mutation, inversion, parent
-choice and survival are members any manifest composes and a researcher switches per campaign, so
-"does recombination help" and "deterministic or through an LLM" are head-to-heads whose arms
-differ in one knob.
+**Whatever one optimizer built, every other can use.** Crossover, mutation, inversion, parent choice
+and survival are members registered once and named by any manifest, so "does recombination help" and
+"deterministic or through an LLM" are head-to-heads whose arms differ in one knob.
 
-## The goal
-
-**Whatever one optimizer built, every other can use.** A member — a proposer, a sampler, an
-eliminator, a selector, an analysis step that feeds another — is registered once and named by any
-manifest, so optimizers are recombined as freely as the prompts they evolve. Two things follow,
-and each is a stage in the roadmap:
-
-- **A capability is one mechanism mounted on a host.** Recombination is not written three times
-  for three nodes: one typed spec, one materializer, and a knob saying which node emits the spec.
-- **The operator controls all of it from every entry point, at three moments** — configuring at
-  check-in, watching a live run, steering one. § The three surfaces.
-
-## One loop, one vocabulary
-
-**Every optimizer is written in the loop's own three stages — generate, score, critique — and a
-preset is a configuration of them, never a second framework.** Recombination is a setting of the
-GENERATE stage: `l1_generate` is that stage's LLM-directed member, a crossover or a seeded draw is
-another member of the same stage, and a peer's proposer is a third. CAPO, GEPA, LEVI and potter are
-then four named configurations of one optimizer — the same members, some switched on and some off —
-and each still reproduces its paper by the values it sets and states every departure beside the
-value it departs from.
-
-**A design choice with two defensible answers is a knob, and a preset picks its value.** What
-closed access withdraws (all free text for that reader, or only the fields the pool serves), when
-the steering layer hosts recombination (every round, or only on a fire), and how potter reads the
-block library by default are each settable at check-in; the preset's value is the one measured to
-perform, never the only one expressible.
-
-**Settled and proposed are kept apart on this page.** § The goal and this section are settled —
-why is [ADR-0007](../adr/0007-one-loop-shared-members.md). Everything below is the current
-PROPOSAL for the mechanism: the stage that builds a part re-derives the shape with the fewest new
-concepts first, and rewrites its section here when that shape differs.
+- **A capability is one mechanism mounted on a host**: one typed spec, one materializer, and a knob
+  saying which node emits the spec.
+- **The operator controls it from every entry point** at check-in, live and by steer (§ The three surfaces).
+- **A preset is a configuration of generate · score · critique, never a second framework.** CAPO, GEPA,
+  LEVI and potter are named configurations of one optimizer; each reproduces its paper by the values it
+  sets and states every departure beside the value.
+- **A design choice with two defensible answers is a knob, and a preset picks its value** — what closed
+  access withdraws, when the steering layer hosts recombination, how potter reads the block library.
 
 ## Vocabulary
 
-Each word is checked against what the repo already calls things; an existing name is reused.
-
 | Term | Means | Reuses / collides |
 |---|---|---|
-| **arm** | an individual a round measures | existing (`domain/optimizer_state.py::OptimizerState.population`). This is the "active pool" — never called a pool |
-| **pool** | a named set of entries of ONE kind that nodes draw from and declared writers add to | `domain/pool.py::Pool` (`BlockPool`, `DemoPool`). Never "sample pool": a sample is a dataset row |
-| **entry kind** | `individual` · `block` · `shot` | `block` = `domain/prompt_block.py::PromptBlock`, a whole-field value; "allele" is not used |
-| **locus** | one separately inheritable part of an individual: a `Locus(node, key)` — an open prompt field or the shots of a prompt node, an open config param | `domain/opt_search_point.py::OptSearchPoint.loci`; an open locus IS an open axis |
-| **variation node** | a proposer node that turns parents and pool entries into arms | "proposer" + `IndividualLineage.variations`; never bare "operator" — the operator is the human |
-| **novelty** / **recombination** | a variation node's class: it can emit a value no pool held / it emits only values its inputs held | new |
+| **arm** | an individual a round measures | `domain/optimizer_state.py::OptimizerState.population` — the "active pool", never called a pool |
+| **pool** | a named set of entries of ONE kind that nodes draw from and declared writers add to | `domain/pool.py::Pool` (`BlockPool`, `DemoPool`); never "sample pool" |
+| **entry kind** | `individual` · `block` · `shot` | `block` = `domain/prompt_block.py::PromptBlock`; "allele" is not used |
+| **locus** | one separately inheritable part: a `Locus(node, key)` — an open prompt field, a node's shots, an open config param | `domain/opt_search_point.py::OptSearchPoint.loci` |
+| **variation node** | a proposer node turning parents and pool entries into arms | `IndividualLineage.variations`; never bare "operator" — the operator is the human |
+| **novelty** / **recombination** | can emit a value no pool held / emits only values its inputs held | new |
 | **access** | how a node reads a pool: `off` · `open` · `closed` | `domain/pool.py::Access`; potter's `l1_generate.block_access` |
-| **host** | the node a capability is mounted on | new; the node whose access to a pool is not `off` |
-| **mix** | how many of a round's arms each variation node produces | new; replaces per-member counts where a manifest composes more than one |
-| **preset** | a manifest whose composition and knob values reproduce a paper | existing (`roadmap.md` § The optimizer plug point) |
+| **host** | the node a capability is mounted on | new |
+| **mix** | how many of a round's arms each variation node produces | new |
+| **preset** | a manifest reproducing a paper | `roadmap.md` § The bench (M13) |
 
 ## The variation node contract
 
 **A variation node is a `Proposer`** — owned by [`../developer/node-standard.md`](../developer/node-standard.md)
-§ Optimizer node types; this page adds what a member declares on top.
+§ Optimizer node types; a member declares on top:
 
-- **Class**: `novelty` or `recombination`, a fact on the member, served. A node is `recombination`
-  only if every value in its child is verbatim from a parent or a pool entry — the property
-  per-locus credit rests on. An LLM merge of two texts is `novelty`.
-- **Inputs it draws**: the pools it reads, by name, and for each whether its access is fixed by
-  the member or a knob.
-- **What it writes**: the pools it may add entries to. A node that invents text under `closed`
-  readers adds it as an entry first.
-- **Arity**: how many parents one child takes. The child carries every parent edge.
-- **Loci**: which it may set. Under a controlled arm the open set is the prompt's own fields —
-  owned by [`../architecture.md`](../architecture.md) § The controlled comparison; a variation node
-  reads the open set and never widens it.
-- **Lineage**: each node that shaped a child is on the child, in walk order; a later node never
-  overwrites an earlier one.
-- **Treatment**: a deterministic member's code is in its optimizer's `Treatment` the way a prompt
-  renderer's is — owned by [`../architecture.md`](../architecture.md) § Three identities.
+- **Class**, served: `recombination` only if every value in its child is verbatim from a parent or a pool
+  entry — the property per-locus credit rests on. An LLM merge of two texts is `novelty`.
+- **Inputs** (pools by name, access fixed or a knob), **writes** (pools it may add to; text invented under
+  `closed` readers becomes an entry first), **arity** (the child carries every parent edge).
+- **Loci**: it reads the open set and never widens it — owned by [`../architecture.md`](../architecture.md) § The controlled comparison.
+- **Lineage**: every node that shaped a child is on it, in walk order, never overwritten.
+- **Treatment**: a deterministic member's code is in its optimizer's `Treatment` — owned by [`../architecture.md`](../architecture.md) § Three identities.
 
-**No member decides who survives or who mates inside a variation node.** Parent choice is the
-opening node's, survival the selector's; each takes a rule knob (uniform · tournament · softmax ·
-Pareto-lead · complementary; top-μ · one-to-one · archive insert). Roulette is admitted only where
-the fitness is accuracy on a fixed panel — θ has no ratio scale.
+**Parent choice is the opening node's, survival the selector's** — never a variation node's; each takes a
+rule knob (uniform · tournament · softmax · Pareto-lead · complementary; top-μ · one-to-one · archive insert).
+Roulette only where fitness is accuracy on a fixed panel — θ has no ratio scale.
 
 ## Recombination is one mechanism, and its host is a knob
 
-- **The spec.** A recombination is a typed value: the parents by id, and for each locus it sets,
-  the entry it takes. Every host emits that value and nothing else.
-- **The materializer.** One deterministic function turns specs into arms through
-  `OptSearchPoint.derive`, recording every parent edge and the variation step. No host builds an
-  individual itself.
-- **The hosts.** `l1_generate` — the proposer decides which children are produced, in the call
-  that already writes its own variants. `l2_context` — the steering layer decides on a fire, and
-  the opening node materializes its specs next round. An `algorithm` node — a seeded draw, no
-  model. Moving the capability moves the pool panels and the reply slot to the host's dispatch;
-  the mechanism does not change, so two hosts are two arms of one comparison.
-- **Closed access picks by id.** The host's response schema carries the entry ids as an enum, the
-  lock `model` already has — never a text match after the fact, so an invented value is
-  inexpressible rather than rejected.
+- **The spec**: the parents by id and, per locus set, the entry taken. Every host emits that and nothing else.
+- **The materializer**: one deterministic function turns specs into arms through `OptSearchPoint.derive`,
+  recording every edge and the variation step. No host builds an individual.
+- **The hosts**: `l1_generate` (in the call that writes its variants), `l2_context` (on a fire; the opening
+  node materializes next round), an `algorithm` node (a seeded draw). Moving the host moves the pool panels and
+  the reply slot; two hosts are two arms of one comparison.
+- **Closed access picks by id**: the host's response schema carries entry ids as an enum, so an invented
+  value is inexpressible rather than rejected.
 
 ## The pool contract
 
 **A pool's shape, sources, access and banking** — owned by
-[`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Other surfaces;
-this section holds only what is still to build.
+[`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Other surfaces; still to build:
 
 - **The campaign's own measured individuals are the next pool**, each entry its content id.
-  Harvested templates enter as block packs, each block citing its work — § Out of scope.
-- **Static or growing is a setting.** Under `open`, a knob bounds how many of a round's arms may
-  carry a new value; each new value becomes an entry with its writer recorded. At zero the pool is
-  static and every value an arm carries was predefined.
-- **Writers are declared and plural**: a variation node, a selector, run init (a miner), a command.
-  A writer not on the list cannot add an entry. The arm gate's seat draws what the
-  proposers it stands in for draw, so an authored shot is admitted against the demo pool only
-  where one of them draws it.
-- **A write during a run is a record, taken at a round boundary.** A node's own write is its
-  decision record. A write from outside the loop is a Control-remote command — owned by
-  [`../architecture.md`](../architecture.md) § Control-remote; its payload model is declared
-  before its handler. Editing a block pack or a
-  manifest is not a write to a running campaign: it is a treatment change for the next mint.
+- **Static or growing is a setting**: under `open`, a knob bounds how many arms may carry a new value, each
+  recorded with its writer; at zero the pool is static.
+- **Writers are declared and plural** (a variation node, a selector, a run-init miner, a command). The arm
+  gate's seat draws what the proposers it stands in for draw.
+- **A write during a run is a record at a round boundary**: a node's own write is its decision record; an
+  outside write is a Control-remote command, payload declared before handler
+  ([`../architecture.md`](../architecture.md) § Control-remote). Editing a pack or manifest is a treatment
+  change for the next mint.
 
-## Knobs and the served shape
+## Knobs
 
-**An optimizer's knobs are its nodes' `config`** — owned by
-[`../architecture.md`](../architecture.md) § Every optimizer is a manifest. This page adds no
-campaign-config field and no second overlay.
-
-- **On / off / how many** is `mix` on the opening node: `{variation node → arms}`. Zero is off. One
-  knob, so a mode contrast is one edit.
-- **Standing size, parent rule, survivor rule** are ordinary knobs on the opening node and the
-  selector.
+**An optimizer's knobs are its nodes' `config`** — owned by [`../architecture.md`](../architecture.md)
+§ Every optimizer is a manifest; no campaign-config field, no second overlay. `mix` on the opening node is
+`{variation node → arms}`, zero is off; standing size, parent rule and survivor rule are knobs on the opening
+node and the selector.
 
 ## The three surfaces
 
-**One served shape, drawn at three moments; the terminal reaches each.** Every element is a served
-field — the class tag, the pool roster, the grouping and the nesting are never derived in the
-browser — owned by [`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § A wire shape is GENERATED.
+**One served shape, drawn at three moments** — class tag, pool roster, grouping and nesting are served, never
+derived in the browser ([`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § A wire shape is GENERATED).
 
-- **Check-in — configuring.** Two regions, one draft: what is tested each round (the mix, as
-  counts and a total) and the pools, each with its active subset and the variation nodes that draw
-  from it grouped by class, each node carrying its own knobs and its access. Every control writes
-  `optimization_overrides.nodes.{node}.config.{knob}` through `edit-draft-campaign` — owned by
-  [`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md)
-  § No ad-hoc mutating routes.
-- **Live — watching.** Each arm shows which variation node made it and from which parents and
-  entries; each pool shows its size, what the round drew and what was added. A two-parent child
-  draws both edges.
-- **Steer — changing a run.** The mix, an access and a pool's active subset are fork-seed knobs
-  like any node config, and a pool write is the command above. A controlled arm refuses both.
-- **The terminal.** `--set nodes.<node>.<knob>=<yaml>`; REST and the embedded launch carry the same
-  overlay; an L4 panel carries it as `inner_nodes`. **Five ways in, one overlay** — owned by root
-  [`CLAUDE.md`](../../CLAUDE.md) § Working principles (`<entry-point-parity>`).
-- A paper preset says which change departs from its paper, as the knob panel does today.
-- Visual language: `/design`, after the wiring, and shown to the operator as a layout first.
+- **Check-in**: the mix (counts and total) and the pools, each with its active subset and its drawing nodes
+  grouped by class with their knobs and access; every control writes
+  `optimization_overrides.nodes.{node}.config.{knob}` through `edit-draft-campaign`
+  ([`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § No ad-hoc mutating routes).
+- **Live**: each arm shows its variation node, parents and entries; each pool its size, draw and additions.
+- **Steer**: mix, access and active subset are fork-seed knobs; a pool write is the command above. A
+  controlled arm refuses both.
+- **Terminal**: `--set nodes.<node>.<knob>=<yaml>`; REST and the embedded launch carry the same overlay, an
+  L4 panel carries it as `inner_nodes` — root [`CLAUDE.md`](../../CLAUDE.md) `<entry-point-parity>`.
 
 ## L4 reach
 
-**L4 tunes whichever manifest its inner campaign selects** — owned by
-[`l4-outer-loop.md`](l4-outer-loop.md); this page adds one thing it must reach.
-
-- An outer arm reaches an inner knob only where the inner member declares it a lever
-  (`application/optimizers/nodes.py::LlmNode.outer_levers`), and only llm nodes are in the outer's graph. `mix`
-  and access become levers, so the lever declaration moves to every member and the outer graph
-  carries any node declaring one.
-- A lever's value space is its knob's own options and bounds; it enters the inner cell's identity
-  as it resolves, so two settings never share a cell.
-- **The instrument stays out of reach** — owned by [`l4-outer-loop.md`](l4-outer-loop.md)
-  § Invariants; a pool that holds held-out rows, a scorer or a seed is never a lever.
+**L4 tunes whichever manifest its inner campaign selects** — owned by [`l4-outer-loop.md`](l4-outer-loop.md).
+An outer arm reaches an inner knob only where the member declares it a lever
+(`application/optimizers/nodes.py::LlmNode.outer_levers`); `mix` and access become levers, so the declaration
+moves to every member. A lever enters the inner cell's identity as it resolves. **The instrument stays out of
+reach** ([`l4-outer-loop.md`](l4-outer-loop.md) § Invariants): a pool holding held-out rows, a scorer or a
+seed is never a lever.
 
 ## Ablation and comparability
 
-**The guard is one served derivation** — owned by
-[`../architecture.md`](../architecture.md) § The controlled comparison. What this page binds:
+**The guard is one served derivation** — owned by [`../architecture.md`](../architecture.md) § The controlled comparison.
 
-- **An ablation arm differs in one knob.** Variation off is `mix` at zero for that node at the same
-  arm count; deterministic vs LLM recombination is the same parents and the same pool under two
-  hosts. The guard names the knob.
-- **`off` is bit-identical.** A node at zero and a pool at `off` leave every other node's prompt
-  unchanged — the property `escalation_ladder`'s arms already have.
-- **Budgets are matched twice and both are reported**: equal incurred USD and equal cells. A
-  deterministic node spends no optimizer tokens, so the two answers differ.
-- **A controlled arm takes no pool write.** Elsewhere a write makes the pair read `differs`,
-  naming the pool.
-- **Structure is a confound to control, not to claim.** A fielded individual against a one-field
-  paper preset compares genomes as well as methods: run both on a one-field origin, or both on the
-  fielded one.
-- **The headless control.** Recombination with a fresh individual in place of the second parent,
-  at equal budget, is what separates recombination from macro-mutation.
-- **Which column** — owned by root [`CLAUDE.md`](../../CLAUDE.md) § The closing directive; a
-  crossover child reading positive against its better parent is the promotion clock, never a
-  result.
+- **An ablation arm differs in one knob**, and the guard names it: `mix` zero at the same arm count;
+  deterministic vs LLM recombination is the same parents and pool under two hosts.
+- **`off` is bit-identical**: every other node's prompt unchanged.
+- **Budgets are matched twice and both reported**: equal USD and equal cells.
+- **A controlled arm takes no pool write**; elsewhere a write makes the pair read `differs`, naming the pool.
+- **Structure is a confound to control**: a fielded individual against a one-field preset runs both on one
+  origin shape.
+- **The headless control** — a fresh individual as second parent at equal budget — separates recombination
+  from macro-mutation.
+- A crossover child positive against its better parent is the promotion clock, never a result (root
+  [`CLAUDE.md`](../../CLAUDE.md) § The closing directive).
 
 ## Out of scope, deliberately
 
-- **Field order as a locus.** A prompt node's field order is its declaration — owned by
-  [`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Backbone
-  primitives. Inversion acts on a node's shots.
-- **Segments inside a field.** No sentence or section model; a splitter is a new concept and
-  passes the pre-flight gate on its own.
-- **Lifting a population into the bench.** Individuals stay in the optimizer's payload — owned by
-  [`../architecture.md`](../architecture.md) § Two-layer searchpoints + self-optimization.
-- **Credit that steers.** Per-entry effects, linkage and adaptive mix are served readings first and
-  decide nothing until a reading shows they are informative.
-- **A learned surrogate.** Same reason.
-- **Authoring a pool's content at check-in.** The check-in picks among declared entries; writing
-  new ones is the pool-write command or the upload path `candidate_library` already has.
-- **Param recombination in a controlled comparison.** The controlled search is the prompt's fields.
-- **A shipped block library.** Core ships no block: a block pool's material is the packs its
-  `packs` knob names, each installed by the operator and each cited work carrying its licence.
+- **Field order as a locus** — a node's declaration ([`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md)
+  § Backbone primitives); inversion acts on shots.
+- **Segments inside a field** — a splitter is a new concept and passes the pre-flight gate on its own.
+- **Lifting a population into the bench** — individuals stay in the optimizer's payload.
+- **Credit that steers, a learned surrogate** — served readings first, deciding nothing until shown informative.
+- **Authoring pool content at check-in** — the check-in picks; writing is the pool-write command or `candidate_library`'s upload.
+- **Param recombination in a controlled comparison.**
+- **A shipped block library** — a block pool's material is the packs its `packs` knob names, installed by the
+  operator, each cited work carrying its licence.

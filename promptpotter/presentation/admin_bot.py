@@ -360,7 +360,7 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                 try:
                     _process_update(update, client, chat_id, passphrase)
                 except Exception:
-                    # One handler's raise must not end the operator's only admin channel (ADR-0004).
+                    # One handler's raise must not end the operator's only admin channel (decisions.md § 0004).
                     logger.exception("admin command failed; channel stays up")
 
 
@@ -373,7 +373,7 @@ def main() -> int:
     if not token or not chat_id:
         logger.error(
             "ADMIN_BOT_TELEGRAM_TOKEN and ADMIN_BOT_CHAT_ID must be set "
-            "(see docs/operations/access-model.md)."
+            "(see deploy-linux/README.md § Admin bot)."
         )
         return 1
     try:

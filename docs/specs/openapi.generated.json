@@ -4912,7 +4912,7 @@
       },
       "DraftCampaignWire": {
         "additionalProperties": false,
-        "description": "A check-in's draft as every check-in route answers it; Start mints its campaign. No\n``tenant_id`` rides it (ADR-0002 no-drift gate #3).",
+        "description": "A check-in's draft as every check-in route answers it; Start mints its campaign. No\n``tenant_id`` rides it (decisions.md § 0002).",
         "properties": {
           "active_steps": {
             "description": "The pipeline this draft runs. Who may move a node's axes is `node_config_schema`'s answer alone.",
@@ -6629,7 +6629,7 @@
             "type": "object"
           },
           "steers_disallowed_model": {
-            "description": "The overlay picks a responder the campaign's declared `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
+            "description": "The overlay picks a responder the campaign's declared `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the babysit act (decisions.md § 0005): it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
             "title": "Steers Disallowed Model",
             "type": "boolean"
           }

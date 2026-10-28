@@ -82,7 +82,7 @@ OpenAI/Anthropic/OpenRouter only if named. `.env.example` is the full template.
 - **New fetched benchmark (rare):** register a recipe returning `list[Sample]`
   (`domain/sample.py`) in `BANK_RECIPES`, and draft the tenant definition
   `.promptpotter/projects/{tenant}/datasets/<name>/{dataset.yaml, task.md, origin.yaml, README.md}` —
-  a WHOLE document, started from the merged `justlogic/d234`. The package ships templates only. Follow `docs/operations/dataset-selection-rationale.md` § Adding a
+  a WHOLE document, started from the merged `justlogic/d234`. The package ships templates only. Follow `docs/operations/datasets.md` § Adding a
   dataset — canonical split first.
 
 ## First-run smoke

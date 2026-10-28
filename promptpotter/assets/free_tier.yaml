@@ -2,7 +2,7 @@
 # with `ask`'s two doors. Each model lists the values every gated parameter may take, launched or
 # searched, lowest first: the first is a task node's launch default. A model or value not listed is
 # refused. `default` (the provider's own rung) is listed only where it is known to resolve inside
-# its entry. Per-model rungs: docs/operations/dataset-reasoning-matrix.md and `registry._MODEL_PROFILES`.
+# its entry. Per-model rungs: docs/operations/datasets.md § The model a dataset runs, and `registry._MODEL_PROFILES`.
 
 # The nodes a free run's pipeline may hold.
 task_nodes: [llm_only]

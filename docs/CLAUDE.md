@@ -1,60 +1,46 @@
-# docs/ — documentation tree
+# docs/ — index for agent readers
 
-This file is the **index for AI/agent readers** over `docs/`. The operator-facing index is [`README.md`](README.md). Load only the subtree you need.
-
-> **Read [`architecture.md`](architecture.md) first.** §0 is the shape on one page; §0.5 is the load-bearing surface that every PR measures against. Everything below is progressive disclosure off §0.
-
-## Top-level
-
-| File | Role |
-|---|---|
-| [`architecture.md`](architecture.md) | **§0 + §0.5 — the single page every PR measures against.** AI entry point. |
-| [`README.md`](README.md) | Operator-facing index (the friendly door) + the short status/roadmap summary; the live forward plan is [`specs/roadmap.md`](specs/roadmap.md). |
+The operator-facing index is [`README.md`](README.md). Read [`architecture.md`](architecture.md) §0 + §0.5 first; load only the subtree you need.
 
 ## Subtrees
 
-| Folder | When to load | Index |
-|---|---|---|
-| [`manual/`](manual/) | Operator onboarding: install → first campaign → reading output → troubleshooting → going deeper. Numbered chapters. | [`manual/README.md`](manual/README.md) |
-| [`concepts/`](concepts/) | How the loop works conceptually. Read before the developer docs: [the-loop](concepts/the-loop.md) (the round shape + § The state record) · [scoring-and-memory](concepts/scoring-and-memory.md) · [structured-output](concepts/structured-output.md) | this table |
-| [`developer/`](developer/) | Implementation specs. **[conventions](developer/conventions.md)** (style + code shape) · [reasoning-doctrine](developer/reasoning-doctrine.md) (the evidence behind root `CLAUDE.md`'s situational guardrails) · [dispatch-hub](developer/dispatch-hub.md) (`injection_table()`, `L1Layout`, the per-placeholder source map) · [adding-a-surface](developer/adding-a-surface.md) (a recipe per expansion point) · [self-healing-internals](developer/self-healing-internals.md) · [node-standard](developer/node-standard.md) (the `pipeline.yaml` contract) · [stable-api](developer/stable-api.md) · [dspy-optimizer](developer/dspy-optimizer.md) · [offline-run](developer/offline-run.md) (every optimizer end to end at zero spend — how a change's parity is proven). **[`developer/README.md`](developer/README.md) is not an index** — it owns prompt structure, dispatch, the scoring node and **§ 4 cross-run memory**. | this table |
-| [`operations/`](operations/) | Running it — four unrelated subjects, load one group not the folder. **run/watch/diagnose:** [persistence-and-state](operations/persistence-and-state.md) · [observability](operations/observability.md) · [backend-integration](operations/backend-integration.md) · [package-cache](operations/package-cache.md) (a containerized cell's downloads). **datasets:** [dataset-selection-rationale](operations/dataset-selection-rationale.md) § Adding a dataset · [dataset-reasoning-matrix](operations/dataset-reasoning-matrix.md). **security + deploy:** [access-model](operations/access-model.md) · [`../deploy-linux/README.md`](../deploy-linux/README.md). **carry-over:** [mask-projection](operations/mask-projection.md). Env vars are [`manual/02-install.md`](manual/02-install.md#environment-variables)'s. | this table |
-| [`methods/`](methods/) | The statistical model and the two spend-control procedures that read it, split by the question each answers. **Which samples:** [verdict-resolution](methods/verdict-resolution.md) — the Rasch θ/δ model, the acquisition score behind `hard_samples.json`. **Which candidate:** [candidate-elimination](methods/candidate-elimination.md) — PoBB, the θ stop rule, why this bandit family, CAPO's paired-t race, and LEVI's and GEPA's mappings. | this table |
-| [`research/`](research/) | Publication-facing: [related-work](research/related-work.md) — the argument against the peers that matter, fed by [landscape](research/landscape.md), the watch list every candidate competitor is recorded on first · [external-constraints](research/external-constraints.md) — the standards, findings and review norms that already decide a design for M13 / M14 / the skill target / L4 · [benchmarks](research/benchmarks.md) — the origin-screening roster, the admission bar, what we report and the winner's-curse ruling — plus [bbeh-comparison/](research/bbeh-comparison/README.md) (head-to-head harness). | this table; how an outside source is read is [`research/CLAUDE.md`](research/CLAUDE.md)'s |
-| [`specs/`](specs/) | Forward direction in one [`roadmap.md`](specs/roadmap.md), whose lane **Status column is truth**; beside it the living contracts (`frontend-surface-contract`, `chat-foundation`, `l4-outer-loop`, the two generated control-plane specs) and the debt backlog. The roster is the directory listing. | § What may live in `specs/` |
-| `assets/` | Images and diagrams; no contract. | n/a |
+| Folder | Holds |
+|---|---|
+| [`manual/`](manual/) | Operator onboarding, numbered chapters — [`manual/README.md`](manual/README.md) |
+| [`concepts/`](concepts/) | How the loop works: [the-loop](concepts/the-loop.md) · [scoring-and-memory](concepts/scoring-and-memory.md) · [structured-output](concepts/structured-output.md) |
+| [`developer/`](developer/) | [conventions](developer/conventions.md) · [dispatch-hub](developer/dispatch-hub.md) · [adding-a-surface](developer/adding-a-surface.md) · [self-healing-internals](developer/self-healing-internals.md) · [node-standard](developer/node-standard.md) · [stable-api](developer/stable-api.md) · [dspy-optimizer](developer/dspy-optimizer.md) · [offline-run](developer/offline-run.md) · [event-stream](developer/event-stream.md) |
+| [`operations/`](operations/) | Run/watch: [persistence-and-state](operations/persistence-and-state.md) · [observability](operations/observability.md) · [backend-integration](operations/backend-integration.md) · [package-cache](operations/package-cache.md). Datasets: [datasets](operations/datasets.md). Security: [access-model](operations/access-model.md). Carry-over: [mask-projection](operations/mask-projection.md) |
+| [`methods/`](methods/) | Which samples: [verdict-resolution](methods/verdict-resolution.md) (Rasch θ/δ). Which candidate: [candidate-elimination](methods/candidate-elimination.md) (PoBB, the θ stop rule) |
+| [`research/`](research/) | Publication-facing; how a source is read is [`research/CLAUDE.md`](research/CLAUDE.md)'s |
+| [`specs/`](specs/) | Direction of travel: [`roadmap.md`](specs/roadmap.md) (its Status column is truth), living contracts, the debt backlog |
+| [`decisions.md`](decisions.md) | The permanent decisions, one section per ADR |
 
 ## Anchor docs for hot questions
 
 | Question | Read first |
 |---|---|
-| Which file owns the thing called **X** — a bare word, a class name? | **Search the repo.** There is no term index and there will not be one: a definition beside the code is a copy that drifts. |
-| How does information flow through L1 / L2 / L3? How is L1's evidence surface built? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) (§ L1 layout for the latter) |
+| How does information flow through L1 / L2 / L3? | [`developer/dispatch-hub.md`](developer/dispatch-hub.md) |
 | How does a layer heal a failure? | [`developer/self-healing-internals.md`](developer/self-healing-internals.md) |
-| Does my change move what the loop decides, or what an optimizer sends? A peer's campaign tree without spend? | [`developer/offline-run.md`](developer/offline-run.md) |
-| What model + `reasoning_effort` for this dataset? | [`operations/dataset-reasoning-matrix.md`](operations/dataset-reasoning-matrix.md) (canonical — NOT self-optimizing campaign NOTES.md) |
-| What's the full access/security model — boundaries, enforcement, deploy checklist? | [`operations/access-model.md`](operations/access-model.md) |
-| How do I freeze a buggy cycle as a test fixture? | You do not: a fixture is built from the generated types — [`../webapp/CLAUDE.md`](../webapp/CLAUDE.md) § Testing posture. [`../tests/CLAUDE.md`](../tests/CLAUDE.md) § Frozen cycle fixtures says why, and where the on-disk guarantee lives instead. |
-| I changed the formula / a PoBB setting / the engine — do my measurements still carry over, or must I fork? | [`operations/mask-projection.md`](operations/mask-projection.md) |
+| Does my change move what the loop decides? | [`developer/offline-run.md`](developer/offline-run.md) |
+| Which model + `reasoning_effort` for this dataset? | [`operations/datasets.md`](operations/datasets.md) § The model a dataset runs |
+| The access/security model? | [`operations/access-model.md`](operations/access-model.md) |
+| Freeze a buggy cycle as a fixture? | You do not — [`../tests/CLAUDE.md`](../tests/CLAUDE.md) § Frozen cycle fixtures |
+| Changed the formula / PoBB / the engine — carry over or fork? | [`operations/mask-projection.md`](operations/mask-projection.md) |
 
-## L4 — the recursion case
-
-L4 has exactly **two owners, split doc-says-what-is-TRUE ([`specs/l4-outer-loop.md`](specs/l4-outer-loop.md)) / skill-says-what-to-DO (`.claude/skills/potter-self/`)**. Most files under `docs/` name L4 somewhere and that is correct — each says what the recursion does to ITS OWN subject. What no other file may hold is **L4's STATUS or its open list**, which is the half that re-goes-stale every slice. Read the spec before trusting any outer number. The dataset side is [`../promptpotter/assets/datasets/CLAUDE.md`](../promptpotter/assets/datasets/CLAUDE.md) § L4.
+**L4 has two owners**: [`specs/l4-outer-loop.md`](specs/l4-outer-loop.md) says what is TRUE, `.claude/skills/potter-self/` says what to DO. No other file holds L4's status or open list.
 
 ## What may live in `specs/`
 
-**`specs/` describes direction of travel — a past-tense fact about how shipped behavior works belongs in [`concepts/`](concepts/) / [`developer/`](developer/) / [`operations/`](operations/) instead.** A spec that has fully shipped is finished, not archived: delete it and recover from `git log`, or it goes on reading as "gating" and costs a reader a re-plan of work that already exists.
-
-Permanent constitutions live in [`adr/`](adr/) instead, and are never deleted on shipping: an ADR records *why* a boundary is where it is, which stays true after the code lands. **The ADR roster is that directory listing, never an enumeration** — a subset is what leaves one unindexed, a copy is what makes two indexes disagree. **An ADR is accepted line by line against its plan's verbatim operator decisions**: a built shape that contradicts one is a defect to fix before acceptance, never the new rule, and an "open (operator)" line blocks the stage that touches it.
+**Direction of travel only.** A fact about shipped behavior belongs in `concepts/`, `developer/` or `operations/`; a fully shipped spec is deleted (`git log` keeps it). Why a boundary sits where it does lives in [`decisions.md`](decisions.md), which is never deleted on shipping.
 
 ## Editing a doc
 
-**One fact, one owner. If two files both claim it, that is two facts — split it before you pick.** Name the artifact the rule constrains; the doc governing that artifact owns it. Where it genuinely will not split, the deepest directory wins and everyone else writes an **obligation line**: the rule's name in bold, an em dash, "owned by" plus a link to the owning file, then one clause naming only what THIS layer must do. No rationale, no second filename, no number. The deletion test decides whether you wrote one: remove the link, and the line must read as *broken*, not merely unsourced. If it still teaches the rule, it is a copy, and copies are what drift.
+**One fact, one owner.** The doc governing the artifact a rule constrains owns it; elsewhere write at most an **obligation line** — the rule's name in bold, "owned by" + link, one clause of what THIS layer must do.
 
-**The Recompute Test — docs hold rules, not state.** Could a reader six months from now recompute this line from the repo and get a *different* answer? Then it is state: it will go wrong and nothing will say so. Same answer? The doc is quoting code — name the symbol instead. Not recomputable at all? It is a **decision** — the reason a boundary sits where it does — and it belongs. **A war story is not a third case.** It is a decision still wearing the narrative that produced it, and only the decision survives: how the code got that way is git's ([`developer/conventions.md`](developer/conventions.md) § Prose in the source states the same rule for source).
+**The Recompute Test — docs hold rules, not state.** A line a reader could recompute differently later is state: name the symbol, the enumerator or the counting command instead. A line not recomputable at all is a decision, and belongs. A war story keeps only its decision; the narrative is git's.
 
-Write instead of — line numbers → `<file>.py::<symbol>` · a count of a code-owned set → the enumerator's name · a status word (`SHIPPED`, `gating`, `in flight`, `slice N`) → one link to the single status owner · a count of on-disk data → the command that counts it · an un-anchored `§ Name` → a string resolving to exactly ONE heading in the file just linked, which a unique prefix does and a phrase matching no heading does not · a post-mortem of closed work → its standing rule, leaving the narrative in `git log`. A commit SHA or an event date may stay when all three hold: it is *provenance* (delete it and the rule still reads), *immutable*, and *subordinate* to the rule's own sentence.
+Write instead of: line numbers → `<file>.py::<symbol>` · a count of a code-owned set → the enumerator · a status word → a link to the one status owner · a count of on-disk data → the command · `§ Name` → a string matching exactly one heading in the linked file.
 
-**A one-X / no-second-Y / nothing-reads-Z claim carries its probe beside it** — `<!-- probe: git grep -cE "<pattern>" -- <path> == 0 -->` (or `<=` / `>=` N), which `gate.py --only doc-claims` runs. A sentence the code does not keep yet says what holds today, and its probe is filed in `gate.py::_KNOWN_FALSE` under its phrase in [`specs/code-debt-cleanup.md`](specs/code-debt-cleanup.md) § URGENT.
+**A one-X / no-second-Y claim carries its probe** — `<!-- probe: git grep -cE "<pattern>" -- <path> == 0 -->`, run by `gate.py --only doc-claims`; a claim the code does not keep yet goes in `gate.py::_KNOWN_FALSE`.
 
-**Documentation does not define behavior — code does.** Where a doc and the code disagree, the code wins and the doc gets updated. The one exception is [`architecture.md`](architecture.md) §0 / §0.5, which IS a contract: code disagreeing with it gets fixed instead. And the per-layer `CLAUDE.md` files under `promptpotter/*/` are per-package *contracts*, not docs — this index says which one holds which fact and never restates the fact itself.
+**Code defines behavior; where a doc disagrees, the doc is fixed** — except [`architecture.md`](architecture.md) §0 / §0.5, a contract the code is fixed to.

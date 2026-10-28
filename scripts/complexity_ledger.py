@@ -5,7 +5,8 @@
     ARC_BASE=<rev> python scripts/complexity_ledger.py --check   # and the tip against an arc's base
 
 Move a number in ``BASELINE`` and you owe a written reason — root ``CLAUDE.md`` §
-``<surface-ledger>``, rules in ``docs/developer/reasoning-doctrine.md``. The reason goes in the
+``<surface-ledger>``. No dimension counts a free function or a module-private helper, so a flat
+total falsifies nothing and a raise is not a "refactor". The reason goes in the
 COMMIT BODY, and ``git log -p`` is the history layer: ``BASELINE`` is only where the surface
 stands now, never a target to reach. The check asserts EQUALITY, so a win nobody re-pins cannot
 become silent headroom for the next raise. Under ``ARC_BASE`` the base is counted by THIS counter
@@ -68,7 +69,7 @@ BASELINE = {
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
     "deferred_imports": 7,
     # `CLAUDE.md` files under the package.
-    "claude_md": 21,
+    "claude_md": 20,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names
@@ -506,7 +507,7 @@ def _count_lax_models(bases: dict[str, list[str]], declared: dict[str, str | Non
 # A function-local import of our OWN package, `importlib.import_module` included unless its
 # argument is a literal naming another package. Sanctioned for one reason, which the import must
 # declare: it gates an optional extra, so hoisting it would make the core un-importable without
-# that extra (ADR-0006). Mark those `# extras: <name>` on the import line or the one above; the
+# that extra (docs/decisions.md § 0006). Mark those `# extras: <name>` on the import line or the one above; the
 # rest are debt and count here. Why startup and cycles do not excuse one:
 # `docs/developer/conventions.md` § Code shape.
 _EXTRAS_MARKER = "# extras:"

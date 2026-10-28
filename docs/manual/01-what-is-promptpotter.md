@@ -1,44 +1,27 @@
 # What is PromptPotter?
 
-PromptPotter finds better prompts automatically. You give it a dataset and a pipeline endpoint — it tries variations of your prompt and pipeline configuration, measures accuracy on each one, and iterates. An AI [critique layer](../concepts/the-loop.md) analyzes what worked and what didn't. The result is a better-performing prompt and configuration, found without manual trial and error.
+PromptPotter finds better prompts automatically. You give it a dataset and a pipeline — it tries variations of your prompt and pipeline configuration, measures each one, and iterates. An AI critique analyzes what worked and what didn't. The result is a better-performing prompt and configuration, found without manual trial and error.
 
-The pipeline can be a single LLM call or a [multi-step pipeline](../developer/node-standard.md) with caching, retrieval, and ranking. PromptPotter treats it as a black box: it sends inputs, reads outputs, scores results, and adjusts.
-
----
-
-## How it stays cheap
-
-💰 Every evaluation costs money. PromptPotter is built to maximize accuracy per dollar:
-
-- **[Search-only-with-evidence](../methods/candidate-elimination.md).** Each candidate runs against a small handful of samples first. Only candidates with statistical evidence of being promising get extended.
-- **[Hard-sample leaderboard](../methods/verdict-resolution.md).** Samples everyone aces or everyone fails carry no signal. The optimizer surfaces and scores on the samples that actually separate candidates.
-
----
-
-## When the optimizer gets stuck
-
-🛟 If progress stalls, PromptPotter doesn't just keep trying the same kinds of variations. An outer loop steps in, looks at what's failing, and **re-aims which evidence the optimizer looks at and how widely it explores**. If that also stalls, a higher loop **replans the strategy**.
-
-Internals: [`../concepts/the-loop.md`](../concepts/the-loop.md).
+The pipeline can be a single LLM call or a multi-step pipeline with retrieval and ranking. PromptPotter treats it as a black box: it sends inputs, reads outputs, scores results, and adjusts.
 
 ---
 
 ## Three concepts
 
-🧱 Everything in this manual is built from these three terms.
+Everything in this manual uses these three terms.
 
-**Campaign** — one complete optimization run. A campaign has a fixed dataset, a fixed pipeline endpoint, and a starting prompt. It runs until you stop it or it hits its round limit.
+**Campaign** — one complete optimization run. A campaign has a fixed dataset, a fixed pipeline, and a starting prompt (the origin, `C0`). It runs until you stop it or it hits its round limit.
 
-**Round** — one generate-evaluate-critique cycle inside a campaign. Each round, the optimizer proposes several candidate configurations, scores all of them against the dataset, and runs a critique to decide what to try next. A campaign is a sequence of rounds.
+**Round** — one generate-score-critique cycle inside a campaign. Each round, the optimizer proposes several candidate configurations, scores them on samples from the dataset, and runs a critique to decide what to try next. A campaign is a sequence of rounds.
 
-**Candidate** — one proposed configuration scored during a round. A candidate is a specific combination of prompt fields and pipeline parameters. Under PromptPotter's own optimizer, the candidate that beats its parent (the configuration it was mutated from) on θ — ability, read with how hard each sample is taken into account — becomes the next parent; the others are discarded. Raw accuracy is reported beside it but does not decide.
+**Candidate** — one proposed configuration scored during a round: a specific combination of prompt fields and pipeline parameters. The candidate that beats its parent (the configuration it was mutated from) becomes the next parent; the others are discarded. PromptPotter's own optimizer decides on ability (θ), which weighs how hard each sample is — so a winner's raw accuracy can be lower than a loser's.
 
 ---
 
 ## Why run it
 
-🎯 Prompt tuning by hand is slow, inconsistent, and doesn't compound. You test a few ideas, something works, you ship it — but you don't know which part of the prompt drove the improvement, and the knowledge is lost when the next project starts.
+Prompt tuning by hand is slow, inconsistent, and doesn't compound. You test a few ideas, something works, you ship it — but you don't know which part of the prompt drove the improvement, and the knowledge is lost when the next project starts.
 
-PromptPotter [accumulates knowledge across runs](../concepts/scoring-and-memory.md). Every evaluation is stored. When you start a new campaign later, the optimizer already knows which parameter regions failed on prior runs, which queries are always easy or always hard, and which prompt axes actually move the needle.
+PromptPotter accumulates knowledge across runs. Every evaluation is stored, and a configuration already scored on a sample is replayed instead of paid for again. It spends on the samples that separate candidates, and stops scoring a candidate once the evidence says it cannot win.
 
 Next: [Install](02-install.md).

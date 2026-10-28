@@ -1,104 +1,73 @@
 # application/optimizers/potter/ — potter's L1 / L2 / L3 agent contracts
 
-Potter is three nested generation loops, and each layer mutates with cause, never at random. This file is the **agent contract**: what each layer may do, and what it may never do.
-
-The orchestration shape is [`../../CLAUDE.md`](../../CLAUDE.md), `Cycle` and the bench [`../../bench/CLAUDE.md`](../../bench/CLAUDE.md), the optimizer registry [`../__init__.py`](../__init__.py) and the contract its members satisfy [`../nodes.py`](../nodes.py); channels and signal routing are [`../../../../docs/developer/dispatch-hub.md`](../../../../docs/developer/dispatch-hub.md).
+Potter is three nested generation loops; each layer mutates with cause, never at random. This file says what each layer may and may never do. Channels and signal routing: [`../../../../docs/developer/dispatch-hub.md`](../../../../docs/developer/dispatch-hub.md).
 
 <dispatch-first>
-**★ FIRST PRINCIPLE — fix it in the dispatch.** A prompt is one *information package* for a small model: short, every line unique, high-value, in the right slot. The **dispatch hub** (`application/optimizers/potter/dispatch/`) is where raw measurement is recomposed into those packages and wired in through **deterministic wires** (`DispatchHub.fill`) — so it is the FIRST place to fix a bloated / low-value / misplaced prompt, and the one place to be **creative**: new functions, processing, recomposition, panel logic, whatever forms the information *perfectly for its slot*. The wires stay deterministic; the intelligence lives in the shaping. Corollaries: a panel renders only what adds signal **for this task/state** and is otherwise silent (the `answer_distribution` / suppressed-RANK rule); duplication, paraphrase, filler and task-mismatched blocks are reshaped at source — never patched downstream (a render-time dedup, a louder optimizer prompt clause).
+**Fix a bad prompt in the dispatch hub** (`application/optimizers/potter/dispatch/`): it recomposes raw measurement into one short, high-value package per slot through deterministic wires (`DispatchHub.fill`), and is where shaping may be creative.
+A panel renders only what adds signal for this task and state; duplication, paraphrase and mismatched blocks are reshaped at source, never patched downstream.
 </dispatch-first>
-
-## Load-bearing
-
-- Fix a bad prompt in the dispatch, not downstream → `<dispatch-first>` above
-- Every tunable starts at its FLOOR → § Origin = conservative floor
-- A patience paces the ladder, never shortens it → § The ladder's DEPTH is a knob, and it is a real suppression
-- Editing renderer prose is a measurement change → § Editing a renderer's PROSE
-- A validator rejects or scores, never both → § A validator either REJECTS or SCORES
-- No round-number thresholds inside the loops → § Signals come from measurement
-- No `l4_*.py`, ever → § Add no 4th layer
 
 ## Origin = conservative floor
 
-**Start every tunable in the dataset's per-node overlay (`dataset.yaml` `pipeline.nodes.{name}.config`) at its FLOOR, not its centre** — low `temperature`, minimal `thinking_budget`, no expensive system-prompt scaffolding. **`reasoning_effort`'s floor is the MODEL's, so the overlay never spells one**: a declared axis no layer sets resolves to the lowest rung the running model accepts (`pipeline_resolve.py::_apply_model_floors`), where a spelled rung would follow no model a campaign swaps in. L1 expands upward when stall or axis-memory evidence supports it; an expanded start burns round-0 budget and steals the headroom L1 exists to discover. Per-dataset starting points: [`../../../../docs/operations/dataset-reasoning-matrix.md`](../../../../docs/operations/dataset-reasoning-matrix.md).
+**Every tunable in `dataset.yaml` `pipeline.nodes.{name}.config` starts at its FLOOR** — low `temperature`, minimal `thinking_budget`, no costly scaffolding; L1 expands upward on evidence. **`reasoning_effort`'s floor is the model's, so the overlay never spells one** (`pipeline_resolve.py::_apply_model_floors`). Starting points: [`../../../../docs/operations/datasets.md`](../../../../docs/operations/datasets.md) § The model a dataset runs.
 
 ## Cycle stop conditions
 
-**The boundary stops are the bench's, and run for every optimizer** (`runner/termination.py::standing_tripped`): `optimization.budget.rounds`, `optimization.lives` → `LIVES_EXHAUSTED`, a perfect objective → `PERFECT`, `optimization.convergence_patience` → `CONVERGED`. Potter's `escalation` node paces the L1/L2/L3 ladder and stops nothing but its own exhaustion: `l3_patience` spent → `STOP_L3_PATIENCE`. **The only stop a LAYER authors is `terminate_proposal`** (→ `StopReason.OPTIMIZER_ABORT`, § The layer-control channel) — deterministic rules route and never diagnose, so no rule is a layer's exit.
+**Boundary stops are the bench's** (`runner/termination.py::standing_tripped`); potter's `escalation` node stops only on its own exhaustion (`STOP_L3_PATIENCE`). **The only stop a layer authors is `terminate_proposal`.**
 
 ## The ladder's DEPTH is a knob, and it is a real suppression
 
-The `escalation` node's `escalation_ladder` is `full` / `l1_l2` / `l1` — the ablation arms. At `l1` the `l1_only_ladder` rule preempts every `FIRE_L2` rule, so `escalate_l2` is never called and no `l2_context` / `l3_plan` prompt is ever composed; at `l1_l2` the L3 gate and the post-L2 force-trigger both stand down. **A patience never shortens the ladder** — it paces one. L1's own prompt is bit-for-bit identical across the three arms, which is what makes them comparable.
+**`escalation_ladder` is `full` / `l1_l2` / `l1`, the ablation arms**: `l1` composes no L2/L3 prompt, `l1_l2` stands the L3 gate down. **A patience paces the ladder, never shortens it**; L1's prompt is identical across arms.
 
 ## L1 — what `l1_generate` may propose
 
-- **Mutate only with cause**: stall-driven escalation, critique / axis-memory evidence on the chosen axis, or the operator's frozen `task_context`. **No data justifying a choice ⇒ do not gamble.** Random exploration is reserved for explicit stall, and if a panel field speaks against a mutation, `l1_generate` does not propose it.
-- **Every citable panel is a same-named injection.** A citable name that renders nothing invites a fabricated citation, so the citable set is **derived, never declared** — `citable_fields(layout, exploration_budget, rendered)` intersects `@signal(citable=True)` with the node's live layout and what rendered, which feeds the wire schema's enum, the only statement of the menu. The round banks that menu (`L1Readout.l1_citable`) and the behavior check reads it there, never a second derivation. L1 cannot cite a panel it was never shown.
-- **The `*_override` slots derive the same way**: a slot whose panel produced nothing this call is withdrawn. L1 may not EDIT an axis it was never shown any more than it may cite one — nor a prompt field the operator held: `prompt_fields_updates` offers, per prompt node, that node's `open_prompt_fields` alone — the one carrier of those fields; `shots` is keyed per prompt node the same way.
-- **`evidence_grounding` is required on the wire** even though it is optional at the parse boundary — tolerating an omission is not the same as offering one. Variants without a real citation fail `evidence_grounding_present` (`validators/l1_behavior.py`).
-- **Field order is load-bearing — never reorder `L1Variant` alone.** `evidence_grounding` generates above `changes_description` *and* the `*_override` slots, because fields generate in schema order and a citation emitted after the mutation can only rationalize it. Three surfaces state that order and move together: the Pydantic model (the SoT), `l1_generate`'s `answer_format` prose, and the regenerated `resolved_schemas`.
-- **The decision frame comes first**, answering what the evidence panels cannot — whether the number under them can be trusted: `measurand` · `detectable_move` · `confounds` · `budget_state`. `budget_state` is deliberately **not citable**: budget says how boldly to spend a round, never that a mutation is right.
-- **Four panel rules the renderers do not state.** `answer_distribution` is `L1_MANDATORY`, because without it a generator rewrites the instruction it is already being denied, louder, every round. `failing_samples` orders on the cycle's difficulty view (`Cycle.difficulty`) — that same ruler binds sample SELECTION and the hard-sample view, so no round chooses, scores or shows cells on a second δ. `mutation_memory` derives from the payload, **never** from `changes_description`, which two candidates can share. `axis_memory` and the raw cross-run panels stay OFF the floor; L2 adds them on stall.
-- **A cluster spans two rows or it is not one.** The critique's `failure_highlights` are `FailureCluster`s over the ids the panels mark — `l1/critique.py::spanning_clusters` drops one spanning fewer at the seam, the wire's `minItems` being advisory — and a variant names its target as `targets_rows`, never a label: ids are checkable against the prompt (`validators/l1_behavior.py`, `targets_a_cluster`), a name is not. `[#id]` therefore marks only a row a cluster may span. So a variant attacks a cluster the round measured, and its edit must hold for every row in it; the per-row patch (one query's procedure in `instruction`) is what the contract refuses.
-- **The block pool is the only channel handing L1 reusable prompt MATERIAL** — every cross-run panel beside it carries statistics *about* material. Reusing a block does not excuse `evidence_grounding`; the citation still names a panel.
-- **An idea this cycle already measured and lost is rejected, not re-scored** (`repeat_variant`) — the only cross-round invariant, beside round-local `no_op_variant` and `duplicate_variant`. All three are `l1_invariants`' alone, never a parse-boundary check: a parse rejection is all-or-nothing over the batch, so one no-op variant would cost the round every candidate. The match is lexical over the mutated VALUES (`domain/candidate_diff.py::idea_fingerprint`), never field names, because a re-proposal arrives as the same idea rewritten into a different FIELD. Four bounds, because a wrong rejection is destructive and leaves no trace: only **measured losses** count, the reject threshold is stricter than the marking one, a repeat may cost a candidate but **never empties a round**, and every rejection names the round it repeats on the wound channel.
+- **Mutate only with cause** — stall, critique / axis-memory evidence, or the frozen `task_context`. No data for a choice ⇒ no gamble; a panel speaking against a mutation vetoes it.
+- **The citable set is derived** (`citable_fields`), and `*_override` slots are withdrawn the same way when their panel rendered nothing.
+- **Never reorder `L1Variant` alone**: `evidence_grounding` generates before `changes_description` and the overrides, and the model, `answer_format` prose and `resolved_schemas` move together.
+- **Panel rules the renderers do not state**: `answer_distribution` is `L1_MANDATORY`; `failing_samples` orders on `Cycle.difficulty`, the one δ; `mutation_memory` derives from the payload, never `changes_description`; `axis_memory` and raw cross-run panels stay off the floor until L2 adds them.
+- **A cluster spans two rows** (`l1/critique.py::spanning_clusters`); a variant targets `targets_rows`, and its edit holds for every row — no per-row patch.
+- **The block pool is L1's only channel for reusable prompt material**; reusing a block still needs `evidence_grounding`.
+- **`repeat_variant` rejects an idea this cycle measured and lost**, inside `l1_invariants`, never at parse: only measured losses count, the reject threshold is stricter than the marking one, a round is never emptied, and every rejection names its round on the wound channel.
 
 ## L2 — what `l2_context` may write
 
-Fires on L1 stall (default), yield drought (`l2_axis_yield_drought`), or evidence-starvation (`l1_evidence_starved`). Every transition is a rule in `escalation/rules.py` — whether a round asks for a fire, which layer it reaches, what a landed L2 fire asks next — **the rule set is the policy**; the `Ladder` slice only holds the counters those rules read. **Each layer is its manifest node's member** (`members.py::L2Context`, `L3Plan`), and a fact about one node is stated on that node's member (`optimizers/nodes.py::LlmNode`), never in a table keyed by node name.
+**L2 fires on L1 stall, yield drought or evidence starvation; the rule set in `escalation/rules.py` is the policy.** A fact about one node lives on its member (`optimizers/nodes.py::LlmNode`), never in a table keyed by node name.
 
-- **Deterministic rules route; they never diagnose or stop.** A systemic fault brings L2 in as a *weak preemptor*, bypassing `l1_patience`, and L2 judges recoverability — fixable by steering L1's attention, or a BACKEND fault no prompt move recovers (never a hard task), in which case `terminate_proposal` is the HITL exit. The diagnose-and-stop authority lives in the LLM tier.
-- **L2 writes exactly two surfaces**: `l1_layout` (which panels L1 sees) and `l1_overrides` (how hard it explores) — **never pipeline_params**, which belong to `l1_generate`. Both land as ONE node overlay on `l1_generate` (`L2Memory.steer`, the shape the campaign's own `nodes` overlay takes), keyed as that node's config is: `layout`, `temperature`, `n_variants`.
-- **The steer is evidence-anchored**: it cites a specific axis, sample or yield number. Speculative moves ("maybe try X") are out of contract, and a fire touching no L1 surface is a wasted escalation scored as one (`l2_targets_l1_surface`).
-- **The framing is frozen — no layer writes `task_context`.** It is operator-authored evidence, locked structurally: no wire schema has a field of it. A round's findings reach L1 through `critique`, `axis_memory` and `mutation_memory` instead. `upstream_context` / `downstream_context` still splice into the TARGET prompt, but target text is L1's to write through `prompt_fields_updates` alone — a second carrier was scored yet never persisted on the candidate, so every delta reader disagreed about it.
-- **Escalating to L3 is rare** — only when the failure mode is outside what `l1_layout` / `l1_overrides` can steer. Default: keep steering L1's surface.
+- **Deterministic rules route; they never diagnose or stop.** L2 judges recoverability, and `terminate_proposal` is its exit for a backend fault.
+- **L2 writes exactly `l1_layout` and `l1_overrides`, as one node overlay on `l1_generate`** (`L2Memory.steer`) — never `pipeline_params`. Each steer cites an axis, sample or yield number (`l2_targets_l1_surface`).
+- **No layer writes `task_context`** — no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`.
 
 ## L3 — what `l3_plan` may write
 
-Fires only on L2 stall. Produces a **strategic replan** — what L2 and L1 should do with the levers they hold, escalation policy, which axes are in scope — written to `L3Memory.plan` and read by **every** prompt, so it is the frame inside which both L2 and L1 operate. It heals L2 on layout HARD-validator failures or repeated cross-field issues — L2 thrashing within the plan.
-
-**Firing is rarer still than L2**: a fire signals the cycle's plan was wrong, not that one variant missed.
+**L3 fires only on L2 stall** and writes a strategic replan (`L3Memory.plan`) every prompt reads; it heals L2 thrashing within the plan. **A fire means the plan was wrong**, so it is rarer than L2.
 
 ## The layer-control channel — `fork_proposal` + `terminate_proposal`
 
-**These two are the COMPLETE layer-control vocabulary; nothing else back-doors a cycle exit.** Both ride the `_run_transition` post-apply seam and each is gated by an `OptimizationConfig` capability bit whose injection renders empty when off, so an ablation run is bit-for-bit identical on prompt text. Terminate outranks fork when both are set.
+**These two are the complete layer-control vocabulary**, each gated by a capability bit whose injection renders empty when off; terminate outranks fork.
 
-- **`fork_proposal` carries no round offset, because the layer decides WHETHER to rewind and UCB decides WHERE** (`application/mask/backprop.py::select_rewind_round`, UCB1 over the lineage tree). A layer has no evidence to name a round — no panel enumerates the ancestors and their fitness — so asking would buy a phantom citation on the loop's most expensive decision. `resume --rewind N` is the operator's equivalent gesture.
-- **`unlock_schema_field_rename` is a bool, never the `ConfigOverrides` object.** Handed the whole delta, a layer could move its own spend ceiling. It is the layer's only search-policy request and can ride nothing but this rewind, because `schema_field_rename` invalidates comparability and must mint a sibling.
-- **A REASON is what makes `terminate_proposal` a decision.** A blank one is ignored, exactly as one arriving with the capability off is, and both the honored stop and the ignored blank land on the operator's warnings channel — a halt whose reason lives only in a log line is one nobody can act on.
+- **`fork_proposal` carries no round offset**: the layer decides whether to rewind, UCB decides where (`application/mask/backprop.py::select_rewind_round`).
+- **`unlock_schema_field_rename` is a bool, never `ConfigOverrides`** — a layer must not move its own spend ceiling.
+- **A blank `terminate_proposal` reason is ignored**; honored and ignored both land on the operator's warnings channel.
 
 ## The optimizer never searches the GATEWAY or the ROUTE
 
-`PARAM_FORBIDDEN_KEYS` (`domain/search_point.py` — read the set there) holds `provider` and `route_order`, and is an INVARIANT rather than a toggle: neither is emitted for the LLM to set, so the lock is structural. Both are cost levers the operator sets against a measured capture, and hosts of one model disagree systematically.
-
-**Where the operator sets one is two places, split by which side of the recursion answers.** A BACKEND node's rides the dataset overlay ([`../../../assets/datasets/CLAUDE.md`](../../../assets/datasets/CLAUDE.md) § Sole route). The OPTIMIZER's own rides `OptimizationConfig.determinism`, which pins temperature, seed and route together on every optimizer call and is applied LAST, so it beats the node's file config and `l1_generate`'s steered `temperature` alike. An L4 inner cell is one caller of that field among the rest — `runner/inner/tasks.py::inner_instrument_config` writes the panel's temperature and the cell's seed into it — never a second mechanism.
-
-**`model` is NOT in that set and is a legitimate axis.** Whether it is open is the answer of a node's own `optimizer.param_keys`, per dataset — so an instrument that must not move under the arms it measures closes it there (`justlogic/d234`, `bbeh`), and a campaign free to search it leaves it open. Its permitted values are `param_allowed_values["model"]`, the ONE set: what the optimizer may pick, and what a human may steer a fork to un-tainted. Steering outside it is cap-gated and taints the branch babysat ([ADR-0005](../../../../docs/adr/0005-delegated-principals-and-capability-scoping.md) §4). Either way the done C0 is inherited — `WHO_ANSWERS_KEYS` (model + the two cost levers) is what that inherit reads, and it is deliberately the wider set.
+**`PARAM_FORBIDDEN_KEYS` (`domain/search_point.py`) is an invariant**: the operator sets a backend node's route in the dataset overlay ([`../../../assets/datasets/CLAUDE.md`](../../../assets/datasets/CLAUDE.md) § Sole route), the optimizer's in `OptimizationConfig.determinism`, applied last.
+**`model` is a legitimate axis**, opened per node by `optimizer.param_keys` within `param_allowed_values["model"]`; steering outside it is cap-gated and taints the branch ([decisions](../../../../docs/decisions.md) § 0005).
 
 ## Editing a renderer's PROSE is a measurement change
 
-`dispatch/injections/` composes most of every optimizer prompt, so rewording a directive changes what every inner cycle is handed — and on L4 that is measurement identity. `OptimizerRuntime.source_digest` hashes it AST-normalized into potter's `Treatment.source`: a comment, docstring, reflow or import path costs nothing; a panel's prose, its `char_cap`, a node's discretionary allowance or a selection rule voids the banked origins. **Expect the re-measure; the bug is the reverse.** A pool's starting content is hashed beside it as DATA, through each initializer's `nodes.py::Initializer.starting_content` (the block pool's is `config/prompt_blocks.py::pack_identity`): a block's text, source, place and presumptions are in the key, its provenance is not.
-
-The hashed set is `compose` + `facade` + `domain/ruler.py` + the renderers, and `bundle` marks itself; a mark inside an optimizer's package reaches that optimizer's digest alone. **A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else the prompt reports** — the wire schema's `maxLength`/descriptions belong there, a node's allowance is its `NODE_LAYOUTS` entry's (`dispatch/layout.py`, hashed whole); `BAND_COLLAPSE_LOGITS`/`_RATIO` do not, describing the δ scale and served on `AbilityReading` as well as rendered. Either way **the module holding it MUST be in the hashed set, or the definition itself carries `shared/hashing.py::shapes_optimizer_prompt`** — one parked outside both shapes every prompt for free.
+**`OptimizerRuntime.source_digest` hashes the prompt-shaping set AST-normalized, so rewording a directive voids banked origins — expect the re-measure.** A pool's starting content is hashed as data (`nodes.py::Initializer.starting_content`).
+**A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else**, and its module is in the hashed set or carries `shared/hashing.py::shapes_optimizer_prompt`.
 
 ## A validator either REJECTS or SCORES — never both
 
-`*_strict` / `*_output` / `l1_invariants` **reject**, so a failure routes back up as a `ValidationFailure` and the layer heals. `*_behavior` only **scores** conformance into `review.md` and the round file, and never blocks a candidate.
-
-Within the reject posture, `l1_strict.py` judges ONE proposal against a declared rule; `l1_invariants.py` compares proposals against each other and against history. **Emitting the wire schema is neither posture** — that is `dispatch/l1_wire_schema.py`, which composes a prompt surface. The SCORING vocabulary (`ValidatorContext`, `CheckFn`) is owned by `validators/behavior_base.py` and by neither layer that speaks it; the result is the bench's `optimizers/nodes.py::CheckResult`, which `review.md` renders.
-
-**A rejection the REJECT posture already makes deterministically must not also be taught in prompt text.** The candidate dies before the backend call either way, so the words buy no behaviour and are charged twice — tokens and the quality tax of a longer input (`<simplify-the-problem>`). State that they ARE mechanical in one clause, and spend the prompt on the traps nothing polices.
+**`*_strict` / `*_output` / `l1_invariants` reject (a `ValidationFailure` the layer heals); `*_behavior` only scores into `review.md`.**
+**Never teach in prompt text a rejection the reject posture already makes** — say in one clause that it is mechanical.
 
 ## Signals come from measurement, not from the calendar
 
-Avoid hardcoded round thresholds inside the loops. `param_scope_discipline` (`validators/l1_behavior.py`) scores a param-scope mutation only while a prompt field went unmutated for two rounds — mutation history, never `round ≥ N`; `exploration_budget` widens with stall depth, not on a fixed schedule. Hardcoded stop conditions sit at the cycle boundary; everything inside the loops reasons from measurement.
+**No round-number thresholds inside the loops**; hardcoded stops sit at the cycle boundary.
 
 ## Add no 4th layer — L4 is a recursion
 
-**There is no `l4_*.py` in potter and there will not be one.** The ban is derived rather than arbitrary, which is why naming a file `l4_recursion.py` breaks it just as surely: L4 is the same PromptPotter applied to itself via the `promptpotter` connector — an outer cycle whose *backend* is an inner cycle, mutating the inner's optimizer prompt template fields as `pipeline_params`. Potter's ladder is closed at L1 / L2 / L3; a peer is a sibling manifest the bench runs, never a layer here.
-
-Conceptually L2 / L3 / L4 are one family, each mutating a slower-changing surface of the level below. Structurally L2 and L3 live here as escalation strategies while L4 lives at the connector seam and the dataset; which package holds which half is [`../../../CLAUDE.md`](../../../CLAUDE.md) § Where L4 lives. Spec: [`../../../../docs/specs/l4-outer-loop.md`](../../../../docs/specs/l4-outer-loop.md).
-
-## Reviewing an L1 round trace
-
-Walk `potter-self`'s § The round-trace checklist before reporting on a pasted round dump.
+**There is no `l4_*.py` in potter, under any name**: L4 is PromptPotter applied to itself through the `promptpotter` connector, and a peer is a sibling manifest. Which package holds L4's law and machinery: [`../../runner/inner/CLAUDE.md`](../../runner/inner/CLAUDE.md) § Where L4 lives. Spec: [`../../../../docs/specs/l4-outer-loop.md`](../../../../docs/specs/l4-outer-loop.md).

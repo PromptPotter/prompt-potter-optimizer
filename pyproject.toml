@@ -36,7 +36,7 @@ requires-python = ">=3.13"
 # measured, not asserted: `application/embedded_run.py` and the CLI entry each import to
 # exactly this closure and no further. Everything a SERVER needs is `[api]`, because the
 # fourth distribution tier is PromptPotter running inside someone else's program
-# (`docs/adr/0006-embeddable-core-and-extras.md`), and a library that drags a web server in is
+# (`docs/decisions.md` § 0006), and a library that drags a web server in is
 # one nobody adds.
 dependencies = [
     "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
@@ -63,7 +63,7 @@ api = [
     "scalar-fastapi>=1.0.0",   # why kept: API doc UI on the FastAPI app
     "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the API
     "sse-starlette>=2.4.1",    # why kept: EventSourceResponse owns events:subscribe SSE framing + heartbeat + teardown on client-disconnect/server-shutdown (patches uvicorn handle_exit, so one Ctrl+C shuts down clean)
-    "cryptography>=50.0.0",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007, and now past GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle, fixed in 50.0.0). Held at 49 until `observability` moved off full mlflow, which required `cryptography<50`.
+    "cryptography>=50.0.0",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (the identity foundation, docs/decisions.md § 0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007, and now past GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle, fixed in 50.0.0). Held at 49 until `observability` moved off full mlflow, which required `cryptography<50`.
 ]
 excel = [
     # why kept: .xlsx ingest (`application/datasets/tabular_ingest.py::_xlsx_records`). Lazy behind `shared/extras.py::require_extra`,
@@ -86,7 +86,7 @@ dspy = [
     # no skinny-shaped swap. `uv lock` resolves EVERY declared extra, so a lock scanner sees this
     # whether or not anyone installs it — the alert is not evidence the surface is reachable.
     # Deleting the extra would drop exactly 4 packages (dspy, gepa, orjson, diskcache) and break
-    # `pip install promptpotter[dspy]`, which README + ADR-0006 + `docs/developer/dspy-optimizer.md`
+    # `pip install promptpotter[dspy]`, which README + `docs/decisions.md` § 0006 + `docs/developer/dspy-optimizer.md`
     # publish. Dismiss the alert; do not trade the published install path for it.
     #
     # 3.4 is the floor the connector's billing is verified on: an LM is an ENGINE there

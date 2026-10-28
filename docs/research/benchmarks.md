@@ -1,9 +1,9 @@
 # Benchmark Methodology
 
 What we measure on, what it scored, and what we refuse to measure on. Model + `reasoning_effort`
-pins → [`../operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md).
+pins → [`../operations/datasets.md`](../operations/datasets.md) § The model a dataset runs.
 Selection criteria and the recon detail behind each verdict →
-[`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md).
+[`../operations/datasets.md`](../operations/datasets.md) § Selection criteria.
 The BBEH head-to-head protocol →
 [`bbeh-comparison/README.md`](bbeh-comparison/README.md).
 Who the peers are and how we compare on capability rather than score →
@@ -34,7 +34,7 @@ Two ways to misread the bar:
   headroom and ties just as hard — the floor and the ceiling produce the same symptom from opposite
   directions.
 - **The constant-answer floor is invisible to the bar** — owned by
-  [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
+  [`../operations/datasets.md`](../operations/datasets.md)
   § Selection criteria, criterion 1b. Screen it before reading any origin in the roster below.
 
 ## Order of use
@@ -151,7 +151,7 @@ the origin inside 15–60% AND a settled gap over it. Sidecars:
 | IFBench · CRUXEval-O · MuSR (2-subtask) | — | ❌ desk-rejected / not measurable |
 
 **Rejected without trial** — the list, and the reason beside each name, is owned by
-[`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
+[`../operations/datasets.md`](../operations/datasets.md)
 § Rejected without trial; none is re-investigated. The recurring reasons are *above the bar*, *below the floor*, *unstable test set*, and *outside PoBB's
 cost model* (tool-call dependent — the budget gate polls at the sample edge, so one
 agent episode is unbounded spend between polls). Neither *boundary* is a reason any more: a

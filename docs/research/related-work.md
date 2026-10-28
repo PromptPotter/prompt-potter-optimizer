@@ -26,7 +26,7 @@ the same table. That is where PromptPotter is pointed, and
 it is why the direction of travel is a **bench**: a place a third party's search method plugs in as
 an optimizer manifest and is measured under one model, one budget meter, one grader, one
 split and one archive. Status and design of that plug point are
-[`../specs/roadmap.md`](../specs/roadmap.md) § The optimizer plug point, and this page will not
+[`../specs/roadmap.md`](../specs/roadmap.md) § The bench (M13), and this page will not
 claim a head-to-head before a peer actually runs a real campaign inside it.
 
 ## The family PromptPotter's own algorithm belongs to
@@ -108,6 +108,16 @@ an outer cycle whose backend is an inner cycle
 arrives there too, one level harder: in the recursion the optimizer *is* the instrument, so the
 thing being varied is also the thing doing the measuring. A bench that holds a harness constant is
 the only place that question is answerable.
+
+### Agent-harness evolution
+
+Evolving a harness around a frozen model is an occupied thesis, not a differentiator: SkillOpt,
+DarwinX and AutoDesign all do it, and DarwinX's abstract makes the "single-lineage search is
+path-dependent" critique. All three score on agent and tool environments (ALFWorld,
+SpreadsheetBench, Terminal-Bench, WebArena), which the `harbor` connector measures here too, so a
+head-to-head is a wiring job plus a per-cell spend ceiling. None of them runs sequential
+elimination, a cost-per-fitness model or a subset-invariant ability scale; that, with joint prompt
+and pipeline-parameter search, is where the distinguishing claim sits.
 
 **The precedent to cite, and the measured danger** — owned by
 [`external-constraints.md`](external-constraints.md) § Ranked, items 1–2, and § L4; cite STOP,

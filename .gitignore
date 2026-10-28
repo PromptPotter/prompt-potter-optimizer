@@ -100,7 +100,6 @@ logs/
 !.claude/skills/potter-box/
 !.claude/skills/potter-release/
 !.claude/skills/digest/
-!.claude/skills/serve/
 !.claude/hooks/
 tools
 .playwright-cli/
@@ -122,9 +121,6 @@ deploy-linux/*.local.md
 
 # Local campaign config (user-specific overrides)
 campaign_config.json
-
-# teach-impeccable skill scratch (unrelated to PromptPotter)
-.impeccable.md
 
 # Third-party agent harness config — points its own tool at this repo's CLAUDE.md.
 # Local to whoever runs that tool; it configures no PromptPotter behaviour.

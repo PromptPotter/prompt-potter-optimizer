@@ -2545,7 +2545,7 @@ _UNPRICEABLE = {
 def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, run_bound: None
 ) -> None:
-    """TWO units, because a price needs a rate on file and a token count never does (ADR-0003 D1)."""
+    """TWO units, because a price needs a rate on file and a token count never does (decisions.md § 0003)."""
     with monkeypatch.context() as patched:
         rates = RateTable({("openrouter", "openai/gpt-4o"): Rate(1e-6, 2e-6)})
         patched.setattr(pricing, "load_rates", lambda: rates)

@@ -1,203 +1,51 @@
 # judges/ — LLM-as-judge graders for scoring
 
-A judge grades one cell by asking a model, where no deterministic matcher can — a free-text
-answer, a CRM note, a rated ordering. Adding one is local to `judges/<name>.py` plus a
-`_BUILTIN` row.
+A judge grades one cell by asking a model where no deterministic matcher can. Adding one is local to `judges/<name>.py` plus a `_BUILTIN` row.
 
 ## A judge is a MEASUREMENT, never a formula term
 
-**The hard constraint the whole package is shaped around.** The compiled scoring formula is pure,
-synchronous and AST-allowlisted, and it is re-run **offline over already-archived rows** — the δ
-ruler, A/B replay, resume, the origin gate among others. `domain/scoring.py` states it outright — *"Archive rows are RE-GRADED by the
-reading campaign's scorer … a STORED verdict is never consulted."*
-
-So a judge inside the formula would re-bill **one LLM call per archived row, every time an index
-warms**. Instead a judge runs ONCE, at measure time, and banks its verdict into the row; the pure
-formula reads that banked number by name. Re-grading stays free, which is what makes `--from N`,
-`--fork-on-divergence` and `verify` cheap.
+**A judge runs ONCE, at measure time, and banks its verdict into the row; the pure formula reads that number by name.**
+The formula re-runs offline over archived rows (δ ruler, A/B replay, resume), so a judge inside it would re-bill one LLM call per archived row on every index warm.
 
 ## The seam — a judge IS an `Evaluator`
 
-No new concept reaches the scoring layer. `build_evaluators(specs)` returns ordinary
-`application/scoring/evaluators.py::Evaluator`s at `per_sample` scope — one per declared TERM —
-and three of their existing fields already do the work:
-
-| field | what it buys |
-|---|---|
-| `scope="per_sample"` | materialized inside `measure_sample`, once, at measure time; `materialize_round_values` re-derives `per_round` evaluators only — the anti-re-bill property, already encoded |
-| `needs_labels=True` | auto-skipped on a verifier-graded bank — a judge never fabricates a 0.0 where there is no gold |
-| `direction` | polarity |
-
-`materialize_sample_values` is **async, and `per_sample` only**. `_validate_evaluator` REFUSES an
-awaitable `compute` at `per_round` scope, because those materializers are sync read paths over
-archived rows — that refusal is what stops the re-billing bug being reintroduced from the sync
-side. The values land **top-level in `pipeline_data`**, where `cell_namespace`'s splat binds them;
-nested under a dict they would be unreachable, since the AST allowlist bans attribute access.
-
-**Every judge evaluator goes through `validate_campaign_evaluator`, and that call is the contract
-rather than a courtesy** — a judge's term is the one evaluator name an OPERATOR picks. Three ways a
-term is unreachable or wrong, all silent: a non-identifier the
-formula's AST allowlist cannot resolve, a name `cell_namespace` binds itself (dropped by the splat,
-so the formula scores the intrinsic), and a name a package evaluator owns (`extra` is written
-last, so the formula scores the judge under a name promising something else).
+**`build_evaluators(specs)` returns ordinary `per_sample` `Evaluator`s, one per TERM** (`needs_labels=True` skips them on a verifier-graded bank); values land top-level in `pipeline_data`. `_validate_evaluator` refuses an awaitable at `per_round`.
+**Every judge evaluator goes through `validate_campaign_evaluator` — that call is the contract**: it refuses a non-identifier term, one `cell_namespace` binds itself, and one a package evaluator owns.
 
 ## Scoring, never the optimizer loop — and it is structural
 
-**Nothing that sets the loop's LLMs may reach a judge.** A node's permitted model set,
-`nodes.{node}.config.model`, the optimizer's own `assets/optimizers/potter/pipeline.yaml`, and any global
-"set every model" steer are all not consulted. A judge's models are declared in
-`dataset.yaml` `campaign.judges.{term}.stages` and inherited from nowhere — not from the
-loop, and not from a sibling term either; absent means absent, and never a borrow.
+**Nothing that sets the loop's LLMs reaches a judge** — models come only from `campaign.judges.{term}.stages`; required fields, exclusion from `param_keys` and the `judge` spend kind enforce it.
+**Every shipped judge asks ONE stage** (`Judge.max_stages`, enforced by `build_evaluators`); a composing judge raises its own.
 
-Three things enforce it rather than describe it: `JudgeStage.model`/`provider` are **required**
-fields with no default; the judge sits outside `param_keys` entirely, so the optimizer can never
-search its own grader (a candidate free to move its ruler would optimize the ruler); and
-`TokenUsageKind` carries a third arm `"judge"` so grading spend lands in its own
-`SpendRollup` bucket instead of reading as optimizer cost.
-
-## A judge is a COMPOSITION, not a call
-
-`JudgeSpec.stages` is a LIST, so two models in a row (grade, then tie-break) or several in
-parallel (a panel, voted) are the same type. `Judge.grade` returns one `JudgeVerdict`; how many
-calls it made is its own business, and token accounting is per underlying call via `call.py::ask`,
-so a chain prices correctly with no special case.
-
-**Every shipped judge asks exactly ONE stage, and says so in `Judge.max_stages`**, which
-`build_evaluators` enforces at init, before a cell is bought. A judge that genuinely composes
-raises its own.
-
-**A grader that FAILED must never be bankable as a graded answer.** Every arm that declines to
-grade — a failed call, an unreadable reply, an input the cell does not carry — returns
-`call.py::absent`, and a judge shapes its verdict through `call.py::graded`, never a copy of it:
-they are one fact, *this term has no reading*, and written per site it collapses into a zero the
-first time someone reaches for a sensible default. A judge reads its cell through `judge_question`
-and `judge_answer`, one reader each — `predicted` read raw grades the `NO_RESULT` sentinel and
-banks a category for it.
+**A grader that FAILED is never bankable as a graded answer** — every declining arm returns `call.py::absent`, and verdicts are shaped through `call.py::graded`.
+A judge reads its cell through `judge_question` / `judge_answer`; `predicted` read raw grades the `NO_RESULT` sentinel.
 
 ## The step schema — one per task SHAPE
 
-`campaign_config.judges` is keyed by **the term the scoring formula reads, never by the judge's
-name**, and that is what makes a multi-STEP cell expressible: three entries, three rubrics, three
-banked observations per cell. Keyed by judge, two terms sharing a rubric would collapse into one
-and the second verdict would land on top of the first.
-
-**A schema belongs to a task SHAPE, and `retrieve → ground → answer` is one shape's** — the
-search-augmented one. An agent-harness task has a different shape and a different schema,
-`open → adhere` (the `spreadsheetbench/s10` tenant definition's `README.md` § Step schema). Adopt the shipped
-schema where the shape matches; one coined on a task it does not fit is *wrong*, worse than merely
-new. A third shape earns a third schema and owes the same screen.
-
-**A step may be graded by a CONNECTOR OBSERVATION as well as by a judge — what makes something a
-step is that it banks its own TERM, not that a model decided it.** `open` is graded by
-`connectors/harbor.py::_skill_opened` off the trial's own trajectory at no model cost, and composes
-into the cell exactly as a judge term does. So look for the cheap mechanical half of a schema
-before authoring a rubric: it costs nothing per cell and cannot saturate the way a rubric can.
-
-**The schema is a semantic decision, and it is fixed BEFORE a cell is bought.** Per-step δ pools only if "step 2" is the same KIND of thing across cells, so a
-turn *index* is not an item and an agentic episode takes however many turns it takes. Retrofitting
-a schema means re-paying for every row — the fingerprint folds the whole term → judge mapping
-(`application/pipeline_resolve.py::_identity_contributions`), so re-keying a grader is a new measurement, by
-construction. Declaration order is the step order; a later testlet or partial-credit fit reads
-the banked terms, not a re-measure
-([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict-resolution.md) § Phase 3).
-
-Three steps, and which half of a failure each isolates:
-
-| step | graded by | reads | needs gold | what it separates |
-|---|---|---|---|---|
-| retrieve | `evidence_retrieval` | question, what the cell DID | no | did the system gather evidence that SETTLES the question — whether or not it then used it |
-| ground | `answer_grounding` | question, answer, what the cell DID | no | is the answer traceable to the system's OWN evidence — a grounded answer can still be wrong, and that separation is the measurement |
-| answer | `sealqa` / `simpleqa`, **or the backend's own verifier** | question, gold, answer | yes, for the judge | is the final answer correct |
-
-**On a verifier-graded backend the answer step needs no judge**, and that is what makes the schema
-complete where it matters most. A harbor cell declares `ground_truth: None`, so every `needs_gold`
-judge is skipped — but the task's verifier already grades the answer and banks it as `env_reward`,
-which a formula reads like any other term. The two evidence graders need no gold precisely so the
-other two thirds survive there — the backend whose cells are turn-structured enough to have steps.
-
-Asking for SUFFICIENCY rather than correctness is also the better instrument: a grader handed the
-gold accepts any trace that merely *contains* the gold string.
-
-**"What the cell DID" is `pipeline_data::turns` where the backend has a conversation, else the
-`reasoning_trace` digest** — a preference order in `grounding.py::_trace`, never a choice, and
-never a config key: a grader that could be pointed elsewhere is one whose input is not part of
-what the fingerprint says it graded. The rubrics turn on separating what the system ASSERTED from
-what the environment ANSWERED, so turns are rendered labelled, never concatenated.
-
-**A cell missing an input a judge needs is ABSENT, never zero, and costs no model call** — no
-trace (a backend with no trace channel has not produced a badly-grounded answer) and no answer
-alike. **`evidence_retrieval` deliberately does not read the answer**, so it still reads on a cell
-whose answer never arrived — the case the retrieve step most wants measured. **The middle score is
-a prior we invented** (`PARTIAL = 0.5`, a hand-set threshold of the kind `verdict-resolution.md`
-§ Phase 3 warns about), survivable only because `_compute` banks the LABEL beside the score, so a
-later fit re-derives its own thresholds from archived rows.
-
-**Their rubrics are OURS, and that is the difference from `simpleqa.py`.** Nothing published grades
-these two steps, so screen them (`seed-screen`, `noise-floor`) before funding a campaign on them
-and record the reading in the dataset's `README.md`, exactly as any other instrument decision is
-recorded.
+**`campaign_config.judges` is keyed by the formula's TERM, never the judge's name** — that makes a multi-step cell expressible.
+**A schema belongs to a task shape**: `retrieve → ground → answer` is the search-augmented one, `open → adhere` the agent-harness one (`spreadsheetbench/s10` tenant `README.md` § Step schema). Adopt a shipped schema where the shape matches; a third shape earns a third schema.
+**A step may be graded by a connector observation** (`open` by `connectors/harbor.py::_skill_opened`, free) — look for the mechanical half before writing a rubric.
+**The schema is fixed BEFORE a cell is bought** — the fingerprint folds the term → judge mapping, so re-keying is a new measurement; declaration order is step order.
+Steps: retrieve = `evidence_retrieval` (no gold; never reads the answer); ground = `answer_grounding` (no gold; answer traceable to the cell's own evidence); answer = `sealqa` / `simpleqa` or the backend's verifier.
+**On a verifier-graded backend the answer step needs no judge** — `env_reward` is the answer term.
+**"What the cell DID" is `pipeline_data::turns` where present, else the `reasoning_trace` digest** (`grounding.py::_trace`), never a config key; turns render labelled.
+**A missing input is absent and costs no call** — [`conventions.md`](../../docs/developer/conventions.md) § Code shape.
+**Our rubrics (and `PARTIAL = 0.5`) are invented: screen them (`seed-screen`, `noise-floor`) before funding a campaign, and record the reading in the dataset's `README.md`.**
 
 ## Identity — a judge that changed must re-cut the key
 
-`Judge.fingerprint(spec)` hashes the judge name, its declared `version`, **its rubric text**, and
-the whole stage chain. `application/pipeline_resolve.py::_identity_contributions` folds the whole term → judge
-mapping into ONE `node_configs` entry under `JUDGE_INSTRUMENT_KEY`, so `sp_hash` moves — an archive
-row is keyed on config, and a judge swapped silently would have every prior verdict replayed under
-the new grader. **The TERM is inside that hash**: re-keying a grader banks a different set of
-observations, so it is a different measurement even when the rubric and the models are identical.
-Declaration order is not, because two campaigns declaring the same graders in a different order
-measured the same thing.
-
-**Hash the rubric, never trust a hand-bumped version** — an author who edits a rubric and forgets
-to bump `version` still moves the fingerprint.
-
-**The scorer id folds the same digest** (`judge_instrument`, into `application/scoring/formula/compiler.py::auto_scorer_id`):
-a formula reads the terms a judge banked, so one formula over two graders is two grading
-functions, and a ruler or a head-to-head keyed on the id would pool them.
+**`Judge.fingerprint` hashes the rubric text — never trust a hand-bumped version**; `_identity_contributions` folds term → judge into `sp_hash`.
+**The scorer id folds the same digest** (`judge_instrument` → `auto_scorer_id`), so one formula over two graders is two scorers.
 
 ## Emit absence, never zero
 
-`compute` returns `float | None`, and `None` is **not** a zero: the materializer omits the key,
-`cell_namespace` leaves the term unbound, and the formula raises `ScoringTermMissingError`. That
-is the difference between *this answer was wrong* and *we did not find out*, and it is why
-`call.py::ask` never raises. **A refused send is the one exception** (`CellSendRefusedError`): the
-cell is a hole of that refusal's category, and the walk halts.
-
-**`ask` not raising is only half of it, and the other half is one frame up.** Anything else that
-throws inside `grade` — a rubric placeholder the caller does not fill, a label outside `to_score`,
-a third-party judge's own bug — would reach `measure_sample`'s catch-all and throw the backend answer away; `registry.py::_compute`
-catches it and returns `absent`, so **no failure in a grader can cost the measurement it grades**.
-The rule belongs to the seam, not to any one judge.
-
-The shipped SimpleQA judge **deliberately diverges from upstream here**: `simple-evals` defaults an
-unparseable grading reply to `"C"` / `NOT_ATTEMPTED`, a category that does not count against
-accuracy-given-attempted. Ours returns `None`. Record any such divergence in the dataset's
-`README.md`.
-
-## Why this package hand-rolls its own protocol
-
-There is **no** cross-library standard for a judge OBJECT. There IS one for its OUTPUT, OpenTelemetry's `gen_ai.evaluation.result`, which `JudgeVerdict`'s field
-names follow; adopting names costs nothing. Depending on a vendor's object does not work here:
-ADR-0006 makes core the engine, a judge is reachable from the core measurement loop, so anything
-it depended on would be a **core** dependency. A vendor adapter belongs in an entry-point plugin.
-
-**A label is not a score**, which is why `to_score` is declared and `_validate` refuses a judge
-whose labels and scores disagree either way — picking a numeric reading for a three-way taxonomy
-silently is how `NOT_ATTEMPTED` becomes a zero that flatters an evasive model.
+**`compute` returns `float | None`; `call.py::ask` never raises, and `registry.py::_compute` catches any grader failure and returns `absent`** — no grader failure costs the measurement it grades. A refused send (`CellSendRefusedError`) is the one exception.
+**The SimpleQA judge diverges from upstream** (an unparseable reply is `None`, not `NOT_ATTEMPTED`); record any such divergence in the dataset's `README.md`.
 
 ## Registering one
 
-**A connector's rules, deliberately, through the one loader** (`shared/plugin_registry.py`) — the
-`promptpotter.judges` entry-point group, one `_validate` over both, the judge's own `name` as its
-key, no plugin shadowing a built-in, a broken plugin fatal, `judge_origins()` as the audit surface.
-A built-in is a `_BUILTIN` row rather than a walked module because one module declares several
-judges; the table completes where the connector table does
-([`../application/initialization/CLAUDE.md`](../application/initialization/CLAUDE.md) § Registries complete). The reasoning, and the
-trusted-code boundary, are owned by [`../connectors/CLAUDE.md`](../connectors/CLAUDE.md) §§
-Registering a connector · A connector is trusted code.
+**A connector's rules through the one loader** (`shared/plugin_registry.py`, the `promptpotter.judges` group, `judge_origins()` as audit surface) — owned by [`../connectors/CLAUDE.md`](../connectors/CLAUDE.md) §§ Registering a connector · A connector is trusted code.
 
 ## What is cached is the REPLY, not the verdict
 
-`call.py::ask` stores the model's REPLY, so ONE cache is enough — a changed `_parse` or `to_score` re-derives from it, and a rubric or model edit moves the key: `hash_call` over the rendered prompt plus the stage's model / provider / temperature / max_tokens. A hit is metered too, flagged `cached`; an empty reply is never stored, since the tree is tenant-global; absent, unreadable and stale are one answer — sample again.
-
-**One judge cache and one chokepoint, never the loop's** (`bench/llm_call.py` meters `kind="optimizer"`). `judge_reuse` is a peer tree to `optimizer_reuse`: a grader reading the loop's cached answers is a ruler fed by what it measures.
+**`call.py::ask` caches the model's REPLY**, keyed by `hash_call` over rendered prompt + model / provider / temperature / max_tokens, so a changed `_parse` or `to_score` re-derives. A hit is metered (`cached`); an empty reply is never stored.

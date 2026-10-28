@@ -113,7 +113,7 @@ class CycleEventLog:
 
     def append(self, record: CycleRecord) -> int:
         # A scored cell's five appends are five moments, never one record: the hold before its send
-        # (ADR-0003), a bill per send, the start as the live marker, the priced key, the score.
+        # (decisions.md § 0003), a bill per send, the start as the live marker, the priced key, the score.
         raw = RECORD_ADAPTER.dump_json(record, fallback=str)
         written = append_line(self._path, raw)
         # The offset is the record's LINE, so what another writer appended since is fanned out first.

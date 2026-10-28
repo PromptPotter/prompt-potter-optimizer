@@ -156,7 +156,7 @@ def _who(account: AccountDir) -> str:
 
 
 def trail_by_email(projects_root: Path, email: str) -> Trail:
-    """The operator-admin read (ADR-0004) of what one PERSON did, across every workspace on the box.
+    """The operator-admin read (decisions.md § 0004) of what one PERSON did, across every workspace on the box.
 
     Everything in a workspace they own, whoever did it, and their own lines in anyone else's: a
     delegate acts in its delegator's workspace. Several ids where one address signed in through more
@@ -192,7 +192,7 @@ class AccountTrail(NamedTuple):
 
 
 def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail], list[str]]:
-    """The operator-admin read (ADR-0004) of what EVERY account did from ``since`` (epoch) on.
+    """The operator-admin read (decisions.md § 0004) of what EVERY account did from ``since`` (epoch) on.
 
     One trail per workspace that has a line, whoever acted in it, then the workspaces that could
     not be read.

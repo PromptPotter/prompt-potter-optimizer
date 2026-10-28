@@ -13,7 +13,7 @@ from the dataset NAME by its `DATASET_FAMILIES` row / `_justlogic_rows`
 `justlogic/d34` needs a dataset dir and no code.
 
 **Each cut is a separate dataset name, never a re-cut of another** — owned by
-[`../CLAUDE.md`](../../CLAUDE.md) § Re-cutting a dataset needs a NEW name; here that means a
+[`datasets/CLAUDE.md`](../../CLAUDE.md) § L4 — `promptpotter-self`; here that means a
 cross-cut comparison reads a difference of δ scales, not of capability.
 
 Two things no other file carries:
@@ -27,7 +27,7 @@ Two things no other file carries:
 
 The model, provider and the `output_schema` that carries the answer enum live in `../family.yaml::pipeline`;
 the pin rationale in
-[`../../docs/operations/dataset-reasoning-matrix.md`](../../../../../docs/operations/dataset-reasoning-matrix.md).
+[`docs/operations/datasets.md`](../../../../../docs/operations/datasets.md) § The model a dataset runs.
 `provider` is operator-locked engine-wide (a cost lever, never any dataset's to open). `model`
 COULD be an axis now — the engine searches it wherever a node lists it — and this dataset
 deliberately does not: its menu is one model under two ROUTES (`:nitro` and plain), so opening it

@@ -50,7 +50,7 @@ class DraftDependency(PipelineDependency):
 
 class DraftCampaignWire(StrictModel):
     """A check-in's draft as every check-in route answers it; Start mints its campaign. No
-    ``tenant_id`` rides it (ADR-0002 no-drift gate #3)."""
+    ``tenant_id`` rides it (decisions.md § 0002)."""
 
     draft_id: str
     slug: str

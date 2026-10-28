@@ -2387,8 +2387,9 @@ export interface NestedPipelineRef {
 export interface ForkPreviewResponse {
   /** The overlay picks a responder the campaign's declared `optimizer_narrowing`
    * never sanctioned, or touches a cost lever, which no permitted set can
-   * sanction. True means the fork is the ADR-0005 babysit act: it needs
-   * `campaign.babysit` (404 without it) and stamps the branch grade C. */
+   * sanction. True means the fork is the babysit act (decisions.md § 0005):
+   * it needs `campaign.babysit` (404 without it) and stamps the branch grade
+   * C. */
   steers_disallowed_model: boolean;
   /** What the verdict above was compared AGAINST, per node — this campaign's
    * declared `optimizer_narrowing[node].param_allowed_values.model`. Served

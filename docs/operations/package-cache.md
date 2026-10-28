@@ -2,81 +2,26 @@
 
 ## The rule
 
-**A containerized cell measures the agent, never the machine's network.** A benchmark whose
-container downloads its own tools at run time — terminus-2 installing `tmux`, a SpreadsheetBench
-verifier installing LibreOffice (167 packages, 134 MB, per cell) — makes every cell depend on a
-package mirror. That costs wall clock on every cell, and during an outage it produces one of two
-things, both wrong:
+**A containerized cell measures the agent, never the machine's network.** A container that downloads its own tools at run time (terminus-2 installing `tmux`, a verifier installing LibreOffice) makes every cell depend on a mirror, and an outage then yields **a hole scored as the candidate's**, or **a silent wrong number** — `set -e` does not stop a failed `apt-get update && apt-get install`, so the verifier grades without its tools. Three mechanisms close it, none changing measurement identity:
 
-- **a hole scored as the candidate's** — the build or setup fails and the cell reads as unscoreable;
-- **a silent wrong number** — `set -e` does not stop on a failed `apt-get update && apt-get install`,
-  so the verifier grades without the tools it went to fetch, and the reward is written.
-
-Three mechanisms close this, and none of them changes measurement identity:
-
-1. **Fetch once per machine.** One cache container serves every opted-in cell's downloads.
-2. **An infrastructure failure is never a measurement.** A cell whose trial shows a
-   registry/mirror/DNS failure, or whose setup or verifier ran out of clock, is retried by the
-   connector with bounded backoff. If the retries still fail, the cell is banked as
-   `ErrorCategory.CONNECTION` (`shared/errors.py::CellInfrastructureError`), carrying what every
-   attempt spent so the one catch in `measure_sample` bills it, and the walk halts with
-   `StopReason.BACKEND_UNREACHABLE`. A provider account out of credit is not retried: it is banked
-   as `ErrorCategory.PROVIDER_CREDIT` (`CellSendRefusedError`) on the first attempt and halts with
-   `StopReason.PROVIDER_CREDIT`. Either cell stays a hole that `resume` re-measures. There is no
-   fallback to direct downloads: in an outage it fails the same way, one path later. An episode a
-   model provider's throttle ended — or that ran out of clock after one — measured the provider,
-   not the machine, and is the run's backpressure's to re-send (`infrastructure/llm/send_pacing.py::
-   Backpressure`); a throttle the episode outlived is only latency, and its grade stands.
-3. **No registry call once a task image exists.** A kept `hb__<hash>` tag starts as a prebuilt
-   image, so a cell no longer resolves the task's `FROM` against its registry.
+1. **Fetch once per machine** — one cache container serves every opted-in cell.
+2. **An infrastructure failure is never a measurement.** A registry/mirror/DNS failure, or a setup or verifier out of clock, is retried with bounded backoff; still failing, it banks as `ErrorCategory.CONNECTION` (`shared/errors.py::CellInfrastructureError`, carrying every attempt's spend) and halts the walk `BACKEND_UNREACHABLE`. A provider out of credit is not retried: `PROVIDER_CREDIT` (`CellSendRefusedError`). Either stays a hole `resume` re-measures. **No fallback to direct downloads** — in an outage it fails the same way, one path later. An episode a provider throttle ended is the backpressure's to resend (`infrastructure/llm/send_pacing.py::Backpressure`); a throttle it outlived is latency, and its grade stands.
+3. **No registry call once a task image exists** — a kept `hb__<hash>` tag starts as a prebuilt image.
 
 ## The cache
 
-- **One container per machine:** `promptpotter-package-cache` (same name for its image and
-  volume), running `apt-cacher-ng` from Debian's own archive, published on port 3142 with
-  `--restart unless-stopped`. The cell path starts it, once per process, before the first cell of an
-  opted-in dataset (`infrastructure/docker_host.py::ensure_package_cache`). Doing it there rather than in `Connector.preflight` means every entry point
-  that measures a cell gets it, including the diagnostics and the embedded launch, which never run
-  preflight.
-- **Reached at `host.docker.internal:3142`.** Docker Desktop resolves that name natively; on Linux
-  (the Fedora deploy box) the compose overlay maps it with `host-gateway`. Untested on Fedora:
-  firewalld must let bridge traffic reach a published port, which Docker's own NAT rules normally
-  do.
-- **Operating it:** `docker logs promptpotter-package-cache` shows cache hits. `docker rm -f
-  promptpotter-package-cache` stops it, and the next opted-in cell starts it again. `docker volume rm
-  promptpotter-package-cache` drops the downloads.
-- **A stale index takes down every cell on the box, and reads as the backend being unreachable.**
-  The cache answers `200` and apt refuses what it got — *OpenPGP signature verification failed …
-  Message has been manipulated* — so `apt-get update` aborts, the verifier measures nothing and
-  every task on the machine burns its infra attempts. Tell it from a real outage by running the
-  same fetch without the proxy. The cure is the INDEX, not the volume: delete `InRelease`,
-  `Release` and `Packages` under the cache and restart it, keeping the `.deb`s that make it worth
-  having.
+- **One container per machine**, `promptpotter-package-cache` (image and volume alike): `apt-cacher-ng` on port 3142, `--restart unless-stopped`. The cell path starts it before the first opted-in cell (`infrastructure/docker_host.py::ensure_package_cache`), not `Connector.preflight`, so the diagnostics and the embedded launch get it too.
+- **Reached at `host.docker.internal:3142`** — native on Docker Desktop; on Linux the compose overlay maps it with `host-gateway`, and firewalld must let bridge traffic reach the published port.
+- **Operating it:** `docker logs promptpotter-package-cache` shows hits; `docker rm -f` stops it (the next opted-in cell restarts it); `docker volume rm` drops the downloads.
+- **A stale index takes down every cell on the box and reads as the backend being unreachable** — the cache answers `200`, apt refuses the signature, every task burns its infra attempts. Tell it from an outage by fetching without the proxy. The cure is the INDEX, not the volume: delete `InRelease`, `Release` and `Packages` under the cache and restart, keeping the `.deb`s.
 
-## What fits the seam, and what does not
+## What fits the seam
 
-| Tool | Fits | Why |
-|---|---|---|
-| apt (Debian/Ubuntu images) | yes | `http_proxy` is honoured and the default mirrors are plain HTTP, so apt-cacher-ng caches them. |
-| pip | no, cheaply | PyPI is HTTPS-only, so an HTTP proxy can only tunnel it, not cache it. It needs a PyPI mirror (`PIP_INDEX_URL`), which is a second service. |
-| npm | no, cheaply | Same reason; it needs a registry mirror (`npm_config_registry`). |
+apt fits: it honours `http_proxy` and its default mirrors are plain HTTP. pip and npm do not, cheaply — their registries are HTTPS-only, so a proxy can tunnel but not cache them; each needs its own mirror service.
 
 ## Scope — the identity trade
 
-A dataset opts in with `package_cache: <scope>` in its experiment file. A connector declares the
-scopes it routes on `Connector.package_cache_scopes`, and run init refuses a dataset naming any
-other (`wiring.py::_verify_package_cache_scope`) — so on a backend declaring none, the key itself
-is refused rather than ignored. `dbllmbench` is one: its runner image is prebuilt and a cell
-installs nothing. Harbor declares `harbor.py::PACKAGE_CACHE_SCOPES`:
+A dataset opts in with `package_cache: <scope>` in its experiment file. A connector declares its scopes on `Connector.package_cache_scopes`, and run init refuses any other (`wiring.py::_verify_package_cache_scope`) — so a backend declaring none refuses the key rather than ignoring it. Harbor declares `harbor.py::PACKAGE_CACHE_SCOPES`:
 
-- **`verifier`** — the proxy rides `VerifierConfig.env`, which Harbor passes to the verifier's
-  exec alone. The agent cannot observe it and the packages are the same signature-checked files, so
-  **measurement identity does not change** (`_identity_config` does not hash the key).
-- **`agent`** — deliberately not offered as a proxy scope: a proxy in the container environment is
-  something the agent sees and inherits. The agent's own setup downloads are kept out a different
-  way. `harbor.py::_reuse_task_image` builds an agent-ready tag `FROM` the kept task image and
-  runs the agent's own install there, at build time. That install goes through the cache as a
-  build argument, which Docker keeps out of the image environment and its history. The agent's
-  setup then finds its tools present and installs nothing. The container is the one setup would
-  have produced — same tool versions, same apt lists, no proxy anywhere — so identity is unchanged.
-  terminus-2 declares no tool list, so `_AGENT_TOOLS` copies its pair.
+- **`verifier`** — the proxy rides `VerifierConfig.env`, the verifier's exec alone. The agent cannot observe it and the packages are the same signature-checked files, so identity does not change (`_identity_config` does not hash the key).
+- **`agent` is deliberately not a proxy scope** — a proxy in the container environment is something the agent sees. Instead `harbor.py::_reuse_task_image` builds an agent-ready tag `FROM` the kept task image and runs the agent's install at build time, through the cache as a build argument Docker keeps out of the image. The container is the one setup would have produced, with no proxy anywhere. terminus-2 declares no tool list, so `_AGENT_TOOLS` copies its pair.

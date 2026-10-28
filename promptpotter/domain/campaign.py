@@ -121,7 +121,7 @@ class Compare(FrozenModel):
     arm: Arm
 
 
-# What a run is FOR (ADR-0009), declared once: every scope, stamp and meter derives from it.
+# What a run is FOR (decisions.md § 0009), declared once: every scope, stamp and meter derives from it.
 Purpose = Annotated[Optimize | Compare, Field(discriminator="kind")]
 
 

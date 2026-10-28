@@ -125,7 +125,7 @@ class Session:
         return str(self.store.base_dir)
 
     def record_intervention(self, kind: str) -> None:
-        """ADR-0005: the act is banked on the cycle, and every run it scores after grades C."""
+        """decisions.md § 0005: the act is banked on the cycle, and every run it scores after grades C."""
         self.store.campaigns.record_intervention(self.hop, kind=kind)
         self.state.human_intervened = True
 

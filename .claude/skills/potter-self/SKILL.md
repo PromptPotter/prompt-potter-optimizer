@@ -1,6 +1,6 @@
 ---
 name: potter-self
-description: PromptPotter L4 self-optimization — Claude + operator reading a round's artifacts, diagnosing why candidates underperformed, and deciding what evidence to buy next before spending another round. Use whenever the operator pauses at the round-1 gate, halts the loop to review, mentions L4, `promptpotter-self`, L1 stall, mode collapse, weak candidate stratification, identical / near-duplicate candidates, candidates ignoring the critique or task_context, parse failures on the l1_generate JSON, or wants to tune `l1_generate/1` in `promptpotter/assets/optimizers/potter/pipeline.yaml`. Also use when the operator opens a `round_NNNN.json`, asks "why did L1 do that?", says "let's improve the optimizer prompt", or is weighing what experiment to run next — panel width, seed count, how many cells, whether a result is real, or why past runs never accumulated — even if "L4" is not named explicitly. Also the entry for AUTHORED MODE, where Claude or the operator writes each round's arms and the generator node does not run — said as "authored mode", "self-potter but you are the proposer", "you propose the candidates", "you write the arms", "hand-authored round" — and for the standing optimizer-tuning thread — "continue the tuning", "work the board", "next card", "get the price down", "find the optimizer's parameters". Each searchpoint costs real LLM spend, so this collaborative review is the substitute for an L4 LLM-driven layer; do not skip it just because the operator did not utter the letter L4.
+description: PromptPotter L4 self-optimization — Claude and the operator read a round's artifacts, diagnose why candidates underperformed, and decide what evidence to buy before another paid round. Use at the round-1 gate or a halted loop; on L4, `promptpotter-self`, L1 stall, mode collapse, flat stratification, near-duplicate candidates, candidates ignoring the critique or task_context, l1_generate parse failures, tuning `l1_generate/1` in potter's pipeline.yaml; on opening a `round_NNNN.json`, "why did L1 do that?", "improve the optimizer prompt"; when weighing the next experiment (panel width, seed count, cells, is a result real). Also AUTHORED MODE ("you are the proposer", "you write the arms", "hand-authored round") and the tuning thread ("continue the tuning", "work the board", "next card", "get the price down"). Fires even when "L4" is not said.
 ---
 
 # L4: collaborative review of L1-generate
@@ -9,13 +9,7 @@ L4 is **not another LLM layer**. It is the operator (with you, Claude, as analys
 
 This skill walks the loop: **read → classify → edit → predict → re-run one round → compare**. One concrete edit per pass. Multiple changes at once destroy the signal.
 
-## How to read this file
-
-**This file is procedure: how to run, read and decide. What has been MEASURED — every dated figure, corpus size and status — is [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § What the banked corpus measured; the planning sections here are a guideline, not a contract.** Three standing instructions:
-
-1. **Criticize it.** Each claim names the evidence it stands on. If you can knock one down, that is the file working — and it has happened: several of the best pieces here started as the operator pushing back on what this file said.
-2. **When the operator proposes something else, COMPARE — do not replace.** Put the new idea beside the relevant section, price both on the cost ladder, and say which wins and why. A proposal supersedes this plan on an argument, never on recency.
-3. **Prefer the answer already on disk.** Walking `.promptpotter/` takes seconds. Spending money to learn what the archive already knows is the failure this file exists to prevent.
+**This file is procedure. What is TRUE of L4 is [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md); what a corpus measured, ask `promptpotter evidence`.** Criticize what is here; when the operator proposes something else, price both on the cost ladder and say which wins; prefer the answer already on disk.
 
 ## The tuning thread — start here when the operator says "continue"
 
@@ -86,55 +80,36 @@ Read this before proposing any new run: an edit inside the inner-origin fingerpr
 
 ## What the outer panel can and cannot tell you
 
-> **`promptpotter evidence --subject campaign:<id>` answers the variance and power half of this on demand — run it rather than quoting a figure.** The split is `variance.{cell_effect_sd,subject_effect_sd,residual_sd}`, the resolving power `power.{paired_se,min_detectable_effect,cells_for_largest_gap}`, and the replicate and run-order reasoning `replicates` / `order_confound`. What stays below is what the verb does not answer; the figures behind each rule are the spec's § What the banked corpus measured.
+> **`promptpotter evidence --subject campaign:<id>` answers the variance and power half of this on demand — run it rather than quoting a figure.** The split is `variance.{cell_effect_sd,subject_effect_sd,residual_sd}`, the resolving power `power.{paired_se,min_detectable_effect,cells_for_largest_gap}`, and the replicate and run-order reasoning `replicates` / `order_confound`. What stays below is what the verb does not answer.
 
 - **Pairing is what makes the comparison possible at all**, because seed variance runs several times arm variance. Read `power.cells_for_largest_gap` against the panel's cell count: where the panel runs fewer, adding paired cells is the cheapest move on the board.
 - **Read the SHAPE as well as the scalar — it is legible on a small panel where the scalar is not.** Every cell records a per-round `improved` verdict, a *within-round* paired comparison against the matched parent on the same samples, so it touches neither the θ anchor nor the re-drawn subset, and a panel carries one per cell per round against one scalar per cell (`application/runner/inner/spawn.py::_lift_shape`).
 - **Target shape:** most cells lift in round 1 (most headroom, cleanest evidence), about half again in round 2, stragglers in round 3, thinning as they saturate. A round 1 that lifts too rarely is an `l1_generate` problem — diagnose it from candidates already on disk, not from a new run.
 - **The scored term is `mean_bench_lift`** — the adopted prompt's accuracy on the cell's HELD-OUT rows minus the origin's, averaged over the round budget — and what it rewards is lifting **early and generally**: a cell that climbs in round 1 and holds scores above one reaching the same place in round 4, and a promotion that held only on the rows it was selected on scores zero. `mean_round_delta` (the search split's θ) is served beside it wherever the inner series differences, and scores nothing. So edits that make L1 find a hypothesis that transfers sooner are worth more than edits that make it find a better in-sample one later. (Why that term and not another: [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § The measurand.)
 - **Validate any cheap proxy at the ARM level, never per-cell.** A proxy can pass the per-cell `proxy_lift_corr >= 0.6` bar and still order arms little better than a coin; round-1 truncation did. Put the bar where the decision is made.
-- **Widen candidates semantically — that is the lever with no measurement cost.** L1 emits incremental edits, so arms differ by less than the instrument can see. Different evidence framing, a different node targeted, a different edit vocabulary — not a reworded instruction — raises the arm SD for free. (A quieter instrument is *also* worth buying; see the plan below. The two are complements, not alternatives.)
+- **Widen candidates semantically — that is the lever with no measurement cost.** L1 emits incremental edits, so arms differ by less than the instrument can see. Different evidence framing, a different node targeted, a different edit vocabulary — not a reworded instruction — raises the arm SD for free. A quieter instrument (§ Decision points) is its complement, not an alternative.
 - **A panel cell whose constant-answer floor exceeds its origin accuracy is disqualified** (`application/diagnostics/seed_screen.py::rewards_collapse`) — a candidate that stops reasoning and hedges to one label then outscores the parent, every round. The raw floor is the wrong reading; the *gap* is. `promptpotter-self/panel/dataset.yaml::panel` records the grounds per retired seat — cite those, because not every retirement was a collapse verdict.
 - **A cell's score moves in STEPS, and an unchanged prompt takes one by itself.** The scored term reads the promoted parent (`domain/l4/proxies.py::compute_outer_proxies`), and an inner promotion is a point estimate on a small panel — so a variant that restates its parent can be promoted on retest churn and move the cell a full step. Before reading a cell's gain as the arm's, open that cell's `review.md` and ask what the promoted variant CHANGED: a clone, or a parameter that does not bind, is the instrument's noise with the arm's name on it.
 - **Compare arms on the cells BOTH met.** A round's headline is a mean over the cells each arm reached, and an arm that skipped the parent's weakest cell reads above it for that reason alone.
 - **A win is a few rows.** Improvement is granular and infrequent; do not read the smallest positive matched-parent lift as noise, and do not expect an edit to produce more than a few rows.
 - **A flat round 2 is not evidence the search is done.** A campaign's best round can land anywhere in the budget, the last round included.
-- **A limit stated on one axis binds all of them** — owned by `docs/developer/reasoning-doctrine.md` `<one-budget>`; here it means pricing every panel proposal in wall-clock *and* dollars before proposing it.
+- **A limit stated on one axis binds all of them** — owned by root `CLAUDE.md` `<one-budget>`; here it means pricing every panel proposal in wall-clock *and* dollars before proposing it.
 
-## The plan, as a proposal — not a contract
+## Decision points and the cost ladder
 
-**Decision points, not campaigns.** A campaign already *is* ~4 questions asked in sequence with only the last answer written down, and the ratio between what is paid for and what is kept is the whole argument. Count both before proposing anything: the outer layer everyone reports on is a couple of dozen candidates, while the inner rounds underneath it — each one a scored, paired optimizer decision — run into the hundreds. Recount rather than cite; the gap widens with every run.
+A **decision point** is one inner round frozen: the parent target prompt, the evidence the optimizer saw, the rows it scored on, and the parent's level on those rows — all already in `rounds/round_NNNN.json`. Grading an optimizer prompt on one is one `l1_generate` call plus a scoring pass, against a whole inner campaign per panel cell. The bank is the inner rounds under `.promptpotter/.inner/` carrying a parsed `l1_generate` call, less round 0 per campaign (`os.walk`; a glob cannot see a dot-directory). It is the cheap screen; campaigns stay the confirmation on the survivors, because a frozen bank cannot see whether a prompt reaches positions it can then exploit. The one-step → trajectory link is unvalidated: the pilot (30 points, the parent twice, one degraded prompt once) gives the noise floor and a known-sign effect before anything is built on it.
 
-A **decision point** is one such moment frozen — the parent target prompt, the evidence package the optimizer saw, the rows that round scored on, and the parent's already-measured level on exactly those rows. Every field is already written to `rounds/round_NNNN.json` on every round. Grading a prompt on one = render it against the frozen evidence, one `l1_generate` call, score its candidates on the frozen rows, take the best candidate's lift over the frozen parent. **One optimizer call and a scoring pass, against a whole inner campaign for a cell that yields one number** — read both prices off the ledger. The bank is large and unspent — walk `.promptpotter/.inner/` (`os.walk`; a glob cannot see a dot-directory) and count the inner rounds carrying a parsed `l1_generate` call, then subtract one per campaign, since round 0 has no parent to be a decision against.
-
-Why it would accumulate: the frozen bank is the *ruler*, not the origin, so editing the prompt voids nothing — it is the treatment. Replicates rise from one per panel cell to one per banked decision point, each perfectly paired and near-deterministic (`inner_optimizer_temperature: 0.0`). Depth is preserved rather than averaged — a round-4 state has a strong parent and a crowded `mutation_memory`, so "can it still find something new" becomes its own sample.
-
-**Two tiers, not a replacement.** Decision points are the cheap daily screen; campaigns stay the weekly confirmation on the 1-2 survivors, because a frozen bank cannot see self-consistency — whether a prompt reaches positions it can then exploit. Cheap screen → expensive confirm. Reading the screen as the whole instrument is the mistake.
-
-**Open, and honestly so.** The one-step→trajectory link is **unvalidated**, and the round-1-truncation result above is a live warning shot (the counter-argument: that test truncated *and* kept n=6, whereas this trades depth for n). How much pairing on an identical frozen state cancels has never been measured, because no two prompts have ever answered the same frozen state. Goodhart on a frozen bank is real. **The ~30-question pilot resolves the first two: harvest 30 points, run the parent twice and one deliberately degraded prompt once** — parent-vs-itself gives the noise floor, parent-vs-degraded a known-sign effect. Rung 1. It validates the scheme or kills it before anything is built on it.
-
-### The cost ladder
-
-**Always run the cheapest unexhausted experiment.** As cheap rungs are exhausted the frontier price rises, and an experiment previously too expensive becomes admissible *then* — not before. Cost focus is simultaneously efficiency and time focus.
+**Always run the cheapest unexhausted rung**, and never rung 4 while rung 0 has content. Prices come off the ledger.
 
 | Rung | What lives here |
 |---|---|
-| 0 — free | Anything answerable by walking `.promptpotter/`: harvesting, retrospective reads, identity and plumbing fixes |
-| 1 — cents | Single-prompt probes over a handful of decision points; the pilot above |
-| 2 — one panel | One challenger against the pinned baseline; topping up a promising one |
-| 3 — one round | A full outer round; the weekly confirmation |
+| 0 — free | Walking `.promptpotter/`: harvesting, retrospective reads, identity and plumbing fixes |
+| 1 — cents | Single-prompt probes over a handful of decision points; the pilot |
+| 2 — one panel | One challenger against the pinned baseline |
+| 3 — one round | A full outer round |
 | 4 — deferred | Wider panels, longer campaigns, a new benchmark |
 
-**Never propose rung 4 while rung 0 has content.** Read per-unit prices off the ledger, not off this table, which deliberately carries none.
-
-**Corollary, operator-stated: we are not optimizing the long campaign.** Push performance in the first few rounds — the budget already running — and collect longer horizons as an additional gain afterwards. `max_inner_rounds` stays where `promptpotter-self/panel/dataset.yaml::panel` sets it, and the measurand already agrees.
-
-### The seed question — open, and two traps
-
-Whether to cut the panel to one seed turns entirely on the **arm×seed interaction**, which is invisible today because the instrument never replicates an (arm, seed) pair — it is content-addressed, so asking again replays. Decision points replicate *within* a seed by construction, so they measure that term directly. **Do not cut on intuition; cut when the data says the interaction is small, and get the cut for free.**
-
-- **"Best performing seed" is outcome selection.** The highest-mean bank is where *every* arm looks good — hence the least discriminating, not the most.
-- **Un-pairing is the expensive way to save money.** Letting arms draw their own banks stops the seed main effect cancelling, and the same resolving power then costs more than twice the cells.
+**We are not optimizing the long campaign** (operator): push the first few rounds. **Cut the panel to one seed only when data shows the arm×seed interaction is small** — "best performing seed" is outcome selection, and un-pairing arms costs more than twice the cells for the same power.
 
 ## The playbook
 
@@ -158,73 +133,39 @@ The `l1_critique` block names which candidates won and failed and cites the axis
 
 Pick the *single closest* match. If two apply, pick the one upstream of the other.
 
-#### ★ Semantic restatement — one hypothesis in N wordings (check this first)
+Every edit rides `changes_description` (no new fields — see Edit etiquette).
 
-Symptom: candidates are valid, well-formed, distinct as strings, and all test the *same idea* — every one landing at +0.000.
+| Mode | Symptom | Edit |
+|---|---|---|
+| **★ Semantic restatement** (check first) | Valid, string-distinct candidates all testing one idea, each at +0.000. No counter sees it: `idea_fingerprint` is word overlap, so no `repeat_variant` rejection is not novelty. Judge the `changes_description` texts across rounds yourself — rung 0. | State the **hypothesis** under test, differing in hypothesis from every `mutation_memory` row: another panel cited, another node, another edit vocabulary. |
+| Off-task | Candidates contradict the frozen `task_context`. | Quote one phrase of `task_context` in the rationale; never summarize it at the prompt site. |
+| Ignoring critique | Round N+1 repeats the failure round N's critique named. | Name the critique bullet each candidate addresses. |
+| Surface-only | Identical `pipeline_overlay`, cosmetic text change, composite ≈ parent. | Name the axis moved and the effect expected, grounded in `mutation_memory` / `axis_memory`. |
+| Params overreach | `param_scope_discipline` (`validators/l1_behavior.py`) scores a param mutation while a prompt field sat unmutated two rounds. | Name the prompt-field evidence exhausted first. |
+| Critique-score divergence | Critique says A, composite says B. | Not L1: route to `{dataset}/dataset.yaml::campaign.scoring`. |
 
-**No counter detects this.** `idea_fingerprint` is content-word overlap and misses a reworded idea, so a round with no `repeat_variant` rejection (`l1_rejected` on its optimizer state) is *not* evidence of novelty. This is what flattens the early rounds of the lift shape.
-
-Diagnosis, and it is free: read the `changes_description` texts across rounds yourself and judge them semantically. The decision points already on disk make this a rung-0 retrospective — no run required.
-
-Edit: must ride `changes_description` (no new fields — see Edit etiquette). Require it to state the **hypothesis** under test, and to differ in hypothesis rather than wording from every row in `mutation_memory`. Aim at semantic width: a different evidence panel cited, a different node targeted, a different edit vocabulary.
-
-#### Off-task — candidates ignore `task_context`
-
-Symptom: candidates contradict the operator's frozen framing. Root cause: the slot renders but the template never cites it as a constraint. Edit: require the rationale to quote one phrase from `task_context`. Keep the injection through `DispatchHub` — do not summarize it at the prompt site.
-
-#### Ignoring critique — candidates repeat last round's mistakes
-
-Symptom: round N+1 exhibits the exact failure round N's critique called out. Root cause: critique renders as background, not as a constraint. Edit: require each candidate's `changes_description` to name which critique bullet it addresses.
-
-#### Surface-only changes — rephrasing without substantive intent
-
-Symptom: identical `pipeline_overlay`; only prompt text varies cosmetically; composite ≈ parent. Root cause: the template asks for "improvements" without forcing the candidate to declare its mutation surface. Edit: require `changes_description` to name the axis moved and the effect expected, grounded in `mutation_memory` or `axis_memory`.
-
-#### Pipeline-params overreach — touching locked axes
-
-Symptom: `param_scope_discipline` (`validators/l1_behavior.py`) scores a param-scope mutation made while a prompt field sat unmutated for two rounds. Edit: require `changes_description` to name the prompt-field evidence exhausted first. `overlay_failures`' rejections are mechanical — do not restate them in the prompt.
-
-#### Critique-score divergence (out of scope from L1)
-
-Critique says A is best, composite says B. **Not an L1 problem.** Route to `{dataset}/dataset.yaml::campaign.scoring` and stop reading L1 artifacts.
-
-#### Footnote — generator mechanics, measured absent
-
-Parse failures, no-ops and verbatim duplicates were measured absent (the spec carries the corpus). Do not spend an edit here without fresh evidence that one has returned, such as `l1_yield` below 1.00.
+Parse failures, no-ops and verbatim duplicates were measured absent; spend no edit there without fresh evidence (`l1_yield` below 1.00).
 
 ### 5b. The round-trace checklist — walk it before reporting findings
 
-Skipping these has historically let evidence-free or rule-violating proposals through unflagged. None
-is blanket-rejected by code; **for the unenforced ones your analysis IS the gate.** The enforced set is
-the checks in `optimizers/potter/validators/l1_strict.py` plus the bench's `overlay_failures()` (`application/bench/children.py`), which rejects
-`PARAM_FORBIDDEN_KEYS` unconditionally — read them before assuming a check is unenforced.
+What code enforces is `optimizers/potter/validators/l1_strict.py` plus `overlay_failures()`
+(`application/bench/children.py`); read them first — **for everything else your analysis IS the gate.**
 
-- **Evidence availability.** For round 1 (especially a fresh fork), does the rendered input actually
-  carry the signals a candidate claims to consult? `axis_memory` is present iff `SampleIndex.ensure_for`
-  found ≥1 prior archive measurement (empty on a backend's first cycle). `runtime_failures` is present
-  iff this cycle produced one OR a concluded sibling fork did — **empty in round 1 while
-  siblings DID produce failures means the inheritance path is broken** (`bench/cycle.py::Cycle.runtime_failures`,
-  `_rf_matches_current_config`). `critique` / `escalation_panel` are empty in round 1 by design.
-- **Re-proposal of known-failing configs.** `validators/l1_strict.py::l1_config_not_in_runtime_failures` catches EXACT
-  `(param, value)` matches only — a *near* value is legitimate exploration, so flag one proposed near a
-  known-failing value without justification rather than expecting a rejection.
-- **The generator's standing constraints** — PEAKED-axis discipline, param-field axes as a last resort,
-  the numeric envelopes. **Read them off `resolved_prompts['l1_generate/1']` at review time, never off
-  any doc:** it is an L4-searched surface, so a quoted constraint is one that has already moved. For
-  every candidate that crosses one, read its `evidence_grounding.citation` and ask whether the evidence
-  the prompt demands is actually quoted; if not, flag it by the constraint's own name.
-- **Grounding actually grounds.** A citation must be a real quote from the named `field`, and the field
-  must be one the round's layout rendered (`citable_fields`). `field=stall_exploration` is valid only
-  at `exploration_budget ∈ {normal, wide}`. Not a strict validator by operator direction — the model may
-  read all input as evidence — but a citation naming a field absent from the rendered input is a
-  fabrication.
-- **Intra-round paraphrase.** Jaccard of word-sets (lowercase, `\w+`, len > 2) over `changes_description`
-  for each pair; ≥ 0.5 → `intra_round_paraphrase`. Below threshold, watch shared THEME words (verify,
-  check, restate, validate) — ≥ N/2 candidates carrying one → `theme_mode_collapse`. Nothing enforces
-  either, and `idea_fingerprint` is blind to both (see § semantic restatement).
-- **Format integrity.** LaTeX escapes survive (`\boxed{N}`, not `oxed{N}`); no template placeholders
-  (`{x}`, `[insert]`, `<query>`) in prompt-field values; `pipeline_overlay` keys are real node
-  `param_keys` (`overlay_failures` catches invalid ones).
+- **Evidence availability.** Does round 1's rendered input carry what a candidate claims to consult?
+  `axis_memory` needs ≥1 prior archive measurement; `runtime_failures` empty in round 1 while sibling
+  forks DID fail means the inheritance path is broken (`bench/cycle.py::Cycle.runtime_failures`).
+  `critique` / `escalation_panel` are empty in round 1 by design.
+- **Near re-proposal.** `l1_config_not_in_runtime_failures` catches exact `(param, value)` matches only;
+  flag an unjustified value near a known-failing one.
+- **Standing constraints** (PEAKED axes, param axes last, numeric envelopes) — read them off
+  `resolved_prompts['l1_generate/1']` at review time, never off a doc, and flag each candidate crossing
+  one without the evidence it demands quoted.
+- **Grounding grounds.** A citation is a real quote from the named `field`, and the field is one the
+  layout rendered (`citable_fields`); a field absent from the rendered input is a fabrication.
+- **Intra-round paraphrase.** Word-set Jaccard ≥ 0.5 over a pair's `changes_description` →
+  `intra_round_paraphrase`; a theme word (verify, check, restate) in ≥ N/2 → `theme_mode_collapse`.
+- **Format integrity.** LaTeX escapes survive; no template placeholders in field values;
+  `pipeline_overlay` keys are real `param_keys`.
 
 **Report violations as a checklist at the TOP of the reply, before any narrative** — the glyph makes it
 scannable and the parenthetical lets the operator verify in the trace:
@@ -251,7 +192,7 @@ Launch with `--set arm_gate=author`, read the hold in the readout, and answer it
 
 1. **The lever must be in the node's sight.** A node told to use a lever its layout does not render names one that does not exist. Read the node's `possible` set in `dispatch/layout.py` and its rendered prompt in a banked round before writing an instruction that depends on a panel.
 2. **The lever must bind in the inner benchmark.** A budget axis moves nothing where the solver never reaches the cap; an axis the inner `{dataset}/dataset.yaml::pipeline` does not open cannot be searched. Settle headroom with `ab` on the inner dataset (the parent at two values of the axis) before asking an optimizer prompt to find it.
-3. **The edit must change what the node EMITS.** Diagnosis quality is not scored; behaviour is. Run the edited node on banked decision points (§ The plan) and compare its output with the parent's on the failure you named — cluster labels, the axes variants touch, prompt growth. An edit that changes no output cannot change a cell.
+3. **The edit must change what the node EMITS.** Diagnosis quality is not scored; behaviour is. Run the edited node on banked decision points (§ Decision points) and compare its output with the parent's on the failure you named — cluster labels, the axes variants touch, prompt growth. An edit that changes no output cannot change a cell.
 
 ## Edit etiquette (the non-negotiables)
 
@@ -279,6 +220,6 @@ Paths below are repo-relative; this file sits at `.claude/skills/potter-self/`.
 - **Dispatch hub + info flow** — `docs/developer/dispatch-hub.md`. How slots reach optimizer prompts.
 - **The measurand, the invariants, what a panel may claim** — `docs/specs/l4-outer-loop.md`. Read it before trusting any outer number, and before touching a file mid-run.
 - **Persistence + the identity fingerprint** — `docs/operations/persistence-and-state.md` (fact 4 owns what `_identity_config` reads).
-- **Conventions** — `docs/developer/conventions.md`. Style, no-back-compat, no-hidden-defaults; the reasoning doctrines are `docs/developer/reasoning-doctrine.md`.
+- **Conventions** — `docs/developer/conventions.md`. Style, no-back-compat, no-hidden-defaults; the reasoning doctrines are root `CLAUDE.md` § Working principles.
 
 **When an edit does not produce its predicted effect, reclassify rather than rewording it** — rewording a failed edit is the same failure one level up.

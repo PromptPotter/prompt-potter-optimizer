@@ -29,20 +29,18 @@ home of its own — whenever a file the engine runs from has changed since it wa
 engine change has every optimizer run end to end and its resume proven without anyone asking; a
 docs or webapp edit reruns nothing. `--changed` leaves it out: it proves a landing, not an edit.
 
-**A green run is not taken twice.** A home that already holds the green run of the same arguments
-over the same sources — `scripts/last_green.py::OFFLINE_RUN_READS`, by content — is left standing, and the script says `unchanged since green` and exits 0. Name a
-different home, or pass `--against`, to run it regardless; a default-argument green by hand is
-the gate check's green too (`scripts/last_green.py`).
+**A green run is not taken twice.** A home holding the green run of the same arguments over the
+same sources (`scripts/last_green.py::OFFLINE_RUN_READS`, by content) prints `unchanged since green`
+and exits 0; name another home or pass `--against` to rerun. A default-argument green by hand is
+the gate's green too.
 
 `--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md)
-§ The controlled comparison): two workspaces, each running the arms `--optimizer` names (potter and
-capo by default) of one head-to-head, one of them after a foreign campaign on the dataset whose
-origin differs — the one layout that puts several optimizers' campaigns in ONE workspace, so the
-webapp's Compare tab can read them together. It fails
-unless a skip on an arm is refused, an arm searches its prompt's fields alone, each arm's memory
-holds only runs it filed, and every election of every arm read its head-to-head's freeze plus
-its own lines. Whether the foreign campaign moved the arms' decisions is printed as a
-reading: its rows are in that version. `head_to_head.json` beside them is the evidence read of all three.
+§ The controlled comparison): two workspaces, each running one head-to-head's arms (`--optimizer`,
+potter and capo by default), one after a foreign campaign on the dataset — the one layout putting
+several optimizers' campaigns in ONE workspace, for the webapp's Compare tab. It fails unless a
+skip on an arm is refused, an arm searches its prompt's fields alone, each arm's memory holds only
+runs it filed, and every election read its head-to-head's freeze plus its own lines; whether the
+foreign campaign moved the decisions is printed as a reading. `head_to_head.json` is the evidence read.
 
 ## Why it cannot be mistaken for a real run
 
@@ -69,7 +67,7 @@ decisions. Each campaign is a child process, as many at once as free memory hold
 | `decisions.json` | Every decision the run made, canonical: ids mapped to candidate labels; timestamps, paths and hashes dropped; floats rounded; concurrent records compared as sets. `harness` adds the stop reason, the unrouted URLs and the call counts. |
 | `run.log` | The child's stdout and stderr. |
 | `resumed/` | The same campaign in a workspace of its own, paused at a round boundary and ended on a session rebuilt from disk. |
-| `diverged/` | The first optimizer's campaign paused like `resumed/`, then resumed with `--fork-on-divergence` under an edited proposer prompt: run init must fork, its parent end on one `REBASED` stop carrying spend with its lock released and its readout naming the fork, and the fork run on. The operator then forks that fork two rounds and one round before the cap, each fork off the last and each closing a round of its own, so one campaign carries four courses: the fixture for a sidebar of several courses. |
+| `diverged/` | The first optimizer's campaign resumed with `--fork-on-divergence` under an edited proposer prompt: the parent ends on one `REBASED` stop, the fork runs on, and two further forks give one campaign four courses (the multi-course sidebar fixture). |
 | `interrupted/`, `interrupted-twice/` | The first optimizer's one-round campaign launched by the CLI's own `main` as a terminal dispatches it, under one and under two SIGINTs, then `resume`d. |
 
 **The interrupted legs are the Ctrl+C contract, run**: `new` must exit 130 with its slot released and
@@ -79,13 +77,11 @@ signal is raised inside the child at a fixed cell, since Windows cannot deliver 
 to one child; what no leg covers is the console's own delivery.
 
 **The run fails unless the resumed campaign decides what the uninterrupted one decided** — every
-round, the run's result and the bench headline equal; only the ledger streams a resume appends its
-own init records to are left out of the comparison. At `--rounds 1` the only boundary is the
-origin's, where a resume replays round 0: there the run fails on a resume that ends without a bench
-headline, and prints `MOVED` without failing on it. A campaign that ends on a failed stop
-(`domain/phases.py::stop_reason_outcome`) fails its leg whatever it wrote. Both halves run one tree, so the leg catches a
-resume that reads what its own writer does not persist, and says nothing about a ledger an earlier
-build wrote.
+round, the result and the bench headline equal, less the init records a resume appends. At
+`--rounds 1` a resume replays round 0: it fails without a bench headline and prints `MOVED`
+otherwise. A campaign ending on a failed stop (`domain/phases.py::stop_reason_outcome`) fails its
+leg. Both halves run one tree, so the leg catches a resume reading what its writer does not
+persist, never a ledger an earlier build wrote.
 
 ## Proving parity
 
@@ -100,10 +96,9 @@ diff base/<optimizer>/decisions.json after/<optimizer>/decisions.json
 ```
 
 Requests differing while decisions match is a rendering change; decisions differing is a
-behaviour change, and the first differing record says where. Two runs of one tree are byte
-identical in both, so any diff is the change's. `--digests` prints the L4 identity digests — the
-estimator's source digest and each optimizer's treatment digest — which a change that should not
-re-key an inner cell leaves equal.
+behaviour change. Two runs of one tree are byte identical, so any diff is the change's.
+`--digests` prints the L4 identity digests (estimator source, each optimizer's treatment), which
+a change that should not re-key an inner cell leaves equal.
 
 ## What is faked, and how
 
@@ -116,19 +111,14 @@ only the bank and the call-identity policy below.
 - **The backend** is TermNorm's wire: one `llm_only` node, whose answer is correct with probability
   `k/10`, `k` read off the `Variant <tag>:` marker in the rendered prompt. Potter's markers follow
   a scripted trajectory that fires L2 and L3; every other marker draws its `k` from its name.
-- **The optimizer LLM** answers by CALL IDENTITY, never by the prompt's wording or the order
-  concurrent sends arrive in: the node, the request's seed, and the call's turn among sends sharing
-  both. A
-  structured call names its node in its response schema and gets a minimal valid instance, shaped
-  per potter node. A paper preset's text call is matched to the llm node whose manifest template
-  it opens with, and answered in the form that template asks for — a `<prompt>` block, a fenced
-  block, or an array.
-- **The knobs** are the dataset's `{dataset}/dataset.yaml::campaign` under the script's `BENCH` sizes. The template's
-  node overlay rides only the optimizer it selects; any other takes its `SCALED` entry, which
-  sizes it to the bank, or runs its manifest as declared when it has none. A sampler that
-  declares a size knob draws `ROUND_CELLS` whichever optimizer runs. Every optimizer runs under
-  one seeded determinism clamp: unseeded, draws follow the campaign's id, which every run mints
-  anew, so two runs of one tree would differ.
+- **The optimizer LLM** answers by CALL IDENTITY — the node, the request's seed, the call's turn
+  among sends sharing both — never by wording or arrival order. A structured call gets a minimal
+  valid instance of its response schema; a paper preset's text call is matched to the manifest
+  template it opens with and answered in the form that template asks for.
+- **The knobs** are the dataset's `campaign` under the script's `BENCH` sizes; an optimizer the
+  template's overlay does not select takes its `SCALED` entry or runs its manifest as declared, and
+  a sampler's size knob draws `ROUND_CELLS`. One seeded determinism clamp holds every optimizer:
+  unseeded, draws follow the freshly minted campaign id and two runs of one tree would differ.
 
 **Adding an optimizer** needs nothing here: it runs as its manifest declares, one installed through
 its entry points alone included — `examples/optimizer-plugin/` is that case.

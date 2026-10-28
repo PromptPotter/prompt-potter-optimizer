@@ -584,7 +584,7 @@ CellGrade = Literal["fitness", "objective"]
 DEFAULT_SCORER_ID = "default_hit"
 
 # Every pass size — a definition's, a derived default's, a request's — is bounded here:
-# docs/adr/0010-every-paid-pass-lean-stoppable-visible.md.
+# docs/decisions.md § 0010.
 MAX_PASS_ROWS: Annotated[int, shapes_optimizer_prompt] = 150
 
 HIT_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 1.0

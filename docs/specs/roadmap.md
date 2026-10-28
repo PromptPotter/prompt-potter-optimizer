@@ -1,609 +1,338 @@
 # Roadmap
 
-> **Beta.** Forward todo in execution order; this file absorbs the per-milestone specs, and `git log` holds their full prose. The two generated control-plane specs + the ADRs are the only other live contracts.
->
-> **Live now:** deployed at `https://app.promptpotter.com` (Cloudflare Tunnel + systemd, OIDC — see [`deploy-linux/`](../../deploy-linux/README.md)). **Open signup**: completing OIDC grants access, bounded by a per-account lifetime spend ceiling rather than an approval queue, on **one shared LLM key** from `.env` — so the sequence below is "harden a thing already serving users," not "prep before launch."
->
-> **Three ways to run it, by who operates it.** *We* run it (the hosted beta above, limited free then BYO key — Lane A2, spec-only today) · *you* run it (local, Claude-operated via `/potter-run` on your own keys — [`../manual/02-install.md`](../manual/02-install.md)) · *your team* runs it (the same self-hosted stack as the beta, multi-user + whitelabel). The developers and operator run tier 3. Tiers 1 and 3 are one codebase plus the `deploy-linux/` stack, differentiated by who owns the box, not by a fork.
-
-## Hard ordering (violate → rebuild)
-
-- **Build every new webapp data panel on `dashboard.json` polling + the SSE ledger-tail.** That pair is the design, not an interim seam awaiting a cutover; there is no `live-state` endpoint to wait for. **One exemption, and its shape is the rule: a ONE-SHOT TOPOLOGY read may sit beside the poll when the poll is its INVALIDATION signal rather than its transport.** `GET /campaigns/{id}/pipeline` is the only PANEL-feeding one — a pipeline resolution cannot change without a new cycle or a new searchpoint, and `dashboard.json` announces both. A panel whose content changes *while nothing else does* fails that test and rides the poll. `POST /campaigns/{id}/fork-preview` (`presentation/api/routers/campaigns/manifests.py::preview_fork_steer`) is a read too, but it sits OUTSIDE this rule rather than under it: it is keyed on the operator's pending gesture, which no poll can invalidate because the run does not know about it. Feeding a panel is what puts a read under the rule.
-- **BYO per-user API keys — now the load-bearing half, and unbuilt.** Signup is open and each account is metered against `FREE_TIER_SPEND_CAP_USD` + `FREE_TIER_TOKEN_CAP` (lifetime, `application/jobs/quota.py::lifetime_ceilings`), so the host key is bounded — but a user who spends their ceiling has **nowhere to go**. That is the liability now, not the unbounded spend it replaced. Lane A2.
-- **HTTP-edge abuse protection is now due.** Cloudflare edge + the per-account ceiling + per-user `JobRegistry` quotas bound the public surface; with the approval queue gone, app-level rate-limiting (C6) is the remaining gap — nothing bounds the NUMBER of accounts, only what each one may spend.
-
+Forward work in execution order, each item with the check that closes it. Why a boundary sits where
+it does is [`../decisions.md`](../decisions.md)'s; debt is [`code-debt-cleanup.md`](code-debt-cleanup.md)'s.
 Any new endpoint is multi-tenant by default.
-
-## Lane 0 — daily hygiene
-
-Drain before feature work: [`code-debt-cleanup`](code-debt-cleanup.md).
 
 ## Sequence
 
-Sequenced into lanes by dependency, not milestone number. **Front priority = Lane A + the bench lane, concurrent** (no shared seam); the publication lane is now downstream of the bench rather than beside it. Lane B is closed; Lane C follows A.
+Lanes by dependency. Front priority: Lane A and the bench lane (M13), concurrently; C9 ahead of
+the rest of Lane C.
 
-### Lane A — beta usable for free-tier web users, end-to-end
-
-| # | Item | Status |
-|---|---|---|
-| A1 | First-run exhibit — a finished campaign a new account reads before supplying anything | **no working dataset** — `screen-taste-v0` is a stub whose origin read below its own chance floor; cutting a replacement is its own work-scope after the release. The mechanism that SERVES it (install-tier campaign root, `demo_mode_enabled` reader) is unbuilt — [`recommender-demo.md`](recommender-demo.md) |
-| A2 | Host coupon + BYO per-user API keys | pending — **overdue** (see § Host coupon + BYO per-user API keys); token HQ at `/auth/{quota-status,activity}` already shipped |
-| A3 | Anonymous preview tier — the public site's chat before sign-in | spec only, deliberately (see § Anonymous preview tier); blocked on the chat backend existing |
-
-### Lane C — product differentiator + capability (after A)
+### Lane A — the hosted beta, usable by a free-tier account end to end
 
 | # | Item | Status |
 |---|---|---|
-| C1 | **Chat-first front door** — one thread: ingest/check-in → curated activity stream → inline decision buttons (existing verbs). | Arc 2 (conversation endpoint) deferred — [`chat-foundation.md`](chat-foundation.md) |
-| C2 | Composite fitness P2–P4 (P1 = spend, done) — data rollup anytime; **scatter panel after P3** | pending (see § The optimizer plug point) |
-| C2b | **Judged + turn-structured scoring** — an LLM-as-judge as a measured observation, and the per-step ruler it opens | judges, the grading call path and the `retrieve → ground → answer` schema all SHIPPED (`promptpotter/judges/`); open: the per-step ruler (see § Judged and turn-structured scoring) |
-| C3 | L4 closure — the recursion + the L4 campaign + `proxy_lift_corr ≥ 0.6` re-validation | Open — the roster is [`l4-outer-loop.md`](l4-outer-loop.md) § Open, read there and never subsetted here |
-| C4 | Cross-user measurement panel (after P3) | pending (see § Ingest + chat-first web) |
-| C5 | MCP server mode (= **agent-tool parity**, see § Agent-tool parity) · user-editable `dataset.yaml` `pipeline` in UI · **the connector as a unit** (see § The connector as a unit) | pending — the connector unit is a draft design, and its first dependency, Harbor's second skill-delivery mode, shipped; the editable half's gate is LIFTED: the served campaign pipeline resolution shipped (`architecture.md` § Two resolution seams), so the surface can now READ the value it would write back, and what remains is the write side alone |
-| C6 | Public-service hardening (Docker, metrics, rate-limit, billing) — `/health` shipped; **pull rate-limit/metrics forward if the beta opens past the allowlist** | pending |
-| C7 | Non-prompt targets · **agent harnesses** (§ Evolving agent harnesses) · multimodal · research extensions | pending — after v1, except the agent-harness half, pulled forward and part-shipped (§ Evolving agent harnesses) |
-| C9 | **Variation and pools** — every optimizer's features as members any manifest composes and a campaign switches | **next, ahead of every other lane** — spec [`variation-and-pools.md`](variation-and-pools.md); the order is § Variation and pools |
-| C8 | **Mask abstraction** — backend organizing structure (alternative-criterion + transferability); M1 = scoring-function-swap divergence + minimal visual clues, then migrate every divergence trigger onto it | M1 + abort + the scoring write side shipped (see § Lineage mask) |
+| A1 | First-run exhibit — a finished campaign a new account reads before supplying anything (§ First-run exhibit) | no working dataset; the serving mechanism (install-tier campaign root, `demo_mode_enabled` reader) is unbuilt |
+| A2 | Host coupon + BYO per-user API keys (§ Host coupon + BYO keys) | unbuilt; overdue — an account that spends its free ceiling has nowhere to go |
+| A3 | Anonymous preview tier — the public site's chat before sign-in (§ Anonymous preview tier) | blocked on the chat backend |
 
-**Parallel lane — the bench = M13, the project's closing focus** — owned by root [`CLAUDE.md`](../../CLAUDE.md) § The closing directive, which states the closing bar; this page holds its design, presets and stage order in § The optimizer plug point. SIFT joins as a preset — § SIFT reproduction.
+### Lane C — differentiator and capability
 
-**Downstream lane — publication = M14** — owned by that same directive; this page holds what the run needs. The benchmark roster and admission bar are [`../research/benchmarks.md`](../research/benchmarks.md)'s, and the protocol is stage 5 of § The optimizer plug point's Order. Ablation rows: L1 / L1+L2 / full · scan · cross-run archive · critique · zero-signal-filter. Competitor + L4 numbers wait on C3. Endpoint hardening P0 (auth dep on every router, pinned `ALLOWED_ORIGINS`, `extra=forbid` on request models, poll rate-limit) lands before any non-localhost open.
-
-**The four publication blockers re-read against the bench — three DISSOLVE by construction, not by repair**, and all four are stated in [`../research/bbeh-comparison/README.md`](../research/bbeh-comparison/README.md). *Grader*: `application/scoring/formula/matchers.py::_label_match` runs `extract_last_bold` on both sides while the notebooks inline a whole-string compare, and on a chain-of-thought benchmark that difference favours us — a peer arm measured through `measure_sample` → `Scorer.grade` → the campaign's compiled formula makes the notebook code path cease to exist. *Model*: an arm is measured through the dataset's resolved `pipeline_params` and `configure_and_apply_pipeline` RAISES on a node with no `config.model` rather than defaulting, so a peer cannot reach a different one without editing the file both sides read. *Split*: the headline is read on the held-out bench set, which no optimizer node ever sees — a sampler draws its panels from the search split alone — so no optimizer picks its own exam. **What survives** is the optimization budget, converted from unmeasurable to one meter plus a decision: every arm's spend lands in one `SpendRollup`, and holding calls constant *and* reporting spend as a dimension beside them — what reviewers ask for first ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 4) — is then a knob and a paid run. The 28% BBEH-mini reading dies by re-measurement regardless; no orchestration re-derives a number taken at a model the dataset no longer pins.
-
-**Two artifacts the wrap CREATES, both ours to declare.** A peer never shown a panel scores 0% on `evidence_grounding_present` and the `*_behavior` scorers, so those are N/A for every optimizer but `potter` or `review.md` publishes an artifact as a result. And the wrap is itself a confound a reviewer will name — GEPA-inside-PromptPotter is not GEPA. The honest framing is the milestone's own: this measures **a peer's method under a held-constant harness**, a better-posed question than end-to-end. So **do not delete the notebooks** — they become the uncontrolled reference arm that shows what the control was worth.
-
-**Far-horizon (unscheduled).** A synthetic dataset cut from one hold-out question, which would remove the dataset-provision requirement — the real metric there is synthetic→real transfer of *optimizer lift*, anchored on the single genuine hold-out · an AlphaEvolve code-harness · dogfooding against a self-hosted gateway, which would prove the "gateway routes, PromptPotter tunes what it routes to" pairing against a real system and exercise the REST surface as an external caller, forcing the inbound credential we do not have. Opportunistic, no date.
-
-## Permanent contracts (constitutions, not steps)
-
-**The ADR roster is the [`../adr/`](../adr/) directory listing, never an enumeration** — a subset here is what leaves one unindexed ([`../CLAUDE.md`](../CLAUDE.md) § What may live in `specs/`). Two live contracts are not ADRs, so they are named here:
-
-- **Frontend surface** — per-control behavior per auth/data state. → [`frontend-surface-contract`](frontend-surface-contract.md)
-- **Verdict resolution** — the statistical model behind the live adaptive queue + `hard_samples.json`. → [`verdict-resolution`](../methods/verdict-resolution.md)
-
----
-
-## Design notes (folded specs)
-
-Terse landing for the per-milestone specs consolidated here. Status is truth; the original prose is in `git log`.
-
-### The optimizer plug point — every optimizer is a manifest
-
-**The contract is [`../architecture.md`](../architecture.md) § Bench and optimizer; the node types and the rules a manifest must pass are [`../developer/node-standard.md`](../developer/node-standard.md) § Optimizer node types.** This section owns the direction: which optimizers, how one is selected and registered, what identity and spend owe it, the members the presets need, and the order the lane closes in.
-
-**The plug point is the whole round, not one call.** A seam at L1's generation call holds scoring, the loop and the individual fixed, and CAPO's population, LEVI's archive and GEPA's Pareto front all live outside it. So a peer is decomposed into members of the node types rather than wrapped as a black box, and whatever it brings — shots, a population, racing, an archive, model routing — becomes a member ours can select too.
-
-| Manifest | Nodes (type) | Its configuration, as node config |
+| # | Item | Status |
 |---|---|---|
-| `potter` | `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` (llm) · the δ-adaptive sampler · PoBB (eliminator) · θ election (selector) · `l1_score` (measurement); its escalations are alternative `pipelines:` its controller picks | patiences, `pobb_*`, the `mechanisms` toggles but the bench's degradation fast path, `n_variants`, `block_access`, `escalation_ladder`, the rebase and terminate capabilities |
-| `capo` | `capo_crossover`, `capo_mutate`, `capo_init` (llm) · `mating`, `shot_crossover`, `few_shot`, `population_rejoin` (algorithm) · `blocks` (sampler) · `paired_t` (eliminator) · `population` (selector) · `score` (measurement) | μ=10, c=4, α=0.2, b=30, z_max=10, k_max=5, γ=0.05 (CAPO App. C.4); the 5M input-token budget is the campaign's (`docs/methods/candidate-elimination.md` § CAPO's population and operators) |
-| `levi` | `levi_refine` (llm, small model) · `levi_paradigm_shift`, `levi_seed` (llm, large model) · `proxy_css` (sampler) · `map_elites` (selector) · `score` (measurement) | K_proxy=30, (r, s, c)=(0.5, 0.5, 0.15), 50 centroids, 4 seeds, paradigm period 10, k=3 (App. A/B/F, templates App. E.6/E.7); the 90/10 routing is two nodes' `config.model` (`docs/methods/candidate-elimination.md` § LEVI mapping and deviations) |
-| `gepa` | `gepa_reflect` (llm, its own reflection model) · `minibatch` (sampler) · `minibatch_gate` (eliminator) · `pareto` (selector) · `score` (measurement) | minibatch 3 (App. E.4), the Pareto set half the pool (App. E.1), reflection at Qwen3 8B's decoding (App. E.2), template App. C; no merge on a one-module individual (`docs/methods/candidate-elimination.md` § GEPA mapping and deviations) |
-| `sift` | a self-proposer and the candidate judge (llm) · `fixed_gate` (eliminator) · the Bradley-Terry parent selector · `score` (measurement) | § SIFT reproduction |
+| C1 | Chat-first front door | Arc 2 (conversation endpoint) open — [`chat-foundation.md`](chat-foundation.md) |
+| C2 | Composite fitness P2–P4 (§ Members the presets need) | open; scatter panel after P3 |
+| C2b | Judged + turn-structured scoring: the per-step ruler (§ Judged and turn-structured scoring) | open |
+| C3 | L4 closure | [`l4-outer-loop.md`](l4-outer-loop.md) § Open |
+| C4 | Cross-user measurement panel | after P3 |
+| C5 | MCP server mode (§ Agent-tool parity) · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit) | open; the read side is served |
+| C6 | Public-service hardening: Docker, metrics, app-level rate limit, billing | open; nothing bounds the NUMBER of accounts |
+| C7 | Non-prompt targets · agent harnesses (§ Evolving agent harnesses) · multimodal | after v1, except agent harnesses |
+| C8 | Mask abstraction — the sample-set half (§ Lineage mask) | open |
+| C9 | Variation and pools (§ Variation and pools) | **next** |
+| C10 | Operator-authored prompt-field order (§ Prompt-field order) | waits on an operator decision |
 
-A value that departs from its paper says so beside itself in the manifest.
+**M14 (publication)** needs: ablation rows L1 / L1+L2 / full · scan · cross-run archive · critique ·
+zero-signal-filter; competitor and L4 numbers after C3; **endpoint hardening P0** (auth dependency on
+every router, pinned `ALLOWED_ORIGINS`, `extra=forbid` on request models, poll rate limit) before any
+non-localhost open. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
 
-**Selection is one field and one overlay.** `optimizer: <name>` on the campaign's config picks the manifest and `nodes.{name}.config` adjusts it, exactly as a target pipeline's overlay does — so all five entry points get it with no flag, and two presets run on one box at once, which an install-global choice could not. A named prompt set is a prompt family a node's overlay picks (`promptpotter-self` runs potter's `*_self_optimizing` families).
+## The bench (M13)
 
-**Registration is the connectors' and judges' registry, folded.** `connectors/__init__.py::_load/_validate/_add/connector_origins` and its judges twin are one piece of code written twice, so member implementations get no third copy: one stdlib-only helper `(group, builtins, validate) → (table, origins)` serves all three, and a third party ships an optimizer as a manifest plus its members under two entry-point groups, `promptpotter.optimizer_nodes` and `promptpotter.optimizer_runtimes`. A served roster declares its response model before the handler and serves each member's ORIGIN the way `connector_origins()` does — a plugin name greps to nothing in this tree. `IndividualLineage.source` is a free `str`, so `source="capo:capo_crossover"` needs no enum edit. Built-in members live under their preset's directory, a third party's in its own package.
+The contract is [`../architecture.md`](../architecture.md) § Bench and optimizer; node types are
+[`../developer/node-standard.md`](../developer/node-standard.md) § Optimizer node types. Two rules a
+member must keep: **it is handed its node's `NodeContext`, never `Cycle`** (a store handle or live
+client in its input moves the core boundary and the trusted-code story); **its own sends are
+admitted before they leave** (`infrastructure/llm/litellm_sends.py::litellm_sends_billed_as`).
 
-**Off the L4 ban by construction.** [`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md) § Add no 4th layer binds potter's controller. A preset is a sibling manifest with its own `default` pipeline, not a rung beside L1–L3: nothing escalates into another preset, and a peer's own reflection runs inside its own nodes the way L4 expresses nesting as re-entrancy. **A member is shared; a paper preset names only its paper's.** Any manifest may name any registered member (§ Variation and pools); what stays closed is a PAPER preset's own manifest — a potter critique inside a peer's round would bill our algorithm to the peer.
+- **The compare pane does not render the head-to-head headline** (`GET /evidence::head_to_head` serves it).
 
-**Measurement identity is the target's content, and holds no optimizer** ([`../architecture.md`](../architecture.md) § Three identities) — which is what makes an arm a peer proposes and we already measured replay free, and what makes an N-way head-to-head affordable at all. On L4 the target IS an optimizer, so its `Treatment` is that target's content and enters through `application/runner/inner/connector.py::_identity_config`; one rule, never a flip by site. L4 mutates whichever manifest its inner campaign selects, so it tunes any preset.
+### Order
 
-**Spend: a member's own sends are admitted before they leave.** Peers evaluate internally (GEPA's reflective rollouts, MIPROv2's minibatch trials), and those sends must reach the run's meter or the budget claim is void. The template is `infrastructure/llm/litellm_sends.py::litellm_sends_billed_as`, which admits every litellm send made inside it on the spend book at its bound before it is sent — the way `connectors/harbor.py` bills an agent's sends. `connectors/dspy_module.py` is not the template: it leaves `holds_own_sends` false and reads the student's usage after the call returns, so it bills after the fact and bounds nothing in flight.
+5. **The comparability run** (PAID): BBEH, one target model, one grader, one bench set, arms
+   `optimizer ∈ {potter, capo, levi, gepa}`, calls held equal, 3 seeds; paired per-cell differences,
+   clustered SEs, Holm/BH across the matrix. The controlled reading (one declared head-to-head) and
+   the uncontrolled one (each peer run its own way, the notebooks) are never substituted. Owed: `bbeh`
+   re-ingested with a bench partition wider than 100 rows; an N-arm mint verb over
+   `application/jobs/mint.py::_join_head_to_head`; the h2h-3 re-run (§ Optimizer tuning) first.
+   Price it in dollars and wall clock before asking.
+6. **The budget dimension** (PAID, after 5): the same arms at two or three budget points — the
+   budget-matched Pareto comparison reviewers ask for first.
+7. **Third-party reachability**: a scratch-venv example package with one entry point and one
+   proposing node. *Closes when* `optimizer: example` runs a round whose arms carry
+   `source="example:propose"` with zero edits inside this tree.
 
-**A member is handed its node's `NodeContext` and never `Cycle`** (`application/bench/node_context.py`) — its own typed knobs, the round's readings, and the three acts the bench keeps: a seeded draw, an llm call, a recorded decision. The house precedent is a connector getting `InProcessWorkload` and never the session. The moment a member's input carries a store handle or a live client, both the core-is-the-engine boundary and the trusted-code story move — that is the design question to refuse, not to solve. An optimizer's RUNTIME is the other tier: the bench hands it the session at `start` and the cycle at a repair. **No new dependency anywhere**: the registry is `importlib.metadata`, and a DSPy-backed member rides the existing `[dspy]` extra, never core ([`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)). `presentation/teleprompter.py` points the other way — it wraps PromptPotter OUTWARD as a DSPy `Teleprompter` for a caller's program, and carries no peer inward.
+- **LEVI defect:** `application/optimizers/paper_templates.py::marked` refuses a `<prompt>` block with
+  no closing tag (`gpt-oss-20b`, ~1 in 6), and its INVALID card names potter's `l1_generate`.
 
-**Not every peer decomposes cleanly.** Opik's shape is a whole-loop optimizer — `optimize_prompt` with its own metric and `evaluate_prompt` ([`../research/external-constraints.md`](../research/external-constraints.md) § M13; Opik's own [extending-optimizers docs](https://www.comet.com/docs/opik/agent_optimization/)). Reaching it is the outbound direction (a `BaseOptimizer` subclass on an extra, as ADR-0006 places every embedded adapter), or members that keep its proposals and drop its evaluation. The decomposition is not ours alone ([`../research/external-constraints.md`](../research/external-constraints.md) § L4): [EvoAgentX](https://arxiv.org/abs/2507.03616) plugs AFlow, TextGrad and MIPRO in as swappable evolution algorithms apart from the workflow topology, which is this design seen from the other side. Whether a proposer should itself be an agent stays empirical — [AFlow](https://arxiv.org/abs/2410.10762) beat hand-designed workflows by 5.7% searching them as code graphs, while [AI Scientist v2](https://github.com/SakanaAI/AI-Scientist-v2), the more agentic version, did not reliably beat the templated v1 — so the comparability run is where that gets answered, not argued.
+### Members the presets need
 
-#### The bench score — one evaluator on a held-out set
+- **Composite fitness (C2).** P2 per-candidate rollup + scatter panel (after P3) · P3
+  `compile_post_aggregate_fitness(formula)` + `campaign.scoring_post_aggregate` · P4 multi-objective
+  racing: a `pareto` selector with an eliminator reading the front.
+- **SIFT's members** (§ SIFT reproduction): the self-proposer (the parent agent on its own source
+  and logs, one patch out); the archive-wide parent selector `P(i) ∝ exp(−α·r_BT − β·r_acc − η·log(1+v))`,
+  whose inherited-accuracy rule may steer a choice, never become a measurement; a candidate-level
+  pairwise judge + regularized Bradley-Terry; the `fixed_gate` eliminator.
 
-**The contract is [`../architecture.md`](../architecture.md) § The bench score is not an optimizer's selection, and why selection and estimation need different rows is [`../research/benchmarks.md`](../research/benchmarks.md) § The winner's own number is biased upward.** What this lane builds: the run-init split into search split, bench set and demo pool, which turns `CampaignConfig.dataset_split` from a display into a partition; the one evaluator scoring each optimizer's final selection — and optionally each round's — on the bench set; and that score as the headline every surface serves and `export.json` reports, so its provenance block states a deployment estimate it can claim. `verify` is the closest existing shape: it re-scores a frozen candidate, C0 included, without touching the cycle. θ election stays potter's selector and stops being anyone's headline. When the passes are sent is `CampaignConfig.bench_trigger`, owned by that section. The trend plots the search-split composite, named as that column, with every bench reading — the origin, the final pick and, opted in, each selecting round — on the round whose selection it graded. The published BBEH comparison's split already satisfies the requirement. Across campaigns the headline is read by `evidence`'s head-to-head — the CLI and `GET /evidence::head_to_head`; **the webapp's compare pane does not render it yet**.
+### Selector members — parent choice as one acquisition
 
-#### Selector members — parent choice as one acquisition
+Potter's selector (`application/scoring/selection.py::elect_round_winner`, greedy) is UCB1 rebase
+(`application/mask/backprop.py::select_rewind_round`) with the exploration term at zero. Direction:
+**one PUCT acquisition `Q + c·P·√ΣN/(1+N)`**, P a predicted lift in θ units on `L1Variant`
+(never a normalized preference). `fork_proposal`'s contract does not change. No learned value model
+until a surrogate's held-out error is measured below the lifts the loop chases; Q stays measured θ.
 
-Scope is WHICH individuals the next round derives from. It is not sample selection (`hard_samples.json`'s acquisition — a different question over a different set); here **acquisition** always means the lineage-tree one.
+1. **Bank the predicted lift as an inert field** and compare it with realized θ lift — built first,
+   shipped with its display (one mark per arm, read by state; an arm the eliminator cut shows its
+   prediction as resolved without measurement).
+2. **Serve what the acquisition cannot otherwise report:** visit concentration, value vs exploration
+   term, prior entropy across arms, calibration trend, and ruler provenance on a backpropagated Q
+   (`NodeStats.value_sum` mixes scales under `prior_pinned`).
+3. **The rebase forfeit as its cost term** — a pure fold beside `divergence.py` emitting a per-cut
+   `ForfeitReading`, served first, then `Q − λ·forfeit`; lands as ONE function with the acquisition.
 
-**Potter runs three selection rules over one tree, and two are one rule with a term missing.**
+Open: what stands in for θ on unmeasured children; forest vs round normalization; whether a cut arm
+is a legal parent; names (`selection`, `prior`, `value_sum` → `theta_sum`).
 
-| Decision | Rule | Code | Member |
-|---|---|---|---|
-| Which arm survives the round | PoBB — θ posterior against paired priors | `application/scoring/selection.py::elimination_p_best` | potter's eliminator |
-| Which arm the next round derives from | greedy elitism — the round's winner, always | `application/scoring/selection.py::elect_round_winner` | potter's selector |
-| Which ancestor a rebase fork re-expands from | UCB1 over backpropagated θ | `application/mask/backprop.py::select_rewind_round` | potter's controller |
+## SIFT reproduction
 
-Rows 2 and 3 answer one question — *given everything measured, where should the next mutation come from?* — with different arithmetic: row 2 is row 3 with the exploration term forced to zero and the candidates restricted to one round's arms. **The direction is one PUCT acquisition, `Q + c · P · √ΣN / (1 + N)`, as potter's selector.** `mask/backprop.py` already carries the tree (`NodeKey = (cycle_id, round)`), per-node visits and value sums, backpropagation and UCB1 against `UCB_EXPLORATION_C`, so Q, N and ΣN exist. The missing term is **P, a prior over this round's fresh proposals**, and L1 is the policy: one field on `L1Variant`, a **predicted lift in θ's units against the parent**. Never a normalized preference — it is dimensionless, cannot be drawn beside θ, means different things in rounds of different widths, and falls out of predicted lifts by normalizing, while the reverse does not hold; a lift's error is predicted minus realized, in logits, which is what the gate below needs. The field generates after `evidence_grounding` and the mutation slots, and three surfaces move with it — the Pydantic model, `l1_generate`'s `answer_format` prose and the regenerated `resolved_schemas`. One number, no justification field (`changes_description` carries the reasoning). A renderer change voids banked origins through `PotterRuntime.source_digest`; count before expecting the re-measure.
+SIFT-exact is a `sift` preset (a frozen sampler, `fixed_gate`, no controller, one variant per round),
+and the paper is the ablation ladder from it: one potter member swapped in per arm at one budget.
+Models: the dataset's own; S3's agent `qwen/qwen3.7-flash`; the candidate judge `openai/gpt-oss-120b`.
+Code-artifact candidates (a content-hashed file set loaded per episode) are the design-bearing gap.
 
-What collapses: greedy promotion becomes the acquisition at `c = 0`, and the rewind stops being a separate mechanism reached only through `fork_proposal`. **`fork_proposal`'s contract does not change** — the layer decides WHETHER, arithmetic decides WHERE, no panel enumerates ancestors (`optimizers/potter/CLAUDE.md` § The layer-control channel), and a prior over this round's own arms is not an ancestor enumeration. Not opportunistic for L4: selection must see lineage, not only the round's best ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2).
+- **S1** — the judge, parent selector and `fixed_gate` on a single-call dataset (`justlogic/d234`),
+  opening with the judge's ranking against realized θ (bar ρ≈0.68). *Closes when* SIFT-on-prompts vs
+  SIFT-on-prompts + PoBB is served by `evidence`.
+- **S2** — the self-proposer. *Closes when* an `optimizer: sift` round proposes through it.
+- **S3** — code artifacts + Polyglot, only if S1 makes it worth it; the sandbox is decided then.
 
-**The rebase forfeit is the acquisition's cost term, and the two land as ONE function** — each rewrites the same expression, so whichever lands second names the other in its diff. UCB1 prices no cost, so a deep ancestor looks free. Measurements are content-addressed, so everything measured replays free at any cut; what a rebase forfeits is (1) **search position**, the θ climbed between the target and the frontier; (2) **evidence leverage**, visits above the cut stop informing the new branch; (3) **future cache misses**, predictable from observed reuse at comparable cuts (`CandidateFacts.reading.panel.cached`). Against all three sits the gain of a target whose adjacent child edges differ by ONE data-affecting knob: a controlled one-parameter contrast. Shape: a pure fold beside `divergence.py`, over the `SpineCycle` list UCB already loads, emitting a per-cut `ForfeitReading`, **served first** on the subtree's course entries, then folded in as `Q − λ·forfeit` with λ beside `UCB_EXPLORATION_C`. It never reaches L2 as prose.
+## Optimizer tuning — the standing board
 
-**No learned value model.** A surrogate predicting fitness from prompt text would need an error smaller than the lifts the loop chases, which already need paired comparison and Holm to resolve. Measure that before proposing it — fit one on the banked archive, hold out candidates, compare its error to the observed lift distribution; a negative result closes the axis. Until then Q stays **measured θ, never estimated**.
+The goal is the price of a unit of optimizer progress, per dollar and per minute. How to work it is
+the `potter-self` skill's; numbers are [`../research/benchmarks.md`](../research/benchmarks.md)'s. The
+operator's bar: at least +10 points on a held-out bench in about five rounds, then the same lift in
+less wall clock, on an official dataset with a natural origin below 0.4. A one-key task is a smoke test.
 
-**Gated on one reading, built first:** bank the predicted lift as an **inert field** — written, served, read by nothing that decides — and compare it against realized θ lift. An LLM's stated expectation about its own proposals may be uninformative or anti-correlated, and this is measurable before any acquisition is built. The reading and the operator display are the same artifact, so they ship together.
+**The path:** (1) replicate the nearest climbing setting and read what the proposer saw of the
+misses; (2) screen library blocks without the optimizer — authored arms, origin plus ONE block;
+(3) the optimizer-model screen — re-run the halted `qwen3.7-flash @ none` arm; (4) combine the winners.
 
-**Five states the acquisition can enter and cannot report**, each served with it or it is unfalsifiable:
+**Wall clock:**
+- The `n_min` origin-panel top-ups block the round close; root: one scoring pass over every member.
+- `l1_critique` gets the `detectable_move` panel; `spanning_clusters` drops clusters below it.
+- `mutation_memory` only for separated lifts.
+- A transcript carries the question and the gold paragraph (`potter/dispatch/bundle.py::TRANSCRIPT_QUERY_CAP`);
+  `MISS_ROWS_CAP` 40 → 20 once the top-ups are gone.
 
-- **Visit concentration** — `accumulate_node_stats` computes visits for every node and `select_rewind_round` keeps one argmax, so a tree that never branched reads exactly like one whose branches all lost.
-- **What the leader leads on** — serve the value and exploration terms, never their sum alone: winning on curiosity is not winning on evidence.
-- **Prior entropy across the round's arms** — mode collapse and near-duplicate candidates as a number.
-- **Calibration trend across rounds** — whether the proposer is improving, degrading or was never informative; no single round answers it.
-- **Ruler provenance on a backpropagated Q — a correctness finding, not a display gap.** `NodeStats.value_sum` adds θ read on a ruler that grows (`domain/ruler.py`'s `prior_pinned` caveat), so a deep node's `q` mixes scales. Establish on the overlap line whether the drift is material before the acquisition consumes `q`.
-
-**Where they live.** The three node readings ride `candidates/ForestCard` through `candidates/Forest`'s `CladogramCtx`, sourced from `/hierarchy/{address}` — no second cladogram. Prior entropy rides `candidates/FitnessRankSummary` from `dashboard.json`. The calibration trend is the one new element: a per-round series about the PROPOSER, which hung on a candidate chart would read as a candidate's number, fed by `dashboard.json::rounds[]`. Every reading is served ([`../developer/adding-a-surface.md`](../developer/adding-a-surface.md) § 3), one source per data class. `<entry-point-parity>` must be decided, not defaulted: the trend reaches `evidence` too, or browser-only is declared in [`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md).
-
-**The prediction's display is a forward view — no toggle, no new element.** `DashboardCandidate.label` is composed at mint, so every arm has a row before it is measured, and for an unmeasured arm the prediction is the row's only content. One mark, drawn always, read by arm state: minted → the prediction alone; measuring → the prediction over a growing bar; selected → prediction and bar, the gap being the error; **cut by the eliminator → the prediction marked RESOLVED-WITHOUT-MEASUREMENT**, the state that will be got wrong, since a pending mark left in place reads as loading forever — the failure `DashboardCandidate.invalid` exists to prevent. Predict in θ and accept that it resolves at selection rather than continuously: predicting in composite fitness would reopen the accuracy-vs-θ confusion `candidates/AbilityInfo.tsx` closes. No band by default — a prediction has no sampling error, and a whisker drawn like a measured one claims it was measured.
-
-**Open.** What stands in for θ on unmeasured children, and whether the normalization window is the forest or the round (`select_rewind_round` min-max normalizes across the forest, and a degenerate forest collapses to pure exploration). Whether an arm the eliminator cut is a legal parent — a policy question, not a derivation. Three names to settle when it lands: `selection` names both survival and expansion; `prior` is taken by PoBB's paired comparison, so the predicted lift is not called one; `NodeStats.value_sum` sums θ, so it is `theta_sum`, and a round is a measurement, not a simulation.
-
-#### Members the presets need
-
-- **Composite fitness (C2; P1, spend, is done).** P2 a per-candidate rollup and its scatter panel, which waits on P3 · P3 `compile_post_aggregate_fitness(formula)` + `dataset.yaml` `campaign.scoring_post_aggregate` · P4 multi-objective racing, which is a `pareto` selector (GEPA's) with an eliminator reading the front.
-- **CAPO's features, ours too.** A demo pool held out at run init that `AdaptiveQueue.draw` and `sample_dataset` never draw; shots carried by sample id, rendered by `_render_few_shot_block` and emittable by `L1Variant` within `k_max` ([`prompt-field-roster.md`](prompt-field-roster.md) § What this does NOT change); a `target_prompt_chars` channel in the `per_cell` namespace, which lets any campaign's formula price prompt length; the `blocks` sampler, the `paired_t` eliminator, and a `population` selector with crossover lineage.
-- **LEVI's calibration, ours too.** A screening phase any manifest can opt into — potter's
-  included — on the check-in node rather than in a round: N calibration prompts (the origin plus
-  proposed seeds) scored on the discovery set before round 1, the matrix banked on the cycle,
-  and a sampler handed it (`shared/statistics.py::greedy_column_subset` draws the proxy off that set; the
-  δ ruler could anchor on the same rows). Today it is LEVI's round 1, so the matrix exists only
-  where the calibration round's own rows hold it; lifting it needs a check-in step that measures,
-  a banked-matrix record, and a sampler input that is not a round file.
-  Proposed as a round kind, not a check-in step: [`survey-round.md`](survey-round.md).
-- **SIFT's members** (§ SIFT reproduction). The **self-proposer** — the parent agent run on its own source and evaluation logs, returning one patch; a proposing node is handed its parents, which is the whole of the self-reference. The **archive-wide parent selector** with SIFT's `P(i) ∝ exp(−α·r_BT − β·r_acc − η·log(1+v))`; their "an unevaluated node inherits its parent's accuracy" lives inside this function and nowhere else — it may steer a choice, never become a measurement. The **candidate-level pairwise judge + regularized Bradley-Terry**, new because `promptpotter/judges/` grades cells, not candidates: two candidates' full source in, a preference out, bounded comparisons per new node, ranks out to the selector and the eliminator. The **`fixed_gate` eliminator** — their small pass/fail block as a literal replacement for PoBB, a priority queue by `r_BT + r_acc`, the full search split on the chosen node.
-
-#### Target wire shapes
-
-**Declared model-first**: each new field lands on its model before a writer sets it, and the field it replaces leaves in the same change, so the regenerated specs (`scripts/build_specs.py`) carry the migration as a visible diff. `dashboard.json`'s `current_round.candidates` and `racing` are generated types (the dashboard route's `response_model` reaches both), not a hand-declared contract, so they land with the code that serves them.
-
-#### Surface parity — what a peer's campaign still reads wrong
-
-**Whatever optimizer a campaign runs gets the same surfaces wherever the method permits; where a feature cannot apply, the surface says so.** A surface learns which manifest a course runs from the served `optimizer` (`CampaignPipelineResponse`, `CampaignRunsWith`) and which apply from served facts (`elects_on`, `run_limits.optimizer`), never from a default or a name test; the check-in picks from `GET /optimizers`. What an optimizer says in its own words rides its runtime's declarations — `phases`, `opening`, `round_facts`, `pacing` (`optimizers/nodes.py`) — its eliminator's `EliminationReading.reason`, carried on the concluded arm as its `Elimination.reason` (`domain/results.py::arm_elimination`), and its manifest's node `description`s, and every surface renders them as served.
-
-#### Order
-
-Each stage closes on a verification, never a date.
-
-1. **The contract** — §0, this section, the node types and parser rules, the two YAMLs. *Closes when* the four state one design and every new wire shape is declared before a handler moves.
-2. **The neutral migration** (breaking, before any peer). The individual and the round go neutral (`parent_ids`, `selected`, `optimizer_state`); `OptimizationConfig` splits into the bench's core plus `optimizer:` and the node overlay; the round spine walks the manifest; the bench score lands; `pobb/classification` and `DegradationCheck` move under the bench's measurement; L4 identity folds the manifest; the surfaces follow; the local store is wiped, so no key or render has to survive. *Closes when* the gate is green, an `optimizer: potter` campaign on `justlogic/d234` runs end to end and serves a bench-set headline, a grep for `l1_` / `pobb` / `escalat` / `critique` outside potter's directory returns only named exceptions, and every `complexity_ledger` baseline edit carries its reason.
-3. **CAPO — the general members first, the preset second** (§ Members the presets need), then `assets/optimizers/capo/pipeline.yaml`. *Closes when* a real campaign runs `optimizer: capo` and `evidence`'s head-to-head compares its bench headline with `potter`'s on one bench set — **M13's closing bar**. **Met by `h2h-1007`** ([`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured).
-4. **LEVI, then GEPA.** GEPA's reflective rollouts run through the scoring gateway and its reflection through `llm_call`, so neither needs `litellm_sends_billed_as`. *Closes when* each runs a real campaign with its spend in the same `SpendRollup` as a `potter` round. **Met by `h2h-1007`.** Open on LEVI: `application/optimizers/paper_templates.py::marked` refuses a `<prompt>` block with no closing tag, which `gpt-oss-20b` emits on about one proposal in six, and its INVALID card names potter's `l1_generate`.
-5. **The comparability run** (PAID): BBEH, one target model, one grader by construction, one bench set, arms = `optimizer ∈ {potter, capo, levi, gepa}`, total calls held equal across arms, 3 seeds; paired per-cell differences with clustered SEs; exact/bootstrap CIs; Holm/BH across the optimizer matrix ([`../research/external-constraints.md`](../research/external-constraints.md) § M14). Retires the 28%. `<one-budget>` binds both axes — price it in dollars *and* wall clock before asking. **It yields TWO readings and a claim may quote only the matching one.** The *controlled* reading is an OPTIMIZER contrast under one bench — whose method is better under one harness, the question the guard licenses, and its arms are controlled arms of one declared head-to-head ([`../architecture.md`](../architecture.md) § The controlled comparison). Minting one is `new … --arm {id}:{key}` or `mint-campaign`'s `purpose` today, one arm at a time; the spec file declaring the instrument and budget up front and an N-arm mint verb over it are the next step, a front-end over `application/jobs/mint.py::_join_head_to_head` and the record it writes; potter's controller capped at `escalation_ladder: l1` adds the proposer-only row when the question is proposals alone. The *uncontrolled* reading is each peer run its own way, which the notebooks already produce. Neither substitutes for the other. **One seed on one dataset is done (`h2h-1007`);** the grid still needs `bbeh` re-ingested with a `dataset_split` bench partition and a bench wider than 100 rows, and opens on a cheap pair proving the ruler fix first (the h2h-3 re-run below).
-6. **The budget dimension** (PAID, strictly after 5): the same arms at two or three budget points, so cost is an axis rather than a constant. Stage 5 already matches calls at one point; this is the budget-matched Pareto comparison reviewers ask for first ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 4), and what makes the claim distinctive. The reason it is asked first: [LEVI](https://arxiv.org/abs/2605.09764) matches or exceeds [GEPA](https://arxiv.org/abs/2507.19457) at less than half its rollout budget, so an optimizer's margin can live entirely in its budget, and [HAL](https://arxiv.org/abs/2510.11977)'s cost–accuracy frontier is the form reviewers will read it in.
-7. **Third-party reachability**: a minimal example package — a `pyproject.toml` entry point, a manifest with one proposing node `propose`, one member, the one-liner that proves it loaded. *Closes when* `pip install -e .` in a scratch venv plus `optimizer: example` runs a round whose arms carry `source="example:propose"`, with **zero edits inside this tree**. That is the literal statement of the milestone.
-
-### Optimizer tuning — the standing board
-
-**The goal is the price of a unit of optimizer progress, read per dollar and per minute, at held or
-raised velocity.** How to work it is the `potter-self` skill's; this section is the open board, and
-a session that moves a card edits it here. Every number it rests on is in
-[`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured.
-
-- **A card is a question, the cheapest test that answers it, and the check that closes it** —
-  cheapest rung first: a frozen decision point (`decision-bank`), then `ab` / `seed-screen` /
-  `noise-floor`, then one campaign, then an outer round. A prompt or config edit that wins moves
-  into the base prompt in one deliberate batch, since it re-keys the banked cells.
-- **The operator's bar (2026-10-23): at least +10 points on a held-out bench in about five
-  rounds, then the same lift in less wall clock.** The instrument wanted is an official dataset
-  with a natural origin below 0.4 and a prompt that reaches 0.8. A one-key task (`bbh-dyck`,
-  `last-letters`), where one instruction fixes every row, is a smoke test, never the instrument.
-
-**The agreed path, in order.**
-1. **Find a setting that climbs.** None has cleared the bar on a held-out bench; the nearest are
-   `banking77` on `gemma-3-4b-it` and `logic-fld` on `gpt-oss-20b` (+0.08 each, one campaign).
-   Replicate the better one, and read what the proposer saw of the misses before buying more.
-2. **Screen library blocks without the optimizer**: authored mode, each arm the origin plus ONE
-   block, on fixed rows. The block pool's effect is unmeasured — the blocks-off arms sat inside
-   the replicate spread — so the pool is neither kept nor deleted on evidence yet.
-3. **Optimizer-model screen.** `gpt-6-luna` and `claude-haiku-5.5` lift; `qwen3.7-flash` lifted
-   at `medium` on `justlogic-d234-held` and not at `none` on `hotpotqa-distractor`;
-   `deepseek-v4-flash` did not. The `qwen3.7-flash @ none` arm halted at $0.17 of its $0.60 cap
-   and needs a clean re-run.
-4. **Combine** the winners.
-
-**Same lift in less wall clock** — a read of one 6-round campaign (1,114 s: measure 39%,
-origin-panel top-ups ~30%, generate 19%; rounds 4–6 promoted nothing):
-- The `n_min` origin-panel top-ups block the round close and send about half the target calls.
-  Running them beside the round raises `application/run_phase_control.py`'s "a scoring phase is
-  already publishing on this gauge"; the election now reads those cells, so the root is one
-  scoring pass over every member.
-- `l1_critique` gets the `detectable_move` panel, and `spanning_clusters` drops clusters below
-  it — critiques split misses into 2–5-row clusters, and every variant of a round targets one.
-- `mutation_memory` only for separated lifts: the lifting runs cited it zero times.
-- A transcript carries the question and the paragraph holding the gold, not the context in order
-  (`application/optimizers/potter/dispatch/bundle.py::TRANSCRIPT_QUERY_CAP`); `MISS_ROWS_CAP` 40 → 20 once the
-  top-ups are gone.
-
-**Defects met while running, each open.**
-- **A held leader's evidence is discarded** — the election now reads the round's rows plus the
-  origin-panel cells each arm paid for (`domain/results.py::election_rows`), yet an arm that leads
-  but misses the bar is never re-scored: on `logic-proverqa` (llama) C1.1 led C0 on the panel
-  0.45 vs 0.20 and its posterior rose only 0.623 → 0.788 under pooling, below the 0.85 bar. Carry
-  a held leader into the next round's draw so its rows accumulate. The sampler
-  (`application/intelligence/adaptive_queue_mechanism.py::pick_value`) draws cells the
-  parent misses, where few pairs are discordant, so a prompt that lifts the middle of the
-  distribution is invisible to the election.
-- **Whole-reply answer counting** survives `Grade.span`: `domain/scoring.py::modal_answer_share`
-  and `domain/scoring.py::is_answer_collapsed`, `application/optimizers/potter/pobb/checks.py`,
-  `infrastructure/projections/live_dashboard/blocks.py` and `application/bench/round_analysis.py`
-  read the whole reply.
-- **`l1_generate` never edits `answer_format`**: the potter manifest's "THE ONE UNPOLICED TRAP"
-  warns it off the whole field. Keep the parsed directive locked and free the rest — the diff is
-  shown to the operator before it lands.
-- **A new campaign can land on another campaign's cycle** — `new logic-proofwriter` after a bank
-  re-cut minted its campaign but ran on an older campaign's cycle and old bank. A cycle id must
-  hash what makes the run different, the bank's hash included; `logic-proofwriter` waits on it.
-- **A declared bench is not the held-out count**: `dataset_split: {bench: 100}` held out 162 rows on
-  a 174k-row bank, past the 150-row pass cap.
-- **Stops**: a stopped bench or verify pass acks `rejected`; a pass with no hop stops only on
-  Ctrl+C; a standing pause on a campaign stops a later bench pass, which exits with no result.
+**Defects:**
+- **A held leader's evidence is discarded**: an arm that leads but misses the bar is never
+  re-scored. Carry it into the next round's draw. The sampler
+  (`adaptive_queue_mechanism.py::pick_value`) draws cells the parent misses, so a mid-distribution lift
+  is invisible to the election.
+- **Whole-reply answer counting** survives `Grade.span`: `domain/scoring.py::modal_answer_share`,
+  `is_answer_collapsed`, `potter/pobb/checks.py`, `live_dashboard/blocks.py`, `bench/round_analysis.py`.
+- **`l1_generate` never edits `answer_format`**: keep the parsed directive locked, free the rest; show
+  the operator the diff first.
+- **A new campaign can land on another campaign's cycle**: a cycle id must hash the bank's hash; `logic-proofwriter` waits on it.
+- **A declared bench is not the held-out count**: `dataset_split: {bench: 100}` held out 162 rows.
+- **Stops**: a stopped bench or verify pass acks `rejected`; a pass with no hop stops only on Ctrl+C;
+  a standing pause stops a later bench pass with no result.
 - **One refusal, every entry point**: `seed-screen` skips the reasoning-model token-floor refusal
-  `new` raises, and `--set` parses `off` as `False`, which a `Literal` knob then refuses.
+  `new` raises; `--set` parses `off` as `False`.
 
-**Owed re-run**: the h2h-3 pair on `hotpotqa-closedbook`, the ruler fix's proof on a cheap pair
-(~$0.40) — `new hotpotqa-closedbook --arm hotpotqa-cb-h2h-4:levi --set optimizer=levi --set
+**Owed re-run** — the h2h-3 pair on `hotpotqa-closedbook`, the ruler fix's proof:
+`new hotpotqa-closedbook --arm hotpotqa-cb-h2h-4:levi --set optimizer=levi --set
 nodes.levi_refine.model=openai/gpt-oss-20b:nitro --set nodes.proxy_css.discovery=40 --set
-nodes.proxy_css.size=20 --max-rounds 30 --max-usd 0.2`, and the same with `:potter --set
-optimizer=potter`. *Closes when* C0 reads near its ~21% on potter's round panels.
+nodes.proxy_css.size=20 --max-rounds 30 --max-usd 0.2`, and the same `:potter --set optimizer=potter`.
+*Closes when* C0 reads near its ~21% on potter's round panels.
 
-### SIFT reproduction — their method as a PromptPotter preset
+## Variation and pools
 
-**SIFT-exact is a preset, and the paper is the ablation ladder from it.** [SIFT](../research/landscape.md#sift--self-improvement-via-fast-tree-search-paper) (the Darwin Gödel Machine line, with a judge-ranked evaluation front end) is reproduced as the `sift` manifest, its parts as members (§ Members the presets need). The reading is then one potter member swapped in per arm through the node overlay — PoBB for the fixed gate, Rasch θ rank for accuracy rank, the hard-first sampler for the fixed subset, the held-out adoption gate — each paired against SIFT-exact at one budget and one seed set, so every claim reads "X instead of theirs buys Y at equal cost". The self-referential half (the improved optimizer proposes the next round) is [`l4-outer-loop.md`](l4-outer-loop.md) § Open, self-adopt mode.
-
-**Its manifest runs nothing of potter's:** a sampler frozen to one subset and one order, the `fixed_gate` eliminator, no controller, one variant per round, `budget.rounds` at their step count, the search split at their search-subset size and the full benchmark as the bench set.
-
-**One part is not a member — code-artifact candidates, the design-bearing gap.** SIFT patches the agent's source and tools; a candidate here is prompt fields and pipeline params. The new candidate is a file set or patch, content-hashed into measurement identity, loaded per episode by an agent runner (Harbor or something lighter — S3 below decides) — an extension of § Evolving agent harnesses.
-
-Optional and later: expansion overlapping measurement ("disaggregated") — needed only to match wall clock, and it waits on § Run admission + concurrent serving.
-
-**Models: cheap and already measured, not theirs.** S1 and S2 run on the dataset's own declared model; S3's agent is `qwen/qwen3.7-flash`; the candidate judge is `openai/gpt-oss-120b` throughout — the Harbor agent and the `sealqa` judge in [`../operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md). Whether to rerun on SIFT's own models is decided when the paper is written, not before.
-
-**Benchmark.** Polyglot is not wired here; check Harbor's registry for an adapter before building the code-artifact dataset.
-
-**Declared inexact.** No code release: the judge prompt, the BT pseudo-count, the gate threshold and the queue's tie-breaks come from the paper or are chosen and stated. Their CPU-hours column is not reproducible — § Captured, CPU-hours.
-
-**Proposed sequence — a suggestion, not a commitment. Risk goes last.** Every rung waits on the plug point's neutral migration (§ The optimizer plug point, stage 2); code artifacts touch measurement identity and need a new Harbor agent, so nothing waits on them.
-
-- **S1 — SIFT's search on a surface we already have (the transition milestone).** The candidate judge, then the parent selector and `fixed_gate` — no code artifacts. The proposing node stays `l1_generate`; the candidate stays a prompt on an already-wired **single-call dataset, not a Harbor one** (`justlogic/d234` is the cheapest, `bbeh` the paper's primary) — no container, no episode, nothing the SIFT members could be blamed on. Opens with the zero-build reading the selector members are gated on (§ Selector members — parent choice as one acquisition): the candidate judge's ranking against realized θ over banked rounds, their ρ≈0.68 as the bar. *Closes when* one campaign runs end-to-end with the SIFT members selected, and SIFT-on-prompts vs SIFT-on-prompts + PoBB is served by `evidence` — the first two rungs of the ladder, which is a result on its own.
-- **S2 — the self-proposer.** *Closes when* an `optimizer: sift` campaign runs a round whose proposing node is the self-proposer.
-- **S3 — code artifacts + Polyglot**, only if S1's readings make the full reproduction worth it. Whether it runs through Harbor is open: Harbor may be more than a patched agent needs, but Polyglot grades by running each task's tests across several language toolchains, so SOMETHING must supply the sandbox — decide which when S3 opens, not before.
-
-Within a milestone the members are independent worktrees, each closing on `scripts/gate.py` green: S1 is two (the judge as a standalone module with its tests; the selector and gate against a stub rank until the judge merges).
-
-### Variation and pools — the bench as a laboratory for evolving prompts
-
-**The contract is [`variation-and-pools.md`](variation-and-pools.md).** This section owns the
-order and how the lane sits against the two milestones.
-
-**Tracked as C9.** Every optimizer here proposes by some mix of recombining what it holds and
-writing something new, and each built that mix into one sealed package: CAPO's crossover reads
-CAPO's state, potter's block library reaches potter's proposer alone, GEPA's merge is unrun
-because a paper individual has one field. The lane turns each of those into a member any manifest
-names and a campaign switches, and gives what they draw from one declared shape — the pool — so
-that "does recombination help" and "by arithmetic or through an LLM" are head-to-heads whose arms
-differ in one knob.
-
-**It is the next work, ahead of everything else, and it is part of M13.** The bench's claim is
-that every optimizer is a manifest; a member only its own optimizer can run is that claim half
-kept. The closing bar stays CAPO against potter with the optimizer the only difference
-(§ The optimizer plug point), and this lane adds no arm to that comparison.
-
-**For M14 it is evidence for the claim, not a second claim.** A crossover switched off in one
-knob, under the comparability guard, is "the components were fragmented and are executable here"
-demonstrated on a third component. Each ablation row is quoted from `rounds_to_separable`, never
-from a round's point lift.
-
-**What it must not become.** A fifth sealed optimizer; a second overlay beside
-`optimization.nodes`; a pool written by a file edit; a credit model that steers before a reading
+The contract is [`variation-and-pools.md`](variation-and-pools.md); why is
+[`../decisions.md`](../decisions.md) § 0007. Part of M13; each M14 ablation row quotes
+`rounds_to_separable`. It must not become a fifth sealed optimizer, a second overlay beside
+`optimization.nodes`, a pool written by a file edit, or a credit model steering before a reading
 shows it informative.
 
-**Decided — build on these, do not re-ask.** Why each holds is
-[ADR-0007](../adr/0007-one-loop-shared-members.md).
-
-- Recombination is built once, and which node decides it — the proposer, the steering layer, or
-  a rule with no model — is a setting.
-- A reader restricted to a pool cannot emit a value the pool does not hold, and every value on a
-  child is traceable to the entry it came from.
-- A pool can be fixed or can grow, from inside the loop or from outside it, and the operator
-  chooses which of its entries are in play.
-- Where two answers are defensible the choice is a setting, and a preset picks its value.
-
-**The lane opens with planning done WITH the operator, and building follows it.** That pass
-explores how to reach the outcomes above with the fewest new concepts, and rewrites the order
-below and the spec's proposal sections to match what it finds — both are provisional until then.
-Once it closes, what still needs the operator is a paid run, a push, and the check-in layout
-shown as a sketch before it is built; every other choice inside a stage is made, stated in the
-report, and built.
-
-**Each stage starts by writing its closing check and watching it fail**, so "done" is the check
-turning green and never a reading of the diff.
-
-#### Order
-
-Each stage closes on a verification, never a date.
-
-1. **Members off their runtime.** Built: a member declares the state parts it reads and writes,
-   and a roster leaving one open is refused at load (`application/optimizer_manifest.py::_open_edges`).
-2. **Pools.** Built for the block library and the demo pool (`domain/pool.py`). Owed: the
-   campaign's measured individuals as a pool. *Closes when* a manifest declares it and a resumed run
-   hands its reader the pool its banked round names.
-3. **Recombination on a host.** The spec, the materializer, and the three hosts — `l1_generate`,
-   `l2_context`, an `algorithm` node — with the mix on the opening node and the novelty allowance.
-   *Closes when* the offline leg produces arms under each host from the same pools, none from a
-   node at zero, and a two-parent child carries both edges.
-4. **Parent choice and survival as members**, each with a rule knob. *Closes when* `capo` is
-   re-expressed on them with its offline leg unchanged.
-5. **The three surfaces.** The served shape, the check-in region, the live reading and the steer,
-   with the terminal's `--set` writing the same draft. *Closes when* the cold browser walk switches
-   a host, narrows a pool and reads both back, and the terminal's draft for the same choices is
-   equal.
-6. **The mode head-to-head** (PAID). Two controlled arms, the host the only difference. *Closes
-   when* `evidence`'s head-to-head reads the pair `controlled` and names that knob. `<one-budget>`
-   binds dollars and wall clock; the arms are matched on incurred USD and on cells, and both
-   readings are reported.
-7. **L4 reach.** The mix and access as levers an outer arm sets. *Closes when* the one-cell
-   self-optimization leg shows an outer arm's mix on its inner cell's overlay and in that cell's
-   identity.
-8. **A pool fed while a campaign runs.** The command, its record, its replay. *Closes when* a
-   controlled arm refuses it, an ordinary campaign applies it at the next round boundary, a resume
-   replays it, and `evidence` reads the pair as differing on that pool.
-9. **Paper compositions.** EvoPrompt in its GA and DE forms, PhaseEvo and GEPA's merge, each a
-   manifest over the shared members plus its own templates. *Closes when* each runs its offline leg
-   and states every departure beside the value it departs from.
-
-Stages 5, 7, 8 and 9 share no seam and may run as separate worktrees once 3 lands.
-
-### Probe rounds — what they mean, and why the lever is not wired
-
-**This section stays at full length — it is a written SPEC, not stale description of an unwired lever.** It reads as prose about nothing because `L2ContextOutput` carries no `action` field, so a doc-shrink pass scores it as dead. Operator-decided: don't compress it, don't fold it into a code pointer, and don't file the missing field as drift.
-
-**A probe round spends its whole budget interrogating ONE thing** — one axis, one variable, one recurring mistake — instead of spreading a broad mutation set across the failure surface. The distinguishing move is **more candidates on a narrower question**, so the round returns a real answer about that one thing rather than one noisy sample of it.
-
-**L2 cannot request one today: there is no `action` field on `L2ContextOutput`, deliberately.** The shipped version selected samples by *warning* while the prompt asked L2 which *axis* to probe, and the warning inventory behind it was later deleted — leaving a set that only fills on backend degradation. On a healthy run it is empty, so the round scored every candidate 0/0 and persisted `accuracy: 0.0`, indistinguishable downstream from a genuinely terrible candidate, while still paying its optimizer calls and consuming a round. `l2_targets_l1_surface` even counted the choice as conformant — L2 scored 100% precisely by picking the action that measured nothing.
-
-The lever was removed rather than guarded, because a guard leaves a no-op action sitting on L2's menu. **Re-running warned queries is degradation triage, not a search action**; conflating the two is what put an empty-set path in the candidate scorer. Build the real thing as defined above: pick the target from measurement (a peaked axis, a recurring failure cluster), widen `n_variants` for that round only, and select samples by *relevance to the hypothesis* — never by a set that is empty whenever the run is healthy.
-
-### Origin-resolution check-in
-Three invariants outlive the build: it reuses the `checkin/2` node (never a separate `origin_resolve` node or model); `reasoning_floor`/`ceiling` stay **off the operator surface**, backend-node-only; and model and provider are optimizer-locked. Concept: [`../architecture.md`](../architecture.md) § Origin, parent, and check-in. Post-flip the same node consults in RUN mode, raising `pause-cycle` / `change-run-limits` / `fork-cycle` instead of draft patches, over the `RaisedCommand` shape `application/datasets/origin_resolve.py` already carries. Lands with L4, not before.
-
-**Next: the check-in proposes the WHOLE setup from the operator's text**, not only columns and framing — every node's `model` and `reasoning_effort`, the rounds and the cap — each one a `PROPOSED` finding priced against the served menu (`model_capabilities`, the round's cell ceiling) and the account's launch bound (`application/jobs/quota.py::launch_usd_bound`). The host's bound outranks the operator's words, as a system prompt does a user's: "spend $2" on a $0.03 account is proposed AT the bound, with the bound as its evidence, while Start still admits only the number on screen. A proposal outside the menu is dropped at `_coerce` and the served default stands, so a bad proposal needs no second call.
-
-### Ingest + chat-first web
-> **Chat-first front door** (thread model, served activity state, copilot decision buttons, campaign-scoped persistence) has its own contract: [`chat-foundation.md`](chat-foundation.md). This note keeps only the ingest / draft-campaign detail.
-
-Four nouns map to OIDC: Install=`iss`, User=`sub` (`infrastructure/identity/user.py::derive_user_id` hashes the pair — not a concatenation, and the record carries no SCIM field name), Project=`tenant_id`, Campaign=cycle 1:1.
-
-**The committed artifact is a Dataset, not a campaign:** its bank, held once by content (`banks/{dataset_hash}.json`), and 3 files at `projects/{tenant}/datasets/{slug}/` (`dataset.yaml`, `task.md`, `origin.yaml`) compose into `JobSearchPoint.content_hash`; the sibling `campaign.json` is NOT in the hash. Identical datasets → identical `cycle_{target_hash[:12]}`, so two campaigns in ONE tenant pool their paid cells for free. **Cross-TENANT pooling is refused** — owned by [`../adr/0002-identity-foundation.md`](../adr/0002-identity-foundation.md) § Contract B; this lane must not build a feature that assumes it.
-
-**The hash is dataset-scoped and pipeline resolution is campaign-scoped — owned by [`../architecture.md`](../architecture.md) § Two resolution seams**, which carries the census the decision was taken on. What this lane must not do is collapse them: the hash answers *are these the same measurement*, the resolution answers *what is this campaign doing*.
-
-### Connectors + L4 inner-cycle execution
-- **Connector contract** — owned by [`../../promptpotter/connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); a third party registers one through the `promptpotter.connectors` entry-point group, and no plugin may shadow a built-in.
-- **Execution mode (the L4 self-recursion seam)** — owned by that same file; what is still open rides [`l4-outer-loop.md`](l4-outer-loop.md) § Open.
-- **Prompt-injection Phase 2:** `TrustedText`/`UntrustedText` renderer types + L1/critique injection-echo validators + a repeat-detection circuit breaker.
-
-### The connector as a unit — select, see its pipelines, pick a mode
-
-**Draft: a direction and its constraints, not a design.** Still undesigned: the schema's fields, the connector panel's layout, the attachment's wire shape. Every bullet is operator direction, 2026-09-16.
-
-**The operator picks a connector, not a backend URL.** At the origin each registered connector shows its live status and its **pipelines** (TermNorm: "LLM only", "Research + Match"; Harbor: "agent (terminus-2)"). A pipeline shows its **modes**; Harbor's skill delivery is *advanced* (the agent opens `SKILL.md`) or *primitive* (the skill sits in the system prompt, as in WikiSkill). Today the browser reaches only TermNorm's pipeline choice, through the check-in toggle. `dataset.yaml` `pipeline.backend_type` fixes the connector, a CSV upload always drafts TermNorm, `ConnectorInspector`'s switch does nothing, and a verifier-graded dataset cannot be checked in from the web.
-
-- **One declaration schema, so the connector is a platform entry point.** `Connector` (`connectors/protocol.py`) is the schema. `GET /connectors` serves its projection as a generated type, and the webapp draws every connector from that alone: label, pipelines, modes, node kinds, attachments, status. A new connector, built in or from an entry point, needs no webapp change. Backend-specific code stays in the adapter (wire shape, session, `extract_experiment`, `in_process_run`), and nothing branches on a connector's name; `connectors/CLAUDE.md` § Execution mode already holds that for transport. As backends converge on a common agent and tool protocol, the adapters shrink toward one generic adapter; until then, core stays agnostic. The schema absorbs the browser's current connector knowledge: `PipelineSetupSection`'s two preset labels.
-- **The chat hero (`wf-hero`) is the connector's picture, nested connector ⊃ pipeline ⊃ node.** A node click opens its detail as today (model, parameters, starting prompt). A click inside the hero but off the pipeline opens the connector panel (status, pipelines, modes, current choice marked). With a campaign selected, the panel also shows what it runs, read from the same served resolution one level up. It is one element; where you click decides the level.
-- **Advanced mode draws the skill as a tool attached to the agent, like an n8n sub-node.** It sits off the flow line, because the agent decides whether to open it. Its detail reuses the node parts (value lists, 🔒/🔓, prompt editor) and shows the body, which holds the evolved prompt fields, and the frontmatter, locked for the one-skill episode because it is never a search axis there — the skilled-agent target treats `description` as the routing surface ([`../research/external-constraints.md`](../research/external-constraints.md) § SKILL). The agent node keeps model, provider, host (`route_order`), `max_turns`, `temperature` and delivery mode. Primitive mode has no attachment: the body is the agent's starting prompt. The attachment is served, never guessed: when `Connector.prompt_delivery(params)` resolves to `artifact_body`, the pipeline view carries it and splits the config rows between agent and tool. `PipelineFlow` gains one geometry case, not a second graph, and later agent tools such as web search or code execution attach the same way.
-- **The pipeline choice uses the existing channel.** The TermNorm toggle writes `DraftPatch.pipeline_steps` → `DraftCampaign.active_steps` → `dataset.yaml` `pipeline.pipelines.default` → `mint_and_start`'s `exclude_nodes` → TermNorm's wire `steps`. Only its two browser-side guesses go: the hardcoded "LLM only" and "Research + Match" read off the committed view. In their place, `Connector.default_pipeline` widens into a named set with one default (not a second field), which the draft and the pipeline view serve. The control moves into the connector panel with the same write, and the check-in section keeps the picture and the node detail.
-- **A mode is a node-config key with declared options.** It is never a search axis (`never_axis`) and always part of measurement identity.
-- **Served.** `GET /connectors` answers from `connectors.registered()`: name, execution kind, pipelines, their nodes, and each node's modes and options. The route's response model is declared before the handler. Status comes from `Connector.preflight`, bounded and cached, never from HTTP `/status`, which cannot see in-process connectors. `/backends` stays endpoint history, not a picker.
-- **Check-in writes add no field to `EditDraftPatch`.** The connector goes through `connector`, the pipeline through `pipeline_steps`, a mode through `pipeline_overlay`. Two things are missing: validation against the declarations, with the node schema re-resolved on a change, and `draft_from_dataset` accepting a verifier-graded dataset, which has no labels.
-- **A running campaign never switches in place.** A mode or connector change alters identity, so the dashboard switch opens a fork preview (`fork-cycle` with a seed overlay). The control stays operable, as I3 requires.
-- **Order.**
-  1. Harbor's second delivery mode, as a declared node-config key.
-  2. `Connector` declarations (named pipelines, modes, node kinds) plus `GET /connectors`. Harbor's agent is not an `llm` node, and its skill is an attached tool.
-  3. The TermNorm toggle moves into the connector panel and reads the served pipelines.
-  4. The dashboard inspector reads the same object.
-  5. The C5 write side uses the same overlays, so the declared but unwired `change-pipeline-param` is re-scoped or deleted, not built against the dataset file.
-
-### Agent-tool parity — PromptPotter as a callable tool inside an operating agent
-
-Two halves of one question, and they are siblings: parity widens how PromptPotter is **invoked**, § Application radius widens what it **emits**.
-
-Today PromptPotter is driven by a human or by Claude via `/potter-run`. The next invocation surface is **parity as a first-class agent-callable tool**: an *operating agent* — the user's own, an agent harness like dsh, or an ML-research agent like NVIDIA's AutoResearch or verl — calls PromptPotter as one move in its toolbox. Those callers stack rather than compete: a harness is where an operator sits, verl and NeMo RL only start above the weights line, and a gateway sits below both. Parity means the MCP tool exposes the CLI/skill lifecycle — mint, run, supervise, read results — so an agent can operate a campaign end-to-end. Mechanism already on the board: **C5**.
-
-**Notes for our MCP server, taken from MLflow's** — seen in its tutorial video (2026-09-11), not read in its docs. One setting picks the tool set a client is offered — a family (`genai`, `ml`), `all`, or a named subset — so ours scopes the same way, along ADR-0005's capabilities. Transport is stdio beside a local box and remote otherwise. Every read names the fields it wants back, which keeps an answer inside a context window: ours returns named `dashboard.json` keys, never the document. Reads and writes share one server, and its delete is an ordinary tool the client's approval gates — so `purge-cold` stays out of ours.
-
-**Deliberately held, not just unscheduled.** The REST API is the integration surface for now — protocol-agnostic, and callable by anything that can hold a browser session, which is the live constraint rather than a detail — **the inbound-credential gap is owned by [`../developer/stable-api.md`](../developer/stable-api.md) § 8. What is NOT stable**. MCP would need the same credential and would add a protocol on top of the gap. The protocol's shape is settled ([`../research/external-constraints.md`](../research/external-constraints.md) § TOOL), so the hold is the credential gap alone. Revisit once that closes and a concrete caller asks.
-
-**The first concrete caller is HuggingChat** ([hf.co/chat](https://huggingface.co/chat)). The operator wants to run an optimization from inside it. Its MCP surface, from [chat-ui's docs](https://huggingface.co/docs/chat-ui/configuration/mcp-tools) (read 2026-10-20), shapes three things:
-- **Credential.** A server a user adds from the UI carries only a name and a URL. Custom headers and HF-token forwarding are only for servers the admin configures, so ours has to authenticate without either one. That is the credential gap above, now with a caller behind it.
-- **Text-only results.** A tool result renders as a collapsible text block, so every read returns terse named fields and never a document.
-- **Async run.** A campaign outlives a tool call, so `run` returns an id at once and a status tool reads it.
-
-Not read: [hf.co/settings/mcp](https://huggingface.co/settings/mcp), which needs a login, and whether HuggingChat supports MCP OAuth.
-
-### The stack we commit to — optimizer, telemetry, sandbox
-
-Three systems are first-class here, named in every integration plan and recommended wherever their job comes up:
-- **PromptPotter** finds the configuration.
-- **Langfuse / MLflow** hold its prompts and traces (§ Ecosystem outreach, bidirectional).
-- **[NVIDIA OpenShell](https://docs.nvidia.com/openshell/v0.0.116/about/how-it-works)** runs agent workloads sandboxed. A supervisor inside each sandbox drops privileges, applies filesystem policy before start and sends egress through a policy proxy. Credentials are injected by policy, and `https://inference.local` routes model calls without the agent ever holding a provider key.
-
-**Deferred, no priority: coding-agent optimization.** Tuning a coding agent (Claude Code, Codex, Gemini CLI, Hermes, …) is program optimization one level up, because the program is written as code by a model. The field has not converged on what to optimize there or how to grade it. It stays out of every milestone until we have an expert on it, or until the field visibly converges and we commit. What is already true when it is picked up:
-- Harbor runs about 45 such agents.
-- About 25 of them take the Agent Skill the harbor connector ships a candidate on.
-- 35 emit the ATIF trajectories `TurnRecord` projects.
-- `AGENTS.md` is the instruction file most of them read, and nothing stages it yet.
-
-Read 2026-10-20 from Harbor's `main` (`agents/factory.py`, `agents/capabilities.py`) and each vendor's docs. Every campaign so far ran `terminus-2`, the one agent `skill_delivery: system_prompt` reaches; every other agent gets the Agent Skill channel.
-
-The seam for OpenShell is the containerized cell (the harbor connector). Run in an OpenShell sandbox, a cell never sees the account's key. That is what tier 3's per-account spend ceiling needs from a cell it cannot trust. Read 2026-10-20: the how-it-works page of v0.0.116 only. The latest version then was v0.1.4, and the license, the repo and the install were not read.
-
-### Application radius — what PromptPotter EMITS, and the standing DSPy rule
-
-**The standing rule governs every future integration, not just this one: whenever we plan an ecosystem expansion — a new integration, export, registry, tracing sink, or callable surface — DSPy is the reference we read before designing.** Not because their code is better; a source study says plainly that it is not. **Their ecosystem beats ours while their code does not**, and that asymmetry is the lesson: reach is won by being consumable, not by being well-built.
-
-**M13 reverses the arrow without retiring the rule.** Being consumable stays the goal, but it now runs both ways: we install into DSPy as an optimizer, *and* DSPy's optimizers run inside us as manifests (§ The optimizer plug point). The second direction is the one that makes reach a *measurement* claim rather than a distribution one — a peer that runs here is a peer we can price. **Opik is the next host for the first direction, later rather than now:** its Agent Optimizer already sells six algorithms behind one API, GEPA among them, so PromptPotter registered there is one call away for a buyer who already pays for autonomous optimization ([`../research/landscape.md`](../research/landscape.md) § Langfuse and Opik).
-
-**The gap, located.** PromptPotter today is *terminal* — it ends at "here is your prompt", and a human carries that to production. DSPy is *ambient*: it is already what runs, and optimization is one operation performed against it. The gap is not features but that our output is a **report** where theirs is an **artifact a running system consumes**.
-
-**The boundary is not negotiable: we write a file and provide a reader. We never load, host, route, or hot-swap.** The swap belongs to the host — a registry alias, a path the app reads at boot, a committed artifact. Becoming a serving framework is permanently out of scope.
-
-**The artifact** is `cycles/{id}/export.json`; its reader contract and the four rules it obeys are owned by [`../developer/stable-api.md`](../developer/stable-api.md) § 5c. Two of those rules invert findings in DSPy's source: `Signature.dump_state` writes fields positionally and `load_state` zips them back with `strict=False`, so a signature that gained a field reloads a scrambled prompt with no error at all — hence **field names, never positions**; and their artifact carries no provenance, which is the half we compute and they do not.
-
-**The radius stops at the model the winner was won on** — owned by [`../research/external-constraints.md`](../research/external-constraints.md) § Direction; an export names its model, and a model swap is a new run, never a copy of the winner.
-
-**Open — two of the three consumers.** Our own runtime is built. `to_dspy` rides the `[dspy]` extra beside `presentation/teleprompter.py`, never core (the dependency arrow is one-way — [`ADR-0006`](../adr/0006-embeddable-core-and-extras.md)), waits on Phase C, and applies the winner to a *live* program rather than emitting DSPy state, sidestepping the positional-zip corruption. MLflow's is the **Prompt Registry** (`register_prompt` / `load_prompt` / `search_prompts`), **not a model flavor**, because we produce prompts, not programs — written, and owned by [`../operations/observability.md`](../operations/observability.md) § MLflow. Its registry semantics (placeholders, versions, aliases) bind the write-back: [`../research/external-constraints.md`](../research/external-constraints.md) § TOOL.
-
-#### Copy and download — one standard, tiered by what the reader does next
-
-**Direction.** Every copy or download is one of five READINGS of the same served facts, chosen by the reader's next move, and a sixth costs one serializer — never a new wire type, a per-panel format or a second provenance header. **Every tier is SERVED**, the pasted ones included: one closed set `domain/export.py::ExportTier`, one serializer each in `application/views/render/export.py::export_files`, one read `application/cycle_reads.py::export_cycle`. A browser derivation of the chat text would be a second serializer beside the CLI's, so the webapp fetches it. `pasted` (`EXPORT_TIER_INFO`) splits the surfaces: a pasted tier is a `CopyButton` choice, the rest are download links. `export.json` stays the core of the downloads.
-
-**One name everywhere:** `GET /campaigns/{id}/cycles/{id}/export?tier=chat|report|notebook|deploy|package` · `python -m promptpotter export --tier …` · the candidates card's copy choices and download menu. The embedded launch has no read surface; a notebook host calls `export_cycle` itself.
-
-| Reader's next move | Tier | Shape | Borrows |
-|---|---|---|---|
-| paste into a chat; read at a glance | **`chat`** | one header, at most five lines per candidate on the viewed course: label · round · parent · verdict / own level with CI and n, θ with its caveat / lift vs its reference with CI and flips / which loci changed and the proposer's sentence / bench and verify only where held; a run reads as its served standing line | `log.md`'s idiom (`application/views/render/markdown.py`), nothing outside |
-| file a bug | **`report`** — `chat` under a provenance header: `tool_version`, campaign and cycle ids, dataset and `dataset_hash`, the optimizer treatment, the models, the ledger offset | its first line is the stamp every artifact opens with (`{"tool": "promptpotter", "kind": …, "tool_version": …}`), so a paste back into a check-in is recognised | n8n's self-describing paste, as text |
-| notebook, pandas | **`notebook`** — `candidates.jsonl`, one flat record per candidate keyed by the served names (`arm.label`, `own.accuracy.value`, `vs_reference.headline.estimate.value`, …), beside a `README.md` dataset card | every candidate in the tree, not the drawn ones; no parquet, no pyarrow | Hugging Face datasets: JSONL rows + a card with YAML frontmatter |
-| reproduce or deploy the winner | **`deploy`** — `export.json`; reader contract [`../developer/stable-api.md`](../developer/stable-api.md) § 5c | the winner flat, plus its `lineage` | DSPy `save()` inverted — fields by name |
-| hand to another agent | **`package`** — a skill-shaped folder, below, as one zip | `SKILL.md` + the prompts rendered + `export.json` + the notebook rows | Agent Skills · PROV-O · OpenUSD composition |
-
-**The package** — a folder an agent opens without PromptPotter installed:
-
-```
-<dataset>-<cycle>/
-  SKILL.md                  frontmatter: name, description (required) + metadata: model, dataset, dataset_hash,
-                            scorer, bench lift + CI, campaign_id, cycle_id, tool_version
-                            body: how to run the winner — the model it binds to, its prompt per node
-  prompts/<node>.md         the winner's prompt per node, rendered as scored
-  export.json               the ONE machine file: the winner flat, and its lineage
-  evidence/candidates.jsonl the notebook tier
-```
-
-- **Agent Skills gives the envelope.** `SKILL.md` with YAML frontmatter is already how the harbor connector ships a candidate (`connectors/harbor.py::SKILL_FILENAME`, `SkillDelivery`) and what about 25 Harbor agents open unprompted (the coding-agent paragraph above), so the package IS a skill: an importing agent reads `SKILL.md` and can run the winner. The frontmatter's `metadata` is where the model it was won on rides, so a reader that reads nothing else still sees the binding (the radius rule above).
-- **PROV-O gives `export.json::lineage` two edges and no more:** `wasDerivedFrom` (candidate → parent, the served `parent_ids`), `wasGeneratedBy` (candidate → its round and the members that proposed it); every round measured on the file's one `dataset_hash`, stated once at its top level. One `@context` naming the PROV namespace makes the file JSON-LD to a reader that cares and a dict to one that does not; no library on either side.
-- **OpenUSD composition gives the shape that stops repetition.** The origin is the base layer (its loci stated once); each candidate is a sparse delta over its parent (`changes`, the moved loci and their new values — what `changes_description` says in prose, as data). A reader composes any candidate by walking deltas to the root, and the lineage never states a prompt twice. The winner's own fields stay flat because their reader will not compose.
-- **Not borrowed:** LangSmith's run export — a cells tier is the measurement log, `GET /datasets/{name}/cells`'s, and the package carries its address rather than the rows; MLflow's model flavor (the open-consumers paragraph above); DSPy's positional state.
-
-**Cited from recall, not read in this pass** ([`../research/CLAUDE.md`](../research/CLAUDE.md)): PROV-O, JSON-LD, OpenUSD composition, Hugging Face datasets, n8n's paste format, LangSmith exports, DSPy `save()`. Read: the Agent Skills frontmatter (`name`, `description` required).
-
-### Ecosystem outreach — optional, unscheduled, no commitment implied
-
-Places PromptPotter could get *found* by systems it complements. None are promises; the list exists so it is not lost, tiered by what blocks each.
-
-- **Nothing blocking — DSPy.** `PromptPotterOpt` already exists and installs ([`dspy-optimizer.md`](../developer/dspy-optimizer.md)), so this is a real integration rather than a pitch, and the one item here worth not letting sit. A PR/listing pointing DSPy users at it, alongside `dspy.GEPA`, is next up.
-- **No blocker, unsequenced — verl and NVIDIA AutoResearch / Karpathy's `autoresearch`.** Doc-level PRs making the harness-vs-weights case: try a frozen-model harness tune before spending on a training run. The case says *before*, never *instead of* ([`../research/external-constraints.md`](../research/external-constraints.md) § Direction). For AutoResearch a *skill* entry is stronger than a doc PR, since their loop already runs on markdown skills, and it does not need C5.- **No blocker, a capability to build — bidirectional MLflow/Langfuse/LangSmith.** Today's sink is fan-out only, so the optimizer never reads it and it can never become load-bearing for the loop. **Write-back** pushes the winning prompt to MLflow's Prompt Registry or Langfuse's Prompt Management, so a team's production app picks up the winner with no PromptPotter dependency at request time — no new search mechanism, mapped onto each registry's own version and label semantics; the MLflow half exists ([`../operations/observability.md`](../operations/observability.md) § MLflow) and Langfuse's is the one still to build ([`../research/external-constraints.md`](../research/external-constraints.md) § TOOL). **Read-in** ingests a team's traces as a dataset source, chipping at the labeled-dataset requirement, but production traces carry no guaranteed labels, plus PII and format drift, so it needs real design rather than a flag. A LangSmith **Dataset** is the exception — labeled and split already — so it can enter as a "pull from LangSmith" option at the origin check-in's dataset step, landing on the same `Table` as `tabular_ingest.py`. **Executing** there is narrower than it looks: a Hub prompt cannot be run remotely (their REST evaluation API has the caller run the model), so a remote LangSmith connector targets a **LangSmith Deployment**, with the candidate injected through `config.configurable`.
-- **Waits on C5 — MLflow as a second viewer, never a second control plane.** An avenue inside whatever milestone follows M13 and M14, not a milestone of its own; its build order is [`mlflow-interop.md`](mlflow-interop.md). The whole idea — operate PromptPotter from MLflow's UI in place of the webapp — does not hold: that UI renders MLflow's own data model (experiments, runs, traces, prompts, evaluations) and has no place for a campaign's verbs or a check-in, and the campaign tree has no equivalent there, so the webapp stays. The **read half** does hold. A campaign is an experiment and a round is a run (`infrastructure/tracing/mlflow_server.py::MLflowSink` already writes both); the winner is in the Prompt Registry (the write-back above); what is missing is a measured cell as a trace and its score as feedback on that trace, after which MLflow's UI shows a campaign with no webapp open. The **control half** is an assistant holding two MCP servers — ours for mint, run and supervise, MLflow's own for reading results — so for a team already on MLflow, C5 need not grow a read-results tool set of its own. Two limits. The server and its UI are the user's process, never our dependency: `observability` pins `mlflow-skinny` for the reasons `pyproject.toml` states beside it, and this avenue must not reverse that. And the sink stays fan-out, so nothing here becomes load-bearing for the loop. Seen only in MLflow's own tutorial video (2026-09-11), not read in its docs: the server's tool sets (`genai` / `ml` / `all` / a named subset), and whether `mlflow-skinny` carries the server at all.
-- **Waits on C5 — OmniRoute and DeepSeek Harness.** OmniRoute is the gateway-pairing case, untried, and earns adoption only where evaluation spend is the binding constraint; its live router must never act on the evaluation path ([`../operations/backend-integration.md`](../operations/backend-integration.md) § Endpoints), because optimizing a routing *policy* is an axis while routing during a campaign voids the numbers. DeepSeek Harness is the operating-agent category itself, and its ecosystem already names MCP servers as a first-class submission category — likely the lowest-friction placement once C5 lands.
-- **Waits on C7 and C9 — Popper (inductive logic programming, [arXiv 2005.02259](https://arxiv.org/abs/2005.02259)).** The same generate → test → constrain loop over logic programs, with no LLM in it. It is ported as members, never wrapped (§ The optimizer plug point), and the member worth having is its constrain-from-failure stage, which any manifest could then name over its own search space. Its individual is a Prolog program scored by deterministic entailment, so it needs the non-prompt target first and is written against C9's typed slice; SWI-Prolog and a constraint solver arrive as an extra. The cheaper first step needs neither: cut the paper's three task families — Buttons, Robots, list transformations (its § 5) — as datasets and run the existing optimizers on them, each example a sample. The candidates and what blocks cutting them are [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md) § Deferred research.
-
-### Judged and turn-structured scoring
-
-**Tracked as C2b.** What is live — the judges, the grading call path, plural judges keyed by the term the formula reads, the `retrieve → ground → answer` step schema — is owned by [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md); this section holds what remains. Two datasets record being stuck on a judge: `email-tagging`'s free-text CRM fields and `screen-taste-v0`'s rating.
-
-**The conversation reaches a formula only as scalars** — owned by `domain/scoring.py::turn_scalars`; no design here adds a third route beside that projection and a judge banking a term.
-
-**What remains, at three distances.** *Per-step difficulty* is the larger prize and the only part needing a run rather than a decision; its blockers and its one non-skippable precondition — bank each step's term separately, which the step schema does — are at [`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3. A rubric owes one criterion before a campaign funds it — **does the term vary across arms on the same cell** — and the two authored rubrics were removed for failing it: they saturated and graded a property of the cell rather than of the arm (`sealqa/longseal-12/dataset.yaml` `campaign.judges` records the numbers). *Scoring* one step is already config and step-agnostic. *Optimizing* one step is near: the candidate prompt is trial-scoped (one `SKILL.md` per episode), so an arm mutates the whole episode however narrowly it is scored, and the open design is whether a declared step becomes a NODE — one per step with its own `prompt_info` and `param_keys` — which makes the existing `campaign_config.exclude_nodes` the step selector and adds no new channel. It costs generalizing `connectors/harbor.py`'s singular `AGENT_NODE`. Separately: not RUNNING the later steps, where the cost saving lives, since Harbor runs every declared step and `_unscoreable_step` raises on a truncated one.
-
-**PARTIAL PIPELINE GENERATION — far, and deliberately so.** Today L1 always proposes a COMPLETE pipeline. The feature is that it may propose a partial one, with *which* subset being **L2's** decision — the first place the escalation layer chooses a search SHAPE rather than a search direction.
-
-- **Do not open it until a real pipeline is blocked without it.** With few steps a whole-pipeline proposal is both cheaper to reason about and strictly more expressive. The gain appears only where a pipeline has many steps and no way to tell which one moved the number.
-- **Its trigger is a FORK, not a stall.** The signal is L2 reaching a two-way split it cannot choose between: two strategies, no evidence favouring either, and a whole-pipeline arm that would confound them. A plain stall belongs to the existing escalation ladder.
-- **It is a human-in-the-loop design cycle, not an implementation ticket.** What a partial proposal may touch, how a partial arm compares against a whole one, and what a δ ruler does with arms of different shapes are all open and none is answerable from code.
-### Evolving agent harnesses
-**Tracked as C7, ahead of v1; the connector half is `connectors/harbor.py`.** The artifact to evolve becomes an **agent harness** — an agent's prompts, tools and control flow — rather than only a single LLM call or a declared pipeline, because wording alone is the smaller lever on agentic tasks ([`../research/external-constraints.md`](../research/external-constraints.md) § Direction).
-
-**Do not re-open "whose harness — dsh or LangChain".** That question binds the design to one vendor's harness and inherits its mutation surface. [Harbor](https://github.com/harbor-framework/harbor) sits a layer below — evaluation infrastructure, in `pytest`'s category — and drives ~30 agents behind one `BaseAgent` interface, so which harness is under test is one line in a dataset's `panel` rather than a design commitment.
-
-What a verifier-graded cell needed from core — the labelless cell, the arm-time observation-key contract, the per-cell envelope and spend bound — is owned by [`../../promptpotter/connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md). **Harbor's per-cell wall clock is the envelope it declares** (`connectors/harbor.py::_CELL_ENVELOPE_S`; `cell_envelope_s` is required on every connector), so an episode is bounded by it and the launch's clock left as well as by Harbor's own `task.toml`. A cap on measured counts is not a substitute: tokens and dollars jitter run to run, so it would cut the same cell on one run and not the next.
-
-SkillOpt, DarwinX and AutoDesign already evolve harnesses for a frozen model, and DarwinX states our own one-armed-search argument back at us. What that comparison leaves standing is what a PromptPotter version must keep rather than re-derive — sequential elimination, cost-per-fitness, subset-invariant ability. Their benchmarks are agent environments `harbor` can now measure but PoBB's cost model still cannot bound, so adopting the target does **not** mean adopting their evaluation suite.
-
-**Under M13 they stop being only a comparison and become candidate ARMS.** The WikiSkill / SkillOpt *setting* is already here as Harbor's advanced-vs-primitive skill delivery ([`../operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md)), so "PP+WikiSkill vs WikiSkill" is a grid CELL rather than a new surface, and what the plug point adds is their *method* beside ours on the same cells — which is what answers "are their methods actually better at the same model", a question the published numbers cannot settle because nobody held the model constant. The factorial follows for free: optimizer × delivery mode, read by `evidence --grid`.
-
-**The target worth building toward is a skilled agent.** That means one agent equipped with many skills, where each skill is maintained, evaluated and updated separately, rather than one monolithic prompt tuned as a whole. The design is ours to build: it is one configuration of our agent toolkit, and we optimize each skill as well as evaluate it. [NVIDIA SkillEvaluator](https://github.com/NVIDIA/skillevaluator) covers only the evaluation half of that one design, and it is not a competitor ([`../research/landscape.md`](../research/landscape.md) § NVIDIA SkillEvaluator). Adopting and testing it is for later. Its three tiers — **validation** (is it safe and well-formed?), **deduplication** (does it repeat guidance?) and **live evaluation** (does it help the agent, measured against not having it?) — are a search *strategy*, so the part our infrastructure already carries enters as **L2 and L3 context**, not as new machinery. **Measured lift is the only admission ticket** — owned by [`../research/external-constraints.md`](../research/external-constraints.md) § SKILL; no design here admits a skill on an LLM's rewrite alone, and skill results are reported on SkillsBench. Whether the optimizer should itself become a skilled agent rather than the fixed L1–L3 loop is empirical, and the comparability run answers it (that page's § L4).
-
-**Now, on what exists.** The tiers live in the shared optimizer prompts (`assets/optimizers/potter/pipeline.yaml`): when the candidate is an agent skill, `l2_context/1` checks the tiers in order and names the first failing one in `axis_targeted`, and `l3_plan/1` replans onto it; every other target reads those prompts unchanged. The one unbuilt piece is tier 1's size rule, which is code.
-- **Tier 2 → no repeated guidance.** A skill grows by appending, and appended guidance overlaps what the skill already says until two lines disagree. So the prompts say: prefer merging or deleting a line over adding one, and never restate guidance the skill already carries. `mutation_memory` already shows L1 what was tried, so the repeat is visible to it. The proposer pattern to prefer over a free rewrite is trajectory-grounded ([`../research/external-constraints.md`](../research/external-constraints.md) § SKILL).
-- **Tier 3 → the ablation move, and a no-skill anchor.** The prompts say a line that cannot beat its own absence is removed rather than reworded, which makes deletion a first-class mutation. The baseline is measurable today: an origin with an empty `SKILL.md` is an ordinary campaign, and the matched-parent lift on the same cells prices every later skill against it. What does not exist is the no-skill arm running *beside* the search inside one cycle; that waits on M13's arms.
-- **Tier 1 → a strict validator, the one piece that is code.** The candidate is the skill's body; `connectors/harbor.py::_write_skill` owns the frontmatter, so a mutation cannot break the header. What a mutation *can* break is the [Agent Skills spec](https://agentskills.io/specification)'s size bound, a body under 500 lines ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 5). A `validators/l1_strict.py` rule would reject an oversized body before it runs, at $0; it is unbuilt, so today only the L2 prompt names the bound. Security review and dependency checks stay with SkillEvaluator. **The security floor no mutated body may cross** — owned by [`../research/external-constraints.md`](../research/external-constraints.md) § SKILL; tier 1 is where it is checked. The skilled agent moves `description` into the search, and the frontmatter rules then join this check.
-
-**Before the library grows — skill routing** — owned by [`../research/external-constraints.md`](../research/external-constraints.md) § SKILL; the skilled agent gets its routing design before its library reaches a few dozen skills, with mutual distinguishability against sibling skills as an objective. Whether prose skills transfer the way callable ones do stays open there.
-
-**Later, on SkillEvaluator.** Semantic overlap measured against the whole skill library rather than asked for in the framing, its four-bucket synthetic datasets, and Skill Lift as a served statistic beside ours.
-
-The unit of optimization then becomes the skill and the unit of acceptance becomes the library. Evolving one skill is re-measured against the others it ships with, which is where tier 2 and tier 3 meet.
-
-### Schema axes — the one open step
-Why the schema steers at all is [`../concepts/structured-output.md`](../concepts/structured-output.md). Two axes now ride the same gate: the `description` prose, and whether the node uses its schema at all (`response_format`). **Open: contrast them on `justlogic/d234`** — promote at `proxy_lift_corr ≥ 0.6`, and a negative result closes an axis by reverting it. The verb is already there: `evidence --grid ROW,COL` DISCOVERS its factors off each subject's own config (`application/evidence/grid.py::levels_by_subject`), so a varying `response_format` lands as a config factor and a varying schema `description` as a prompt-field one. What is missing is the paired run, not a surface to read it on.
-
-### Fitness comparability — the slice-4 remainder
-Open: the **cross-round headline surfaces** + the lineage `/N` badge.
-
-### Exit gate
-`rounds_to_separable ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`; `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches (or modify the rules). **The clock is separability, never an absolute accuracy** — the admission bar takes datasets scoring 15–40% at origin, so a fixed accuracy target sits above their ceiling by construction and closes on nothing.
-
-### Host coupon + BYO per-user API keys
-**The whole mechanism is owned by [`ADR-0003`](../adr/0003-spend-and-tenancy.md) § Host coupon + BYO keys** — `grant.json`, `key_source`, the three-step resolution order and its two 422s, `TenantApiKeyStore`, and the auth-router verbs. In one line: the host runs users on its own keys up to a per-user coupon; past it a user uploads their own key and continues on their own money. The coupon protects the host wallet, `jobs/quota.py` protects the machine, and the two stay separate.
-
-**Status: none of the coupon exists in code today** — no `HOST_ALLOWANCE` member on `StopReason`, no `grant.json`, no `TenantApiKeyStore`; no model declares `key_source`, so no spec carries it.
-
-### Anonymous preview tier
-Spec only — **do not build it before the chat backend exists** (`presentation/api/routers/chat.py` is absent), because an anonymous meter with no conversation to meter is a writer with no reader.
-
-- **Its own issuer sentinel, and `is_anonymous` asked BEFORE the operator arm.** This is the trap, not a detail: `application/jobs/quota.py::spends_the_hosts_own_key` reads a missing issuer as "came through the terminal, which only the operator reaches", so an anonymous identity built by leaving the issuer unset resolves as the box operator and is metered by nothing. The sentinel makes the two distinguishable; the ordering makes the distinction bind.
-- **Empty capability set.** No command verb, no launch, no ingest, no dataset write — it converses and reads, and every action surface is a sign-in prompt. Nothing is added to `CAMPAIGN_CAP_BY_NAME`, so the dispatcher's capability gate refuses each verb with no per-verb exception to keep in step.
-- **One shared tenant.** `application/account.py::arrive` writes a `user.json` per tenant, so a tenant per visitor is an unbounded directory-creation surface reachable without authentication. One tenant gives the spend a reader for free: a single row in `application/jobs/install_spend.py::read_install_spend`.
-- **A global daily pool is the ceiling; the per-visitor allowance is UX.** A per-visitor cap is defeated by discarding the visitor, so the only figure that binds is one install-wide daily pool. `admit_launch`'s reservation does not apply — an anonymous turn is one call, and anonymous cannot launch a campaign at all.
-- **No trustworthy origin signal ⇒ refuse the request**, or the pool becomes a scrape budget assembled from millions of small turns.
-
-### Operator-steered fork
-Two rules survive the build. `config_overrides` carries the fork's whole `OptimizationConfig` delta — the budget **plus** the policy toggles — so **a fork at offset 0 A/Bs a behaviour knob in isolation** without moving the global default; that is the standing "behaviour-knob change → sibling cycle" workflow. And `budget.rounds` on a fork is an absolute target, not a remainder: the fork's counter continues from its parent.
-
-### State-sync
-**Teardown-only design was rejected — do not re-propose** (it reverses the folder-UI §0 commitment). The two state surfaces it concerns are owned by [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md).
-
-### Run admission + concurrent serving
-**The mechanism has nothing open** — owned by [`../operations/access-model.md`](../operations/access-model.md) § What bounds resource use and [`../architecture.md`](../architecture.md) § Run admission; what this lane keeps is that its OS-file-lock substrate is C6's predecessor, so `--workers > 1` and a containerised worker need no second mechanism.
-
-- **Open — full-speed-each needs more provider quota, not a better divider.** Two busy users on one key each get roughly half the throughput however the window is shared; only **Lane A2** buys more. It is cheap once reached: an `api_key` dimension on `get_llm_client`'s cache key gives every tenant its own limiter.
-- **Distinct axis — sample look-ahead *within* one run.** `capacity` is how many CAMPAIGNS the box admits; look-ahead is how many CALLS one scoring round holds in flight, so it does not cross-bill and is gated separately on `campaign.lookahead`. **Open:** the ceiling is a hand-set constant per connector rather than measured peak-RSS headroom (there is an OOM post-mortem in `runner/inner/spawn.py`), and inner and outer still share the process-global `RateLimiter` with no per-tenant slice. Only TermNorm's is measured, and only on `llm_only` — its web-search pipeline meters one Brave query per cell against a per-key rate limit, unprobed at that depth; `harbor`, `dspy` and the recursion keep guesses. Re-test: `seed-screen --parallel N` at rising N on a dataset of that backend, reading wall clock and error rows per depth. **Open, forward:** the horizon is a worst case — a cell is launched only if no rule can POSSIBLY cut before it — so early in a walk PoBB's reachable-but-unlikely cut holds look-ahead near `n_min`. A horizon priced in expected waste (P(cut before i) × a call) would launch deeper at a bounded expected cost. Boundary: [`../operations/access-model.md`](../operations/access-model.md) § host-admin ↔ user.
-
-### Lineage mask
-The read side and the fork-from-divergence write side are [`../operations/mask-projection.md`](../operations/mask-projection.md)'s (§ Applying one); code SoT `application/mask/`. The alternative branch materialises only as a real, measured fork the operator chose to run — never a stored forecast tail — which is why persisted mask identity is still not a thing: the criterion rides the seed the fork already writes.
-
-Open as **Lane C8**: the SAMPLE-SET half, and it is a different substrate rather than a second knob. A scoring mask forks on the existing rails because it re-selects a *candidate* from arms the run measured; a mask that changes which samples a round buys needs a replayable measurement ORDER seeded into the fork, which `CycleSeed` does not carry and `ForkSpec` does not root at. Until it does, a sample-subset mask previews and stops there.
-
-### One served hierarchy
-`campaign → course → round → step → candidate | cell → inner course`, served as ONE entry shape every surface renders. **Decided:** the address is server-minted (`campaign::cycle`, `~` into an inner sandbox — `domain/cycle_paths.py::hierarchy_address`); dataset, optimizer, model, fork, diag and inner are tags, never levels; a fork is an event inside its parent, drawn at its spawn point; one entry at four densities — sidebar row, hover card (its newest moment), run card (a chosen moment), compare channel — and the time ray beside them. Shipped, and a contract now: [`frontend-surface-contract.md`](frontend-surface-contract.md) § The served hierarchy.
-
-### Plus-backlog (opportunistic, unscheduled)
-Hard-Sample Sorter Phase 2/3 · MCP server mode · research extensions.
-
-## Captured — pending triage
-
-- **Origin panel that drifts on the δ ruler** — the panel every green bar is read on is the first round-panel-sized set of cells C0 answered, fixed for the life of the cycle (`domain/results.py::origin_panel`). The far-out version lets it swap a cell once the ruler has settled, drifting far slower than the round draw the winners are decided on. Zero priority: the fixed panel is what makes the bars comparable, and drift can only cost that.
-- **A second panel trigger: the cheap top-up — blocked on a concept, not on code.** Today one `PanelTrigger` fires (`n_min`, `domain/results.py`). A second would read an arm on the origin panel when completing it costs little, but a fixed share of missing rows is a magic number. The unanswered question is the rule that prices a missing row against the round's marginal draw cell, so an arm may be partly backfilled when the row beats it. Pick it up after the app, not before.
-- **Origin check-in plain-language recap** — folded into the origin check-in flow; pending review.
-- **CPU-hours as a suite-wide measurement** — container and CPU time metered per phase (expansion · judge · evaluation) beside `SpendRollup`, for every connector rather than for one comparison. SIFT's cost table (§ SIFT reproduction) is the shape; to be designed, not dropped.
-- **Render-and-judge demo — a fun button, then a dataset** — one button hands the best optimizer prompt (the L4 winner) an objective such as *"a 3D unicorn"*: the candidate is a program that renders the picture, a VLM grades it against a few aspects, and the operator watches the picture improve. Representation change made visible: the image is not optimized, the program is. GEPA shows the shape with no example data (`seed_candidate=None`, 4 rubric aspects as its `dataset`). Needs a sandbox (their notebook runs LLM code in a bare `subprocess` with a 120 s timeout) and a turn cap (one VLM call per aspect per candidate). **Long term:** a set of such objectives with held-out ones, so the optimizer prompt's skill is measured on outputs anyone can see. Reading: [`../../paper/notes/gepa-optimize-anything-aie-2026.md`](../../paper/notes/gepa-optimize-anything-aie-2026.md) § 4.
-- **Run card: the post card of 21.10.2026 is the starting point** — the static card in the LinkedIn post "The best edit was not in the prompt" (real run `swiss-invoices-eval__b1b4f5`) is the agreed target for the webapp's run card, collapsed and interactive later. Keep from it: before/after against the origin with the distance drawn (accuracy, avg time, tokens and cost per cell, changed settings); the accuracy line carries regressions in words ("1 → 18 right · 1 newly wrong") instead of a separate flips bar, which only repeated the accuracy; accuracy per round with every candidate hollow and the winners joined in green; the lineage of elected mutations only; the samples as a two-row heatmap, one column per sample sorted by campaign hit rate: the campaign row in the three spread colours (19 never red · 47 partly orange · 4 always green of 70; a continuous gradient was tried and rejected), the winner row on the same columns (37 right, 2 wrong, very dark grey where it never ran the sample), which shows both readings of the next entry at once. Per-sample data: `run-heatmap-swiss-invoices-b1b4f5.json` in the post folder. Design: Run Widget Studies artifact, section "The post card", https://claude.ai/artifact/8bra9rCBGvR4p8191YrZEE . Source: `CANVAS_25/Writing/BlogPosts/Published/261021_BestEditNotInPrompt/run-card.html`.
-- **The never / partly / always spread contradicts the headline beside it** — on `swiss-invoices-eval__b1b4f5` the card leads with best C9.2 at 90% (18 of 20 on the origin panel) and, a section lower, "19 never · 47 partly · 4 always". Cause: `application/scoring/measurement_log.py::_cycle_cells` pools one column per candidate the cycle ran — losers and the 5% origin included — and `domain/cells.py::hit_spread` buckets each sample across all of them, so a sample only C0 saw is "never" by construction. **17 of the 19 "never" samples were measured once, by C0, in round 0**, and no later candidate ran them; of the other two, #31 and #96 were seen only by round 1–2 arms, and only #4 was ever missed by a late winner. On C9.2's own rows the split is 37 always / 2 never (#1, #4). `HardSamplesPreview.tsx`'s "N of M rows measured in this scope" title is the only scope hint, and it is a tooltip. **What the card needs is one decision, not a relabel:** the spread either (a) describes the SUBJECT — the selected searchpoint's own cells, the same subject every other line of the card describes — or (b) stays a search-coverage statistic and says so in the visible label ("never solved by any candidate"), with samples whose only measurers sit below some ability floor counted apart as *unchallenged* rather than *never*. (b) is closer to what the Rasch sort already wants; (a) is what the reader assumes. Evidence and per-sample measurers: the post folder `CANVAS_25/Writing/BlogPosts/Published/261021_BestEditNotInPrompt/` (`run-data-…json`, `run-signals-…json`).
-- **Model screen as a `seed-screen` variant** — the model as the screened axis, so a screen's results land in the tree with the analytics `seed-screen` already has, never in a script outside PromptPotter that only an agent can read.
-
-## Identity — live forward gap (non-derivable)
-
-Identity is at **Stage 1** by [`ADR-0002`](../adr/0002-identity-foundation.md)'s own ladder, which has three rungs and no 0.5: Stage 1 IS "OIDC client, same file-based layout, tenant-prefixed for real", and that is what ships. Tenant isolation is enforced — structurally, by `build_stores` ([`../operations/access-model.md`](../operations/access-model.md) § user ↔ user — tenancy). PostgreSQL + RLS is **Stage 2**, so its absence is the definition of Stage 1 rather than a shortfall from it; there is no SQL driver and no SCIM vocabulary anywhere in the package. What is genuinely owed is ADR-0002's no-drift gate #6 (SCIM field names on the internal `User`), unimplemented.
-
-## Non-functional requirements
-
-| Requirement | Target |
-|---|---|
-| LLM providers | OpenAI-compatible (OpenRouter default) |
-| Python | 3.13 |
-| Crash recovery | append-only `measurements/cells/{config_key}.jsonl` + the per-cycle ledger; resume cache-hits prior |
-
-**No wall-clock or per-campaign storage target is declared, and neither should be re-added.** Both
-were, at per-item rates set before an agent episode was a cell. What a cell costs is measured in
-[`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
-§ What a cell costs, and what a workspace holds on disk is `compact-archive inventory`'s — the
-archive is not scoped by campaign, so a per-campaign figure is not a question it answers.
+2. **Pools** — owed: the campaign's measured individuals as a pool. *Closes when* a manifest declares
+   it and a resumed run hands its reader the pool its banked round names.
+3. **Recombination on a host** (`l1_generate`, `l2_context`, an `algorithm` node). *Closes when* the
+   offline leg produces arms under each host from the same pools and a two-parent child carries both edges.
+4. **Parent choice and survival as members.** *Closes when* `capo` is re-expressed on them, offline leg unchanged.
+5. **The three surfaces**, the terminal's `--set` writing the same draft. *Closes when* the cold
+   browser walk switches a host, narrows a pool and reads both back, equal to the terminal's draft.
+6. **The mode head-to-head** (PAID), the host the only difference, matched on USD and cells.
+7. **L4 reach** — the mix as an outer-arm lever, on the inner cell's overlay and identity.
+8. **A pool fed while a campaign runs** — refused by a controlled arm, applied at the next round
+   boundary, replayed on resume.
+9. **Paper compositions** — EvoPrompt GA/DE, PhaseEvo, GEPA's merge, each stating its departures.
+
+Stages 5, 7, 8 and 9 share no seam once 3 lands.
+
+## Probe rounds
+
+A probe round spends its budget on ONE narrow question: more candidates on a narrower question.
+`L2ContextOutput` carries no `action` field for it. Build it as: the target picked from measurement
+(a peaked axis, a recurring failure cluster), `n_variants` widened for that round, samples chosen by
+relevance to the hypothesis — never by a set that is empty on a healthy run. Re-running warned
+queries is degradation triage, not a search action.
+
+## Origin-resolution check-in
+
+Invariants: it reuses the `checkin/2` node; `reasoning_floor`/`ceiling` stay off the operator
+surface; model and provider are optimizer-locked.
+- **Run mode** — the same node raises `pause-cycle` / `change-run-limits` / `fork-cycle` over
+  `application/datasets/origin_resolve.py`'s `RaisedCommand`. Lands with L4.
+- **The whole setup proposed from the operator's text** — every node's model and effort, rounds and
+  cap — priced against the served menu and `application/jobs/quota.py::launch_usd_bound`; the host's
+  bound outranks the operator's words; an off-menu proposal is dropped at `_coerce`.
+
+## Connectors
+
+- **Prompt-injection Phase 2:** `TrustedText`/`UntrustedText` renderer types, L1/critique
+  injection-echo validators, a repeat-detection circuit breaker.
+
+### The connector as a unit
+
+Operator direction, not yet a design. **The operator picks a connector, not a backend URL**: each
+registered connector shows its status, its pipelines and their modes (Harbor's skill delivery is
+advanced or primitive).
+- **One declaration schema**: `Connector` (`connectors/protocol.py`) served by `GET /connectors` as a
+  generated type, and the webapp draws every connector from that alone; nothing branches on a name.
+- **The chat hero is the connector's picture**, connector ⊃ pipeline ⊃ node; where you click picks the level.
+  Advanced mode draws the skill as a tool attached to the agent, served from `Connector.prompt_delivery`.
+- **The pipeline choice rides the existing channel** (`DraftPatch.pipeline_steps` → … → TermNorm's
+  `steps`); `Connector.default_pipeline` widens into a named set with one default.
+- **A mode is a node-config key with declared options**, never a search axis, always in identity.
+- **Check-in adds no `EditDraftPatch` field**; owed: validation against the declarations, and
+  `draft_from_dataset` accepting a verifier-graded dataset. A running campaign never switches in place.
+
+Order: (2) `Connector` declarations + `GET /connectors`, status from `Connector.preflight`; (3) the
+TermNorm toggle moves into the connector panel; (4) the dashboard inspector reads the same object;
+(5) the C5 write side rides the same overlays, and `change-pipeline-param` is re-scoped or deleted.
+
+## Agent-tool parity
+
+An operating agent calls PromptPotter as one tool: the MCP server exposes mint, run, supervise and
+read. **Held on the inbound credential** — owned by [`../developer/stable-api.md`](../developer/stable-api.md)
+§ 8. The first caller is HuggingChat: a user-added server carries only a name and URL, so ours
+authenticates without headers; results are terse named fields, never a document; `run` returns an id
+at once and a status tool reads it. The tool set scopes along [`../decisions.md`](../decisions.md)
+§ 0005's capabilities; `purge-cold` stays out.
+
+**Sandbox:** NVIDIA OpenShell is the sandbox seam, at the containerized cell. **Coding-agent
+optimization is deferred** until we have an expert or the field converges.
+
+## What PromptPotter emits
+
+**We write a file and provide a reader; we never load, host, route or hot-swap.** DSPy is the
+reference read before designing any ecosystem expansion. The artifact and its reader contract are
+[`../developer/stable-api.md`](../developer/stable-api.md) § 5c.
+
+- **`to_dspy`** on the `[dspy]` extra beside `presentation/teleprompter.py`: applies the winner to a
+  live program rather than emitting DSPy state.
+- **Langfuse write-back** to Prompt Management (the MLflow half exists — [`../operations/observability.md`](../operations/observability.md) § MLflow).
+- **A DSPy listing PR** pointing users at `PromptPotterOpt` beside `dspy.GEPA`.
+- MLflow as a second viewer: [`mlflow-interop.md`](mlflow-interop.md).
+
+## Judged and turn-structured scoring
+
+What is live is [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md)'s. A
+rubric must vary across arms on the same cell before a campaign funds it. Open: **per-step
+difficulty** ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3); **a
+declared step as a NODE**, so `campaign_config.exclude_nodes` is the step selector (generalizes
+`connectors/harbor.py`'s `AGENT_NODE`); not running later steps (`_unscoreable_step` raises on a truncated one).
+
+## Evolving agent harnesses
+
+The artifact becomes an agent harness, through `connectors/harbor.py`. Do not re-open "whose
+harness": Harbor sits below every harness. The target is a **skilled agent** — many skills, each
+maintained and measured separately; measured lift is the only admission ticket.
+- **Tier 1 validator** — a `validators/l1_strict.py` rule rejecting a skill body over 500 lines
+  before it runs; today only the L2 prompt names the bound.
+- **The no-skill arm beside the search** inside one cycle.
+- **Skill routing** before the library reaches a few dozen skills.
+
+## Small open items
+
+- **Schema axes** — contrast `description` prose and `response_format` on `justlogic/d234` via
+  `evidence --grid`; promote at `proxy_lift_corr ≥ 0.6`, a negative result reverts the axis.
+- **Fitness comparability** — the cross-round headline surfaces and the lineage `/N` badge.
+- **Exit gate** — `rounds_to_separable ≤ 5` on `llm_only` AND TermNorm under one `l1_generate_hash`;
+  `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches. The clock is
+  separability, never an absolute accuracy.
+- **Run admission** — full speed for two busy users needs more provider quota (A2; an `api_key`
+  dimension on `get_llm_client`'s cache key); look-ahead's ceiling is a hand-set constant per
+  connector, not measured RSS headroom; a horizon priced in expected waste would launch deeper.
+- **Cheap top-up** — a second `PanelTrigger`, blocked on the rule that prices a missing row against
+  the round's marginal draw cell.
+- **CPU-hours** metered per phase beside `SpendRollup`, for every connector.
+- **Delegation, open** ([`../decisions.md`](../decisions.md) § 0005): who edits grants; how a
+  channel is identified unspoofably; whether the user's own assistant is attenuable; depth beyond
+  one level; whether a delegate is its own tenant.
+
+## Lineage mask
+
+The read side and the fork write side are [`../operations/mask-projection.md`](../operations/mask-projection.md)'s.
+**Open (C8): the sample-set half.** A mask that changes which samples a round buys needs a replayable
+measurement order seeded into the fork, which `CycleSeed` does not carry; until then a sample-subset
+mask previews and stops.
+
+## First-run exhibit
+
+The demo: write down ten films you like, get better recommendations than the starting prompt, and
+the prompt. Bars: most people do it; platform-independent; no private data; a right answer
+(held-out titles, scored by `list_rr`). Before a round, compute the chance floor of the draw — the
+first cut's origin read below it. **MovieLens cannot ship** (no commercial use or redistribution):
+collect our own rows, cut under a name nothing has run before.
+
+## Host coupon + BYO keys
+
+The host runs a user on its own keys up to a per-user coupon; past it the user uploads their own key
+and continues on their own money. The coupon protects the host wallet, `jobs/quota.py` the machine.
+- **The coupon remainder is derived from the host-key ledger, never a counter** (`grant.json`); keys
+  sit in `TenantApiKeyStore` (`api_keys.json`), both on `read_json_optional` / `write_json`.
+- **`resolve_api_key(identity, provider, stores)` wraps `get_llm_client` as the one choke point**:
+  the user's own key for the provider wins with no coupon check; else a live coupon uses the host
+  key; else 422 `host_allowance_exhausted`, distinct from 422 `no_api_key`. Per provider, unless
+  `settings.coupon_void_on_byo` retires the coupon.
+- **The coupon replaces the free-tier path** (`application/jobs/quota.py::admit_launch` + the `User`
+  lifetime ceilings) in the same change, keeping both units (USD and tokens) and the per-run
+  reservation; the `SpendBook` caps live at the remainder, stopping on a new `StopReason.HOST_ALLOWANCE`.
+- **`TokenUsageRecord.key_source: host|user`** — the one exception to identity-from-path, since it
+  records which wallet paid; `/auth/activity` `group_by=api_key` then groups by whose key.
+- `/auth/api-keys` and `/auth/coupon` ride the auth router, not `/commands/*`.
+
+## Anonymous preview tier
+
+Do not build before the chat backend exists.
+- **Its own issuer sentinel, `is_anonymous` asked before the operator arm** —
+  `quota.py::spends_the_hosts_own_key` reads a missing issuer as the box operator.
+- **Empty capability set**: it converses and reads; every action is a sign-in prompt.
+- **One shared tenant** (a tenant per visitor is an unauthenticated directory-creation surface).
+- **A global daily pool is the ceiling**; a per-visitor cap is UX.
+- **No trustworthy origin signal ⇒ refuse the request.**
+
+## Prompt-field order
+
+Today a node's field order is its declaration. Proposal: the check-in carries an order per prompt
+node beside its fields (`DraftCampaign.origin_prompts`), the editor drags it, `edit-draft-campaign`
+persists it, a fork inherits it. **Open (operator): an optimizer axis or an operator setting?** Held
+is the smaller change. Reorder re-keys every cell, so order is a searchpoint property (never
+`localStorage`), and a descendant reading under a changed order renders `?`. The drag surface: a new
+`components/ui/` primitive on Pointer Events, keyboard parity (`↑`/`↓` with an `aria-live`
+announcement), commit on drop, the handle the touch target.
+
+## Run card
+
+The post card of 21.10.2026 (`swiss-invoices-eval__b1b4f5`) is the run card's expanded layer:
+collapsed it is the compact card (round axis, trend glyph, heatmap, subject, hardest samples); `more`
+swaps in before/after against the origin, the evolution chart with the lineage, and the two-row
+sample heatmap. Rendered from the served hierarchy (`domain/hierarchy.py`), a fork drawn as an event at
+its spawn point. Owed: the round that changed each key, served ("changed in C7.3"). Rejected: the
+round rail of hollow/filled bars and the ring readout. Design: the Run Widget Studies artifact,
+§ "The post card", https://claude.ai/artifact/8bra9rCBGvR4p8191YrZEE; source
+`CANVAS_25/Writing/BlogPosts/Published/261021_BestEditNotInPrompt/run-card.html`.

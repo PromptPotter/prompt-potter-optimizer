@@ -402,14 +402,14 @@ def _path_claims(text: str) -> set[str]:
 
 
 def _instruction_files(_: Selection) -> Outcome:
-    code, listed = git("ls-files", "-z", *_INSTRUCTION_FILES)
+    code, listed = _on_disk(*_INSTRUCTION_FILES)
     if code:
-        return code, listed
-    code, tracked = git("ls-files", "-z")
+        return code, listed[0]
+    code, tracked = _on_disk()
     if code:
-        return code, tracked
+        return code, tracked[0]
     tails: set[str] = set()
-    for path in tracked.split("\0"):
+    for path in tracked:
         parts = path.split("/")
         for end in range(1, len(parts) + 1):
             tails.update("/".join(parts[start:end]) for start in range(end))
@@ -418,7 +418,7 @@ def _instruction_files(_: Selection) -> Outcome:
     pages: dict[Path, int] = {}
     # Both spellings git may know a claim by: from the root, and from the file's own directory.
     unresolved: dict[tuple[str, str], set[str]] = {}
-    for rel in filter(None, listed.split("\0")):
+    for rel in listed:
         text = (REPO / rel).read_text(encoding="utf-8")
         if (words := len(text.split())) > _INSTRUCTION_MAX_WORDS:
             over.append(f"{rel}: {words} words")
@@ -684,23 +684,31 @@ def _probe_count(pattern: str, where: str) -> int | str:
     return sum(int(line.rpartition(":")[2]) for line in out.splitlines())
 
 
+def _on_disk(*pathspec: str) -> tuple[int, list[str]]:
+    """The working tree's files: tracked ones still present, and new ones git does not ignore."""
+    code, out = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *pathspec)
+    if code:
+        return code, [out]
+    return 0, sorted({p for p in out.split("\0") if p and (REPO / p).is_file()})
+
+
 def _doc_claims(_: Selection) -> Outcome:
-    code, claim_docs = git("ls-files", "-z", "--", *_CLAIM_DOCS)
+    code, claim_docs = _on_disk(*_CLAIM_DOCS)
     if code:
-        return code, claim_docs
-    code, every_doc = git("ls-files", "-z", "--", "*.md")
+        return code, claim_docs[0]
+    code, every_doc = _on_disk("*.md")
     if code:
-        return code, every_doc
-    code, listed = git("ls-files", "-z")
+        return code, every_doc[0]
+    code, listed = _on_disk()
     if code:
-        return code, listed
+        return code, listed[0]
     tails: dict[str, list[Path]] = {}
-    for path in filter(None, listed.split("\0")):
+    for path in listed:
         parts = path.split("/")
         for i in range(len(parts)):
             tails.setdefault("/".join(parts[i:]), []).append(REPO / path)
     failures: list[str] = []
-    for rel in filter(None, claim_docs.split("\0")):
+    for rel in claim_docs:
         # A cited path is relative to the doc, or the tail of ONE tracked path: `runner/round.py`.
         here = (REPO / rel).parent
         prose = _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8"))
@@ -734,7 +742,7 @@ def _doc_claims(_: Selection) -> Outcome:
         if phrase not in urgent
     ]
     probed: set[str] = set()
-    for rel in filter(None, every_doc.split("\0")):
+    for rel in every_doc:
         # A probe quoted in code is an example, never one to run.
         prose = _BACKTICKED.sub("", _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8")))
         for opened in _PROBE_OPENS.finditer(prose):

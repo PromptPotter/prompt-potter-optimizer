@@ -16,35 +16,14 @@ when the entry was written, so re-check it before quoting it.
 
 ## Promptim (LangChain)
 
-**What.** `pip install promptim`, a CLI over LangSmith: `promptim create task` scaffolds a
-`config.json` + `task.py`, `promptim train` runs the search. The config names a LangSmith
-`dataset`, an `initial_prompt` (a Prompt Hub identifier, pulled *with* its model), `evaluators`
-(an import path to functions `(run, example) -> {key, score, comment}`) and plain-language
-`evaluator_descriptions`. The default loop is a minibatch hill-climb — score on train, a metaprompt
-rewrites from the scores and comments, keep the rewrite only if dev improves; later versions add
-MIPRO, PhaseEvo, debate, few-shot and feedback-guided optimizers. Every evaluation is written back
-as a LangSmith **Experiment** on the user's dataset, baseline and final are a tagged test-split
-pair, human review goes through Annotation Queues, and the winner is committed to the Prompt Hub.
-Announced in [the LangChain blog post](https://www.langchain.com/blog/promptim), Nov 2024; source
-[`hinthornw/promptimizer`](https://github.com/hinthornw/promptimizer).
-
-**Verdict — weak.** A single-prompt optimizer with no budget meter, no stopping rule and a
-keep-if-dev-improved acceptance test that is exactly the winner's-curse exposure
-[`benchmarks.md`](benchmarks.md) rules on. It cannot run without LangSmith. None of the properties
-`related-work.md` § A menu is not a bench argues from is present, so there is nothing to argue
-against.
-
-**Worth taking — the LangSmith round trip, as a template.** It is the cleanest existing picture
-of an optimizer that lives *inside* a team's evaluation tool: their dataset in, their prompt in, every
-measurement visible as an Experiment they can compare in their own UI, the winner back in their
-Prompt Hub. That is the shape our read-in / write-back lane in
-[`../specs/roadmap.md`](../specs/roadmap.md) is aiming at. Smaller: the two-command onboarding
-(`create task` → `train`), and `evaluator_descriptions` — metric meaning handed to the proposer as
-prose. Its email-triage experiments (`experiments/email_cs*`) are the same task as our
-`email-tagging` dataset, graded the same way (exact match on the predicted category), which makes
-them a ready-made demo pairing.
-
-**Checked** 2026-09-24 — last commit 2025-04-17 (`v9`, PyPI `0.0.9`), not archived.
+**What.** A CLI over LangSmith ([`hinthornw/promptimizer`](https://github.com/hinthornw/promptimizer)):
+a minibatch hill-climb that keeps a rewrite only if dev improves, every evaluation written back as a
+LangSmith Experiment and the winner committed to the Prompt Hub. **Verdict — weak:** no budget
+meter, no stopping rule, and keep-if-dev-improved is the winner's-curse exposure
+[`benchmarks.md`](benchmarks.md) rules on. **Worth taking:** the round trip inside a team's own
+eval tool — the shape of our read-in / write-back lane — and `evaluator_descriptions`, metric
+meaning handed to the proposer as prose; its `experiments/email_cs*` pair with our `email-tagging`.
+**Checked** 2026-09-24 — last commit 2025-04-17.
 
 ## Langfuse and Opik — one overlap, read together
 
@@ -81,10 +60,7 @@ write-back half of the interop lane in [`../specs/roadmap.md`](../specs/roadmap.
 tracing already writes to it. From Opik, three things: tool definitions as a search surface next
 to the prompt; assertions written in plain language as a grader an operator can author without
 code; and Ollie's trace → diagnosis → code-edit loop, which is our self-healing idea aimed at the
-user's codebase rather than at our own layers. And the UI's layout grammar, as a design reference
-rather than code to fork: a left nav grouped by lifecycle (observe → evaluate → engineer →
-optimize → production), a list with a split inspector (span tree beside a Pretty/YAML detail
-pane), and J/K stepping through rows.
+user's codebase rather than at our own layers.
 
 **The door this opens — PromptPotter reached THROUGH Opik.** Opik already sells optimization as
 a menu of algorithms behind one API, GEPA among them, and its own pitch against Langfuse is that
@@ -95,22 +71,13 @@ experiment, the winner back in their prompt library — with PromptPotter either
 more optimizer behind that API (a `BaseOptimizer` subclass,
 [`external-constraints.md`](external-constraints.md) § M13) or driving Opik's six through an
 adapter that strips their own evaluation, since each is a whole loop rather than a set of
-manifest members (the plug point in [`../specs/roadmap.md`](../specs/roadmap.md) § The optimizer plug point). Either way the pitch is
+manifest members (the plug point in [`../specs/roadmap.md`](../specs/roadmap.md) § The bench (M13)). Either way the pitch is
 the bench against the menu: their algorithms, our budget, stopping rule and comparability guard.
 
-**Vendor-stated numbers** (Comet's
-[Langfuse vs. Opik](https://www.comet.com/site/products/opik/compare/langfuse-vs-opik/) page,
-updated 2026-07-30; rows "from each vendor's public documentation as of August 2026"): GitHub
-stars on 2026-08-13 — Langfuse 33,270, Opik 21,433, Arize Phoenix 11,088, W&B Weave 1,118. Free
-tier — Opik 10 seats, Langfuse 2; entry paid tier — Opik $19/month, Langfuse $29/seat/month. Opik
-claims 21 heuristic and 22 LLM-as-judge metrics, thread-level evaluation and guardrails, and marks
-all three "not documented" for Langfuse. A competitor's own table: re-check before quoting.
-Comet keeps one such page per rival at the [compare hub](https://www.comet.com/site/products/opik/compare/)
-— the fastest way to refresh this whole section.
+Vendor-stated comparisons live at Comet's [compare hub](https://www.comet.com/site/products/opik/compare/),
+the fastest way to refresh this section; re-check any figure before quoting it.
 
-**Checked** 2026-09-24 — Opik docs list six optimizers (a Comet product page says seven);
-Langfuse under ClickHouse since 2026-01-16. Opik `LICENSE` read (Apache-2.0), last commit
-2026-09-24; Langfuse's licence not re-read.
+**Checked** 2026-09-24 — Opik `LICENSE` read (Apache-2.0); Langfuse's licence not re-read.
 
 ## SIFT — Self-Improvement via Fast Tree-search (paper)
 
@@ -223,133 +190,59 @@ model reaches with reasoning set to High. Reading, numbers and the experiments i
 
 ## Promptolution (LMU / Freiburg / TUM)
 
-**What.** "A unified, modular framework for prompt optimization" for researchers
-([EACL 2026 demo](https://aclanthology.org/2026.eacl-demo.21/), arXiv 2512.02840). Optimization
-stage only: one LLM backend (API, local, vLLM), response caching, token-usage logging, and four
-optimizers in `promptolution/optimizers/` — **CAPO**, **EvoPrompt** (DE and GA) and **OPRO**. The
-same group publishes CANTANTE and MO-CAPO on top of it. Apache-2.0.
-
-**Verdict — weak (as a product), relevant (as a peer).** It is the closest thing to a bench on
-the research side — shared backend, shared cache, token logging — but it has no stopping rule
-beyond each optimizer's own, no subset-invariant score and no interface past the Python API. Named
-in [`related-work.md`](related-work.md) § Three layers (menu row) and § The family (CAPO beat GEPA
-in its head-to-head). The menu row overstates it slightly: four optimizers, all its own lineage,
-not a wrapper around third-party ones.
-
-**Worth taking.** CAPO as the first non-DSPy peer to plug in — racing plus an explicit token
-budget is the closest published neighbour to PoBB, so a head-to-head there is the sharpest one.
-
-**Checked** 2026-09-24 — repo is [`gepromptet/promptolution`](https://github.com/gepromptet/promptolution)
-(the secondhand URL is right; `automl/promptolution` and `finitearth/promptolution` both redirect
-there, and the README badges still say `automl`). Last push 2026-09-16, last `main` commit
-2026-05-24; 158 stars.
+**What.** A research framework ([`gepromptet/promptolution`](https://github.com/gepromptet/promptolution),
+[EACL 2026 demo](https://aclanthology.org/2026.eacl-demo.21/)): one backend, a response cache,
+token logging, and its own CAPO, EvoPrompt and OPRO. **Verdict — weak as a product, relevant as a
+peer:** the closest research-side bench, but no stopping rule beyond each optimizer's own, no
+subset-invariant score, no interface past Python; argued in [`related-work.md`](related-work.md).
+**Worth taking:** CAPO as the first non-DSPy peer — racing under a token budget is PoBB's nearest
+published neighbour. **Checked** 2026-09-24 — last push 2026-09-16.
 
 ## Promptomatix (Salesforce AI Research)
 
-**What.** [`SalesforceAIResearch/promptomatix`](https://github.com/SalesforceAIResearch/promptomatix)
-([arXiv 2507.14241](https://arxiv.org/abs/2507.14241), Apache-2.0). A zero-configuration wrapper:
-it reads a raw task description, classifies the task, **generates a synthetic train/test set**,
-picks a DSPy module and metric, and optimizes through a DSPy or meta-prompt backend, with a
-session log, human feedback, a CLI and a REST API.
-
-**Verdict — weak.** A DSPy front end, not a new search method; no budget meter or stopping rule
-was visible in the README.
-
-**Worth taking.** Synthetic data as an on-ramp for a user with no dataset — the gap our `new
-<file.csv>` path assumes away.
-
-**Checked** 2026-09-24 — last commit 2026-06-02 (a `SECURITY.md` upload); 977 stars. The
-README's install line clones `airesearch-emu/promptomatix`, which 404s.
+**What.** A zero-configuration DSPy front end ([`SalesforceAIResearch/promptomatix`](https://github.com/SalesforceAIResearch/promptomatix))
+that generates a synthetic train/test set from a task description. **Verdict — weak:** no new
+search, no budget meter or stopping rule seen. **Worth taking:** synthetic data as an on-ramp for a
+user with no dataset. **Checked** 2026-09-24 — last commit 2026-06-02.
 
 ## Evidently Prompt Optimizer
 
-**What.** A `PromptOptimizer` class in the open-source `evidently` library (Apache-2.0), described
-in [How we built open-source automated prompt optimization](https://www.evidentlyai.com/blog/automated-prompt-optimization)
-(2026-01-01) and [Evidently 0.7.10](https://www.evidentlyai.com/blog/llm-judge-prompt-optimization).
-A loop over three pluggable parts — Strategy, Executor, Scorer — with two strategies ("ask the LLM
-to improve" and mistake-driven feedback), a 40/40/20 train/val/test split, and early stopping on
-max iterations, minimum score gain or a target score. Aimed first at **LLM-judge prompts**
-trained from labelled data.
-
-**Verdict — weak.** One hill-climb with a held-out test split — sounder than keep-if-dev-improved,
-but no cost accounting was described.
-
-**Worth taking.** Judge prompts as an optimization target in their own right: our grader node is
-a prompt too, and "fit the judge to expert labels" is a campaign we could run on it.
-
-**Checked** 2026-09-24 — blog read; repo `evidentlyai/evidently` last push 2026-09-11.
+**What.** A `PromptOptimizer` in `evidently` ([blog](https://www.evidentlyai.com/blog/automated-prompt-optimization)):
+one hill-climb over a 40/40/20 split with early stopping, aimed at LLM-judge prompts. **Verdict —
+weak:** a held-out split, but no cost accounting. **Worth taking:** the judge prompt as a target in
+its own right — our grader node is a prompt too. **Checked** 2026-09-24.
 
 ## agent-opt (Future AGI)
 
-**What.** [`future-agi/agent-opt`](https://github.com/future-agi/agent-opt), `pip install
-agent-opt`, Apache-2.0 (confirmed). Six optimizers, confirmed as files under
-`src/fi/opt/optimizers/`: random search, Bayesian (Optuna), ProTeGi, meta-prompt, PromptWizard,
-GEPA. LiteLLM for models, Future AGI's `ai-evaluation` for 50+ metrics, traces from `traceAI` as
-training data, winner deployed through their gateway.
-
-**Verdict — weak.** Named in [`related-work.md`](related-work.md) § Three layers as a menu; the
-argument of § A menu is not a bench applies unchanged.
-
-**Worth taking.** Nothing Opik does not already show.
-
-**Checked** 2026-09-24 — last `main` commit 2026-04-27, last push 2026-06-30; 75 stars.
+**What.** Six optimizers behind one package ([`future-agi/agent-opt`](https://github.com/future-agi/agent-opt)):
+random, Optuna, ProTeGi, meta-prompt, PromptWizard, GEPA. **Verdict — weak:** a menu, which
+[`related-work.md`](related-work.md) § A menu is not a bench answers. Nothing to take Opik does not
+show. **Checked** 2026-09-24 — last push 2026-06-30.
 
 ## Promptfoo
 
-**What.** [`promptfoo/promptfoo`](https://github.com/promptfoo/promptfoo) (MIT): a CLI and library
-for declarative evaluations (a prompts × providers × test-cases matrix with assertions, a local web
-viewer, CI integration) and red-teaming. No optimizer in the README. OpenAI announced its
-acquisition on [2026-03-09](https://openai.com/index/openai-to-acquire-promptfoo/) and said the
-open-source tools stay maintained.
-
-**Verdict — weak.** An evaluation harness; nothing searches.
-
-**Worth taking.** Its YAML test matrix and assertion vocabulary as a read-in format — a promptfoo
-config is a dataset plus graders a team already wrote.
-
-**Checked** 2026-09-24 — last push 2026-09-24, ~25k stars.
+**What.** Declarative evaluations and red-teaming ([`promptfoo/promptfoo`](https://github.com/promptfoo/promptfoo),
+acquired by OpenAI 2026-03-09); nothing searches. **Verdict — weak.** **Worth taking:** its YAML
+test matrix as a read-in format — a dataset plus graders a team already wrote. **Checked** 2026-09-24.
 
 ## llm-prompt-optimizer (MCP server)
 
-**What.** [`Divyesh-freelance/llm-prompt-optimizer`](https://github.com/Divyesh-freelance/llm-prompt-optimizer)
-([glama listing](https://glama.ai/mcp/servers/Divyesh-freelance/llm-prompt-optimizer)), MIT. Not a
-prompt optimizer in our sense: deterministic middleware that compresses a coding-agent request and
-attaches minimal repo context (intent guard, classification, dependency resolution, a 0.90
-similarity floor, drift detection) behind nine MCP tools. No dataset, no scoring loop.
-
-**Verdict — weak.** Name collision only.
-
-**Checked** 2026-09-24 — 3 commits, last 2026-04-28; 0 stars; glama marks it inactive.
+Deterministic request-compression middleware behind MCP tools
+([`Divyesh-freelance/llm-prompt-optimizer`](https://github.com/Divyesh-freelance/llm-prompt-optimizer)),
+no dataset or scoring loop. **Verdict — weak:** name collision only. **Checked** 2026-09-24.
 
 ## Arize Phoenix and W&B Weave
 
-Both sit in the telemetry row of [`related-work.md`](related-work.md) § Three layers beside
-Langfuse, and are compared with it (and Opik) on Comet's page quoted above.
-
-**What — Phoenix.** [`Arize-ai/phoenix`](https://github.com/Arize-ai/phoenix): tracing, evaluations,
-datasets and experiments, a prompt store with span replay. Licence is **Elastic License 2.0**, not
-OSI open source. Arize's search offering is **Prompt Learning**, a meta-prompt optimizer over
-English evaluation feedback, documented under the commercial Arize AX SDK with a Phoenix cookbook
-([docs](https://arize.com/docs/ax/develop/prompt-learning)); Arize has benchmarked it against GEPA
-on its own blog.
-
-**What — Weave.** [`wandb/weave`](https://github.com/wandb/weave) (Apache-2.0): `weave.op`
-tracing and evaluations; the README says the rest of the codebase is paused. No optimizer found.
-
-**Verdict — weak, both.** Telemetry-first; Phoenix's Prompt Learning is one more single algorithm.
-
-**Worth taking.** Span replay — rerun one step of a chain from a captured trace — is the
-node-level probe our pipeline search would want against a real trace.
-
-**Checked** 2026-09-24 — both last pushed 2026-09-24; Phoenix ~11.6k stars, Weave ~1.1k. Prompt
-Learning read from search summaries, not its source.
+**What.** Telemetry-first: [Phoenix](https://github.com/Arize-ai/phoenix) (Elastic License 2.0,
+span replay, a commercial meta-prompt optimizer "Prompt Learning") and
+[Weave](https://github.com/wandb/weave) (tracing and evaluations; no optimizer). **Verdict — weak,
+both.** **Worth taking:** span replay — rerun one step of a chain from a captured trace — as a
+node-level probe. **Checked** 2026-09-24; Prompt Learning read from summaries only.
 
 ## LangSmith
 
-The platform [Promptim](#promptim-langchain) runs on — datasets, Experiments, Annotation Queues,
-Prompt Hub; that entry covers it. No first-party optimizer beyond Promptim was checked.
-
-**Verdict — weak.** **Checked** 2026-09-24, via the Promptim entry only.
+The platform [Promptim](#promptim-langchain) runs on; that entry covers it. **Verdict — weak.**
+**Checked** 2026-09-24, via Promptim only.
 
 ## AlphaEvolve (Google DeepMind / Google Cloud)
 
@@ -378,53 +271,24 @@ proposer that only emits candidates and receives scores.
 
 ## Palantir AIP (AIP Evals)
 
-**What.** Inside Foundry, [AIP Evals](https://www.palantir.com/docs/foundry/aip-evals/overview)
-tests AIP Logic, chatbot or code functions against evaluation suites (LLM-as-judge, ROUGE, custom
-evaluators, intermediate parameters). Its [experiments](https://www.palantir.com/docs/foundry/aip-evals/experiments)
-treat prompts and models as hyperparameters and **grid-search** every combination as separate
-suite runs, compared by parameter group or up to four runs side by side. Search summaries also
-mention a results analyzer that clusters failures and suggests prompt edits — not verified at the
-source.
-
-**Verdict — weak.** Exhaustive grid over human-written variants, locked to Foundry. Nothing
-proposes, nothing stops early.
-
-**Checked** 2026-09-24 — docs pages, undated.
+**What.** [AIP Evals](https://www.palantir.com/docs/foundry/aip-evals/overview) grid-searches
+human-written prompt and model variants as separate suite runs inside Foundry. **Verdict — weak:**
+nothing proposes, nothing stops early. **Checked** 2026-09-24.
 
 ## NVIDIA SkillEvaluator
 
-**What.** [`NVIDIA/skillevaluator`](https://github.com/NVIDIA/skillevaluator) is an open-source
-framework for evaluating agent skills: instructions plus supporting files that an agent loads. It
-is the gate for NVIDIA's Verified Skills catalog. It works in three tiers:
-
-1. **Validation.** "Safe & well-formed?" Static and dependency checks, a rubric, an LLM security
-   pass, and optional scanners (Semgrep, Gitleaks).
-2. **Deduplication.** "Repeated or overlapping guidance?" Embedding-based overlap within a skill,
-   and across skills when you pass it a `--catalog`.
-3. **Live evaluation.** "Does it help the agent?" Paired trials with and without the skill,
-   reported as *Skill Lift*, over a four-bucket synthetic dataset or an existing one. The agents
-   run in Docker (Claude Code, Codex, OpenCode).
-
-Paper: *Evaluating Skills, Not Just Agents*, [arXiv 2608.20614](https://arxiv.org/abs/2608.20614).
-
-**Verdict — not a competitor.** It covers a small slice of what we do. It supports **one agent
-design**, an agent equipped with skills, and it only **evaluates** that design: nothing proposes a
-better skill, and nothing searches or stops. PromptPotter can build that design itself. A skilled
-agent is a configuration of our agent toolkit (the harbor connector plus one `SKILL.md` per
-episode) and is close to ready. What our toolkit adds is optimizing each skill, which
-SkillEvaluator does not do.
-
-**Worth taking.** The three tiers, adopted as the principle for skilled-agent targets
-([`../specs/roadmap.md`](../specs/roadmap.md) § Evolving agent harnesses). Specifically:
-- the baseline is the skill being *absent*, not the previous version of it;
-- checking overlap against the rest of the library is what keeps many skills maintainable.
-
-Its validation tier has a sibling in NVIDIA's own [SkillSpector](https://github.com/nvidia/skillspector),
-the scanner class [`external-constraints.md`](external-constraints.md) § SKILL names as the long-run
-form of our tier-1 security floor.
-
-**Checked** 2026-09-24 — README only; the four buckets and the exact Skill Lift statistic were not
-read at the source.
+**What.** [`NVIDIA/skillevaluator`](https://github.com/NVIDIA/skillevaluator)
+([arXiv 2608.20614](https://arxiv.org/abs/2608.20614)), the gate for NVIDIA's Verified Skills
+catalog, in three tiers: validation (static checks, a rubric, an LLM security pass), deduplication
+(embedding overlap within a skill and across a `--catalog`), and live evaluation (paired trials with
+and without the skill, reported as *Skill Lift*). **Verdict — not a competitor:** it evaluates one
+agent design and nothing proposes, searches or stops; a skilled agent is a configuration of our
+harbor connector plus one `SKILL.md`. **Worth taking:** the three tiers, adopted for skilled-agent
+targets ([`../specs/roadmap.md`](../specs/roadmap.md) § Evolving agent harnesses) — the baseline is
+the skill *absent*, and overlap is checked against the library. Its sibling scanner
+[SkillSpector](https://github.com/nvidia/skillspector) is the class
+[`external-constraints.md`](external-constraints.md) § SKILL names for our tier-1 security floor.
+**Checked** 2026-09-24 — README only.
 
 ## SoL-Pi (NVIDIA Labs)
 

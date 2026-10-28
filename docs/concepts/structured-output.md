@@ -46,9 +46,7 @@ An `enum` is easy to misfile. Its *values* are contract — `evidence_grounding_
 
 *Corollary — an enum whose value space is per-call belongs on the wire schema, not on the model.* `evidence_grounding.field` is grafted per round in `build_l1_response_schema` from `citable_fields(layout, …)`, the one statement of the menu, so a citable name the prompt never rendered is unrepresentable. **If a value space depends on state, freezing it in a model is a second declaration that will silently diverge from the first** — and the validator checking the frozen copy waves the fabrications through.
 
-Note what this means. The lever everyone reaches for first — rename the field — is the one that breaks things. The levers invisible to every parser, and therefore free to move, are the ones nobody touches. Reordering a schema and rewriting its descriptions changes what the model produces while leaving every consumer bit-for-bit unaffected.
-
-That asymmetry is the reason these two are the optimizable ones, and it is why a schema-mutating optimizer must be scoped to them explicitly — handed the whole schema, it will happily rename `candidate` and take the pipeline down.
+**A schema-mutating optimizer is scoped to the free levers explicitly** — handed the whole schema, it renames `candidate` and takes the pipeline down.
 
 ## Enforcement is provider-dependent
 
@@ -64,8 +62,4 @@ Two things both called "answer extraction" run in sequence, in different repos. 
 
 ## Shape-determinism ≠ content-determinism
 
-Structured output is often called "quasi-deterministic." It is not. Same schema, same temperature, two calls → different values. A schema constrains **shape**; it guarantees a parseable object with the fields you named and nothing about whether the values are right.
-
-That distinction is why this project exists. An LLM is an approximator — never *always* right, so per-call correctness is the wrong target. Shape-determinism converts unbounded generation into **bounded estimation**: prose can only be judged, a typed field can be compared, comparisons aggregate, aggregates carry an error bar, and a quantity with an error bar can be optimized. `score_search_point()`, composite fitness, θ, PoBB all rest on the answer arriving in a slot we named, positioned, and described.
-
-A schema buys no correctness. It buys a number you can trust yourself to measure — then you go earn the correctness with a loop.
+Structured output is often called "quasi-deterministic." It is not. Same schema, same temperature, two calls → different values. A schema constrains **shape**; it guarantees a parseable object with the fields you named and nothing about whether the values are right. What shape buys is **bounded estimation**: a typed field can be compared, comparisons aggregate with an error bar, and composite fitness, θ and candidate elimination all rest on the answer arriving in a slot we named, positioned and described.

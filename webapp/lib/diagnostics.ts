@@ -145,7 +145,7 @@ export function useIncidents(): Ring {
   return useSyncExternalStore(subscribeIncidents, getIncidents, emptyIncidents);
 }
 
-// Never ship it anywhere from here: ADR-0004 keeps privileged outbound work out of the app.
+// Never ship it anywhere from here: decisions.md § 0004 keeps privileged outbound work out of the app.
 export function formatDiagnostics(opts: { version: string | null }): string {
   const ring = getIncidents();
   const lines = [

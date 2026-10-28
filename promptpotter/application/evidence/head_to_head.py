@@ -596,7 +596,7 @@ def _pairs(graded: list[_Graded], record: HeadToHeadRecord | None) -> list[Selec
             if a.row.treatment_digest == b.row.treatment_digest:
                 continue
             read.append((_across(a.selected, b.selected, a.sample_keys), _guard([a, b], record)))
-    # ADR-0009 #6: a controlled and an uncontrolled reading never share a family; one that differs is in none.
+    # decisions.md § 0009: a controlled and an uncontrolled reading never share a family; one that differs is in none.
     families = {
         state: iter(
             as_family(

@@ -1,20 +1,10 @@
 # Adding a surface — golden-path recipes
 
-Expansion in PromptPotter is **fill-in-the-blank, CI-guarded**. Each surface
-below has a fixed set of edits and a contract test that fails the build when you
-wire only half of it. The pre-flight gate (root `CLAUDE.md`) and the
-per-layer `CLAUDE.md` files say *what* the rules are; this page says *where you
-type* and *which test catches you* if you miss a half.
-
-The pattern every recipe shares: **one registry is the source of truth, and an
-import- or init-time assert proves nothing fell out of it.** A capability can't silently
-disappear because the registry is code-derived and the assert walks it.
-
-**Where the guard lives.** Per [`tests/CLAUDE.md`](../../tests/CLAUDE.md) a test
-earns its place only if it catches *silent* harm; the structural / wire / shape
-suites were deliberately cut because those failures break loud. So most guards
-below are **import- or init-time asserts beside the registry they validate**, not standing
-tests. Add new ones the same way — never as a `test_structure` scan.
+The pre-flight gate (root `CLAUDE.md`) and the per-layer `CLAUDE.md` files say *what* the rules
+are; this page says *where you type* and *what catches you* if you wire only half. The pattern
+every recipe shares: **one registry is the source of truth, and an import- or init-time assert
+beside it proves nothing fell out of it** — never a standing `test_structure` scan
+([`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Structural invariants live in production, not tests).
 
 | You want to add… | Recipe | What actually catches you |
 |---|---|---|
@@ -27,74 +17,56 @@ tests. Add new ones the same way — never as a `test_structure` scan.
 | A CLI verb | [§7](#7-a-cli-verb) | `gate.py --only handler-tables` over `commands/verbs.py::VERBS` |
 | A control-plane command kind | [§8](#8-a-control-plane-command-kind) | None to satisfy: cap, handler **and the CLI verb** are columns of the kind's one row, its payload model the class named for it |
 | A served READ (a GET) | [§9](#9-a-served-read) | `gate.py --only specs` / `--only ts-types`, but **only once the route carries a `response_model`** — a read without one is invisible to both |
-| A measurement field | [developer README §4](README.md#4-cross-run-memory) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence. Declare it on `domain/scoring.py::MeasuredCell` / `PipelineData`; a `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
+| A measurement field, archive query or derived index | [§10](#10-a-measurement-field) | **Arm-time where a connector declares the key** (`Connector.required_observation_keys`), otherwise nothing — it is dropped at `sample_measurement.py::measure_sample` in silence |
+| A self-healing check | [§11](#11-a-self-healing-check) | Nothing to wire past the check: render and persistence iterate the outcomes |
 
 ---
 
 ## 1. A ledger record / telemetry event
 
-**First, the one decision**: there are
-two writer shapes, and they are *not* interchangeable — pick by whether the call
+**First, the one decision**: two writer shapes, *not* interchangeable — pick by whether the call
 site holds an explicit ledger handle.
 
 | If the fact originates… | Use | Why |
 |---|---|---|
-| in the **runner**, which owns the observers and threads per-cycle `ViewContext` state across events (phase enter/exit, round complete, the per-candidate / per-sample arm-walk records) | **`RunCallbacks`** method (`application/run_callbacks.py`) | The runner has the ledger as an explicit dependency and the phase path is **stateful** — the view builders read a `ViewContext` carried round-over-round. Owned state, explicit injection. |
-| **deep in the async LLM / dispatch chain**, with no ledger handle in scope (token usage, an LLM-call marker, a command ack, a crash, a self-healed round warning) | **`emit_*`** helper (`infrastructure/llm/telemetry.py`) | Stateless: kwargs in, append out. Reads the ledger from the `_CYCLE_LEDGER` ContextVar (set by `build_run_observers`, reset by `drain_all`) — the ContextVar exists *because* these sites can't be handed a handle. |
+| in the **runner**, which owns the observers and threads per-cycle `ViewContext` state across events | **`RunCallbacks`** method (`application/run_callbacks.py`) | The phase path is **stateful** — the view builders read a `ViewContext` carried round-over-round. Owned state, explicit injection. |
+| **deep in the async LLM / dispatch chain**, with no ledger handle in scope | **`emit_*`** helper (`infrastructure/llm/telemetry.py`) | Stateless: kwargs in, append out, off the `_CYCLE_LEDGER` ContextVar — which exists *because* these sites can't be handed a handle. |
 
-Do **not** fold one into the other: routing the runner's `RunCallbacks` through
-`emit_*` would force its explicit `ViewContext` into an ambient ContextVar
-(implicit mutable global), and routing `emit_*` through `RunCallbacks` is
-impossible (the deep sites have nothing to call it on).
+Do **not** fold one into the other: `RunCallbacks` through `emit_*` turns an explicit
+`ViewContext` into an ambient global, and the deep sites have nothing to call `RunCallbacks` on.
 
 The step-by-step is [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md)
-§ Conventions' canonical template. The one step it does not spell out: **override `_handle_xxx`
-on each projection that surfaces the fact** (`LiveDashboardProjection` for `dashboard.json`,
-`AuditTrailProjection` for `round_NNNN.json`, `ReadoutProjection` for `readout.log`). Unhandled = silently dropped,
-which is exactly what the guard prevents.
+§ Conventions. The one step it does not spell out: **override `_handle_xxx` on each projection
+that surfaces the fact** (`LiveDashboardProjection`, `AuditTrailProjection`, `ReadoutProjection`).
 
-**Guard (an import-time raise, not a standing test — see
-[`tests/CLAUDE.md`](../../tests/CLAUDE.md) § Structural invariants):** `Projection._route_table` must answer
-for every `CycleRecord` arm, and which arms are deliberately unfolded is stated there with
-each one's reason rather than here — a second list is what let the first one go wrong.
+**Guard (import-time):** `Projection._route_table` must answer for every `CycleRecord` arm; which
+arms are deliberately unfolded is stated there with each one's reason. **A missing arm does NOT
+break loud** — a record no fold answers for reaches no artifact and nothing raises, which is why
+the claim is checked at import.
 
-**A missing arm does NOT break loud** — a record no fold answers for reaches no artifact and
-nothing raises, which is why the claim is checked at import rather than asserted in prose.
-
-**A trace is a fold of the same record, not a second home for the fact.**
-`infrastructure/tracing/bridge.py::TracingProjection` is one more ledger subscriber: it carries
-the trace TOPOLOGY — campaign / round / phase / call spans and their scores, the shape a remote
-sink renders — by overriding `_handle_xxx` like any projection and calling the matching
-`tracing/events.py::TraceSink` hook on each sink. A sink overrides only the hooks it renders, so
-a record reaches a trace by one `_handle_*` there and one hook; nothing in the loop emits to it.
-
-Contract: [`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) §
-"Per-call telemetry", [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md)
-§ "Persistence — one ingress".
+**A trace is a fold of the same record, not a second home for the fact**: one `_handle_*` on
+`infrastructure/tracing/bridge.py::TracingProjection` and one `tracing/events.py::TraceSink` hook;
+nothing in the loop emits to it. Contract:
+[`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md) § Persistence — one
+ingress, two projections.
 
 ---
 
 ## 2. A prompt injection
 
 A `{{slot}}` the optimizer LLM sees. The registry is `injection_table()`
-(`application/optimizers/potter/dispatch/injections/registry.py`); every renderer
-is a pure `(InjectionBundle) -> list[Item]`.
+(`application/optimizers/potter/dispatch/injections/registry.py`).
 
-**Recipe:**
+1. Write a pure `_r_<name>(bundle) -> list[Item]` renderer in `dispatch/injections/` (returns
+   `[]` when its source field is empty — a panel that produces nothing is silent).
+2. Decorate it with `@signal("<name>", kind=…, char_cap=…, citable=…)` — registration happens at
+   the definition site, no separate registry edit.
+3. Make it reachable: the node's `NODE_LAYOUTS[node].floor` puts it on by default, `.extras`
+   offers it off the floor; `.possible` is the two together.
 
-1. Write a `_r_<name>(bundle) -> list[Item]` renderer in `dispatch/injections/`
-   (returns `[]` when its source field is empty — a panel that produces nothing is silent).
-2. Decorate it with `@signal("<name>", kind=…, char_cap=…, citable=…)` — registration
-   happens at the definition site; key and body are co-located, no separate
-   registry edit.
-3. To make it reachable, add it to the node's `NODE_LAYOUTS[node].floor` to put it on by
-   default, or to `.extras` to offer it off the floor; `.possible` is the two together (for
-   `l1_generate`, `.mandatory` is `L1_MANDATORY`).
-
-**Guard (at registry completion, no standing test):** `injection_table()` fails loud if a
-`possible` name has no registered renderer, and
-`validate_template()` (at `load_optimizer_prompt`) raises at template load on any
-`{{slot}}` not in the registry — typos fail loud.
+**Guard (at registry completion):** `injection_table()` fails loud if a `possible` name has no
+registered renderer, and `validate_template()` (at `load_optimizer_prompt`) raises on any
+`{{slot}}` not in the registry.
 
 Contract: [`dispatch-hub.md`](dispatch-hub.md) § L1 layout.
 
@@ -102,59 +74,40 @@ Contract: [`dispatch-hub.md`](dispatch-hub.md) § L1 layout.
 
 ## 3. A dashboard / view field
 
-A field on a phase view (the live CLI render + `dashboard.json`). A view is the
-typed `PhaseRecord.view`, so the field is **on-disk shape**: a reader folding the
-ledger and a subscriber folding live hold the same value, and there is **no
-reconstructor to keep in sync**.
-
-**Recipe:**
+A field on a phase view (the live CLI render + `dashboard.json`). A view is the typed
+`PhaseRecord.view`, so the field is **on-disk shape**: a ledger fold and a live subscriber hold
+the same value, with **no reconstructor to keep in sync**.
 
 1. Add the field to the `*View` model in `domain/phase_views.py`.
-2. Set it where the view is built — its builder in `application/views/ingress.py`,
-   or the call site that constructs a trivial one.
-3. Render it in `application/views/render/` (`ansi.py::to_text` /
-   `markdown.py::to_markdown`) and/or
-   read it where the fact is surfaced — `LiveDashboardProjection._handle_phase`
-   matches on the typed view.
-4. If the field also appears in post-hoc `log.md`, set it in `from_disk_log`
-   (`application/runner/output.py`) — that builder reads on-disk `index.json` for
-   **cross-cycle** rendering and is a genuinely separate source, not a roundtrip shim.
+2. Set it where the view is built — its builder in `application/views/ingress.py`.
+3. Render it in `application/views/render/` and/or read it where the fact is surfaced
+   (`LiveDashboardProjection._handle_phase` matches on the typed view).
+4. If it also appears in post-hoc `log.md`, set it in `application/runner/output.py::from_disk_log`
+   — a genuinely separate, **cross-cycle** source, not a roundtrip shim.
 
-**A field on the ROUND file is not this recipe — it is one edit.** Declare it on
-`RoundOutcome` (`domain/results.py`) and it rides the round's close, reaches every reader
-of a standing round, the typed round route and the `rounds/round_NNNN.json` checkout,
-because the model IS the document. There is no payload builder to mirror it into.
+**A field on the ROUND file is one edit**: declare it on `domain/results.py::RoundOutcome` — the
+model IS the document, so it reaches every reader of a standing round with no payload builder.
 
-**But the webapp's live surface is not the round** — it reads `dashboard.json`. Which model you
-mirror onto decides the cost, so ask first *whose* fact it is:
+**But the webapp's live surface is `dashboard.json`, not the round.** Ask first *whose* fact it is:
 
 - **Per-ARM** (it already lives on an `ArmState`) → add it to **`ArmReading`**
   (`domain/results.py`) and stop: a dashboard row live or closed, a scoreboard row and a tree
-  node all embed it, built by `ArmReading.of` off the arm's state. `build_candidate_rows` fills the live half from the
-  `AnnouncedArms` the buffer holds — each arm's last `ArmRecord` state and running fold, and `RoundBuffer.election` once held — so **ask WHEN your fact exists**: one the scorer
-  knows per sample rides `SampleScoredRecord.running`, one the election stamps rides `ElectionRecord.fit`, and a field that reaches
-  neither is null on every live row until the round closes. The webapp seam is `CandidateRow`
-  (`lib/types/candidate.ts` + `lib/derivations/round-candidates.ts`, which maps both halves
-  through ONE function).
+  node all embed it, built by `ArmReading.of`. The live half is `build_candidate_rows`', so
+  **ask WHEN your fact exists**: one the scorer knows per sample rides
+  `SampleScoredRecord.running`, one the election stamps rides `ElectionRecord.fit`, and a field
+  that reaches neither is null on every live row until the round closes. The webapp seam is
+  `CandidateRow` (`lib/derivations/round-candidates.ts` maps both halves through ONE function).
 - **Per-ROUND** → declare it on `RoundSummary` (`domain/dashboard_rows.py`) and set it in
   `RoundSummary.of`, beside it, which reads the round's close.
 
-Reach for the round-level route only when the fact genuinely isn't a candidate's, and only for a
-fact a panel renders: one the engine alone reads stays on `RoundOutcome`, and a served copy of it
-is dead surface.
+Reach for the round level only when the fact genuinely isn't a candidate's and a panel renders
+it: one the engine alone reads stays on `RoundOutcome`, and a served copy of it is dead surface.
 
 **A display field is not done until you have SEEN it render.** Every step above wires a
-declaration and a reader; none of them writes the value, and a field that nothing writes is
-invisible to every check that could exist — it is declared, so no schema refuses it; it is read,
-so no compaction moves it; the panel renders blank and each reader honestly reports "this backend
-does not say". `domain/scoring.py` names this as the third direction and states outright that no
-assert can catch it, so the enforcement is procedural and costs one glance: run it, look at the
-surface, confirm a number appeared.
-
-**Guard:** the two-factories-onto-one-View correctness invariant — the live
-builder and the disk builder must produce an equal `RoundCompleteView`. No
-standing test (a broken round-trip surfaces as a wrong/empty dashboard; the
-structural/contract suite was cut, see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
+declaration and a reader; none writes the value, and a field nothing writes passes every check
+that could exist — the panel renders blank and each reader honestly reports "this backend does not
+say". No assert can catch it, so the enforcement is one glance: run it, look, confirm a number
+appeared.
 
 Contract: [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md).
 
@@ -163,8 +116,6 @@ Contract: [`presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md).
 ## 4. A resume / decision checkpoint kind
 
 A decision a resume re-derives, or one it only archives.
-
-**Recipe:**
 
 1. Name the kind: a value of the deciding party's `CheckpointKind` enum — `BenchCheckpointKind`
    (`domain/run_records.py`), or the optimizer's own in its package (potter's
@@ -185,143 +136,82 @@ kind. `cli/commands/launch.py::divergence_hint` lists the checked kinds off that
 A new backend kind — one file under `connectors/` defining `CONNECTOR`, owned step by step by
 [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
 
-**The usual reader here is not us** — it is someone with a backend already running who wants it
-optimized, working through it in one conversation. **The wiring is the easy half**: four required
-fields, and the guard below catches a half-wired one before a run spends. Step 2 is what decides whether the
-campaign is worth running, and nothing about their backend tells you the answer. Each step's output
-is the next one's input.
+**The wiring is the easy half**; what decides whether the campaign is worth running is what is
+being improved and how it is graded, and nothing about the backend tells you that. Learn the shape
+cheapest-first (what they have, then ONE live probe they approve), then settle each decision where
+it is owned:
 
-### Step 1 — Learn the shape, cheapest source first
-
-Read what they already have (spec, handler source, a saved response, a `curl` line) — that costs
-nothing and answers most of it. Then **probe the live endpoint once**, with one real input they
-choose, which is the only way to see what it *actually* returns rather than what it documents;
-it spends against their provider, so ask first and fire once. Ask them only what neither answered.
-
-Come out knowing five things, and say them back before writing code: the **request** shape, the
-**response** shape, **where the number is** in it (or that there isn't one), what one row **costs**
-in seconds and dollars, and which request fields are **safe to vary**.
-
-### Step 2 — Decide what is being improved, and how it is graded
-
-The hard half, and the one that has no default. Five questions, each with a consequence:
-
-- **What is ONE measured row — one request, or a whole run?** It decides `measured_unit` and
-  `max_cells_in_flight` — and NOT how long an operator's concurrency press lasts, which is the
-  round's to spend and no connector's to declare;
+- **One measured row** — one request or a whole run: `measured_unit` + `max_cells_in_flight`,
   [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The measured unit.
-- **What decides whether that row was good — a label, or a number something else produced?**
-  That is the ANSWER SHAPE, declared in `extract_experiment` and nowhere else; § The answer shape
-  on the same page has what each choice commits you to.
-- **What is the formula?** `{dataset}/dataset.yaml::campaign.scoring` — `per_sample` is *was this cell RIGHT*,
-  `per_cell` the optional composite of what it was WORTH (latency, cost, reliability), and θ is
-  fit on the second. Namespace: [`stable-api.md`](stable-api.md) § 2. **Start with `per_sample`
-  alone.** A cost term needs a MEASURED anchor, and the first campaign is what measures it.
-- **What may the optimizer move?** `nodes.{node}.optimizer.param_keys` in `{dataset}/dataset.yaml::pipeline`. The
-  prompt is a lever only if the node declares `prompt_info` — a `remote_http` backend serves that
-  over `GET /pipeline`, an `in_process` one must declare it, or every variant would score
-  identically as no-skill: run init refuses that shape
-  (`pipeline_resolve.py::_validate_prompt_reach`). Prompt fields in `param_keys` do not stand in
-  for it unless the connector declares `prompt_fields_as_node_params`, which only the recursion does.
-- **What must it never move?** Anything that is a cost rail rather than a search axis stays
-  pinned in `config` and out of `param_keys` (Harbor's `max_turns` moves a cell's cost by an
-  order of magnitude). `model` and `provider` are structurally unreachable and need no decision —
-  [`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md).
+- **What grades it** — the answer shape, declared in `extract_experiment` alone, where a
+  verifier-graded backend yields `ground_truth: None` (same page, § The answer shape).
+- **Transport and credential** — declare `execution` on the connector (§ Execution mode — never a
+  branch in the core loop) and the `auth_token` hook (§ The credential rides the connector).
+- **The formula** — `{dataset}/dataset.yaml::campaign.scoring` ([`stable-api.md`](stable-api.md)
+  § 2). **Start with `per_sample` alone**: a cost term needs a MEASURED anchor, and the first
+  campaign is what measures it.
+- **What it may move** — `nodes.{node}.optimizer.param_keys`. The prompt is a lever only if the
+  node declares `prompt_info`, or run init refuses (`pipeline_resolve.py::_validate_prompt_reach`).
+  A cost rail (Harbor's `max_turns`) stays pinned in `config`, out of `param_keys`.
+- **The test slice** — never optimize on the rows they will report on:
+  [`datasets.md`](../operations/datasets.md) § Adding a dataset, steps 1 and 3.
+- **The wiring** — the connector file, then the dataset directory
+  ([`promptpotter/assets/datasets/CLAUDE.md`](../../promptpotter/assets/datasets/CLAUDE.md)
+  § A dataset file is a partial); every tunable starts at its **floor**
+  ([`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md)
+  § Origin = conservative floor).
 
-And one question that is theirs, not ours: **which slice have they reserved as test?** Never
-optimize on the rows they will later report on. [`dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
-§ Adding a dataset — the wiring process owns the rest of that decision; its step 1 is about
-published benchmarks and does not apply to a private backend, but steps 2–4 do.
+### Screen the instrument before funding a campaign
 
-### Step 3 — Wire it
+Set `budget: {rounds: 0}` and measure the origin only. **Read the spread, not the mean**: an
+origin at 0% is floor-pinned and one at 100% has nothing for a prompt to move, and neither is
+visible from a single cell. `seed-screen`, `noise-floor`, `verify` and `evidence` answer the
+sharper versions — [`persistence-and-state.md`](../operations/persistence-and-state.md).
 
-The connector file, then the dataset directory
-([`promptpotter/assets/datasets/CLAUDE.md`](../../promptpotter/assets/datasets/CLAUDE.md) § Canonical layout). **A dataset file is a
-partial** — owned by that page's section of the name; a new connector's dataset therefore states its
-own `backend_type` and `backend_name`, which the default names for TermNorm. Every tunable starts at its
-**floor**, never its centre —
-[`optimizers/potter/CLAUDE.md`](../../promptpotter/application/optimizers/potter/CLAUDE.md)
-§ Origin = conservative floor.
-
-### Step 4 — Screen the instrument before funding a campaign
-
-Set `budget: {rounds: 0}` and measure the origin only. **Read the spread, not the mean.** An origin at
-0% is floor-pinned and an origin at 100% has nothing for a prompt to move; both are unusable
-instruments and neither is visible from a single cell. `seed-screen`, `noise-floor` and `verify`
-answer the sharper versions of this, and `evidence` answers whether two readings can be compared
-at all — [`persistence-and-state.md`](../operations/persistence-and-state.md).
-
-**Guard (at registry completion, no standing test):** `connectors/__init__.py::_validate` raises
-if any connector is half-wired, and its own raise enumerates every half-wiring it rejects — read
-the list there rather than a copy here.
-
-Three things the recipe cannot show you:
-
-- **Execution mode** — owned by
-  [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § Execution mode — declare
-  `execution` on the connector; transport is never a branch in the core loop.
-- **The answer shape** — owned by
-  [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The answer shape — decide
-  it while writing `extract_experiment`, which is where a verifier-graded backend yields
-  `ground_truth: None` and where it declares that nowhere else.
-- **The credential** — owned by
-  [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The credential rides the
-  connector — declare it on the `auth_token` hook, never read one at a construction site.
+**Guard (at registry completion):** `connectors/__init__.py::_validate` raises on a half-wired
+connector, and its own raise enumerates every half-wiring it rejects.
 
 ---
 
 ## 6. An optimizer node
 
-One of the optimizer's own LLM nodes — `optimizers.llm_nodes()` enumerates the structured
-ones (each an `LlmNode` member declaring its own `response_model`), and is the only place that count is correct. The JSON declaration format
-and registry live in [`developer/node-standard.md`](node-standard.md). A node renders a
-`OptimizerPromptTemplate` through the same `DispatchHub` fill path as every other node —
-adding a slot it needs is §2.
+One of the optimizer's own LLM nodes — `optimizers.llm_nodes()` enumerates the structured ones
+(each an `LlmNode` member declaring its own `response_model`). The declaration format and registry
+live in [`node-standard.md`](node-standard.md). A node renders an `OptimizerPromptTemplate`
+through the same `DispatchHub` fill path as every other node — adding a slot it needs is §2.
 
-**Guard (at template load):** `validate_template()` at `load_optimizer_prompt` rejects any
-`{{slot}}` the node's template references that isn't in `injection_table()`. Keep every
-optimizer LLM call on the one `bench/llm_call.py::llm_call` path — an
-unwrapped LLM call is an automatic block at review (pre-flight gate), not a test.
+**Guard (at template load):** `validate_template()` rejects any `{{slot}}` not in
+`injection_table()`. Keep every optimizer LLM call on `bench/llm_call.py::llm_call` — an unwrapped
+call is an automatic block at review, not a test.
 
 **A whole optimizer is one package and edits nothing outside it:** `members.py` exports `MEMBERS`
-and `RUNTIME` (a plugin ships them through the two entry-point groups instead), the runtime's
-`manifest_dir` holds its `pipeline.yaml`, each kind of state it banks is a `StateSlice` (across rounds) or a `RoundOutput` (one round's)
-registered under its own `kind` and declared by the members that read and write it, and its decision kinds a
-`CheckpointKind` its runtime gates.
-[`examples/optimizer-plugin/`](../../examples/optimizer-plugin/) is that package, installable as it
-stands, and the [offline run](offline-run.md) runs it as the proof.
+and `RUNTIME` (a plugin ships them through the two entry-point groups), the runtime's
+`manifest_dir` holds its `pipeline.yaml`, each kind of state it banks is a `StateSlice` (across
+rounds) or a `RoundOutput` (one round's) registered under its own `kind`, and its decision kinds a
+`CheckpointKind` its runtime gates. [`examples/optimizer-plugin/`](../../examples/optimizer-plugin/)
+is that package, and the [offline run](offline-run.md) runs it as the proof.
 
 ---
 
 ## 7. A CLI verb
 
-A new `python -m promptpotter <verb>`. The CLI is a **thin shell**: parse, call into
-`application/`, format. Business logic that lands here is drift.
+A new `python -m promptpotter <verb>` — a **thin shell**: parse, call into `application/`, format.
+One module under `presentation/cli/commands/` and one `Verb` in `commands/verbs.py::VERBS`, the
+handler NAMED (`module:function`) so `--help` imports no verb; parser and dispatch derive from that
+roster. **A verb answering a `/commands/{kind}` is not written**: `VERBS` derives it from the
+kind's payload model and `command.py::cmd_command` dispatches it; a shell the derivation cannot
+express is its own module (`bench.py`).
 
-One module under `presentation/cli/commands/` and one `Verb` in `commands/verbs.py::VERBS` — its
-name, help, arguments and handler together, the handler NAMED (`module:function`) so `--help`
-imports no verb. The parser and the `COMMANDS` dispatch are both derived from that roster. **A
-verb answering a `/commands/{kind}` is not written**: `VERBS` derives it from the kind's payload
-model, one argument per field, and `command.py::cmd_command` dispatches it. A shell the
-derivation cannot express is its own module (`bench.py`).
-
-**Two decisions the wiring does not make for you.** Honor the verb's class — **write**
-(`new` / `resume`, which mint or extend a cycle), **lifecycle** (`archive` / `delete` /
-`unarchive` / `reset`), **manifest-edit** (`rename`, which rewrites `campaign.json` in place
-and leaves the tree and every measurement where they are), **diagnostic** (`ab` / `verify` /
-`noise-floor` / `seed-screen`, which must not perturb an existing cycle's measurements), or
-**maintenance** (`reindex` / `restamp` / `compact-archive`, which rewrite stored artifacts on
-purpose). A maintenance verb owes two things a diagnostic does not: it is dry-run by default,
-and it refuses while a producer could still be writing what it rewrites
-(`application/maintenance/archive_maintenance.py::archive_writers`) — except `reindex`, which
-rebuilds a derived index from the cell files and deletes nothing, so it owes neither. And do
-**not** add a read verb: reads happen by opening the artifact tree. **The readings in no file**
-— owned by [`persistence-and-state.md`](../operations/persistence-and-state.md) § Active session
-pointer; a read verb prints the application reading its REST peer serves. **An L4 inner run is
-addressed on the reads, never on a run-control verb** (`cycles --inside`, an `evidence` / `verify`
-subject's `;in=`): every other cycle-scoped kind declares an `inner_refusal`
-(`domain/command_kinds.py`), so its verb takes no such flag. Raw-file ingest is
-`new <file.csv>`, not an `ingest` verb.
+**Two decisions the wiring does not make for you.** A diagnostic verb must not perturb an
+existing cycle's measurements. A maintenance verb (one that rewrites stored artifacts on purpose)
+is dry-run by default and refuses while a producer could still be writing what it rewrites
+(`application/maintenance/archive_maintenance.py::archive_writers`) — except one that only
+rebuilds a derived index and deletes nothing (`reindex`), which owes neither. And do **not** add
+a read verb: reads happen by opening the artifact tree; the readings in no file are owned by
+[`persistence-and-state.md`](../operations/persistence-and-state.md) § Active session pointer,
+each printing the reading its REST peer serves. **An L4 inner run is addressed on the reads,
+never on a run-control verb** (`cycles --inside`, an `evidence` / `verify` subject's `;in=`):
+every other cycle-scoped kind declares an `inner_refusal` (`domain/command_kinds.py`).
 
 **Guard:** `gate.py --only handler-tables` resolves every named handler, and `--only help-imports`
 keeps the roster import-light. If the verb answers a `/commands/{kind}`, §8 owns the other half.
@@ -331,10 +221,8 @@ keeps the roster import-light. If the verb answers a `/commands/{kind}`, §8 own
 ## 8. A control-plane command kind
 
 A new `POST /commands/{kind}`. **A kind is ONE row of `domain/command_kinds.py::CommandKind`**,
-and every table a reader wants is derived from it. It sits in `domain/` and not beside the
-dispatcher because the parties that read it cannot all afford to import the dispatcher: the CLI
-resolves command bodies lazily so `--help` does not pay for the application tree, and a ledger
-fold reads which kinds a running loop takes.
+and every table a reader wants is derived from it. It sits in `domain/` because its readers — the
+lazy CLI `--help`, a ledger fold — cannot all afford to import the dispatcher.
 
 | The row's column | What it is | What refuses a wrong one |
 |---|---|---|
@@ -346,14 +234,13 @@ fold reads which kinds a running loop takes.
 The payload's address base is its target ledger (`CyclePayload`, `CampaignPayload`, a check-in's,
 or a bare `CommandPayload` for the workspace), and `routers/commands.py` routes on it.
 
-`cli_verb` is the `<entry-point-parity>` guard. Its value is either
-a CLI verb or `None` — and `None` is a **declaration**, not an escape hatch. Exactly one exists
-(`set-sample-lookahead`, whose absence from the terminal is the contract; root `CLAUDE.md`
-§ Conventions). Writing a second one is a design decision with a reason, not a wiring shortcut.
+`cli_verb` is the `<entry-point-parity>` guard. Its value is a CLI verb or `None` — and `None` is
+a **declaration**, not an escape hatch. Exactly one exists (`set-sample-lookahead`, whose absence
+from the terminal is the contract; root `CLAUDE.md` § Conventions). A second one is a design
+decision with a reason, not a wiring shortcut.
 
-Nothing else is written: `routers/commands.py` routes every kind on its payload model,
-`scripts/build_specs.py` generates its spec entry and `scripts/build_ts_types.py` its
-`CommandPayloads` entry, which `postCommand` types its body on.
+Nothing else is written: `scripts/build_specs.py` generates its spec entry and
+`scripts/build_ts_types.py` its `CommandPayloads` entry, which `postCommand` types its body on.
 
 ---
 
@@ -362,32 +249,56 @@ Nothing else is written: `routers/commands.py` routes every kind on its payload 
 A new `GET`. **Not a Control-remote command and not a sixth I/O kind** — that kind is defined by
 MUTATION, so a read adds no ingress and no writer (`architecture.md` § Control-remote).
 
-**Nothing here is caught by an import-time assert.** Steps 2–4 are what make a read
-machine-checked at all; skip them and every gate stays green over a surface nobody declared.
+**Nothing here is caught by an import-time assert**; skip steps 2–4 and every gate stays green
+over a surface nobody declared.
 
 | Step | Do | Why it is not optional |
 |---|---|---|
 | 1 | **Name the scope the read is a fact ABOUT**, and address it by that entity's id | A read keyed on the wrong entity is not a bug you find later — it answers *plausibly and wrongly* |
 | 2 | **Declare the response model before the handler** | Root `CLAUDE.md` § Pre-flight gate. The generated spec and TS types are built from it (`--only specs`, `--only ts-types`), and a route without one is undeclared with every gate green — the only step on the page nothing can catch |
-| 3 | **Resolve in `application/`, never in the router** | ADR-0006 (`cli/` + `embedded_run.py` must reach it) and `presentation/CLAUDE.md` § Out-of-bounds |
+| 3 | **Resolve in `application/`, never in the router** | [`decisions.md`](../decisions.md) § 0006 (`cli/` + `embedded_run.py` must reach it) and `presentation/CLAUDE.md` § Out-of-bounds |
 | 4 | **Serve provenance for anything the client could otherwise infer** | A closed set belongs on the server (`webapp/lib/CLAUDE.md`). Every value the browser has to *diff* to explain becomes a client twin that drifts |
 | 5 | **Add the row to `webapp/lib/CLAUDE.md` § Display-data sources** | A data class with no row is a data class with no owner, and the gap fills itself with stores |
 | 6 | **Run it and look at the panel** | §3's rule, and it binds hardest here: a served field that is declared, typed and never *written* renders as nothing, and no check that could exist would see it |
 
-**Reads and the polling rule.** `roadmap.md` § Hard ordering requires new webapp data panels to
-ride `dashboard.json` + the SSE tail. A GET is allowed beside that pair only when it is
-**one-shot topology** — its answer cannot change unless something the poll already announces
-changes, so the poll is its *invalidation signal* rather than its transport. Anything that
-changes on its own schedule belongs on the poll.
+**Reads and the polling rule.** New webapp data panels ride `dashboard.json` + the SSE tail. A
+GET is allowed beside that pair only when it is **one-shot topology** — its answer cannot change
+unless something the poll already announces changes, so the poll is its *invalidation signal*
+rather than its transport. Anything that changes on its own schedule belongs on the poll.
 
 ---
 
-## The shared discipline
+## 10. A measurement field
 
-Three invariants hold across every recipe above, each owned elsewhere and each breaking loud,
-which is why [`tests/CLAUDE.md`](../../tests/CLAUDE.md) says not to test them: **one ingress**
-— owned by [`infrastructure/CLAUDE.md`](../../promptpotter/infrastructure/CLAUDE.md)
-§ Persistence — one ingress, two projections · **layers don't reach backward** — owned by
-[`application/CLAUDE.md`](../../promptpotter/application/CLAUDE.md) § Layer rule · **registries
-are code-derived** — owned by [`../../promptpotter/CLAUDE.md`](../../promptpotter/CLAUDE.md)
-§ Ask the typed predicate, never a set of names.
+The archive's shape is [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md)'s;
+`MeasurementArchive` is the only gateway.
+
+| Change | Files |
+|---|---|
+| New field on every measurement | A measured FACT joins `domain/scoring.py::MeasuredCell` (or `PipelineData`); a STAMP beside the facts joins `domain/sample.py::FiledAnswer`. A `pipeline_data` key also needs `_INFRA_KEYS` or a dataset `observation_mapping`, plus the compaction asserts beside those types |
+| New retrieval query | A method on `MeasurementArchive` parallel to `measurements_for_config`; pair it with an index class if filtering must stay efficient |
+| New derived index | A class folding each POPULATION into one row keyed by `config_key` and stamped with its signature, applied through ONE `replay_row()` both live and on replay; register on `AxisIndex.refresh()`, persist via `archive_queries.write_sample_fold`'s shape — never a second mechanism |
+
+**`node_configs` is canonical identity** — it must stay deterministic from pipeline params.
+
+---
+
+## 11. A self-healing check
+
+Pick the wound by detector + score effect ([`self-healing-internals.md`](self-healing-internals.md)
+§ The wounds, mapped to the two axes); the owner falls out of the record type, so you never wire a
+nurse by hand.
+
+- Gen-time check on L1's output → **Wound 1**: a function in `validators/l1_strict.py` called from
+  `parse_population`, or in `bench/children.py` when every optimizer's child owes it. Give it a
+  stable `reason`.
+- Runtime measurement pointing at a config region → **Wound 2**: a check emitting `RuntimeFailure`
+  from `application/scoring/arm_states.py::read_breakage`, stamped `NurseOwner.L1` when L1 can
+  retune it, `NurseOwner.OPERATOR` when only the operator can.
+- Strategic stall → **Wound 3** is the patience timer, not a registry.
+- Post-parse check on L2/L3 output → **Wound 4**: extend the one that owns the output —
+  `validators/l3_output.py::l3_plan_breaches` or `dispatch/layout.py::validate_l1_layout`. Give it
+  a stable `validator_id`.
+
+Render and persistence are already wired — they iterate the outcomes, not a hard-coded list. Add a
+`NurseOwner` member only when a producer actually stamps it.

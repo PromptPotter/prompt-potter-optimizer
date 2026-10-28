@@ -453,17 +453,13 @@ one, and read `n_discordant` on the p_best stream to tell the two doors apart.
 
 ---
 
-## The two round-boundary mutations, and what each writes
+## The round-boundary draw, and what it writes
 
-Both run at end of round, **zero-signal first**:
+One mutation runs at end of round: **the round draw** — `AdaptiveQueue.draw` draws the `budget`
+samples of the active scoring set, in memory only (§ The between-round draw). Answers *"which
+samples does the next round score?"* No sample is removed from the dataset.
 
-1. **Zero-signal filter** — samples with no variance across observations are physically dropped from
-   the active dataset, on disk. Pre-policy: they carry no signal to either exploit or explore. Answers
-   *"is this sample dead across the campaign?"*
-2. **The round draw** — `AdaptiveQueue.draw` draws the `budget` samples of the active scoring set,
-   in memory only (§ The between-round draw). Answers *"which samples does the next round score?"*
-
-Beside them, deterministic triage reads each sample's failure streak: **zero-signal** (always-hit or
+Beside it, deterministic triage reads each sample's failure streak: **zero-signal** (always-hit or
 always-miss) is naturally deprioritized by `p(1−p)→0` with no physical removal; **chronically
 failing** is surfaced to Critique and L2/L3; **intermittent** is kept — it has the discrimination.
 
@@ -478,7 +474,7 @@ its ledger's ruler over no cells. **Campaign scope names the cycle it reads**
 (`application/scoring/measurement_log.py::campaign_scope_cycle`): its cells, δ, sample order and ruler are
 all that one cycle's. Every surface reads the view in one ranking
 (`hard_sample_sorter.py::rank_hard_samples`). The active scoring set is in-memory only — restored
-on resume by re-running both mutations against the rebuilt observation history. **Dataset scope is
+on resume by re-running the draw against the rebuilt observation history. **Dataset scope is
 never persisted**: it is cross-campaign, so no campaign owns it, and
 `GET /datasets/{name}/cells?scope=dataset` anchors a ruler per request on the dataset's archived
 cells alone (`bench/difficulty.py::calibrate_delta_ruler`). No θ was read on that anchor, and a
@@ -526,7 +522,7 @@ Three things gate it, none of them theory:
 - **Step-schema stability.** Per-step δ pools only if "step 2" is the same KIND of thing across
   cells. An agentic episode takes however many turns it takes, so a turn *index* is not an item.
   This needs a fixed SEMANTIC schema, decided when the dataset is cut —
-  [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
+  [`../operations/datasets.md`](../operations/datasets.md)
   § Adding a dataset owns that obligation, because retrofitting one means re-paying for every row.
   The `retrieve → ground → answer` schema and the three graders that measure it have SHIPPED, and
   [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md) § The step schema

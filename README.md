@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://app.promptpotter.com"><b>Open the app →</b></a> &nbsp;·&nbsp; nothing to install, sign in and bring your examples<br>
-  <sub><b>10 free optimization runs</b>, up to 10 rounds each, on our key, until <b>3 Dec 2026</b>. Or <code>pip install promptpotter</code> and run it on your machine; or self-host it for your team.</sub>
+  <sub>A <b>free allowance on our key</b> to start. Or <code>pip install promptpotter</code> and run it on your machine; or self-host it for your team.</sub>
 </p>
 
 <p align="center">
@@ -188,7 +188,7 @@ python -m promptpotter resume
 Bring a **labeled dataset** — input/output pairs as any delimited text, JSON, JSONL or a spreadsheet (`.xlsx`, `.xls`, `.ods`) — and say what the job is. No key set yet? `new` offers to write one on first run. `resume` picks up wherever the last run stopped: Ctrl+C pauses a campaign rather than losing it.
 
 > [!IMPORTANT]
-> **`new` needs a pipeline backend to score against** — the default is [TermNorm](https://github.com/runfish5/TermNorm-excel) on `:8000`, and a campaign refuses to start without one ([setting it up by hand](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/03-first-campaign.md#no-backend)).
+> **`new` needs a pipeline backend to score against** — the default is [TermNorm](https://github.com/runfish5/TermNorm-excel) on `:8000`, and a campaign refuses to start without one ([setting it up by hand](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/03-first-campaign.md#what-if-i-dont-have-a-backend)).
 >
 > **Shortest path:** in [Claude Code](https://claude.com/claude-code), type `/potter-run`. It downloads and starts that backend for you, audits your setup, picks a dataset, runs init, and reads the rounds back to you as they land.
 
@@ -274,7 +274,7 @@ The table is capability, not a benchmark result:
 
 ### The bench
 
-Peers ship an algorithm; PromptPotter ships an algorithm *and* the interface around it, and is built to run **other people's optimizers inside that interface** — one grader, one budget meter, one exam, one stopping rule, so their numbers may sit in one table ([what is held equal](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#a-menu-is-not-a-bench--the-honest-version)). Manifests for `potter`, `capo`, `levi` and `gepa` are in the tree; no comparison number is published until one peer — CAPO first — has run end to end in a head-to-head whose only difference is the optimizer.
+Peers ship an algorithm; PromptPotter ships an algorithm *and* the interface around it, and is built to run **other people's optimizers inside that interface** — one grader, one budget meter, one exam, one stopping rule, so their numbers may sit in one table ([what is held equal](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#a-menu-is-not-a-bench--the-honest-version)). Manifests for `potter`, `capo`, `levi` and `gepa` are in the tree, and each has run end to end in a real campaign; no comparison number is published until the controlled run across all four, scored on one held-out bench set.
 
 What we measure on, each dataset's starting score and the protocol a published number must pass: [promptpotter.com/benchmarks](https://promptpotter.com/benchmarks).
 
@@ -294,9 +294,7 @@ The optimizer is itself a pipeline of nodes, so it can be pointed at its own opt
 
 <br>
 
-While a campaign runs, keep **`cycles/{cycle_id}/dashboard.json`** open in an auto-reloading editor beside the terminal: the file is live scalar state (phase, round, candidate, accuracy, in-flight query), the terminal prints HIT/MISS and per-round banners. Drill-down peers sit beside it — `rounds/`, `log.md`, `index.json`, and `readout.log`, the terminal mirrored to a file. Full guide: [reading the output](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/04-reading-the-output.md).
-
-Every cycle writes a per-round digest to `log.md`. Verbatim, from the round replayed above — what the artifact looks like, not a result to read a number off:
+Each cycle is a directory: `dashboard.json` (live state), `rounds/`, `readout.log` (the terminal, mirrored) and `log.md`, a per-round digest ([reading the output](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/04-reading-the-output.md)). Verbatim, from the round replayed above — what the artifact looks like, not a result to read a number off:
 
 ```
 - improved: **yes**
@@ -335,7 +333,7 @@ A percentage in a round banner is an **in-campaign reading, computed on the rows
 
 - **Parameter-based optimization only.** It optimizes any pipeline that exposes tunable parameters — prompts, thresholds, model settings — but not model weights, neural architectures, or modality-specific representations.
 - **Requires a labeled dataset.** Input/output pairs are mandatory.
-- **In-campaign figures are not held-out figures.** The winner's own number is read off the rows that selected it, so it overstates deployment performance. A selection-clean partition is [on the roadmap](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/specs/roadmap.md); published head-to-head numbers use a reserved split instead.
+- **In-campaign figures are not held-out figures.** The winner's own number is read off the rows that selected it, so it overstates deployment performance. The headline is its score on a held-out bench set no optimizer sees: `python -m promptpotter bench`.
 
 ## Documentation
 

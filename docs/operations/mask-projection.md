@@ -1,193 +1,63 @@
 # The mask — how far a change reaches before you have to fork
 
-You changed something after the measurements were paid for: a scoring formula, a PoBB
-setting, the engine itself. Two questions follow, and only the second costs money.
+You changed something after the measurements were paid for — a scoring formula, a PoBB setting, the engine. The mask answers, against the record on disk with no LLM call, (1) would anything have gone differently, and (2) **how much of what you paid for still carries over, and where must you branch instead?**
 
-1. Would anything have gone differently?
-2. **How much of what you already paid for still carries over — and where must you branch
-   instead of continuing?**
+**Mask and lens are not two words for one thing.** The *mask* is the alternative criterion projected over the record; the *lens* is the query parameter that picks one (`?lens=…`).
 
-The mask answers both against the record on disk, with no re-runs and no LLM calls. It is
-what lets you change your mind about the criterion without throwing away the campaign.
+## The vocabulary
 
-**Mask and lens are not two words for one thing.** The *mask* is the alternative criterion
-projected over the record. The *lens* is the query parameter that picks one — `?lens=…` on
-the tree endpoint. One concept, one selector.
+The **record** is the realized lineage — a tree, not a line. A mask splits it:
 
-## The vocabulary you will see
+- **Invariant** — holds regardless: every measured `(candidate, sample)` result, each node's own value, any subtree off the diverging path.
+- **Divergent** — the lineage *structure* downstream of a choice the change would have made differently. The node's value is real; only its *position* is counterfactual, rendered dimmed.
 
-The **record** is the realized lineage: a campaign is a *tree*, not a line, and what it
-actually ran is the record. A mask applies a change and lets it propagate, splitting the
-record in two:
-
-- **Invariant** — holds regardless. Every measured `(candidate, sample)` result, each
-  node's own value, any subtree off the diverging path. Yours to keep building on.
-- **Divergent** — contingent on a choice the change would have made differently: the
-  lineage *structure* downstream. A divergent node's own value is still real; only its
-  *position* is counterfactual. The tree renders it dimmed.
-
-The **divergence point** is the boundary, and it is *emergent* — it appears wherever the
-change first stops carrying over, not at a site anyone declared. Because the lineage is a
-tree, this is per-branch: a divergence claims its descendant subtree, while a fork rooted
-*before* it stays invariant and is analysed for its own divergence. One mask can therefore
-yield several divergence points, and "how big a change can I make" has a per-branch answer.
-
-Nothing is stored. One shared fold, `find_divergences(record, verdict)`, walks the record
-asking a **verdict** — "would this have gone differently here?" — and the first flip on a
-branch is a divergence. Only the verdict varies; the fold never does. It deliberately does
-**not** build a second tree: past the first divergence nothing was measured, so any deeper
-tail would be fiction.
+**Say "divergence point", never "decision point" or "fork point"** ("fork" is `ForkSpec`'s). It is emergent and per-branch: one mask can yield several. Nothing is stored: one fold, `find_divergences(record, verdict)`, asks a verdict at each step and the first flip on a branch is a divergence. It builds no second tree — past the first divergence nothing was measured.
 
 ## Asking it
 
-Three verdicts ship, and each answers a different "what if".
-
 | Ask | How | Names an alternative? |
 |---|---|---|
-| **A different scoring formula** | `?lens=score:<formula>` on `GET /hierarchy/{address}`, the formula a `per_cell` composite — each candidate also gets a `lens_value`. `?lens=dials:<term=weight,…>` says the same thing as weights: the server realizes them on the campaign's own anchors (the origin's levels, under whatever the active criterion already pins) and serves the formula it read under as the course's `lens_criterion` | Yes — the candidate that formula ranks first |
-| **A PoBB gate switched off** | `?lens=abort:<variant>`, variant = `<gate>_off` for any `EliminationGate` (`epsilon` \| `lock_in` \| `collapsed`), or `all_off` — the table is DERIVED from that enum, so a new gate is switchable without editing this row | No — the continuation was never measured |
-| **A changed engine or scorer** | `python -m promptpotter ab [--campaign <id>]` — replays one whole campaign, the active one by default | Where a `round_winner` decision flips, yes |
+| **A different scoring formula** | `?lens=score:<formula>` on `GET /hierarchy/{address}` (a `per_cell` composite; each candidate gets a `lens_value`). `?lens=dials:<term=weight,…>` realizes weights on the campaign's own anchors and serves the formula as `lens_criterion` | Yes — the candidate that formula ranks first |
+| **A PoBB gate switched off** | `?lens=abort:<gate>_off` for any `EliminationGate` member, or `all_off` — derived from the enum | No — the continuation was never measured |
+| **A changed engine or scorer** | `python -m promptpotter ab [--campaign <id>]` | Where a `round_winner` decision flips, yes |
 
-**A lens is scored the way the run is.** `score:F` is the cycle's own scoring block with
-`per_cell` set to `F` — `mask/load.py::lens_overrides`, the `ConfigOverrides` a fork applying it
-carries; a `dials:` lens becomes its `F` first, so the fork carries `lens_criterion` — compiled to that cycle's `Scorer`, run over each arm's rows in the standing round
-(`Scorer.sheet`) and folded by `fold_cells`. So a `lens_value` is the composite a fresh run under
-`F` reports for that arm, whatever `F`'s shape: `F` over a round's means is a different number the
-moment `F` is nonlinear, and it ranks arms differently. The round's evaluator map is a reading the
-dashboard shows, never a formula input.
+**A lens is scored the way the run is.** `score:F` is the cycle's own scoring block with `per_cell = F` (`mask/load.py::lens_overrides`, the `ConfigOverrides` a fork applying it carries), run over each arm's rows (`Scorer.sheet`, `fold_cells`) — so a `lens_value` is what a fresh run under `F` reports, never `F` over a round's means.
 
-**Row one re-ranks the RECORD; row three re-runs the ELECTION, and the difference is not a
-matter of degree.** The lens orders candidates by `scoreboard_rank_key` over each arm's reading,
-so its divergence means *under this formula the crowned candidate is no longer the best-scoring
-one*. The election ranks Rasch θ-lift over the parent behind a coverage floor, and θ under
-another formula has to be re-fit from per-sample grades against a re-calibrated δ ruler — which
-is what `ab` does and what a polled tree read cannot. Ask the lens which rounds are worth
-replaying; ask `ab` whether the run would have moved.
+**The lens re-ranks the RECORD; `ab` re-runs the ELECTION.** The lens orders by `scoreboard_rank_key`; the election ranks θ-lift over the parent behind a coverage floor, which under another formula needs a re-fit against a re-calibrated ruler — `ab`'s job. Ask the lens which rounds are worth replaying; ask `ab` whether the run would have moved. Both stop at the first departure.
 
-`?samples=<id,id,…>` composes with a `score:` lens: re-score over just those samples, on **both
-sides** — the arms off their own rows, the parent off its own arm's rows (`RoundResult.reference_rows`) — or the bar
-stays at its full-set value while every challenger moves, and a round flips on nothing but that.
-A round that banked no parent panel is undecidable on a subset, never judged against a carried
-one. A lens read on a subset is exact there, since it grades cells rather than meaning a map.
-Samples with no lens read each cycle under its own scorer. No lens and no samples is the raw read.
+`?samples=<id,…>` composes with a `score:` lens and re-scores **both sides** — the arms and the parent (`RoundResult.reference_rows`) — or the bar stays put while every challenger moves. A round with no banked parent panel is undecidable on a subset.
 
-### The second consumer: a mask as a compare CHANNEL
-
-The tree answers *where does the record first disagree*. `GET /evidence` answers *and then
-what*, by carrying the same two segments on a subject address —
-`subject=course:<campaign>/<cycle>;lens=score:<formula>;samples=3,7,11` — so a branch and the
-same branch under another criterion pool as two channels of one read instead of two page loads.
-The mask is part of the subject KEY, which is what keeps them apart.
-
-Two folds, one round-level ranking, all in `application/mask/divergence.py`. `masked_election`
-decides one round against a stated parent floor; `find_divergences` asks it against the RECORDED
-parent one round at a time, while `scenario_spine` walks the chain — each round judged against the winner the
-scenario is standing on — and **ends on the round the two part**. Past that the run would have
-stood on a parent it never had, so no measurement describes it; that round is also where a fork
-applying the criterion is minted, which `resume_and_fork/resume.py` branches at on a scoring
-divergence, carrying the rounds before it. Every step is an arm the run measured; the fold picks
-among them and invents none.
-
-What the evidence read serves back per masked channel — the round the two part, who each reading
-stood on there, invariant rounds, samples scored, and the caveat as a served sentence — is
-`ScenarioReading` (`application/evidence/subjects.py`). The caveat is the same boundary this section
-already draws: θ is not re-fitted and no election is replayed, so the round it names is where the
-two readings part rather than a verdict the campaign reached.
+**The second consumer: a compare channel.** `GET /evidence` carries the same segments on a subject (`subject=course:<c>/<cy>;lens=score:<F>;samples=3,7`), the mask part of the subject KEY. `application/mask/divergence.py::masked_election` decides one round; `scenario_spine` walks the chain and **ends on the round the two part** — the round a fork applying the criterion is minted at. It serves `application/evidence/subjects.py::ScenarioReading`; θ is not re-fitted and no election is replayed, so the parting round is a boundary, not a verdict.
 
 ### Applying one — the preview IS the fork point
 
-A `score:` mask is the one setting an operator can change mid-campaign and see the cost of first,
-and the round it parts at is the round the fork is cut at. `fork-cycle` carries `keep_rounds`,
-which swaps the offshoot trigger for `OPERATOR_REWIND` — rounds `0..N-1` lifted, the branch
-continuing at N — and `ConfigOverrides.scoring` carries the criterion as `{per_cell: F}`, laid
-key by key over the parent's block, so the fork runs the scorer the preview read under. Preview
-and action are one fact rather than two surfaces that have to agree, which is why the apply
-affordance sits beside the mask editor rather than in a fork dialog of its own.
+The round a `score:` mask parts at is the round the fork is cut at: `fork-cycle` with `keep_rounds` mints an `OPERATOR_REWIND` (rounds `0..N-1` lifted) and `ConfigOverrides.scoring` carries `{per_cell: F}` over the parent's block. Preview and action are one fact, so the apply affordance sits beside the mask editor.
 
-**Two settings preview; everything else forks blind, and the difference is the point.** A criterion
-and a sample subset are re-projections of rows already measured. A node parameter, a model or a
-prompt field is not: nothing ever ran at the edited value, so no measurement on that searchpoint
-carries over and the honest render is unknown rather than a recomputed anything. Budget and sample
-look-ahead are the only two settings that move a RUNNING cycle in place. A surface offering the
-change is obliged to say which of the three it is.
+**Two settings preview; everything else forks blind.** A criterion and a sample subset re-project measured rows; a node parameter, a model or a prompt field has no measurement at the edited value, so the honest render is unknown. Budget and look-ahead alone move a RUNNING cycle in place. A surface offering a change says which of the three it is. **A knob's `Scope` (`application/campaign_config.py`)** decides resume: `POLICY` resumes in place; `DATA` and `IDENTITY` run divergence detection.
 
-**A knob's `Scope` (`application/campaign_config.py`) says what resume does with an edit to it.**
-`POLICY` governs unevaluated rounds only, so the cycle resumes in place. `DATA` shapes the trace and
-`IDENTITY` names what runs — a new treatment — so resume runs divergence detection on both.
-
-`ab` is the one that answers question 2 out loud. It reports where the change departs the
-record, how many rounds that leaves counterfactual, and the decisions that re-derived
-differently up to those points — then stops, because replaying past a departure describes a
-history that would not have happened. The lens takes the same stopping rule; what separates them
-is how exactly each locates the departure, not how far past it either will speak. Zero divergences means the whole forest survives the
-change and no fork is needed. It reads through the store's typed round loader, so a round
-file the current models cannot parse stops it loudly; a `score:` or `abort:` lens reads the
-summary fields instead and still serves such a cycle.
+`ab` reads through the typed round loader, so an unparseable round file stops it loudly; a `score:` or `abort:` lens reads summary fields and still serves such a cycle.
 
 ## What it will not claim
 
-- **A record is campaign-scoped; the tree is not.** One record is loaded per campaign the
-  tree spans. An inner (L4) run is its own campaign in its own `.inner/` sandbox, and a
-  cycle_id is content-addressed on the origin, so it repeats across them. Drill into an
-  inner cycle and every bar answering `null` is **a read nobody made**, not the lens
-  declining to speak.
-- **The computable boundary on abort.** *Suppressing* a contributor that did fire is
-  computable from the record. *Adding* one the run lacked is not — lock-in keys off the
-  leader's per-step `p_best` trajectory, which the per-candidate snapshot does not carry.
-  That question is answered by running a real sibling cycle on the policy-scope fork path.
-- **No backfill, structurally.** Every masked reading is graded from the persisted per-sample rows
-  at read time, so an old record is never "missing" a term; a term a row does not carry leaves
-  that ROW unscored, exactly as in a run. No tool rewrites a stored round file.
-- **A node lacking the masked input is *unknown*, never divergent.** Absence of data is not
-  evidence of departure.
+- **A record is campaign-scoped; the tree is not.** An L4 inner run is its own campaign in its own `.inner/` sandbox; a `null` bar there is a read nobody made, not the lens declining.
+- **Abort is computable only one way.** Suppressing a contributor that fired is computable; adding one the run lacked is not (lock-in keys off a `p_best` trajectory the snapshot does not carry) — that needs a real sibling cycle.
+- **No backfill.** Masked readings are graded from persisted rows at read time; a term a row lacks leaves that row unscored. No tool rewrites a stored round file.
+- **A node lacking the masked input is *unknown*, never divergent.**
 
-## Design decisions (the non-derivable rationale)
+## Design decisions
 
-1. **No persisted mask, and the write side did not create one.** The reuse is the fold plus the
-   verdicts; the criterion rides the request and is computed-then-discarded. Fork-from-divergence
-   was expected to be its first real reader and turned out not to be: an applied criterion rides
-   `CycleSeed.config_overrides`, which the fork already writes, so mask identity would be a second
-   home for a value the seed holds.
-2. **A mask is a verdict over the record, not a data-kind.** The value face is
-   scoring-specific and stays out of the shared fold; a verdict reads whatever features it
-   needs and the fold is indifferent. This is why a verdict lives beside the math it asks
-   rather than in one registry: scoring and abort beside the fold in `application/mask/divergence.py`, replay
-   beside the replayers it wraps.
-3. **One-step counterfactual.** At a divergence, name the alternative option — it was
-   measured, so it is real. Its descendants never existed; claim nothing deeper until a
-   real fork runs.
-4. **A mask is a testable hypothesis.** Anticipate a fork under the mask → measure the real
-   branch → attribute the outcome back. That closure *is* MCTS backpropagation, and it
-   landed exactly there: `backprop.py` is a second fold over the same record.
-5. **One active mask** at a time; overlays are additive later.
-6. **Say "divergence point", never "decision point" or "fork point".** "Fork" is taken by
-   the real branched-cycle `ForkSpec`, and the deferred write-side is literally
-   fork-from-divergence.
-7. **No commitment to "one day every criterion".** Every shipped verdict is a per-round
-   predicate, which is what the fold is proven for — not open-ended generality. Extract the
-   next one when a real consumer lands.
+1. **No persisted mask.** The criterion rides the request; an applied one rides `CycleSeed.config_overrides`, which the fork already writes, so mask identity would be a second home.
+2. **A mask is a verdict over the record, not a data-kind** — each verdict lives beside the math it asks (scoring and abort in `application/mask/divergence.py`, replay beside its replayers), not in a registry.
+3. **One-step counterfactual** — name the measured alternative at a divergence; claim nothing deeper until a real fork runs. `backprop.py` is a second fold over the same record.
+4. **One active mask** at a time.
+5. **No commitment to "every criterion"** — shipped verdicts are per-round predicates; extract the next when a real consumer lands.
 
 ## Invariants
 
-- **Fed the realizing criterion, the fold reproduces the record.** Each entity is re-graded
-  from its *own* rows under its cycle's own scorer, and the recorded eligibility filter is reused
-  verbatim — so a higher-scoring but ineligible candidate is still not named leader.
-- **Non-stationary realized criterion.** A `per_cell` formula changes by FORK, never mid-cycle
-  (`persistence-and-state.md` § Changing the composite formula), so a lens replaces the composite
-  in each cycle's OWN block and keeps the correctness formula in effect there; a parent carried
-  across a fork edge is re-graded under the child's scorer.
-- **A mask IS the composite, read per cell** — never a formula over a round's means, which agrees
-  with the run only where the formula is linear, and the shipped length charge is not.
-- **Cost.** A lens read folds the standing rounds of every campaign the tree spans, takes each
-  arm's rows from the archive and grades them once per request — formula evaluations only, no LLM call.
-- **Record unchanged.** A mask is a projection on top. The realized lineage and its winners
-  never move.
-- **One scoring home.** No mask math in TypeScript; the scoring gateway stays the single one; the fold is a read-time `application/` service, never an infrastructure
-  ledger-projection; no mask state is persisted.
-- **Selection unchanged.** Divergent nodes stay clickable — dimming is opacity and a label,
-  never a disabled interaction.
+- **Fed the realizing criterion, the fold reproduces the record** — each entity re-graded from its own rows under its cycle's own scorer, the recorded eligibility filter reused verbatim.
+- **A formula changes by fork, never mid-cycle** ([`persistence-and-state.md`](persistence-and-state.md) § Changing the composite formula), so a lens replaces the composite in each cycle's OWN block; a parent carried across a fork edge is re-graded under the child's scorer.
+- **A mask IS the composite read per cell** — a formula over means agrees only where linear, and the shipped length charge is not.
+- **Record unchanged; one scoring home** — no mask math in TypeScript, the fold a read-time `application/` service, no mask state persisted; formula evaluations only, no LLM call.
+- **Selection unchanged** — divergent nodes stay clickable; dimming is opacity and a label.
 
-Code is the source of truth: `promptpotter/application/mask/`. Composite-fitness chain and
-scoring authority: [`../architecture.md`](../architecture.md) §0.5. What of the write side is
-still open — the SAMPLE-SET half, which needs a replayable measurement order the fork seed does
-not carry — is [`../specs/roadmap.md`](../specs/roadmap.md) § Lineage mask.
+Code: `promptpotter/application/mask/`. Composite-fitness chain: [`../architecture.md`](../architecture.md) §0.5.

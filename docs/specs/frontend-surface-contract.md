@@ -54,44 +54,22 @@ invariants:
                       accepted floor (it's the probe that decides anon vs authed).
   I6_run_state_server_owned: '"Is anything running?" has ONE server-owned answer: the served
                       producer reading (domain/phases.py::ProducerReading — `producer.attached`
-                      on the dashboard, `state.attached` on a /hierarchy course entry), derived with
-                      run_phase. A paused cycle whose worker has exited is NOT attached —
-                      counting it keeps the jobs dock lit and destroys its all-quiet signal — and
-                      stays reachable as a sidebar row wearing its phase. detached means a dead
-                      producer (the heartbeat invariant, architecture.md § Display) and never
-                      renders as running. The browser holds no set of "live" phases and
-                      subtracts no clock of its own from a served stamp: every duration it
-                      shows of a run arrives as one (`silent_for_s`, `open_for_s`).
-                      Client-side connection loss (failed poll, offline, hidden tab) is presented as
-                      connection state (offline / stale affordance) and MUST NOT impersonate a run
-                      phase or unmount run controls while the last-known server phase is running.
-                      Every "running" surface — the sidebar-edge jobs dock (and its phone stand-in,
-                      the app bar back-arrow dot), the registry''s `running` — reads this one set AND
-                      one shared ordering (what needs you first); the dock adds the viewer's own
-                      scoring passes from the served machine-status (`mine`). A surface that RENDERS the
-                      phase reads the served table TOTAL over RunPhase (`RUN_PHASE_INFO`, generated
-                      from `domain/phases.py`), and the verb it offers is the served
-                      `admission` the dispatcher refuses on:
-                      testing `=== "running"` renders half the vocabulary as nothing, so
-                      a gate-held run — blocked on the operator, first in that ordering — reads as
-                      an idle sidebar row. `isLive` (poll.tsx) is NOT this answer and never
-                      substitutes for it: it is the served `producer.appending` — "should
-                      transient indicators be on" — which is false at the gate because nothing
-                      is being measured, while the producer is attached and polling for a
-                      decision. Read as "the run ended" it freezes **Run finished** into the chat
-                      above a card saying the run is holding.
-                      COROLLARY (wedged). run_phase provably cannot express running vs WEDGED:
-                      ATTACHMENT is the producer''s OS lock on the cycle (producer_lock.py) and
-                      no clock enters it, so a wedged process reads "running" for as long as
-                      it lives. The lock proves ATTACHMENT, never PROGRESS, so the server
-                      grades progress beside the phase (ProducerState: live, idle, wedged) off
-                      the heartbeat and the last non-heartbeat ledger append, over the windows
-                      runtime_flags.py owns. It is not a RunPhase member and must not become
-                      one; the gate (`held`) and an open cell are never wedged, because both
-                      legitimately heartbeat with zero progress.
-                      SIBLING: I9 applies this same rule — ONE server-owned answer, no
-                      client-side reconstruction — to "what config does this node run". Two
-                      questions, one discipline; they are a family, not a duplicated mechanism.'
+                      on the dashboard, `state.attached` on a /hierarchy course entry). A paused
+                      cycle whose worker has exited is NOT attached (it stays a sidebar row wearing
+                      its phase); detached never renders as running. The browser holds no set of
+                      "live" phases and subtracts no clock from a served stamp — every duration
+                      arrives served (`silent_for_s`, `open_for_s`). Connection loss renders as
+                      connection state, never as a run phase, and never unmounts run controls.
+                      Every "running" surface (the jobs dock, its phone dot, the registry''s
+                      `running`) reads this one set and one shared ordering; the dock adds the
+                      viewer''s own scoring passes (machine-status `mine`). A surface rendering the
+                      phase reads `RUN_PHASE_INFO`, TOTAL over RunPhase, and offers the served
+                      `admission` — testing `=== "running"` drops a gate-held run to an idle row.
+                      `isLive` (poll.tsx) is the served `producer.appending`, false at the gate,
+                      and never substitutes for attachment. Progress (ProducerState: live, idle,
+                      wedged) is graded server-side beside the phase and is never a RunPhase
+                      member — owned by persistence-and-state.md § Liveness.
+                      I9 is the same discipline applied to node config.'
   I7_failure_traceable: 'Every user-visible failure is IDENTIFIED, CLASSIFIED and TRACEABLE.
                       IDENTIFIED — the API stamps `error_id` on every error envelope and logs
                       it under the same handle (one seam, main.py::_error_response), so a
@@ -127,45 +105,45 @@ invariants:
   I9_pipeline_resolution_server_owned: 'What config a node RUNS in a campaign has ONE
                       server-owned answer: GET /campaigns/{id}/pipeline?at=<subject>, resolved by
                       application/pipeline_resolve.py::resolve_pipeline_for_campaign. A check-in
-                      draft, which is no campaign yet, takes its sibling
-                      (resolve_pipeline_for_draft), which the draft response also carries — so
-                      StaticConnectorProvider is a second TRANSPORT of one answer, not a second
-                      source, and overlaying anything else into it re-opens this. The campaign
-                      list''s `CampaignFacts.runs_with` is a second TRANSPORT of the same
-                      kind (campaign_runs_with: the root''s two merges, cut to settings), never a
-                      second source a row may re-merge or diff. I6 is its
-                      sibling — same shape, different question — and neither is a second
-                      mechanism for the other. The browser never joins a VALUE from one store
-                      onto a SCHEMA from another. Every param carries a served `source` naming
-                      the layer that won it (domain/pipeline_schema.py::ParamSource — `backend`
-                      is the check-in arm''s floor alone, `model_floor` a declared
-                      reasoning_effort no layer set, at the lowest rung its model accepts, and
-                      `unset` a param no layer wrote), so a badge, a compact fold, a lock glyph or a
-                      "(current)" off-menu option derived from a client-side diff is the
-                      violation this invariant names: a resolved config carries every param, so
-                      a diffed ·evolved badge fires on all of them, and once the base is served AT
-                      the addressed subject, `value !== baseValue` compares a number with itself
-                      and folds the whole configuration away. WHY an axis is shut is served too
-                      (`never_axis`), because the browser inferring it from the key''s name tells
-                      the cost-lever story for the output-schema contract.
-                      A component must not take a prop that RE-ROUTES which store it reads;
-                      identity props (which campaign, which round) are fine, source props are
-                      not. That distinction is the whole bug: call sites that disagree about
-                      where to look make one panel answer two models on two tabs, and a dataset
-                      file shared by several campaigns is nobody''s answer in particular.
-                      TWO BOUNDARIES, both deliberate. (1) A NEST is dataset-scoped until it
-                      SPAWNS: before any cell runs, an inner benchmark''s pipeline is topology
-                      and the dataset read is honest; once a cell has run it IS a whole inner
-                      campaign and the honest address is ?at=...;in=<hop>. Do not collapse them —
-                      the failure is silent, rendering a benchmark''s template under a heading
-                      naming a run that used something else. (2) This read is gated on
-                      owned_campaign and nothing else; a future demo-mode or shared-origin read is
-                      its OWN decision and does not inherit this one.
-                      PERMISSION IS SERVED TWICE on every enumerable axis, because one list
-                      cannot say both: `options` is the MENU, `permitted` the set the gate
-                      allows — the menu itself where the campaign stated no narrowing, which
-                      `permitted_stated` says. `narrow` REPLACES `param_allowed_values`, so a
-                      menu that is its own selection can never offer back an unticked value.'
+                      draft takes its sibling (resolve_pipeline_for_draft), carried on the draft
+                      response, so StaticConnectorProvider and `CampaignFacts.runs_with`
+                      (campaign_runs_with) are TRANSPORTS of one answer, never sources a row may
+                      re-merge or diff. The browser never joins a VALUE from one store onto a
+                      SCHEMA from another. Every param carries a served `source`
+                      (domain/pipeline_schema.py::ParamSource), so a badge, fold, lock glyph or
+                      "(current)" option derived from a client-side diff is the violation — a
+                      resolved config carries every param, and `value !== baseValue` at the
+                      addressed subject compares a number with itself. WHY an axis is shut is
+                      served too (`never_axis`), never inferred from a key name. A component takes
+                      IDENTITY props, never a prop that re-routes which store it reads. Two
+                      deliberate boundaries: (1) a NEST is dataset-scoped until a cell runs, then
+                      it is an inner campaign addressed ?at=...;in=<hop>; (2) this read is gated on
+                      owned_campaign alone — a demo-mode or shared-origin read is its own
+                      decision. Permission is served twice per enumerable axis: `options` the
+                      MENU, `permitted` what the gate allows (`permitted_stated` says whether the
+                      campaign narrowed); `narrow` REPLACES `param_allowed_values`.'
+  I10_poll_is_the_transport: 'Every webapp data panel builds on `dashboard.json` polling + the
+                      SSE ledger-tail — the design, not an interim seam; there is no live-state
+                      endpoint. One exemption: a ONE-SHOT TOPOLOGY read may sit beside the poll
+                      when the poll is its invalidation signal, not its transport.
+                      `GET /campaigns/{id}/pipeline` is the only panel-feeding one (a resolution
+                      cannot change without a new cycle or searchpoint, both announced by
+                      `dashboard.json`). A panel whose content changes while nothing else does
+                      rides the poll. `POST /campaigns/{id}/fork-preview`
+                      (presentation/api/routers/campaigns/manifests.py::preview_fork_steer) sits
+                      outside this rule: it is keyed on the operator''s pending gesture, which no
+                      poll can invalidate.'
+  I11_surface_parity: 'Whatever optimizer a campaign runs gets the same surfaces wherever the
+                      method permits; where a feature cannot apply, the surface says so. A surface
+                      learns the manifest from the served `optimizer` (CampaignPipelineResponse,
+                      CampaignRunsWith) and which features apply from served facts (`elects_on`,
+                      `run_limits.optimizer`), never from a default or a name test; the check-in
+                      picks from `GET /optimizers`. What an optimizer says in its own words rides
+                      its declarations — the manifest''s `phases`
+                      (application/optimizer_manifest.py), the runtime''s `opening` and
+                      `round_facts` (optimizers/nodes.py::OptimizerRuntime), its eliminator''s
+                      `Elimination.reason` (domain/results.py::arm_elimination) and its
+                      manifest''s node `description`s — rendered as served.'
 ```
 
 ## The served hierarchy
@@ -234,16 +212,15 @@ The only surfaces with a block here, because their constraints are legal and ord
 than rendering — a plausible edit undoes them and nothing fails.
 
 ```yaml
-access_gate:   # components/onboarding/AccessGate.tsx — status==='authed' AND access_state==='pending'
-  - anon NEVER sees this (no account yet) — I4.
-  - it PRECEDES consent_gate and the two are mutually exclusive: consent attaches when someone is
-    about to submit data, and a pending account cannot, so asking it to accept Terms would collect
-    a consent for something it may not do.
-  - reflects, never enforces — the dispatcher's capability gate already refuses a pending account's
-    every command (it holds the empty set), so this adds no second check.
-  - NO dismiss beyond sign-out: no ×, no backdrop-close, no ESC. There is nothing to agree to.
-    Sign-out navigates even when the logout call fails — a dead button on a non-dismissable
-    overlay strands the user.
+access_gate:   # components/onboarding/AccessGate.tsx — status==='authed' AND access_state==='blocked'
+  - the blocklist is its one trigger (shared/identity.py::AccessState is active | blocked); anon
+    NEVER sees it — I4.
+  - it takes precedence over consent_gate: a blocked account cannot submit, so has nothing to
+    consent to.
+  - reflects, never enforces — the dispatcher's capability gate already refuses a blocked
+    account's every command (it holds the empty set).
+  - NO dismiss beyond sign-out: no ×, no backdrop-close, no ESC. Sign-out navigates even when the
+    logout call fails — a dead button on a non-dismissable overlay strands the user.
 
 consent_gate:  # components/onboarding/ConsentGate.tsx — access_state==='active' AND version mismatch
   - anon NEVER sees this (read-only preview submits no data → no consent needed) — I4.

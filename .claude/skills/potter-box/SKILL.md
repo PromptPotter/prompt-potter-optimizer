@@ -2,14 +2,10 @@
 name: potter-box
 description: >-
   Operating the self-hosted Linux box that serves the PromptPotter API/webapp and the TermNorm
-  backend. Use this whenever the user mentions the linux box, the fedora box, the server, "start
-  termnorm", "termnorm isn't reachable", restarting the app, editing the box's .env, or checking
-  what is actually running in production — and also when a change you just made locally needs to
-  reach the deployed instance, even if the user does not name the server. Every use opens the
-  TermNorm window on the box first; reading the box is free, and anything that pulls, starts,
-  restarts or edits asks the operator first. Holds only what cannot be answered in one command —
-  preferences, and lessons that cost real time. Everything else, go read the box.
-compatibility: OpenSSH client with a `potter-box` Host alias configured (see Setup); tmux on the box; a Wayland desktop session for the GUI-terminal recipe.
+  backend. Use on the linux / fedora box, the server, "start termnorm", "termnorm isn't reachable",
+  restarting the app, the box's .env, what runs in production, or a local change that must reach
+  the deployed instance. Reading the box is free; pulling, starting, restarting or editing asks.
+compatibility: OpenSSH client with a `potter-box` Host alias in `~/.ssh/config`; tmux on the box; a Wayland desktop session for the GUI-terminal recipe.
 ---
 
 # potter-box
@@ -18,27 +14,10 @@ compatibility: OpenSSH client with a `potter-box` Host alias configured (see Set
 ssh potter-box
 ```
 
-**The alias is the point.** Hostname, user, key path and the Tailscale address live in
-`~/.ssh/config` — never in this file, never in the repo. That keeps this skill shareable: a reader
-gets the operating knowledge without inheriting your attack surface, and points the same alias at
-their own machine.
-
-## Setup (once per workstation)
-
-Add to `~/.ssh/config`, filling in your own values. Nothing else in this skill needs editing.
-
-```
-Host potter-box
-    HostName <lan-ip-or-dns>
-    User <you>
-    IdentityFile ~/.ssh/<your-key>
-    IdentitiesOnly yes
-```
-
-Add a second block (`potter-box-ts` or similar) for the Tailscale address if the box is reachable
-off-LAN. Verify with `ssh -o BatchMode=yes potter-box "echo OK; hostname"` — `BatchMode` makes a
-missing key fail immediately instead of hanging on a password prompt, which matters because an
-agent cannot answer one.
+Hostname, user, key and the Tailscale address live in `~/.ssh/config` (`Host potter-box`, plus a
+Tailscale block if off-LAN), never in the repo. Verify with
+`ssh -o BatchMode=yes potter-box "echo OK; hostname"` — `BatchMode` fails a missing key at once
+instead of hanging on a password prompt an agent cannot answer.
 
 ## `sudo` needs a password
 

@@ -1,14 +1,10 @@
 ---
 name: potter-run
 description: >-
-  Runs and supervises PromptPotter optimization campaigns — launches (`new` / `resume`), reads a
-  live run's dashboard and round files, diagnoses what the loop produced, and onboards a new
-  dataset. Fires when the operator says "/potter-run", "start a campaign", "run promptpotter-self",
-  "resume", "watch it", "how's the run", "why did round N do that", or names a dataset to
-  optimize — and equally when a campaign is already in flight and needs supervising
-  mid-conversation, with no fresh-start ceremony. Re-reads run state from disk on every entry,
-  then declares its mode in one line — bug-hunting (the default in this repo, where the run is an
-  instrument and the bug is the deliverable) or campaign-supervision (the run is the product).
+  Launches (`new` / `resume`), supervises and diagnoses PromptPotter campaigns, and onboards a new
+  dataset. Fires on "/potter-run", "start a campaign", "run promptpotter-self", "resume", "watch
+  it", "how's the run", "why did round N do that", a dataset named to optimize, or a campaign
+  already in flight that needs supervising.
 model: opus
 ---
 
@@ -82,20 +78,13 @@ Who launches is the autonomy mode's call — root `CLAUDE.md` § Working princip
 minutes to hours, so never block a foreground shell on one; `promptpotter-self` is the exception,
 owned by `/potter-self`.
 
-| Verb | Behavior |
-|---|---|
-| `new <name>` | Registered benchmark. Mint a fresh Campaign + root cycle from `promptpotter/assets/datasets/<name>/`, run from round 0 on the framing committed in `task.md`'s front matter — none committed, the mint decomposes its body and commits it first (one `checkin` call on the run's spend); `task_framing: off` in the campaign config runs unframed on purpose. Distinct `campaign_id` per invocation; the prior campaign is preserved. |
-| `new <file>` | Raw ingest — parse → `--set` → resolve origin → commit tenant dataset → mint + run. See [onboarding.md](reference/onboarding.md). One that stops short keeps its check-in and names it: finish it in the browser or `discard-draft <draft_id>`. |
-| `new … --set optimizer=<name>` | Pick the optimizer, either form: any `GET /optimizers` roster name (potter, capo, gepa, levi), plus `--set nodes.<node>.<knob>=V` for its knobs (`GET /optimizers/{name}/knobs`). The CLI spelling of `{dataset}/dataset.yaml::campaign.optimization.optimizer` + `optimization.nodes.<node>.config.<knob>`; the web check-in's optimizer picker writes the same two. A knob the manifest does not take is refused before anything mints. |
-| `new … --arm <h2h>:<key>` | Mint a CONTROLLED arm of a head-to-head, for an optimizer comparison rather than a best result: the first arm declares its instrument and budget, a later one adopts its split and budget and is refused on any other instrument, and each arm reads no other campaign's measurements, refuses steer/skip, and spends its declared search budget; `set-limits` moves one arm's cap alone, and the read then serves that arm's guard as `differs` on `budget`. `evidence` then reads the arms under the declared scorer. |
-| `resume` | Continue the active cycle from the tenant pointer. `--from N` rewinds in place. The run's shape — `--from`, `--no-check`, `--fork-on-divergence`, `--diag` — is the `start-run` command's `mode` (`from_round` / `no_divergence_check` / `fork_on_divergence` / `diag`), so REST takes it too and an embedded host passes the same `RunMode` to `run_campaign`. |
-| `set-limits` | Raise (or lower) a cap, each flag `N\|none` — the same four `new` and `resume` take for a launch. `--max-usd` / `--max-tokens` move the CAMPAIGN cap, one book every live cycle shares; `--max-rounds` / `--max-wall-clock` move this cycle's own. A `resume --steer`/`--rewind` fork takes the cycle pair only. |
-| `pause` | Ask a RUNNING cycle to stop at its next checkpoint — resumable, and the same dispatcher verb the webapp control fires. This is the HALT this skill keeps asking for. A launch still `queued` / `starting` refuses it: withdraw that one with `cancel-queued <job_id>` (`machine-status` lists it). |
-| `submit-arms` | Answer a round holding at the arm gate (`optimization.arm_gate: review \| author`, `off` by default): `submit-arms --arms arms.yaml [--keep 0,2]`. The file is a YAML list of arms, each an edit of the round's parent (`changes_description` + any of `prompt_fields` per prompt node, `shots` per prompt node, `pipeline_overlay`); `--keep` takes the listed drafts by index and is refused under `author`. The readout names the hold and its drafts; a run under this knob blocks every round until answered. |
-| `bench` | Grade the campaign's result on its held-out bench set: `bench [--campaign ID]`; admitted exactly where the served dashboard's `bench_score.status.can_grade` is true, and refused in its `refusal` otherwise (a run in flight, a selection already graded, a cycle beside the line). When a launch sends the pass itself is `bench_trigger` (`docs/architecture.md` § The bench score is not an optimizer's selection). Head-to-head arms grade at their own end. |
-| `verify` | Re-score one candidate (`candidate:<campaign>/<cycle>/<candidate_id>`) on search cells it has never met; moves no round and no election. The sanctioned way to settle a candidate — never re-ask a cell it already answered. |
-| `evidence` | Read any set of campaigns together: roster, comparability, replicates, the variance split, resolving power, and (behind `--ranking`) which edits beat their own origin. Zero spend, writes nothing. |
-| `compact-archive <mode>` | Reclaim the measurement archive: `inventory` COUNTS it first — configurations, answers and bytes by dataset, role and age, and the read that sizes every other mode. Then `compact` moves the fields nothing reads out of candidates' own answers into a gzip store beside them, `restore` puts them back, `purge-cold` deletes that store. Dry-run by default; `--dataset` scopes it. `origin` / `parent` answers are never touched. **`purge-cold --apply` is the one irreversible verb in this table** — the rows it drops are paid LLM spend. Refuses outright while any cycle can still append. |
+The verbs and their flags are [`persistence-and-state.md`](../../../docs/operations/persistence-and-state.md)'s
+and `--help`'s. The ones this skill reaches for: `new <name>` (a fresh campaign; `--set optimizer=<name>`
+picks the optimizer, `--arm <h2h>:<key>` mints a controlled head-to-head arm), `new <file>` (raw
+ingest, [onboarding.md](reference/onboarding.md)), `resume`, `pause` (the HALT this skill asks for;
+a queued launch takes `cancel-queued <job_id>`), `set-limits`, `submit-arms` (a round held at the arm
+gate), `bench`, `verify` and `evidence`. `compact-archive purge-cold --apply` destroys paid spend and
+is always asked for.
 
 **Every ending states its own next verb** (`STOP_REASON_INFO::next_step`), so read the run's
 readout rather than a ladder here. What it cannot tell you is the two ways a raise silently fails:
@@ -111,20 +100,12 @@ first pauses (resumable, exit 130), second force-quits. Every query lands in
 `measurements/cells/{config_key}.jsonl` immediately, so a hard kill loses zero work and `resume`
 cache-hits prior results.
 
-**Launch discipline for `promptpotter-self`** — owned by the `potter-self` skill
-(§ Live-run supervision), which states it in more depth: once, foreground, to completion; `resume` to
-iterate; `new` again only after a prompt or config change. Read it there; it is not
-restated here.
+**Launch discipline for `promptpotter-self`** — owned by the `potter-self` skill § Live-run supervision.
 
 ## Supervise
 
-**Self-firing cadence, ~150–270 s** (`ScheduleWakeup`), set the moment a run starts. Each wake is a
-full reading pass — a log-tail grep is not a checkup, and a passive Monitor is not supervision:
-every real bug so far was found by reading the run's own measurement files, not by a pattern hit.
-The interval is for *fanning out and researching*, not for idling.
-
-For `promptpotter-self`, the per-tick reading list is the `potter-self` skill
-(§ The per-checkup reading list) — read it there; it is the source of truth and is not restated here.
+**Self-firing cadence, ~150–270 s** (`ScheduleWakeup`), each wake a full reading pass — owned by the
+`potter-self` skill § Live-run supervision, whose per-checkup list is the `promptpotter-self` one.
 
 **Check node health before calling a round healthy.** Accuracy and critique are not enough. From
 `round_NNNN.json` (or `dashboard.json::rounds[-1]`): `health.grade` / `health.reasons` /
@@ -174,45 +155,19 @@ and the browser all say the same thing; don't compose a different one here).
 
 ### A held potter round is not proof the candidate failed — check the other estimator
 
-This section reads potter's own instruments — its sampler, PoBB and the θ gate, all present only
-where the selector elects on θ (`elects_on == "ability"`). A peer's round is ordered, cut and elected by its
-own manifest's nodes, so read those instead; none of what follows carries over.
+Potter's instruments only (`elects_on == "ability"`); a peer's round is read off its own manifest's
+nodes. How the round order, PoBB and the θ gate work is
+[`docs/methods/candidate-elimination.md`](../../../docs/methods/candidate-elimination.md)'s. What to do
+with it here:
 
-**The hit sequence is difficulty-ordered, so a tail of 1s is the ORDER, never a surge.**
-`build_round_order` (`intelligence/rasch.py`) puts parent-MISS win-opportunities
-first (ascending δ), a parent-HIT regression probe every 4th position while a miss or unknown is
-still unplaced, and cells the parent never answered last, ordered by DISTANCE FROM THE RULER'S
-CENTRE — never as misses, which front-loaded the easiest cells. (Not "by discrimination": that is
-2PL `aₛ`, and it reaches θ estimation alone.) So every
-arm ends `…1111111` and opens near zero: the late run is the bank, not momentum, and paired
-against a parent that also wins those rows it carries no information.
-
-**The promotion gate and the PoBB posterior can disagree — they are asking different questions.**
-`p_better` is a **stopping** posterior (is more measurement worth buying?); `improved` is a
-**promotion effect-size** gate (is the lift big enough to adopt?). Both read θ on the locked δ
-ruler — `display_metric` is DISPLAY config, never what the gate compares. They can legitimately
-disagree without either being broken. Read both, name both.
-
-**A number can be set by where you STOPPED — ask what CHOSE the rows.** `vs_reference` strata
-are defined by the *parent's own* grades, so on a truncated prefix the score is fixed by
-construction rather than by the data (one HIT-stratum slot every 4th position ⇒ a cut arm reports
-`⌊n/4⌋/n`). `PairedReading.reference_level` answers `None` unless both sides scored every cell
-of the set, so a cut arm reports where it stopped plus its θ, never a standing.
-**A `vs_reference` rate on a row whose `panel.scored < panel.expected` is not a standing —
-do not quote it, and do not compare it across arms.**
-
-**The ordering does not starve the posterior.** `p_best` moves across most of the budget, so arms
-that end close are close, and stratification is not why ε fails to fire.
-
-So: **when a round reports `improved: false`, open
-`.runtime/streams/round_NNNN_pobb.jsonl` and read the final `paired_breakdown` before accepting
-it.** A held round whose `p_better` sits far off 0.5 is a promotion the gate refused, not a
-candidate that failed. Report it as an instrument disagreement, and name both numbers.
-
-Do **not** answer this by retuning PoBB's `epsilon`, and do **not** route promotion through
-`display_metric` — that knob is display-only on purpose, and the gate is already θ. A held round
-means exactly one thing: no candidate's ability exceeded the parent's. If that still looks
-wrong after reading both numbers, ask what the round measured, not which estimator the gate uses.
+- **A tail of 1s is the difficulty ORDER** (`build_round_order`), never a surge.
+- **`p_better` (stop: buy more?) and `improved` (promote: adopt?) can disagree without either being
+  broken.** On `improved: false`, read the final `paired_breakdown` in
+  `.runtime/streams/round_NNNN_pobb.jsonl`; a `p_better` far off 0.5 is a refused promotion, not a
+  failed candidate. Report both numbers. Never answer it by retuning `epsilon` or by routing
+  promotion through `display_metric`.
+- **A `vs_reference` rate on a row with `panel.scored < panel.expected` is not a standing** — it is set
+  by where the arm stopped. Do not quote it or compare it across arms.
 
 ## Configs are the source of truth
 
@@ -221,7 +176,7 @@ The skill carries no parallel default-ladder. `README.md` (source, split, sample
 model, caps). BBEH's notebook run alone passes overrides beside the file:
 `docs/research/bbeh-comparison/bbeh_potter_runner.py::build_campaign_config` merges them over
 `{dataset}/dataset.yaml::campaign`, and an override wins. Model, `reasoning_effort` and the `max_tokens` convention are owned by
-[`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md)
+[`docs/operations/datasets.md`](../../../docs/operations/datasets.md) § The model a dataset runs
 — CHECK a campaign's `pipeline_overlay` against it rather than assuming.
 
 Read them. Don't propose parameter tweaks unbidden, don't classify data volume, don't offer
