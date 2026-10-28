@@ -11,8 +11,9 @@ from promptpotter.application.runner.round import (
     close_round,
     settle_owed_outputs,
 )
+from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ReadingState
-from promptpotter.domain.results import OverlapReading, RoundResult
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
 
 

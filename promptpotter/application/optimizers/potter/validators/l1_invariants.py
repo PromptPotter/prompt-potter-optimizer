@@ -6,6 +6,7 @@ from itertools import pairwise
 from typing import Any
 
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
+from promptpotter.domain.arms import Cut, Eliminated, Measured, Proposal
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_REJECT,
     candidate_delta,
@@ -13,13 +14,7 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import (
-    Cut,
-    Eliminated,
-    Measured,
-    Proposal,
-    RoundResult,
-)
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.wounds import INVARIANT_REASONS, ValidationFailure
 
 logger = logging.getLogger(__name__)

@@ -21,9 +21,9 @@ from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, default_jobs_dir
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.results import DiagnosticRunRecord
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.scoring import GradedCell
 from promptpotter.infrastructure.ledger import CycleEventLog

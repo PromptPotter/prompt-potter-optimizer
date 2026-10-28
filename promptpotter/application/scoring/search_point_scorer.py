@@ -12,9 +12,10 @@ from typing import TYPE_CHECKING
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
+from promptpotter.domain.arms import degradation_reading
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.measurement_provenance import grade_answer
 from promptpotter.domain.phases import WalkEnd
-from promptpotter.domain.results import ScoreSummary, degradation_reading
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, MeasuredCell, WalkedCell
 from promptpotter.domain.spend import ROLE_SPEND_KIND

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import Field, field_validator
 
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.bench import BenchTrigger, DatasetSplit
 from promptpotter.domain.campaign import (
     DeterminismClamp,
@@ -15,10 +16,10 @@ from promptpotter.domain.campaign import (
     RunDeclaration,
     StoppingRule,
 )
+from promptpotter.domain.cells import HardSampleOrder
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
-from promptpotter.domain.results import DisplayMetric, HardSampleOrder
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
@@ -111,7 +112,7 @@ class LivesConfig(StrictModel):
 
     @property
     def bank(self) -> tuple[int, int]:
-        """``(start, cap)``, as ``domain/results.py::stalls_left`` folds it."""
+        """``(start, cap)``, as ``domain/run_standing.py::stalls_left`` folds it."""
         return (self.start, self.cap)
 
 

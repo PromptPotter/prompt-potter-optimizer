@@ -7,6 +7,7 @@ import logging
 import traceback
 from typing import TYPE_CHECKING
 
+from promptpotter.domain.origin_panel import RoundAdvance
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
@@ -15,7 +16,6 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.results import RoundAdvance
 from promptpotter.infrastructure.llm.telemetry import emit_error_record, emit_round_warning
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -32,7 +32,8 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign_config import OriginGateMode, PanelGateMode
-    from promptpotter.domain.results import DegradationHealth, RunStanding
+    from promptpotter.domain.round_health import DegradationHealth
+    from promptpotter.domain.run_standing import RunStanding
     from promptpotter.domain.scoring import GradedCell
 
 logger = logging.getLogger(__name__)

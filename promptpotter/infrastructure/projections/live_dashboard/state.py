@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.dashboard_rows import (
@@ -14,10 +15,10 @@ from promptpotter.domain.dashboard_rows import (
 )
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
-from promptpotter.domain.results import DisplayMetric, RunStanding
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import DefaultsDrift, RunWiringRecord
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel

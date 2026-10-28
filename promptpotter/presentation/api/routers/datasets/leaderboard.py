@@ -9,9 +9,8 @@ from promptpotter.application.scoring.measurement_log import (
     measurement_log,
     open_cell,
 )
-from promptpotter.domain.cells import Cell, CellsResponse, HeatmapScope
+from promptpotter.domain.cells import Cell, CellsResponse, HardSampleOrder, HeatmapScope
 from promptpotter.domain.cycle_paths import decode_cycle_path
-from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.scoring import SampleStatus
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json

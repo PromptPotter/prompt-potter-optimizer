@@ -17,8 +17,8 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
 from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyRound, SubtreeCourse
 from promptpotter.domain.paired_reading import READING_STATE_INFO, PairedReading
-from promptpotter.domain.results import VERIFY_STRATEGY_LABELS
 from promptpotter.domain.treatment import Treatment
+from promptpotter.domain.verify_pass import VERIFY_STRATEGY_LABELS
 from promptpotter.shared.errors import ConflictError
 
 

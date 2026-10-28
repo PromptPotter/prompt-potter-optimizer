@@ -37,6 +37,8 @@ from promptpotter.application.runner.inner.tasks import (
     panel_cell,
 )
 from promptpotter.application.views.render.primitives import fmt_pct
+from promptpotter.domain.arm_reading import ArmFit, order_floor
+from promptpotter.domain.arms import Cut, Measured
 from promptpotter.domain.campaign_config import CampaignConfig, effective_config
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
@@ -51,7 +53,6 @@ from promptpotter.domain.l4.proxies import (
     unread_rounds,
 )
 from promptpotter.domain.phases import REFUSAL_STOPS, StopReason
-from promptpotter.domain.results import ArmFit, Cut, Measured, order_floor
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import SpawnedBy
 from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts

@@ -4,8 +4,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.search_point_scorer import SCORING_ERROR_ABORT, ScoredWalk
-from promptpotter.domain.phases import WalkEnd
-from promptpotter.domain.results import (
+from promptpotter.domain.arms import (
     Broken,
     Concluded,
     Cut,
@@ -18,6 +17,7 @@ from promptpotter.domain.results import (
     Proposed,
     Skipped,
 )
+from promptpotter.domain.phases import WalkEnd
 from promptpotter.domain.validators import BrokenSignal, StopSignal
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
 from promptpotter.shared.errors import ErrorCategory

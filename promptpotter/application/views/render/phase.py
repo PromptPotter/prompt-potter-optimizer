@@ -19,8 +19,8 @@ from promptpotter.application.views.render.primitives import (
     render_pipeline_overlay,
 )
 from promptpotter.domain.connector import MeasuredUnit, unit_count
+from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
 from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
-from promptpotter.domain.results import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
 from promptpotter.domain.ruler import PLATEAU_ROUNDS, LevelSeries
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 

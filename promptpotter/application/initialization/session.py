@@ -5,12 +5,13 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
+from promptpotter.domain.arm_reading import DisplayMetric
+from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, restored_partition
 from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
-from promptpotter.domain.results import DisplayMetric, PointContext
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import HeldBudget

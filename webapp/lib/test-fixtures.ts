@@ -508,7 +508,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
   };
 }
 
-// Mirrors `domain/results.py::candidate_label`; fixtures only — production reads the served label.
+// Mirrors `domain/arms.py::candidate_label`; fixtures only — production reads the served label.
 export const servedLabel = (round: number, idx: number) =>
   round === 0 ? "C0" : `C${round}.${idx + 1}`;
 

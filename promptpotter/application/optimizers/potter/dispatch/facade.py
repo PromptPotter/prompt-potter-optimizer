@@ -50,7 +50,7 @@ from promptpotter.domain import ruler
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.pool import BlockPool, DemoPool
-from promptpotter.domain.results import rounds_without_advance
+from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.infrastructure.llm.telemetry import (
     emit_round_warning,
     reset_cycle_ledger,

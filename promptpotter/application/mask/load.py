@@ -22,18 +22,13 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.application.scoring.metrics import fold_cells
+from promptpotter.domain.arms import ArmState, Cut, arm_elimination, is_electable
 from promptpotter.domain.campaign_config import CampaignConfig, apply_config_overrides
+from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.results import (
-    ArmState,
-    Cut,
-    RoundResult,
-    arm_elimination,
-    is_electable,
-    measured_cells,
-)
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import (
     CellSheet,

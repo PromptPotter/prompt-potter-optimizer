@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import Field
 
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.campaign import LIFECYCLE_STATUS_LABELS, LifecycleStatus
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -11,8 +12,8 @@ from promptpotter.domain.phases import (
     StopReason,
     run_phase_label,
 )
-from promptpotter.domain.results import DisplayMetric, RunStanding, closed_after_origin
 from promptpotter.domain.run_records import CycleFinal, ForkSpec, SpawnedBy, sibling_cycle_id
+from promptpotter.domain.run_standing import RunStanding, closed_after_origin
 from promptpotter.domain.strict_model import FrozenModel
 
 

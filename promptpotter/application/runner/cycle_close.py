@@ -27,8 +27,9 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.results import CycleResult, round_clocks
+from promptpotter.domain.results import CycleResult
 from promptpotter.domain.run_records import CycleFinal
+from promptpotter.domain.run_standing import round_clocks
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
 from promptpotter.shared.clock import utcnow_iso

@@ -56,6 +56,7 @@ from promptpotter.application.runner.bench import pair_on_bench
 from promptpotter.application.runner.inner.tasks import inner_instrument_config, parse_panel
 from promptpotter.application.scoring.paired import MemberRows
 from promptpotter.config.paths import install_datasets_root
+from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
@@ -64,11 +65,12 @@ from promptpotter.domain.l4.proxies import (
     mean_parent_level_se,
 )
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
+from promptpotter.domain.origin_panel import origin_panel
 from promptpotter.domain.paired_reading import ArmKey, MemberAddress
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineNode
-from promptpotter.domain.results import ArmSlot, CycleResult, RoundResult, origin_panel
+from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.ruler import (
     CellScopes,
     DeltaRuler,

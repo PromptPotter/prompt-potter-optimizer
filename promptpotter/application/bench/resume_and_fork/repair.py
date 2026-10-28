@@ -8,9 +8,9 @@ from promptpotter.application.bench.resume_and_fork.replayers import ReplayMisma
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.run_callbacks import stated_line
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.results import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.run_records import (
     ForkDirection,
     ForkTrigger,

@@ -120,6 +120,7 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
+from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
 from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, RunDeclaration
 from promptpotter.domain.campaign_config import (
@@ -165,7 +166,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptBlock
-from promptpotter.domain.results import PointContext, RoundResult
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
 from promptpotter.domain.sample import Bank, Sample

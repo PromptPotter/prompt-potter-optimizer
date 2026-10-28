@@ -20,8 +20,8 @@ from promptpotter.application.optimizers.potter.pobb.checks import (
     PoBBStop,
 )
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
+from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.results import Elimination
 from promptpotter.domain.validators import CaughtUp
 
 if TYPE_CHECKING:

@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import assert_never
 
+from promptpotter.domain.arms import Concluded, Measuring
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir
 from promptpotter.domain.dashboard_rows import RoundSummary, VerificationKind, VerificationMark
@@ -29,7 +30,6 @@ from promptpotter.domain.phases import (
     ErrorRecord,
     RunPhase,
 )
-from promptpotter.domain.results import Concluded, Measuring, RunStanding
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
 from promptpotter.domain.ruler import LevelSeries
@@ -58,6 +58,7 @@ from promptpotter.domain.run_records import (
     SampleStartedRecord,
     TokenUsageRecord,
 )
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, fitness_bands
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain

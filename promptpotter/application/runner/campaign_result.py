@@ -14,11 +14,11 @@ from promptpotter.application.runner.bench import (
     score_on_bench,
 )
 from promptpotter.application.scoring.closed_rounds import cycle_instrument
+from promptpotter.domain.arms import candidate_label
 from promptpotter.domain.bench import BenchPasses, BenchScore, LineRun
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.runtime_flags import derive_run_state

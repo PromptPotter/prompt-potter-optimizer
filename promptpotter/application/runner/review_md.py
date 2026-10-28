@@ -13,13 +13,9 @@ from promptpotter.application.views.render.primitives import (
 from promptpotter.domain.bench import BandedValue, BenchColumn, BenchReading, BenchScore
 from promptpotter.domain.paired_reading import ArmKey, LiftEstimate
 from promptpotter.domain.phases import StopReason, stop_next_step
-from promptpotter.domain.results import (
-    CEILING_FRACTION,
-    DegradationHealth,
-    RoundClocks,
-    RoundResult,
-    round_clocks,
-)
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.round_health import DegradationHealth
+from promptpotter.domain.run_standing import CEILING_FRACTION, RoundClocks, round_clocks
 from promptpotter.domain.spend import (
     RATE_PRICED_LABEL,
     SpendBucket,

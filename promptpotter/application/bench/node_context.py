@@ -26,6 +26,8 @@ from promptpotter.application.runner.inner.spawn_context import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.arms import ArmRole, Proposal, Proposed
+from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.opt_search_point import (
     OPERATOR_SOURCE,
     Locus,
@@ -37,15 +39,9 @@ from promptpotter.domain.opt_search_point import (
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool, PoolEntry
-from promptpotter.domain.results import (
-    ArmRole,
-    Proposal,
-    Proposed,
-    merge_known_outcomes,
-    round_document_digest,
-    walked_slot,
-)
+from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_records import LLMCallRecord, RoundProposedRecord
+from promptpotter.domain.run_standing import walked_slot
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel

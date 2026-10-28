@@ -5,8 +5,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from promptpotter.application.views.view_models import ViewContext
+from promptpotter.domain.arms import ArmState
 from promptpotter.domain.phases import CampaignPhase
-from promptpotter.domain.results import ArmState, Election, RoundResult, RunStanding
+from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.run_records import (
     ArmRecord,
     CycleRecord,
@@ -18,6 +19,7 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RoundEnteredRecord,
 )
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.shared.errors import graceful

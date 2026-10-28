@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.metrics import fold_cells
-from promptpotter.domain.results import CellFold
+from promptpotter.domain.cell_fold import CellFold
 from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import CellSheet, Scorer

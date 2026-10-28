@@ -4,7 +4,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.results import degradation_reading
+from promptpotter.domain.arms import degradation_reading
 from promptpotter.domain.results_health import classify_result, is_deprecated
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.shared.hashing import shapes_optimizer_prompt

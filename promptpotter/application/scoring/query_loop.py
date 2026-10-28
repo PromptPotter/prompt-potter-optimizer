@@ -59,7 +59,7 @@ from promptpotter.shared.errors import (
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.domain.results import ScoreSummary
+    from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import CatchUps, CaughtUp

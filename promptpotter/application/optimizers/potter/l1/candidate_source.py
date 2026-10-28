@@ -19,13 +19,13 @@ from promptpotter.application.optimizers.potter.l1.generate import L1Generation,
 from promptpotter.application.optimizers.potter.l1.population import parse_population
 from promptpotter.application.optimizers.potter.records import L1Readout, L2Memory
 from promptpotter.application.optimizers.potter.validators.l1_invariants import detect_invariants
-from promptpotter.domain.results import candidate_label
+from promptpotter.domain.arms import candidate_label
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.wounds import fatal_validation_failures
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.domain.results import Proposal
+    from promptpotter.domain.arms import Proposal
 
 logger = logging.getLogger(__name__)
 

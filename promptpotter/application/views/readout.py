@@ -40,7 +40,10 @@ from promptpotter.application.views.render.primitives import (
     display_tags,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
+from promptpotter.domain.arm_reading import ScoreboardRankKey, scoreboard_rank_key
+from promptpotter.domain.arms import Concluded, Cut, Measured, Measuring, Proposed, arm_elimination
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.paired_reading import ArmKey
@@ -51,17 +54,6 @@ from promptpotter.domain.phase_views import (
     ViewAnchors,
 )
 from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
-from promptpotter.domain.results import (
-    Concluded,
-    Cut,
-    Measured,
-    Measuring,
-    Proposed,
-    ScoreboardRankKey,
-    ScoreSummary,
-    arm_elimination,
-    scoreboard_rank_key,
-)
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,

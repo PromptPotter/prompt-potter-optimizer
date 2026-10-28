@@ -12,11 +12,11 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_prompt_field_not_gutted,
     l1_prompt_fields_open,
 )
+from promptpotter.domain.arms import Proposal
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_overlay import merge_pipeline_params
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import Proposal
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 if TYPE_CHECKING:

@@ -15,8 +15,9 @@ from promptpotter.application.optimizers.potter.validators.l1_behavior import (
 )
 from promptpotter.application.optimizers.potter.validators.l2_behavior import run_all_l2_checks
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_CHARGED, CritiqueReadout
-from promptpotter.domain.results import OptimizerFact, RoundResult, rounds_without_advance
+from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
+from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.wounds import COLLAPSE_WORDS
 
 RoundOneVerdict = Literal["healthy", "degraded", "broken", "unknown"]

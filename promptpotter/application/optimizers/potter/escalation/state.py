@@ -14,8 +14,8 @@ from promptpotter.application.optimizers.potter.escalation.rules import (
     decide_escalation,
 )
 from promptpotter.application.optimizers.potter.records import Ladder, LayerCounters
+from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:

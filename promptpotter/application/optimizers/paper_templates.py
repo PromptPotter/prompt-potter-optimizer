@@ -12,9 +12,9 @@ from promptpotter.domain.wounds import ValidationFailure
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
+    from promptpotter.domain.arms import Proposal
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineNode
-    from promptpotter.domain.results import Proposal
 
 
 _PROMPT = re.compile(r"<prompt>(.*?)</prompt>", re.DOTALL)

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Annotated, Any
 
-from promptpotter.domain.results import CellFold
+from promptpotter.domain.cell_fold import CellFold
 from promptpotter.domain.search_point import PARAM_FORBIDDEN_KEYS
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 

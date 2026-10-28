@@ -2,18 +2,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from promptpotter.domain.arm_reading import ArmElection, ArmReading, panel_counts, panel_cuts
+from promptpotter.domain.arms import Proposed, arm_name
 from promptpotter.domain.dashboard_rows import (
     DashboardSample,
     LiveCandidate,
     sample_status,
-)
-from promptpotter.domain.results import (
-    ArmElection,
-    ArmReading,
-    Proposed,
-    arm_name,
-    panel_counts,
-    panel_cuts,
 )
 from promptpotter.domain.results_health import terminal_node
 from promptpotter.domain.scoring import SampleStatus, ground_truth_text, is_verifier_graded

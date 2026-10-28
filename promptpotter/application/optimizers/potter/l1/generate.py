@@ -29,13 +29,13 @@ from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_blocks_in_pool,
     l1_shots_in_demo_pool,
 )
+from promptpotter.domain.arms import Proposal
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, loci_of
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
     PARSE_FAILURE_WRONG_TYPE,
 )
-from promptpotter.domain.results import Proposal
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning

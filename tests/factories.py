@@ -36,6 +36,21 @@ from promptpotter.application.runner.inner.tasks import (
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
 from promptpotter.connectors.termnorm import termnorm_wire_adapter
+from promptpotter.domain.arms import (
+    ArmRole,
+    ArmSlot,
+    ArmState,
+    Broken,
+    Cut,
+    CutKind,
+    Eliminated,
+    Elimination,
+    Invalid,
+    Measured,
+    Proposed,
+    Skipped,
+    arm_end,
+)
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     BandedValue,
@@ -53,36 +68,19 @@ from promptpotter.domain.campaign_config import (
     OptimizationConfig,
     declare_run,
 )
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
+from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, PairedReading, ReadingState
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import BlockPool, DemoPool
-from promptpotter.domain.results import (
-    ArmRole,
-    ArmSlot,
-    ArmState,
-    Broken,
-    Cut,
-    CutKind,
-    CycleResult,
-    DegradationHealth,
-    Election,
-    Eliminated,
-    Elimination,
-    Invalid,
-    Measured,
-    OverlapReading,
-    Proposed,
-    RoundResult,
-    ScoreSummary,
-    Skipped,
-    arm_end,
-)
+from promptpotter.domain.results import CycleResult, Election, RoundResult
+from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.ruler import (
     AbilityReading,
     LevelSeries,

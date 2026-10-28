@@ -71,6 +71,7 @@ from promptpotter.application.scoring.closed_rounds import (
     walked_rows,
 )
 from promptpotter.application.scoring.paired import MemberRows, as_family
+from promptpotter.domain.arms import Concluded, Proposed, arm_name
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
     flatten_prompts,
@@ -84,13 +85,6 @@ from promptpotter.domain.paired_reading import (
     Measurand,
     MemberAddress,
     PairedReading,
-)
-from promptpotter.domain.results import (
-    Concluded,
-    IndividualWalk,
-    Proposed,
-    arm_name,
-    individual_cells,
 )
 from promptpotter.domain.ruler import CellScopes
 from promptpotter.domain.scoring import CellSheet, GradedCell, ScoringFormulaError, WalkedCell
@@ -117,7 +111,7 @@ from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.measurement_context import RoleScope
+from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
 from promptpotter.shared.statistics import sample_sd
 
 if TYPE_CHECKING:

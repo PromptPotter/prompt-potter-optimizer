@@ -9,8 +9,11 @@ from typing import Annotated, Any, Literal, NamedTuple, Self
 
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+from promptpotter.domain.arm_reading import DisplayMetric
+from promptpotter.domain.arms import ArmState, Proposal, Proposed
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import PartitionRecord
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
@@ -30,19 +33,9 @@ from promptpotter.domain.phases import (
     StopReason,
 )
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
-from promptpotter.domain.results import (
-    ArmState,
-    DisplayMetric,
-    Election,
-    Proposal,
-    Proposed,
-    RoundCells,
-    RoundOutcome,
-    RoundResult,
-    RunStanding,
-    ScoreSummary,
-)
+from promptpotter.domain.results import Election, RoundCells, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import LevelSeries
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import LedgerCell, WalkedCell
 from promptpotter.domain.spend import (
     Budget,

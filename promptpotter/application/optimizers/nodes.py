@@ -25,10 +25,12 @@ from typing import (
 
 from pydantic import Field
 
+from promptpotter.domain.arms import ArmSlot, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, Scope
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
+from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import ArmSlot, Proposed, election_rows, rounds_without_advance
+from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import CatchUps
@@ -49,6 +51,9 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
+    from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
+    from promptpotter.domain.arms import Concluded, Elimination, Proposal
+    from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
@@ -56,16 +61,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Access, Pool
-    from promptpotter.domain.results import (
-        ArmFit,
-        Concluded,
-        DisplayMetric,
-        Elimination,
-        OptimizerFact,
-        Proposal,
-        RoundResult,
-        ScoreSummary,
-    )
+    from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell

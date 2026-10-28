@@ -5,7 +5,9 @@ from functools import cache
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, cast, get_args
 
+from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchPasses, BenchReading, PartitionRecord
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     LoopPayload,
@@ -23,18 +25,7 @@ from promptpotter.domain.phase_views import (
     VerifyGradedView,
 )
 from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase
-from promptpotter.domain.results import (
-    ArmState,
-    Cut,
-    IndividualWalk,
-    Measured,
-    RoundCells,
-    RunStanding,
-    ScoreSummary,
-    Skipped,
-    VerifyPass,
-    VerifyReading,
-)
+from promptpotter.domain.results import RoundCells
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import (
     AnnouncedArms,
@@ -74,6 +65,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
     WallClock,
 )
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import WalkedCell
 from promptpotter.domain.spend import (
     Budget,
@@ -82,6 +74,7 @@ from promptpotter.domain.spend import (
     metered,
 )
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.verify_pass import VerifyPass, VerifyReading
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
@@ -92,7 +85,7 @@ from promptpotter.infrastructure.store.read_model import (
 )
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.identity import Principal
-from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.measurement_context import IndividualWalk, MeasurementRole
 
 
 class _Last:

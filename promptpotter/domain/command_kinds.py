@@ -27,12 +27,12 @@ from promptpotter.domain.phases import (
     GateDecision,
 )
 from promptpotter.domain.pipeline_schema import ParamIntent
-from promptpotter.domain.results import VerifyStrategy
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel, WireInt
+from promptpotter.domain.verify_pass import VerifyStrategy
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
     CAMPAIGN_CREATE_CAP,

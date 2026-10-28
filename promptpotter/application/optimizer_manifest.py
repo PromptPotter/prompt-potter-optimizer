@@ -60,11 +60,11 @@ if TYPE_CHECKING:
         Sampler,
         Selector,
     )
+    from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pool import Access
-    from promptpotter.domain.results import DisplayMetric
 
 shapes_optimizer_prompt(__name__)
 

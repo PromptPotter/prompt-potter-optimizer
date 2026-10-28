@@ -107,8 +107,8 @@ from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
-from promptpotter.domain.results import rounds_without_advance
 from promptpotter.domain.results_health import evidence_starved_node
+from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.answer_text import truncate
@@ -136,12 +136,13 @@ if TYPE_CHECKING:
         Selection,
     )
     from promptpotter.application.optimizers.potter.dispatch.bundle import InjectionBundle
+    from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.pool import Pool
-    from promptpotter.domain.results import DisplayMetric, OptimizerFact, RoundResult
+    from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet

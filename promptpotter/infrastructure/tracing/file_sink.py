@@ -18,8 +18,9 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.measurement_context import instrument_depth
 
 if TYPE_CHECKING:
+    from promptpotter.domain.arms import Concluded
+    from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.results import Concluded, ScoreSummary
     from promptpotter.domain.run_records import (
         RoundClosedRecord,
         RoundEnteredRecord,

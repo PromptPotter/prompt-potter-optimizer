@@ -36,10 +36,10 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     PotterCheckpointKind,
 )
+from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.phase_views import OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
-from promptpotter.domain.results import order_floor
 from promptpotter.domain.run_records import (
     ConfigOverrides,
     ForkTrigger,

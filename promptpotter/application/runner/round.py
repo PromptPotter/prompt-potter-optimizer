@@ -31,7 +31,10 @@ from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.primitives import overlap_series
+from promptpotter.domain.arms import ArmState, Concluded, Measured, Proposal, is_leader_eligible
+from promptpotter.domain.cell_fold import unscoreable_cells
 from promptpotter.domain.optimizer_state import RoundOutput
+from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, OverlapReading, RoundAdvance
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState
 from promptpotter.domain.phase_views import MeasureEnterView
 from promptpotter.domain.phases import (
@@ -40,24 +43,10 @@ from promptpotter.domain.phases import (
     StopLoop,
     StopReason,
 )
-from promptpotter.domain.results import (
-    ROUND_ADVANCE_INFO,
-    ArmState,
-    Concluded,
-    Election,
-    Measured,
-    OverlapReading,
-    Proposal,
-    RoundAdvance,
-    RoundResult,
-    RunStanding,
-    is_leader_eligible,
-    line_reference,
-    stalls_left,
-    unscoreable_cells,
-)
+from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
 from promptpotter.domain.run_records import BenchCheckpointKind
+from promptpotter.domain.run_standing import RunStanding, line_reference, stalls_left
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -73,7 +62,7 @@ if TYPE_CHECKING:
         Proposer,
         Selection,
     )
-    from promptpotter.domain.results import DisplayMetric
+    from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)

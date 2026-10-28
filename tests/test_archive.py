@@ -87,6 +87,7 @@ from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
+from promptpotter.domain.arms import ArmSlot, PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
@@ -109,17 +110,11 @@ from promptpotter.domain.hierarchy import (
 )
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.optimizer_state import UnregisteredStatePartError
+from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
-from promptpotter.domain.results import (
-    ArmSlot,
-    OverlapReading,
-    PointContext,
-    RoundResult,
-    line_reference,
-    walked_slot,
-)
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     AnnouncedArms,
@@ -135,6 +130,7 @@ from promptpotter.domain.run_records import (
     RunPhaseRecord,
     SpawnedBy,
 )
+from promptpotter.domain.run_standing import line_reference, walked_slot
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition

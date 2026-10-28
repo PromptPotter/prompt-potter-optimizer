@@ -120,9 +120,9 @@ Checked in severity order (`ruler.py::theta_caveat`):
   cancel inside a lift. A later round reads it once this round's rows fold in.
 
   **"Is the round-N winner better than C0?" has its own answer, and it is not θ.**
-  `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads C0 and each declared pick
-  (`::best_line`, one line for every optimizer) on the fixed ORIGIN PANEL (`::origin_panel` — per
-  dataset, the cells the origin answered, every member topped up onto them once). Fixed, because a
+  `RoundResult.overlap` (`domain/origin_panel.py::OverlapReading`) reads C0 and each declared pick
+  (`run_standing.py::best_line`, one line for every optimizer) on the fixed ORIGIN PANEL
+  (`origin_panel.py::origin_panel` — per dataset, the cells the origin answered, every member topped up onto them once). Fixed, because a
   set re-chosen from what the line shared contracted as it grew. It is a rate, needing no ruler —
   readable when θ's scale has collapsed. The panel's rows also feed the election (draw and panel
   pooled, less the parent's crowning cells: `::election_rows`; mid-round cuts stay on the draw), so
@@ -168,7 +168,7 @@ implies. Call any "this round improved" claim provisional.
   parent's bar needs no winner's-curse credit. Still no interval and no multiplicity correction;
   `RoundResult.improved` reads any selection past round 0 as a promotion.
 - **Separability is read against C0, not the parent.** A round closes `advanced`
-  (`domain/results.py::round_advance`) only where its pick leads C0 on the origin panel by an
+  (`domain/origin_panel.py::round_advance`) only where its pick leads C0 on the origin panel by an
   interval clear of 0 and tops every earlier pick there. That `RoundAdvance` resets L1 patience and
   is the clock a result quotes (`index.json::final.rounds_to_separable`); adoption stays `improved`.
   A pick whose reading was not taken closes `unread` (neither reset nor stall); a panel with no pair

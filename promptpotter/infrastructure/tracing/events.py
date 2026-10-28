@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
-    from promptpotter.domain.results import Concluded, ScoreSummary
+    from promptpotter.domain.arms import Concluded
+    from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.run_records import (
         RoundClosedRecord,
         RoundEnteredRecord,

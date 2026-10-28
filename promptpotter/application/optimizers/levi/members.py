@@ -56,9 +56,11 @@ if TYPE_CHECKING:
         Proposals,
         Selection,
     )
+    from promptpotter.domain.arm_reading import DisplayMetric
+    from promptpotter.domain.arms import Proposal
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
     from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.results import DisplayMetric, Proposal, RoundResult
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
 

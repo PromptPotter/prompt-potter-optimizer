@@ -4,7 +4,7 @@
 
 **One error is innocent.** A single failed measurement — a validation failure on L1 output, a runtime failure mid-eval, a deprecated cache entry from a transient backend hiccup — is a technical issue, not the candidate's fault: the row is skipped, never scored, and evidence keeps accumulating on the same candidate. The default posture is "ignore and continue"; aborting requires evidence.
 
-**Repeats are the candidate's.** Errors that keep repeating on ONE candidate are its fault: `application/scoring/classification.py::DegradationCheck` — a bench check, run on every optimizer's arms whatever its eliminator — stops it as **`broken`** once its fraction of failed measurements crosses the campaign's `optimization.degradation_threshold`, or on a single fatal-classified sighting (`optimization.degradation_fatal_fastpath`). A broken arm is charged to the candidate as a wound the next proposals read, recorded apart from **`eliminated`**, which only the optimizer's eliminator says (`domain/results.py::Cut.kind`).
+**Repeats are the candidate's.** Errors that keep repeating on ONE candidate are its fault: `application/scoring/classification.py::DegradationCheck` — a bench check, run on every optimizer's arms whatever its eliminator — stops it as **`broken`** once its fraction of failed measurements crosses the campaign's `optimization.degradation_threshold`, or on a single fatal-classified sighting (`optimization.degradation_fatal_fastpath`). A broken arm is charged to the candidate as a wound the next proposals read, recorded apart from **`eliminated`**, which only the optimizer's eliminator says (`domain/arms.py::Cut.kind`).
 
 **Errors on every arm are an outage**, nobody's fault: the run halts (`StopReason.BACKEND_UNREACHABLE`).
 

@@ -113,6 +113,7 @@ from promptpotter.application.scoring.search_point_scorer import (
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
+from promptpotter.domain.arms import CutKind
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
@@ -126,6 +127,7 @@ from promptpotter.domain.command_kinds import (
     StartCheckinPayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.diagnostic_run import RescoreCount
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.proxies import inner_cell_facts
@@ -144,7 +146,6 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     WebSpendBound,
 )
-from promptpotter.domain.results import CutKind, RescoreCount
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (

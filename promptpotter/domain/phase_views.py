@@ -4,19 +4,14 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
+from promptpotter.domain.arm_reading import ArmReading, DisplayMetric
 from promptpotter.domain.bench import BenchPass, BenchReading, BenchScore, BenchSubject
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
-from promptpotter.domain.results import (
-    ArmReading,
-    DisplayMetric,
-    RunStanding,
-    ScoreSummary,
-    VerifyPass,
-    VerifyReading,
-    VerifyStrategy,
-)
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import CeilingMeter
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.domain.verify_pass import VerifyPass, VerifyReading, VerifyStrategy
 
 
 class ViewAnchors(FrozenModel):

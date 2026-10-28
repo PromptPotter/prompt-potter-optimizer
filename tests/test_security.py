@@ -63,6 +63,7 @@ from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import TERMS_VERSION
+from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.command_kinds import (
     CancelQueuedRunPayload,
     CommandKind,
@@ -85,7 +86,6 @@ from promptpotter.domain.pipeline_overlay import (
     steers_disallowed_model,
 )
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.results import ArmSlot
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
 from promptpotter.domain.run_records import (
     CommandAckRecord,

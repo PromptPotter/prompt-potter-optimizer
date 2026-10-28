@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from promptpotter.domain.activity import ActivityItem
+from promptpotter.domain.arm_reading import ArmReading, DisplayMetric
 from promptpotter.domain.bench import BenchStatus
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
@@ -18,8 +19,8 @@ from promptpotter.domain.phases import (
     RunState,
     stop_next_step,
 )
-from promptpotter.domain.results import ArmReading, DisplayMetric, RunStanding
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import LifetimeSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 

@@ -30,8 +30,8 @@ if TYPE_CHECKING:
         Proposals,
         Selection,
     )
+    from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
-    from promptpotter.domain.results import DisplayMetric
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
 

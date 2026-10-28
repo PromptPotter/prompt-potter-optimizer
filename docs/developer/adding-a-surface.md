@@ -90,7 +90,7 @@ model IS the document, so it reaches every reader of a standing round with no pa
 **But the webapp's live surface is `dashboard.json`, not the round.** Ask first *whose* fact it is:
 
 - **Per-ARM** (it already lives on an `ArmState`) → add it to **`ArmReading`**
-  (`domain/results.py`) and stop: a dashboard row live or closed, a scoreboard row and a tree
+  (`domain/arm_reading.py`) and stop: a dashboard row live or closed, a scoreboard row and a tree
   node all embed it, built by `ArmReading.of`. The live half is `build_candidate_rows`', so
   **ask WHEN your fact exists**: one the scorer knows per sample rides
   `SampleScoredRecord.running`, one the election stamps rides `ElectionRecord.fit`, and a field

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import contextvars
 import enum
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any, NamedTuple
 
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -77,6 +78,27 @@ SCOPE_ROLES: dict[RoleScope, frozenset[MeasurementRole]] = {
     RoleScope.REPORT: frozenset(MeasurementRole) - _HELD_OUT,
     RoleScope.BENCH: _HELD_OUT,
 }
+
+
+class IndividualWalk[C: tuple[Any, ...]](NamedTuple):
+    """A cell is any tuple LEADING with its sample's content key."""
+
+    individual_id: str
+    roles: frozenset[MeasurementRole]
+    cells: Sequence[C]
+
+
+def individual_cells[C: tuple[Any, ...]](
+    walks: Iterable[IndividualWalk[C]], individual_id: str, scope: RoleScope
+) -> list[C]:
+    """Nothing is folded: the reader grades these and takes ``CellSheet.standing``."""
+    visible = SCOPE_ROLES[scope]
+    return [
+        cell
+        for walk in walks
+        if walk.individual_id == individual_id and walk.roles <= visible
+        for cell in walk.cells
+    ]
 
 
 # A cell of these roles is a cell of the ARM its individual is in its round; any other is a pass.

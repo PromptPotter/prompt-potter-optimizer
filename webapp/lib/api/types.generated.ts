@@ -4510,11 +4510,11 @@ export const READING_STATE_KINDS: Record<ReadingState, ReadingStateKind> = {
   'instrument_differs': 'refused',
 };
 
-// What a closed round did to the best-so-far line (domain/results.py::RoundAdvance).
+// What a closed round did to the best-so-far line (domain/origin_panel.py::RoundAdvance).
 export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
 
 // The served label and sentence per advance. Mirror of
-// domain/results.py::ROUND_ADVANCE_INFO — the single wording source.
+// domain/origin_panel.py::ROUND_ADVANCE_INFO — the single wording source.
 export const ROUND_ADVANCE_LABELS: Record<RoundAdvance, string> = {
   'origin': 'origin',
   'advanced': 'advanced',
@@ -4577,7 +4577,7 @@ export const THETA_CAVEAT_INFO: Record<'disjoint_scopes' | 'cold_ruler' | 'flat_
   'floor_pinned': { head: "θ reads nothing for an all-miss arm", body: "This arm missed every cell it answered. With no hit the fit has nothing to read: every all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken from it, is not a measurement. The ruler, the election and the other arms' θ are unaffected." },
 };
 
-// Mirror of domain/results.py::ARM_VERDICT_LABELS — the single wording.
+// Mirror of domain/arm_reading.py::ARM_VERDICT_LABELS — the single wording.
 export const ARM_VERDICT_LABELS: Record<'retired' | 'invalid' | 'origin' | 'elected' | 'uncontested' | 'selected' | 'not_elected' | 'unmeasured' | 'awaiting', string> = {
   'retired': "retired",
   'invalid': "invalid — never measured",
@@ -4623,10 +4623,10 @@ export const MOVABLE_AGENT_LABELS: Record<"proposer" | "optimizer", string> = {
 // domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX.
 export const SCHEMA_DESCRIPTION_PREFIX = "output_schema_descriptions.";
 
-// A column every arm carries (domain/results.py::DisplayMetric).
+// A column every arm carries (domain/arm_reading.py::DisplayMetric).
 export type DisplayMetric = 'accuracy' | 'ability' | 'composite';
 
-// Each column's words, in pick order. Mirror of domain/results.py::DISPLAY_METRIC_INFO.
+// Each column's words, in pick order. Mirror of domain/arm_reading.py::DISPLAY_METRIC_INFO.
 export const DISPLAY_METRICS: readonly {
   id: DisplayMetric;
   label: string;
@@ -4644,7 +4644,7 @@ export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {
   'composite': 'composite',
 };
 
-// A displayed level's unit (domain/results.py::LevelUnit).
+// A displayed level's unit (domain/arm_reading.py::LevelUnit).
 export type LevelUnit = 'rate' | 'score' | 'theta';
 
 export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {
@@ -4654,7 +4654,7 @@ export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {
 };
 
 // How a verify pass's pick of fresh cells reads, by strategy. Mirror of
-// domain/results.py::VERIFY_STRATEGY_LABELS.
+// domain/verify_pass.py::VERIFY_STRATEGY_LABELS.
 export const VERIFY_STRATEGY_LABELS: Record<VerifyReading["strategy"], string> = {
   'random': 'picked at random',
   'hard': 'hardest first',

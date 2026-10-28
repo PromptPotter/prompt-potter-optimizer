@@ -19,6 +19,13 @@ from promptpotter.application.hierarchy import (
 )
 from promptpotter.application.mask.record import Lens
 from promptpotter.application.mask.tree_lens import lensed, read_samples
+from promptpotter.domain.arm_reading import (
+    ARM_VERDICT_LABELS,
+    ArmReading,
+    DisplayMetric,
+    arm_verdict,
+    panel_cuts,
+)
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import (
@@ -49,14 +56,7 @@ from promptpotter.domain.hierarchy import (
     entries_under,
 )
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.results import (
-    ARM_VERDICT_LABELS,
-    ArmReading,
-    DisplayMetric,
-    Election,
-    arm_verdict,
-    panel_cuts,
-)
+from promptpotter.domain.results import Election
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.run_records import ForkDirection, SpawnedBy
 from promptpotter.domain.strict_model import FrozenModel

@@ -101,7 +101,7 @@ arms still prints a leader.
 - **The instrument is decided per CELL** (`domain/cells.py::Seat`), each running its own manifest; two cells
   running one node under different overlays refuse (`tasks.py::InnerCells.owners`).
 - **θ never crosses a dataset; a lift pairs on shared cells.** A cross-dataset arm serves
-  `ThetaCaveat.DISJOINT_SCOPES`, C0 is topped up per dataset (`domain/results.py::origin_panel`), the bench is read
+  `ThetaCaveat.DISJOINT_SCOPES`, C0 is topped up per dataset (`domain/origin_panel.py::origin_panel`), the bench is read
   per dataset (`BenchScore.scopes`), and `adaptive_queue`'s `strata` draws per dataset.
 - **A cell runs the optimizer its own dataset names** (`tasks.py::InnerCell`); the outer pipeline is the union of
   their nodes (`InnerCells.pipeline`), and an edit reaches a cell only on its own optimizer's nodes (`InnerCells.own`).

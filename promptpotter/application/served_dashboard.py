@@ -21,8 +21,8 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.results import closed_after_origin
 from promptpotter.domain.run_records import ForkRemainder, RunWiringRecord
+from promptpotter.domain.run_standing import closed_after_origin
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import Budget, CeilingMeter, MeteredSpend
 from promptpotter.domain.strict_model import StrictModel

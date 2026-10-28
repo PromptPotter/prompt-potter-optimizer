@@ -9,6 +9,7 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.config.settings import settings
+from promptpotter.domain.arms import Proposal, candidate_label
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
     flatten_prompts,
@@ -24,12 +25,8 @@ from promptpotter.domain.phase_views import (
     SpDiffView,
     WarningEntry,
 )
-from promptpotter.domain.results import (
-    Proposal,
-    RoundResult,
-    RunStanding,
-    candidate_label,
-)
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import Budget, MeteredSpend
 from promptpotter.domain.wounds import collapse_reason
 from promptpotter.shared.answer_text import truncate

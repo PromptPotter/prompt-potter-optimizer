@@ -18,8 +18,8 @@ from promptpotter.application.scoring.selection import (
     elect_round_winner,
     paired_p_best,
 )
+from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.results import election_rows
 from promptpotter.domain.scoring import NO_CELLS, is_answer_collapsed
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import graceful

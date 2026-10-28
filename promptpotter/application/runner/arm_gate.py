@@ -16,10 +16,10 @@ from promptpotter.domain.search_point import SHOTS_KEY
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import RoundContext
+    from promptpotter.domain.arms import Proposal
     from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.command_kinds import SubmittedArm
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.results import Proposal
 
 logger = logging.getLogger(__name__)
 

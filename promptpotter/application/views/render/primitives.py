@@ -4,17 +4,18 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.origin_panel import LineRate, overlap_line, triggered_rates
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import LineRate, overlap_line, triggered_rates
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from promptpotter.domain.arm_reading import ArmReading
+    from promptpotter.domain.origin_panel import OverlapReading
     from promptpotter.domain.paired_reading import Coverage
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.results import ArmReading, OverlapReading
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 

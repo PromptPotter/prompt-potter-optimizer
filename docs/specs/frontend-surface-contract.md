@@ -142,7 +142,7 @@ invariants:
                       its declarations — the manifest''s `phases`
                       (application/optimizer_manifest.py), the runtime''s `opening` and
                       `round_facts` (optimizers/nodes.py::OptimizerRuntime), its eliminator''s
-                      `Elimination.reason` (domain/results.py::arm_elimination) and its
+                      `Elimination.reason` (domain/arms.py::arm_elimination) and its
                       manifest''s node `description`s — rendered as served.'
 ```
 

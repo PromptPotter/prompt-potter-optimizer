@@ -14,9 +14,9 @@ from promptpotter.application.cycle_addressing import (
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.initialization.loop_start import open_diagnostic
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.arms import BankedSearchPointError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.results import BankedSearchPointError
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import DiagnosticError

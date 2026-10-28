@@ -3,19 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
+from promptpotter.domain.arm_reading import ArmElection, ArmReading
+from promptpotter.domain.arms import ArmState, arm_name
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
+from promptpotter.domain.origin_panel import line_by_individual, overlap_line
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.results import (
-    ArmElection,
-    ArmReading,
-    ArmState,
-    Election,
-    arm_name,
-    line_by_individual,
-    overlap_line,
-)
+from promptpotter.domain.results import Election
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (

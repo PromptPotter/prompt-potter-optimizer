@@ -7,9 +7,9 @@ from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import ErrorRecord, StopReason
-from promptpotter.domain.results import ScoreSummary
 from promptpotter.domain.run_records import (
     BackendWarningRecord,
     CommandAckRecord,

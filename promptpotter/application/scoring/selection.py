@@ -22,8 +22,9 @@ from promptpotter.shared.statistics import (
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.rasch import RoundAbilities
+    from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.paired_reading import ArmKey
-    from promptpotter.domain.results import DisplayMetric, RoundResult
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
     from promptpotter.domain.scoring import GradeColumn
 

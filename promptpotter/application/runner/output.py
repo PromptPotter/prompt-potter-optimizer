@@ -25,9 +25,10 @@ from promptpotter.application.views.view_models import (
     LogMdView,
     RoundDigestView,
 )
+from promptpotter.domain.cells import HardSampleOrder
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.results import HardSampleOrder, RoundResult
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain

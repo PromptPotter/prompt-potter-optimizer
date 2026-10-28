@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import settings
+from promptpotter.domain.arms import Concluded
 from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.results import Concluded
 from promptpotter.domain.run_records import AnnouncedArms
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.tracing.events import (

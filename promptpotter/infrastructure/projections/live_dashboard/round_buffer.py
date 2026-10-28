@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
+from promptpotter.domain.arms import ArmState, arm_name
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey, ArmName
-from promptpotter.domain.results import ArmState, Election, ScoreSummary, arm_name
+from promptpotter.domain.results import Election
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,

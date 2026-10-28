@@ -12,7 +12,7 @@ import { fmtSigned } from "@/lib/format";
 const AXIS_W = 220;
 const ROW_H = 18;
 
-// served: domain/results.py::leading_arm — never an argmax here, which cannot apply the election's admission rule.
+// served: domain/results.py::Election.leading — never an argmax here, which cannot apply the election's admission rule.
 function leadingArm(r: ServedRound): ArmReading | null {
   return r.candidates.find((c) => c.reading.election.leading)?.reading ?? null;
 }

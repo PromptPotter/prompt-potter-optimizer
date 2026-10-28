@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
 
 from pydantic import Field
 
-from promptpotter.domain.results import CellFold
+from promptpotter.domain.cell_fold import CellFold
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl

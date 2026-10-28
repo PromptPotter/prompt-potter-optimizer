@@ -25,13 +25,13 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import ScoredWalk, score_search_point
+from promptpotter.domain.arms import ArmSlot, Concluded, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
-from promptpotter.domain.results import ArmSlot, Concluded, Proposed
 from promptpotter.domain.run_records import (
     OPERATOR_ORIGIN_SOURCES,
     CycleSeed,

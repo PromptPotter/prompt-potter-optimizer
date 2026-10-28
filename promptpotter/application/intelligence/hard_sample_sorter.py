@@ -21,7 +21,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.application.intelligence.rasch import Observation
-    from promptpotter.domain.results import HardSampleOrder, RoundResult
+    from promptpotter.domain.cells import HardSampleOrder
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.ruler import DeltaRuler
 
 

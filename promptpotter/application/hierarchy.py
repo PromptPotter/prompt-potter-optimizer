@@ -8,6 +8,7 @@ from promptpotter.application.pipeline_resolve import campaign_runs_with, line_c
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits
+from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO, LevelUnit
 from promptpotter.domain.bench import BENCH_STATE_INFO, BenchScore
 from promptpotter.domain.campaign import (
     LIFECYCLE_STATUS_LABELS,
@@ -47,7 +48,6 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
     ReadingState,
 )
-from promptpotter.domain.results import DISPLAY_METRIC_INFO, LevelUnit
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state

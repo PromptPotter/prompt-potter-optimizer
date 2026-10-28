@@ -22,12 +22,13 @@ from promptpotter.application.optimizers.descriptors import prompt_chars
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import rewrite, rewritten
 from promptpotter.config.paths import optimizers_root
+from promptpotter.domain.arms import Cut, Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.pool import DemoPool
-from promptpotter.domain.results import Cut, Elimination, OptimizerFact, Proposal
+from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import SHOTS_KEY
@@ -56,10 +57,11 @@ if TYPE_CHECKING:
         Selection,
     )
     from promptpotter.application.scoring.query_loop import Walk
+    from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
     from promptpotter.domain.pool import Pool
-    from promptpotter.domain.results import DisplayMetric, RoundResult
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
     from promptpotter.domain.search_point import JobSearchPoint

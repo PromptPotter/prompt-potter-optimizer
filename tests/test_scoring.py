@@ -158,6 +158,8 @@ from promptpotter.application.scoring.selection import (
     readable_lifts,
 )
 from promptpotter.config.paths import optimizers_root
+from promptpotter.domain.arm_reading import order_floor
+from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, is_leader_eligible
 from promptpotter.domain.bench import (
     BenchPass,
     BenchPasses,
@@ -168,10 +170,19 @@ from promptpotter.domain.bench import (
 )
 from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
 from promptpotter.domain.command_kinds import PauseCyclePayload, SubmitArmsPayload, SubmittedArm
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
+from promptpotter.domain.origin_panel import (
+    OverlapReading,
+    PanelTrigger,
+    RoundAdvance,
+    TriggeredReading,
+    line_by_individual,
+    round_advance,
+)
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
@@ -190,38 +201,14 @@ from promptpotter.domain.phase_views import BenchGradedView
 from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason, WalkEnd
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNode
 from promptpotter.domain.pool import BlockPool
-from promptpotter.domain.results import (
-    ArmSlot,
-    Cut,
-    CutKind,
-    IndividualWalk,
-    InRunCells,
-    Measured,
-    OverlapReading,
-    PanelTrigger,
-    RoundAdvance,
-    RoundResult,
-    RunStanding,
-    TriggeredReading,
-    VerifyPass,
-    VerifyStrategy,
-    individual_cells,
-    is_floor_pinned,
-    is_leader_eligible,
-    line_by_individual,
-    merge_known_outcomes,
-    order_floor,
-    round_advance,
-    rounds_without_advance,
-    stalls_left,
-    unscoreable_cells,
-)
+from promptpotter.domain.results import InRunCells, RoundResult
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import DeltaRuler, anchor_id_of
 from promptpotter.domain.run_records import (
     PhaseRecord,
     TokenUsageRecord,
 )
+from promptpotter.domain.run_standing import RunStanding, rounds_without_advance, stalls_left
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
@@ -243,6 +230,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget, StepUsage, TokenUsageKind
+from promptpotter.domain.verify_pass import VerifyPass, VerifyStrategy
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import Hold, spending_under
 from promptpotter.infrastructure.llm.telemetry import (
@@ -265,7 +253,7 @@ from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
 )
-from promptpotter.shared.measurement_context import RoleScope
+from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
 
 _H2H_FORMULA = "env_reward"

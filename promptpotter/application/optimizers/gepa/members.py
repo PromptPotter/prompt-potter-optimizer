@@ -30,10 +30,11 @@ from promptpotter.application.optimizers.gepa.state import (
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.config.paths import optimizers_root
+from promptpotter.domain.arms import Cut, Elimination, Measured
 from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import Cut, Elimination, Measured, OptimizerFact
+from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.run_records import CheckpointKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
@@ -59,9 +60,10 @@ if TYPE_CHECKING:
         Selection,
     )
     from promptpotter.application.scoring.query_loop import Walk
+    from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
     from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.results import DisplayMetric, RoundResult
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet, GradedCell
     from promptpotter.domain.search_point import JobSearchPoint

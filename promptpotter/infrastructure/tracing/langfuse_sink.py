@@ -19,7 +19,8 @@ from promptpotter.infrastructure.tracing.events import (
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 if TYPE_CHECKING:
-    from promptpotter.domain.results import Concluded, ScoreSummary
+    from promptpotter.domain.arms import Concluded
+    from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.run_records import (
         RoundClosedRecord,
         RoundEnteredRecord,

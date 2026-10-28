@@ -42,6 +42,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
 from promptpotter.application.scoring.judges.registry import judge_instrument
+from promptpotter.domain.arms import Concluded
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
@@ -81,7 +82,6 @@ from promptpotter.domain.pipeline_schema import (
     reach_map,
 )
 from promptpotter.domain.pool import Access, PoolSource
-from promptpotter.domain.results import Concluded
 from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin, ScoringLockedRecord
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.domain.strict_model import StrictModel

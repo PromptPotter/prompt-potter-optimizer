@@ -17,9 +17,10 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
 )
 from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
+from promptpotter.domain.diagnostic_run import RescoreCount, rescore_count
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
-from promptpotter.domain.results import RescoreCount, VerifyStrategy, rescore_count
 from promptpotter.domain.spend import Budget
+from promptpotter.domain.verify_pass import VerifyStrategy
 from promptpotter.presentation.cli.parsers import (
     ACTIVE_CAMPAIGN,
     ACTIVE_CYCLE,

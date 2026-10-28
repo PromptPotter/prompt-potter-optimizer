@@ -35,6 +35,7 @@ from promptpotter.application.runner.campaign_ids import (
 )
 from promptpotter.application.scoring.formula.compiler import split_scoring_block
 from promptpotter.application.scoring.formula.matchers import matcher_of
+from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, PartitionRecord, partition_bank
 from promptpotter.domain.campaign import (
     Arm,
@@ -53,7 +54,6 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.results import PointContext
 from promptpotter.domain.run_records import CycleSeed, DefaultsDrift, OriginSource
 from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.ledger import CycleEventLog
