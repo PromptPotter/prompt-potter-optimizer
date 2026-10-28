@@ -46,7 +46,7 @@ BASELINE = {
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     "config_leaf_fields": 90,
     # `Settings` fields — what the environment can set.
-    "settings_env": 43,
+    "settings_env": 42,
     # The upper-case constants `config/settings.py` exports.
     "settings_const": 3,
     # Leaves of `OptSearchPoint` — what a run is handed.
@@ -58,7 +58,7 @@ BASELINE = {
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 66,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
-    "models_lax": 8,
+    "models_lax": 9,
     # Injections the optimizers' runtimes price — each a block an optimizer prompt can carry.
     "injections": 29,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a

@@ -295,12 +295,6 @@ never a local patch. **Re-test:** each entry's command; a hit means it still sta
 The classifier and the settle rule are one (`infrastructure/llm/spend_book.py::SendOutcome`,
 `Admission.close`); what stands is the half no edit on this side reaches: a relay's own retry loop
 runs on its own budget and reports its attempts as a count.
-- TermNorm reports `attempts` per node and ONE usage sum, so an answered repair turn and a 5xx it
-  retried read the same, and `application/scoring/sample_measurement.py::_uncounted_attempts` holds both as
-  unreported. Owed by TermNorm's `llm_call` (`backend-api/core/llm_providers.py`): per node, how many attempts
-  left and reported no usage (today only a timeout says so, by voiding the whole cell). **Re-test:**
-  `grep -n "unreported" backend-api/core/pipeline_context.py` in the TermNorm checkout — a per-node
-  count beside `attempts` closes it, and `_uncounted_attempts` then reads that count instead.
 - A unit of work's one budget (`infrastructure/llm/send_pacing.py::SendBudget`) stops at the relay's door: TermNorm's
   `_MAX_ATTEMPTS` and terminus-2 × litellm each still count under one of our attempts — retry
   loops in the relay's own code. **Re-test:** `grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`

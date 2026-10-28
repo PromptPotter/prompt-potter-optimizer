@@ -59,10 +59,19 @@ class Stores:
         return in_inner_sandbox(self.projects_root)
 
 
+def own_campaign(stores: Stores, campaign_id: str) -> None:
+    """Another user's campaign is NOT FOUND, never forbidden: existence leakage is a violation.
+
+    Asks the owner alone, so a manifest this build cannot read whole is still its owner's to delete."""
+    owner = stores.campaigns.campaign_owner(campaign_id)
+    if owner is None or owner.owner_user_id != str(stores.identity.user_id):
+        raise NotFoundError(f"Campaign not found: {campaign_id}")
+
+
 def owned_campaign(stores: Stores, campaign_id: str) -> Campaign:
-    """Another user's campaign is NOT FOUND, never forbidden: existence leakage is a violation."""
+    own_campaign(stores, campaign_id)
     campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None or campaign.owner_user_id != str(stores.identity.user_id):
+    if campaign is None:
         raise NotFoundError(f"Campaign not found: {campaign_id}")
     return campaign
 

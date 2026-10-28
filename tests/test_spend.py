@@ -166,7 +166,12 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, heartbeat, pricing, telemetry
 from promptpotter.infrastructure.llm.litellm_sends import ReportedCost
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
-from promptpotter.infrastructure.llm.pricing import PriceTier, Rate, RateCeiling, RateTable
+from promptpotter.infrastructure.llm.pricing import (
+    PriceTier,
+    Rate,
+    RateCeiling,
+    RateTable,
+)
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -2146,8 +2151,20 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     # A backend cell is never sent again while it may still bill.
     cell_ledger = CycleEventLog(tmp_path / "termnorm.jsonl")
     billed_step = {
-        "step_tokens": {"n": {"attempts": 3, "input": 10, "output": 5, "cost_usd": 0.001}}
+        "step_tokens": {
+            "n": {
+                "attempts": 3,
+                "unreported_attempts": 2,
+                "input": 10,
+                "output": 5,
+                "cost_usd": 0.001,
+            }
+        }
     }
+    # A repaired node's resend is IN its sums: holding it again halted runs short of their cap.
+    repaired = {"step_tokens": {"n": {"attempts": 2, "input": 10, "output": 5, "cost_usd": 0.001}}}
+    bill, _ = cell_billing(pipeline_schema([]), {}, {"n": SendBound(40, 20, 0.004)})(repaired)
+    assert bill is not None and bill.unknown is None, "an answered attempt was held as unreported"
     attempt = SendBound(input_tokens=40, output_tokens=20, usd=0.004)
     deadline = {
         "detail": {"error_code": "llm_timeout", "retryable": False, "message": "no reply in 164s"},
@@ -2380,7 +2397,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             return await agent.run_query(
                 Sample(id=sample_id, query="q", ground_truth=None),
                 bound=whole,
-                billed=lambda _data, _refused: (None, None),
+                billed=lambda _data: (None, None),
             )
 
     async def cancel_mid_episode() -> None:
@@ -2427,7 +2444,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
 
 
 _WEB = "https://accounts.google.com"
-_STEP_USD = settings.FREE_TIER_LAUNCH_STEP_USD
+_GRANT_USD = settings.FREE_TIER_SPEND_CAP_USD
 _TOKENS = settings.FREE_TIER_TOKEN_CAP
 _GENEROUS = {"spend_budget_usd_total": 50.0, "token_budget_total": 50_000}
 _HELD_HOP = CycleHop(campaign_id="camp", cycle_id="cycle_x")
@@ -2543,7 +2560,9 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
 
     for n, (door, issuer, budget, declared, grant, running, spent, admitted_caps) in enumerate(
         (
-            ("launch", _WEB, {}, None, None, None, None, Budget(usd=_STEP_USD, tokens=_TOKENS)),
+            ("launch", _WEB, {}, None, None, None, None, Budget(usd=_GRANT_USD, tokens=_TOKENS)),
+            # A free-tier run is admitted whole at its campaign's own ceiling, never a ration under it.
+            ("launch", _WEB, {}, 0.15, None, None, None, Budget(usd=0.15, tokens=_TOKENS)),
             ("launch", _WEB, {}, 10.0, None, None, None, None),
             (
                 "launch",
@@ -2567,7 +2586,7 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                 None,
                 None,
                 _UNPRICEABLE,
-                Budget(usd=_STEP_USD, tokens=_TOKENS - 500_000),
+                Budget(usd=settings.UNPRICED_GRACE_USD, tokens=_TOKENS - 500_000),
             ),
             ("launch", None, {}, None, None, None, None, Budget(usd=None, tokens=None)),
             ("launch", _WEB, _GENEROUS, 10.0, 2.0, None, None, Budget(usd=2.0, tokens=50_000)),
@@ -2616,6 +2635,15 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
             assert knocked == admitted_caps, (
                 f"door {n} ({door}): an account was admitted under another ceiling than it holds"
             )
+
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            pricing, "load_rates", lambda: RateTable({("openai", "dear"): Rate(5e-8, 6e-7)})
+        )
+        assert (pricing.route_priced("x", "openai"), pricing.route_priced("dear", "openai")) == (
+            False,
+            True,
+        ), "a dollar ceiling would admit a route no rate prices"
 
     # A paid verb never bills a cycle its producer still holds.
     operator = User(user_id="op", tenant_id="op", created_at="")
@@ -2696,30 +2724,6 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         "a pass kept its slot past its exit"
     )
     assert launch_beside().usd == pytest.approx(1.0), "the pass kept its reservation past its exit"
-
-    # A free-tier step is its share: the account reserves more for it, and it meters the step.
-    stepper = build_stores(
-        IdentityContext(
-            user_id=UserId("sub-6"),
-            tenant_id=TenantId("sub-6"),
-            issuer=Issuer(_WEB),
-            claims={},
-            capabilities=frozenset(),
-        ),
-        projects_root=built_stores.projects_root,
-        install_datasets_root=built_stores.install_datasets_root,
-    )
-
-    async def step_pass() -> None:
-        async with paid_pass(stores=stepper, verb="verify", hop=None, declared=Budget()) as book:
-            assert book.reserve.usd is not None and book.reserve.usd > _STEP_USD, (
-                "the setup lost its point: the account reserves the step alone"
-            )
-            assert book.money_left().usd == pytest.approx(_STEP_USD), (
-                "a free-tier step may meter past its step, up to what the account reserves"
-            )
-
-    asyncio.run(step_pass())
 
     # A budget change leaves the arm it did not touch alone.
     def web_account(sub: str) -> Stores:

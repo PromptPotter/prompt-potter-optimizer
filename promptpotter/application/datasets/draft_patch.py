@@ -16,7 +16,8 @@ from promptpotter.application.datasets.draft_campaign import (
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.optimizer_manifest import resolve_optimizer
-from promptpotter.application.pipeline_resolve import draft_pipeline
+from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
+from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
 from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.origin_provenance import Provenance
@@ -132,12 +133,23 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
                 f"patch.{label} {col!r} is not one of the uploaded headers {list(draft.headers)}."
             )
 
+    if changes.keys() & {"pipeline_overlay", "optimization_overrides"}:
+        # Only what THIS edit adds: a route already on the draft is the Start's to refuse.
+        was_unpriced = _unpriced(stores, draft)
+        unpriced = _unpriced(stores, draft.patch(**changes))
+        refuse_unpriced([r for r in unpriced if r not in was_unpriced])
+
     return DraftPatchPlan(
         changes=changes,
         provenance=provenance,
         column_query=patch.column_query,
         column_ground_truth=patch.column_ground_truth,
     )
+
+
+def _unpriced(stores: Stores, draft: DraftCampaign) -> list[str]:
+    params, _rows, schema = draft_pipeline(stores, draft)
+    return unpriced_routes(draft_config(stores, draft), params, schema)
 
 
 def _block(value: object) -> dict[str, Any]:

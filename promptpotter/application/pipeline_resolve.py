@@ -82,6 +82,7 @@ from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
+from promptpotter.infrastructure.llm.pricing import route_priced
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_scoring_lock
 from promptpotter.infrastructure.store.dataset_access import (
@@ -845,9 +846,20 @@ def _rows(m: _Merge, params: dict[str, Any]) -> dict[str, list[NodeConfigParam]]
     return m.filtered.node_config_schema(
         values={n: c for n, c in params.items() if isinstance(c, dict)},
         sources=m.provenance,
-        model_menu=m.filtered.selectable_models(),
+        model_menu=_admitted_menu(m),
         declared=m.declared,
     )
+
+
+def _admitted_menu(m: _Merge) -> list[str]:
+    """Never offers a model the Start would refuse: one no rate prices under a dollar ceiling."""
+    models = m.filtered.selectable_models()
+    providers = {n.provider for n in m.filtered.declared_nodes if n.provider}
+    if not providers or m.cfg.optimization.budget.usd is None:
+        return models
+    return [
+        model for model in models if any(route_priced(model, p) is not False for p in providers)
+    ]
 
 
 def _response(

@@ -328,7 +328,7 @@ Each is idempotent.
 
 Signing up is the grant (§ The perimeter), so there is no queue to work through and the only recurring admin action is the reverse one — **taking access away**.
 
-The free-tier ceiling is spent one **step** at a time (`Settings.FREE_TIER_LAUNCH_STEP_USD`, applied by `quota.py::_launch_step`): the offer is denominated in runs rather than in credit, so a launch declares a step instead of the whole remainder and a first campaign can no longer consume the grant a tenth one was promised. It rations the anonymous grant only — a delegated principal answers to its attenuated ceiling instead, and an account you raised by hand on `user.json` keeps what you gave it.
+A free-tier launch is admitted at **its campaign's own ceiling** against what the account has left, with no per-launch ration beneath it: a ration smaller than the shipped campaign ceiling clamps a stranger's first run into the mid-campaign halt [ADR-0003](../adr/0003-spend-and-tenancy.md) D1 forbids, so the campaign ceiling is what sizes a run and the lifetime grant is what counts them.
 
 **The one rule: a control-plane change never has an inbound door open to the internet** — owned by [ADR-0004](../adr/0004-operator-admin-channels.md); here it means the blocklist edit happens **on the box**, which reaches *out* to your phone. If an external tool (n8n, Zapier, CI) genuinely must drive an admin action, gate it behind an edge broker (Cloudflare Access service token) **plus** an app token — never a bare public route (that ADR § "When option C is the right escalation").
 

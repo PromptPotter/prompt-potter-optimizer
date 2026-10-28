@@ -164,7 +164,6 @@ CONNECTOR = Connector(
         "qwen/qwen3.7-flash:nitro",
         "inclusionai/ling-3.0-flash",
         "upstage/solar-pro4",
-        "nex-agi/nex-n2-mini",
     ),
     # No `reasoning_effort`: a rung named here follows no model the tenant swaps in.
     default_node_config={

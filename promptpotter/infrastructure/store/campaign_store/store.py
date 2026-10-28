@@ -14,6 +14,7 @@ from promptpotter.domain.bench import BenchScore, PartitionRecord
 from promptpotter.domain.campaign import (
     Campaign,
     CampaignEdit,
+    CampaignOwner,
     HeadToHeadRecord,
     LifecycleFilter,
     LifecycleStatus,
@@ -175,7 +176,7 @@ class CampaignStore:
         write_cycle_index(cycle_dir)
         return offset
 
-    def _read_declared[M: (Campaign, HeadToHeadRecord)](
+    def _read_declared[M: (Campaign, CampaignOwner, HeadToHeadRecord)](
         self, path: Path, model: type[M]
     ) -> M | None:
         data = read_json_optional(path)
@@ -191,6 +192,9 @@ class CampaignStore:
 
     def load_campaign(self, campaign_id: str) -> Campaign | None:
         return self._read_declared(self._manifest_path(campaign_id), Campaign)
+
+    def campaign_owner(self, campaign_id: str) -> CampaignOwner | None:
+        return self._read_declared(self._manifest_path(campaign_id), CampaignOwner)
 
     def _campaigns_root(self) -> Path:
         return campaigns_root_dir_for(self._base_dir)
@@ -329,7 +333,12 @@ class CampaignStore:
     ) -> list[Campaign]:
         out: list[Campaign] = []
         for cid in self.list_campaign_ids():
-            campaign = self.load_campaign(cid)
+            # A survey: one manifest this build cannot read must not hide the account's others.
+            try:
+                campaign = self.load_campaign(cid)
+            except ManifestUnreadableError as exc:
+                logger.warning("%s", exc)
+                continue
             if campaign is None:
                 continue
             if dataset_name and campaign.dataset_name != dataset_name:
@@ -426,6 +435,9 @@ class CampaignStore:
         campaign_dir = self.campaign_root_dir(campaign_id)
         if not campaign_dir.is_dir():
             return False
+        # A keepsake is its manifest marked deleted, so one this build cannot read refuses before the bank.
+        # With no manifest nothing marks it deleted, and its rows would count beside the bank.
+        keepsake = keep_results and self.load_campaign(campaign_id) is not None
         self._guard_and_release(campaign_id, "delete")
         # After the guard: a tombstone beside a refused delete's rows counts the money twice.
         self._campaign_metered_bank(campaign_id)
@@ -435,8 +447,7 @@ class CampaignStore:
             cycles_dir = campaign_cycles_dir(campaign_dir)
             if cycles_dir.is_dir():
                 inner_cycle_ids = [p.name for p in cycles_dir.iterdir() if p.is_dir()]
-        # With no manifest nothing marks a keepsake deleted, so its rows would count beside the bank.
-        if keep_results and CampaignLayout(campaign_dir).manifest.is_file():
+        if keepsake:
             self._set_lifecycle(campaign_id, "deleted", changed_at, reason)
             _strip_to_keepsake(campaign_dir)
         else:

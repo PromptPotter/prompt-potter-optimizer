@@ -191,19 +191,15 @@ def _ran_last(pipeline_schema: PipelineSchema, ran: Mapping[str, Any]) -> str | 
     return reached[-1] if reached else None
 
 
-def _uncounted_attempts(
-    reported: Mapping[str, StepUsage], each: Mapping[str, SendBound], *, refused_on: str | None
+def _unreported_attempts(
+    reported: Mapping[str, StepUsage], each: Mapping[str, SendBound]
 ) -> SendBound | None:
-    """A node's usage accounts for ONE attempt; nothing says the retried others billed nothing."""
     input_tokens = output_tokens = 0
     usd: float | None = 0.0
     for name, entry in reported.items():
         bound = each.get(name)
-        if bound is None or entry.attempts is None:
-            continue
-        priced = bool(entry.input or entry.output or entry.cost_usd)
-        left = entry.attempts - priced - (name == refused_on)
-        if left <= 0:
+        left = entry.unreported_attempts
+        if bound is None or not left:
             continue
         input_tokens += left * bound.input_tokens
         output_tokens += left * (bound.output_tokens or 0)
@@ -220,7 +216,7 @@ def cell_billing(
 ) -> CellBilling[PipelineData]:
     """``None`` where the reply reports no usage at all, which is charged the cell's whole bound."""
 
-    def billed(data: dict[str, Any], refused: bool) -> tuple[Reported | None, PipelineData]:
+    def billed(data: dict[str, Any]) -> tuple[Reported | None, PipelineData]:
         spent = _reply_spend(data, pairs)
         if not isinstance(data.get("step_tokens"), dict):
             return None, spent
@@ -234,9 +230,7 @@ def cell_billing(
                 "web_search",
             )
             parts.append(Billed(TokenAccount(), float(usd), node=searched))
-        refused_on = _ran_last(pipeline_schema, reported) if refused else None
-        unknown = _uncounted_attempts(reported, each, refused_on=refused_on)
-        return Reported(tuple(parts), unknown), spent
+        return Reported(tuple(parts), _unreported_attempts(reported, each)), spent
 
     return billed
 
