@@ -136,7 +136,6 @@ misses; (2) screen library blocks without the optimizer — authored arms, origi
   `is_answer_collapsed`, `potter/pobb/checks.py`, `live_dashboard/blocks.py`, `bench/round_analysis.py`.
 - **`l1_generate` never edits `answer_format`**: keep the parsed directive locked, free the rest; show
   the operator the diff first.
-- **A new campaign can land on another campaign's cycle**: a cycle id must hash the bank's hash; `logic-proofwriter` waits on it.
 - **A declared bench is not the held-out count**: `dataset_split: {bench: 100}` held out 162 rows.
 - **Stops**: a stopped bench or verify pass acks `rejected`; a pass with no hop stops only on Ctrl+C;
   a standing pause stops a later bench pass with no result.

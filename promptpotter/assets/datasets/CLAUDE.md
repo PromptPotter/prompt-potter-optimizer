@@ -58,8 +58,8 @@ The roster is the directory tree. Special cases:
 
 ## A dataset is its content; its name is a label
 
-**A bank's identity is the hash of its rows as stored** (`shared/hashing.py::dataset_hash`). A re-cut is a new hash
-and needs no new name: the next `new` moves the label, and per-sample history carries over by `sample_key`.
+**A bank's identity is the hash of its rows as stored** (`shared/hashing.py::dataset_hash`). A re-cut (rows, `source:`
+section or the recipe's code, `loaders.py::Source.identity`) is a new hash and needs no new name: the next `new` moves the label, and per-sample history carries over by `sample_key`.
 
 ## L4 — `promptpotter-self`
 

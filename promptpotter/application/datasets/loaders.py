@@ -4,6 +4,7 @@ import json
 import logging
 import random
 import re
+import sys
 import urllib.request
 from collections import defaultdict
 from collections.abc import Callable, Mapping
@@ -28,7 +29,7 @@ from promptpotter.infrastructure.store.io import write_bytes
 from promptpotter.infrastructure.store.measurement_archive import config_key
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.extras import Extra, require_extra
-from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
+from promptpotter.shared.hashing import ADDRESS_HEX, module_source_digest, stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -36,6 +37,8 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
+
+RECIPE_CODE = module_source_digest(sys.modules[__name__])
 
 Row = dict[str, Any]
 Drawn = tuple[str, str]
@@ -100,9 +103,9 @@ class Source:
 
     @property
     def identity(self) -> str:
-        """A new ``rev`` is a new recipe, so it cuts a bank of its own."""
+        """A new ``rev``, cut parameter or edit to this module's code cuts a bank of its own."""
         return stable_hash(
-            [self.recipe, self.kind.value, self.repo, self.rev, dict(self.params)],
+            [RECIPE_CODE, self.recipe, self.kind.value, self.repo, self.rev, dict(self.params)],
             length=ADDRESS_HEX,
         )
 
@@ -450,7 +453,7 @@ BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
     "screen_taste": lambda src: _bank(src, lambda: _screen_taste_rows(src)),
 }
 """A recipe is the code half of a cut; the ``source:`` section beside the definition is the data half
-— repo, commit and every cut parameter, so a new cut is a new definition and no edit here."""
+— repo, commit and every cut parameter. ``Source.identity`` keys a held cut on both halves."""
 
 
 def _sealqa_longseal(src: Source, out_dir: Path) -> int:

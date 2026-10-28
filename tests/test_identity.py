@@ -56,7 +56,7 @@ from promptpotter.application.campaign_config import (
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.commands.payloads import MintCampaignPayload, StartCheckinPayload
-from promptpotter.application.datasets import ingest
+from promptpotter.application.datasets import ingest, loaders
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, new_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
@@ -177,6 +177,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.tracing.bridge import TracingProjection
 from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 from promptpotter.shared.errors import (
     ConflictError,
@@ -696,6 +697,48 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert [t["git_commit_id"] for t in panel_tasks("bench", "1.0", ["a"])] == ["c1"], (
         "a repinned registry moved the panel under the name it had"
     )
+
+    # A held cut is keyed on its recipe's code too, so an edited recipe re-cuts its bank.
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("hubcut") / DEFINITION_FILE,
+        {
+            "source": {
+                "recipe": "columns",
+                "hub": "org/repo",
+                "rev": "c1",
+                "split": "test",
+                "query": "q",
+                "truth": "t",
+            },
+            "pipeline": {"backend_type": "termnorm"},
+        },
+    )
+    hubcut = resolve_dataset(built_stores, "hubcut")
+    hub_source = loaders.definition_source(hubcut.directory)
+    assert hub_source is not None
+    hub_bank = Bank.of([Sample(id=0, query="q", ground_truth="g")])
+    built_stores.tenant_datasets.record_cut(hub_source.identity, hub_bank)
+    held_cut = loaders.held_bank(built_stores, hubcut)
+    assert held_cut is not None and held_cut.dataset_hash == hub_bank.dataset_hash, (
+        "a recorded cut was not held"
+    )
+    monkeypatch.setattr(loaders, "RECIPE_CODE", "an edited recipe")
+    assert loaders.held_bank(built_stores, hubcut) is None, (
+        "a recipe whose code changed served the bank its old code cut"
+    )
+
+    # Two campaigns sharing a root cycle id trace apart, each under its own campaign.
+    monkeypatch.setattr(settings, "OBS_ENABLED", True)
+    for campaign_id in ("hubcut__000001", "hubcut__000002"):
+        hop = CycleHop(campaign_id=campaign_id, cycle_id="cycle_shared")
+        TracingProjection.for_cycle(built_stores.base_dir, hop, langfuse=None).start(
+            config_snapshot={}, dataset=(), langfuse_session_id=None
+        )
+        traces = built_stores.campaigns.cycle_dir(hop) / "langfuse" / "traces"
+        traced = {
+            json.loads(p.read_text("utf-8"))["input"]["campaign_id"] for p in traces.iterdir()
+        }
+        assert traced == {campaign_id}, "a campaign's trace was filed under its cycle id"
 
 
 # 2. The config a campaign runs

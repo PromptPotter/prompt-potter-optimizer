@@ -37,7 +37,7 @@ An eliminator emits a `race_standing` per candidate naming its manifest `member`
 
 `MLFLOW_TRACKING_URI` names the operator's server; unset, MLflow receives nothing. The client is `mlflow-skinny` from `.[observability]`; credentials are MLflow's own variables. One server takes both halves (`infrastructure/tracing/mlflow_server.py`):
 
-- **Rounds as runs** — `MLflowSink` logs each closed round under experiment `{tenant_id}/{cycle_id}`.
+- **Rounds as runs** — `MLflowSink` logs each closed round under experiment `{tenant_id}/{campaign_id}/{cycle_id}`.
 - **The winner as a prompt version** — `register_export` (via `application/runner/output.py::publish_export`) registers each finished cycle's `export.json` render as a version of `{tenant_id}.{dataset_name}`, linked to the crowning round's run. One version per cycle and prompt text; a later bench restates its tags in place.
 - **No alias is ever set or moved** — promotion is the host's swap, and a reader wanting the newest loads `prompts:/<name>@latest`.
 - **Not registered:** diagnostic cycles and every cycle inside an L4 sandbox.
