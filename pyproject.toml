@@ -184,6 +184,8 @@ promptpotter = "promptpotter.presentation.cli.campaign_runner:main"
 # The ONE uv pin: uv refuses any other, CI's setup-uv installs this, deploy-linux/uv.sh reads it.
 [tool.uv]
 required-version = "==0.11.21"
+# Security floors for packages only other dependencies pull in (GHSA advisories, Dependabot).
+constraint-dependencies = ["filelock>=4.2.1", "litellm>=1.100.4"]
 
 [tool.setuptools.packages.find]
 include = ["promptpotter*"]
