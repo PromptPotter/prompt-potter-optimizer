@@ -1301,8 +1301,10 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 
     def composed(walk: list[str], seed: list[str] = seed, unwalked: tuple[str, ...] = ()) -> None:
         # The demo pool's initializer is the shared pools package's, a third registrant beside the two.
-        init = ["demo_pool"]
-        nodes = {n: (capo["nodes"] | potter["nodes"])[n] for n in (*init, *seed, *walk, *unwalked)}
+        init, gate = ["demo_pool"], ["operator_seat"]
+        nodes = {
+            n: (capo["nodes"] | potter["nodes"])[n] for n in (*init, *seed, *walk, *gate, *unwalked)
+        }
         manifest = manifest_dir / "pipeline.yaml"
         manifest.write_text(
             yaml.safe_dump(
@@ -1311,7 +1313,12 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     "version": "v0",
                     "available_models": capo["available_models"],
                     "nodes": nodes,
-                    "pipelines": {"run_init": init, "default": walk, "initial_population": seed},
+                    "pipelines": {
+                        "run_init": init,
+                        "default": walk,
+                        "initial_population": seed,
+                        "arm_gate": gate,
+                    },
                     "initial_population_walks": "before_default",
                     "resolved_prompts": {
                         key: capo["resolved_prompts"][key]
@@ -2605,9 +2612,8 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
                     for n, (improved, electable) in enumerate(closes, 1)
                 ),
             ]
-            set_cycle(cycle, line=line)
-            standing = RunStanding.after(line, lives=lives.bank)
-            return stalls_left(line, lives.bank), standing_tripped(cycle, standing)
+            set_cycle(cycle, line=line, standing=RunStanding.after(line, lives=lives.bank))
+            return stalls_left(line, lives.bank), standing_tripped(cycle)
 
         held, promoted, uncompared = (False, 2), (True, 2), (False, 0)
         assert stop_after(held) == (1, None)
@@ -2638,8 +2644,9 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             set_cycle(
                 cycle,
                 line=[round_result(0, improved=False), closing.model_copy(update={"folds": folds})],
+                standing=RunStanding.opening(None),
             )
-            return standing_tripped(cycle, RunStanding.opening(None))
+            return standing_tripped(cycle)
 
         for advance in (
             RoundAdvance.NOT_SEPARATED,

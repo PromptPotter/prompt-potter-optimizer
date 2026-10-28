@@ -72,12 +72,6 @@ class CapoCheckpointKind(CheckpointKind):
     POPULATION_KEPT = "population_kept"
 
 
-class FewShotKnobs(StrictModel):
-    k_max: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
-        ge=0, description="The most shots an individual may carry after the mutation."
-    )
-
-
 def mutate_shots(
     shots: Sequence[str], pool: Sequence[str], *, k_max: int, rng: random.Random
 ) -> list[str]:
@@ -104,12 +98,14 @@ class FewShot(nodes.Member):
     prompt_arity: ClassVar[PromptArity] = "one"
     opens: ClassVar[bool] = False
     variation_mode: ClassVar[VariationMode] = "deterministic"
-    knobs: ClassVar[type[StrictModel]] = FewShotKnobs
+    knobs: ClassVar[type[StrictModel]] = nodes.ShotKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Replay, Target})
-    draws: ClassVar[Mapping[type[Pool], Draw]] = {DemoPool: nodes.CountKnob(FewShotKnobs, "k_max")}
+    draws: ClassVar[Mapping[type[Pool], Draw]] = {
+        DemoPool: nodes.CountKnob(nodes.ShotKnobs, "k_max")
+    }
 
     async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
-        k_max = ctx.knobs(FewShotKnobs).k_max
+        k_max = ctx.knobs(nodes.ShotKnobs).k_max
         pool = [s.key for s in ctx.drawn(DemoPool)]
         node = ctx.read(Target).prompt_node.name
         children, replay = ctx.read(Children), ctx.read(Replay)

@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign_config import OriginGateMode, PanelGateMode
     from promptpotter.domain.round_health import DegradationHealth
-    from promptpotter.domain.run_standing import RunStanding
     from promptpotter.domain.scoring import GradedCell
 
 logger = logging.getLogger(__name__)
@@ -129,7 +128,9 @@ def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
     return StopReason.TARGET_HIT if accuracy is not None and accuracy >= target else None
 
 
-def standing_tripped(cycle: Cycle, standing: RunStanding) -> StopReason | None:
+def standing_tripped(cycle: Cycle) -> StopReason | None:
+    standing = cycle.standing
+    assert standing is not None, "a boundary stop reads the close it follows"
     # The OBJECTIVE, not accuracy: where it prices tokens, 100% correct at 3x the tokens is no ceiling.
     fold = cycle.parent_fold
     if (

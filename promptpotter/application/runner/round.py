@@ -46,7 +46,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
 from promptpotter.domain.run_records import BenchCheckpointKind
-from promptpotter.domain.run_standing import RunStanding, line_reference, stalls_left
+from promptpotter.domain.run_standing import line_reference, stalls_left
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -309,10 +309,7 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
             model=cycle.optimizer.model(node),
             pipeline_params=cycle.parent_point.pipeline_params,
             parent_prompts=cycle.parent.prompts,
-            run_standing=RunStanding.after(
-                cycle.rounds,
-                lives=None if (lives := cycle.config.optimization.lives) is None else lives.bank,
-            ),
+            run_standing=cycle.standing,
         ),
     )
     return opening
@@ -513,12 +510,12 @@ async def close_round(
     round_num: int,
     session: Session,
     cb: RunCallbacks,
-) -> tuple[RoundResult, RunStanding]:
+) -> RoundResult:
     stood = round_result.model_copy(update={"optimizer_state": cycle.close_state(round_num)})
     facts = cycle.optimizer.runtime.round_facts(cycle.optimizer, stood)
     closing = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
     flush_pending_decisions(cycle, cb.ledger)
-    offset, standing = cb.on_round_close(
+    offset, cycle.standing = cb.on_round_close(
         closing,
         cycle.rounds,
         session.bank.slot_of,
@@ -541,7 +538,7 @@ async def close_round(
             session.store,
             scorer=session.state.scoring.require_scorer(),
         )
-    return round_result, standing
+    return round_result
 
 
 async def post_round(
@@ -564,7 +561,7 @@ async def post_round(
         )
         rule = controller.observe(ctx, round_result)
 
-    round_result, standing = await close_round(cycle, round_result, round_num, session, cb)
+    round_result = await close_round(cycle, round_result, round_num, session, cb)
 
     # Before the stop below, so a perfect round that also ends the campaign still gets its check.
     fold, election = round_result.fold, round_result.election
@@ -579,7 +576,7 @@ async def post_round(
     await grade_round_selection(cycle, session, round_result, cb=cb)
     reserve_selection_pass(cycle, session)
 
-    if (stop := standing_tripped(cycle, standing)) is not None:
+    if (stop := standing_tripped(cycle)) is not None:
         raise StopLoop(stop)
     if rule is not None and not is_final_round:
         assert controller is not None

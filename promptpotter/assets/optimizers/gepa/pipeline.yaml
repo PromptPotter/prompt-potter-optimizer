@@ -61,6 +61,11 @@ nodes:
   pareto:
     type: selector
     config: {}
+  # The arm gate's seat (`optimization.arm_gate`); GEPA seeds no demo pool, so it writes no shot.
+  operator_seat:
+    type: algorithm
+    config:
+      k_max: 0
 pipelines:
   default:
     - minibatch
@@ -68,6 +73,8 @@ pipelines:
     - minibatch_gate
     - score
     - pareto
+  arm_gate:
+    - operator_seat
 resolved_prompts:
   # App. C: "GEPA's Meta Prompt", paragraphed as the reference implementation's template is.
   gepa_reflect/1:

@@ -141,6 +141,11 @@ nodes:
       escalation_ladder: full
       rebase_capability: true
       terminate_capability: true
+  # The arm gate's seat (`optimization.arm_gate`): an operator's arms, admitted as any child is.
+  operator_seat:
+    type: algorithm
+    config:
+      k_max: 5
 pipelines:
   run_init:
     - block_pool
@@ -153,6 +158,8 @@ pipelines:
     - theta_election
     - l1_critique
     - escalation
+  arm_gate:
+    - operator_seat
 resolved_prompts:
   l1_generate/1:
     persona: >-

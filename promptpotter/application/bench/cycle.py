@@ -26,7 +26,7 @@ from promptpotter.domain.results import Election, RoundOutcome, RoundResult
 from promptpotter.domain.results_health import compute_round_health
 from promptpotter.domain.ruler import RulerStamp
 from promptpotter.domain.run_records import ResumeCheckpointRecord
-from promptpotter.domain.run_standing import declared_selection, measured_arm
+from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
@@ -147,6 +147,8 @@ class Cycle:
     sample_index: SampleIndex | None = None
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     bench_passes: BenchPasses | None = None
+    # The last close's, set by the close and by a resume's replay; ``None`` until a close states one.
+    standing: RunStanding | None = None
 
     @classmethod
     def start(

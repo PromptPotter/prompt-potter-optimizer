@@ -100,6 +100,33 @@ async def resume_with_divergence_check(
     skip_divergence_check: bool,
     fork_on_divergence: bool = False,
 ) -> str | None:
+    """The cycle opens on the standing the last close of the line it continues stated, a fork's included."""
+    fork = await _replay_line(
+        campaign_store,
+        hop,
+        resumed_from_round,
+        session,
+        cycle,
+        dataset,
+        skip_divergence_check=skip_divergence_check,
+        fork_on_divergence=fork_on_divergence,
+    )
+    line = hop if fork is None else CycleHop(campaign_id=hop.campaign_id, cycle_id=fork)
+    cycle.standing = campaign_store.standing_rounds(line, moment=None).standing
+    return fork
+
+
+async def _replay_line(
+    campaign_store: CampaignStore,
+    hop: CycleHop,
+    resumed_from_round: int,
+    session: Session,
+    cycle: Cycle,
+    dataset: list[Any],
+    *,
+    skip_divergence_check: bool,
+    fork_on_divergence: bool,
+) -> str | None:
     sc = session.state.scoring
     scorer = sc.require_scorer()
     prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)

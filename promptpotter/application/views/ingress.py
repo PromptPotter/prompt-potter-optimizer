@@ -112,7 +112,7 @@ def propose_enter(
     model: str | None,
     pipeline_params: dict[str, Any] | None,
     parent_prompts: Mapping[str, NodePrompt],
-    run_standing: RunStanding,
+    run_standing: RunStanding | None,
 ) -> RoundStartView:
     # The header renders before candidates exist: it describes the parent.
     preview = prompt_preview.replace("\n", " ").strip()

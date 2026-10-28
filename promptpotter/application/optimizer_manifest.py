@@ -13,10 +13,11 @@ from pydantic import Field
 
 from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import (
+    ARM_GATE,
     INITIAL_POPULATION,
     RUN_INIT,
+    ArmAuthor,
     Initializer,
-    OperatorSeat,
     RoundWalk,
     member_package,
 )
@@ -137,8 +138,8 @@ class RoundPlan:
     """What the bench walks, by role: built once, at load, so a walk the bench cannot run is refused before a mint."""
 
     initializers: tuple[Initializer, ...]
-    # Walked in the proposers' place by an `author` gate, and beside them by `review`.
-    seat: OperatorSeat
+    # Walked in the proposers' place by an `author` gate, and after them by `review`.
+    seat: ArmAuthor
     measurement: str
     sampler: Sampler
     initial_population: tuple[Proposer, ...]
@@ -234,9 +235,16 @@ def _round_plan(
             name,
             f"`{RUN_INIT}` walks {strays}, which are no pool initializer: it seeds pools alone.",
         )
+    seats = [optimizers.NODE_MEMBERS.get(n) for n in schema.pipelines.get(ARM_GATE, ())]
+    if len(seats) != 1 or not isinstance(seats[0], ArmAuthor):
+        raise _walk_refused(
+            name,
+            f"`{ARM_GATE}` must walk the one member an operator's arms are written through — "
+            f"it walks {[m.name for m in seats]}.",
+        )
     return RoundPlan(
         initializers=tuple(cast("Initializer", m) for m in initializers),
-        seat=OperatorSeat((*initial, *proposers)),
+        seat=seats[0],
         measurement=walk[measured_at],
         sampler=samplers[0],
         initial_population=tuple(initial),
@@ -610,7 +618,7 @@ def _select(
     return selected
 
 
-_WALKS = (RUN_INIT, INITIAL_POPULATION, "default")
+_WALKS = (RUN_INIT, INITIAL_POPULATION, "default", ARM_GATE)
 
 
 def _edges_of(member: NodeMember) -> frozenset[type]:
@@ -642,9 +650,10 @@ def _walk(selected: SelectedOptimizer, gate: ArmGateMode) -> tuple[NodeMember, .
     ]
     seeds: list[NodeMember] = list(plan.initial_population)
     match gate:
-        case "off" | "review":
-            # Review walks the seat after the proposers; it reads and writes nothing, so no edge moves.
+        case "off":
             pass
+        case "review":
+            default.insert(default.index(plan.proposers[-1]) + 1, plan.seat)
         case "author":
             opens = default.index(plan.proposers[0])
             default = [m for m in default if m not in plan.proposers]
@@ -677,13 +686,16 @@ def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
             held = sorted(n for n, m in members.items() if isinstance(m, edge))
             if len(held) != 1:
                 open_.append(f"{node!r} reaches {edge.__name__}, which the roster holds as {held}")
+    if open_:
+        return open_
     # One closure: a part that holds no value until written is written earlier in the walk than
-    # any member reading or drawing it, unless that member writes it itself.
+    # any member reading or drawing it, unless that member writes it itself; an `off` draw reads none.
     written: set[type[StatePart]] = set()
     for member in _walk(selected, gate):
+        drawn = {pool for pool in member.draws if selected.access(member, pool) != "off"}
         early = sorted(
             kind.kind
-            for kind in {*member.reads, *member.draws}
+            for kind in {*member.reads, *drawn}
             if kind.written_first() and kind not in written and kind not in member.writes
         )
         if early:

@@ -149,7 +149,9 @@ ADAPTS (potter's critique). The round's phases follow the walk — PROPOSE, MEAS
 An `algorithm` node before the measurement proposes too, and so do the nodes of a manifest's
 `initial_population` pipeline, walked in a round the run enters with no population: in place of
 `default` (`initial_population_walks: alone`) or ahead of it, into the population `default` reads
-(`before_default`). An eliminator's `Race` stops a walk on its own rows (`rule`) or every live walk
+(`before_default`). **Every manifest's `arm_gate` pipeline walks `operator_seat`**
+(`optimizers/operator_seat/members.py`), the one member an operator's arms are written through,
+its `k_max` the shots it may write. An eliminator's `Race` stops a walk on its own rows (`rule`) or every live walk
 together at each block's close (`blocks`); its catch-ups are the calls pairing a prior with the arm
 on turn.
 

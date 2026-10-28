@@ -90,6 +90,7 @@ from promptpotter.domain.ruler import (
     flat_ruler_id,
 )
 from promptpotter.domain.run_records import RunPhaseRecord, SampleScoredRecord
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer, WalkedCell
 from promptpotter.domain.search_point import TaskDecomposition
@@ -436,9 +437,12 @@ def set_cycle(
     line: Sequence[RoundResult] | None = None,
     population: Sequence[OptSearchPoint] | None = None,
     slices: Iterable[StateSlice] = (),
+    standing: RunStanding | None = None,
 ) -> None:
     if line is not None:
         cycle.rounds = list(line)
+    if standing is not None:
+        cycle.standing = standing
     if population is not None:
         cycle.population = list(population)
     for held in slices:

@@ -40,11 +40,9 @@ acting.
 - **No offline leg rebases mid-run:** `scripts/offline_run.py` strips every `fork_proposal`, so
   `runner/entry.py::_run_line`'s later passes are reached only by patched privates. **Re-test:**
   no test under `tests/` patches a private of `runner/entry.py`.
-- **Ledger shapes left standing:** `optimizers/nodes.py::OperatorSeat` duck-types a member
-  instead of being one; the rebase clock has no test (blocked by the offline-rebase item above);
-  `round_restated` carries the whole round; `runner/round.py::announce_opening` re-derives
-  `RunStanding.after` over every round where the last close stated it. **Re-test:** each symbol
-  deleted, read, or tested.
+- **Ledger shapes left standing:** the rebase clock has no test (blocked by the offline-rebase
+  item above); `round_restated` carries the whole round. **Re-test:** each symbol deleted, read,
+  or tested.
 
 ## Open — multi-arc
 

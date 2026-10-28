@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
     from promptpotter.domain.arms import Concluded, Elimination, Proposal
     from promptpotter.domain.cell_fold import ScoreSummary
+    from promptpotter.domain.command_kinds import SubmittedArm
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
@@ -106,6 +107,14 @@ class RewriteKnobs(StrictModel):
         min_length=1,
         description="The prompt field the reply is written into; every prompt node the member "
         "rewrites declares it, or the campaign is refused before it mints.",
+    )
+
+
+class ShotKnobs(StrictModel):
+    k_max: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        ge=0,
+        description="The most shots an individual this node writes may carry; 0 withdraws the "
+        "demo pool from it.",
     )
 
 
@@ -292,6 +301,7 @@ class RoundOpening:
 
 INITIAL_POPULATION = "initial_population"
 RUN_INIT = "run_init"
+ARM_GATE = "arm_gate"
 
 
 @dataclass(frozen=True)
@@ -708,24 +718,11 @@ class Selector(NodeMember, Protocol):
     ) -> Selection: ...
 
 
-class OperatorSeat:
-    """The arm gate's seat, declared as a member is: it writes the round's arms and no state, and draws what the proposers it stands in for draw, under their knobs."""
+@runtime_checkable
+class ArmAuthor(NodeMember, Protocol):
+    """A manifest's `arm_gate` walk: the one member an operator's arms are written through, in the proposers' place (`author`) or after them (`review`)."""
 
-    name: ClassVar[str] = "operator_seat"
-    kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = StrictModel
-    reads: ClassVar[frozenset[type[StatePart]]] = frozenset()
-    writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
-    variation_mode: ClassVar[VariationMode] = "operator"
-
-    def __init__(self, proposers: Sequence[Proposer]) -> None:
-        # The opening proposer's draw wins where two draw one pool.
-        self.draws: Mapping[type[Pool], Draw] = MappingProxyType(
-            {pool: draw for p in reversed(proposers) for pool, draw in p.draws.items()}
-        )
-        self.consults: frozenset[type] = frozenset(type(p) for p in proposers)
-        self.sees: frozenset[type[CycleRead]] = frozenset(k for p in proposers for k in p.sees)
+    def author(self, ctx: NodeContext, parent: OptSearchPoint, arm: SubmittedArm) -> Proposal: ...
 
 
 class MintFacts(NamedTuple):

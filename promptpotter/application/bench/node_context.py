@@ -479,11 +479,12 @@ class Children(CycleRead):
 
     def _demo_keys(self, loci: Mapping[Locus, Any]) -> frozenset[str] | None:
         """The shots this member may write: what it draws of the demo pool, asked only where *loci* write one; ``None`` where it draws none."""
-        if DemoPool not in self._member.draws:
-            return None
+        member = self._member
         if not any(locus.key == SHOTS_KEY for locus in loci):
             return frozenset()
-        return frozenset(s.key for s in _drawn(self._round, self._member, DemoPool))
+        if DemoPool not in member.draws or self._cycle.optimizer.access(member, DemoPool) == "off":
+            return None
+        return frozenset(s.key for s in _drawn(self._round, member, DemoPool))
 
     @property
     def _variation(self) -> Variation:
