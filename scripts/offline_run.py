@@ -233,7 +233,7 @@ class ByCallIdentity:
         schema = body.get("response_format", {}).get("json_schema")
         node = schema["name"] if schema else self._text_node(prompt)
         self.calls[node] = self.calls.get(node, 0) + 1
-        # Concurrent sends of one node land in any order; their seeds (`NodeContext.ask`) tell
+        # Concurrent sends of one node land in any order; their seeds (`Calls.ask`) tell
         # them apart, and sends sharing a seed are sequential, so their turn is theirs alone.
         seed: int | None = body.get("seed")
         turn = self.turns.get((node, seed), 0)

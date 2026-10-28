@@ -47,7 +47,7 @@ from promptpotter.application.bench.children import (
     carried_writes,
     overlay_failures,
 )
-from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.bench.node_context import Calls, Children, NodeContext
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
@@ -58,6 +58,7 @@ from promptpotter.application.datasets.draft_patch import apply_draft_patch, pla
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
 from promptpotter.application.datasets.origin_resolve import build_origin_consultation
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
+from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
@@ -140,6 +141,7 @@ from promptpotter.domain.opt_search_point import (
     OptSearchPoint,
     Variation,
 )
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import fold_output_contract, normalize_model_id
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -158,7 +160,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptBlock
-from promptpotter.domain.results import PointContext
+from promptpotter.domain.results import PointContext, RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
 from promptpotter.domain.sample import Bank, Sample
@@ -309,17 +311,21 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     # An L4 override moves the prompt and the hash of every preset, and the inner campaign it runs.
     capo = resolve_optimizer("capo", {}, gate="off")
     capo_seat = seat(built_stores, optimization={"optimizer": "capo"})
-    ctx: NodeContext[Any] = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate"))
+    calls = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate")).read(Calls)
     values = {"task_description": "sort the list", "instruction": "Sort it."}
     mutated = {
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
     }
     potter = resolve_optimizer("potter", {}, gate="off")
-    sent, capo_hashes, treated = (ctx.fill(**values), capo.prompt_hashes(), capo.treatment().digest)
+    sent, capo_hashes, treated = (
+        calls.fill(**values),
+        capo.prompt_hashes(),
+        capo.treatment().digest,
+    )
     baseline = potter.prompt_hashes()
     assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
     with binding_prompt_overrides(mutated):
-        assert ctx.fill(**values) == "Rephrase [Sort it.] to sort the list." != sent, (
+        assert calls.fill(**values) == "Rephrase [Sort it.] to sort the list." != sent, (
             "the mutated CAPO prompt never reached the request it sends"
         )
         assert capo.treatment().digest != treated, (
@@ -785,7 +791,7 @@ _YAML_1_1_HAZARDS = (
 
 
 def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
-    tmp_path: Path, built_stores: Stores
+    tmp_path: Path, built_stores: Stores, offline: Router
 ) -> None:
     # The draft's CHAIN reaches the mint on a reused dataset.
     pinned = {"per_sample": "label_match(predicted, ground_truth)", "per_cell": "correct"}
@@ -1377,7 +1383,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         prompt_fields={"review": {"rubric": "Cite the clause."}},
         changes_description="tighten the review",
     )
-    operator: NodeContext[Any] = NodeContext(reflected_on, gepa.plan.seat)
+    operator = NodeContext(reflected_on, gepa.plan.seat)
     authored = authored_arm(operator, origin, arm)
     assert authored.validation_failures == [], "an operator arm on the second node was refused"
     assert authored.individual.prompts["review"].fields["rubric"] == "Cite the clause.", (
@@ -1396,21 +1402,33 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     assert optimizers.unfit_pipeline(gepa, two) is None, "GEPA was refused a chain it can walk"
 
-    class _Reflecting(NodeContext[Any]):
-        async def measure_parent(self, individual_id: str, cells: list[Sample]) -> Any:
-            return []
+    # Round 0 measured each parent a reflection re-reads; the bench resolves it by id.
+    def measured(*held: OptSearchPoint) -> list[RoundResult]:
+        points, schema = reflected_on.cycle.points, reflected_on.cycle.session.pipeline_schema
+        arms = {
+            ArmKey(ind.id): arm_state(
+                "parent",
+                individual=ind,
+                resolved_params=points.job(ind).config_params or {},
+                sp_hash=points.job(ind).sp_hash(schema),
+            )
+            for ind in held
+        }
+        arms[PARENT] = arm_state("parent", individual=origin)
+        return [round_result(0, arms=arms, improved=False)]
 
-        async def ask(self, prompt: str, idx: int | None = None) -> str:
-            return f"```\nRewritten in round {len(population)}.\n```"
-
-        def emit(self, output: Any) -> None:
-            return None
-
+    offline.llm.says = lambda _body: f"```\nRewritten in round {len(population)}.\n```"
+    set_cycle(reflected_on.cycle, line=measured(reflected_on.cycle.parent))
     reflected: list[set[str]] = []
     for _ in range(3):
-        reflecting = _Reflecting(reflected_on, optimizers.NODE_MEMBERS.get("gepa_reflect"))
+        reflecting = NodeContext(reflected_on, optimizers.NODE_MEMBERS.get("gepa_reflect"))
         no_cells = Panel(cells=[], order=[], block_size=0)
-        reflection = asyncio.run(GepaReflect().propose(reflecting, no_cells, Proposals([])))
+        with (
+            binding_optimizer(reflected_on.cycle.config.optimization),
+            spending_under(unbounded_spend_book()),
+            verb_ledger(built_stores, reflected_on.cycle.session.hop),
+        ):
+            reflection = asyncio.run(GepaReflect().propose(reflecting, no_cells, Proposals([])))
         (child,) = reflection.proposals
         reflected.append(
             {locus.split(".")[0] for locus in child.individual.lineage.variations[0].loci}
@@ -1418,6 +1436,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         population.append(child.individual)
         set_cycle(
             reflected_on.cycle,
+            line=measured(reflected_on.cycle.parent, *population),
             population=population,
             slices=[ParetoScores(scores={child.individual.id: {}}, parent_id=child.individual.id)],
         )
@@ -1892,8 +1911,10 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             schema=mixed_schema,
             optimization={"optimizer": mixed.owners[node].name},
         )
-        return NodeContext(proposing, optimizers.NODE_MEMBERS.get(node)).child(
-            [parent], overlay=overlay
+        return (
+            NodeContext(proposing, optimizers.NODE_MEMBERS.get(node))
+            .read(Children)
+            .child([parent], overlay=overlay)
         )
 
     proposals = parse_population(
@@ -1917,7 +1938,9 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     with binding_prompt_overrides(payload["optimizer_prompt_overrides"]):
         capo_seat = seat(built_stores, optimization={"optimizer": "capo"})
-        sent = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate")).fill(
-            task_description="sort the list", instruction="Sort it."
+        sent = (
+            NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate"))
+            .read(Calls)
+            .fill(task_description="sort the list", instruction="Sort it.")
         )
     assert sent.endswith("Keep the rewrite under 80 words."), "the inner cell ran the parent"

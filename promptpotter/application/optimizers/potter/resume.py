@@ -114,12 +114,12 @@ POTTER_REPLAYERS: dict[str, Replayer] = {
 }
 
 
-def _seat_on(cycle: Cycle, rounds: list[RoundResult], rr: RoundResult) -> NodeContext[Any]:
+def _seat_on(cycle: Cycle, rounds: list[RoundResult], rr: RoundResult) -> NodeContext:
     cycle.replay_priors([*(p for p in rounds if p.round < rr.round), rr])
     ledger = cycle.session.state.ledger
     assert ledger is not None, "a resume replays its rounds under the run's observers"
     seat = RoundContext(cycle=cycle, round_num=rr.round, callbacks=RunCallbacks(ledger=ledger))
-    return NodeContext[Any](seat, optimizers.NODE_MEMBERS.get("l1_critique"))
+    return NodeContext(seat, optimizers.NODE_MEMBERS.get("l1_critique"))
 
 
 def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:

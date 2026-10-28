@@ -101,8 +101,8 @@ class BlockPoolInitializer(_PoolInitializer):
             )
         return None
 
-    def initialize(self, ctx: NodeContext[BlockPoolKnobs]) -> None:
-        target = ctx.read(Target)
+    def initialize(self, ctx: NodeContext) -> None:
+        target, knobs = ctx.read(Target), ctx.knobs(BlockPoolKnobs)
         earned = (
             PoolEntry(id=entry_id(field, text), group=(field, EARNED_SOURCE), text=text)
             for field, texts in target.earned_blocks().items()
@@ -110,9 +110,9 @@ class BlockPoolInitializer(_PoolInitializer):
         )
         entries: Mapping[str, PoolEntry] = {
             **{e.id: e for e in earned},
-            **pack_entries(ctx.knobs.packs, admits=_admits(ctx.schema, target.matcher)),
+            **pack_entries(knobs.packs, admits=_admits(target.schema, target.matcher)),
         }
-        active = kept(ctx.knobs.active, ((i, e.group) for i, e in entries.items()))
+        active = kept(knobs.active, ((i, e.group) for i, e in entries.items()))
         ctx.put(BlockPool(entries=tuple(entries[i] for i in active)))
 
 
@@ -133,9 +133,9 @@ class DemoPoolInitializer(_PoolInitializer):
             return f"{self.name}.active names {bad}, which the demo partition lacks"
         return None
 
-    def initialize(self, ctx: NodeContext[PoolKnobs]) -> None:
+    def initialize(self, ctx: NodeContext) -> None:
         demo = ctx.read(Target).demo_split
-        ctx.put(DemoPool(keys=kept(ctx.knobs.active, ((s.key, ()) for s in demo))))
+        ctx.put(DemoPool(keys=kept(ctx.knobs(PoolKnobs).active, ((s.key, ()) for s in demo))))
 
 
 MEMBERS = (BlockPoolInitializer(), DemoPoolInitializer())

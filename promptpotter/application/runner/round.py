@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext, bank_proposals
@@ -454,6 +454,7 @@ async def execute_round(
     callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=round_num)
     callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
     selection = plan.selector.select(NodeContext(ctx, plan.selector), measured, population)
+    cycle.population = list(selection.population)
     round_result = _round_result(ctx, measured, selection, elects_on=plan.selector.elects_on)
     callbacks.on_phase(
         CampaignPhase.SELECT,
@@ -566,7 +567,7 @@ async def post_round(
     controller = cycle.optimizer.plan.controller
     rule: str | None = None
     if controller is not None:
-        ctx = NodeContext[Any](
+        ctx = NodeContext(
             RoundContext(
                 cycle=cycle, round_num=round_num, callbacks=cb, is_final_round=is_final_round
             ),

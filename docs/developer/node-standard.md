@@ -129,18 +129,19 @@ or a live client: each receives the `NodeContext` the bench builds for its node
 (`application/bench/node_context.py` — read its accessors there), and **a node shared between
 manifests reads that context alone** — the readings it declares it `sees`, the state slices it
 `reads` / `writes`, the members it `consults`. A roster where any of those is not closed by exactly
-one member is refused at load. A child is made through `ctx.child` / `ctx.edit`, so its lineage
+one member is refused at load, and so is a read the member cannot hold (`CycleRead.refusal`). A
+child is made through `Children.child` / `Children.edit`, so its lineage
 names every node that wrote it and the loci each moved. What an optimizer needs of the harness
 itself is its runtime's (`OptimizerRuntime`).
 
 | Type | Reads | Returns | Binds it |
 |---|---|---|---|
-| `llm` | its prompt, filled through the dispatch hub | its parsed response — for a proposing node, individuals, each written through `ctx.child` (a later node's change through `ctx.edit`), the one writer of every locus, so its lineage carries its `parent_ids` and every node that wrote it | every child is admitted by the bench as it is written, once (`application/bench/children.py::admission_failures`): forbidden keys, `overlay_failures`, the node's permitted model set, the backend's mandatory placeholders |
+| `llm` | its prompt, filled through the dispatch hub | its parsed response — for a proposing node, individuals, each written through `Children.child` (a later node's change through `Children.edit`), the one writer of every locus, so its lineage carries its `parent_ids` and every node that wrote it | every child is admitted by the bench as it is written, once (`application/bench/children.py::admission_failures`): forbidden keys, `overlay_failures`, the node's permitted model set, the backend's mandatory placeholders |
 | `measurement` | the round's candidates, the sampler's panel, the eliminator's checks | the round's rows | the bench's scoring gateway, walked unchanged; `config` stays empty |
 | `sampler` | the search split, the bench's per-sample difficulty, prior rows | the round's panel: ordered sample ids, cut into the blocks an eliminator decides between | draws from the search split alone; deterministic given its inputs and seed, so resume and fork replay it |
 | `eliminator` | the panel, the candidates, rows as they land | a continue or cut per arm per block, each cut a ledger decision stamped with this node | cuts on evidence about the arm, never on a technical failure — that is the bench's `DegradationCheck`, which runs whatever the eliminator; the `none` member walks every arm to the end |
-| `selector` | the round's rows, lineage, the population on its context (`ctx.read(Lineage).population`) | a `Selection` — `selected`, one arm's key or `None` to hold the round, and `leading` — and the population it keeps (`ctx.keep`) | its choice is what the optimizer keeps, never a score the bench serves |
-| `algorithm` | individuals, and the demo pool when it edits shots | individuals it wrote through `ctx.child` / `ctx.edit`, no model call and no measurement | deterministic given its inputs and seed |
+| `selector` | the round's rows, lineage, the population on its context (`ctx.read(Lineage).population`) | a `Selection` — `selected`, one arm's key or `None` to hold the round, and `leading` — and the population it keeps (`population`) | its choice is what the optimizer keeps, never a score the bench serves |
+| `algorithm` | individuals, and the demo pool when it edits shots | individuals it wrote through `Children.child` / `Children.edit`, no model call and no measurement | deterministic given its inputs and seed |
 | `controller` | the round's envelope and the optimizer's own state | which of the manifest's other `pipelines:` entries runs at the round boundary | whether the run STOPS is the bench's, for every optimizer (`runner/termination.py::standing_tripped`: lives, a perfect objective, convergence); the bench walks `default` alone; the entries a controller picks are the optimizer's, and a manifest without one runs `default` every round |
 
 An `llm` node's role is its position: before the measurement it PROPOSES, after the selector it

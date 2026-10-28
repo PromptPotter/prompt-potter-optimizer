@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import random
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.node_context import Calls, Target
 from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.paper_templates import shown, task_description
 from promptpotter.domain.scoring import ROW_GRADES
@@ -16,8 +17,9 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
 
 
-def _prompt(ctx: NodeContext[Any], individual: OptSearchPoint) -> str:
-    return f"--- PROMPT START ---\n{shown(ctx, individual, ctx.prompt_node)}\n--- PROMPT END ---"
+def _prompt(ctx: NodeContext, individual: OptSearchPoint) -> str:
+    node = ctx.read(Target).prompt_node
+    return f"--- PROMPT START ---\n{shown(ctx, individual, node)}\n--- PROMPT END ---"
 
 
 def _score(score: float) -> str:
@@ -25,7 +27,7 @@ def _score(score: float) -> str:
 
 
 def paradigm_shift_prompt(
-    ctx: NodeContext[Any], shown: Sequence[tuple[OptSearchPoint, float | None]]
+    ctx: NodeContext, shown: Sequence[tuple[OptSearchPoint, float | None]]
 ) -> str:
     """E.7; a calibration-round seed is shown unscored, none being measured."""
     blocks = [
@@ -34,8 +36,8 @@ def paradigm_shift_prompt(
         + f"\n{_prompt(ctx, individual)}"
         for n, (individual, score) in enumerate(shown, start=1)
     ]
-    return ctx.fill(
-        problem_description=task_description(ctx, ctx.prompt_node),
+    return ctx.read(Calls).fill(
+        problem_description=task_description(ctx, ctx.read(Target).prompt_node),
         representatives="\n\n".join(blocks),
     )
 
@@ -54,9 +56,7 @@ def _failures(rows: Sequence[GradedCell], n: int, rng: random.Random) -> str:
     return f"## Failures\n{fence_untrusted(traces)}\n\n"
 
 
-def _inspirations(
-    ctx: NodeContext[Any], inspirations: Sequence[tuple[OptSearchPoint, float]]
-) -> str:
+def _inspirations(ctx: NodeContext, inspirations: Sequence[tuple[OptSearchPoint, float]]) -> str:
     return "".join(
         f"## Inspiration\nScore: {_score(score)}\n{_prompt(ctx, individual)}\n\n"
         for individual, score in inspirations
@@ -64,7 +64,7 @@ def _inspirations(
 
 
 def refine_prompt(
-    ctx: NodeContext[Any],
+    ctx: NodeContext,
     *,
     parent: tuple[OptSearchPoint, float],
     parent_rows: Sequence[GradedCell],
@@ -74,8 +74,8 @@ def refine_prompt(
 ) -> str:
     """E.6; meta-advice stays empty: the paper publishes no template for it (App. B)."""
     individual, score = parent
-    node = ctx.prompt_node
-    return ctx.fill(
+    node = ctx.read(Target).prompt_node
+    return ctx.read(Calls).fill(
         problem_description=task_description(ctx, node),
         parent_score=_score(score),
         parent_prompt=shown(ctx, individual, node),

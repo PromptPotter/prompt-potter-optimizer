@@ -4,7 +4,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler
+from promptpotter.application.bench.node_context import (
+    Bounds,
+    Frontier,
+    Lineage,
+    Progress,
+    Replay,
+    Ruler,
+)
+from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb.checks import (
     EliminationContext,
     EliminationGate,
@@ -21,7 +29,6 @@ if TYPE_CHECKING:
 
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizers.nodes import CatchUp, CatchUpFn, Panel
-    from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
     from promptpotter.application.scoring.query_loop import Walk
     from promptpotter.domain.connector import MeasuredUnit
     from promptpotter.domain.sample import Sample
@@ -145,7 +152,7 @@ class PoBBRace(CatchUpPool):
 
     def __init__(
         self,
-        ctx: NodeContext[PoBBKnobs],
+        ctx: NodeContext,
         panel: Panel,
         catch_up: CatchUpFn,
         *,
@@ -155,7 +162,7 @@ class PoBBRace(CatchUpPool):
         parent = ArmKey(ctx.read(Lineage).parent.id)
         super().__init__(
             PoBBCheck(
-                ctx.knobs,
+                ctx.knobs(PoBBKnobs),
                 n_min=ctx.read(Bounds).elimination_n_min,
                 n_samples=len(panel.cells),
                 ruler=ctx.read(Ruler).difficulty.ruler,
@@ -165,6 +172,7 @@ class PoBBRace(CatchUpPool):
             ctx.node,
         )
         self._ctx = ctx
+        self._progress, self._replay = ctx.read(Progress), ctx.read(Replay)
         self._measured_unit = measured_unit
         frontier = ctx.read(Frontier)
         if parent_results := frontier.parent_own_rows:
@@ -183,7 +191,7 @@ class PoBBRace(CatchUpPool):
         return _PriorsAhead(self._check, ahead)
 
     def open_turn(self, key: ArmKey) -> None:
-        self._check.set_current(key, on_snapshot=self._ctx.race_standing)
+        self._check.set_current(key, on_snapshot=self._progress.race_standing)
 
     def judge(
         self,
@@ -231,7 +239,7 @@ class PoBBRace(CatchUpPool):
             inputs["gate"] = gate
             if gate is EliminationGate.EPSILON:
                 inputs["epsilon"] = context["epsilon"]
-        self._ctx.decide(kind, inputs, True, data=data)
+        self._replay.decide(kind, inputs, True, data=data)
         named = {**labels, check.parent: "parent"}
         return Elimination(
             reason=_reason(context, self._measured_unit, named), context=dict(context)

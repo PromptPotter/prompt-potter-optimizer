@@ -4,7 +4,7 @@ import logging
 import math
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.node_context import NodeContext, measure_as_parent
 from promptpotter.application.intelligence.rasch import candidate_abilities
@@ -116,7 +116,7 @@ async def measure_population(
     )
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
-    seat: NodeContext[Any] = NodeContext(ctx, selector)
+    seat = NodeContext(ctx, selector)
     # Cold too: a selector elects on that θ, and the round's `AbilityReading.caveat` names it.
     ruler = cycle.difficulty.ruler
 

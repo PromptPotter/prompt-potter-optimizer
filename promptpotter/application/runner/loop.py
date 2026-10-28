@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
@@ -139,12 +140,12 @@ async def run_round_loop(
                 if diag:
                     controller = cycle.optimizer.plan.controller
                     assert controller is not None, "a --diag launch with no controller is refused"
-                    await controller.diagnose(
-                        NodeContext(
-                            RoundContext(cycle=cycle, round_num=round_num, callbacks=cb),
-                            controller,
+                    diagnosed = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
+                    await controller.diagnose(NodeContext(diagnosed, controller))
+                    with at_round(round_num + 1):
+                        await cycle.optimizer.runtime.show_round(
+                            replace(diagnosed, round_num=round_num + 1)
                         )
-                    )
                     return LoopEnd(StopReason.DIAG_COMPLETE)
             round_num += 1
 

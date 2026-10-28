@@ -56,9 +56,11 @@ BASELINE = {
     "p_command": 11,
     # The rows each file naming most of them leaves out.
     "p_command_drift": 0,
-    # What an optimizer member is handed: `NodeContext`'s public members, inherited ones included,
-    # and the public members of each object one of its properties exposes; each `CycleRead` alike.
-    "p_member": 307,
+    # What every optimizer member is handed: `NodeContext`'s public members, inherited ones included,
+    # and the public members of each object one of its properties exposes.
+    "p_member": 12,
+    # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
+    "p_reads": 300,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.
@@ -504,7 +506,8 @@ def compute_ledger() -> dict[str, int]:
         "p_served": sum(prop not in read for prop in _served_properties()),
         "p_command": commands,
         "p_command_drift": commands_left_out,
-        "p_member": sum(map(_count_handed, (NodeContext, *CycleRead.__subclasses__()))),
+        "p_member": _count_handed(NodeContext),
+        "p_reads": sum(map(_count_handed, CycleRead.__subclasses__())),
         "test_files": test_files,
         "test_functions": test_functions,
     }

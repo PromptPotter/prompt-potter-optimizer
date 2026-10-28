@@ -5,7 +5,17 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
-from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
+from promptpotter.application.bench.node_context import (
+    Bounds,
+    Calls,
+    Children,
+    Frontier,
+    Lineage,
+    Progress,
+    Replay,
+    Ruler,
+    Target,
+)
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     covered_prefix,
     parent_grades,
@@ -157,16 +167,18 @@ class AdaptiveQueue(nodes.Member):
     name: ClassVar[str] = "adaptive_queue"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = AdaptiveQueueKnobs
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Frontier, Ruler, Bounds})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
+        {Lineage, Frontier, Ruler, Bounds, Replay}
+    )
     size_knob: ClassVar[str | None] = "sp_budget_round"
 
     def round_cells(self, knobs: AdaptiveQueueKnobs, search: int) -> int:
         # Unclamped: a budget above the search split is the finding preflight reports.
         return knobs.sp_budget_round
 
-    def draw(self, ctx: NodeContext[AdaptiveQueueKnobs], pool: list[Sample]) -> Panel:
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         view = ctx.read(Ruler).difficulty
-        knobs = ctx.knobs
+        knobs = ctx.knobs(AdaptiveQueueKnobs)
         lineage = ctx.read(Lineage)
         # A race read on cells that crowned its parent re-reads the parent's luck as its ability.
         crowned = crowning_cells(lineage.rounds, lineage.parent.id)
@@ -175,7 +187,7 @@ class AdaptiveQueue(nodes.Member):
         # No outcome and no ability choose a cell: the election reads these rows as the pool's.
         # A cold ruler keeps the campaign-start prefix, whose shared cells warm it fastest.
         ruler = view.ruler if knobs.per_round_resubset else None
-        rng = ctx.rng()
+        rng = ctx.read(Replay).rng()
 
         def pick(stratum: list[Sample], budget: int) -> list[Sample]:
             if ruler is None:
@@ -208,7 +220,7 @@ class L1Generate(LayoutNode):
     knobs: ClassVar[type[StrictModel]] = L1GenerateKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout})
-    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES
+    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Children, Replay}
     draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L1GenerateOutput
     # L2 moves this node's panels, so the outer's only lever here is its output schema's names.
@@ -218,9 +230,7 @@ class L1Generate(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation})
 
-    async def propose(
-        self, ctx: NodeContext[L1GenerateKnobs], panel: Panel, proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
         return await propose_l1_population(ctx)
 
 
@@ -229,7 +239,7 @@ class PoBB(nodes.Member):
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PoBBKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
-        {Lineage, Frontier, Ruler, Bounds, Target}
+        {Lineage, Frontier, Ruler, Bounds, Target, Progress, Replay}
     )
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = ABORT_LENS_SUPPRESS
     # A PoBB stop ends the buying of an arm; θ still reads what it measured.
@@ -237,7 +247,7 @@ class PoBB(nodes.Member):
 
     def race(
         self,
-        ctx: NodeContext[PoBBKnobs],
+        ctx: NodeContext,
         panel: Panel,
         proposals: Proposals,
         catch_up: CatchUpFn,
@@ -248,7 +258,7 @@ class PoBB(nodes.Member):
 class ThetaElection(nodes.Member):
     name: ClassVar[str] = "theta_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Replay})
     # Admission mirrors the stopping rule: one ε says when the parent is futile against an arm.
     consults: ClassVar[frozenset[type]] = frozenset({PoBB})
     elects_on: ClassVar[DisplayMetric] = "ability"
@@ -256,15 +266,13 @@ class ThetaElection(nodes.Member):
 
     def parent_cells(
         self,
-        ctx: NodeContext[StrictModel],
+        ctx: NodeContext,
         panel: Panel,
         rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells
 
-    def select(
-        self, ctx: NodeContext[StrictModel], measured: MeasuredRound, proposals: Proposals
-    ) -> Selection:
+    def select(self, ctx: NodeContext, measured: MeasuredRound, proposals: Proposals) -> Selection:
         return elect_on_theta(ctx, measured, proposals)
 
 
@@ -274,7 +282,7 @@ class L1Critique(LayoutNode):
     name: ClassVar[str] = "l1_critique"
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Critique})
-    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES
+    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls}
     draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L1CritiqueOutput
 
@@ -282,7 +290,7 @@ class L1Critique(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation, L1Generate})
 
-    async def adapt(self, ctx: NodeContext[StrictModel], round_result: RoundResult) -> None:
+    async def adapt(self, ctx: NodeContext, round_result: RoundResult) -> None:
         ctx.emit(await distil_critique(ctx))
 
 
@@ -291,7 +299,7 @@ class L2Context(LayoutNode):
     layer_id: ClassVar[Literal["L2", "L3"]] = "L2"
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L2Memory})
-    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES
+    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Progress}
     draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L2ContextOutput
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(
@@ -309,7 +317,7 @@ class L2Context(LayoutNode):
     def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
         return build_l2_response_model(bundle.silent_l1_panels)
 
-    def parse(self, ctx: NodeContext[StrictModel], raw: L2ContextOutput) -> TransitionResult:
+    def parse(self, ctx: NodeContext, raw: L2ContextOutput) -> TransitionResult:
         # An absent reason is REPORTED, never replaced by a sentence that reads as L2's own.
         rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
         # Filtered here: a landed steer is carried forward on every later fire and never pruned.
@@ -359,7 +367,7 @@ class L2Context(LayoutNode):
             terminate_proposal=raw.terminate_proposal,
         )
 
-    def land(self, ctx: NodeContext[StrictModel], result: TransitionResult) -> None:
+    def land(self, ctx: NodeContext, result: TransitionResult) -> None:
         memory = ctx.slice(L2Memory)
         steered = memory.steered_onto("l1_generate", result.steer) if result.steer else memory
         ctx.put(steered.model_copy(update={"guard_breaches": list(result.l2_guard_breaches)}))
@@ -369,7 +377,7 @@ class L2Context(LayoutNode):
         assert fire.ask is not None, "only L3 heals"
         return l2_fired(ladder, fire.ask.l2)
 
-    def enter_view(self, ctx: NodeContext[StrictModel], fire: Fire) -> OptimizerStepEnterView:
+    def enter_view(self, ctx: NodeContext, fire: Fire) -> OptimizerStepEnterView:
         items = [(k, str(v)) for k, v in ctx.slice(L2Memory).steered("l1_generate").items()]
         if items:
             shown = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
@@ -392,9 +400,7 @@ class L2Context(LayoutNode):
             ),
         )
 
-    def exit_view(
-        self, ctx: NodeContext[StrictModel], result: TransitionResult
-    ) -> OptimizerStepExitView:
+    def exit_view(self, ctx: NodeContext, result: TransitionResult) -> OptimizerStepExitView:
         layout = ", l1_layout edited" if result.l1_layout is not None else ""
         axis = f", axis={result.axis_targeted}" if result.axis_targeted else ""
         changed = len(ctx.slice(L2Memory).steered("l1_generate"))
@@ -410,7 +416,7 @@ class L3Plan(LayoutNode):
     layer_id: ClassVar[Literal["L2", "L3"]] = "L3"
     reads: ClassVar[frozenset[type[StatePart]]] = BUNDLE_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L3Memory})
-    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES
+    sees: ClassVar[frozenset[type[CycleRead]]] = BUNDLE_SEES | {Calls, Progress}
     draws: ClassVar[Mapping[type[Pool], Draw]] = BUNDLE_DRAWS
     response_model: ClassVar[type[BaseModel] | None] = L3PlanOutput
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(
@@ -424,7 +430,7 @@ class L3Plan(LayoutNode):
     def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
         return L3PlanOutput
 
-    def parse(self, ctx: NodeContext[StrictModel], raw: L3PlanOutput) -> TransitionResult:
+    def parse(self, ctx: NodeContext, raw: L3PlanOutput) -> TransitionResult:
         rationale = truncate(raw.rationale, 80) if raw.rationale else "(no rationale given)"
         failures = l3_plan_breaches(raw.plan, prior_plan=ctx.slice(L3Memory).plan)
         if failures:
@@ -442,7 +448,7 @@ class L3Plan(LayoutNode):
             terminate_proposal=raw.terminate_proposal,
         )
 
-    def land(self, ctx: NodeContext[StrictModel], result: TransitionResult) -> None:
+    def land(self, ctx: NodeContext, result: TransitionResult) -> None:
         ctx.put(
             L3Memory(
                 plan=result.plan,
@@ -455,7 +461,7 @@ class L3Plan(LayoutNode):
     def record(self, ladder: Ladder, fire: Fire) -> Ladder:
         return l3_fired(ladder, None if fire.ask is None else fire.ask.l3)
 
-    def enter_view(self, ctx: NodeContext[StrictModel], fire: Fire) -> OptimizerStepEnterView:
+    def enter_view(self, ctx: NodeContext, fire: Fire) -> OptimizerStepEnterView:
         return OptimizerStepEnterView(
             node=self.name,
             activity=self.phase.activity,
@@ -470,9 +476,7 @@ class L3Plan(LayoutNode):
             ),
         )
 
-    def exit_view(
-        self, ctx: NodeContext[StrictModel], result: TransitionResult
-    ) -> OptimizerStepExitView:
+    def exit_view(self, ctx: NodeContext, result: TransitionResult) -> OptimizerStepExitView:
         return OptimizerStepExitView(
             headline=f"New plan: {truncate(result.plan[:120], 55, '...')}",
             details=(result.described,),
@@ -486,11 +490,11 @@ class Escalation(nodes.Member):
     knobs: ClassVar[type[StrictModel]] = EscalationKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({L1Readout, Ladder})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Ladder})
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Replay})
     fires: ClassVar[frozenset[type]] = frozenset({L2Context, L3Plan})
 
-    def observe(self, ctx: NodeContext[EscalationKnobs], round_result: RoundResult) -> str | None:
-        knobs = ctx.knobs
+    def observe(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
+        knobs = ctx.knobs(EscalationKnobs)
         axes = ctx.read(Ruler).axes
         axes_with_positive_yield = (
             None
@@ -520,7 +524,7 @@ class Escalation(nodes.Member):
         ctx.put(ladder)
         return event.rule if event.next_action == NextAction.FIRE_L2 else None
 
-    async def act(self, ctx: NodeContext[EscalationKnobs], cause: str) -> None:
+    async def act(self, ctx: NodeContext, cause: str) -> None:
         if stop := await escalate_l2(
             ctx,
             cause=cause,
@@ -529,9 +533,8 @@ class Escalation(nodes.Member):
         ):
             raise StopLoop(stop)
 
-    async def diagnose(self, ctx: NodeContext[EscalationKnobs]) -> None:
+    async def diagnose(self, ctx: NodeContext) -> None:
         await self.act(ctx, FORCED_BY_DIAG)
-        await ctx.show_next_round()
 
 
 class PotterRuntime(nodes.OptimizerRuntime):

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.llm_call import run_optimizer_node
-from promptpotter.application.bench.node_context import Lineage
+from promptpotter.application.bench.node_context import Calls, Children, Lineage, Target
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
@@ -23,6 +23,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     VariantEvidenceGrounding,
     build_l1_response_model,
 )
+from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
 from promptpotter.application.optimizers.potter.records import Ladder
 from promptpotter.application.optimizers.potter.validators.l1_strict import (
     l1_blocks_in_pool,
@@ -41,7 +42,6 @@ from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
     from promptpotter.domain.wounds import ValidationFailure
 
 import logging
@@ -71,7 +71,7 @@ class L1Generation:
 
 
 async def l1_generate(
-    ctx: NodeContext[L1GenerateKnobs],
+    ctx: NodeContext,
     *,
     n_variants: int,
     temperature: float,
@@ -80,9 +80,10 @@ async def l1_generate(
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
     round_num = ctx.round_num
-    model = ctx.model
+    calls, knobs = ctx.read(Calls), ctx.knobs(L1GenerateKnobs)
+    model = calls.model
     opt_sp = ctx.read(Lineage).parent
-    pipeline_schema = ctx.schema
+    pipeline_schema = ctx.read(Target).schema
 
     bundle = build_bundle(ctx, ctx.slice(Ladder))
     filled = DispatchHub.fill(load_optimizer_prompt("l1_generate"), bundle, node="l1_generate")
@@ -95,7 +96,7 @@ async def l1_generate(
     )
     prompt_vars: dict[str, str] = {"n_variants": str(n_variants), **filled.injection_vars}
 
-    schema_field_rename = ctx.knobs.schema_field_rename
+    schema_field_rename = knobs.schema_field_rename
     # Under `closed` the wire takes an active entry's id where a pooled field's text would go.
     pooled = (
         {name: {b.id: b.text for b in blocks} for name, blocks in bundle.block_window().items()}
@@ -125,7 +126,7 @@ async def l1_generate(
             temperature=temperature,
             response_model=response_model,
             response_schema=output_schema,
-            context=ctx.call_context(injections=breakdown),
+            context=calls.call_context(breakdown),
             template=filled.template,
         )
     except OptimizerPromptParseError as parse_err:
@@ -188,6 +189,7 @@ async def l1_generate(
 
     variants_list = generated.variants
 
+    children = ctx.read(Children)
     population: list[Proposal] = []
     for v in variants_list[:n_variants]:
         updates = v.prompt_fields_updates
@@ -206,9 +208,9 @@ async def l1_generate(
                 for node, ids in v.shots.items()
             }
         )
-        failures += l1_shots_in_demo_pool(v.shots, demo_ids=key_of.keys(), k_max=ctx.knobs.k_max)
+        failures += l1_shots_in_demo_pool(v.shots, demo_ids=key_of.keys(), k_max=knobs.k_max)
         population.append(
-            ctx.child(
+            children.child(
                 [opt_sp],
                 overlay=v.pipeline_overlay,
                 failures=failures,

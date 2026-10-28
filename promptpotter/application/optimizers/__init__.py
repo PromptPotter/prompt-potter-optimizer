@@ -71,6 +71,9 @@ def _validate(obj: object, origin: str) -> NodeMember:
         isinstance(s, type) and issubclass(s, CycleRead) for s in sees
     ):
         raise RuntimeError(f"{where}: `sees` must be a frozenset of CycleRead kinds.")
+    member = typing.cast("NodeMember", obj)
+    if refused := sorted(why for kind in sees if (why := kind.refusal(member)) is not None):
+        raise RuntimeError(f"{where}: " + "; ".join(refused) + ".")
     consults = getattr(obj, "consults", None)
     if not isinstance(consults, frozenset) or not all(isinstance(c, type) for c in consults):
         raise RuntimeError(f"{where}: `consults` must be a frozenset of member classes.")
@@ -94,7 +97,7 @@ def _validate(obj: object, origin: str) -> NodeMember:
             f"{where}: knobs {defaulted} carry a default. The manifest declares every value, so "
             "a code default would be a second source for one number."
         )
-    return typing.cast("NodeMember", obj)
+    return member
 
 
 def _validate_runtime(obj: object, origin: str) -> OptimizerRuntime:

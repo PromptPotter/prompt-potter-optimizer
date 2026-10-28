@@ -18,8 +18,6 @@ acting.
   `domain/activity.py::ActivityFeed`. Action: every reader a `LedgerFold`, projections checkouts of
   folds, `CampaignStore.ledger(hop)` the one ledger-path derivation. **Re-test:** `rg -c
   "CycleLayout\(stores.campaigns.cycle_dir" promptpotter` → 0; computed `p_record` ≤ 4.
-- **`application/bench/node_context.py::NodeContext` grows a method per member need.** Action:
-  declared typed reads refused at load, a member base in `optimizers/nodes.py`. **Re-test:** `p_member` ≤ 12.
 - **Run state mirrored by test namespaces.** Action: one seat in `tests/factories.py`. **Re-test:**
   renaming a `Cycle` attribute changes one file under `tests/`.
 

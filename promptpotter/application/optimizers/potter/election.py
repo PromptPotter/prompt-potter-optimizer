@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.node_context import Lineage, Ruler
+from promptpotter.application.bench.node_context import Lineage, Replay, Ruler
 from promptpotter.application.optimizers.nodes import Selection
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.records import PotterCheckpointKind
@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import MeasuredRound, Proposals
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.scoring import CellSheet
-    from promptpotter.domain.strict_model import StrictModel
 
 
 def _theta(value: float | None, *, signed: bool = True) -> str:
@@ -77,14 +76,12 @@ def _verdict_reason(
     )
 
 
-def elect_on_theta(
-    ctx: NodeContext[StrictModel], measured: MeasuredRound, proposals: Proposals
-) -> Selection:
+def elect_on_theta(ctx: NodeContext, measured: MeasuredRound, proposals: Proposals) -> Selection:
     ruler = ctx.read(Ruler).difficulty.ruler
     lineage = ctx.read(Lineage)
     electable = measured.electable
     rows: dict[ArmKey, CellSheet] = {key: measured.pooled(key) for key in electable}
-    epsilon = ctx.knobs_of(PoBBKnobs).epsilon
+    epsilon = ctx.knobs(PoBBKnobs).epsilon
     selected, abilities = elect_round_winner(
         electable,
         rows,
@@ -95,7 +92,7 @@ def elect_on_theta(
     )
     reads = readable_lifts(electable, measured.coverage_floor, abilities)
     leading = selected or closest_to_bar(reads)
-    ctx.decide(
+    ctx.read(Replay).decide(
         PotterCheckpointKind.ROUND_WINNER,
         {
             "arms": electable,
@@ -108,10 +105,10 @@ def elect_on_theta(
         },
         selected,
     )
-    ctx.keep([lineage.parent if selected is None else measured.arms[selected].individual])
     return Selection(
         selected=selected,
         leading=leading,
+        population=[lineage.parent if selected is None else measured.arms[selected].individual],
         verdict_reason=_verdict_reason(
             winner=selected,
             leading=leading,

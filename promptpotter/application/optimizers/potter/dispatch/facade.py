@@ -6,7 +6,7 @@ import sys
 from collections.abc import Iterator
 from dataclasses import replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.llm_call import InjectionBreakdown
 from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
@@ -268,7 +268,7 @@ def _by_field(entries: tuple[PoolEntry, ...]) -> dict[str, tuple[PoolEntry, ...]
     return {field: tuple(held) for field, held in out.items()}
 
 
-def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
+def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
     """The round under render is the cycle's last on every node: the bench folds a round in before any node reads it."""
     lineage, frontier, ruler_read, bounds, target = (
         ctx.read(Lineage),
@@ -284,8 +284,8 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
     readout = ctx.recall(L1Readout, latest_round.round)
     health, latest_fold = latest_round.health, latest_round.fold
 
-    escalation = ctx.knobs_of(EscalationKnobs)
-    generate = ctx.knobs_of(L1GenerateKnobs)
+    escalation = ctx.knobs(EscalationKnobs)
+    generate = ctx.knobs(L1GenerateKnobs)
     stall_depth = rounds_without_advance(rounds)
     cs = CycleSlice(
         round_num=latest_round.round + 1,
@@ -309,7 +309,7 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
         l2=ctx.slice(L2Memory),
         l3=ctx.slice(L3Memory),
         framing=target.framing,
-        pipeline_schema=ctx.schema,
+        pipeline_schema=target.schema,
         cycle_slice=cs,
         digest=RoundDigest(
             diagnostics=latest_round.diagnostics,

@@ -78,7 +78,7 @@ Served; no surface recomputes it.
   the L4 admission band are two settings of one predicate.
 - **L4:** each environment's origin cell carries floor and modal share beside
   `domain/l4/inner_facts.py::InnerCellFacts.origin_headroom`; the admitted set is a banked decision
-  (`NodeContext.decide`). **A held-out seat is never admitted or rejected by a survey** — it is the bench.
+  (`Replay.decide`). **A held-out seat is never admitted or rejected by a survey** — it is the bench.
 
 ## Three ways in
 

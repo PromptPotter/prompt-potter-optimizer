@@ -139,11 +139,16 @@ Draw = AccessKnob | CountKnob
 
 
 class CycleRead:
-    """A typed read of the cycle a member names in ``sees``; ``NodeContext.read`` hands it over."""
+    """A typed read a member names in ``sees``, refused at load where ``refusal`` names why; ``NodeContext.read`` hands it over."""
 
-    def __init__(self, round_: RoundContext) -> None:
+    def __init__(self, round_: RoundContext, member: NodeMember) -> None:
         self._round = round_
         self._cycle = round_.cycle
+        self._member = member
+
+    @classmethod
+    def refusal(cls, member: NodeMember) -> str | None:
+        return None
 
 
 class NodeMember(Protocol):
@@ -161,13 +166,13 @@ class NodeMember(Protocol):
     def reads(self) -> frozenset[type[StatePart]]: ...
     @property
     def writes(self) -> frozenset[type[StatePart]]: ...
-    # The cycle reads beyond its own state it is handed (`NodeContext.read`).
+    # Every read beyond its own state, knobs and pools it is handed (`NodeContext.read`).
     @property
     def sees(self) -> frozenset[type[CycleRead]]: ...
     # The pools it draws from, each under the knob that sets its access; read only through `NodeContext.drawn`.
     @property
     def draws(self) -> Mapping[type[Pool], Draw]: ...
-    # The members whose knobs it reads (`NodeContext.knobs_of`), and nothing else of theirs.
+    # The members whose knobs it reads (`NodeContext.knobs`), and nothing else of theirs.
     @property
     def consults(self) -> frozenset[type]: ...
 
@@ -480,7 +485,7 @@ class Panel:
 
 @dataclass(frozen=True)
 class Proposals:
-    """The round's ARMS; the population carried between rounds is ``NodeContext.population``."""
+    """The round's ARMS; the population carried between rounds is ``Selection.population``."""
 
     proposals: list[Proposal]
 
@@ -574,6 +579,8 @@ class Selection:
     selected: ArmKey | None
     leading: ArmKey | None
     verdict_reason: str
+    # What the next round's walk reads as the population, which the bench seats.
+    population: Sequence[OptSearchPoint]
 
 
 class Sampler(NodeMember, Protocol):
@@ -586,7 +593,7 @@ class Sampler(NodeMember, Protocol):
         """Cells a round after the first asks for under its own *knobs*, read BEFORE any round runs; 0 where the search split holds no panel."""
         ...
 
-    def draw(self, ctx: NodeContext[Any], pool: list[Sample]) -> Panel: ...
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel: ...
 
 
 class Proposer(NodeMember, Protocol):
@@ -602,9 +609,7 @@ class Proposer(NodeMember, Protocol):
         """How it makes a child, which every child it writes records."""
         ...
 
-    async def propose(
-        self, ctx: NodeContext[Any], panel: Panel, proposals: Proposals
-    ) -> Proposals: ...
+    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals: ...
 
 
 @dataclass(frozen=True)
@@ -681,7 +686,7 @@ class Eliminator(NodeMember, Protocol):
         ...
 
     def race(
-        self, ctx: NodeContext[Any], panel: Panel, proposals: Proposals, catch_up: CatchUpFn
+        self, ctx: NodeContext, panel: Panel, proposals: Proposals, catch_up: CatchUpFn
     ) -> Race: ...
 
 
@@ -697,13 +702,13 @@ class Selector(NodeMember, Protocol):
         ...
 
     def parent_cells(
-        self, ctx: NodeContext[Any], panel: Panel, rows: Mapping[ArmKey, CellSheet]
+        self, ctx: NodeContext, panel: Panel, rows: Mapping[ArmKey, CellSheet]
     ) -> list[Sample]:
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
         ...
 
     def select(
-        self, ctx: NodeContext[Any], measured: MeasuredRound, proposals: Proposals
+        self, ctx: NodeContext, measured: MeasuredRound, proposals: Proposals
     ) -> Selection: ...
 
 
@@ -716,7 +721,6 @@ class OperatorSeat:
     knobs: ClassVar[type[StrictModel]] = StrictModel
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset()
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
     variation_mode: ClassVar[VariationMode] = "operator"
 
     def __init__(self, proposers: Sequence[Proposer]) -> None:
@@ -725,6 +729,7 @@ class OperatorSeat:
             {pool: draw for p in reversed(proposers) for pool, draw in p.draws.items()}
         )
         self.consults: frozenset[type] = frozenset(type(p) for p in proposers)
+        self.sees: frozenset[type[CycleRead]] = frozenset(k for p in proposers for k in p.sees)
 
 
 class MintFacts(NamedTuple):
@@ -755,13 +760,13 @@ class Initializer(NodeMember, Protocol):
         """At load with ``mint`` ``None``, again before the mint."""
         ...
 
-    def initialize(self, ctx: NodeContext[Any]) -> None: ...
+    def initialize(self, ctx: NodeContext) -> None: ...
 
 
 class Adapter(NodeMember, Protocol):
     """Writes off the round just absorbed; raises where it lands nothing, which the round survives and the next walk re-runs first."""
 
-    async def adapt(self, ctx: NodeContext[Any], round_result: RoundResult) -> None: ...
+    async def adapt(self, ctx: NodeContext, round_result: RoundResult) -> None: ...
 
 
 class Controller(NodeMember, Protocol):
@@ -772,12 +777,12 @@ class Controller(NodeMember, Protocol):
         """The members it runs, each under its own context (``NodeContext.fire``)."""
         ...
 
-    def observe(self, ctx: NodeContext[Any], round_result: RoundResult) -> str | None:
+    def observe(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
         """Read the closed round into its own state; the rule that makes it act at this boundary, ``None`` where none does."""
         ...
 
-    async def act(self, ctx: NodeContext[Any], cause: str) -> None: ...
+    async def act(self, ctx: NodeContext, cause: str) -> None: ...
 
-    async def diagnose(self, ctx: NodeContext[Any]) -> None:
-        """``--diag``: act on the round just closed, then show the next round's proposals unmeasured."""
+    async def diagnose(self, ctx: NodeContext) -> None:
+        """``--diag``: act on the round just closed; the bench then shows the next round unmeasured."""
         ...

@@ -341,21 +341,17 @@ class SelectedOptimizer:
         return name
 
     def knob_owner(self, member: NodeMember, kind: type[StrictModel]) -> str:
-        """It or the consulted member whose declared knobs are a *kind* — ONE of them."""
+        """It where its own knobs are a *kind*, else the ONE consulted member whose knobs are."""
+        if issubclass(member.knobs, kind):
+            return member.name
         held = [
-            name
-            for name, knobs in (
-                (member.name, member.knobs),
-                *(
-                    (n, optimizers.NODE_MEMBERS.get(n).knobs)
-                    for n in (self.roster_one(c) for c in member.consults)
-                ),
-            )
-            if issubclass(knobs, kind)
+            n
+            for n in (self.roster_one(c) for c in member.consults)
+            if issubclass(optimizers.NODE_MEMBERS.get(n).knobs, kind)
         ]
         if len(held) != 1:
             raise TypeError(
-                f"{member.name!r} reaches {len(held)} {kind.__name__} knob sets, not one"
+                f"{member.name!r} consults {len(held)} {kind.__name__} knob sets, not one"
             )
         return held[0]
 

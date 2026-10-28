@@ -119,7 +119,7 @@ A decision a resume re-derives, or one it only archives.
 1. Name the kind: a value of the deciding party's `CheckpointKind` enum — `BenchCheckpointKind`
    (`domain/run_records.py`), or the optimizer's own in its package (potter's
    `PotterCheckpointKind`, `optimizers/potter/records.py`) — or, for a plugin, its own string.
-2. A member records it with `ctx.decide(kind, inputs, outcome)` (`bench/node_context.py`), which
+2. A member records it with `ctx.read(Replay).decide(kind, inputs, outcome)` (`bench/node_context.py`), which
    stamps its node and round; the bench's own go through `record_decision`.
 3. If a resume must re-derive it, register a replayer for the kind on the optimizer runtime's
    `replayers`. **Registering one IS the gating**: a kind with none is archived and never compared.

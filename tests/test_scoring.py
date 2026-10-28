@@ -243,7 +243,6 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget, StepUsage, TokenUsageKind
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import Hold, spending_under
 from promptpotter.infrastructure.llm.telemetry import (
@@ -1936,7 +1935,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                 "Answer tersely."
             ], "a resumed run handed its proposer a pool its banked round does not name"
             l3: Any = optimizers.NODE_MEMBERS.get("l3_plan")
-            replanning: NodeContext[StrictModel] = NodeContext(at_origin, l3)
+            replanning = NodeContext(at_origin, l3)
             set_cycle(cycle, slices=[L3Memory(plan="attack the default label")])
             l3.land(replanning, l3.parse(replanning, L3PlanOutput(plan="")))
             assert cycle.slices.get(L3Memory).plan == "", (

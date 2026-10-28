@@ -34,7 +34,7 @@ def parse_population(
     runtime_failures: Sequence[RuntimeFailure],
     inner_cells: InnerCells | None,
 ) -> list[Proposal]:
-    """L1's rejections only: search space, route keys and backend placeholders are the bench's (``NodeContext.child``); shots are judged on the wire (``generate.py``), where demo ids still exist."""
+    """L1's rejections only: search space, route keys and backend placeholders are the bench's (``Children.child``); shots are judged on the wire (``generate.py``), where demo ids still exist."""
     parsed: list[Proposal] = []
     for cp in proposals:
         pipeline_overlay = cp.overlay

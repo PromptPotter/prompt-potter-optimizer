@@ -3,7 +3,6 @@ from __future__ import annotations
 from promptpotter.application import optimizers
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.optimizers.nodes import RoundContext
-from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
 from promptpotter.application.optimizers.potter.l1.candidate_source import propose_l1_population
 from promptpotter.application.runner.round import (
     announce_opening,
@@ -24,7 +23,7 @@ async def run_generation_only_round(ctx: RoundContext) -> None:
     await settle_owed_outputs(ctx)
     walk = cycle.optimizer.plan.walk(cycle.population)
     opening = announce_opening(ctx, walk)
-    generate = NodeContext[L1GenerateKnobs](ctx, optimizers.NODE_MEMBERS.get("l1_generate"))
+    generate = NodeContext(ctx, optimizers.NODE_MEMBERS.get("l1_generate"))
     population = await propose_l1_population(generate)
     # Banked unmeasured: the resume after `--diag` measures these very arms.
     bank_walk(ctx, population.proposals)

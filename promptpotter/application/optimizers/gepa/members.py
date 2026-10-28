@@ -8,7 +8,14 @@ from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 from pydantic import Field
 
-from promptpotter.application.bench.node_context import Lineage, Target
+from promptpotter.application.bench.node_context import (
+    Calls,
+    Children,
+    Frontier,
+    Lineage,
+    Replay,
+    Target,
+)
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import cell_objectives
 from promptpotter.application.optimizers.gepa import prompts
@@ -85,6 +92,7 @@ class Minibatch(nodes.Member):
     knobs: ClassVar[type[StrictModel]] = MinibatchKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Replay})
     size_knob: ClassVar[str | None] = None
 
     def round_cells(self, knobs: MinibatchKnobs, search: int) -> int:
@@ -92,8 +100,8 @@ class Minibatch(nodes.Member):
             return 0
         return knobs.size + knobs.pareto_size
 
-    def draw(self, ctx: NodeContext[MinibatchKnobs], pool: list[Sample]) -> Panel:
-        knobs = ctx.knobs
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
+        knobs = ctx.knobs(MinibatchKnobs)
         banked = ctx.slice(ParetoSet).keys
         by_key = {s.key: s for s in pool}
         if missing := [key for key in banked if key not in by_key]:
@@ -108,7 +116,7 @@ class Minibatch(nodes.Member):
                 f"of {knobs.size}"
             )
         ctx.put(ParetoSet(keys=[s.key for s in pareto]))
-        batch = ctx.rng().sample(feedback, knobs.size)
+        batch = ctx.read(Replay).rng().sample(feedback, knobs.size)
         cells = [*batch, *pareto]
         return nodes.Panel(cells=cells, order=list(cells), block_size=knobs.size)
 
@@ -124,11 +132,11 @@ class GepaReflect(nodes.Member):
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores, ReflectionModules})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ReflectionModules, MinibatchBars})
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Target})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
+        {Calls, Children, Frontier, Lineage, Target}
+    )
 
-    async def propose(
-        self, ctx: NodeContext[RewriteKnobs], panel: Panel, proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
         candidates = ctx.slice(ParetoScores)
         parent_id = candidates.parent_id
         # A lineage no longer scored keeps no pointer.
@@ -143,16 +151,16 @@ class GepaReflect(nodes.Member):
             if parent_id is None
             else next(ind for ind in lineage.population if ind.id == parent_id)
         )
-        modules = ctx.schema.prompt_nodes()
+        modules = ctx.read(Target).schema.prompt_nodes()
         at = held.get(parent.id, 0) % len(modules)
         node = modules[at]
-        rows = await ctx.measure_parent(parent.id, panel.order[: panel.block_size])
+        rows = await ctx.read(Frontier).measure_parent(parent.id, panel.order[: panel.block_size])
         prompt = prompts.reflection_prompt(ctx, instruction=shown(ctx, parent, node), rows=rows)
         proposal = child(
             ctx,
             node,
             [parent],
-            await ctx.ask(prompt, 0),
+            await ctx.read(Calls).ask(prompt, 0),
             f"reflect on {parent.id[:6]}'s {node.name}",
             parse=prompts.fenced,
         )
@@ -184,13 +192,14 @@ class _GateRace(nodes.NoCatchUps):
 
     def __init__(
         self,
-        ctx: NodeContext[StrictModel],
+        ctx: NodeContext,
         *,
         bars: MinibatchBars,
         block_size: int,
         n_cells: int,
     ) -> None:
         self._ctx = ctx
+        self._replay = ctx.read(Replay)
         self.node = ctx.node
         self._bars = bars.bars
         self._block_size = block_size
@@ -229,7 +238,7 @@ class _GateRace(nodes.NoCatchUps):
             parent_id, bar = held.parent_id, held.objectives
             graded = cell_objectives(arm_rows)
             accepted, sigma, sigma_prime = minibatch_improves(bar, graded)
-            self._ctx.decide(
+            self._replay.decide(
                 GepaCheckpointKind.MINIBATCH_GATE,
                 {
                     "arm": cid,
@@ -291,12 +300,13 @@ class MinibatchGate(nodes.Member):
     name: ClassVar[str] = "minibatch_gate"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({MinibatchBars})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Replay})
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
     stop_disqualifies: ClassVar[bool] = True
 
     def race(
         self,
-        ctx: NodeContext[StrictModel],
+        ctx: NodeContext,
         panel: Panel,
         proposals: Proposals,
         catch_up: CatchUpFn,
@@ -354,24 +364,22 @@ class Pareto(nodes.Member):
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet, ParetoScores})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores})
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage})
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
     elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
 
     def parent_cells(
         self,
-        ctx: NodeContext[StrictModel],
+        ctx: NodeContext,
         panel: Panel,
         rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells[panel.block_size :]
 
-    def select(
-        self, ctx: NodeContext[StrictModel], measured: MeasuredRound, proposals: Proposals
-    ) -> Selection:
+    def select(self, ctx: NodeContext, measured: MeasuredRound, proposals: Proposals) -> Selection:
         pareto_set = ctx.slice(ParetoSet).keys
         candidates = dict(ctx.slice(ParetoScores).scores)
-        lineage = ctx.read(Lineage)
+        lineage, replay = ctx.read(Lineage), ctx.read(Replay)
         kept = [ind for ind in lineage.population if ind.id in candidates]
         offered = [
             (measured.arms[key].individual, measured.rows[key]) for key in measured.electable
@@ -383,7 +391,7 @@ class Pareto(nodes.Member):
             graded = cell_objectives(sheet)
             # An aggregate over fewer cells is no aggregate, for the seat as for every child.
             if ungraded := [key for key in pareto_set if key not in graded]:
-                ctx.decide(
+                replay.decide(
                     GepaCheckpointKind.CANDIDATE_REFUSED,
                     {"arm": ind.id, "round_num": ctx.round_num},
                     False,
@@ -395,7 +403,6 @@ class Pareto(nodes.Member):
             if ind.id not in candidates:
                 kept.append(ind)
             candidates[ind.id] = {key: graded[key] for key in pareto_set}
-        ctx.keep(kept)
         if not candidates:
             ctx.put(ParetoScores())
             return nodes.Selection(
@@ -403,6 +410,7 @@ class Pareto(nodes.Member):
                 leading=None,
                 verdict_reason="no candidate carries a verdict on every Pareto-set cell; none "
                 "is admitted",
+                population=kept,
             )
         aggregates = {cid: _aggregate(scores) for cid, scores in candidates.items()}
         top = max(aggregates.values())
@@ -412,7 +420,7 @@ class Pareto(nodes.Member):
         selected_id = "" if incumbent in leaders else leaders[0]
         if selected_id and selected_id not in admitted:
             raise ValueError("pareto: the best aggregate is neither the incumbent nor this round's")
-        parent_id = draw_parent(candidates, pareto_set, ctx.rng())
+        parent_id = draw_parent(candidates, pareto_set, replay.rng())
         verdict = (
             f"{len(admitted)} of {len(measured.arms)} arms passed the minibatch, joining "
             f"{len(candidates)} candidates; best aggregate {top:.3f} on {len(pareto_set)} "
@@ -424,6 +432,7 @@ class Pareto(nodes.Member):
             selected=ArmKey(selected_id) if selected_id else None,
             leading=ArmKey(leading) if leading else None,
             verdict_reason=verdict,
+            population=kept,
         )
 
 
