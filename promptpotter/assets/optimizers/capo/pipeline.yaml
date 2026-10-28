@@ -107,11 +107,6 @@ nodes:
       length_penalty: 0.05
       rewrites: prompt
       field: instruction
-  # The arm gate's seat (`optimization.arm_gate`): an operator's arms, admitted as any child is.
-  operator_seat:
-    type: algorithm
-    config:
-      k_max: 5
 pipelines:
   run_init:
     - demo_pool
@@ -128,8 +123,6 @@ pipelines:
     - population
   initial_population:
     - capo_init
-  arm_gate:
-    - operator_seat
 # Alg. 1 races the initial population together with the first offspring (lines 3-12): round 1
 # walks `initial_population`, then `default` mates from what it made.
 initial_population_walks: before_default

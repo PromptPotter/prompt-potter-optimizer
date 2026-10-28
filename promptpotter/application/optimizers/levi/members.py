@@ -120,7 +120,7 @@ def choose_proxy(
     return [cells[j] for j in sorted(picked)]
 
 
-class ProxyCss(nodes.Member):
+class ProxyCss(nodes.Sampler):
     """The same cells in the same order every round, resume and fork."""
 
     name: ClassVar[str] = "proxy_css"
@@ -281,7 +281,7 @@ def _replay_proxy_selected(
     )
 
 
-class MapElites(nodes.Member):
+class MapElites(nodes.Selector):
     name: ClassVar[str] = "map_elites"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = MapElitesKnobs
@@ -402,7 +402,7 @@ class LeviSeedKnobs(RewriteKnobs):
     )
 
 
-class LeviSeed(nodes.Member):
+class LeviSeed(nodes.Proposer):
     """The seed pass `M_l.DIVERSESEED` (Alg. 1): the calibration round's arms."""
 
     name: ClassVar[str] = "levi_seed"
@@ -434,7 +434,7 @@ class LeviSeed(nodes.Member):
         return nodes.Proposals(seeds)
 
 
-class LeviParadigmShift(nodes.Member):
+class LeviParadigmShift(nodes.Proposer):
     """The large model's route (§3.2, App. F)."""
 
     name: ClassVar[str] = "levi_paradigm_shift"
@@ -533,7 +533,7 @@ def _softmax_pick(elites: Sequence[LeviElite], temperature: float, rng: random.R
     return rng.choices(list(elites), weights=weights)[0]
 
 
-class LeviRefine(nodes.Member):
+class LeviRefine(nodes.Proposer):
     """The small model's route (§3.2, Alg. 2 lines 9-10)."""
 
     name: ClassVar[str] = "levi_refine"

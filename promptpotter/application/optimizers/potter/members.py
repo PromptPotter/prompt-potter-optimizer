@@ -167,7 +167,7 @@ def _strata(pool: list[Sample], by: CellStrata) -> list[list[Sample]]:
     return list(out.values())
 
 
-class AdaptiveQueue(nodes.Member):
+class AdaptiveQueue(nodes.Sampler):
     """ONE order every arm walks: shared prefixes keep paired stats comparable."""
 
     name: ClassVar[str] = "adaptive_queue"
@@ -224,7 +224,7 @@ class AdaptiveQueue(nodes.Member):
         return nodes.Panel(cells=cells, order=[by_id[sid] for sid in order], block_size=1)
 
 
-class L1Generate(LayoutNode):
+class L1Generate(LayoutNode, nodes.Proposer):
     name: ClassVar[str] = "l1_generate"
     prompt_arity: ClassVar[PromptArity] = "each"
     opens: ClassVar[bool] = True
@@ -290,7 +290,7 @@ class L1Generate(LayoutNode):
         return await propose_l1_population(ctx)
 
 
-class PoBB(nodes.Member):
+class PoBB(nodes.Eliminator):
     name: ClassVar[str] = "pobb"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PoBBKnobs
@@ -315,7 +315,7 @@ class PoBB(nodes.Member):
         return PoBBRace(ctx, panel, catch_up, measured_unit=ctx.read(Target).measured_unit)
 
 
-class ThetaElection(nodes.Member):
+class ThetaElection(nodes.Selector):
     name: ClassVar[str] = "theta_election"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Ruler, Replay})
@@ -337,7 +337,7 @@ class ThetaElection(nodes.Member):
         return elect_on_theta(ctx, measured)
 
 
-class L1Critique(LayoutNode):
+class L1Critique(LayoutNode, nodes.Adapter):
     """A malformed response is survived: the next walk re-runs it (`round.py::settle_owed_outputs`)."""
 
     name: ClassVar[str] = "l1_critique"
@@ -567,7 +567,7 @@ class L3Plan(LayoutNode):
         )
 
 
-class Escalation(nodes.Member):
+class Escalation(nodes.Controller):
     name: ClassVar[str] = "escalation"
     kind: ClassVar[NodeKind] = NodeKind.CONTROLLER
     knobs: ClassVar[type[StrictModel]] = EscalationKnobs

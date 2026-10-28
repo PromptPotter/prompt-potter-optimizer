@@ -90,7 +90,7 @@ def cross_shots(parents: Sequence[Sequence[str]], *, rng: random.Random) -> list
     return rng.sample(union, min(n, len(union)))
 
 
-class FewShot(nodes.Member):
+class FewShot(nodes.Proposer):
     name: ClassVar[str] = "few_shot"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     prompt_arity: ClassVar[PromptArity] = "one"
@@ -155,7 +155,7 @@ class BlocksKnobs(StrictModel):
     )
 
 
-class Blocks(nodes.Member):
+class Blocks(nodes.Sampler):
     """The same cells in the same blocks every round, resume and fork: never shuffled."""
 
     name: ClassVar[str] = "blocks"
@@ -424,7 +424,7 @@ def _replay_paired_t_cut(
     return beaten >= int(inputs_ref["survivors"])
 
 
-class PairedT(nodes.Member):
+class PairedT(nodes.Eliminator):
     name: ClassVar[str] = "paired_t"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PairedTKnobs
@@ -481,7 +481,7 @@ class CapoInitKnobs(RewriteKnobs):
     )
 
 
-class CapoInit(nodes.Member):
+class CapoInit(nodes.Proposer):
     """Draws the initial population, which sets the objective every later race and selection ranks on."""
 
     name: ClassVar[str] = "capo_init"
@@ -558,7 +558,7 @@ class MatingKnobs(StrictModel):
     )
 
 
-class Mating(nodes.Member):
+class Mating(nodes.Proposer):
     """Each child is its first parent's copy naming both; the recombining nodes after it write it."""
 
     name: ClassVar[str] = "mating"
@@ -591,7 +591,7 @@ def _mated(ctx: NodeContext, proposals: Proposals) -> list[list[OptSearchPoint]]
     return [[carried[pid] for pid in p.individual.lineage.parent_ids] for p in proposals.proposals]
 
 
-class CapoCrossover(nodes.Member):
+class CapoCrossover(nodes.Proposer):
     name: ClassVar[str] = "capo_crossover"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
@@ -613,7 +613,7 @@ class CapoCrossover(nodes.Member):
         )
 
 
-class ShotCrossover(nodes.Member):
+class ShotCrossover(nodes.Proposer):
     name: ClassVar[str] = "shot_crossover"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     prompt_arity: ClassVar[PromptArity] = "one"
@@ -640,7 +640,7 @@ class ShotCrossover(nodes.Member):
         )
 
 
-class CapoMutate(nodes.Member):
+class CapoMutate(nodes.Proposer):
     """A child its crossover already failed is passed on untouched: it will never be measured."""
 
     name: ClassVar[str] = "capo_mutate"
@@ -664,7 +664,7 @@ class CapoMutate(nodes.Member):
         return nodes.Proposals(mutated)
 
 
-class PopulationRejoin(nodes.Member):
+class PopulationRejoin(nodes.Proposer):
     """Members go AHEAD of the offspring: they walk first, so every offspring is raced against them."""
 
     name: ClassVar[str] = "population_rejoin"
@@ -710,7 +710,7 @@ def _replay_population_kept(
     )
 
 
-class PopulationSelector(nodes.Member):
+class PopulationSelector(nodes.Selector):
     name: ClassVar[str] = "population"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = PopulationKnobs

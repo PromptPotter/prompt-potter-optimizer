@@ -13,10 +13,10 @@ from pydantic import Field
 
 from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import (
-    ARM_GATE,
     INITIAL_POPULATION,
+    OPERATOR_SEAT,
     RUN_INIT,
-    ArmAuthor,
+    CountKnob,
     Initializer,
     Reviewer,
     RoundWalk,
@@ -40,7 +40,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.domain.pool import Pool
+from promptpotter.domain.pool import DemoPool, Pool
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
@@ -116,12 +116,37 @@ class PipelineManifest(FrozenModel):
         return self.model_copy(update={"nodes": nodes})
 
 
-@functools.lru_cache(maxsize=8)
-def _read_manifest(path: Path, _mtime_ns: int) -> PipelineManifest:
+class ManifestSwap(FrozenModel):
+    # Takes the swapped node's place in every walk, as manifest `of` declares and configures it.
+    node: str
+    of: str
+
+
+class ManifestSwitch(FrozenModel):
+    """A mix: the whole manifest ``extends`` names, each node ``swap`` names replaced by another manifest's node of its type."""
+
+    name: str
+    version: str
+    paper: str | None = None
+    extends: str
+    swap: dict[str, ManifestSwap]
+
+
+@functools.lru_cache(maxsize=16)
+def _read_manifest(path: Path, _mtime_ns: int) -> PipelineManifest | ManifestSwitch:
     # Keyed on path AND mtime: an operator's edit or tenant shadow takes effect without a restart.
     if not path.is_file():
         raise FileNotFoundError(f"no optimizer manifest at {path}")
-    return PipelineManifest.model_validate(read_yaml(path))
+    raw = read_yaml(path)
+    return (
+        ManifestSwitch.model_validate(raw)
+        if "extends" in raw
+        else PipelineManifest.model_validate(raw)
+    )
+
+
+def authored_manifest(path: Path) -> PipelineManifest | ManifestSwitch:
+    return _read_manifest(path, _stamp(path))
 
 
 @functools.lru_cache(maxsize=8)
@@ -145,8 +170,6 @@ class RoundPlan:
     """What the bench walks, by role: built once, at load, so a walk the bench cannot run is refused before a mint."""
 
     initializers: tuple[Initializer, ...]
-    # Walked in the proposers' place by an `author` gate, and after them by `review`.
-    seat: ArmAuthor
     measurement: str
     sampler: Sampler
     initial_population: tuple[Proposer, ...]
@@ -247,16 +270,8 @@ def _round_plan(
             name,
             f"`{RUN_INIT}` walks {strays}, which are no pool initializer: it seeds pools alone.",
         )
-    seats = [optimizers.NODE_MEMBERS.get(n) for n in schema.pipelines.get(ARM_GATE, ())]
-    if len(seats) != 1 or not isinstance(seats[0], ArmAuthor):
-        raise _walk_refused(
-            name,
-            f"`{ARM_GATE}` must walk the one member an operator's arms are written through — "
-            f"it walks {[m.name for m in seats]}.",
-        )
     return RoundPlan(
         initializers=tuple(cast("Initializer", m) for m in initializers),
-        seat=seats[0],
         measurement=walk[measured_at],
         sampler=samplers[0],
         initial_population=tuple(initial),
@@ -271,7 +286,7 @@ def _round_plan(
 
 @dataclass(frozen=True)
 class SelectedOptimizer:
-    """``manifest`` is as authored; ``schema`` is it parsed with the overlay applied."""
+    """``manifest`` is as resolved, a switch laid onto what it extends; ``schema`` is it parsed with the overlay applied."""
 
     name: str
     manifest: PipelineManifest
@@ -384,6 +399,24 @@ class SelectedOptimizer:
                 f"{member.name!r} draws from the {pool.kind!r} pool and does not declare it"
             )
         return draw.access(self.reached_knobs(member, draw.knobs))
+
+    def draws(self, member: NodeMember) -> frozenset[type[Pool]]:
+        """The pools *member* reads entries of: an ``off`` draw reads none, and the bench's seat the demo pool where ``shot_cap`` admits a shot."""
+        if member is OPERATOR_SEAT:
+            return frozenset({DemoPool}) if self.shot_cap else frozenset()
+        return frozenset(pool for pool in member.draws if self.access(member, pool) != "off")
+
+    @property
+    def shot_cap(self) -> int:
+        """The most shots an operator's arm may carry: the most any proposer of a round may draw, 0 where none draws the demo pool."""
+        return max(
+            (
+                draw.count(self.reached_knobs(proposer, draw.knobs))
+                for proposer in (*self.plan.initial_population, *self.plan.proposers)
+                if isinstance(draw := proposer.draws.get(DemoPool), CountKnob)
+            ),
+            default=0,
+        )
 
     def pool_refusals(self, *, mint: MintFacts | None) -> list[str]:
         """Why a pool seeds nothing its readers may draw: at load with no *mint*, before a mint with its facts."""
@@ -623,11 +656,80 @@ def _knobs(name: str, kind: NodeKind | None, config: Mapping[str, Any]) -> Stric
     return model.model_validate({k: v for k, v in config.items() if k in model.model_fields})
 
 
+def _located(name: str) -> tuple[Path, PipelineManifest | ManifestSwitch]:
+    try:
+        shipped = optimizers.MANIFESTS.get(name).directory
+    except KeyError as exc:
+        raise NotFoundError(f"No optimizer named {name!r}", code="optimizer_unknown") from exc
+    return shipped, authored_manifest(optimizer_manifest_path(shipped))
+
+
+def _stamps(name: str) -> tuple[int, ...]:
+    """Of every file *name* resolves from, so an edit to what a switch extends re-resolves the switch."""
+    _, authored = _located(name)
+    read = [name]
+    if isinstance(authored, ManifestSwitch):
+        read += [authored.extends, *(swap.of for swap in authored.swap.values())]
+    return tuple(_stamp(optimizer_manifest_path(_located(n)[0])) for n in read)
+
+
+def _whole(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
+    shipped, authored = _located(name)
+    if isinstance(authored, ManifestSwitch):
+        raise _walk_refused(
+            name, "a switch extends and swaps from whole manifests, never a switch."
+        )
+    return authored, _read_schemas(shipped / "resolved_schemas.json")
+
+
+def _resolved(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
+    """*name*'s manifest and output schemas; a switch's swapped node brings its prompt and schema."""
+    _, authored = _located(name)
+    if not isinstance(authored, ManifestSwitch):
+        return _whole(name)
+    base, base_schemas = _whole(authored.extends)
+    schemas, prompts = dict(base_schemas), dict(base.resolved_prompts)
+    swapped: dict[str, tuple[str, ManifestNode]] = {}
+    for old, swap in authored.swap.items():
+        source, source_schemas = _whole(swap.of)
+        node = source.nodes.get(swap.node)
+        if old not in base.nodes or node is None or swap.node in base.nodes:
+            raise _walk_refused(
+                name,
+                f"swaps {old!r} of {authored.extends!r} for {swap.node!r} of {swap.of!r}: the "
+                "first must be a node of the one, the second of the other alone.",
+            )
+        if node.type is not base.nodes[old].type:
+            raise _walk_refused(name, f"swaps {node.type} {swap.node!r} into {old!r}'s role.")
+        cfg = node.config
+        if key := _resolved_key(cfg.get("prompt_family"), cfg.get("prompt_version")):
+            prompts[key] = source.resolved_prompts[key]
+        if key := _resolved_key(cfg.get("schema_family"), cfg.get("schema_version")):
+            schemas[key] = source_schemas[key]
+        swapped[old] = (swap.node, node)
+    nodes = dict(swapped.get(n, (n, node)) for n, node in base.nodes.items())
+    pipelines = {
+        walk: [swapped[n][0] if n in swapped else n for n in walked]
+        for walk, walked in base.pipelines.items()
+    }
+    manifest = base.model_copy(
+        update={
+            "name": authored.name,
+            "version": authored.version,
+            "paper": authored.paper,
+            "nodes": nodes,
+            "pipelines": pipelines,
+            "resolved_prompts": prompts,
+        }
+    )
+    return manifest, schemas
+
+
 @functools.lru_cache(maxsize=32)
 def _select(
-    name: str, shipped: Path, path: Path, stamp: int, overlay_json: str, gate: ArmGateMode
+    name: str, _stamped: tuple[int, ...], overlay_json: str, gate: ArmGateMode
 ) -> SelectedOptimizer:
-    manifest = _read_manifest(path, stamp)
+    manifest, schemas = _resolved(name)
     overlay: dict[str, dict[str, Any]] = json.loads(overlay_json)
     if unknown := sorted(set(overlay) - set(manifest.nodes)):
         raise ValueError(
@@ -637,7 +739,6 @@ def _select(
     checkin = {n.name for n in checkin_manifest().schema.declared_nodes}
     if taken := sorted(set(manifest.nodes) & checkin):
         raise ValueError(f"optimizer {name!r} declares {taken}, which the bench's check-in owns.")
-    schemas = _read_schemas(shipped / "resolved_schemas.json")
     schema = _parse(manifest.laid_over(overlay), schemas)
     selected = SelectedOptimizer(
         name=name,
@@ -667,7 +768,7 @@ def _select(
     return selected
 
 
-_WALKS = (RUN_INIT, INITIAL_POPULATION, "default", ARM_GATE)
+_WALKS = (RUN_INIT, INITIAL_POPULATION, "default")
 
 
 def _edges_of(member: NodeMember) -> frozenset[type]:
@@ -691,7 +792,7 @@ def _roster(schema: PipelineSchema) -> tuple[str, ...]:
 
 
 def _walk(selected: SelectedOptimizer, gate: ArmGateMode) -> tuple[NodeMember, ...]:
-    """Every member in first-round order under *gate*, then the members only a walked one reaches."""
+    """Every member in first-round order under *gate*, the bench's seat among them, then the members only a walked one reaches."""
     plan = selected.plan
     pipelines = selected.schema.pipelines
     default = [
@@ -702,12 +803,12 @@ def _walk(selected: SelectedOptimizer, gate: ArmGateMode) -> tuple[NodeMember, .
         case "off":
             pass
         case "review":
-            default.insert(default.index(plan.proposers[-1]) + 1, plan.seat)
+            default.insert(default.index(plan.proposers[-1]) + 1, OPERATOR_SEAT)
         case "author":
             opens = default.index(plan.proposers[0])
             default = [m for m in default if m not in plan.proposers]
-            default.insert(opens, plan.seat)
-            seeds = [plan.seat] if seeds else []
+            default.insert(opens, OPERATOR_SEAT)
+            seeds = [OPERATOR_SEAT] if seeds else []
         case unreachable:
             assert_never(unreachable)
     named = {n for walk in _WALKS for n in pipelines.get(walk, ())}
@@ -738,13 +839,12 @@ def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
     if open_:
         return open_
     # One closure: a part that holds no value until written is written earlier in the walk than
-    # any member reading or drawing it, unless that member writes it itself; an `off` draw reads none.
+    # any member reading or drawing it, unless that member writes it itself.
     written: set[type[StatePart]] = set()
     for member in _walk(selected, gate):
-        drawn = {pool for pool in member.draws if selected.access(member, pool) != "off"}
         early = sorted(
             kind.kind
-            for kind in {*member.reads, *drawn}
+            for kind in {*member.reads, *selected.draws(member)}
             if kind.written_first() and kind not in written and kind not in member.writes
         )
         if early:
@@ -765,14 +865,9 @@ def resolve_optimizer(
     name: str, nodes: Mapping[str, ManifestNodeOverlay], *, gate: ArmGateMode
 ) -> SelectedOptimizer:
     """The roster must close as *gate* walks it: under ``author``, the seat in its proposers' place."""
-    try:
-        shipped = optimizers.MANIFESTS.get(name).directory
-    except KeyError as exc:
-        raise NotFoundError(f"No optimizer named {name!r}", code="optimizer_unknown") from exc
-    path = optimizer_manifest_path(shipped)
     overlay = {node: dict(o.config) for node, o in sorted(nodes.items())}
     try:
-        return _select(name, shipped, path, _stamp(path), json.dumps(overlay, sort_keys=True), gate)
+        return _select(name, _stamps(name), json.dumps(overlay, sort_keys=True), gate)
     except ValueError as exc:
         raise PayloadInvalidError(
             f"optimization.nodes refused by optimizer {name!r}: {exc}", code="optimizer_overlay"
@@ -790,8 +885,8 @@ class CheckinManifest:
 
 
 @functools.lru_cache(maxsize=2)
-def _checkin_at(path: Path, stamp: int) -> CheckinManifest:
-    manifest = _read_manifest(path, stamp)
+def _checkin_at(path: Path, _mtime_ns: int) -> CheckinManifest:
+    manifest = PipelineManifest.model_validate(read_yaml(path))
     schemas = _read_schemas(checkin_assets_root() / "resolved_schemas.json")
     return CheckinManifest(manifest=manifest, schema=_parse(manifest, schemas))
 

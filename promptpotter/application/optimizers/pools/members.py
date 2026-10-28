@@ -55,7 +55,7 @@ class BlockPoolKnobs(PoolKnobs):
     )
 
 
-class _PoolInitializer(nodes.Member):
+class _PoolInitializer(nodes.Initializer):
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     knobs: ClassVar[type[StrictModel]] = PoolKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Target})

@@ -133,7 +133,8 @@ one member is refused at load, and so is a read the member cannot hold (`CycleRe
 child is made through `Children.child` / `Children.edit`, so its lineage
 names every node that wrote it and the loci each moved. What an optimizer tells the harness
 itself — its arms, prompt sources, replayers, limits, facts — is a declaration of the member that
-owns it (`nodes.py::Member`), and a backbone fact no member answers, or two do, is refused at load.
+owns it, defaulted on its role's Protocol (`nodes.py::NodeMember`, `Proposer`, `Sampler` …), and a
+backbone fact no member answers, or two do, is refused at load.
 
 | Type | Reads | Returns | Binds it |
 |---|---|---|---|
@@ -150,9 +151,12 @@ ADAPTS (potter's critique). The round's phases follow the walk — PROPOSE, MEAS
 An `algorithm` node before the measurement proposes too, and so do the nodes of a manifest's
 `initial_population` pipeline, walked in a round the run enters with no population: in place of
 `default` (`initial_population_walks: alone`) or ahead of it, into the population `default` reads
-(`before_default`). **Every manifest's `arm_gate` pipeline walks `operator_seat`**
-(`optimizers/operator_seat/members.py`), the one member an operator's arms are written through,
-its `k_max` the shots it may write. An eliminator's `Race` stops a walk on its own rows (`rule`) or every live walk
+(`before_default`). **An operator's arms are written through the bench's own seat**
+(`nodes.py::OPERATOR_SEAT`, `runner/arm_gate.py`), in no manifest; it may write as many shots as
+the round's proposers may draw (`SelectedOptimizer.shot_cap`). **A mix is a switch, never a copy**:
+a manifest declaring `extends: <manifest>` and `swap: {<node>: {node: <name>, of: <manifest>}}`
+is the one it extends with each swapped node replaced, in every walk, by `of`'s node of the same
+type at `of`'s configuration (`capo-pobb`). An eliminator's `Race` stops a walk on its own rows (`rule`) or every live walk
 together at each block's close (`blocks`); its catch-ups are the calls pairing a prior with the arm
 on turn.
 

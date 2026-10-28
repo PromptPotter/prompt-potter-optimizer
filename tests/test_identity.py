@@ -106,6 +106,7 @@ from promptpotter.application.pipeline_resolve import (
     resolved_output_schemas,
 )
 from promptpotter.application.run_observers import declare_run_wiring
+from promptpotter.application.runner.arm_gate import author_arm
 from promptpotter.application.runner.inner.connector import CONNECTOR, promptpotter_wire_adapter
 from promptpotter.application.runner.inner.spawn import inner_campaign_id
 from promptpotter.application.runner.inner.tasks import (
@@ -1396,9 +1397,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         prompt_fields={"review": {"rubric": "Cite the clause."}},
         changes_description="tighten the review",
     )
-    operator_seat = gepa.plan.seat
-    operator = NodeContext(reflected_on, operator_seat)
-    authored = operator_seat.author(operator, origin, arm)
+    authored = author_arm(reflected_on, origin, arm)
     assert authored.validation_failures == [], "an operator arm on the second node was refused"
     assert authored.individual.prompts["review"].fields["rubric"] == "Cite the clause.", (
         "the arm's second-node write did not land"
@@ -1408,7 +1407,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         prompt_fields={"review": {"persona": "x"}, "ghost": {"rubric": "x"}},
         changes_description="off roster",
     )
-    refused = operator_seat.author(operator, origin, stray)
+    refused = author_arm(reflected_on, origin, stray)
     assert len(refused.validation_failures) == 2, "an arm writing off the roster was measured"
     capo = resolve_optimizer("capo", {}, gate="off")
     assert optimizers.unfit_pipeline(capo, two) is not None, (

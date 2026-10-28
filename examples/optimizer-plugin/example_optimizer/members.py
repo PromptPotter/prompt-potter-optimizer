@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.opt_search_point import VariationMode
+    from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
 
@@ -44,7 +45,7 @@ class DrawKnobs(StrictModel):
     )
 
 
-class RandomDraw(nodes.Member):
+class RandomDraw(nodes.Sampler):
     name: ClassVar[str] = "example_draw"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = DrawKnobs
@@ -65,7 +66,7 @@ class ProposeKnobs(RewriteKnobs):
     )
 
 
-class Propose(nodes.Member):
+class Propose(nodes.Proposer):
     name: ClassVar[str] = "propose"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
@@ -88,7 +89,7 @@ class Propose(nodes.Member):
         )
 
 
-class Keep(nodes.Member):
+class Keep(nodes.Selector):
     name: ClassVar[str] = "example_keep"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     sees = frozenset({Lineage, Replay})
@@ -99,7 +100,7 @@ class Keep(nodes.Member):
         self,
         _ctx: NodeContext,
         panel: Panel,
-        _rows: Mapping[str, CellSheet],
+        _rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells
 

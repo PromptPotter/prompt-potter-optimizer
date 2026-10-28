@@ -287,7 +287,7 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
 
 def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     cycle = ctx.cycle
-    opening = walk.members[0].opening(ctx, walk)
+    opening = walk.lead.opening(ctx, walk)
     fold = cycle.parent_fold
     node = walk.proposer
     cb = ctx.callbacks

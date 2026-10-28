@@ -85,7 +85,7 @@ class MinibatchKnobs(StrictModel):
     )
 
 
-class Minibatch(nodes.Member):
+class Minibatch(nodes.Sampler):
     name: ClassVar[str] = "minibatch"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = MinibatchKnobs
@@ -120,7 +120,7 @@ class Minibatch(nodes.Member):
         return nodes.Panel(cells=cells, order=list(cells), block_size=knobs.size)
 
 
-class GepaReflect(nodes.Member):
+class GepaReflect(nodes.Proposer):
     """Alg. 1 lines 7-12; its module is the parent's next prompt node, round-robin per lineage (the reference's default selector)."""
 
     name: ClassVar[str] = "gepa_reflect"
@@ -306,7 +306,7 @@ def _replay_minibatch_gate(
     return accepted
 
 
-class MinibatchGate(nodes.Member):
+class MinibatchGate(nodes.Eliminator):
     name: ClassVar[str] = "minibatch_gate"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({MinibatchBars})
@@ -366,7 +366,7 @@ def draw_parent(
     return rng.choices(ids, weights=[frequency[cid] for cid in ids])[0]
 
 
-class Pareto(nodes.Member):
+class Pareto(nodes.Selector):
     name: ClassVar[str] = "pareto"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet, ParetoScores})

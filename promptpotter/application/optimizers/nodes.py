@@ -54,7 +54,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
     from promptpotter.domain.arms import Concluded, Elimination, Proposal
     from promptpotter.domain.cell_fold import ScoreSummary
-    from promptpotter.domain.command_kinds import SubmittedArm
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
@@ -136,8 +135,11 @@ class CountKnob:
     knobs: type[StrictModel]
     knob: str
 
+    def count(self, values: StrictModel) -> int:
+        return cast("int", getattr(values, self.knob))
+
     def access(self, values: StrictModel) -> Access:
-        return "closed" if getattr(values, self.knob) > 0 else "off"
+        return "closed" if self.count(values) > 0 else "off"
 
 
 Draw = AccessKnob | CountKnob
@@ -157,97 +159,33 @@ class CycleRead:
 
 
 class NodeMember(Protocol):
-    """Every edge to another member is declared here, and ``optimizer_manifest.py::_open_edges`` closes them before a mint."""
+    """Every edge to another member is declared here, and ``optimizer_manifest.py::_open_edges`` closes them before a mint; a member subclassing it states only what it holds."""
 
     @property
     def name(self) -> str: ...
     @property
     def kind(self) -> NodeKind: ...
-    @property
-    def knobs(self) -> type[StrictModel]: ...
-    @property
-    def prompt_arity(self) -> PromptArity: ...
-    @property
-    def reads(self) -> frozenset[type[StatePart]]: ...
-    @property
-    def writes(self) -> frozenset[type[StatePart]]: ...
-    # Every read beyond its own state, knobs and pools it is handed (`NodeContext.read`).
-    @property
-    def sees(self) -> frozenset[type[CycleRead]]: ...
-    # The pools it draws from, each under the knob that sets its access; read only through `NodeContext.drawn`.
-    @property
-    def draws(self) -> Mapping[type[Pool], Draw]: ...
-    # The members whose knobs it reads (`NodeContext.knobs`), and nothing else of theirs.
-    @property
-    def consults(self) -> frozenset[type]: ...
-    # The modules deciding what its prompts SAY; `source_digest` hashes them beside its own module.
-    @property
-    def prompt_sources(self) -> tuple[ModuleType, ...]: ...
-    # By decision kind, pure over one round; registering one is what makes a resume re-derive that kind.
-    @property
-    def replayers(self) -> Mapping[str, Replayer]: ...
-    @property
-    def couplings(self) -> tuple[MemberCoupling, ...]: ...
-    # `{row: count}` of declared surface no manifest shows, which `complexity_ledger` sums.
-    @property
-    def priced_surface(self) -> Mapping[str, int]: ...
-    def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]: ...
-    def round_facts(
-        self, selected: SelectedOptimizer, round_result: RoundResult
-    ) -> list[OptimizerFact]: ...
-    def refuse_origin(self, origin_results: CellSheet) -> None: ...
-    def round_packages(
-        self, cycle: Cycle, rounds: list[RoundResult]
-    ) -> dict[int, dict[str, str]]: ...
-    async def rederive(
-        self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        cycle: Cycle,
-        rounds: list[RoundResult],
-        drifted: list[int],
-    ) -> list[RoundResult]: ...
-    def complete(self) -> None: ...
 
-
-class Member:
-    """What a member declares where it states nothing: no prompt, no state, no cycle read, no pool, no other member, no fact of the round."""
-
-    name: ClassVar[str]
-    kind: ClassVar[NodeKind]
     knobs: ClassVar[type[StrictModel]] = StrictModel
     prompt_arity: ClassVar[PromptArity] = "none"
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset()
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    # Every read beyond its own state, knobs and pools it is handed (`NodeContext.read`).
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
+    # The pools it draws from, each under the knob that sets its access; read only through `NodeContext.drawn`.
     draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType({})
+    # The modules deciding what its prompts SAY; `source_digest` hashes them beside its own module.
     prompt_sources: ClassVar[tuple[ModuleType, ...]] = ()
+    # By decision kind, pure over one round; registering one is what makes a resume re-derive that kind.
     replayers: ClassVar[Mapping[str, Replayer]] = MappingProxyType({})
     couplings: ClassVar[tuple[MemberCoupling, ...]] = ()
+    # `{row: count}` of declared surface no manifest shows, which `complexity_ledger` sums.
     priced_surface: ClassVar[Mapping[str, int]] = MappingProxyType({})
 
     @property
     def consults(self) -> frozenset[type]:
+        """The members whose knobs it reads (`NodeContext.knobs`), and nothing else of theirs."""
         return frozenset()
-
-    def arms(self, _selected: SelectedOptimizer) -> int:
-        """The arms it adds to the walk it proposes in; an editor of arms another made adds none."""
-        return 0
-
-    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
-        return RoundOpening(
-            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
-            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
-            arms=None
-            if walk.pipeline == INITIAL_POPULATION
-            else ctx.cycle.optimizer.arms_per_round,
-            proposer=walk.proposer,
-            replayed=False,
-        )
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        """Overridden only where a round's walks are not every arm plus the parent on the sampler's draw."""
-        return (selected.arms_per_round + 1) * selected.round_cells(search)
 
     def limits(self, _selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
         return ()
@@ -359,7 +297,7 @@ class OptimizerPhase:
     activity: str
 
 
-class LlmNode(Member):
+class LlmNode(NodeMember):
     kind: ClassVar[NodeKind] = NodeKind.LLM
     # ``None`` where the node answers in free text; else ``build_optimizer_schemas.py`` writes its schema.
     response_model: ClassVar[type[BaseModel] | None] = None
@@ -386,7 +324,6 @@ class RoundOpening:
 
 INITIAL_POPULATION = "initial_population"
 RUN_INIT = "run_init"
-ARM_GATE = "arm_gate"
 
 
 @dataclass(frozen=True)
@@ -404,6 +341,11 @@ class RoundWalk:
     @property
     def seeding(self) -> bool:
         return bool(self.seeds) or self.pipeline == INITIAL_POPULATION
+
+    @property
+    def lead(self) -> Proposer:
+        """The proposer making the round's arms, which states its opening; a seed ahead of it does not."""
+        return self.proposers[0]
 
     @property
     def proposer(self) -> str:
@@ -617,7 +559,7 @@ class Sampler(NodeMember, Protocol):
 
     def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
         """The most cells one round's walks read, the parent's among them; 0 where ``round_cells`` is."""
-        ...
+        return (selected.arms_per_round + 1) * selected.round_cells(search)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel: ...
 
@@ -635,11 +577,21 @@ class Proposer(NodeMember, Protocol):
         """How it makes a child, which every child it writes records."""
         ...
 
-    # A walk's arms are the sum over its proposers, a round's the most of any walk it runs alone.
-    def arms(self, selected: SelectedOptimizer) -> int: ...
+    def arms(self, _selected: SelectedOptimizer) -> int:
+        """The arms it adds to its walk, whose arms are the sum and a round's the most of any walk it runs alone; an editor of arms another made adds none."""
+        return 0
 
-    # Asked of a walk's first member.
-    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening: ...
+    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
+        """Asked of the walk's ``lead``."""
+        return RoundOpening(
+            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
+            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
+            arms=None
+            if walk.pipeline == INITIAL_POPULATION
+            else ctx.cycle.optimizer.arms_per_round,
+            proposer=walk.proposer,
+            replayed=False,
+        )
 
     async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals: ...
 
@@ -735,13 +687,6 @@ class Selector(NodeMember, Protocol):
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection: ...
 
 
-@runtime_checkable
-class ArmAuthor(NodeMember, Protocol):
-    """A manifest's `arm_gate` walk: the one member an operator's arms are written through, in the proposers' place (`author`) or after them (`review`)."""
-
-    def author(self, ctx: NodeContext, parent: OptSearchPoint, arm: SubmittedArm) -> Proposal: ...
-
-
 class MintFacts(NamedTuple):
     """What a pool is refused against before a mint, and nothing at load knows."""
 
@@ -813,3 +758,14 @@ class Reviewer(NodeMember, Protocol):
         *,
         context_object: list[str],
     ) -> ReviewReading: ...
+
+
+class OperatorSeat(NodeMember):
+    """The arm gate's seat, the bench's own and no manifest's: an operator's arm is a child it admits as any other (`runner/arm_gate.py`); its draw is the round's proposers' (``SelectedOptimizer.draws``)."""
+
+    name: ClassVar[str] = "operator_seat"
+    kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
+    variation_mode: ClassVar[VariationMode] = "operator"
+
+
+OPERATOR_SEAT = OperatorSeat()

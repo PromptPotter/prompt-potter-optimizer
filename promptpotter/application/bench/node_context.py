@@ -157,9 +157,9 @@ def _rng(round_: RoundContext, node: str, tag: str) -> random.Random:
 
 
 def _drawn(round_: RoundContext, member: NodeMember, kind: type[Pool]) -> tuple[Any, ...]:
-    """The one reading of a pool, by its reader's declared draw: its entries in draw order, none under ``off``."""
+    """The one reading of a pool, by its reader's draw: its entries in draw order, none where it draws none."""
     cycle = round_.cycle
-    if cycle.optimizer.access(member, kind) == "off":
+    if kind not in cycle.optimizer.draws(member):
         return ()
     demo = cycle.session.state.scoring.require_partition().demo
     return cycle.slices.get(kind).drawn({s.key: s for s in demo})
@@ -482,7 +482,7 @@ class Children(CycleRead):
         member = self._member
         if not any(locus.key == SHOTS_KEY for locus in loci):
             return frozenset()
-        if DemoPool not in member.draws or self._cycle.optimizer.access(member, DemoPool) == "off":
+        if DemoPool not in self._cycle.optimizer.draws(member):
             return None
         return frozenset(s.key for s in _drawn(self._round, member, DemoPool))
 
@@ -600,6 +600,10 @@ class NodeContext:
     @overload
     def drawn(self, kind: type[BlockPool]) -> tuple[PoolEntry, ...]: ...
     def drawn(self, kind: type[Pool]) -> tuple[Any, ...]:
+        if kind not in self._member.draws:
+            raise KeyError(
+                f"{self.node!r} draws from the {kind.kind!r} pool and does not declare it"
+            )
         return _drawn(self._round, self._member, kind)
 
     def _bank(self, restated: RoundResult) -> None:

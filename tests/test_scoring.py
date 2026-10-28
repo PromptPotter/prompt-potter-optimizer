@@ -120,7 +120,7 @@ from promptpotter.application.runner.campaign_result import bank_campaign_result
 from promptpotter.application.runner.cycle_close import build_cycle_result
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.measurement import ReferencePairs
-from promptpotter.application.runner.round import execute_round, run_init
+from promptpotter.application.runner.round import announce_opening, execute_round, run_init
 from promptpotter.application.runner.termination import standing_tripped, target_tripped
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
@@ -1292,12 +1292,12 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     ], "a decision reads a survey start off the same cells"
 
     # One round composes a peer's crossover and its state-reading selector with potter's race.
-    name = "capo-pobb"
+    name = "capo"
     capo = yaml.safe_load((optimizers_root() / "capo" / "pipeline.yaml").read_text("utf-8"))
     potter = yaml.safe_load((optimizers_root() / "potter" / "pipeline.yaml").read_text("utf-8"))
     seed = ["capo_init"]
     walk = ["blocks", "mating", "capo_crossover", "pobb", "score", "population"]
-    # Each variant shadows the shipped mix from the operator's home, as an install's edit does.
+    # Each variant shadows capo from the operator's home, as an install's edit does.
     monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "home"))
     manifest_dir = tmp_path / "home" / "optimizers" / name
     manifest_dir.mkdir(parents=True)
@@ -1306,10 +1306,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
 
     def composed(walk: list[str], seed: list[str] = seed, unwalked: tuple[str, ...] = ()) -> None:
         # The demo pool's initializer is the shared pools package's, a third registrant beside the two.
-        init, gate = ["demo_pool"], ["operator_seat"]
-        nodes = {
-            n: (capo["nodes"] | potter["nodes"])[n] for n in (*init, *seed, *walk, *gate, *unwalked)
-        }
+        init = ["demo_pool"]
+        nodes = {n: (capo["nodes"] | potter["nodes"])[n] for n in (*init, *seed, *walk, *unwalked)}
         manifest = manifest_dir / "pipeline.yaml"
         manifest.write_text(
             yaml.safe_dump(
@@ -1322,7 +1320,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                         "run_init": init,
                         "default": walk,
                         "initial_population": seed,
-                        "arm_gate": gate,
                     },
                     "initial_population_walks": "before_default",
                     "resolved_prompts": {
@@ -1478,6 +1475,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             asyncio.run(execute_round(cycle, 1, callbacks))
     assert unwound.value.reason is StopReason.SPEND_BUDGET
     assert cycle.rounds[-1].round == 0, "a cut round stood with no arm its selector could read"
+    (manifest_dir / "pipeline.yaml").unlink()
 
     # The bench grades the pick the optimizer declared, over a higher-composite round.
     def bench_says(body: dict[str, Any]) -> str:
@@ -1875,6 +1873,12 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             assert [b.text for b in origin_read.block_window().get("persona", ())[:1]] == [
                 "Answer tersely."
             ], "round 0's critique composed before the block pool was seeded"
+            l1 = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("l1_generate"))
+            seed = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("mating"))
+            seeded = node_contract.RoundWalk("default", (seed,), (l1,))
+            assert announce_opening(at_origin, seeded) == l1.opening(at_origin, seeded), (
+                "a seed walking ahead of L1 stated the round's standing and arms in L1's place"
+            )
             measured.clear()
 
             async def at_the_hold() -> RoundResult:
