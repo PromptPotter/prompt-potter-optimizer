@@ -34,7 +34,7 @@ PoBB (Russo 2016) assumes i.i.d. observation; the shared order front-loads the s
 The first candidate runs to completion. Each later one, once read on `elimination_n_min` cells its θ is read on (`selection.py::cells_read` over `rasch.py::theta_cells`, never rows walked — [`verdict-resolution.md`](verdict-resolution.md) § The round order), after every query:
 
 1. Map each prior onto the candidate's exact sample ids; one that cannot be caught up is **excluded, never zero-filled**.
-2. Solve each arm's `θ` and Laplace `se` on the cycle's fixed δ ruler (`fit_theta_given_delta`; 1PL, or 2PL where graduated).
+2. Solve each arm's `θ` and Laplace `se` on the cycle's fixed δ ruler (`rasch.py::fit_theta`; 1PL, or 2PL where graduated).
 3. `P(θ_cand > θ_prior) = Φ(Δθ / √(se_c² + se_p²))`, closed form; `p_best = min` over priors.
 4. Bound it by what the DISCORDANT pairs support — `shared/statistics.py::sign_posterior` over `selection.py::discordance`. Concordant cells move θ but cannot say which arm is better. Support is DIRECTIONAL: contradicting pairs collapse the claim to 0.5 (a bare magnitude would license 0.9375 for an arm that lost 3 of 3); it can only spare an arm. **Discordance counts VERDICTS (`Grade.fitness`), never the objective** — a cost term would make a verbose arm lose every tie; cost reaches the comparison through θ alone (`selection.py::paired_grades`).
 5. Stop when `p_best < ε(n)` (graded by depth: `epsilon_floor`).

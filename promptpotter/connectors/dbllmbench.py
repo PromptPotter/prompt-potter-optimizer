@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import logging
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -37,8 +36,6 @@ if TYPE_CHECKING:
 
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import TurnRecord
-
-logger = logging.getLogger(__name__)
 
 
 WRITER_NODE = "query_writer"

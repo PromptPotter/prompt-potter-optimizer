@@ -1955,7 +1955,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
 
 
 def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> None:
-    # ε ramps in from its floor; the depths come from `fit_theta_given_delta`'s dispersion rule.
+    # ε ramps in from its floor; the depths come from `fit_theta`'s dispersion rule.
     cfg = pobb_knobs(epsilon=0.30, epsilon_floor=0.15)
     parent = ArmKey("parent")
     graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)

@@ -229,35 +229,13 @@ def fit_rasch(
     )
 
 
-def fit_theta_given_delta(
-    observations: list[Observation],
-    delta: Ruler | None,
-    *,
-    sigma_theta: float = _INIT_SIGMA_THETA,
-    max_iter: int = 50,
-    tol: float = 1e-4,
-) -> dict[str, tuple[float, float]]:
-    """``delta=None`` is the cold ruler (θ = logit-accuracy); a cell off a live ruler enters no fit, never at δ=0."""
-    graded = _cell_parameters({o.key for o in observations}, delta)
-
-    by_c: dict[str, list[tuple[float, float, float]]] = {}
-    for o in observations:
-        if (cell := graded.get(o.key)) is None:
-            continue
-        by_c.setdefault(o.candidate_id, []).append((*cell, o.response))
-
-    return {
-        cid: _fit_one(rows, sigma_theta=sigma_theta, max_iter=max_iter, tol=tol)
-        for cid, rows in by_c.items()
-    }
-
-
 def fit_theta(
     responses: Mapping[str, float],
     delta: Ruler | None,
     *,
     sigma_theta: float = _INIT_SIGMA_THETA,
 ) -> tuple[float, float] | None:
+    """``delta=None`` is the cold ruler (θ = logit-accuracy); a cell off a live ruler enters no fit, never at δ=0."""
     graded = _cell_parameters(responses.keys(), delta)
     rows = [(*graded[key], y) for key, y in responses.items() if key in graded]
     return _fit_one(rows, sigma_theta=sigma_theta, max_iter=50, tol=1e-4) if rows else None

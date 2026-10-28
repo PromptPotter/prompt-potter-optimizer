@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from urllib.parse import urlencode
 
 import httpx
@@ -13,8 +12,6 @@ from promptpotter.infrastructure.identity.provider_config import (
     OIDCProviderConfig,
 )
 from promptpotter.shared.tls import tls_context
-
-logger = logging.getLogger(__name__)
 
 GITHUB_ISSUER = "https://github.com"
 GITHUB_AUTH_URL = "https://github.com/login/oauth/authorize"

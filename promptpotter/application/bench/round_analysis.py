@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -16,9 +15,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
 
 shapes_optimizer_prompt(__name__)
-
-
-logger = logging.getLogger(__name__)
 
 _RANK_BUCKET_KEYS: tuple[str, ...] = ("1", "2-5", "6-10", "11-20", "not_found")
 _TOP_K_LEVELS: tuple[int, ...] = (1, 3, 5, 10)

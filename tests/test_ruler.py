@@ -48,7 +48,7 @@ from promptpotter.application.intelligence.rasch import (
     RaschPosterior,
     build_round_order,
     fit_rasch,
-    fit_theta_given_delta,
+    fit_theta,
     graduate_ruler_model,
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -139,73 +139,81 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
     ):
         assert abs(fitted - truth) < tol, "the population spread is not the one drawn"
 
-    # θ given a fixed δ: subset-invariant, where raw accuracy inverts the true ability.
+    # θ given a fixed δ, one arm's cells at a time: subset-invariant, where raw accuracy inverts it.
     rng = np.random.default_rng(7)
-    ruler = {"1": -2.0, "2": -2.0, "3": -2.0, "4": 2.0, "5": 2.0, "6": 2.0}
+    level = {"1": -2.0, "2": -2.0, "3": -2.0, "4": 2.0, "5": 2.0, "6": 2.0}
+    ruler = {f"{sid}.{i}": d for sid, d in level.items() for i in range(200)}
     easy, hard = ["1", "2", "3"], ["4", "5", "6"]
 
-    def measure(cid: str, theta: float, sids: list[str], n: int = 200) -> list[Observation]:
-        return _synth({cid: theta}, {sid: ruler[sid] for sid in sids}, n_per_pair=n, rng=rng)
+    def measure(theta: float, sids: list[str], n: int = 200) -> dict[str, float]:
+        cells = [f"{sid}.{i}" for sid in sids for i in range(n)]
+        p = 1.0 / (1.0 + np.exp(-(theta - np.array([ruler[c] for c in cells]))))
+        return dict(zip(cells, (rng.random(len(cells)) < p).astype(float).tolist(), strict=True))
 
-    able, weak = measure("able", 1.5, hard), measure("weak", -0.5, easy)
-    assert sum(o.response for o in weak) / len(weak) > sum(o.response for o in able) / len(able), (
+    def theta_of(
+        responses: dict[str, float], scale: Any, sigma_theta: float = 1.5
+    ) -> tuple[float, float]:
+        read = fit_theta(responses, scale, sigma_theta=sigma_theta)
+        assert read is not None, "an arm with cells on the ruler carried no θ"
+        return read
+
+    able, weak = measure(1.5, hard), measure(-0.5, easy)
+    assert np.mean(list(weak.values())) > np.mean(list(able.values())), (
         "guard: raw accuracy must INVERT the true ability here"
     )
-    fit = fit_theta_given_delta(able + weak, ruler)
-    assert fit["able"][0] > fit["weak"][0], "θ on a fixed ruler ranked the arms by their subset"
-    assert abs(fit["able"][0] - 1.5) < 0.5 and abs(fit["weak"][0] + 0.5) < 0.5, "θ off its truth"
-    same_easy = fit_theta_given_delta(measure("x", 0.8, easy), ruler)["x"][0]
-    same_hard = fit_theta_given_delta(measure("x", 0.8, hard), ruler)["x"][0]
+    able_theta, weak_theta = theta_of(able, ruler)[0], theta_of(weak, ruler)[0]
+    assert able_theta > weak_theta, "θ on a fixed ruler ranked the arms by their subset"
+    assert abs(able_theta - 1.5) < 0.5 and abs(weak_theta + 0.5) < 0.5, "θ off its truth"
+    same_easy = theta_of(measure(0.8, easy), ruler)[0]
+    same_hard = theta_of(measure(0.8, hard), ruler)[0]
     assert abs(same_easy - same_hard) < 0.5, "one ability read differently on two subsets"
 
     # A sample absent from a WARM ruler enters no θ: δ=0 is a position on the scale, not neutral.
-    assert fit_theta_given_delta([Observation("ghost", "99", True)], ruler) == {}
-    off_scale = fit_theta_given_delta([*able, Observation("able", "99", False)], ruler)
-    assert off_scale["able"] == fit_theta_given_delta(able, ruler)["able"], (
+    assert fit_theta({"99": 1.0}, ruler) is None, "a cell off the ruler carried a θ"
+    assert fit_theta({**able, "99": 0.0}, ruler) == fit_theta(able, ruler), (
         "an off-ruler cell moved θ"
     )
-    cold = fit_theta_given_delta([Observation("ghost", "99", True)], None)
-    assert cold["ghost"][0] > 0.0, "a COLD ruler reads plain logit-accuracy: one hit is θ > 0"
+    assert theta_of({"99": 1.0}, None)[0] > 0.0, (
+        "a COLD ruler reads plain logit-accuracy: one hit is θ > 0"
+    )
 
     # θ_se is dispersion-corrected: a GRADED response varies less about its mean than Bernoulli.
-    graded = [Observation("g", sid, 0.5 + 0.02 * i) for i, sid in enumerate(easy * 6)]
-    spread = [Observation("b", sid, float(i % 2)) for i, sid in enumerate(easy * 6)]
-    assert (
-        fit_theta_given_delta(graded, ruler)["g"][1] < fit_theta_given_delta(spread, ruler)["b"][1]
-    ), "a graded response was read as noisy as a coin flip"
+    graded = {f"{sid}.{i}": 0.5 + 0.02 * i for i, sid in enumerate(easy * 6)}
+    spread = {f"{sid}.{i}": float(i % 2) for i, sid in enumerate(easy * 6)}
+    assert theta_of(graded, ruler)[1] < theta_of(spread, ruler)[1], (
+        "a graded response was read as noisy as a coin flip"
+    )
     # Hits far below θ and misses far above, as a δ fit on these rows reads them: φ would be ≪ 1.
-    separated = [Observation("bin", s, float(s in easy)) for s in [*easy, *hard] * 6]
-    for binary in (measure("bin", 0.8, easy, n=60), separated):
-        bin_theta, bin_se = fit_theta_given_delta(binary, ruler, sigma_theta=1.5)["bin"]
-        p_hat = 1.0 / (1.0 + np.exp(-(bin_theta - np.array([ruler[o.key] for o in binary]))))
+    separated = {f"{s}.{i}": float(s in easy) for i, s in enumerate([*easy, *hard] * 6)}
+    for binary in (measure(0.8, easy, n=60), separated):
+        bin_theta, bin_se = theta_of(binary, ruler, sigma_theta=1.5)
+        p_hat = 1.0 / (1.0 + np.exp(-(bin_theta - np.array([ruler[k] for k in binary]))))
         bern_se = 1.0 / np.sqrt(float(np.sum(p_hat * (1 - p_hat))) + 1 / 1.5**2)
         assert abs(bin_se - bern_se) < 0.15 * bern_se, "φ moved the SE of a dichotomous dataset"
-    flat = [Observation("f", sid, 0.5) for sid in easy * 6]
-    assert fit_theta_given_delta(flat, ruler)["f"][1] > 0.1, (
+    flat = {f"{sid}.{i}": 0.5 for i, sid in enumerate(easy * 6)}
+    assert theta_of(flat, ruler)[1] > 0.1, (
         "no residual spread read as infinite confidence: every gate would fire"
     )
 
     # A 1PL entry and a 2PL entry at a = 1 are one ruler.
-    seam_obs = [Observation("c1", str(s), float(s % 2 == 0)) for s in range(8)] + [
-        Observation("c2", str(s), float(s % 3 == 0)) for s in range(8)
-    ]
     bare = {str(s): 0.2 * s - 1.0 for s in range(8)}
-    on_1pl = fit_theta_given_delta(seam_obs, bare)
-    on_unit_a = fit_theta_given_delta(seam_obs, {s: (d, 1.0) for s, d in bare.items()})
-    assert all(abs(on_1pl[c][0] - on_unit_a[c][0]) < 1e-9 for c in on_1pl), (
-        "every θ shifts at 2PL graduation"
-    )
+    on_unit_a = {s: (d, 1.0) for s, d in bare.items()}
+    for arm in (
+        {str(s): float(s % 2 == 0) for s in range(8)},
+        {str(s): float(s % 3 == 0) for s in range(8)},
+    ):
+        assert abs(theta_of(arm, bare)[0] - theta_of(arm, on_unit_a)[0]) < 1e-9, (
+            "every θ shifts at 2PL graduation"
+        )
 
     # Every δ sits five logits from the θ=0 seed, where an undamped `grad / info` step limit-cycles.
     far = dict.fromkeys(map(str, range(20)), 5.55)
-    damped = fit_theta_given_delta(
-        [Observation("parent", s, 0.20) for s in far]
-        + [Observation("better", s, 0.45) for s in far],
-        far,
-        sigma_theta=1.34,
+    parent_theta, parent_se = theta_of(dict.fromkeys(far, 0.20), far, sigma_theta=1.34)
+    better_theta, better_se = theta_of(dict.fromkeys(far, 0.45), far, sigma_theta=1.34)
+    assert 2.0 < parent_theta < better_theta < 7.0 and parent_theta < 5.55, (
+        parent_theta,
+        better_theta,
     )
-    (parent_theta, parent_se), (better_theta, better_se) = damped["parent"], damped["better"]
-    assert 2.0 < parent_theta < better_theta < 7.0 and parent_theta < 5.55, damped
     assert parent_se < 1.0 and better_se < 1.0, (
         "an SE in the hundreds: the iteration never converged"
     )
@@ -408,10 +416,8 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     # Read: a child on cells the judging scale does not carry stays off it until its round folds.
     fitted = _anchored({"1": 1.5, "2": -1.25, "3": 0.0})
-    child = [Observation("child", sid, float(sid == "7")) for sid in ("7", "8", "9")]
-    assert fit_theta_given_delta(child, fitted.entries()) == {}, (
-        "a child read on unlinked cells carried a θ"
-    )
+    child = {sid: float(sid == "7") for sid in ("7", "8", "9")}
+    assert fit_theta(child, fitted.entries()) is None, "a child read on unlinked cells carried a θ"
     tied = _anchored({"1": 0.0, "2": 0.0, "3": 3.0})
     for scale, read_on, expected in (
         (fitted, ["1", "2", "3"], None),

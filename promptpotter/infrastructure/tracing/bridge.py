@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -37,8 +36,6 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
-
-logger = logging.getLogger(__name__)
 
 
 DATASET_NAME: str = "ground_truth"

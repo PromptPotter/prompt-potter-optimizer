@@ -18,7 +18,7 @@ ADAPTIVE_QUEUE = (
             "per_round_resubset=ON re-draws the scored subset per round. Every "
             "cross-round comparator reads ONE anchored δ ruler in θ — the stall replayer, "
             "c0_ok, the round-winner election and PoBB elimination all via "
-            "fit_theta_given_delta on cycle.difficulty — and that ruler is EXTENDED to cover each "
+            "fit_theta on cycle.difficulty — and that ruler is EXTENDED to cover each "
             "round's new cells, so the accuracy-space collision is resolved."
         ),
         consequence=(

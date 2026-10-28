@@ -31,7 +31,8 @@ P(hit_{c,s} = 1) = σ(θ_c − δ_s)
 
 Candidate ability × sample difficulty, fit jointly by MAP (alternating Newton, Laplace SEs,
 `mean(θ) == 0`; `intelligence/rasch.py::fit_rasch`) ONCE, at ruler lock. Every later reading holds δ
-fixed and solves θ alone (`::fit_theta_given_delta`), or the scale moves under the round it judges.
+fixed and solves θ alone, one arm at a time (`::fit_theta`; PoBB's bounds `::theta_bounds_given_delta`
+fill the open cells through it), or the scale moves under the round it judges.
 `δ_s` selects samples and ranks hardness; `θ_c` is the **round-winner gate**.
 
 **θ is why per-round resubsetting is safe.** On different subsets raw accuracy drifts — whoever drew
@@ -44,7 +45,7 @@ graded backend (reciprocal rank, the L4 outer proxy) keeps its gradient.
 **θ's SE is corrected for graded variance.** The logistic information `Σ a²·p(1−p)` assumes coin-flip
 variance and OVERSTATES a graded response's uncertainty — measured against θ̂'s true spread at n=28:
 ×1.02 binary, ×1.51 reciprocal-rank-of-20, ×4.66 on the L4 outer composite (which left the outer
-election unable to crown). `fit_theta_given_delta` scales the SE by `√φ`, the Pearson dispersion off
+election unable to crown). `fit_theta` scales the SE by `√φ`, the Pearson dispersion off
 the fit's residuals (Wedderburn 1974) — **an estimate, not a knob**, shrunk toward 1.0 by an
 inverse-gamma prior so `φ→0` cannot report infinite confidence. **An all-0/1 sheet takes `φ = 1`
 exactly** (`rasch.py::_dispersion`): its residuals against a δ fit on the same rows read as
@@ -129,7 +130,7 @@ Checked in severity order (`ruler.py::theta_caveat`):
   is the bench.** Round files, `log.md`, `review.md`, the round-close line and the candidates
   chart's `overlap` series all render this one reading.
 - **A ruler HOLE is never graded.** δ=0 is a position, not neutral: against a centre near +2.1 it
-  scores an unmeasured cell as easiest and pulls θ down ~2 logits, so `fit_theta_given_delta` reads
+  scores an unmeasured cell as easiest and pulls θ down ~2 logits, so `fit_theta` reads
   only cells the ruler carries.
 
 ## What an arm's lift is read against — `lift_reference`

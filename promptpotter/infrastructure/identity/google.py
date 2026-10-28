@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
@@ -17,8 +16,6 @@ from promptpotter.infrastructure.identity.verifier import (
     verify_id_token,
 )
 from promptpotter.shared.tls import tls_context
-
-logger = logging.getLogger(__name__)
 
 GOOGLE_ISSUER = "https://accounts.google.com"
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
@@ -27,8 +26,6 @@ if TYPE_CHECKING:
     )
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import ArchiveEntry
-
-logger = logging.getLogger(__name__)
 
 
 NOISE_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 0.02
