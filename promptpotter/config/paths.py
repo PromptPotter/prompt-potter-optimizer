@@ -70,6 +70,11 @@ def checkin_assets_root() -> Path:
     return PACKAGE_ROOT / "assets" / "checkin"
 
 
+def free_tier_path() -> Path:
+    """The install's own copy, where its operator edits the free tier, before the shipped one."""
+    return _shadowed(Path("free_tier.yaml"), PACKAGE_ROOT / "assets" / "free_tier.yaml")
+
+
 def _shadowed(relative: Path, shipped: Path) -> Path:
     # A FILE, never its directory: the generated schema registry beside the manifest is ours.
     override = user_data_root() / relative

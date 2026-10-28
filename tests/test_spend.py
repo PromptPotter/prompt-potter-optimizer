@@ -49,9 +49,14 @@ from factories import (
 from offline_world import Hang, Router, Said, completion
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 
+from promptpotter.application import free_tier
 from promptpotter.application.account import account_of
 from promptpotter.application.bench import llm_call as call_mod
-from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
+from promptpotter.application.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    merge_config_layers,
+)
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.limits_and_queue import change_run_limits
 from promptpotter.application.commands.payloads import EditDraftCampaignPayload, StartCheckinPayload
@@ -74,6 +79,7 @@ from promptpotter.application.jobs.quota import (
     admit_launch,
     clamp_budget_change,
     hold_budget_change,
+    on_free_tier,
     paid_call,
     spends_the_hosts_own_key,
 )
@@ -124,6 +130,7 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     WebSpendBound,
@@ -2636,6 +2643,17 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                 f"door {n} ({door}): an account was admitted under another ceiling than it holds"
             )
 
+    # The free tier bounds what a run may ask for, off one table; paid and host accounts are not on it.
+    for n, (issuer, budget, on_tier) in enumerate(
+        ((_WEB, {}, True), (None, {}, False), (_WEB, _GENEROUS, False))
+    ):
+        at = tmp_path / f"tier-{n}"
+        at.mkdir()
+        user = User.model_validate(
+            {"user_id": "sub-9", "tenant_id": "sub-9", "created_at": "2026-01-01", **budget}
+        )
+        stores = _account_stores(at, issuer=issuer, user=user, spent=None)
+        assert on_free_tier(stores) is on_tier, f"account {n} sits on the wrong side of the tier"
     with monkeypatch.context() as patched:
         patched.setattr(
             pricing, "load_rates", lambda: RateTable({("openai", "dear"): Rate(5e-8, 6e-7)})
@@ -2644,6 +2662,50 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
             False,
             True,
         ), "a dollar ceiling would admit a route no rate prices"
+    oss = "openai/gpt-oss-20b:nitro"
+    config = _budgeted(Budget(usd=None))
+    layered = free_tier.with_free_tier_layer(config, {"llm_only": {"model": oss}})
+    assert (
+        layered.sp_budget_origin,
+        layered.optimization.nodes["adaptive_queue"].config["sp_budget_round"],
+        layered.pipeline_overlay,
+    ) == (20, 20, {"llm_only": {"reasoning_effort": "low"}}), (
+        "a free check-in measured on more cells, or launched above its model's lowest rung"
+    )
+    schema = parse_pipeline_response(
+        {
+            "nodes": {
+                "llm_only": {
+                    "config": {"model": oss},
+                    "optimizer": {"param_keys": ["reasoning_effort"]},
+                }
+            },
+            "pipelines": {"default": ["llm_only"]},
+        }
+    )
+
+    def optimizer_on(effort: str) -> CampaignConfig:
+        luna = {"model": "openai/gpt-6-luna", "reasoning_effort": effort}
+        overlay = {"optimization": {"nodes": {"l1_generate": {"config": luna}}}}
+        return CampaignConfig.model_validate(
+            merge_config_layers(layered.model_dump(mode="json", exclude_unset=True), overlay)
+        )
+
+    for run, effort, steps, outside in (
+        (layered, "low", ["llm_only"], 0),
+        (layered, "none", ["llm_only"], 1),
+        # The axis left open: the optimizer could search any rung, so Start refuses it.
+        (config, "low", ["llm_only"], 1),
+        (layered, "low", ["web_search", "llm_only"], 1),
+        (optimizer_on("medium"), "low", ["llm_only"], 0),
+        (optimizer_on("high"), "low", ["llm_only"], 1),
+    ):
+        params = {"steps": steps, "llm_only": {"model": oss, "reasoning_effort": effort}}
+        off = free_tier.outside_free_tier(run, params, schema)
+        assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
+    with pytest.raises(PayloadInvalidError) as said:
+        free_tier.refuse_outside_free_tier(off)
+    assert said.value.code == "not_on_free_tier", "a free-tier refusal named another cause"
 
     # A paid verb never bills a cycle its producer still holds.
     operator = User(user_id="op", tenant_id="op", created_at="")

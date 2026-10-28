@@ -766,6 +766,17 @@ def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
     return updated
 
 
+def on_free_tier(stores: Stores) -> bool:
+    """The ANONYMOUS grant: the host, a delegate and a hand-raised account are outside it."""
+    user = account_of(stores)
+    return (
+        lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores)).usd
+        is not None
+        and user.spend_budget_usd_total is None
+        and _delegated_spend_ceiling(stores) is None
+    )
+
+
 def _delegated_spend_ceiling(stores: Stores) -> float | None:
     ceiling = stores.identity.claims.get("spend_ceiling_usd")
     return float(ceiling) if isinstance(ceiling, int | float) else None

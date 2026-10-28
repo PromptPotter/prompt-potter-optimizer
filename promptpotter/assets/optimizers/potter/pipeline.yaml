@@ -52,7 +52,7 @@ nodes:
       prompt_version: 1
       schema_family: l1_generate
       schema_version: 1
-      reasoning_effort: none
+      reasoning_effort: medium
       # A truncated answer is a zero-candidate round, and 12000 was measured truncating.
       max_tokens: 20000
       provider: openrouter
@@ -61,7 +61,7 @@ nodes:
       k_max: 5
       block_access: open
       schema_field_rename: false
-    # Every llm node runs `openai/gpt-6-luna` on OpenRouter's plain route. Never point a
+    # Every llm node runs `qwen/qwen3.7-flash` on OpenRouter's plain route. Never point a
     # schema-bearing node at a new :nitro route without one call checking it answers an instance
     # of the schema: Cerebras behind `gpt-oss-120b:nitro` silently returned the schema itself.
     description: >-
@@ -96,7 +96,7 @@ nodes:
       schema_version: 1
       prompt_family: l1_critique
       prompt_version: 1
-      reasoning_effort: none
+      reasoning_effort: medium
       # A truncated critique never lands; the measured tail at `low` was 11,370 tokens.
       max_tokens: 16000
       provider: openrouter
@@ -110,7 +110,7 @@ nodes:
       temperature: 0.3
       prompt_family: l2_context
       prompt_version: 1
-      reasoning_effort: none
+      reasoning_effort: medium
       max_tokens: 8000
       provider: openrouter
       model: qwen/qwen3.7-flash
@@ -124,7 +124,7 @@ nodes:
       temperature: 0.5
       prompt_family: l3_plan
       prompt_version: 1
-      reasoning_effort: none
+      reasoning_effort: medium
       max_tokens: 8000
       provider: openrouter
       model: qwen/qwen3.7-flash
