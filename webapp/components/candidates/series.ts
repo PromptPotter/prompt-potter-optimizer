@@ -26,7 +26,7 @@ export interface SeriesCtx {
   electedMetric: DisplayMetric;
 }
 
-export interface SeriesSpec {
+interface SeriesSpec {
   key: SeriesKey;
   metric?: DisplayMetric;
   legend?: (ctx: SeriesCtx) => string;

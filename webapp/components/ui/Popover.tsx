@@ -20,7 +20,7 @@ interface Props {
   children: (args: { close: () => void }) => ReactNode;
   align?: Align;
   side?: Side;
-  className?: string;
+  className?: string | undefined;
 }
 
 const GAP = 2;
@@ -52,7 +52,7 @@ export function Popover({
   useEffect(() => {
     if (!open) return;
     const inside = (t: EventTarget | null) =>
-      t instanceof Node && !!(anchor?.contains(t) || panelRef.current?.contains(t));
+      t instanceof Node && (!!anchor?.contains(t) || !!panelRef.current?.contains(t));
     const onDoc = (e: MouseEvent) => {
       if (!inside(e.target)) setAt(null);
     };

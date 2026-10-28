@@ -4,7 +4,7 @@ import type { ButtonHTMLAttributes } from "react";
 import { cx } from "@/lib/cx";
 import s from "./Button.module.css";
 
-export type ButtonVariant = "default" | "primary" | "danger" | "ghost";
+type ButtonVariant = "default" | "primary" | "danger" | "ghost";
 
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;

@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
-export interface ModuleStore<T> {
+interface ModuleStore<T> {
   get: () => T;
   set: (patch: Partial<T>) => void;
   useStore: () => T;

@@ -36,7 +36,7 @@ function metered(
     kinds,
     replay_share: null,
     ...over,
-  } as MeteredSpend;
+  };
 }
 
 describe("spendHeadline", () => {

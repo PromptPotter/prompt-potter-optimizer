@@ -48,7 +48,7 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
         <span className="inspector-title">Scoring · {selected.label}</span>
         <ToolbarSpacer />
         <CopyButton
-          choices={searchpointCopyChoices({ cfg, reading: row?.reading, cells })}
+          choices={searchpointCopyChoices({ cfg, reading: row?.reading ?? null, cells })}
           title={`Copy ${selected.label}`}
         />
         <button

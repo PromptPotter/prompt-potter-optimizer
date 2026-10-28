@@ -1,6 +1,6 @@
 import type { ServedRound } from "@/lib/api/types";
 
-export interface DegradedRoundNotice {
+interface DegradedRoundNotice {
   round: number;
   detail: string;
 }

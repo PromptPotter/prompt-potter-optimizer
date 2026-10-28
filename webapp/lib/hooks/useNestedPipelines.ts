@@ -15,7 +15,7 @@ import type {
 import type { PipelineStatus } from "@/lib/types";
 
 // One per dataset a level's cells measure, so a level holds several; `parent` is the enclosing layer's `key`.
-export interface NestedLayer {
+interface NestedLayer {
   key: string;
   parent: string;
   depth: number;
@@ -31,7 +31,7 @@ export interface NestedLayer {
 
 const MAX_DEPTH = 6;
 
-export interface NestedPipelines {
+interface NestedPipelines {
   // Breadth-first: every layer follows the one it nests in.
   layers: NestedLayer[];
   truncated: string | null;

@@ -86,11 +86,11 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
     >
       <div className="fitness-body">
         {!areCourses && wonOnTheta && (
-          <ThetaCaveatNotice caveat={m.ability?.caveat ?? null} ability={m.ability?.reading} />
+          <ThetaCaveatNotice caveat={m.ability?.caveat ?? null} ability={m.ability?.reading ?? null} />
         )}
         {!areCourses && wonOnTheta && m.floorPinned.length > 0 && (
           <>
-            <ThetaCaveatNotice caveat="floor_pinned" />
+            <ThetaCaveatNotice caveat="floor_pinned" ability={null} />
             <div className="theta-caveat-arms">Affected: {m.floorPinned.join(", ")}.</div>
           </>
         )}

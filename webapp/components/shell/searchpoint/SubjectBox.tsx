@@ -55,7 +55,7 @@ export function SubjectBox() {
         ) : null}
         <CopyButton
           choices={[
-            ...searchpointCopyChoices({ cfg, reading: row?.reading }),
+            ...searchpointCopyChoices({ cfg, reading: row?.reading ?? null }),
             ...(cfg
               ? [{ key: "text", label: "Prompt + config as text", data: searchpointText(cfg) }]
               : []),

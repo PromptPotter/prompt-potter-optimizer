@@ -40,20 +40,20 @@ function reloadOnceForStaleBuild(): ReloadOutcome {
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null, reload: null };
+  override state: State = { error: null, reload: null };
 
   static getDerivedStateFromError(error: Error): State {
     return { error, reload: null };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error("[dashboard] render error", error, info.componentStack);
     if (fromStaleBuild(error)) {
       this.setState({ reload: reloadOnceForStaleBuild() });
     }
   }
 
-  render(): ReactNode {
+  override render(): ReactNode {
     const { error, reload } = this.state;
     if (!error) return this.props.children;
     const stale = fromStaleBuild(error);

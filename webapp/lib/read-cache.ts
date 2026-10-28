@@ -97,7 +97,7 @@ export function readThrough<T>(id: string, load: ReadLoad<T>, signal: AbortSigna
   return joined.promise.finally(() => signal.removeEventListener("abort", leave)) as Promise<T>;
 }
 
-export interface ReadWatch {
+interface ReadWatch {
   id: string;
   // null reads once, re-asked only by an invalidation.
   intervalMs: number | null;

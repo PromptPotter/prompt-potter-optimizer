@@ -56,6 +56,7 @@ function Lift({ reading, bench }: { reading: ArmReading | null; bench: PairedRea
   return (
     <HoverCard
       className="subject-lift-card"
+      focusable
       content={
         <>
           {benchLift ? (
@@ -77,7 +78,7 @@ function Lift({ reading, bench }: { reading: ArmReading | null; bench: PairedRea
         </>
       }
     >
-      <span className="subject-headline-acc" tabIndex={0}>
+      <span className="subject-headline-acc">
         {fmtPct0(accuracy)}
         {cut ? (
           <span className="subject-headline-cut">

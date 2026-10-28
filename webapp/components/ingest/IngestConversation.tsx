@@ -4,7 +4,6 @@ import { useEffect, useId, useRef, useState } from "react";
 import type {
   Budget,
   DatasetIndexEntry,
-  DraftPatch,
   DraftSummary,
   OriginEntry,
   StartCheckinOptions,
@@ -219,7 +218,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
   const steps = (draft.setup_schema as FieldSchema).properties ?? {};
   const commit: Commit = (path, value, writeOnly) => {
     if (writeOnly) setLaunch((l) => setIn(l, path, value));
-    else flow.applyPatch(setIn({}, path, value) as DraftPatch);
+    else flow.applyPatch(setIn({}, path, value));
   };
 
   return (

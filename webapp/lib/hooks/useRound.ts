@@ -10,7 +10,7 @@ import type { ArmRow, RoundView } from "../types";
 import { useMomentAt } from "../workspace";
 import { readyData, useRead, type ReadFailure } from "./useRead";
 
-export interface RoundState {
+interface RoundState {
   unfiled: boolean;
   doc: RoundView | null;
   loading: boolean;

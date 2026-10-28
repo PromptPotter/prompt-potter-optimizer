@@ -8,7 +8,7 @@ import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { readyData, useRead } from "./useRead";
 
-export interface VerifyState {
+interface VerifyState {
   readings: ReadonlyMap<string, VerifyReading>;
   // Each arm's latest verify pass on the cycle, by `arm.key`.
   passes: ReadonlyMap<string, VerificationMark>;

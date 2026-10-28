@@ -37,7 +37,7 @@ import { hasTag, tagValue } from "./derivations/hierarchy";
 import { useActivePointer, useEntry, useRegistry } from "./registry";
 import { useViewMemory } from "./view-memory";
 
-export interface NavigateOptions {
+interface NavigateOptions {
   candidate?: string | null;
   // A campaign's ROOT row only: view memory may deepen the path.
   resume?: boolean;

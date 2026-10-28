@@ -5,7 +5,7 @@ import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { servedMask, setScoringMask, useScoringMask, type ScoringMask } from "@/lib/scoring-mask";
 
-export interface ServedCriterion {
+interface ServedCriterion {
   formula: string | null;
   mask: ScoringMask;
   // `null` where the formula is not the anchored shape.

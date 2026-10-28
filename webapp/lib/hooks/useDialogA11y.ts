@@ -45,7 +45,7 @@ export function useDialogA11y(open: boolean, onClose: (() => void) | undefined) 
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
-      restoreRef.current?.focus?.();
+      restoreRef.current?.focus();
     };
   }, [open]);
 

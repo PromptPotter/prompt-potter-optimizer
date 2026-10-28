@@ -59,7 +59,7 @@ export type AccountPane =
   | "preferences"
   | "about";
 
-export const ACCOUNT_PANES: readonly AccountPane[] = [
+const ACCOUNT_PANES: readonly AccountPane[] = [
   "profile",
   "usage",
   "activity",

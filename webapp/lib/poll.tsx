@@ -49,7 +49,7 @@ export function measuringArm(dash: ServedDashboard | null): ArmName | null {
   return dash.measuring_arm;
 }
 
-export interface CycleStreamState {
+interface CycleStreamState {
   dash: ServedDashboard | null;
   status: StatusKind;
   statusText: string;
@@ -81,7 +81,7 @@ const LIVE_INTERVAL_MS = 2000;
 
 const RAY_WINDOW = 200;
 
-export interface TimeRayState {
+interface TimeRayState {
   steps: HierarchyStep[];
   loaded: boolean;
   failed: boolean;

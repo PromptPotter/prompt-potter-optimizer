@@ -15,7 +15,7 @@ export interface CommandFailure {
 
 type CommandResult<R> = { ok: true; value: R } | { ok: false };
 
-export interface CommandSlot<V extends string> {
+interface CommandSlot<V extends string> {
   pending: V | null;
   failure: (CommandFailure & { verb: V }) | null;
   /** Never throws. A send while another is in flight is refused as `{ ok: false }`. */

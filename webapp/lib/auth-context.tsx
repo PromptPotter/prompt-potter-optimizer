@@ -13,10 +13,10 @@ import { ApiError, failureKind, meRead, type MeResponse } from "@/lib/api";
 import { reportIncident } from "@/lib/diagnostics";
 import { clearReadCache, readThrough } from "@/lib/read-cache";
 
-export type AuthStatus = "loading" | "authed" | "unauthed";
+type AuthStatus = "loading" | "authed" | "unauthed";
 
 // `code` is non-null only after an OIDC callback bounced back with a failure.
-export interface AuthPrompt {
+interface AuthPrompt {
   open: boolean;
   code: string | null;
 }

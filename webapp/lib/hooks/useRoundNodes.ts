@@ -10,7 +10,7 @@ import type { NodeBlock } from "@/lib/api/types";
 
 const EMPTY: Record<string, NodeBlock> = {};
 
-export interface RoundNodes {
+interface RoundNodes {
   round: number | null;
   showsCurrent: boolean;
   nodes: Record<string, NodeBlock>;

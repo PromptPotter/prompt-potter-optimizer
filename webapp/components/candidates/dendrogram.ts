@@ -33,7 +33,7 @@ interface DendroBracket {
   parentKey: string;
 }
 
-export interface Dendrogram {
+interface Dendrogram {
   nodes: DendroNode[];
   stubs: DendroStub[];
   brackets: DendroBracket[];

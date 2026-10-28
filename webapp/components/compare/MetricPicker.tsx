@@ -7,8 +7,8 @@ import { cx } from "@/lib/cx";
 const EXPR_PREFIX = "expr:";
 
 export const isCustomMetric = (metric: string) => metric.startsWith(EXPR_PREFIX);
-export const customMetric = (expression: string) => EXPR_PREFIX + expression;
-export const expressionOf = (metric: string) => metric.slice(EXPR_PREFIX.length);
+const customMetric = (expression: string) => EXPR_PREFIX + expression;
+const expressionOf = (metric: string) => metric.slice(EXPR_PREFIX.length);
 
 export function MetricPicker({
   reading,

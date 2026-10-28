@@ -103,7 +103,7 @@ function hangOffWinner(
       ? {
           ...rnd,
           children: rnd.children.map((c) =>
-            c.level === "candidate" && c.facts.reading.election.selected
+            c.facts.reading.election.selected
               ? { ...c, children: [...c.children, child] }
               : c,
           ),

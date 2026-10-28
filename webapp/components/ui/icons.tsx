@@ -6,7 +6,7 @@ export function Icon({
   strokeWidth,
   children,
 }: {
-  size?: number;
+  size?: number | undefined;
   viewBox?: string;
   strokeWidth: number;
   children: ReactNode;

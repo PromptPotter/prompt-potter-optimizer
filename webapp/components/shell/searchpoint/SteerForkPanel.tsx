@@ -53,7 +53,7 @@ export function SteerForkPanel({
   const overlay = seed?.pipeline_overlay ?? {};
   // For the EDITOR only: the verdict reads the campaign's frozen narrowing, not these rows.
   const permittedModels = permittedModelsOf(schema.config);
-  const canBabysit = !!me?.capabilities?.includes("campaign.babysit");
+  const canBabysit = !!me?.capabilities.includes("campaign.babysit");
   const [pickedOverlay, setPickedOverlay] = useState<Record<
     string,
     Record<string, unknown>

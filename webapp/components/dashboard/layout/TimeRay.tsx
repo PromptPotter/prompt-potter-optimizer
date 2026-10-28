@@ -149,7 +149,7 @@ function Step({
           type="button"
           className={cx(
             "dash-time-ray-step",
-            `tone-${step.activity.tone ?? "muted"}`,
+            `tone-${step.activity.tone}`,
             elsewhere && "is-elsewhere",
             viewing && "is-viewing",
           )}

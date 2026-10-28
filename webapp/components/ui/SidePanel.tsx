@@ -92,6 +92,7 @@ export function SidePanel({
 
   return (
     <aside className={s.panel} style={{ width: `min(${width}px, 100vw)` }} aria-label="Details">
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- a focusable separator is the ARIA window-splitter widget */}
       <div
         className={s.grip}
         role="separator"

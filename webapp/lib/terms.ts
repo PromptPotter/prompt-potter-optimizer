@@ -3,7 +3,7 @@ import { interiorNodes } from "@/lib/derivations";
 
 // Operator vocabulary for in-product tooltips — one short sentence each; longer goes to docs/manual/.
 
-export const TERMS: Record<string, string> = {
+export const TERMS = {
   composite: "composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the criterion.",
 
   criterion_accuracy: "Whether the answer is right, as the matcher grades it. Every dial below scales this — a dial at 0 is off.",
@@ -23,8 +23,9 @@ export const TERMS: Record<string, string> = {
   arm_eliminated: "The optimizer's eliminator stopped buying it: a budget call, not a verdict on the idea.",
   arm_locked_in:  "The optimizer's eliminator stopped it far enough ahead to call.",
   arm_skipped:    "An operator cut it short.",
+  arm_invalid:    "Refused before its first cell: its own validation failed fatally, so nothing was measured.",
   remote_flight: "Calls the round has out now, how many its stop rules allow right now, and the most it could hold if nothing were cut — every candidate walking plus the parent's catch-ups. Between rounds, the most the next round could hold. Results are taken in order, so a slow call at a candidate's head holds the round; once one has run long it is named below.",
-};
+} satisfies Record<string, string>;
 
 export function targetNodeIds(view: PipelineView | null): string[] {
   return interiorNodes(view).map((n) => n.id);

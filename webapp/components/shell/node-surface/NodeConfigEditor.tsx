@@ -24,24 +24,24 @@ export function NodeConfigEditor(props: {
   // A prop, not the connector context: two hosts resolve it from different reads.
   schema: NodeSchemaReading;
   overlay: Record<string, unknown>;
-  node?: string;
-  readOnly?: boolean;
-  babysitEditable?: boolean;
-  compact?: boolean;
+  node: string | undefined;
+  readOnly: boolean;
+  babysitEditable: boolean | undefined;
+  compact: boolean | undefined;
   // Absent = UNKNOWN, never "no model supports it".
-  modelCapabilities?: CapabilityMenu;
-  permittedModels?: Record<string, readonly string[]>;
-  onApply?: (patch: DraftPatch) => void;
-  onNarrowing?: (node: string, rows: ParamIntent[]) => void;
-  onChange?: (overlay: Record<string, Record<string, unknown>>) => void;
-  keysAskedElsewhere?: readonly string[];
+  modelCapabilities: CapabilityMenu | undefined;
+  permittedModels: Record<string, readonly string[]> | undefined;
+  onApply: ((patch: DraftPatch) => void) | undefined;
+  onNarrowing: ((node: string, rows: ParamIntent[]) => void) | undefined;
+  onChange: ((overlay: Record<string, Record<string, unknown>>) => void) | undefined;
+  keysAskedElsewhere: readonly string[] | undefined;
 }) {
   const {
     mode,
     schema: { status, config: declared, isSingleNode },
     overlay,
     node,
-    readOnly = false,
+    readOnly,
     babysitEditable = true,
     compact = false,
     modelCapabilities,
@@ -98,8 +98,8 @@ export function NodeConfigEditor(props: {
     persist(next, marks);
   };
 
-  const narrowChannel = Boolean(onApply || onNarrowing);
-  const canSetValue = Boolean(onApply || onChange);
+  const narrowChannel = onApply !== undefined || onNarrowing !== undefined;
+  const canSetValue = onApply !== undefined || onChange !== undefined;
 
   const lockable = (r: ConfigRow) =>
     narrowChannel && drawn(r) && r.kind !== "model" && r.kind !== "enum" && !r.neverAxis;
@@ -214,7 +214,7 @@ function EmptyConfig({
 }: {
   status: PipelineStatus;
   schema: Record<string, NodeConfigParam[]> | null;
-  node?: string;
+  node: string | undefined;
 }) {
   const scoped = node !== undefined && schema !== null ? schema[node] : undefined;
   const declared = node !== undefined ? scoped : Object.values(schema ?? {}).flat();
@@ -312,9 +312,9 @@ function ConfigRowView({
 }: {
   row: ConfigRow;
   readOnly: boolean;
-  ignoredBy?: string;
-  onToggleLock?: () => void;
-  onValue?: (v: string) => void;
+  ignoredBy: string | undefined;
+  onToggleLock: (() => void) | undefined;
+  onValue: ((v: string) => void) | undefined;
 }) {
   return (
     <div className="config-row">

@@ -16,8 +16,8 @@ export function RoundFacts({ reading }: { reading: RoundReading | null }) {
             {f.label} {f.text}
           </span>
         ) : (
-          <HoverCard key={f.key} content={<p className="subject-fact-note">{f.text}</p>}>
-            <span tabIndex={0}>{f.label}</span>
+          <HoverCard key={f.key} content={<p className="subject-fact-note">{f.text}</p>} focusable>
+            {f.label}
           </HoverCard>
         ),
       )}

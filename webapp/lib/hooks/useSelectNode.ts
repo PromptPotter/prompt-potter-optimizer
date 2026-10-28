@@ -8,7 +8,7 @@ import { selectedNodeOf } from "@/lib/derivations";
 import { pathLeaf, pathOfAddress } from "@/lib/ids";
 import type { HierarchyCandidate } from "@/lib/api";
 
-export interface SelectNode {
+interface SelectNode {
   isPicked: (node: HierarchyCandidate) => boolean;
   // A deselect returns to the candidate's own course.
   pick: (node: HierarchyCandidate) => void;

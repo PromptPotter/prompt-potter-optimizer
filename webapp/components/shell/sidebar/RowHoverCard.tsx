@@ -71,7 +71,7 @@ function EntryBody({ entry }: { entry: HierarchyEntry }) {
   const knobs = configMap ? declaredKnobs(configMap) : null;
   const runsWith = campaign?.facts.runs_with ?? null;
 
-  const sizes: [string, number | undefined, boolean?][] = [
+  const sizes: [string, number | undefined, true?][] = [
     ["Dataset", data?.dataset_bytes],
     ["Connector", data?.connector_bytes],
     ["Loop", data?.loop_bytes],
@@ -161,7 +161,7 @@ function EntryBody({ entry }: { entry: HierarchyEntry }) {
           <dl className="rowhover-facts">
             {sizes.map(([label, n, indent]) => (
               <Fragment key={label}>
-                <dt data-indent={indent || undefined}>{label}</dt>
+                <dt data-indent={indent}>{label}</dt>
                 <dd>{size(n)}</dd>
               </Fragment>
             ))}

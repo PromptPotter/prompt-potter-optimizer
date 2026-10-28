@@ -2,7 +2,7 @@
 
 import type { NodeOutputSchema } from "@/lib/api";
 
-export interface ContractField {
+interface ContractField {
   key: string;
   name: string;
   depth: number;

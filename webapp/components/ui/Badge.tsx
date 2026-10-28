@@ -10,7 +10,7 @@ export function Badge({
   className,
   children,
 }: {
-  tone?: BadgeTone;
+  tone?: BadgeTone | undefined;
   title?: string;
   className?: string;
   children: ReactNode;

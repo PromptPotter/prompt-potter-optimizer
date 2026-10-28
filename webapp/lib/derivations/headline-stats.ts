@@ -23,7 +23,7 @@ export function metricLevel(
     : (reading.own?.[metric]?.value ?? null);
 }
 
-export interface FitnessTrend {
+interface FitnessTrend {
   // `null` draws a GAP: a point at 0 would claim the prompt scored nothing.
   points: {
     round: number;

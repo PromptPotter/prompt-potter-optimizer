@@ -135,7 +135,7 @@ export function originAt(index: LineageIndex, path: CyclePath | null): Hierarchy
   return originOf(index, courseAt(index, path));
 }
 
-export interface NodeOverlays {
+interface NodeOverlays {
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
 }

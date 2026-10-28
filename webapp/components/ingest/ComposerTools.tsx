@@ -101,11 +101,11 @@ function ToolRow({
   icon,
   name,
   desc,
-  soon,
+  soon = false,
   wand,
   checked = false,
   onChange,
-  locked,
+  locked = false,
   lockedNote,
 }: {
   icon: React.ReactNode;
@@ -114,7 +114,7 @@ function ToolRow({
   soon?: boolean;
   wand?: boolean;
   checked?: boolean;
-  onChange?: () => void;
+  onChange?: (() => void) | undefined;
   locked?: boolean;
   lockedNote?: string;
 }) {

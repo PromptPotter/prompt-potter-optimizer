@@ -1,6 +1,6 @@
 import type { NodePrompt } from "@/lib/api/types";
 
-export const PROMPT_FIELD_LABEL: Record<string, string> = {
+const PROMPT_FIELD_LABEL: Record<string, string> = {
   persona: "Persona",
   task_intent: "Task intent",
   problem_description: "Problem",

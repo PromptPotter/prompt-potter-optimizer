@@ -1,6 +1,6 @@
 import type { PipelineViewEdge, PipelineViewNode } from "@/lib/types";
 
-export interface PlacedNode {
+interface PlacedNode {
   x: number;
   y: number;
   row: number;
@@ -9,7 +9,7 @@ export interface PlacedNode {
   muted: boolean;
 }
 
-export interface GridLayout {
+interface GridLayout {
   pos: Map<string, PlacedNode>;
   width: number;
   height: number;
@@ -17,7 +17,7 @@ export interface GridLayout {
   rows: number;
 }
 
-export interface GridOpts {
+interface GridOpts {
   cell: number;
   // Must clear a row's label AND the model under it.
   rowH: number;

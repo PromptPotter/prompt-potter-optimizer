@@ -9,8 +9,8 @@ export function ThetaCaveatNotice({
   caveat,
   ability,
 }: {
-  caveat: Caveat | null | undefined;
-  ability?: AbilityReading | null;
+  caveat: Caveat | null;
+  ability: AbilityReading | null;
 }) {
   if (!caveat) return null;
   const { head, body } = THETA_CAVEAT_INFO[caveat];

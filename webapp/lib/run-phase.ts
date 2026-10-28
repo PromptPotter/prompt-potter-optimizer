@@ -36,7 +36,7 @@ export function isStopReason(v: unknown): v is StopReason {
 }
 
 export type RunPhaseTone = "live" | "attention" | "quiet" | "success" | "warn" | "danger";
-export interface RunPhaseMark {
+interface RunPhaseMark {
   glyph: string;
   tone: RunPhaseTone;
 }

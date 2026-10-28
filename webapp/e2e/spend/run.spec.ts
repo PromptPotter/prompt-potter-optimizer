@@ -155,7 +155,7 @@ test.describe("a campaign, end to end", () => {
       })
       .toBeTruthy();
 
-    await open(page, `${made!.addr}/dashboard`);
+    await open(page, `${made.addr}/dashboard`);
     await ready(page);
     await expect(page.getByRole("img", { name: "Pipeline graph" })).toBeVisible();
   });

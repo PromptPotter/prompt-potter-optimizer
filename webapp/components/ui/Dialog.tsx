@@ -23,7 +23,13 @@ export function Dialog({ open, title, labelledBy, onClose, children, footer, bar
 
   // mousedown, not click: a drag started inside the card and released outside must not close it.
   return createPortal(
-    <div className={s.backdrop} onMouseDown={onClose}>
+    <div
+      className={s.backdrop}
+      role="presentation"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+    >
       <div
         ref={cardRef}
         className={bare ? s.bare : s.card}
@@ -32,7 +38,6 @@ export function Dialog({ open, title, labelledBy, onClose, children, footer, bar
         aria-label={title}
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        onMouseDown={(e) => e.stopPropagation()}
       >
         {!bare && title !== undefined && <h2 className={s.title}>{title}</h2>}
         {children}

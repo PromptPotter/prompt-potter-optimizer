@@ -13,7 +13,7 @@ export function pipelineReadStatus(read: {
   return read.failed ? "error" : "ok";
 }
 
-export interface ConnectorReachability {
+interface ConnectorReachability {
   reachable: boolean;
   down: boolean;
   stateCls: "live" | "offline" | "idle";
