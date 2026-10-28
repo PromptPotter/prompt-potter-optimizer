@@ -26,6 +26,7 @@ from promptpotter.infrastructure.store.io import (
     write_text,
     write_yaml,
 )
+from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.infrastructure.store.read_model import append_row, derived, file_sig, fold_jsonl
 from promptpotter.shared.clock import utcnow_iso
 
@@ -162,8 +163,7 @@ class TenantDatasetStore:
 
     def materialized_panel_dir(self, name: str) -> Path:
         """Where a panel recipe materializes a connector panel and the task directories it names."""
-        validate_dataset_name(name)
-        return self._base_dir / MATERIALIZED_DIR / name
+        return self._base_dir / MATERIALIZED_DIR / dataset_id_prefix(name)
 
     def keep_upload(self, blob: bytes, extension: str) -> Path:
         """Every upload, kept BEFORE it is parsed, so a file the parser refused or crashed on can be re-read."""
@@ -176,8 +176,7 @@ class TenantDatasetStore:
         return self._base_dir / UPLOADS_DIR / validate_path_component(name)
 
     def task_context_path(self, name: str) -> Path:
-        validate_dataset_name(name)
-        return self._base_dir / "task-context" / f"{name}.yaml"
+        return self._base_dir / "task-context" / f"{dataset_id_prefix(name)}.yaml"
 
     def load_task_context(self, name: str) -> TaskDecomposition:
         return TaskDecomposition.from_dict(read_yaml_optional(self.task_context_path(name)))

@@ -77,6 +77,6 @@ scale; a new cut is a new `justlogic/dNNN/`, never a re-cut of this one.
 ## Conventions
 
 - **`task.md` is L1's framing input**, written for the LLM. Its front matter is optional: absent, the first framed
-  mint decomposes the body into the tenant's `task-context/{name}.yaml`, never back here.
+  mint decomposes the body into the tenant's `task-context/{dataset_id_prefix(name)}.yaml`, never back here.
 - **Unframed is a declaration, never an absence** — `task_framing: off` is the ablation arm, kept in the manifest.
 - **`README.md` is operator-facing** — source, split, sample shape, every model screen, the canonical protocol.

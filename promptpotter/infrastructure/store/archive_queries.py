@@ -13,7 +13,7 @@ from promptpotter.domain.cell_fold import CellFold
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
-from promptpotter.infrastructure.store.measurement_archive import standing
+from promptpotter.infrastructure.store.measurement_archive import ArchiveFile, standing
 from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -170,13 +170,13 @@ def sample_fold_rows(stores: Stores, *, dataset_hash: str) -> list[SampleFoldRow
     """Every campaign's, as it stands: a task remembering less reads none."""
     if not every_campaign_now():
         return []
-    return read_sample_fold(stores.archive.sample_fold_path(dataset_hash))
+    return read_sample_fold(stores.archive.path(ArchiveFile.SAMPLE_FOLD, dataset_hash))
 
 
 def write_sample_fold(stores: Stores, *, dataset_hash: str, rows: Iterable[SampleFoldRow]) -> None:
     if not every_campaign_now():
         return
     write_jsonl(
-        stores.archive.sample_fold_path(dataset_hash),
+        stores.archive.path(ArchiveFile.SAMPLE_FOLD, dataset_hash),
         (row.model_dump(mode="json") for row in rows),
     )

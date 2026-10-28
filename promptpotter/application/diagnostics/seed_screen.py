@@ -30,6 +30,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import write_json
+from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import DiagnosticError
 
@@ -356,7 +357,7 @@ async def _screen(
     readings.sort(key=lambda r: r.rank_key)
     solver_tag = "" if model is None else "-" + re.sub(r"[^A-Za-z0-9.-]+", "-", model)
     path = stores.diagnostic_runs.sidecar_path(
-        f"seed-screen-{dataset_name}{solver_tag}-{utcnow_iso()[:10]}.json"
+        f"seed-screen-{dataset_id_prefix(dataset_name)}{solver_tag}-{utcnow_iso()[:10]}.json"
     )
     write_json(
         path,

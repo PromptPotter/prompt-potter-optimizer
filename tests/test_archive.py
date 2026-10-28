@@ -357,7 +357,7 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
 
 
 def test_the_archive_on_disk_keeps_every_paid_answer(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     archive = built_stores.archive
     entry = _entry(_LLM_ONLY, "kept")
@@ -638,6 +638,21 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert restamp.check_readable()["archive_refused"] == 0, (
         "a file this journey's writers left is one no re-stamp walker reads"
     )
+    # Every kind's file is a key it enumerates, and a key holding a separator names no file.
+    probe = MeasurementArchive(tmp_path / "probe")
+    for kind in ArchiveFile:
+        key = "f" * 32 if kind.keyed else ""
+        probe.path(kind, key).parent.mkdir(parents=True, exist_ok=True)
+        probe.path(kind, key).write_text("", encoding="utf-8")
+        assert probe.keys(kind) == [key], f"{kind.name} does not enumerate the file it names"
+        with pytest.raises(ValueError):
+            probe.path(kind, "justlogic/d234")
+    assert probe.unwalked() == [], "a file an archive kind names is one no walker reads"
+    # A fold filed under its dataset's NAME: one holding '/' nested it, out of every reader's reach.
+    derived = archive.base_dir / MEASUREMENTS_DIR / "derived"
+    by_name = derived / "sample_fold__justlogic" / "d234.jsonl"
+    by_name.parent.mkdir(parents=True)
+    by_name.write_text(fold_row("x").model_dump_json() + "\n", encoding="utf-8")
     stale = "0" * 32
     before_reshape = {
         "config_key": stale,
@@ -670,9 +685,10 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     )
     with pytest.raises(ValueError):
         archive.list_all()
-    assert restamp.check_readable()["archive_refused"] == 3, "guard: each old file refuses"
+    assert restamp.check_readable()["archive_refused"] == 4, "guard: each old file refuses"
     paid = {ref: archive.answer(ref) for ref in refs}
     restamp.restamp_measurement_archives(apply=True)
+    assert not derived.exists(), "a fold under its dataset's name survived the re-stamp"
     assert not stale_config.exists() and not archive.cell_path(stale).exists(), (
         "an unkeyable answer, or the configuration it alone described, survived the re-stamp"
     )

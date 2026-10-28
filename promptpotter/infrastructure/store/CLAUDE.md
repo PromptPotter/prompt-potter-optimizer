@@ -63,8 +63,10 @@ nothing**; a course's card is `application/hierarchy.py::campaign_entry`'s.
 
 `compact` is reversible; only `purge-cold` needs attribution, and only it is irreversible.
 
-**Every archive path is built from `measurement_archive.py::ArchiveFile`** — a new kind is a member, and
-`application/maintenance/restamp.py::_ARCHIVE_WALKS` refuses to import without its walker.
+**Every archive path is built from `measurement_archive.py::ArchiveFile`, keyed by a content address, never a
+name** — a new kind is a member, and `application/maintenance/restamp.py::_ARCHIVE_WALKS` refuses to import
+without its walker; a file no kind names is removed by the re-stamp. A dataset name in any other tenant path
+is one segment, `layout.py::dataset_id_prefix`.
 
 ## Dataset content has two tiers, and only one is writable
 

@@ -26,8 +26,8 @@ _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag)_(?!.*_(fork|diag)_)")
 
 
 def dataset_id_prefix(name: str) -> str:
-    """The name where ONE path segment must hold it — a campaign id, which is a directory and a URL
-    segment. Joined on ``.``, which no name may hold, so two names never share a prefix."""
+    """The name wherever ONE path segment holds it — a campaign id, a tenant file or folder named for a
+    dataset. Joined on ``.``, which no name may hold, so two names never share a prefix."""
     return validate_dataset_name(name).replace("/", ".")
 
 

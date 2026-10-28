@@ -4,6 +4,7 @@ import contextlib
 import gzip
 import json
 import os
+import re
 import threading
 import uuid
 from collections import OrderedDict
@@ -42,24 +43,55 @@ _INDEX_FOLD_KEY = "k"
 _FILES_MAX_BYTES = 32 << 20
 
 
+_ADDRESS = re.compile(f"[0-9a-f]{{{ADDRESS_HEX}}}")
+
+
+def is_address(key: str) -> bool:
+    return _ADDRESS.fullmatch(key) is not None
+
+
 class ArchiveFile(Enum):
-    """Every file the archive writes, at ``{folder}/{key}{suffix}`` under ``measurements/``."""
+    """Every file the archive writes, at ``{folder}/{key}{suffix}`` under ``measurements/``.
+    A key is a content address; the unkeyed INDEX is one file, its key ``""``."""
 
     folder: str
     suffix: str
+    keyed: bool
 
-    INDEX = ("", "index.jsonl")
-    CONFIG = ("configs", ".json")
-    CELLS = ("cells", ".jsonl")
-    COLD = ("cold", ".jsonl.gz")
+    INDEX = ("", "index.jsonl", False)
+    CONFIG = ("configs", ".json", True)
+    CELLS = ("cells", ".jsonl", True)
+    COLD = ("cold", ".jsonl.gz", True)
     # One walk's claim on a cell: the lock, and the row its holder publishes under it.
-    CLAIM_LOCK = ("claims", ".lock")
-    CLAIM_ROW = ("claims", ".json")
-    SAMPLE_FOLD = ("derived", ".jsonl")
+    CLAIM_LOCK = ("claims", ".lock", True)
+    CLAIM_ROW = ("claims", ".json", True)
+    SAMPLE_FOLD = ("sample_folds", ".jsonl", True)
 
-    def __init__(self, folder: str, suffix: str) -> None:
+    def __init__(self, folder: str, suffix: str, keyed: bool) -> None:
         self.folder = folder
         self.suffix = suffix
+        self.keyed = keyed
+
+    def _admits(self, key: str) -> bool:
+        return is_address(key) if self.keyed else key == ""
+
+    def file_name(self, key: str) -> str:
+        if not self._admits(key):
+            raise ValueError(f"{self.name} files no key {key!r}: a key is a content address")
+        return f"{key}{self.suffix}"
+
+    def key_of(self, name: str) -> str | None:
+        key = name[: len(name) - len(self.suffix)]
+        return key if name.endswith(self.suffix) and self._admits(key) else None
+
+
+assert all(
+    (other.key_of(kind.file_name("0" * ADDRESS_HEX if kind.keyed else "")) is None)
+    == (other is not kind)
+    for kind in ArchiveFile
+    for other in ArchiveFile
+    if other.folder == kind.folder
+), "two archive kinds name one file, so one kind's walker rewrites the other's"
 
 
 def config_key(node_configs: list[tuple[str, dict[str, Any]]]) -> str:
@@ -282,22 +314,28 @@ class MeasurementArchive:
     def _store_dir(self) -> Path:
         return self._base_dir / MEASUREMENTS_DIR
 
-    def _dir(self, kind: ArchiveFile) -> Path:
+    def folder(self, kind: ArchiveFile) -> Path:
         return self._store_dir() / kind.folder
 
     def path(self, kind: ArchiveFile, key: str = "") -> Path:
-        return self._dir(kind) / f"{key}{kind.suffix}"
+        return self.folder(kind) / kind.file_name(key)
+
+    def _named(self, kind: ArchiveFile) -> Iterator[tuple[str, os.DirEntry[str]]]:
+        """The one enumeration: each file `path` builds for *kind*, beside its key."""
+        try:
+            with os.scandir(self.folder(kind)) as it:
+                for entry in it:
+                    key = kind.key_of(entry.name)
+                    if key is not None and entry.is_file():
+                        yield key, entry
+        except OSError:
+            return
 
     def keys(self, kind: ArchiveFile) -> list[str]:
-        try:
-            names = os.listdir(self._dir(kind))
-        except OSError:
-            return []
-        cut = len(kind.suffix)
-        return sorted(n[: len(n) - cut] for n in names if n.endswith(kind.suffix) and n[0] != ".")
+        return sorted(key for key, _ in self._named(kind))
 
     def unwalked(self) -> list[Path]:
-        """Every file here no `ArchiveFile` names, `store/io.py`'s dot-named locks and temp files aside."""
+        """Every file here no `keys` names, at any depth; `store/io.py`'s dot-named locks and temp files aside."""
         named = {self.path(kind, key) for kind in ArchiveFile for key in self.keys(kind)}
         return sorted(
             path
@@ -311,9 +349,6 @@ class MeasurementArchive:
 
     def cell_path(self, file_key: str) -> Path:
         return self.path(ArchiveFile.CELLS, file_key)
-
-    def sample_fold_path(self, dataset_hash: str) -> Path:
-        return self.path(ArchiveFile.SAMPLE_FOLD, f"sample_fold__{dataset_hash}")
 
     def config(self, key: str) -> ArchiveConfig | None:
         raw = read_json_optional(self.path(ArchiveFile.CONFIG, key))
@@ -413,7 +448,7 @@ class MeasurementArchive:
 
     def answer(self, ref: str) -> FiledAnswer | None:
         file_key, _, _ = ref.partition(".")
-        if not file_key or any(ch in ref for ch in "/\\") or ".." in ref:
+        if not is_address(file_key):
             return None
         return self._file(file_key).by_id.get(ref)
 
@@ -457,16 +492,10 @@ class MeasurementArchive:
 
     def cell_signatures(self) -> dict[str, tuple[int, int]]:
         out: dict[str, tuple[int, int]] = {}
-        suffix = ArchiveFile.CELLS.suffix
-        try:
-            with os.scandir(self._dir(ArchiveFile.CELLS)) as it:
-                for e in it:
-                    if not e.name.endswith(suffix):
-                        continue
-                    st = e.stat()
-                    out[e.name[: -len(suffix)]] = (st.st_mtime_ns, st.st_size)
-        except OSError:
-            return out
+        with contextlib.suppress(OSError):
+            for key, entry in self._named(ArchiveFile.CELLS):
+                st = entry.stat()
+                out[key] = (st.st_mtime_ns, st.st_size)
         return out
 
     def signature(
@@ -485,7 +514,7 @@ class MeasurementArchive:
             str(self._base_dir),
             file_sig(self._index_path()),
             self.signature(),
-            file_sig(self._dir(ArchiveFile.COLD)),
+            file_sig(self.folder(ArchiveFile.COLD)),
         )
 
     def files_signature(self, file_keys: Iterable[str]) -> tuple[Any, ...]:

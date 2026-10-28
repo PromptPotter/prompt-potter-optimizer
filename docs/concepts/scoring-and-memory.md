@@ -16,7 +16,7 @@ measurements/                               MeasurementArchive
   cells/{config_key}.jsonl  one line per answer
 ```
 
-**`MeasurementArchive` is the only gateway**; programmatic reads go through `infrastructure/store/archive_queries.py`. The two indexes are folded by `refresh()`; `SampleIndex`'s fold is persisted (`measurements/derived/sample_fold__{dataset}.jsonl`) and replayed at start, revalidated against the active formula and each population's signature. Cache reuse and cross-run digests are **derived views over the archive**, never a second store. The format is human-readable — the operator can `cat` a row.
+**`MeasurementArchive` is the only gateway**; programmatic reads go through `infrastructure/store/archive_queries.py`. The two indexes are folded by `refresh()`; `SampleIndex`'s fold is persisted (`measurements/sample_folds/{dataset_hash}.jsonl`) and replayed at start, revalidated against the active formula and each population's signature. Cache reuse and cross-run digests are **derived views over the archive**, never a second store. The format is human-readable — the operator can `cat` a row.
 
 **A cell is one configuration measuring one sample, and it keeps every answer it was given.** An answer is one appended line, never rewritten, filed under the node-chain prefix that PRODUCED it (`terminal_node`), so every configuration sharing that prefix reads it. A configuration × bank's answers are its **population**; each reader declares its take over it, and the default is `infrastructure/store/measurement_archive.py::standing`. The archive knows no run, campaign or round: a walk records the answers it took (`ScoredWalk.cells`) and the ledger names them.
 

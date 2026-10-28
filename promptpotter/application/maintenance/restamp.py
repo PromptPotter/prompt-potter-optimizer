@@ -34,7 +34,7 @@ from promptpotter.infrastructure.projections.cycle_index import (
     write_cycle_index,
 )
 from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.archive_queries import SampleFoldRow, read_sample_fold
+from promptpotter.infrastructure.store.archive_queries import read_sample_fold
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import definition_files
 from promptpotter.infrastructure.store.io import (
@@ -45,7 +45,6 @@ from promptpotter.infrastructure.store.io import (
     take_lock,
     unlink_robust,
     write_json,
-    write_jsonl,
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
@@ -622,26 +621,15 @@ def _walk_sample_folds(run: _ArchivePass) -> None:
     archive, tally = run.archive, run.tallies[ArchiveFile.SAMPLE_FOLD]
     for key in archive.keys(ArchiveFile.SAMPLE_FOLD):
         path = archive.path(ArchiveFile.SAMPLE_FOLD, key)
-        kept: list[dict[str, Any]] = []
-        changed = False
-        for row in iter_jsonl(path):
-            record, dropped = _pruned(row, SampleFoldRow)
-            if record is None or record["config_key"] not in run.named:
-                tally.removed += 1
-                changed = True
-                continue
-            kept.append(record)
-            if dropped:
-                tally.rewritten += 1
-                tally.gone.update(f"{dotted} = {value!r}" for dotted, value in dropped)
-                changed = True
-            else:
-                tally.unchanged += 1
-        if run.apply and changed:
-            if kept:
-                write_jsonl(path, kept)
-            else:
+        try:
+            read_sample_fold(path)
+        except (OSError, ValueError, TypeError, KeyError):
+            # A cache: `SampleIndex.refresh` refolds a missing fold from the cells.
+            tally.removed += 1
+            if run.apply:
                 unlink_robust(path)
+            continue
+        tally.unchanged += 1
 
 
 def _dead_claims(run: _ArchivePass, kind: ArchiveFile) -> Iterator[tuple[str, HeldLock | None]]:
@@ -691,13 +679,32 @@ _ARCHIVE_WALKS: dict[ArchiveFile, _ArchiveWalk] = {
     ArchiveFile.INDEX: _ArchiveWalk(
         "index rows — rebuilt from the cells when one goes", _walk_index
     ),
-    ArchiveFile.SAMPLE_FOLD: _ArchiveWalk("sample folds (rows)", _walk_sample_folds),
+    ArchiveFile.SAMPLE_FOLD: _ArchiveWalk(
+        "sample folds — unreadable, refolded from the cells", _walk_sample_folds
+    ),
     ArchiveFile.CLAIM_ROW: _ArchiveWalk("claim rows a dead walk left", _walk_claim_rows),
     ArchiveFile.CLAIM_LOCK: _ArchiveWalk("claim locks a dead walk left", _walk_claim_locks),
 }
 assert _ARCHIVE_WALKS.keys() == set(ArchiveFile), (
     "a file kind the archive writes and no re-stamp walks keeps its old shape through every deploy"
 )
+
+
+def _remove_unnamed(archive: MeasurementArchive, *, apply: bool) -> int:
+    """Each file no `ArchiveFile` names is read by nothing, so it goes, named, with its emptied folders."""
+    unnamed = archive.unwalked()
+    if unnamed:
+        print(f"\nMeasurement archive {archive.base_dir}: files no archive kind names")
+    for path in unnamed:
+        print(f"  {'removed' if apply else 'would remove'}: {path}")
+        if apply:
+            unlink_robust(path)
+    kept = {archive.folder(kind) for kind in ArchiveFile}
+    for folder in {path.parent for path in unnamed} if apply else ():
+        while folder not in kept and not any(folder.iterdir()):
+            folder.rmdir()
+            folder = folder.parent
+    return len(unnamed)
 
 
 def restamp_measurement_archives(*, apply: bool) -> dict[str, int]:
@@ -715,6 +722,7 @@ def restamp_measurement_archives(*, apply: bool) -> dict[str, int]:
     gone: Counter[str] = Counter()
     for home in homes:
         run = _ArchivePass(MeasurementArchive.at(home), apply=apply)
+        removed += _remove_unnamed(run.archive, apply=apply)
         for walk in _ARCHIVE_WALKS.values():
             walk.walk(run)
         for kind, walk in _ARCHIVE_WALKS.items():
@@ -737,10 +745,13 @@ def restamp_measurement_archives(*, apply: bool) -> dict[str, int]:
     }
 
 
+_REMEDY = "python -m promptpotter restamp --apply removes it while no cycle appends"
+
+
 def _archive_refusals(archive: MeasurementArchive) -> Iterator[str]:
     """Each file the store's own reader refuses; a claim is read only by its live holder."""
     for path in archive.unwalked():
-        yield f"{path} — no re-stamp walker reads this file"
+        yield f"{path} — no archive kind names this file; {_REMEDY}"
     folds = partial(archive.path, ArchiveFile.SAMPLE_FOLD)
     readers: tuple[tuple[ArchiveFile, Callable[[str], object]], ...] = (
         (ArchiveFile.INDEX, lambda _key: archive.list_all()),
@@ -755,10 +766,7 @@ def _archive_refusals(archive: MeasurementArchive) -> Iterator[str]:
                 read(key)
             except (OSError, EOFError, ValueError, TypeError, KeyError) as exc:
                 cause = str(exc).partition("\n")[0]
-                yield (
-                    f"{archive.path(kind, key)} — {type(exc).__name__}: {cause}; "
-                    "python -m promptpotter restamp --apply removes it while no cycle appends"
-                )
+                yield f"{archive.path(kind, key)} — {type(exc).__name__}: {cause}; {_REMEDY}"
 
 
 class _CampaignOf(NamedTuple):

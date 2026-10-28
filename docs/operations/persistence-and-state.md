@@ -61,7 +61,7 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
           streams/round_NNNN_{member}.jsonl
           cache/rounds/
     measurements/                       # PAID; rooted at `Stores.archive_home`
-      index.jsonl  configs/  cells/  cold/  claims/  derived/
+      index.jsonl  configs/  cells/  cold/  claims/  sample_folds/
     optimizer_reuse/  judge_reuse/      # PAID; a grader never reads the loop's answers
     diagnostics/                        # scoring verbs that mint no cycle
     datasets/  materialized/  task-context/
