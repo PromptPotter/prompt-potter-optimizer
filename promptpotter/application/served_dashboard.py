@@ -282,7 +282,7 @@ def _allotment(stores: Stores, hop: CycleHop, run: RunState) -> Budget | None:
     # The share lives on the run's job, which a reshare moves mid-run; no run, no share.
     if not run.producer.appending:
         return None
-    job = JobRegistry.attach().running_job_for(stores.campaigns.workspace, hop)
+    job = JobRegistry.attach(stores.jobs_dir).running_job_for(stores.campaigns.workspace, hop)
     return None if job is None else job.allotment
 
 
@@ -453,7 +453,8 @@ def served_dashboard(
             verify=scan_ledger_verify(CycleLayout(cycle_path).ledger),
             orphaned=any(m.state == "running" for m in state.verification)
             and not run.producer.attached
-            and JobRegistry.attach().pass_on(stores.campaigns.workspace, hop) is None,
+            and JobRegistry.attach(stores.jobs_dir).pass_on(stores.campaigns.workspace, hop)
+            is None,
             fork_remainder=_remainder(stores, hop, limits),
             campaign_metered=None
             if meter is None

@@ -17,7 +17,7 @@ from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
 from promptpotter.application.views.render.phase import render_completion
 from promptpotter.config.first_run import ensure_api_key
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.command_kinds import (
     CyclePayload,
     OriginGateDecisionPayload,
@@ -43,7 +43,7 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 def prepare_launch() -> None:
     """Runs BEFORE the loop exists: a prompt or refusal here never meets a run's Ctrl+C handler."""
     # A CLI-only install has no periodic sweep: a launch is where a dead producer's cycle is recorded.
-    sweep_dead_cycles(DEFAULT_PROJECTS_ROOT)
+    sweep_dead_cycles(default_projects_root())
     ensure_api_key()
 
 

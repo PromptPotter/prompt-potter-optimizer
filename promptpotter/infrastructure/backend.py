@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.config.paths import default_jobs_dir
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.pricing import inline_route
@@ -144,7 +143,9 @@ class MachineSlots:
 
 
 class BackendClient:
-    def __init__(self, connector: Connector, *, workload: InProcessWorkload) -> None:
+    def __init__(
+        self, connector: Connector, *, workload: InProcessWorkload, jobs_dir: Path
+    ) -> None:
         self._connector = connector
         self.base_url = connector.base_url()
         self.workload = workload
@@ -153,7 +154,7 @@ class BackendClient:
         self._http: httpx.AsyncClient | None = None
         self._machine_slots = (
             MachineSlots(
-                default_jobs_dir() / "machine" / connector.name,
+                jobs_dir / "machine" / connector.name,
                 connector.max_cells_in_flight,
                 compose_overlay=connector.compose_overlay,
             )

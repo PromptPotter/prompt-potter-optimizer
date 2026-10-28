@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-import os
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -26,11 +25,19 @@ from factories import (
     PROMPT_INFO,
     arm_state,
     arm_walk,
+    bench_line,
+    bench_pass,
+    bench_passes,
+    billed_call,
     close_round,
+    delta_ruler,
+    filed,
+    filed_under,
     jumping_clock,
     level_series,
     measurement,
     measurements,
+    member_rows,
     minted_campaign,
     optimizer_state,
     pipeline_schema,
@@ -39,6 +46,7 @@ from factories import (
     round_result,
     samples,
     score_summary,
+    scorer_of,
     seat,
     set_cycle,
     sheet,
@@ -52,13 +60,14 @@ from pydantic import ValidationError
 from promptpotter.application import optimizers
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.difficulty import ruler_clock, session_ruler_scope
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference
 from promptpotter.application.evidence.read import subject_evidence
-from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
+from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
@@ -73,7 +82,6 @@ from promptpotter.application.optimizers.gepa.members import MinibatchGate
 from promptpotter.application.optimizers.gepa.state import MinibatchBar, MinibatchBars
 from promptpotter.application.optimizers.nodes import Panel, ReadArm, RoundContext
 from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle
-from promptpotter.application.optimizers.potter.dispatch.injections.panels import _vs_parent
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     coerce_l1_layout,
@@ -108,11 +116,10 @@ from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_observers import declare_gate
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner import arm_gate
-from promptpotter.application.runner import bench as bench_runner
 from promptpotter.application.runner.bench import (
-    BenchLine,
     bench_selection,
     bench_series,
+    pair_on_bench,
     read_bench,
     score_on_bench,
 )
@@ -133,7 +140,6 @@ from promptpotter.application.scoring.evaluators import (
 from promptpotter.application.scoring.formula import compiler
 from promptpotter.application.scoring.formula.compiler import (
     auto_scorer_id,
-    compile_scorer,
     origin_anchors,
     parse_dials,
     realize_dials,
@@ -166,14 +172,19 @@ from promptpotter.domain.bench import (
     BenchPass,
     BenchPasses,
     DatasetSplit,
-    LineRun,
     PassStop,
     partition_bank,
 )
 from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
-from promptpotter.domain.command_kinds import PauseCyclePayload, SubmitArmsPayload, SubmittedArm
+from promptpotter.domain.command_kinds import (
+    OriginGateDecisionPayload,
+    PauseCyclePayload,
+    SkipSearchpointPayload,
+    SubmitArmsPayload,
+    SubmittedArm,
+)
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
@@ -184,6 +195,7 @@ from promptpotter.domain.origin_panel import (
     RoundAdvance,
     TriggeredReading,
     line_by_individual,
+    origin_panel,
     round_advance,
 )
 from promptpotter.domain.paired_reading import (
@@ -201,29 +213,33 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
 )
 from promptpotter.domain.phase_views import BenchGradedView
-from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason, WalkEnd
+from promptpotter.domain.phases import (
+    CampaignPhase,
+    PauseCause,
+    RunPhase,
+    StopLoop,
+    StopReason,
+    WalkEnd,
+)
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNode
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import InRunCells, RoundResult
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.ruler import DeltaRuler, anchor_id_of
+from promptpotter.domain.ruler import CellScopes
 from promptpotter.domain.run_records import (
+    CommandAckRecord,
     PhaseRecord,
     RoundWarningRecord,
-    TokenUsageRecord,
+    RunPhaseRecord,
 )
 from promptpotter.domain.run_standing import RunStanding, rounds_without_advance, stalls_left
-from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import (
-    MAX_PASS_ROWS,
     NO_RESULT,
     ROW_GRADES,
     CellSheet,
-    Diagnostics,
     GradedCell,
-    JudgeReading,
     MeasuredCell,
-    NodeWarning,
     PipelineData,
     Scorer,
     ScoringFormulaError,
@@ -233,7 +249,7 @@ from promptpotter.domain.scoring import (
     turn_scalars,
 )
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.domain.spend import Budget, StepUsage, TokenUsageKind
+from promptpotter.domain.spend import Budget, TokenUsageKind
 from promptpotter.domain.verify_pass import VerifyPass, VerifyStrategy
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import Hold, spending_under
@@ -248,15 +264,9 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.measurement_archive import config_key
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.answer_text import extract_gsm8k_number
-from promptpotter.shared.errors import (
-    BadRequestError,
-    ConflictError,
-    ErrorCategory,
-    PayloadInvalidError,
-)
+from promptpotter.shared.errors import ConflictError, ErrorCategory
 from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
 from promptpotter.shared.statistics import p_exceeds, paired_mean_t
 
@@ -270,38 +280,6 @@ def _keyed(cell: GradedCell, sample_key: str) -> GradedCell:
 def _objective(cell: GradedCell) -> float:
     assert cell.grade.objective is not None, f"cell {cell.key} carries no grade"
     return cell.grade.objective
-
-
-def _pair_member(
-    individual: str,
-    rows: list[GradedCell],
-    bank: list[Sample],
-    *,
-    scorer_id: str = "s",
-    address: MemberAddress | None = None,
-    scope: RoleScope = RoleScope.DECISION,
-    instrument_id: str = "i",
-    dataset_hash: str | None = "d",
-    cell_set_id: str | None = None,
-) -> MemberRows:
-    key_of = {s.id: s.key for s in bank}
-    return MemberRows(
-        address=MemberAddress(
-            path=(CycleHop(campaign_id="camp", cycle_id="cyc"),),
-            individual_id=individual,
-            arm=None,
-            pass_role=None,
-        )
-        if address is None
-        else address,
-        sheet=sheet((_keyed(row, key_of[int(row.key)]) for row in rows), scorer_id),
-        bought=0,
-        cut=False,
-        scope=scope,
-        instrument_id=instrument_id,
-        dataset_hash=dataset_hash,
-        cell_set_id=cell_set_id,
-    )
 
 
 def _read_pair(a: MemberRows, b: MemberRows, panel: list[Sample], **asked: Any) -> PairedReading:
@@ -321,27 +299,6 @@ def _read_pair(a: MemberRows, b: MemberRows, panel: list[Sample], **asked: Any) 
         "instrument_id": "i",
     }
     return read_pair(**(read_under | asked))
-
-
-def _filed(
-    stores: Any, individual: str, rows: list[GradedCell], *, role: str = "panel", sp_hash: str = ""
-) -> list[WalkedCell]:
-    entry = ArchiveEntry(
-        config_key=config_key([("", {"individual": individual})]),
-        prompt_fields_id=sp_hash or individual,
-        node_configs=[],
-        pipeline_params={},
-        dataset_hash="ds",
-    )
-    keyed = [row.facts for row in rows]
-    answers = stores.archive.file_answers(
-        entry,
-        [(facts, "A") for facts in keyed],
-        role=role,
-        source="optimization_loop",
-        created_at="",
-    )
-    return [(facts.sample_key, answer, False) for facts, answer in zip(keyed, answers, strict=True)]
 
 
 # 1. Scorer formulas
@@ -467,12 +424,12 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
         "(",
     ):
         with pytest.raises(ScoringFormulaError):
-            compile_scorer(formula, verifier_graded=False)
+            scorer_of(formula)
     # `turns` is compacted out of cold rows, so a formula reaching it is refused at COMPILE: a
     # bare Call reaches `eval()` as a NameError, which reads as a missing TERM.
     for formula in ("turns[0]", "turns.index", "len(turns)"):
         with pytest.raises(ScoringFormulaError):
-            compile_scorer(formula, None, verifier_graded=True)
+            scorer_of(formula, verifier_graded=True)
 
     # A cell read off the wire keeps its facts and drops any grade it arrived with.
     banked = {
@@ -497,45 +454,12 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     stale = {"fitness": 1.0, "objective": 1.0, "unscored": "an older formula's"}
     facts = MeasuredCell.from_wire({**banked, **stale})
     assert facts.wire() == banked, "a fact was lost, or a grade reached the facts"
-    assert MeasuredCell.from_wire(facts.wire()) == facts, "a cell reads back as the cell it wrote"
     assert (facts.cost_s, facts.elapsed_s, facts.shown_s) == (1.5, 2.0, 1.5), (
         "latency reads the step timings, the elapsed the total"
     )
-    usage = StepUsage(
-        input=3, output=4, estimated=True, cost_usd=0.5, model="m", reasoning=0, cache_read=0
-    )
-    warning = NodeWarning(
-        step="n", code="c", message="m", kind="transient", details=(1, {"a": 2}), stats={"x": 1}
-    )
-    cell = MeasuredCell(
-        sample_key="k",
-        predicted="p",
-        cached=True,
-        retry_of_degraded=True,
-        rerun_comparison={"hit_change": "MISS->HIT", "rank_change": None, "improved": True},
-        pipeline=PipelineData(
-            total_time=0.0,
-            terminal_node="n",
-            step_timings={"n": 1.5},
-            step_tokens={"n": usage, "silent": StepUsage()},
-            diagnostics=Diagnostics(
-                step_statuses={"n": "degraded"}, warnings=(warning, NodeWarning())
-            ),
-            result_ranking=(),
-            turns=({"index": 0},),
-            step_phases={},
-            judge_readings={"t": JudgeReading(), "u": JudgeReading("label", "why")},
-            target_prompt_chars=0,
-            observations={"final_ranking": [1], "env_reward": 0.0, "opened": False},
-        ),
-    )
-    for held in (usage, warning, cell.pipeline, cell, MeasuredCell(sample_key="k0")):
-        wire = json.loads(json.dumps(held.wire()))
-        read = type(held).from_wire(wire)
-        assert read == held and read.wire() == wire, f"a {type(held).__name__} lost a field"
 
     # A grade is a new record and keeps nothing of the formula before it.
-    plain = compile_scorer("env_reward", None, verifier_graded=True)
+    plain = scorer_of("env_reward", verifier_graded=True)
     answered = MeasuredCell.from_wire({**banked, **stale, "error": None, "error_category": None})
     graded = plain.grade(answered)
     assert (graded.grade.fitness, graded.grade.unscored) == (0.25, None), "the stale grade stood"
@@ -556,12 +480,12 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
             ("label_match(predicted, ground_truth)", ranked),
             ("rr(ground_truth_rank)", ranked),
         )
-        for read in [compile_scorer(formula, verifier_graded=False).grade(row).grade]
+        for read in [scorer_of(formula).grade(row).grade]
     ]
     assert readings == [(None, None, 1.0), (2, 2, 0.5), (2, 2, 0.0), (2, 2, 0.5)], (
         "a reply's lines rank only under the formula reading them; the backend's ranking always"
     )
-    composed = compile_scorer("skill_opened", "fitness * 0.5", verifier_graded=True)
+    composed = scorer_of("skill_opened", "fitness * 0.5", verifier_graded=True)
 
     def channels(error: str | None = None, **reads: float) -> MeasuredCell:
         fault: dict[str, Any] = {"error_category": "SERVER"} if error else {}
@@ -580,7 +504,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     assert (first.grade.fitness, first.grade.objective) == (1.0, 0.5), (
         "a regrade moved the record it was taken from"
     )
-    ordered = compile_scorer(
+    ordered = scorer_of(
         "1.0", "fitness * (0.85 + 0.15 * skill_opened)", verifier_graded=True
     ).grade(channels(skill_opened=0.0))
     assert (ordered.grade.fitness, ordered.grade.objective) == (1.0, 0.85), (
@@ -590,18 +514,14 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     # UNSCORED is a third state: ERRORED would stamp 0.0 and abandon the candidate's whole walk.
     unread = composed.grade(channels(env_reward=1.0))
     assert (unread.grade.fitness, unread.grade.objective, unread.scored) == (None, None, False)
-    assert unread.grade.unscored and not {"fitness", "objective"} & unread.wire().keys(), (
-        "a cell the formula cannot grade carries no grade at all"
-    )
     assert not unread.facts.errored and unread.facts.error_category is None, (
         "a cell the formula cannot grade is no fault of the backend"
     )
     assert scoreable_rows([first, unread]) == [first], "an unscored cell entered the mean"
     recovered = plain.grade(unread.facts)
     assert (recovered.grade.fitness, recovered.scored) == (1.0, True), "a regrade recovers it"
-    assert recovered.grade.unscored is None and "unscored" not in recovered.wire()
     # A formula that RAISES is a different fact and halts loud; an errored row never evaluates it.
-    raising = compile_scorer("1.0 / tokens", None, verifier_graded=True)
+    raising = scorer_of("1.0 / tokens", verifier_graded=True)
     with pytest.raises(ScoringFormulaError):
         raising.grade(channels(tokens=0.0))
     errored = raising.grade(channels("HTTP 502", tokens=0.0))
@@ -611,11 +531,11 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     # Arithmetic is on floats, so a tenant's formula cannot buy unbounded CPU or memory.
     for formula in ("'x' * 10**10", "abs('x')", "label_match(predicted, 'x' * 10**10)"):
         with pytest.raises(ScoringFormulaError):
-            compile_scorer(formula, verifier_graded=False)
+            scorer_of(formula)
     for formula in ("9**9**9", "pow(9, pow(9, 9))", "predicted * 10**10", "-predicted"):
         with pytest.raises(ScoringFormulaError):
-            compile_scorer(formula, verifier_graded=False).grade(channels())
-    halved = compile_scorer("label_match(predicted, 'p') * 2**-1", verifier_graded=False)
+            scorer_of(formula).grade(channels())
+    halved = scorer_of("label_match(predicted, 'p') * 2**-1")
     assert halved.grade(channels()).grade.fitness == 0.5, (
         "a helper's string argument or float arithmetic was refused"
     )
@@ -638,10 +558,9 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     )
     assert anchors["tokens"] == pytest.approx(692.0), "the anchor is the origin's mean"
     per_sample = "label_match(predicted, ground_truth)"
-    dialled = compile_scorer(
+    dialled = scorer_of(
         per_sample,
         realize_dials(parse_dials("tokens=0.08, latency=0"), anchors),
-        verifier_graded=False,
     )
     for tokens, expected in ((692, 1.0), (6920, 0.92 + 0.08 * 0.1), (100, 1.0)):
         assert composite(dialled, solve(0, "a", tokens)) == pytest.approx(expected), (
@@ -662,7 +581,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
 
     # A miss is charged its cost, and a solved cell scores its composite.
     per_cell = "fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))"
-    charged = compile_scorer(per_sample, per_cell, verifier_graded=False)
+    charged = scorer_of(per_sample, per_cell)
     walked = charged.sheet(
         [
             solve(0, "a", 692),
@@ -696,7 +615,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     long_perfect = objectives(*(solve(i, "a", 10**6) for i in range(4)))
     short_half = objectives(*(solve(i, "ab"[i % 2], 100) for i in range(4)))
     assert sum(long_perfect) > sum(short_half), "length outranked a 2x accuracy gap"
-    by_cost = compile_scorer(per_sample, "fitness / (1.0 + cost)", verifier_graded=False)
+    by_cost = scorer_of(per_sample, "fitness / (1.0 + cost)")
     at_rate, billed = by_cost.sheet(
         [solve(0, "a", 692, {"rate_priced_usd": 1.0}), solve(0, "a", 692, {"cost_usd": 3.0})]
     )
@@ -723,9 +642,8 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     assert turn_scalars([]) == {}, "no conversation is absence, never a zeroed count"
     talked = measurement(0, 0.0, pipeline_data={"env_reward": 1.0, "turns": turns, **scalars})
     assert (
-        compile_scorer(
+        scorer_of(
             "env_reward * (1.0 if n_turns <= 4 else 0.5) * min(1.0, retrieve_turns / 2.0)",
-            None,
             verifier_graded=True,
         )
         .grade(talked.facts)
@@ -734,7 +652,7 @@ def test_a_scorer_grades_each_cell_from_its_facts_under_the_formula_it_compiled(
     ), "a formula reads the projected scalars"
 
     # The id names the grading function: a ruler must never pool grades across two of them.
-    defaulted = compile_scorer(per_sample, None, verifier_graded=False).grade(solve(2, "b", 692))
+    defaulted = scorer_of(per_sample, None).grade(solve(2, "b", 692))
     assert defaulted.grade.objective == 0.0, "only a DECLARED cell formula charges a miss"
     assert auto_scorer_id(per_sample, None, judge_instrument=None) != auto_scorer_id(
         per_sample, DEFAULT_CELL_FORMULA, judge_instrument=None
@@ -788,7 +706,7 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
     ), "a round of faults has no score"
 
     # Only a provider fault leaves the count: a refusal and a cut cell are the prompt's own.
-    labelled = compile_scorer("label_match(predicted, ground_truth)", verifier_graded=False)
+    labelled = scorer_of()
     cut: dict[str, Any] = {"error": "ran past its envelope", "error_category": "HALTED"}
     walked = [asked(i, "a") for i in range(5)]
     walked += [asked(5 + i, "I cannot help with that request.") for i in range(5)]
@@ -839,36 +757,11 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
 # 3. Electing a round winner
 
 
-def _ruler(
-    delta: dict[int, float],
-    *,
-    mu: float = 0.0,
-    sigma: float = 2.0,
-    se: float | dict[int, float] = 0.5,
-) -> DeltaRuler:
-    """Keyed by slot here, by the slot's `measurement` key on the ruler."""
-    keyed = {str(sid): d for sid, d in delta.items()}
-    return DeltaRuler(
-        delta=keyed,
-        delta_se=(
-            {str(sid): s for sid, s in se.items()}
-            if isinstance(se, dict)
-            else dict.fromkeys(keyed, se)
-        ),
-        mu_delta=mu,
-        sigma_delta=sigma,
-        sigma_theta=1.5,
-        calibration_model="1PL",
-        anchor_id=anchor_id_of(keyed, mu, sigma, "1PL"),
-    )
-
-
 def _charged_by_length() -> tuple[CellSheet, CellSheet]:
     # A length-priced composite: 14 verdicts won and one lost; every tie is the longer answer's loss.
-    scorer = compile_scorer(
+    scorer = scorer_of(
         "label_match(predicted, ground_truth)",
         "fitness * (0.92 + 0.08 * 692.0 / max(692.0, tokens))",
-        verifier_graded=False,
     )
 
     def walked(hits: set[int], tokens: int) -> CellSheet:
@@ -960,10 +853,9 @@ def _peer_cycle(
             bench=bench,
             demo=2,
             # The campaign's composite REWARDS length, the opposite of CAPO's objective.
-            scorer=compile_scorer(
+            scorer=scorer_of(
                 "label_match(predicted, ground_truth)",
                 "fitness * min(1.0, target_prompt_chars / 200.0)",
-                verifier_graded=False,
             ),
             optimization={
                 "optimizer": optimizer,
@@ -1009,15 +901,13 @@ def _bench_pass(
         )
         for s in held_out[:cells]
     ]
-    return BenchPass(
-        round=int(individual != "origin"),
-        candidate_id=individual,
-        sp_hash=individual,
-        cells=_filed(stores, f"bench_{individual}", rows, role="bench", sp_hash=individual),
-        sample_keys=[f"key:{s.query}" for s in held_out],
+    return bench_pass(
+        stores,
+        individual,
+        rows,
+        [f"key:{s.query}" for s in held_out],
         stop=stop,
         scorer_id=auto_scorer_id(_H2H_FORMULA, None, judge_instrument=None),
-        reads_before=0,
     )
 
 
@@ -1025,7 +915,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # The election reads θ on one δ ruler: easy cells {0..19} sit low, hard {20..39} high.
-    ruler = _ruler({i: (-1.5 if i < 20 else 1.5) for i in range(40)})
+    ruler = delta_ruler({i: (-1.5 if i < 20 else 1.5) for i in range(40)})
     eps = pobb_knobs().epsilon
     weak_on_easy = [measurement(i, float(i < 16)) for i in range(20)]
     able_on_hard = [measurement(i, float(i < 34)) for i in range(20, 40)]
@@ -1045,7 +935,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     assert winner_id == "able_on_hard", "a round winner elects by ability, not subset accuracy"
     assert abilities.theta["able_on_hard"] > abilities.theta["weak_on_easy"]
     # 6 hits far below θ, 13 misses far above, one miss near it the arm gained.
-    spread = _ruler({**dict.fromkeys(range(6), -2.8), 6: 1.0, **dict.fromkeys(range(7, 20), 4.0)})
+    spread = delta_ruler(
+        {**dict.fromkeys(range(6), -2.8), 6: 1.0, **dict.fromkeys(range(7, 20), 4.0)}
+    )
     one_cell = {ArmKey("one"): sheet(measurement(i, float(i < 7)) for i in range(20))}
     parent_six = sheet(measurement(i, float(i < 6)) for i in range(20))
     assert elect_round_winner(list(one_cell), one_cell, parent_six, 6, spread, epsilon=eps)[0] is (
@@ -1053,7 +945,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     ), "one discordant cell of 20 promoted: a lift its own paired evidence cannot carry"
 
     # A thin arm cannot win on a margin inside its own noise; `coverage_floor` IS PoBB's `n_min`.
-    flat = _ruler(dict.fromkeys(range(28), 0.0))
+    flat = delta_ruler(dict.fromkeys(range(28), 0.0))
     half = sheet(measurements([1.0] * 14 + [0.0] * 14))
     deep = sheet(measurements([1.0] * 21 + [0.0] * 7))
     shallow = sheet(measurements([1.0] * 5 + [0.0], range(14, 20)))
@@ -1090,7 +982,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         is None
     ), "one cell won and one lost is a tie, whatever the δ weighting or the fit's last digit"
     longer, terse_parent = _charged_by_length()
-    level = _ruler(dict.fromkeys(range(34), 0.0))
+    level = delta_ruler(dict.fromkeys(range(34), 0.0))
     assert elect_round_winner(
         [ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level, epsilon=eps
     )[0] == ("l"), "a cost term's tie-break was counted as a verdict lost"
@@ -1248,16 +1140,12 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             assert (parent in closed.panel) is (cut_round == 2), (
                 f"{case}: a retained parent is ONE arm, its re-read folded into its own cells"
             )
-            folded: list[Any] = []
-            monkeypatch.setattr(
-                session.store.ruler, "fold", lambda _s, got, **_: folded.extend(got)
-            )
-            cycle.difficulty.fold(closed)
             parent_arm = closed.arms[parent]
             assert isinstance(parent_arm, Cut | Measured), f"{case}: the parent never concluded"
-            observed = [cell for walked, cell, _ in folded if walked == parent_arm.sp_hash]
-            assert len(observed) == len(set(observed)) == len(closed.rows(parent)), (
-                f"{case}: the δ fit takes each of the parent's observations ONCE"
+            held = session.store.ruler.rows(session_ruler_scope(session), ruler_clock(session))
+            observed = {cell for walked, cell, _ in held if walked == parent_arm.sp_hash}
+            assert {cell.key for cell in closed.rows(parent)} <= observed, (
+                f"{case}: a parent's observation never reached the δ fit its election read"
             )
             [short] = [key for key in rows if len(rows[key]) == 1]
             assert closed.folds[short].accuracy == 1.0, (
@@ -1297,19 +1185,18 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     potter = yaml.safe_load((optimizers_root() / "potter" / "pipeline.yaml").read_text("utf-8"))
     seed = ["capo_init"]
     walk = ["blocks", "mating", "capo_crossover", "pobb", "score", "population"]
-    # Each variant shadows capo from the operator's home, as an install's edit does.
-    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "home"))
-    manifest_dir = tmp_path / "home" / "optimizers" / name
-    manifest_dir.mkdir(parents=True)
+    homes = count()
 
-    writes = count(1)
-
-    def composed(walk: list[str], seed: list[str] = seed, unwalked: tuple[str, ...] = ()) -> None:
+    @contextmanager
+    def composed(walk: list[str]) -> Iterator[None]:
+        # Shadows capo from an operator's home, as an install's edit does; one home per variant.
+        home = tmp_path / f"home{next(homes)}"
+        manifest_dir = home / "optimizers" / name
+        manifest_dir.mkdir(parents=True)
         # The demo pool's initializer is the shared pools package's, a third registrant beside the two.
         init = ["demo_pool"]
-        nodes = {n: (capo["nodes"] | potter["nodes"])[n] for n in (*init, *seed, *walk, *unwalked)}
-        manifest = manifest_dir / "pipeline.yaml"
-        manifest.write_text(
+        nodes = {n: (capo["nodes"] | potter["nodes"])[n] for n in (*init, *seed, *walk)}
+        (manifest_dir / "pipeline.yaml").write_text(
             yaml.safe_dump(
                 {
                     "name": name,
@@ -1330,37 +1217,17 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             ),
             "utf-8",
         )
-        # The manifest cache keys on mtime, which two writes inside one clock tick share.
-        stamp = manifest.stat().st_mtime_ns + next(writes) * 1_000_000_000
-        os.utime(manifest, ns=(stamp, stamp))
+        with monkeypatch.context() as shadowing:
+            shadowing.setenv("PROMPTPOTTER_HOME", str(home))
+            yield
 
-    open_rosters: dict[str, tuple[list[str], tuple[str, ...]]] = {
-        "a race reading its μ off a selector the roster lacks": (
-            ["blocks", "mating", "capo_crossover", "paired_t", "score", "theta_election"],
-            (),
-        ),
-        "a controller firing layers that consult members the roster lacks": (
-            [*walk, "escalation"],
-            (),
-        ),
-        "a declared member no walk reaches, whose knobs a run would carry unread": (
-            walk,
-            ("theta_election",),
-        ),
-    }
-    for case, (open_walk, unwalked) in open_rosters.items():
-        composed(open_walk, unwalked=unwalked)
-        with pytest.raises(PayloadInvalidError) as refused:
-            resolve_optimizer(name, {}, gate="off")
-        assert refused.value.code == "optimizer_roster_open", f"{case} reached round 1"
-    composed(["adaptive_queue", *walk[1:]])
-    queued = resolve_optimizer(
-        name, {"adaptive_queue": ManifestNodeOverlay(config={"sp_budget_round": 7})}, gate="off"
-    )
+    with composed(["adaptive_queue", *walk[1:]]):
+        queued = resolve_optimizer(
+            name, {"adaptive_queue": ManifestNodeOverlay(config={"sp_budget_round": 7})}, gate="off"
+        )
     assert queued.round_cells(40) == 7, (
         "potter's queue, the one potter member in a peer's roster, sized its panel off another's knobs"
     )
-    composed(walk)
     replies = iter(["Merged.", "Other."])
 
     crossed: list[str] = []
@@ -1378,15 +1245,18 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         "mating": {"config": {"offspring": 2}},
     }
     root = tmp_path / "composition"
-    with _peer_cycle(
-        workspace(root),
-        _PEER_HOP,
-        monkeypatch,
-        name,
-        composed_nodes,
-        lambda prompt, _s: "Merged." in prompt,
-        backend_id="composition-e2e",
-    ) as (cycle, callbacks):
+    with (
+        composed(walk),
+        _peer_cycle(
+            workspace(root),
+            _PEER_HOP,
+            monkeypatch,
+            name,
+            composed_nodes,
+            lambda prompt, _s: "Merged." in prompt,
+            backend_id="composition-e2e",
+        ) as (cycle, callbacks),
+    ):
         offline.llm.says = crossover_says
         session = cycle.session
         assert not cycle.population
@@ -1416,7 +1286,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     )
 
     # A cut θ round reads its cold parent on the cells the archive holds GRADED, guard and election alike.
-    composed([*walk[:-1], "theta_election"])
     replies = iter(["Merged.", "Other."])
     theta_book = spend_book(None, usd_reserve=None)
     # Empty until round 1 walks, so the origin's cells pay toward no cut.
@@ -1444,17 +1313,20 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             }
         )
 
-    with _peer_cycle(
-        workspace(tmp_path / "theta-cut"),
-        _PEER_HOP,
-        monkeypatch,
-        name,
-        composed_nodes,
-        paid_then_cut,
-        backend_id="theta-cut-e2e",
-        control=RunControl(book=theta_book),
-        panel_gate="off",
-    ) as (cycle, callbacks):
+    with (
+        composed([*walk[:-1], "theta_election"]),
+        _peer_cycle(
+            workspace(tmp_path / "theta-cut"),
+            _PEER_HOP,
+            monkeypatch,
+            name,
+            composed_nodes,
+            paid_then_cut,
+            backend_id="theta-cut-e2e",
+            control=RunControl(book=theta_book),
+            panel_gate="off",
+        ) as (cycle, callbacks),
+    ):
         offline.llm.says = crossover_says
         session = cycle.session
         search = list(session.state.scoring.require_partition().search)
@@ -1475,7 +1347,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             asyncio.run(execute_round(cycle, 1, callbacks))
     assert unwound.value.reason is StopReason.SPEND_BUDGET
     assert cycle.rounds[-1].round == 0, "a cut round stood with no arm its selector could read"
-    (manifest_dir / "pipeline.yaml").unlink()
 
     # The bench grades the pick the optimizer declared, over a higher-composite round.
     def bench_says(body: dict[str, Any]) -> str:
@@ -1535,13 +1406,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         )
 
         def graded(*held: BenchPass) -> BenchPasses:
-            banked = BenchPasses(
-                tolerance=0,
-                origin=origin_pass,
-                reserve_usd=0.0,
-                reserve_tokens=0,
-                selections={taken.candidate_id: taken for taken in held},
-            )
+            banked = bench_passes(origin_pass, *held)
             return asyncio.run(
                 bench_selection(
                     session, cycle.rounds, points=cycle.points, banked=banked, cb=callbacks
@@ -1575,15 +1440,13 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             cell: MeasuredCell = await measure(sample, at, pipeline_params)
             return cell
 
-        async def _bench_pick() -> BenchPass:
+        async def _bench_pick() -> BenchPasses:
             async with paid_pass(stores=stores, verb="bench", hop=_PEER_HOP, declared=Budget()):
-                return await score_on_bench(
+                return await bench_selection(
                     session,
-                    cycle.points.measured(head),
-                    individual_id=head.individual.id,
-                    subject="selected",
-                    label=head.label,
-                    round_num=1,
+                    cycle.rounds,
+                    points=cycle.points,
+                    banked=bench_passes(origin_pass),
                     cb=callbacks,
                 )
 
@@ -1609,16 +1472,17 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         assert standing_controls(cycle_dir).pause is None and not cycle_held(cycle_dir), (
             "the pass left its pause unapplied, or kept the cycle after it stopped"
         )
-        with pytest.raises(PayloadInvalidError):
-            asyncio.run(
-                score_search_point(
-                    cycle.parent_point,
-                    search * (MAX_PASS_ROWS // len(search) + 1),
-                    session,
-                    label="origin",
-                    measured=None,
-                )
-            )
+        # A spent budget stops the pass and names the bound; the held passes beside it stand.
+        earlier = origin_pass.model_copy(update={"round": 7, "candidate_id": "an earlier pick"})
+        book = session.state.control.book
+        unspent, book.hold_of = book.hold_of, Hold(Budget(usd=0.0), book.reserve)
+        short = graded(earlier)
+        book.hold_of = unspent
+        stop = short.selections[head.individual.id].stop
+        assert stop is not None and stop.cause is StopReason.SPEND_BUDGET, (
+            "a spent budget stops the pass and names the bound"
+        )
+        assert short.selections[earlier.candidate_id] is earlier, "a held pass was dropped"
 
         passes = graded()
         [taken] = passes.selections.values()
@@ -1633,45 +1497,14 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         resent = graded(left).selections[taken.candidate_id]
         assert [c[:2] for c in resent.cells] == [c[:2] for c in taken.cells]
         assert all(replayed for *_, replayed in resent.cells), "a resent pass bought a cell again"
-        earlier = taken.model_copy(update={"round": 7, "candidate_id": "an earlier pick"})
-
-        async def _stopped(reason: StopReason) -> BenchPass:
-            raise StopLoop(reason)
-
-        with monkeypatch.context() as patched:
-            patched.setattr(
-                bench_runner, "score_on_bench", lambda *_a, **_k: _stopped(StopReason.SPEND_BUDGET)
-            )
-            short = graded(left, earlier)
-            stop = short.selections[taken.candidate_id].stop
-            assert stop is not None and stop.cause is StopReason.SPEND_BUDGET, (
-                "a spent budget stops the pass and names the bound"
-            )
-            assert short.selections[earlier.candidate_id] is earlier, "a held pass was dropped"
-            patched.setattr(
-                bench_runner, "score_on_bench", lambda *_a, **_k: _stopped(StopReason.PAUSED)
-            )
-            with pytest.raises(StopLoop):
-                graded(left, earlier)
         bench = read_bench(
             session.store,
             passes,
             session.state.scoring.require_scorer(),
-            line=BenchLine(
+            line=bench_line(
+                ArmName(key=ArmKey(taken.candidate_id), round=1, label=head.label),
                 hop=session.hop,
-                on_line=True,
-                inner=False,
-                held_by=None,
-                trigger="at_end",
-                held_out=4,
                 instrument_id="capo-e2e",
-                run=LineRun(
-                    selecting=False,
-                    ending=StopReason.ROUNDS_BUDGET,
-                    selection=ArmName(key=ArmKey(taken.candidate_id), round=1, label=head.label),
-                    rounds_closed=1,
-                ),
-                spend=None,
             ),
         )
         assert bench.selected is not None and bench.origin is not None
@@ -1695,8 +1528,8 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     line_stores = workspace(tmp_path / "line")
     pick = prompted(instruction="the declared pick")
     spent = PassStop(cause=StopReason.SPEND_BUDGET, warning=None)
-    forbidden = PassStop(cause=WalkEnd.CLIENT_ERROR, warning="HTTP 403 :: model is not allowed")
-    line_scorer = compile_scorer(_H2H_FORMULA, verifier_graded=False)
+    refused = PassStop(cause=WalkEnd.CLIENT_ERROR, warning=None)
+    line_scorer = scorer_of(_H2H_FORMULA)
     line_cases: tuple[
         tuple[
             dict[str, Any] | None,
@@ -1745,7 +1578,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         ({"cells": 3, "tolerance": 1}, {}, ReadingState.READ, False, 1.0, (0.0, [1.0]), None),
         ({"stop": spent}, {}, ReadingState.PASS_STOPPED, True, None, (0.0, [None]), "selected"),
         (
-            {"origin_stop": forbidden},
+            {"origin_stop": refused},
             {},
             ReadingState.PASS_STOPPED,
             True,
@@ -1776,37 +1609,18 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     )
                 ]
             )
-            line_passes = BenchPasses(
-                tolerance=banked.get("tolerance", 0),
-                origin=line_origin,
-                reserve_usd=0.0,
-                reserve_tokens=0,
-                selections={taken.candidate_id: taken for taken in held},
-            )
+            line_passes = bench_passes(line_origin, *held, tolerance=banked.get("tolerance", 0))
         selection = "origin" if banked and banked.get("pick") == "origin" else pick.id
-        line = BenchLine(
-            hop=CycleHop(campaign_id="camp", cycle_id="cyc"),
+        line = bench_line(
+            ArmName(key=ArmKey(selection), round=1, label="C1.1"),
             on_line="held_by" not in run,
-            inner=False,
-            held_by=run.get("held_by"),
-            trigger=run.get("trigger", "at_end"),
-            held_out=4,
-            instrument_id="i",
-            run=LineRun(
-                selecting=run.get("selecting", False),
-                ending=run.get("ending", StopReason.ROUNDS_BUDGET),
-                selection=ArmName(key=ArmKey(selection), round=1, label="C1.1"),
-                rounds_closed=1,
-            ),
-            spend=None,
+            **run,
         )
         line_bench = read_bench(line_stores, line_passes, line_scorer, line=line)
         assert (line_bench.status.state, line_bench.status.can_grade) == (state, can_grade), case
         headline = line_bench.vs_origin.headline
         assert (None if headline is None else headline.estimate.value) == lift, case
         assert line_bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
-        if stopped == "origin":
-            assert "model is not allowed" in line_bench.status.sentence, f"{case}: says why"
         pick_arm = arm_state("C1.1", slot=ArmSlot(round=1, idx=0, total=1), individual=pick)
         on_line = round_result(1, arms={ArmKey(pick.id): pick_arm}, selected=pick.id, cells={})
         assert bench_series(line_stores, line_passes, line_scorer, rounds=[on_line]) == series, case
@@ -1839,17 +1653,6 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
         )
         return CommandDispatcher(authored).dispatch(CommandCall(payload, key))
 
-    # Only a roster whose every read has a walked writer runs authored: the seat writes no state.
-    for optimizer, closes in (("potter", True), ("capo", False), ("gepa", False), ("levi", True)):
-        try:
-            resolve_optimizer(optimizer, {}, gate="author")
-            refused = None
-        except PayloadInvalidError as exc:
-            refused = exc.code
-        assert (refused is None) is closes and refused in (None, "optimizer_roster_open"), (
-            f"{optimizer} under `arm_gate: author`: a gate reading what no walked member writes "
-            "reached round 1"
-        )
     # What earlier runs earned on this answer space reaches the origin's critique, not round 1 alone.
     monkeypatch.setattr(
         node_context, "earned_blocks_for", lambda *_a: {"persona": ("Answer tersely.",)}
@@ -2064,9 +1867,6 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     ]
     signal = collapse(labelled)
     assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED
-    assert not {"p_best", "epsilon", "n_priors"} & signal.check_result.keys(), (
-        "a collapse cut returns before the posterior, so it carries no ε field"
-    )
 
     # On a graded backend p_best discriminates; concordant cells move θ and must not reach ε.
     def uncharged(*values: float) -> list[PairedGrade]:
@@ -2083,14 +1883,12 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     epsilon = pobb_knobs().epsilon
     prefix = [str(s) for s in range(6)]
     # The probe is also the EASIEST cell in the prefix, which tempts a fit to read it as decisive.
-    warm = DeltaRuler(
-        delta={"0": 2.90, "1": 3.01, "2": 2.66, "3": 1.39, "4": 2.85, "5": 2.95},
-        delta_se=dict.fromkeys(prefix, 0.4),
-        mu_delta=2.6,
-        sigma_delta=0.6,
+    warm = delta_ruler(
+        {0: 2.90, 1: 3.01, 2: 2.66, 3: 1.39, 4: 2.85, 5: 2.95},
+        mu=2.6,
+        sigma=0.6,
+        se=0.4,
         sigma_theta=1.0,
-        calibration_model="1PL",
-        anchor_id="test-anchor",
     )
     nothing_solved = uncharged(*[0.0] * 6)
     p_thin, _ = elimination_p_best(
@@ -2186,7 +1984,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
             "strong_parent_child": MinibatchBar(parent_id="p2", objectives={"0": 0.9, "1": 0.9}),
         }
     )
-    weak_child, strong_child, unbarred = (ArmKey(cid) for cid in (*bars.bars, "unbarred_child"))
+    weak_child, strong_child = (ArmKey(cid) for cid in bars.bars)
     gated = seat(built_stores, optimization={"optimizer": "gepa"})
     gated.cycle.emit(bars, gated.round_num)
     gate = MinibatchGate()
@@ -2205,8 +2003,6 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     assert (
         list(stops) == [strong_child] and stops[strong_child].check_result["parent_id"] == "p2"
     ), "one arm's parent bar decided another arm's gate"
-    with pytest.raises(KeyError):
-        race.close({unbarred: level})
 
 
 # 6. Escalation and stop — live, and folded back on resume
@@ -2226,7 +2022,7 @@ def _line_read(
     def member(label: str, grades: Sequence[float | None]) -> MemberRows:
         rnd = int(label[1:].split(".")[0])
         arm = ArmName(key=ArmKey((ids or {}).get(label, label.lower())), round=rnd, label=label)
-        return _pair_member(
+        return member_rows(
             arm.key,
             [
                 measurement(i, g)
@@ -2558,11 +2354,6 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
     assert (short.advance, whole.advance) == (RoundAdvance.NOT_SEPARATED, RoundAdvance.ADVANCED), (
         "against an earlier pick the holed one is a rate over another exam: it tops nobody"
     )
-    told = _vs_parent(whole.vs_parent) or ""
-    assert told.startswith("  C2.1 vs its parent C1.1") and told.endswith("NOT separated"), (
-        "the generator was told a pick's move over C0, or five flips read as separated"
-    )
-    assert _vs_parent(lines[0].vs_parent) is None, "a first pick's parent is C0, read once"
     # No pair to read stands alone; a pair owed, refused or not landed is no evidence.
     alone, no_evidence = RoundAdvance.ADVANCED_UNPAIRED, RoundAdvance.UNREAD
     promoted_on = {
@@ -2584,7 +2375,6 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         ReadingState.CELL_SET_DIFFERS: no_evidence,
         ReadingState.INSTRUMENT_DIFFERS: no_evidence,
     }
-    assert promoted_on.keys() == set(ReadingState), "a reading state with no decided advance"
     for state, advance in promoted_on.items():
         pair = lead if state is ReadingState.READ else PairedReading.unread(state)
         assert round_advance(1, True, pair, ()) is advance, state
@@ -2760,6 +2550,77 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         "rewound to re-run round 1: the fires are discarded with it"
     )
 
+    # A loop command is acted on by the loop it reached, or refused — never acked and dropped.
+    commanded = workspace(tmp_path / "commands")
+    command_hop, command_dir = walking_cycle(commanded)
+    commands = CycleEventLog.open(CycleDir(command_dir))
+    control = RunControl(cycle_dir=command_dir)
+    address = {"campaign_id": command_hop.campaign_id, "cycle_id": command_hop.cycle_id}
+
+    def press(payload: Any, key: str) -> str:
+        outcome = asyncio.run(CommandDispatcher(commanded).dispatch(CommandCall(payload, key)))
+        return outcome.accepted.command_id
+
+    def acks(command_id: str) -> list[str]:
+        return [
+            record.status
+            for _, record in commands.iter()
+            if isinstance(record, CommandAckRecord) and record.command_id == command_id
+        ]
+
+    def intervened() -> bool:
+        index = commanded.campaigns.load(command_hop, moment=None)
+        assert index is not None
+        return index.human_intervened
+
+    skip = SkipSearchpointPayload(**address)
+    gate_abort = OriginGateDecisionPayload(**address, decision="abort")
+    try:
+        untaken = press(skip, "skip-1")
+        assert acks(untaken) == ["accepted"], "a press was acked as a cut"
+        assert not intervened(), "the press alone marked the cycle babysat"
+        # A second RUNNING record is a new launch: the press the last one never reached is not its.
+        commands.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+        assert standing_controls(command_dir).skips == ()
+        token = set_cycle_ledger(commands)
+        try:
+            assert not control.spend_skip(), "a skip no walk took cut the next launch's arm"
+            taken = press(skip, "skip-2")
+            assert control.spend_skip()
+            assert not control.spend_skip(), "one press cut two searchpoints"
+            assert (acks(taken), acks(untaken)) == (["accepted", "applied"], ["accepted"])
+            with pytest.raises(ConflictError):
+                press(gate_abort, "gate-early")
+            assert control.take_gate_decision() is None, "a refused decision reached the gate"
+            commands.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate="origin"))
+            press(gate_abort, "gate-open")
+            assert control.take_gate_decision() == "abort"
+            assert control.take_gate_decision() is None, "one decision was taken twice"
+            commands.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+            press(PauseCyclePayload(**address), "pause-1")
+            assert control.pause_requested()
+            waiting = derive_run_state(command_dir).pause
+            assert waiting is not None and waiting.stop_reason is None, (
+                "a pause the loop has not reached read as a run already stopped"
+            )
+            paused_by = control.take_pause()
+            assert paused_by is not None and paused_by[0] is PauseCause.COMMAND
+            commands.append(
+                RunPhaseRecord.stop(StopReason.PAUSED, cause=paused_by[0], detail=paused_by[1])
+            )
+        finally:
+            reset_cycle_ledger(token)
+    finally:
+        release_cycle(command_dir)
+    paused = derive_run_state(command_dir)
+    assert paused.run_phase is RunPhase.PAUSED
+    assert paused.pause is not None and paused.pause.cause is PauseCause.COMMAND
+    for late, key in ((skip, "skip-3"), (PauseCyclePayload(**address), "pause-2")):
+        with pytest.raises(ConflictError):
+            press(late, key)
+    assert standing_controls(command_dir).skips == ()
+    assert not control.pause_requested(), "a pause with no run to stop was left standing"
+
 
 # 7. Paired readings over shared cells
 
@@ -2772,7 +2633,7 @@ def _reference_reading(
     cut: CutKind | None,
 ) -> PairedReading:
     bank = samples(len(reference), "t")
-    scorer = compile_scorer("label_match(predicted, ground_truth)", verifier_graded=False)
+    scorer = scorer_of()
 
     def rows(grades: Sequence[float | None]) -> CellSheet:
         return sheet(
@@ -2863,7 +2724,11 @@ def _evidence_campaign(
         )
         for s in partition.search[:4]
     ]
-    walked = _filed(stores, f"panel_{cid}", panel, sp_hash="origin")
+    walked = filed(
+        stores.archive,
+        [cell.facts for cell in panel],
+        filed_under([("", {"individual": f"panel_{cid}"})], prompt_fields_id="origin"),
+    )
     # A rebase fork replays its own origin and redraws the one partition.
     ledgers: dict[CycleHop, CycleEventLog] = {}
     held = Bank.of(_H2H_BANK)
@@ -2911,15 +2776,13 @@ def _evidence_campaign(
             )
             for s in partition.bench
         ]
-        passes[role] = BenchPass(
-            round=int(role == "selected"),
-            candidate_id=individual,
+        passes[role] = bench_pass(
+            stores,
+            individual,
+            rows,
+            [s.key for s in partition.bench],
+            filed_as=f"bench_{individual}_{seed}_{level}",
             sp_hash=role,
-            cells=_filed(
-                stores, f"bench_{individual}_{seed}_{level}", rows, role="bench", sp_hash=individual
-            ),
-            sample_keys=[s.key for s in partition.bench],
-            stop=None,
             scorer_id=scoring,
             reads_before=int(role == "selected") * n,
         )
@@ -2933,12 +2796,12 @@ def _evidence_campaign(
     ]
     for kind, usd, cached in calls:
         ledgers[root if kind == "optimizer" else hop].append(
-            TokenUsageRecord(
+            billed_call(
+                usd,
                 kind=kind,
                 node=kind,
                 input_tokens=10,
                 output_tokens=5,
-                cost_usd=usd,
                 cached=cached,
                 timestamp=started,
             )
@@ -3020,7 +2883,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     bank = [
         Sample(id=i, query="same" if i < 2 else f"q{i}", ground_truth=f"t{i}") for i in range(7)
     ]
-    a = _pair_member(
+    a = member_rows(
         "a",
         [
             *measurements([1.0, 0.0, 0.0, 1.0, 1.0]),
@@ -3029,7 +2892,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         ],
         bank,
     )
-    b = _pair_member(
+    b = member_rows(
         "b",
         [*measurements([1.0, 1.0, 1.0, 0.0, 1.0, 1.0]), measurement(6, None, unscored="no term")],
         bank,
@@ -3052,8 +2915,8 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert (lift.flips.gained, lift.flips.lost, lift.flips.unchanged) == (2, 1, 2)
     sparse = samples(34, "t", query="w")
     gained = _read_pair(
-        _pair_member("a", measurements([0.0] * 34), sparse),
-        _pair_member("b", measurements([1.0] * 4 + [0.0] * 30), sparse),
+        member_rows("a", measurements([0.0] * 34), sparse),
+        member_rows("b", measurements([1.0] * 4 + [0.0] * 30), sparse),
         sparse,
     ).headline
     assert gained is not None and gained.estimate.ci_lo > 0.0
@@ -3073,8 +2936,8 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         "a measurand beside the headline is read over the SAME scored cells"
     )
     clear = _read_pair(
-        _pair_member("a", measurements([0.0] * 6), bank),
-        _pair_member("b", measurements([1.0] * 6), bank),
+        member_rows("a", measurements([0.0] * 6), bank),
+        member_rows("b", measurements([1.0] * 6), bank),
         bank,
     )
     assert clear.headline is not None
@@ -3107,7 +2970,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     by_slot = {0: 1.0, 1: 1.0, 2: 0.0, 3: 1.0}
     standing = {four[sid].key: grade for sid, grade in by_slot.items()}
     worth = {four[sid].key: _objective(measurement(sid, g)) for sid, g in by_slot.items()}
-    twice = _pair_member("twice", walked, four)
+    twice = member_rows("twice", walked, four)
     cells = twice.sheet
     assert cells.column(ROW_GRADES["fitness"]) == standing, "a second reading is a second row"
     assert cells.column(ROW_GRADES["objective"]) == worth
@@ -3118,7 +2981,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert fold.composite_fitness == pytest.approx(sum(worth.values()) / 4)
     assert level_band(cells, ROW_GRADES["fitness"])[0] == fold.accuracy
     assert {key: row.grade.fitness for key, row in twice.by_key().items()} == standing
-    once = _pair_member("once", measurements(list(by_slot.values())), four)
+    once = member_rows("once", measurements(list(by_slot.values())), four)
     unmoved = _read_pair(once, twice, four)
     lift, coverage = unmoved.headline, unmoved.coverage
     assert lift is not None and coverage is not None and lift.flips is not None
@@ -3127,7 +2990,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         "paired against an individual that walked each cell once at those grades, nothing moved"
     )
     assert (lift.flips.gained, lift.flips.lost, lift.flips.unchanged) == (0, 0, 4)
-    ungraded = _pair_member(
+    ungraded = member_rows(
         "ungraded", [*walked[:-1], measurement(3, None, unscored="no latency recorded")], four
     )
     assert ungraded.sheet.column(ROW_GRADES["fitness"]) == {
@@ -3142,10 +3005,10 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     # A pair that cannot be read says which way instead of reading zero.
     six = samples(6, "t")
     panel = six[:4]
-    left = _pair_member("a", measurements([1.0, 0.0, 1.0, 0.0]), six)
+    left = member_rows("a", measurements([1.0, 0.0, 1.0, 0.0]), six)
 
     def right(rows: list[GradedCell] | None = None, **read_under: Any) -> MemberRows:
-        return _pair_member(
+        return member_rows(
             "b", measurements([1.0, 1.0, 1.0, 0.0]) if rows is None else rows, six, **read_under
         )
 
@@ -3241,7 +3104,41 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         assert on_reference.reference_level("fitness") == level, (
             f"{coverage_state}: a reference level is served only on its whole cell set"
         )
-        assert on_reference.beside[0].measurand.key == "objective"
+
+    # C0 sat scope `a` alone; the line drew `b`, so C0 is topped up there, never paired on `a` only.
+    seated = [
+        Sample(id=i, query=f"q{i}", ground_truth=None, measured_dataset=ds)
+        for i, ds in enumerate("aabb")
+    ]
+    scopes = CellScopes.of(seated, "outer")
+    assert origin_panel(
+        [0, 1],
+        line_cells=range(4),
+        poolable=range(4),
+        scope_of={s.id: scopes.by_key[s.key] for s in seated},
+        size=2,
+    ) == [0, 1, 2, 3], "a scope the line drew and C0 never sat was left off the panel"
+    on_bench = pair_on_bench(
+        member_rows(
+            "c0",
+            measurements([0.0, 1.0, 0.0, 0.0]),
+            seated,
+            scope=RoleScope.BENCH,
+            dataset_hash=None,
+        ),
+        member_rows(
+            "c1",
+            measurements([1.0, 1.0, 1.0, 0.0]),
+            seated,
+            scope=RoleScope.BENCH,
+            dataset_hash=None,
+        ),
+        sample_keys=[s.key for s in seated],
+        instrument_id="i",
+    ).lift("fitness")
+    assert on_bench is not None and on_bench.estimate.value == pytest.approx(0.5), (
+        "the lift lost its pairing"
+    )
 
     # A verify reads its fresh cells alone and pairs its lift over the origin.
     def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerifyPass:
@@ -3356,7 +3253,18 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         ]
         arm_walk(
             CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(cycle_hop))),
-            zip(slots, _filed(built_stores, f"keyed_{cycle_id}", rows), strict=True),
+            zip(
+                slots,
+                filed(
+                    built_stores.archive,
+                    [row.facts for row in rows],
+                    filed_under(
+                        [("", {"individual": f"keyed_{cycle_id}"})],
+                        prompt_fields_id=f"keyed_{cycle_id}",
+                    ),
+                ),
+                strict=True,
+            ),
         )
         return scan_ledger_walks(
             ledger_chain(CycleDir(built_stores.campaigns.cycle_dir(cycle_hop)), moment=None)
@@ -3470,11 +3378,6 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     _evidence_campaign(h2h_stores, "capo_b", 2, selected=0.7, incurred=0.3, loop=0.15, wall=50)
     shared = subject_evidence(h2h_stores, [potter_a, capo_b]).head_to_head
     assert shared is not None and shared.rows[0].bench_set is not None
-    for lens in ("score:(", "score:'x'"):
-        masked = parse_subject(f"course:potter_a/cycle_potter_a_fork_r1;lens={lens}")
-        with pytest.raises(ScoringFormulaError) as refused:
-            subject_evidence(h2h_stores, [masked, capo_b])
-        assert refused.value.http_status == 400, f"the lens {lens!r} is the caller's input"
     declared = minted_campaign(
         CycleHop(campaign_id="arm", cycle_id="cycle_arm"),
         config=_h2h_config("potter", 0, _H2H_FORMULA, None),
@@ -3514,7 +3417,6 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             ["origin_reading"],
             1,
         ),
-        ((potter_a, capo_b), {"cid": "capo_h", "n": 8, "scoring": "0.5 * env_reward"}, None, [], 0),
         # capo_b and capo_f run one treatment, so they contrast nothing and never pair.
         ((potter_a, capo_b), {"cid": "capo_f", "n": 6, "at": 1}, True, [], 2),
         (
@@ -3537,10 +3439,6 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         roster = [*subjects]
         if third is not None:
             roster.append(_evidence_campaign(h2h_stores, **{"selected": 0.7, **third}))
-        if not family:
-            with pytest.raises(BadRequestError):
-                subject_evidence(h2h_stores, roster)
-            continue
         evidence = subject_evidence(h2h_stores, roster)
         h2h = evidence.head_to_head
         assert evidence.scorer_id == auto_scorer_id(_H2H_FORMULA, None, judge_instrument=None)

@@ -370,7 +370,7 @@ async def embedded_share(
     step_rounds: int | None,
 ) -> AsyncIterator[tuple[str, HeldBudget]]:
     """A launch's admission with no slot, entered BEFORE anything paid: the job, then its hold."""
-    job_registry = JobRegistry.attach()
+    job_registry = JobRegistry.attach(stores.jobs_dir)
     job = job_registry.create(
         user_id=str(stores.identity.user_id),
         principal_id=acting_principal(stores.identity).id,
@@ -408,7 +408,7 @@ def inner_share(
     enclosing = bound_spend_book()
     if enclosing is None:
         raise RuntimeError("an inner run spawns only under its enclosing run's book")
-    job_registry = JobRegistry.attach()
+    job_registry = JobRegistry.attach(stores.jobs_dir)
     job = job_registry.create(
         user_id=str(stores.identity.user_id),
         principal_id=acting_principal(stores.identity).id,
@@ -449,7 +449,7 @@ async def paid_pass(
     *, stores: Stores, verb: ScoringVerb, hop: CycleHop | None, declared: Budget
 ) -> AsyncIterator[SpendBook]:
     """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops it."""
-    job_registry = JobRegistry.attach()
+    job_registry = JobRegistry.attach(stores.jobs_dir)
     job = await asyncio.to_thread(
         request_job,
         stores=stores,

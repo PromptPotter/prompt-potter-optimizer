@@ -51,6 +51,10 @@ class Stores:
         return self.identity.tenant_id
 
     @property
+    def jobs_dir(self) -> Path:
+        return paths.jobs_dir(self.shared_root)
+
+    @property
     def inner(self) -> bool:
         """An L4 inner run's sandbox: every cycle under it answers every run verb for itself."""
         return in_inner_sandbox(self.projects_root)

@@ -4,7 +4,7 @@ import argparse
 
 from promptpotter.application.account import tenant_trail, trail_by_email
 from promptpotter.application.views.trail import trail_notes, trail_rows
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
@@ -12,7 +12,7 @@ from promptpotter.presentation.cli.commands.workspace import open_stores
 async def cmd_trail(args: argparse.Namespace) -> CommandResult:
     email = args.email.strip()
     trail = (
-        trail_by_email(DEFAULT_PROJECTS_ROOT, email) if email else tenant_trail(open_stores(args))
+        trail_by_email(default_projects_root(), email) if email else tenant_trail(open_stores(args))
     )
     nothing = "Nothing recorded yet." if trail.own else f"No account with email {email}."
     return CommandResult(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import math
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -340,6 +341,47 @@ _CELL = WireRecord.of(
     "MeasuredCellRecord",
     "A :class:`MeasuredCell` on the wire, as :meth:`MeasuredCell.wire` writes it.",
 )
+
+_SAYS_EVERYTHING = MeasuredCell(
+    sample_key="k",
+    query="q",
+    ground_truth="g",
+    predicted="p",
+    error="e",
+    error_category=ErrorCategory.SERVER,
+    cached=True,
+    answer="f.a",
+    retry_of_degraded=True,
+    rerun_comparison={"hit_change": "MISS->HIT", "rank_change": None, "improved": True},
+    degraded_obs_count=2,
+    pipeline=PipelineData(
+        total_time=0.0,
+        terminal_node="n",
+        step_timings={"n": 1.5},
+        step_tokens={
+            "n": StepUsage(input=3, output=4, estimated=True, cost_usd=0.5, model="m", reasoning=0),
+            "silent": StepUsage(),
+        },
+        diagnostics=Diagnostics(
+            step_statuses={"n": "degraded"},
+            warnings=(
+                NodeWarning("n", "c", "m", "transient", (1, {"a": 2}), {"x": 1}),
+                NodeWarning(),
+            ),
+        ),
+        result_ranking=(),
+        turns=({"index": 0},),
+        step_phases={},
+        judge_readings={"t": JudgeReading(), "u": JudgeReading("label", "why")},
+        target_prompt_chars=0,
+        observations={"final_ranking": [1], "env_reward": 0.0, "opened": False},
+    ),
+)
+assert all(
+    MeasuredCell.from_wire(wired := json.loads(json.dumps(cell.wire()))) == cell
+    and MeasuredCell.from_wire(wired).wire() == wired
+    for cell in (_SAYS_EVERYTHING, MeasuredCell(sample_key="k"))
+), "a field of a measured cell does not survive its own wire"
 
 
 # What `archive_maintenance.py` may move to the cold store.

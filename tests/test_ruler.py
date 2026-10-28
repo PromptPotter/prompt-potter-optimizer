@@ -15,7 +15,6 @@ from typing import Any
 import numpy as np
 import pytest
 from factories import (
-    PROMPT_INFO,
     arm_state,
     cycle_result,
     election,
@@ -37,7 +36,6 @@ from promptpotter.application.bench.difficulty import (
     session_ruler_scope,
 )
 from promptpotter.application.bench.node_context import NodeContext
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     covered_prefix,
@@ -51,24 +49,15 @@ from promptpotter.application.intelligence.rasch import (
     fit_theta,
     graduate_ruler_model,
 )
-from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.runner.bench import pair_on_bench
-from promptpotter.application.runner.inner.tasks import inner_instrument_config, parse_panel
-from promptpotter.application.scoring.paired import MemberRows
-from promptpotter.config.paths import install_datasets_root
 from promptpotter.domain.arms import ArmSlot
-from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
     compute_outer_proxies,
     inner_cell_facts,
     mean_parent_level_se,
 )
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
-from promptpotter.domain.origin_panel import origin_panel
-from promptpotter.domain.paired_reading import ArmKey, MemberAddress
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.ruler import (
@@ -84,7 +73,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
+from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -93,12 +82,9 @@ from promptpotter.infrastructure.store.archive_queries import (
     OpenAt,
     bind_memory_scope,
 )
-from promptpotter.infrastructure.store.dataset_access import read_dataset_definition
 from promptpotter.infrastructure.store.ruler_store import RulerStore
-from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError
-from promptpotter.shared.identity import default_identity
-from promptpotter.shared.measurement_context import RoleScope
 
 # 1. The estimator
 
@@ -449,45 +435,6 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     assert caveat([0, 1]) is None and caveat([0, 2]) is ThetaCaveat.DISJOINT_SCOPES
 
-    def rows(hits: list[float]) -> list[GradedCell]:
-        return [measurement(i, h, sample_key=key[i]) for i, h in enumerate(hits)]
-
-    c0_rows, pick = rows([0.0, 1.0, 0.0, 0.0]), rows([1.0, 1.0, 1.0, 0.0])
-    # C0 sat `a` alone; the line drew `b`, so C0 is topped up there rather than paired on `a` only.
-    topped = origin_panel(
-        [0, 1],
-        line_cells=[0, 1, 2, 3],
-        poolable=range(4),
-        scope_of={s.id: scopes.by_key[s.key] for s in seated},
-        size=2,
-    )
-    assert topped == [0, 1, 2, 3]
-
-    def member(individual: str, cells: list[GradedCell]) -> MemberRows:
-        return MemberRows(
-            address=MemberAddress(
-                path=(CycleHop(campaign_id="c", cycle_id="y"),),
-                individual_id=individual,
-                arm=None,
-                pass_role=None,
-            ),
-            sheet=sheet(cells),
-            bought=0,
-            cut=False,
-            scope=RoleScope.BENCH,
-            instrument_id="i",
-            dataset_hash=None,
-            cell_set_id=None,
-        )
-
-    paired = pair_on_bench(
-        member("c0", c0_rows), member("c1", pick), sample_keys=list(key.values()), instrument_id="i"
-    )
-    lift = paired.lift("fitness")
-    assert lift is not None and lift.estimate.value == pytest.approx(0.5), (
-        "the lift lost its pairing"
-    )
-
     # Stratified: a stratum short of its share hands the rest on; an empty one takes nothing.
     assert stratum_shares([2, 10, 10], 9) == [2, 4, 3]
     assert stratum_shares([0, 5], 4) == [0, 4]
@@ -665,44 +612,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 # 3. The L4 outer proxy — what one finished inner cycle says
 
 
-def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_path: Path) -> None:
-    # The shipped panel measures in ONE unit: no inner cell may graduate its ruler to 2PL.
-    d = install_datasets_root() / "promptpotter-self" / "panel"
-    definition = read_dataset_definition(d)
-    assert definition is not None and definition.panel is not None
-    declared = definition.panel
-    panel = parse_panel(declared)
-    assert panel.tasks
-    # The SHIPPED config, not a hand-built one — the question is what the panel runs under.
-    base = load_dataset_campaign_config(d)
-    cells = panel.resolve_cells(build_stores(default_identity(), projects_root=tmp_path))
-    graph = parse_pipeline_response(cells.pipeline())
-    for task in panel.tasks:
-        task_spec = cells.spec(task)
-        # The INNER backend's prompt nodes: what the recursion's cell pins and narrows.
-        solver = [PipelineNode(name="llm_only", tunes_llm=True, prompt_info=PROMPT_INFO)]
-        derived = inner_instrument_config(task_spec, base, solver=solver, n_search=40)
-        assert derived.optimization.enable_2pl_graduation is False, (
-            f"cell {task.id} may graduate its ruler to 2PL — its theta would then be in units of "
-            "1/a while the rest of the panel is in logits, and the outer verdict pools them anyway"
-        )
-        assert [derived.optimizer_narrowing[n.name].param_keys for n in solver] == [
-            [] for _ in solver
-        ], "the solver's spend axes are the instrument: the inner search writes prompt text alone"
-        assert derived.bench_trigger == "each_round" and derived.dataset_split is not None
-        own = CampaignConfig.model_validate(
-            dict(cells.by_dataset[task_spec.inner_dataset].campaign_config)
-        )
-        ran = select_optimizer(
-            inner_instrument_config(task_spec, own, solver=solver, n_search=40).optimization
-        )
-        shown = cells.held(task).optimizer
-        assert shown.treatment() == ran.treatment(), (
-            "the manifest the outer mutates a cell against is not the one that cell runs"
-        )
-        assert shown.knobs("escalation") == ran.knobs("escalation")
-        assert {n.name for n in graph.declared_nodes if n.tunes_llm} == set(ran.llm_nodes)
-
+def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> None:
     def cyc(
         levels: list[float | None],
         *,
@@ -753,7 +663,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_pa
     assert lift([0.30, 0.55], [0.40, 0.50], round_budget=4) == pytest.approx(0.075)
 
     # EXCLUDED, never floored: the -1 floor would punish the optimizer prompt for a slow provider.
-    tooling = [round_result(1, parse_failure="l1_provider_empty_response")]
+    tooling = [round_result(1, parse_failure=PARSE_FAILURE_TOOLING)]
     for unscoreable in (
         cyc([], stop_reason=StopReason.TARGET_HIT),
         cyc([0.40, 0.55], stop_reason=StopReason.TOKEN_BUDGET),

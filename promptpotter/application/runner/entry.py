@@ -84,7 +84,6 @@ async def _run_single_cycle(
     observers: RunObservers,
     mode: RunMode,
     step_rounds: int | None,
-    rebases: int,
 ) -> _CycleOutcome:
     origin = prep.origin
     campaign_config = prep.campaign_config
@@ -187,14 +186,7 @@ async def _run_single_cycle(
             if isinstance(exc, asyncio.CancelledError):
                 cancel_exc = exc
 
-    if fork is not None and rebases >= MAX_AUTO_REBASES:
-        logger.warning("Auto-rebase cap %d reached; ignoring further fork_proposals.", rebases)
-    rebasing = (
-        fork is not None
-        and cancel_exc is None
-        and stop_reason == StopReason.REBASED
-        and rebases < MAX_AUTO_REBASES
-    )
+    rebasing = fork is not None and cancel_exc is None and stop_reason == StopReason.REBASED
     cycle_result = close_cycle(
         cycle,
         session,
@@ -239,7 +231,6 @@ def _mint_and_rebase_fork(
     session: Session,
     observers: RunObservers,
     rebase_req: RebaseRequest,
-    rebase_count: int,
 ) -> tuple[PreparedRun, Session, RunObservers]:
     """``config_overrides`` re-snapshot BEFORE the mint, so seed and in-process config agree."""
     parent = session.hop
@@ -269,7 +260,7 @@ def _mint_and_rebase_fork(
     )
     logger.info(
         "Auto-rebase #%d/%d: %s → %s at round %d [trigger=%s, reason=%s]",
-        rebase_count,
+        session.state.rebases,
         MAX_AUTO_REBASES,
         parent.cycle_id,
         new_cycle_id,
@@ -289,7 +280,6 @@ async def _run_line(
     mode: RunMode,
     step_rounds: int | None,
 ) -> _CycleOutcome:
-    rebase_count = 0
     while True:
         outcome = await _run_single_cycle(
             prep,
@@ -298,11 +288,10 @@ async def _run_line(
             observers=observers,
             mode=mode,
             step_rounds=step_rounds,
-            rebases=rebase_count,
         )
         if outcome.fork is None:
             return outcome
-        rebase_count += 1
+        outcome.session.state.rebases += 1
         # The operator's `--from` rewound the line's first cycle; a fork stands on its rebase's cut.
         mode = mode.model_copy(update={"from_round": None})
         prep, session, observers = _mint_and_rebase_fork(
@@ -310,7 +299,6 @@ async def _run_line(
             session=outcome.session,
             observers=outcome.observers,
             rebase_req=outcome.fork,
-            rebase_count=rebase_count,
         )
 
 

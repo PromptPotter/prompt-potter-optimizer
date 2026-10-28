@@ -7,7 +7,7 @@ from fastapi import Depends, Header, Request
 
 from promptpotter.application.account import registered_or_default_identity
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import (
@@ -38,7 +38,7 @@ IdentityDep = Annotated[IdentityContext, Depends(resolve_identity)]
 
 def build_stores_from_identity(identity: IdentityDep) -> Stores:
     """An inner sandbox is reached by DESCENT (``?descend=``), never by a store at another root."""
-    return build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
+    return build_stores(identity, projects_root=default_projects_root())
 
 
 StoresDep = Annotated[Stores, Depends(build_stores_from_identity)]

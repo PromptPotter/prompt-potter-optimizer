@@ -157,12 +157,13 @@ class InnerTasks(FrozenModel):
         for name in sorted(self.datasets):
             dataset_dir = resolve_dataset(stores, name).directory
             campaign = dataset_campaign_block(dataset_dir)
-            identity = _select_inner_optimizer(campaign, cfg.inner_nodes, {}, n_samples=None)
+            opt = CampaignConfig.model_validate(campaign).optimization
+            identity = _select_inner_optimizer(opt, cfg.inner_nodes, {}, n_samples=None)
             by_dataset[name] = InnerCell(
                 campaign_config=campaign,
                 pipeline=read_dataset_pipeline(dataset_dir),
                 optimizer=_select_inner_optimizer(
-                    campaign,
+                    opt,
                     cfg.inner_nodes,
                     cfg.inner_depth_nodes,
                     n_samples=cfg.n_samples_per_inner_round,
@@ -324,21 +325,15 @@ def _inner_manifest_nodes(
 
 
 def _select_inner_optimizer(
-    campaign_config: Mapping[str, Any],
+    opt: OptimizationConfig,
     nodes: Mapping[str, ManifestNodeOverlay],
     depth_nodes: Mapping[str, ManifestNodeOverlay],
     *,
     n_samples: int | None,
 ) -> SelectedOptimizer:
-    opt = campaign_config.get("optimization") or {}
-    own = {
-        node: ManifestNodeOverlay.model_validate(raw)
-        for node, raw in (opt.get("nodes") or {}).items()
-    }
-    name = opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
     return resolve_optimizer(
-        name,
-        _inner_manifest_nodes(name, own, nodes, depth_nodes, n_samples=n_samples),
+        opt.optimizer,
+        _inner_manifest_nodes(opt.optimizer, opt.nodes, nodes, depth_nodes, n_samples=n_samples),
         gate=INNER_ARM_GATE,
     )
 
@@ -487,6 +482,7 @@ def inner_instrument_config(
         "arm_gate": INNER_ARM_GATE,
         # Under 2PL θ is in units of 1/a and each cycle graduates on its OWN CV, so the panel would average a mixture of scales.
         "enable_2pl_graduation": False,
+        # The nodes and gate `_select_inner_optimizer` resolves: the manifest a cell holds is the one it runs.
         "nodes": _inner_manifest_nodes(
             base.optimization.optimizer,
             base.optimization.nodes,

@@ -662,13 +662,14 @@ def _located(name: str) -> tuple[Path, PipelineManifest | ManifestSwitch]:
     return shipped, authored_manifest(optimizer_manifest_path(shipped))
 
 
-def _stamps(name: str) -> tuple[int, ...]:
+def _stamps(name: str) -> tuple[tuple[Path, int], ...]:
     """Of every file *name* resolves from, so an edit to what a switch extends re-resolves the switch."""
     _, authored = _located(name)
     read = [name]
     if isinstance(authored, ManifestSwitch):
         read += [authored.extends, *(swap.of for swap in authored.swap.values())]
-    return tuple(_stamp(optimizer_manifest_path(_located(n)[0])) for n in read)
+    paths = [optimizer_manifest_path(_located(n)[0]) for n in read]
+    return tuple((path, _stamp(path)) for path in paths)
 
 
 def _whole(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
@@ -725,7 +726,7 @@ def _resolved(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
 
 @functools.lru_cache(maxsize=32)
 def _select(
-    name: str, _stamped: tuple[int, ...], overlay_json: str, gate: ArmGateMode
+    name: str, _stamped: tuple[tuple[Path, int], ...], overlay_json: str, gate: ArmGateMode
 ) -> SelectedOptimizer:
     manifest, schemas = _resolved(name)
     overlay: dict[str, dict[str, Any]] = json.loads(overlay_json)

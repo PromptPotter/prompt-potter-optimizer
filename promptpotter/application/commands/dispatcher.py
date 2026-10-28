@@ -183,7 +183,7 @@ class CommandDispatcher:
     @property
     def job_registry(self) -> JobRegistry:
         if self._attached is None:
-            self._attached = JobRegistry.attach()
+            self._attached = JobRegistry.attach(self.stores.jobs_dir)
         return self._attached
 
     def run_state(self, hop: CycleHop) -> RunState:

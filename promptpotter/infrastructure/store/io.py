@@ -287,24 +287,34 @@ def _represent_str(dumper: yaml.SafeDumper, data: str) -> yaml.ScalarNode:
 _YamlDumper.add_representer(str, _represent_str)
 
 
-def write_yaml(path: Path, data: Any) -> None:
-    _atomic_write(
-        path,
-        lambda f: yaml.dump(
-            data,
-            f,
-            Dumper=_YamlDumper,
-            # Load-bearing: declaration order is meaning (node order, schema field order).
-            sort_keys=False,
-            allow_unicode=True,
-            default_flow_style=False,
-            width=100,
-            indent=2,
-        ),
+def _yaml_text(data: object) -> str:
+    return yaml.dump(
+        data,
+        Dumper=_YamlDumper,
+        # Load-bearing: declaration order is meaning (node order, schema field order).
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+        width=100,
+        indent=2,
     )
 
 
+def write_yaml(path: Path, data: Any) -> None:
+    write_text(path, _yaml_text(data))
+
+
 _YAML_LOADER: type = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+# Strings a YAML 1.1 loader reads as another type: written, each must read back as the string it was.
+_YAML_1_1_HAZARDS = (
+    *("TRUE", "FALSE", "True", "no", "No", "yes", "on", "off", "OFF", "y", "n", "null", "~"),
+    *("1", "1.5", "0755", "1e5", "2026-07-26", "v1.0"),
+)
+_hazards = {h: h for h in _YAML_1_1_HAZARDS} | {"nested": {"labels": list(_YAML_1_1_HAZARDS)}}
+if yaml.load(_yaml_text(_hazards), Loader=_YAML_LOADER) != _hazards:
+    raise RuntimeError("write_yaml leaves a YAML 1.1 scalar bare, so read_yaml reads another type")
+del _hazards
 
 
 def read_yaml(path: Path) -> Any:

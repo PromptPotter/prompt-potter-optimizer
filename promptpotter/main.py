@@ -25,7 +25,8 @@ from promptpotter.application.jobs.reaper import periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.paths import (
-    DEFAULT_PROJECTS_ROOT,
+    default_projects_root,
+    jobs_dir,
     user_data_root,
     webapp_static_root,
 )
@@ -101,9 +102,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     # The registry ends cycles whose JOB is proven dead; the sweep clears dead cycles it never saw.
-    registry = JobRegistry.attach()
+    projects_root = default_projects_root()
+    registry = JobRegistry.attach(jobs_dir(projects_root))
     app.state.job_registry = registry
-    sweep_task = asyncio.create_task(periodic_sweep(DEFAULT_PROJECTS_ROOT))
+    sweep_task = asyncio.create_task(periodic_sweep(projects_root))
     yield
     sweep_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):

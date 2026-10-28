@@ -25,7 +25,7 @@ from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
 from promptpotter.application.views.trail import trail_fields, trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
 from promptpotter.domain.run_records import Device
 from promptpotter.domain.spend import RATE_PRICED_LABEL
@@ -91,7 +91,7 @@ def _render_trail(argument: str) -> str:
     email = argument.strip()
     if not email:
         return "Usage: /trail <email>"
-    trail = trail_by_email(DEFAULT_PROJECTS_ROOT, email)
+    trail = trail_by_email(default_projects_root(), email)
     notes = trail_notes(trail)
     if not trail.own:
         return "\n".join([f"No account with email {email}.", *notes])
@@ -114,7 +114,7 @@ def _render_trail(argument: str) -> str:
 
 
 def _render_install_spend() -> str:
-    rows = read_install_spend(DEFAULT_PROJECTS_ROOT)
+    rows = read_install_spend(default_projects_root())
     if not rows:
         return "No accounts on this install."
     torn = sum(1 for r in rows if r.unreadable)
@@ -220,7 +220,7 @@ def notify_operator(text: str) -> bool:
 
 def check_health_and_tell() -> list[health.Checked]:
     """Every entry point's health check, each change of state already told. Blocking."""
-    checked = asyncio.run(health.check(DEFAULT_PROJECTS_ROOT))
+    checked = asyncio.run(health.check(default_projects_root()))
     for one in checked:
         if (said := health.notice(one)) is not None:
             notify_operator(said)
@@ -262,7 +262,7 @@ def forward_trail_to_briefing() -> bool:
     url = settings.N8N_TRAIL_WEBHOOK_URL.get_secret_value().strip()
     if not url:
         return False
-    trails, unreadable = trails_since(DEFAULT_PROJECTS_ROOT, time.time() - _TRAIL_WINDOW_H * 3600)
+    trails, unreadable = trails_since(default_projects_root(), time.time() - _TRAIL_WINDOW_H * 3600)
     try:
         with httpx.Client(timeout=10, verify=tls_context()) as client:
             resp = client.post(
@@ -277,7 +277,7 @@ def forward_trail_to_briefing() -> bool:
                         {"who": account.who, "lines": trail_fields(account)} for account in trails
                     ],
                     "unreadable": unreadable,
-                    "health": health.briefing(DEFAULT_PROJECTS_ROOT),
+                    "health": health.briefing(default_projects_root()),
                 },
             )
     except httpx.HTTPError:

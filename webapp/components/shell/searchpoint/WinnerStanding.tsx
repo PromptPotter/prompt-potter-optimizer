@@ -13,6 +13,7 @@ export function WinnerStanding({ standing }: { standing: RunStanding }) {
     <div className="subject-facts" aria-label="Where the run stands">
       <span>{plural(rounds_closed, "round")}</span>
       <HoverCard
+        focusable
         content={
           <p className="subject-fact-note">
             A round promotes an arm on a bare point estimate — it moves the search on and is not a
@@ -21,7 +22,7 @@ export function WinnerStanding({ standing }: { standing: RunStanding }) {
           </p>
         }
       >
-        <span tabIndex={0}>
+        <span>
           {improved} promoted, {advanced} separated
         </span>
       </HoverCard>
@@ -30,6 +31,7 @@ export function WinnerStanding({ standing }: { standing: RunStanding }) {
         <PairedLift reading={standing.vs_origin}>
           {(lift, cells) => (
             <HoverCard
+              focusable
               content={
                 <p className="subject-fact-note">
                   The origin and the selection on the {plural(cells, "origin-panel cell")} both
@@ -38,7 +40,7 @@ export function WinnerStanding({ standing }: { standing: RunStanding }) {
                 </p>
               }
             >
-              <span tabIndex={0}>
+              <span>
                 {fmtLift(lift, "rates")} on {cells} shared
               </span>
             </HoverCard>

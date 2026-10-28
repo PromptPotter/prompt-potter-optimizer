@@ -81,7 +81,7 @@ async def prepare_run(
     move_campaign_money(
         budget.standing,
         stores=session.store,
-        job_registry=JobRegistry.attach(),
+        job_registry=JobRegistry.attach(session.store.jobs_dir),
         campaign_id=session.hop.campaign_id,
     )
     stand_held_budget(session.store, session.hop, budget)
@@ -116,7 +116,7 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
     book = open_spend_book(
         session.state.held,
         stores=session.store,
-        job_registry=JobRegistry.attach(),
+        job_registry=JobRegistry.attach(session.store.jobs_dir),
         hop=session.hop,
         meters=ceiling_meter(session.purpose),
         opened=session.state.launch_clock().monotonic,
@@ -141,7 +141,7 @@ def rebase_held(session: Session, parent: CycleHop) -> None:
     if held is None:
         raise RuntimeError("a run rebases only over what admission held for it")
     spent = session.store.campaigns.cycle_metered(parent, book.meters)
-    job_registry = JobRegistry.attach()
+    job_registry = JobRegistry.attach(session.store.jobs_dir)
     with job_registry.admission_gate():
         job = job_registry.get(held.job_id)
         if job is None:

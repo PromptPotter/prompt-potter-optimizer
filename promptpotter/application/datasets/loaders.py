@@ -511,11 +511,15 @@ def _reached(value: object, seen: set[object]) -> set[ModuleType]:
     return set().union(*(_reached(v, seen) for v in (*names, *cells)))
 
 
-def recipe_code(recipe: str) -> str:
+def recipe_modules(recipe: str) -> tuple[ModuleType, ...]:
     """What a recipe's code IS: this module and every module of this package it runs."""
     run = (BANK_RECIPES | PANEL_RECIPES)[recipe]
     imported = sorted(_reached(run, set()), key=lambda m: m.__name__)
-    return module_source_digest(sys.modules[__name__], *imported)
+    return (sys.modules[__name__], *imported)
+
+
+def recipe_code(recipe: str) -> str:
+    return module_source_digest(*recipe_modules(recipe))
 
 
 def definition_source(dataset_dir: Path) -> Source | None:

@@ -619,6 +619,11 @@ class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
 # The last payload model is declared above, so a kind carrying none fails right here.
 if _unpaired := sorted(set(CommandKind) - PAYLOAD_MODEL_FOR_KIND.keys()):
     raise RuntimeError(f"command kinds carried by no payload model: {_unpaired}")
+# A payload keeping an undeclared key carries a steer no handler owns, an endpoint among them.
+if _lax := sorted(
+    k for k, m in PAYLOAD_MODEL_FOR_KIND.items() if m.model_config["extra"] != "forbid"
+):
+    raise RuntimeError(f"command payloads accepting undeclared keys: {_lax}")
 
 
 class CommandAcceptedBody(StrictModel):

@@ -41,6 +41,7 @@ from promptpotter.domain.phase_views import OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.run_records import (
+    MAX_AUTO_REBASES,
     ConfigOverrides,
     ForkTrigger,
     RebaseRequest,
@@ -245,7 +246,19 @@ def _rebase_request(
     ctx: NodeContext, layer_id: str, proposal: ForkProposal
 ) -> RebaseRequest | None:
     round_num = ctx.round_num
-    target_round = ctx.read(Lineage).rewind_round()
+    lineage = ctx.read(Lineage)
+    if lineage.rebases >= MAX_AUTO_REBASES:
+        emit_round_warning(
+            kind="layer_rebase_dropped",
+            message=(
+                f"{layer_id} asked to rewind this cycle, but this launch has already rebased "
+                f"{lineage.rebases} times, the most one launch may. The request was dropped and "
+                "the run continued on this line."
+            ),
+            detail={"layer": layer_id, "round": round_num, "caveats": []},
+        )
+        return None
+    target_round = lineage.rewind_round()
     if target_round is None:
         # A rewind to nowhere mints a duplicate of this cycle.
         series = ctx.read(Ruler).level_series

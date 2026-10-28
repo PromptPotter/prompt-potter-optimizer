@@ -58,7 +58,7 @@ from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
 from promptpotter.application.runner.inner.connector import measurement_modules
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, install_datasets_root
+from promptpotter.config.paths import default_projects_root, install_datasets_root
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import Arm, Compare, Optimize, Purpose
@@ -71,7 +71,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import CycleSeed
+from promptpotter.domain.run_records import MAX_AUTO_REBASES, CycleSeed
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
@@ -105,6 +105,8 @@ STAMP = "offline-run.json"
 CONTROLLED = ("controlled", "controlled-bare")
 RESUMED = "resumed"
 DIVERGED = "diverged"
+REBASED = "rebased"
+REBASE_HARDNESS = 6
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
@@ -210,11 +212,12 @@ class SchemaFiller:
 
 class ByCallIdentity:
     """The offline run's `FakeLLM` policy: an answer follows the CALL's identity, never the
-    prompt's wording nor the arrival order."""
+    prompt's wording nor the arrival order. *rebasing*, every L2 fire proposes a fork."""
 
-    def __init__(self, capture: Path, templates: dict[str, str]) -> None:
+    def __init__(self, capture: Path, templates: dict[str, str], *, rebasing: bool = False) -> None:
         self.capture = capture
         self.templates = templates
+        self.rebasing = rebasing
         self.prefixes = {node: template.split("{{")[0] for node, template in templates.items()}
         self.calls: dict[str, int] = {}
         self.turns: dict[tuple[str, int | None], int] = {}
@@ -301,6 +304,8 @@ class ByCallIdentity:
             obj["axis_targeted"] = "instruction"
             obj["rationale"] = f"L2 fire {call}: L1 stalled on the instruction axis."
             obj.pop("fork_proposal", None)
+            if self.rebasing:
+                obj["fork_proposal"] = {"reason": f"L2 fire {call}: rewind past the stall."}
             obj.pop("terminate_proposal", None)
         elif node.startswith("L3Plan"):
             obj["plan"] = (
@@ -499,7 +504,7 @@ async def run_one(
     router = Router(FakeLLM(llm), backend)
     install_network(router)
 
-    stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
     session = await open_session(DATASET, stores=stores)
     session, result = await run_campaign(
@@ -569,6 +574,50 @@ async def run_one(
     return cycle, session.campaign_id
 
 
+async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
+    """Potter resumed with `--from` under an L2 proposing a fork at every fire, until the clock stops it."""
+    config = campaign_config("potter", rounds, bench_trigger="manual")
+    samples = synthetic_rows(rows)
+    (workspace / "requests").mkdir()
+    llm = ByCallIdentity(workspace / "requests", text_templates(config))
+    # A rewind lands on a round holding a θ level, which only a ruler spanning the rows gives.
+    install_network(Router(FakeLLM(llm), FakeBackend(samples, hardness=REBASE_HARDNESS)))
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    stand_in_fetch(stores, samples)
+    # The first campaign banks the rows the second's ruler is fit on; the second pauses at 1.
+    for step_rounds in (None, 1):
+        session, _ = await run_campaign(
+            await open_session(DATASET, stores=stores),
+            config,
+            readout_sink=print,
+            budget=Budget(),
+            step_rounds=step_rounds,
+            mode=RunMode(),
+        )
+        await session.backend_client.aclose()
+    llm.rebasing = True
+    session, _ = await run_campaign(
+        await rebound_session(stores, session.hop),
+        readout_sink=print,
+        budget=Budget(),
+        mode=RunMode(from_round=1),
+    )
+    await session.backend_client.aclose()
+    cycles = dict(stores.campaigns.campaign_cycles(session.campaign_id))
+    forks = [index for index in cycles.values() if index.parent_cycle_id is not None]
+    if len(forks) != MAX_AUTO_REBASES:
+        raise SystemExit(
+            f"offline run: the line forked {len(forks)} times, its clock is {MAX_AUTO_REBASES}"
+        )
+    ended = [index.stop_reason for index in forks]
+    if any(r is None or stop_reason_outcome(r).exit_code for r in ended):
+        raise SystemExit(f"offline run: a rebase's fork re-applied the operator's rewind: {ended}")
+    final = cycles[session.hop].stop_reason
+    if final in (None, StopReason.REBASED):
+        raise SystemExit(f"offline run: the clock stopped the line, which still reads {final}")
+    print(f"rebased {len(forks)} times, clock stopped at MAX_AUTO_REBASES, line ended {final}")
+
+
 def run_terminal(
     optimizer: str, workspace: Path, verb: str, *, rounds: int, rows: int, interrupts: int
 ) -> None:
@@ -578,7 +627,7 @@ def run_terminal(
     requests.mkdir()
     llm = FakeLLM(ByCallIdentity(requests, text_templates(config)))
     install_network(Router(llm, FakeBackend(samples, interrupts=interrupts)))
-    stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
     declared = workspace / "campaign.yaml"
     declared.write_text(
@@ -652,7 +701,7 @@ async def run_controlled(
         )
         arms[name] = (cycle, cid)
         subjects.append(cid)
-    stores = build_stores(default_identity(), projects_root=DEFAULT_PROJECTS_ROOT)
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
     cycle, cid = arms[arm_names[0]]
     try:
         await CommandDispatcher(stores).dispatch(
@@ -1035,6 +1084,7 @@ def main() -> int:
     ap.add_argument("--child", help=argparse.SUPPRESS)
     ap.add_argument("--pause-after", type=int, help=argparse.SUPPRESS)
     ap.add_argument("--diverge", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--rebase", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
     ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
@@ -1065,6 +1115,9 @@ def main() -> int:
                 rows=args.rows,
                 interrupts=args.interrupts,
             )
+            return 0
+        if args.rebase:
+            asyncio.run(run_rebasing(workspace, rounds=args.rounds, rows=args.rows))
             return 0
         one = run_one(
             args.child,
@@ -1105,7 +1158,7 @@ def main() -> int:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    tasks = len(names) if args.controlled else 2 * len(names) + len(INTERRUPTED) + 1
+    tasks = len(names) if args.controlled else 2 * len(names) + len(INTERRUPTED) + 2
     pool = ThreadPoolExecutor(RamBudget.read().offline_run_children(tasks))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
@@ -1144,6 +1197,12 @@ def main() -> int:
         else spawn(
             names[0], home / names[0] / DIVERGED, f"--pause-after={pause_after}", "--diverge"
         )
+    )
+    # Only potter's L2 proposes a fork; its prior campaign needs rounds past the one it pauses at.
+    rebasing = (
+        spawn("potter", home / "potter" / REBASED, "--rebase")
+        if not args.controlled and "potter" in names and pause_after
+        else None
     )
     resumed = (
         {}
@@ -1203,6 +1262,14 @@ def main() -> int:
             f"{names[0]}: a resume diverged at run init "
             f"{f'FAILED (exit {rc}) -- {log}' if rc else 'forked, its parent REBASED'}"
         )
+    if rebasing is not None:
+        rc = rebasing.result()
+        failed += bool(rc)
+        log = home / "potter" / REBASED / "run.log"
+        lines = log.read_text(encoding="utf-8").splitlines()
+        ended = f"FAILED (exit {rc}) -- {log}" if rc else ""
+        ended = ended or next(ln for ln in reversed(lines) if ln.startswith("rebased "))
+        print(f"potter: a line proposing a fork at every L2 fire {ended}")
     if args.controlled and not failed:
         beside, bare = (home / name for name in CONTROLLED)
         for arm in (f"arm-{name}" for name in arm_names):

@@ -42,12 +42,8 @@ acting.
   near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
   green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:**
   five builders plus one full gate with no reap and no gate waiting longer than its own run.
-- **No offline leg rebases mid-run:** `scripts/offline_run.py` strips every `fork_proposal`, so
-  `runner/entry.py::_run_line`'s later passes are reached only by patched privates. **Re-test:**
-  no test under `tests/` patches a private of `runner/entry.py`.
-- **Ledger shapes left standing:** the rebase clock has no test (blocked by the offline-rebase
-  item above); `round_restated` carries the whole round. **Re-test:** each symbol deleted, read,
-  or tested.
+- **Ledger shapes left standing:** `round_restated` carries the whole round. **Re-test:** the
+  symbol deleted, read, or tested.
 
 ## Open — multi-arc
 

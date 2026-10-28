@@ -183,6 +183,10 @@ class Lineage(CycleRead):
         """Sealed: a round's optimizer state opens only through ``recall`` / ``slice``, which check what the node declares."""
         return [rr.model_copy(update={"optimizer_state": None}) for rr in self._cycle.rounds]
 
+    @property
+    def rebases(self) -> int:
+        return self._cycle.session.state.rebases
+
     def rewind_round(self) -> int | None:
         """Where a rewind of this cycle lands (UCB over the campaign's lineage); ``None`` where no ancestor stands."""
         return select_rewind_round(

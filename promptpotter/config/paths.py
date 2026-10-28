@@ -59,8 +59,12 @@ def install_cache_root() -> Path:
     return (checkout if checkout is not None else _os_app_data_dir()) / ".cache"
 
 
-def default_jobs_dir() -> Path:
-    return user_data_root() / "jobs"
+def default_projects_root() -> Path:
+    return user_data_root() / "projects"
+
+
+def jobs_dir(projects_root: Path) -> Path:
+    return projects_root.parent / "jobs"
 
 
 def optimizers_root() -> Path:
@@ -120,9 +124,6 @@ def webapp_static_root() -> Path:
         checkout / "webapp" / "out" if checkout is not None else PACKAGE_ROOT / "assets" / "webapp"
     )
 
-
-# Bound at import: `$PROMPTPOTTER_HOME` is an environment decision, never a runtime one.
-DEFAULT_PROJECTS_ROOT = user_data_root() / "projects"
 
 MEASUREMENTS_DIR = "measurements"
 OPTIMIZER_REUSE_DIR = "optimizer_reuse"

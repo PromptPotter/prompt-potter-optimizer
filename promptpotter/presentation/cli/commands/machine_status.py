@@ -15,7 +15,7 @@ from promptpotter.presentation.cli.commands.workspace import open_stores
 
 async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
-    jobs = JobRegistry.attach()
+    jobs = JobRegistry.attach(stores.jobs_dir)
     status = machine_status(jobs, identity=stores.identity)
     account = quota_status(stores=stores, job_registry=jobs)
     lines = [

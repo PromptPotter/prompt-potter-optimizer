@@ -22,7 +22,6 @@ from promptpotter.application.jobs.interlock import (
     this_producer,
     this_producer_lock,
 )
-from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import LaunchStage, RunPhase
@@ -185,8 +184,8 @@ class JobRegistry:
     """No process sweeps another's jobs: one is cleared only by proving its producer gone."""
 
     @classmethod
-    def attach(cls) -> JobRegistry:
-        return cls(default_jobs_dir(), capacity=resolve_run_capacity)
+    def attach(cls, jobs_dir: Path) -> JobRegistry:
+        return cls(jobs_dir, capacity=resolve_run_capacity)
 
     def __init__(self, jobs_dir: Path, *, capacity: Callable[[int], int]) -> None:
         self._dir = jobs_dir

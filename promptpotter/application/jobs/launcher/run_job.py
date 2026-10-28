@@ -10,7 +10,9 @@ import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
+
+from pydantic import TypeAdapter, model_validator
 
 from promptpotter.application.initialization.wiring import bind_cycle_session, complete_registries
 from promptpotter.application.jobs.capacity import resolve_run_capacity
@@ -70,6 +72,16 @@ class JobSpec(StrictModel):
     projects_root: Path
     shared_root: Path
     install_datasets_root: Path
+
+    @model_validator(mode="after")
+    def _reads_back_as_written(self) -> Self:
+        # The run's process rebuilds every field off this JSON: one reading back otherwise is another launch.
+        wire = self.model_dump(mode="json")
+        for name, field in type(self).model_fields.items():
+            held = getattr(self, name)
+            if TypeAdapter(field.annotation).validate_python(wire[name]) != held:
+                raise ValueError(f"JobSpec.{name} does not read back as written: {held!r}")
+        return self
 
 
 def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> None:

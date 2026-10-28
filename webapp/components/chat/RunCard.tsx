@@ -21,7 +21,7 @@ export function RunCard() {
   if (!dash?.cycle_id || (!isLive && dash.round_axis.completed.length === 0)) return null;
 
   return (
-    <section className={cx("run-card", isLive && "is-live")} aria-label="This run" role="region">
+    <section className={cx("run-card", isLive && "is-live")} aria-label="This run">
       <div className="run-card-axis">
         <RoundAxis trailing={<TrendChart density="glyph" onOpen={onOpenDashboard} />} />
         {!cv.selfOptimization && <HardSamplesHeatmap />}

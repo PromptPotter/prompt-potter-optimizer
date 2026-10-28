@@ -18,7 +18,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
     workspace_trees,
 )
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, default_jobs_dir
+from promptpotter.config.paths import default_projects_root, jobs_dir
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.cycle_paths import WorkspaceDir
@@ -260,7 +260,7 @@ def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tall
 
 
 def prune_stored_documents(*, apply: bool) -> dict[str, int]:
-    root = DEFAULT_PROJECTS_ROOT
+    root = default_projects_root()
     print(f"Workspace: {root}")
     if not root.is_dir():
         print("  absent — nothing to prune.")
@@ -372,7 +372,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     skipped: Counter[RunPhase] = Counter()
     gone: Counter[str] = Counter()
     rows: list[tuple[int, str]] = []
-    for ledger_path in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT):
+    for ledger_path in iter_cycle_ledgers(default_projects_root()):
         cycle_dir = ledger_path.parent.parent
         run = derive_run_state(cycle_dir)
         # A live producer holds `_next_offset`; a paused cycle MUST be taken — resume skips stale lines.
@@ -414,7 +414,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
 
 
 def reproject_cycle_indexes(*, apply: bool) -> dict[str, int]:
-    cycle_dirs = sorted(p.parent.parent for p in iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT))
+    cycle_dirs = sorted(p.parent.parent for p in iter_cycle_ledgers(default_projects_root()))
     touched = failed = 0
     for cycle_dir in cycle_dirs:
         try:
@@ -444,7 +444,7 @@ def prune_finished_jobs(*, apply: bool) -> dict[str, int]:
     and the registry validates every file it lists, so one left in an old shape 500s admission."""
     today = utcnow_iso()[:10]
     finished = invalid = 0
-    for path in sorted(default_jobs_dir().glob("*.json")):
+    for path in sorted(jobs_dir(default_projects_root()).glob("*.json")):
         raw = read_json_optional(path)
         if raw and raw.get("released_at") and str(raw.get("created_at", ""))[:10] < today:
             finished += 1
@@ -709,8 +709,8 @@ def _remove_unnamed(archive: MeasurementArchive, *, apply: bool) -> int:
 
 def restamp_measurement_archives(*, apply: bool) -> dict[str, int]:
     """A record its model refuses after pruning cannot be keyed: it goes with what it alone describes."""
-    homes = archive_homes(DEFAULT_PROJECTS_ROOT)
-    writers = archive_writers(DEFAULT_PROJECTS_ROOT)
+    homes = archive_homes(default_projects_root())
+    writers = archive_writers(default_projects_root())
     if homes and writers:
         print(f"\nMeasurement archives — {writers} cycle(s) can still append, so none was walked")
         return {
@@ -776,7 +776,7 @@ class _CampaignOf(NamedTuple):
 
 def _campaign_of(tree: pathlib.Path, path: pathlib.Path) -> _CampaignOf | None:
     """A sandbox's file is its owner's campaign, whose delete takes the sandbox; a draft's is none."""
-    if tree != DEFAULT_PROJECTS_ROOT:
+    if tree != default_projects_root():
         owner = read_sandbox_owner(tree)
         return None if owner is None else _CampaignOf(owner.tenant_id, owner.campaign_id)
     parts = path.relative_to(tree).parts
@@ -789,7 +789,7 @@ def check_readable() -> dict[str, int]:
     ledgers: list[str] = []
     manifests: list[str] = []
     checked = 0
-    for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
+    for tree in workspace_trees(default_projects_root()):
         for ledger in sorted(tree.glob("**/.runtime/ledger.jsonl")):
             checked += 1
             try:
@@ -809,7 +809,7 @@ def check_readable() -> dict[str, int]:
                     if campaign := _campaign_of(tree, store.campaign_root_dir(campaign_id)):
                         refused[campaign] = None
 
-    homes = archive_homes(DEFAULT_PROJECTS_ROOT)
+    homes = archive_homes(default_projects_root())
     archive_refused = [
         cause for home in homes for cause in _archive_refusals(MeasurementArchive.at(home))
     ]

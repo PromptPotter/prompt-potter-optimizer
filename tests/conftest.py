@@ -12,6 +12,7 @@ from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.optimizer_manifest import binding_optimizer
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import OptimizationConfig
+from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
 from promptpotter.infrastructure.store.stores import Stores
@@ -36,13 +37,17 @@ def built_stores(tmp_path: Path) -> Stores:
 
 
 @pytest.fixture
-def offline(monkeypatch: pytest.MonkeyPatch) -> Iterator[Router]:
-    """The offline run's world; a journey sets what its edges answer (`llm.says`, `backend.faults`).
+def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]:
+    """The offline run's world; a journey sets what its edges answer (`llm.says`, `backend.faults`,
+    `rates` — then `pricing.refresh_rates(force=True)` fetches them).
 
     Its provider caps no rate and rates one account, as a sending entry binds it."""
     for key in PROVIDER_KEYS:
         monkeypatch.setattr(settings, key, SecretStr(NOT_A_KEY))
     monkeypatch.setattr(settings, "RATE_LIMITS", {})
+    # The fetched price list lands in this journey's tree, never the checkout's cache.
+    monkeypatch.setattr(pricing, "CACHE_PATH", tmp_path / "fetched_rates.json")
+    pricing.load_rates.cache_clear()
     world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
     restore = install_network(world)
     get_llm_client.cache_clear()
@@ -51,5 +56,6 @@ def offline(monkeypatch: pytest.MonkeyPatch) -> Iterator[Router]:
     tenant.var.reset(tenant)
     restore()
     get_llm_client.cache_clear()
+    pricing.load_rates.cache_clear()
     # A refused request reads as a provider error, which a journey can assert past unseen.
     assert not world.unrouted, f"a journey sent what the world does not answer: {world.unrouted}"

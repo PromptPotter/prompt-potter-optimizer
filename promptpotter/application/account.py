@@ -11,7 +11,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.infrastructure.identity import blocklist, migration
 from promptpotter.infrastructure.identity.grants import (
@@ -231,7 +231,9 @@ def registered_or_default_identity(explicit_tenant: str | None = None) -> Identi
 
 
 def local_stores(*, tenant: str | None) -> Stores:
-    return build_stores(registered_or_default_identity(tenant), projects_root=DEFAULT_PROJECTS_ROOT)
+    return build_stores(
+        registered_or_default_identity(tenant), projects_root=default_projects_root()
+    )
 
 
 def blocked_emails() -> list[str]:

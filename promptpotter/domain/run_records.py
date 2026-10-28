@@ -689,7 +689,8 @@ RoundWarningKind = Literal[
     "send_refused",
     # A `terminate_proposal` carrying no reason: ignored, never silently.
     "layer_terminate_blank",
-    # A `fork_proposal` with no ancestor holding a level: dropped, naming what withholds θ.
+    # A `fork_proposal` dropped: no ancestor holds a level (naming what withholds θ), or the
+    # launch's rebase clock is spent.
     "layer_rebase_dropped",
     # An adapter landed no round output, and the re-runs before the next walk failed: the run halts.
     "adapter_output_unavailable",

@@ -18,7 +18,7 @@ from promptpotter.application.jobs.account_activity import (
     account_activity,
 )
 from promptpotter.application.jobs.quota import QuotaStatus, quota_status
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import TERMS_VERSION, settings
 from promptpotter.domain.run_records import Device, device_of
 from promptpotter.domain.strict_model import StrictModel
@@ -230,7 +230,7 @@ async def callback(
         box = build_stores_from_identity(account.registered_or_default_identity())
         account.record_refusal(box, subject=f"sign-in through {provider}: {exc}")
         # No retry of the user's mends a provider the health check found refusing this server.
-        broken = health.is_broken(DEFAULT_PROJECTS_ROOT, health.signin_probe(provider))
+        broken = health.is_broken(default_projects_root(), health.signin_probe(provider))
         return _redirect_with_error("signin_unavailable" if broken else "code_exchange_failed")
 
     # A blocked account still gets a session: the session seam empties its capabilities per request.
@@ -241,7 +241,7 @@ async def callback(
     elif _is_declared_host_admin(identity.email, identity.issuer):
         # The marker names the box's own tenant, so who writes it is declared, never inferred from arrival order.
         maybe_claim_default(
-            projects_root=DEFAULT_PROJECTS_ROOT,
+            projects_root=default_projects_root(),
             user_id=str(user_id),
             marker_path=bundle.paths.default_claim_marker,
         )
@@ -305,7 +305,7 @@ def _announce_new_account(
 ) -> None:
     who = email or f"(no email) {user_id}"
     # Read once the account is on disk, so the arriving account is inside the total.
-    total = count_accounts(DEFAULT_PROJECTS_ROOT)
+    total = count_accounts(default_projects_root())
     notify_operator(
         f"New PromptPotter account: {who}\n"
         f"Accounts now: {total}\n"
