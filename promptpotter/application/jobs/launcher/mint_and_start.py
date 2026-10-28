@@ -98,10 +98,10 @@ class FreshMint:
     def dataset_name(self) -> str:
         return self.dataset.name
 
-    def backend_type(self, stores: Stores) -> str:
+    def backend_type(self, _stores: Stores) -> str:
         return declared_backend_type(self.dataset.directory)
 
-    def campaign_config(self, stores: Stores) -> CampaignConfig:
+    def campaign_config(self, _stores: Stores) -> CampaignConfig:
         declared = self.declared or load_dataset_campaign_config(self.dataset.directory)
         return with_optimization(declared, self.optimization)
 

@@ -24,8 +24,6 @@ def client_seen_at_or_after(if_modified_since: str | None, mtime_epoch: float) -
         client_dt = parsedate_to_datetime(if_modified_since)
     except (TypeError, ValueError):
         return False
-    if client_dt is None:
-        return False
     return int(client_dt.timestamp()) >= int(mtime_epoch)
 
 

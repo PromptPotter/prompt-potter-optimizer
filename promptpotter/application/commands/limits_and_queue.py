@@ -12,8 +12,11 @@ from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.domain.campaign import Campaign
+    from promptpotter.application.commands.dispatcher import (
+        CommandDispatcher,
+        Dispatched,
+        DispatchedToCycle,
+    )
     from promptpotter.domain.command_kinds import (
         CancelQueuedRunPayload,
         ChangeRunLimitsPayload,
@@ -22,13 +25,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
 
 
-def change_run_limits(
-    dispatcher: CommandDispatcher,
-    payload: ChangeRunLimitsPayload,
-    campaign: Campaign,
-    hop: CycleHop,
-) -> Applier[object]:
-    change = payload.budget
+def change_run_limits(dispatched: DispatchedToCycle[ChangeRunLimitsPayload]) -> Applier[object]:
+    dispatcher, hop, change = dispatched.dispatcher, dispatched.hop, dispatched.payload.budget
     return Applier.silent(lambda: _apply_change_run_limits(dispatcher, hop, change))
 
 
@@ -65,26 +63,19 @@ async def _apply_change_run_limits(
     )
 
 
-def set_concurrent_cycles(
-    dispatcher: CommandDispatcher, payload: SetConcurrentCyclesPayload
-) -> Applier[object]:
-    limit = payload.max_concurrent_cycles
-    return Applier.silent(
-        lambda: quota.set_concurrent_cycles(stores=dispatcher.stores, limit=limit)
-    )
+def set_concurrent_cycles(dispatched: Dispatched[SetConcurrentCyclesPayload]) -> Applier[object]:
+    stores, limit = dispatched.dispatcher.stores, dispatched.payload.max_concurrent_cycles
+    return Applier.silent(lambda: quota.set_concurrent_cycles(stores=stores, limit=limit))
 
 
-def cancel_queued_run(
-    dispatcher: CommandDispatcher, payload: CancelQueuedRunPayload
-) -> Applier[object]:
+def cancel_queued_run(dispatched: Dispatched[CancelQueuedRunPayload]) -> Applier[object]:
     """A queued FORK's stub stays for ``cleanup-empty-cycles``: deleting a cycle is that verb's."""
+    dispatcher, job_id = dispatched.dispatcher, dispatched.payload.job_id
 
     def _apply() -> None:
         stores = dispatcher.stores
         principal = acting_principal(stores.identity).id
-        if not withdraw_queued(
-            stores, dispatcher.job_registry, payload.job_id, principal_id=principal
-        ):
+        if not withdraw_queued(stores, dispatcher.job_registry, job_id, principal_id=principal):
             raise NotFoundError("Not found", code="not_found")
 
     return Applier.silent(_apply)

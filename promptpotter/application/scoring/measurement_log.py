@@ -485,7 +485,7 @@ def _cycle_cells(
     cells: list[CellRow] = []
     for (round_no, arm_key), arm in scan_standing_rounds(chain).arms.items():
         state = arm.state
-        if state is None or (isinstance(state, Cut) and state.kind == "invalid"):
+        if isinstance(state, Cut) and state.kind == "invalid":
             continue
         label, individual_id = arm_name(arm_key, state, round_no).label, state.individual.id
         live = isinstance(state, Proposed | Measuring)

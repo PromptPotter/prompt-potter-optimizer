@@ -550,7 +550,7 @@ async def run_one(
         sent = spend.by_kind["bench"]
         if sent.incurred_usd or sent.input_tokens or sent.output_tokens:
             raise SystemExit(f"offline run: a manual launch of {optimizer} sent bench cells")
-        if bench is None or bench.status.state != "not_asked" or not bench.status.can_grade:
+        if bench.status.state != "not_asked" or not bench.status.can_grade:
             raise SystemExit(f"offline run: a manual launch of {optimizer} serves {bench}")
         bench = await grade_bench(stores, session.hop.campaign_id)
     decisions = extract(cycle, bench)

@@ -17,8 +17,8 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import PotterError, ServiceUnavailableError
 
 if TYPE_CHECKING:
+    from promptpotter.application.commands.dispatcher import DispatchedToDraft
     from promptpotter.domain.command_kinds import ResolveOriginPayload
-    from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -32,10 +32,10 @@ class ResolveOriginResponse(StrictModel):
 
 
 def resolve_origin(
-    dispatcher: CommandDispatcher, payload: ResolveOriginPayload, claim: DraftClaim
+    dispatched: DispatchedToDraft[ResolveOriginPayload],
 ) -> Applier[ResolveOriginResponse]:
-    stores = dispatcher.stores
-    draft_id, message = payload.draft_id, payload.message
+    stores = dispatched.dispatcher.stores
+    draft_id, message = dispatched.payload.draft_id, dispatched.payload.message
     draft = owned_draft(stores, draft_id)
 
     async def _apply() -> ResolveOriginResponse:
@@ -66,7 +66,7 @@ def resolve_origin(
         _apply,
         replay=_on_replay,
         effect_fn=lambda: origin_effect(stores, draft_id, before),
-        claim=claim,
+        claim=dispatched.claim,
     )
 
 

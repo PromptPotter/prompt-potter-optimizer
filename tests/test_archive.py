@@ -66,12 +66,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.application.mask.divergence import VerdictOutcome, find_divergences
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.optimizers.nodes import (
-    MeasuredRound,
-    Panel,
-    Proposals,
-    ReadArm,
-)
+from promptpotter.application.optimizers.nodes import MeasuredRound, Panel, ReadArm
 from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.optimizers.potter.race import PoBBRace
@@ -247,7 +242,7 @@ def _walk_panel(
         prompted(instruction="Answer.")
     )
 
-    async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:
+    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
         predicted = "b" if sample.id % 2 else "a"
         return MeasuredCell(
             sample_key=sample.key,
@@ -760,12 +755,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         racing.cycle, line=[*line, _round(round=1, cells={ArmKey(parent.id): hits}, **on_parent)]
     )
     race = race_of()
-    reading = race.judge(
-        race.rule([]).check(walked.cells),
-        key=ArmKey("c1"),
-        results=walked.cells,
-        labels={ArmKey("c1"): "C3.1"},
-    )
+    reading = race.judge(race.rule([]).check(walked.cells), ArmKey("c1"), {ArmKey("c1"): "C3.1"})
     assert reading is not None and reading.context["gate"] == EliminationGate.EPSILON
     [cut] = racing.cycle.pending_decisions
     assert cut.data["candidate_cells"] == [str(i) for i in range(8) if i != 2]
@@ -824,7 +814,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
             on_panel={},
             crowned=frozenset(),
         ),
-        Proposals([]),
     )
     assert selection.selected == walked_child, "guard: the live election charges the error"
     charged, ledger = _minted(stores, "cycle_charged_parent")
@@ -1251,7 +1240,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         for rnd in line_drawn.children
         if isinstance(rnd, HierarchyRound)
         for e in rnd.children
-        if isinstance(e, HierarchyCandidate) and e.facts.stands
+        if e.facts.stands
     ]
     assert [(e.facts.reading.arm.round, e.facts.reading.arm.key) for e in line_stood] == [
         (picked.round, picked.key)
@@ -1641,7 +1630,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         issued_by=SYSTEM_PRINCIPAL,
     )
 
-    async def one_cycle(prep: Any, *, mode: RunMode, rebases: int, **_: Any) -> Any:
+    async def one_cycle(_prep: Any, *, mode: RunMode, rebases: int, **_: Any) -> Any:
         rewinds.append(mode.from_round)
         return mock.Mock(fork=None if rebases else rebase)
 

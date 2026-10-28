@@ -47,7 +47,7 @@ async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
     )
 
 
-async def cmd_health(args: argparse.Namespace) -> CommandResult:
+async def cmd_health(_args: argparse.Namespace) -> CommandResult:
     checked = await asyncio.to_thread(check_health_and_tell)
     return CommandResult(
         data={one.probe.name: one.reading._asdict() for one in checked},

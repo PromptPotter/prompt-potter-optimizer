@@ -207,7 +207,6 @@ async def commit_task_framing(
     dataset_name: str,
     description: str,
     *,
-    campaign_id: str,
     ledger: CycleEventLog,
 ) -> None:
     context = checkin_call_context(stores, ledger)

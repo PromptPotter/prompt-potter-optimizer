@@ -49,7 +49,7 @@ def prepare_launch() -> None:
 
 def pipeline_summary(session: Session, pipeline_params: dict[str, Any] | None) -> str:
     ps = session.pipeline_schema
-    pipe = f"{ps.name} v{ps.version}" if ps else "pipeline unavailable"
+    pipe = f"{ps.name} v{ps.version}"
     active = list((pipeline_params or {}).get("steps") or [])
     nodes = f"{len(active)} node{'s' if len(active) != 1 else ''}"
     if active:

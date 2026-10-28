@@ -173,7 +173,7 @@ class AdaptiveQueue(nodes.Member):
     )
     size_knob: ClassVar[str | None] = "sp_budget_round"
 
-    def round_cells(self, knobs: AdaptiveQueueKnobs, search: int) -> int:
+    def round_cells(self, knobs: AdaptiveQueueKnobs, _search: int) -> int:
         # Unclamped: a budget above the search split is the finding preflight reports.
         return knobs.sp_budget_round
 
@@ -231,7 +231,7 @@ class L1Generate(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation})
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         return await propose_l1_population(ctx)
 
 
@@ -246,13 +246,7 @@ class PoBB(nodes.Member):
     # A PoBB stop ends the buying of an arm; θ still reads what it measured.
     stop_disqualifies: ClassVar[bool] = False
 
-    def race(
-        self,
-        ctx: NodeContext,
-        panel: Panel,
-        proposals: Proposals,
-        catch_up: CatchUpFn,
-    ) -> PoBBRace:
+    def race(self, ctx: NodeContext, panel: Panel, catch_up: CatchUpFn) -> PoBBRace:
         return PoBBRace(ctx, panel, catch_up, measured_unit=ctx.read(Target).measured_unit)
 
 
@@ -267,14 +261,14 @@ class ThetaElection(nodes.Member):
 
     def parent_cells(
         self,
-        ctx: NodeContext,
+        _ctx: NodeContext,
         panel: Panel,
-        rows: Mapping[ArmKey, CellSheet],
+        _rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells
 
-    def select(self, ctx: NodeContext, measured: MeasuredRound, proposals: Proposals) -> Selection:
-        return elect_on_theta(ctx, measured, proposals)
+    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
+        return elect_on_theta(ctx, measured)
 
 
 class L1Critique(LayoutNode):
@@ -291,7 +285,7 @@ class L1Critique(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation, L1Generate})
 
-    async def adapt(self, ctx: NodeContext, round_result: RoundResult) -> None:
+    async def adapt(self, ctx: NodeContext) -> None:
         ctx.emit(await distil_critique(ctx))
 
 
@@ -428,7 +422,7 @@ class L3Plan(LayoutNode):
     def consults(self) -> frozenset[type]:
         return frozenset({AdaptiveQueue, Escalation, L1Generate})
 
-    def reply_model(self, bundle: InjectionBundle) -> type[BaseModel]:
+    def reply_model(self, _bundle: InjectionBundle) -> type[BaseModel]:
         return L3PlanOutput
 
     def parse(self, ctx: NodeContext, raw: L3PlanOutput) -> TransitionResult:
@@ -477,7 +471,7 @@ class L3Plan(LayoutNode):
             ),
         )
 
-    def exit_view(self, ctx: NodeContext, result: TransitionResult) -> OptimizerStepExitView:
+    def exit_view(self, _ctx: NodeContext, result: TransitionResult) -> OptimizerStepExitView:
         return OptimizerStepExitView(
             headline=f"New plan: {truncate(result.plan[:120], 55, '...')}",
             details=(result.described,),
@@ -584,7 +578,7 @@ class PotterRuntime(nodes.OptimizerRuntime):
             ),
         )
 
-    def opening(self, ctx: RoundContext, walk: nodes.RoundWalk) -> nodes.RoundOpening:
+    def opening(self, ctx: RoundContext, _walk: nodes.RoundWalk) -> nodes.RoundOpening:
         cycle = ctx.cycle
         selected = cycle.optimizer
         replayed = cycle.banked_proposals(ctx.round_num) is not None
@@ -627,16 +621,14 @@ class PotterRuntime(nodes.OptimizerRuntime):
 
     def review(
         self,
-        selected: SelectedOptimizer,
         rounds: list[RoundResult],
         audits: list[RoundAudit | None],
-        *,
         context_object: list[str],
     ) -> ReviewReading:
         return review_reading(rounds, audits, context_object=context_object)
 
     def round_facts(
-        self, selected: SelectedOptimizer, round_result: RoundResult
+        self, _selected: SelectedOptimizer, round_result: RoundResult
     ) -> list[OptimizerFact]:
         return round_facts(round_result)
 

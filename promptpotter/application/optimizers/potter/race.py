@@ -194,12 +194,7 @@ class PoBBRace(CatchUpPool):
         self._check.set_current(key, on_snapshot=self._progress.race_standing)
 
     def judge(
-        self,
-        signal: StopSignal | None,
-        *,
-        key: ArmKey,
-        results: Sequence[GradedCell],
-        labels: Mapping[ArmKey, str],
+        self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
     ) -> Elimination | None:
         """Read off the priors BEFORE the arm joins them: the pool the stop rule tested against."""
         if not isinstance(signal, PoBBStop):

@@ -351,7 +351,7 @@ def _xlsx_records(blob: bytes) -> Iterator[dict[str, Any]]:
     try:
         wb = openpyxl.load_workbook(io.BytesIO(blob), read_only=True, data_only=True)
     except Exception as exc:  # openpyxl raises a grab-bag of errors on bad blobs
-        raise IngestError(reason="unreadable", message=f"Excel parse failed: {exc}") from None
+        raise IngestError(reason="unreadable", message=f"Excel parse failed: {exc}") from exc
     try:
         ws = wb.active
         if ws is None:
@@ -374,7 +374,7 @@ def _xls_records(blob: bytes) -> Iterator[dict[str, Any]]:
         book = xlrd.open_workbook(file_contents=blob, on_demand=True, ragged_rows=True)
         sheet = book.sheet_by_index(0)
     except Exception as exc:  # xlrd raises its own grab-bag on bad blobs
-        raise IngestError(reason="unreadable", message=f"Excel parse failed: {exc}") from None
+        raise IngestError(reason="unreadable", message=f"Excel parse failed: {exc}") from exc
     return _sheet_records(sheet.row_values(i, end_colx=MAX_COLUMNS + 1) for i in range(sheet.nrows))
 
 

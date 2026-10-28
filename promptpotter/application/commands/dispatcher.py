@@ -145,6 +145,23 @@ def refused_on_an_arm(campaign: Campaign) -> Applier[object] | None:
 
 
 @dataclass(frozen=True, slots=True)
+class Dispatched[P: CommandPayload]:
+    dispatcher: CommandDispatcher
+    payload: P
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchedToCycle[P: CommandPayload](Dispatched[P]):
+    campaign: Campaign
+    hop: CycleHop
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchedToDraft[P: CommandPayload](Dispatched[P]):
+    claim: DraftClaim
+
+
+@dataclass(frozen=True, slots=True)
 class CommandOutcome[R]:
     accepted: CommandAcceptedBody
     result: R
@@ -172,14 +189,14 @@ class CommandDispatcher:
     def run_state(self, hop: CycleHop) -> RunState:
         return derive_run_state(self.stores.campaigns.cycle_dir(hop))
 
-    def _applier(self, call: CommandCall[Any], *target: object) -> Applier[Any]:
-        kind = call.kind
+    def _applier(self, dispatched: Dispatched[Any]) -> Applier[Any]:
+        kind = dispatched.payload.kind
         require_capability(self.stores.identity, kind.capability, subject=f"command {kind.value!r}")
         module, _, name = kind.handler.partition(":")
-        handler: Callable[..., Applier[Any]] = getattr(
+        handler: Callable[[Dispatched[Any]], Applier[Any]] = getattr(
             importlib.import_module(f"{_HANDLER_PACKAGE}.{module}"), name
         )
-        return handler(self, call.payload, *target)
+        return handler(dispatched)
 
     async def dispatch(self, call: CommandCall[Any]) -> CommandOutcome[Any]:
         """The payload's address base IS its target ledger."""
@@ -194,19 +211,22 @@ class CommandDispatcher:
                 return await self._on_draft(call)
             case _:
                 ledger = CycleEventLog.open_workspace(self.stores.base_dir)
-                return await self._record_and_apply(ledger, call, self._applier(call))
+                applier = self._applier(Dispatched(self, call.payload))
+                return await self._record_and_apply(ledger, call, applier)
 
     async def _on_campaign(self, call: CommandCall[CampaignPayload]) -> CommandOutcome[object]:
         own_campaign(self.stores, call.payload.campaign_id)
         # The WORKSPACE ledger: `delete` REMOVES the campaign tree, and its own ledger with it.
         ledger = CycleEventLog.open_workspace(self.stores.base_dir)
-        return await self._record_and_apply(ledger, call, self._applier(call))
+        applier = self._applier(Dispatched(self, call.payload))
+        return await self._record_and_apply(ledger, call, applier)
 
     async def _on_line(self, call: CommandCall[LinePayload]) -> CommandOutcome[object]:
         campaign = owned_campaign(self.stores, call.payload.campaign_id)
         hop = self.stores.campaigns.line_holder(campaign.root_hop)
         ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(hop)))
-        return await self._record_and_apply(ledger, call, self._applier(call, campaign, hop))
+        applier = self._applier(DispatchedToCycle(self, call.payload, campaign, hop))
+        return await self._record_and_apply(ledger, call, applier)
 
     async def _on_cycle(self, call: CommandCall[CyclePayload]) -> CommandOutcome[object]:
         payload = call.payload
@@ -231,7 +251,8 @@ class CommandDispatcher:
         # Its apply removes the dir AND its ledger, so the record and ack go on the campaign root's.
         recorded_on = campaign.root_hop if isinstance(payload, DeleteCyclePayload) else hop
         ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(recorded_on)))
-        return await self._record_and_apply(ledger, call, self._applier(call, campaign, hop))
+        applier = self._applier(DispatchedToCycle(self, payload, campaign, hop))
+        return await self._record_and_apply(ledger, call, applier)
 
     async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any]:
         # Under the draft's claim, which a Start holds until its mint closed: no command lands inside
@@ -239,7 +260,7 @@ class CommandDispatcher:
         owned_draft_data(self.stores, call.payload.draft_id)
         claim = self.stores.drafts.claim(call.payload.draft_id)
         try:
-            applier = self._applier(call, claim)
+            applier = self._applier(DispatchedToDraft(self, call.payload, claim))
         except BaseException:
             claim.release()
             raise

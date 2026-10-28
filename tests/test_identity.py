@@ -1490,8 +1490,9 @@ _EXPORTED_ROWS = [
 ]
 
 
+@pytest.mark.usefixtures("offline")
 def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
-    monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Router
+    monkeypatch: pytest.MonkeyPatch, built_stores: Stores
 ) -> None:
     # A mis-decoded label grades every cell against text the person never wrote, with no error.
     for filename, blob in (

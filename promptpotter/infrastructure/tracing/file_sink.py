@@ -33,13 +33,13 @@ Document = dict[str, Any]
 class FileSink(TraceSink):
     def __init__(self, store_base_dir: str | Path, hop: CycleHop) -> None:
         self._scope = cycle_dir_for(WorkspaceDir(Path(store_base_dir)), hop)
-        self._campaign_traces: dict[str, Document] = {}
-        self._round_observations: dict[tuple[str, int], Document] = {}
-        self._node_observations: dict[tuple[str, int | None, str], Document] = {}
+        self._campaign_id = hop.campaign_id
+        self._trace: Document | None = None
+        self._round_observations: dict[int, Document] = {}
+        self._node_observations: dict[tuple[int | None, str], Document] = {}
 
-    def _trace_id(self, campaign_id: str) -> str:
-        trace = self._campaign_traces.get(campaign_id)
-        return "" if trace is None else str(trace["id"])
+    def _trace_id(self) -> str:
+        return "" if self._trace is None else str(self._trace["id"])
 
     def _log_event(self, event: Document) -> None:
         event["timestamp"] = utcnow_iso()
@@ -146,14 +146,12 @@ class FileSink(TraceSink):
             input_data={"campaign_id": event.campaign_id, "config": event.config},
             tags=["campaign", "optimization_loop"],
         )
-        self._campaign_traces[event.campaign_id] = trace
+        self._trace = trace
         self._log_event(
             {"event": "campaign_start", "trace_id": trace["id"], "campaign_id": event.campaign_id}
         )
 
-    def on_arm_concluded(
-        self, campaign_id: str, round_num: int, arm: Concluded, fold: ScoreSummary | None
-    ) -> None:
+    def on_arm_concluded(self, round_num: int, arm: Concluded, fold: ScoreSummary | None) -> None:
         walked = {
             "label": arm.label,
             "individual_id": arm.individual.id,
@@ -180,10 +178,10 @@ class FileSink(TraceSink):
             }
         )
 
-    def on_round_entered(self, campaign_id: str, record: RoundEnteredRecord) -> None:
-        trace_id = self._trace_id(campaign_id)
+    def on_round_entered(self, record: RoundEnteredRecord) -> None:
+        trace_id = self._trace_id()
         if trace_id:
-            self._round_observations[(campaign_id, record.round)] = self._write_observation(
+            self._round_observations[record.round] = self._write_observation(
                 trace_id=trace_id,
                 as_type="span",
                 name=f"round_{record.round}",
@@ -193,7 +191,6 @@ class FileSink(TraceSink):
 
     def on_span_open(
         self,
-        campaign_id: str,
         round_num: int | None,
         span_id: str,
         *,
@@ -202,12 +199,10 @@ class FileSink(TraceSink):
         as_type: str,
         metadata: dict[str, Any],
     ) -> None:
-        trace_id = self._trace_id(campaign_id)
+        trace_id = self._trace_id()
         if not trace_id:
             return
-        parent = (
-            None if round_num is None else self._round_observations.get((campaign_id, round_num))
-        )
+        parent = None if round_num is None else self._round_observations.get(round_num)
         observation = self._write_observation(
             trace_id=trace_id,
             as_type=as_type,
@@ -216,7 +211,7 @@ class FileSink(TraceSink):
             metadata={"node_type": node_type, **metadata},
             parent_observation_id=None if parent is None else parent["id"],
         )
-        self._node_observations[(campaign_id, round_num, span_id)] = observation
+        self._node_observations[(round_num, span_id)] = observation
         self._log_event(
             {
                 "event": "node_start",
@@ -227,10 +222,8 @@ class FileSink(TraceSink):
             }
         )
 
-    def on_span_close(
-        self, campaign_id: str, round_num: int | None, span_id: str, *, error: str | None
-    ) -> None:
-        observation = self._node_observations.pop((campaign_id, round_num, span_id), None)
+    def on_span_close(self, round_num: int | None, span_id: str, *, error: str | None) -> None:
+        observation = self._node_observations.pop((round_num, span_id), None)
         if observation is None:
             return
         self._finalize_observation(observation, None, {"error": error} if error else None)
@@ -243,8 +236,8 @@ class FileSink(TraceSink):
             }
         )
 
-    def on_round_closed(self, campaign_id: str, record: RoundClosedRecord) -> None:
-        trace_id = self._trace_id(campaign_id)
+    def on_round_closed(self, record: RoundClosedRecord) -> None:
+        trace_id = self._trace_id()
         head, fold = record.head, record.fold
         winner_id = "" if head is None else head.individual.id
         accuracy = None if fold is None else fold.accuracy
@@ -252,7 +245,7 @@ class FileSink(TraceSink):
         if head is not None:
             self._write_prompt_version(head.individual)
         if trace_id:
-            observation = self._round_observations.pop((campaign_id, record.round), None)
+            observation = self._round_observations.pop(record.round, None)
             if observation is not None:
                 self._finalize_observation(
                     observation,
@@ -271,7 +264,7 @@ class FileSink(TraceSink):
             {
                 "event": "round_complete",
                 "trace_id": trace_id,
-                "campaign_id": campaign_id,
+                "campaign_id": self._campaign_id,
                 "round": record.round,
                 "accuracy": accuracy,
                 "total": total,
@@ -304,10 +297,8 @@ class FileSink(TraceSink):
             }
         )
 
-    def on_run_stopped(
-        self, campaign_id: str, record: RunPhaseRecord, *, rounds_closed: int
-    ) -> None:
-        trace = self._campaign_traces.get(campaign_id)
+    def on_run_stopped(self, record: RunPhaseRecord, *, rounds_closed: int) -> None:
+        trace = self._trace
         ending = {
             "run_phase": record.run_phase.value,
             "stop_reason": record.stop_reason,
@@ -319,8 +310,8 @@ class FileSink(TraceSink):
         self._log_event(
             {
                 "event": "campaign_end",
-                "trace_id": self._trace_id(campaign_id),
-                "campaign_id": campaign_id,
+                "trace_id": self._trace_id(),
+                "campaign_id": self._campaign_id,
                 **ending,
             }
         )

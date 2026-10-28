@@ -154,11 +154,11 @@ def edited(s, pipeline, root):
     return next((w for w, p in s.writes if p in read and under(p, root) is not None), None)
 
 
-def stdin_script(s, pipeline, root):
+def stdin_script(s, _pipeline, _root):
     return "python" if s.program == STDIN_SCRIPT and s.stdin != "none" else None
 
 
-def authored(s, pipeline, root):
+def authored(s, _pipeline, root):
     if not literal_output(s):
         return None
     return next((w for w, p in s.writes if under(p, root) is not None), None)
@@ -189,12 +189,12 @@ RULES = (
     ("author", authored, "writes literal text into {} through the shell — use Write or Edit"),
     (
         "read-once",
-        lambda s, pipeline, root: paged(s, root, records=True),
+        lambda s, _pipeline, root: paged(s, root, records=True),
         "pages the record {} — Grep its key or Read a slice (root CLAUDE.md <read-once>)",
     ),
     (
         "read",
-        lambda s, pipeline, root: paged(s, root, records=False),
+        lambda s, _pipeline, root: paged(s, root, records=False),
         "reads {} through the shell — use Read (offset/limit for a slice), Grep or Glob",
     ),
 )
@@ -698,9 +698,4 @@ def main():
 if __name__ == "__main__":
     if sys.argv[1:] == ["--selftest"]:
         sys.exit(selftest())
-    try:
-        main()
-    except SystemExit:
-        raise
-    except Exception:
-        sys.exit(0)
+    main()

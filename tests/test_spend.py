@@ -53,7 +53,11 @@ from pydantic import BaseModel, Field, JsonValue, ValidationError
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of
 from promptpotter.application.bench import llm_call as call_mod
-from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.commands.dispatcher import (
+    CommandCall,
+    CommandDispatcher,
+    DispatchedToCycle,
+)
 from promptpotter.application.commands.limits_and_queue import change_run_limits
 from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.loaders import archive_entry
@@ -325,7 +329,7 @@ def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Bud
     campaign = minted_campaign(hop)
 
     async def apply() -> None:
-        ran = change_run_limits(dispatcher, payload, campaign, hop).run()
+        ran = change_run_limits(DispatchedToCycle(dispatcher, payload, campaign, hop)).run()
         assert inspect.isawaitable(ran)
         await ran
 
@@ -612,7 +616,7 @@ class _OrderedFakeBackend:
         # In flight as each call began. Read its PEAK only: the tail measures the scheduler.
         self.entries: list[int] = []
 
-    async def measure(self, sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
+    async def measure(self, sample: Sample) -> Any:
         self.calls.append(sample.id)
         return await self.hold(sample)
 
@@ -725,16 +729,16 @@ async def _walk(
     book = spend_book(cap_usd)
     dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
 
-    async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
+    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
         with admitted(CallLabel("cell", "backend"), dollar, model=None, provider=None) as bill:
             if sample.id == stall:
                 await asyncio.sleep(0.3)
-            row = await backend.measure(sample, session, pipeline_params=pipeline_params)
+            row = await backend.measure(sample)
             returned.append(sample.id)
             bill.settle(Billed(TokenAccount(), 1.0))
         return row
 
-    def _backfill(sp: Any, sample: Sample, _prior_id: str) -> Any:
+    def _backfill(_sp: Any, sample: Sample, _prior_id: str) -> Any:
         call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
 
         def _commit() -> list[Any]:
@@ -836,11 +840,11 @@ async def _round(
     # Each call beside how many cells the round had absorbed when it went out.
     asked: list[tuple[int, int, int]] = []
 
-    async def _measure(sample: Sample, session: Any, *, pipeline_params: Any = None) -> Any:
+    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
         call = len(backend.calls) + 1
         walk = int(cast("MeasuredPass", measured_pass()).individual_id[1:])
         asked.append((walk, sample.id, len(absorbed())))
-        row = await backend.measure(sample, session, pipeline_params=pipeline_params)
+        row = await backend.measure(sample)
         if call == pause_after_call:
             flag["pause"] = True
         return row
@@ -1133,7 +1137,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     monkeypatch.setattr(spawn, "OUTER_SAMPLE_WALL_S_PER_ROUND", 0.02)
     started, cancelled = asyncio.Event(), asyncio.Event()
 
-    async def _hanging_inner(cell: Any, _minted: list[Any], spawned_by: dict[str, Any]) -> Any:
+    async def _hanging_inner(_cell: Any, _minted: list[Any], _spawned_by: dict[str, Any]) -> Any:
         """SWALLOWS the cancellation and returns normally: a stub that re-raises cannot catch that."""
         started.set()
         try:
@@ -2090,7 +2094,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         )
     )
     facts = inner_cell_facts(cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}))
-    assert facts is not None and silent.total_used_usd == 0.0, "an unbilled inner cell vanished"
+    assert silent.total_used_usd == 0.0, "an unbilled inner cell vanished"
     inner_row = MeasuredCell(
         sample_key="k0",
         query="q",
@@ -2386,6 +2390,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     turns: list[Any] = []
     cut_short = [True]
+    three_answered = asyncio.Event()
 
     async def episode_run(_workload: Any, _sample: Any, _payload: dict[str, Any]) -> dict[str, Any]:
         for n in range(4):
@@ -2398,6 +2403,8 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
                     label=CallLabel("agent", "backend"),
                 )
             )
+            if len(turns) == 3:
+                three_answered.set()
         return {"data": {"terminal_node": "agent"}}
 
     agent = backend_client(execution="in_process", in_process_run=episode_run, holds_own_sends=True)
@@ -2416,8 +2423,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
 
     async def cancel_mid_episode() -> None:
         running = asyncio.ensure_future(agent_cell(0))
-        while len(turns) < 3:
-            await asyncio.sleep(0.001)
+        await three_answered.wait()
         await asyncio.sleep(0.05)
         running.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -2516,7 +2522,10 @@ def _running(admitted_at: str | None, reserve: Budget) -> Any:
         reserve=reserve,
         admitted_at=admitted_at,
     )
-    return types.SimpleNamespace(list_holding_spend=lambda *, user_id: [held], get=lambda _id: None)
+    return types.SimpleNamespace(
+        list_holding_spend=lambda *, user_id: [held] if user_id in (None, held.user_id) else [],
+        get=lambda _id: None,
+    )
 
 
 async def _paid_door(door: str, stores: Any) -> None:

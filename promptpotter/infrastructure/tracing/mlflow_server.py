@@ -60,7 +60,7 @@ class MLflowSink(TraceSink):
         found = client.get_experiment_by_name(name)
         self._experiment_id = found.experiment_id if found else client.create_experiment(name)
 
-    def on_round_closed(self, campaign_id: str, record: RoundClosedRecord) -> None:
+    def on_round_closed(self, record: RoundClosedRecord) -> None:
         if self._experiment_id is None:
             return
         client = _client()

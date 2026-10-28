@@ -12,12 +12,12 @@ from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import CommandDispatcher
+    from promptpotter.application.commands.dispatcher import Dispatched
     from promptpotter.domain.command_kinds import LifecyclePayload, SetCampaignLabelPayload
 
 
-def campaign_lifecycle(dispatcher: CommandDispatcher, payload: LifecyclePayload) -> Applier[object]:
-    stores = dispatcher.stores
+def campaign_lifecycle(dispatched: Dispatched[LifecyclePayload]) -> Applier[object]:
+    stores, payload = dispatched.dispatcher.stores, dispatched.payload
 
     def _apply() -> None:
         changed_at = utcnow_iso()
@@ -41,13 +41,12 @@ def campaign_lifecycle(dispatcher: CommandDispatcher, payload: LifecyclePayload)
     return Applier.silent(_apply)
 
 
-def set_campaign_label(
-    dispatcher: CommandDispatcher, payload: SetCampaignLabelPayload
-) -> Applier[object]:
+def set_campaign_label(dispatched: Dispatched[SetCampaignLabelPayload]) -> Applier[object]:
     """Identity-neutral: ``label`` is not in ``root_content_hash``, so a rename voids no banked origin."""
-    campaign_id, label = payload.campaign_id, payload.label
+    campaigns = dispatched.dispatcher.stores.campaigns
+    campaign_id, label = dispatched.payload.campaign_id, dispatched.payload.label
 
     def _apply() -> None:
-        dispatcher.stores.campaigns.update_campaign(campaign_id, label=label)
+        campaigns.update_campaign(campaign_id, label=label)
 
     return Applier.silent(_apply)

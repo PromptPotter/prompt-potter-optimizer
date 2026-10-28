@@ -207,7 +207,7 @@ A family is a partial order over **cuts**, with two operations: **iterate** by t
 - **A cut names a `CycleHop`, not a `CyclePath`** — descent is spent before anything folds; `CyclePath` is the WIRE address.
 - **Every artifact stamps the cut it is of**, so the ledger is the truth and each file a cache: `?at=<offset>` on the dashboard route re-folds any past moment, and `read_model.py::Moment` replays every ledger of the family to one instant.
 
-Subscribers read via `Projection.on_record(record)` and MUST NOT write any campaign artifact beyond their declared allowlist (fails loud; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
+Subscribers read via `Projection.on_record` and MUST NOT write any campaign artifact beyond their declared allowlist (fails loud; see [`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 
 ## 7. Per-cycle artifact paths
 

@@ -104,7 +104,7 @@ class FewShot(nodes.Member):
         DemoPool: nodes.CountKnob(nodes.ShotKnobs, "k_max")
     }
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         k_max = ctx.knobs(nodes.ShotKnobs).k_max
         pool = [s.key for s in ctx.drawn(DemoPool)]
         node = ctx.read(Target).prompt_node.name
@@ -255,7 +255,7 @@ class PairedTRace(nodes.NoCatchUps):
     def block_size(self) -> int:
         return self._block_size
 
-    def rule(self, ahead: Sequence[tuple[ArmKey, Walk | None]]) -> None:
+    def rule(self, _ahead: Sequence[tuple[ArmKey, Walk | None]]) -> None:
         return None
 
     def open_turn(self, key: ArmKey) -> None:
@@ -312,12 +312,7 @@ class PairedTRace(nodes.NoCatchUps):
         return stops
 
     def judge(
-        self,
-        signal: StopSignal | None,
-        *,
-        key: ArmKey,
-        results: Sequence[GradedCell],
-        labels: Mapping[ArmKey, str],
+        self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
     ) -> Elimination | None:
         if signal is None or signal.check_name != self.node:
             return None
@@ -363,7 +358,7 @@ class PairedTRace(nodes.NoCatchUps):
         reason = f"outscored {where} by {len(outscored)} of {len(raced)}: {named}"
         return Elimination(reason=reason, context=context)
 
-    def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
+    def admit(self, _key: ArmKey, _results: Sequence[GradedCell], _sp: JobSearchPoint) -> None:
         return None
 
 
@@ -381,13 +376,7 @@ class PairedT(nodes.Member):
     def consults(self) -> frozenset[type]:
         return frozenset({PopulationSelector})
 
-    def race(
-        self,
-        ctx: NodeContext,
-        panel: Panel,
-        proposals: Proposals,
-        catch_up: CatchUpFn,
-    ) -> PairedTRace:
+    def race(self, ctx: NodeContext, panel: Panel, _catch_up: CatchUpFn) -> PairedTRace:
         return PairedTRace(
             ctx,
             survivors=ctx.knobs(PopulationKnobs).size,
@@ -429,7 +418,7 @@ class CapoInit(nodes.Member):
     )
     draws: ClassVar[Mapping[type[Pool], Draw]] = {DemoPool: nodes.CountKnob(CapoInitKnobs, "k_max")}
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         knobs = ctx.knobs(CapoInitKnobs)
         raw = await ctx.read(Calls).ask(prompts.init_prompt(ctx))
         start, end = raw.find("["), raw.rfind("]")
@@ -490,7 +479,7 @@ class Mating(nodes.Member):
     knobs: ClassVar[type[StrictModel]] = MatingKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Lineage, Replay})
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         carried = list(ctx.read(Lineage).population)
         if len(carried) < 2:
             raise ValueError(f"a mating needs two parents; the population holds {len(carried)}")
@@ -519,7 +508,7 @@ class CapoCrossover(nodes.Member):
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         pairs = _mated(ctx, proposals)
         if lone := [len(pair) for pair in pairs if len(pair) != 2]:
             raise ValueError(f"a crossover merges two parents; an offspring names {lone[0]}")
@@ -539,7 +528,7 @@ class ShotCrossover(nodes.Member):
     variation_mode: ClassVar[VariationMode] = "deterministic"
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Lineage, Replay, Target})
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         rng = ctx.read(Replay).rng()
         node = ctx.read(Target).prompt_node.name
         children = ctx.read(Children)
@@ -569,7 +558,7 @@ class CapoMutate(nodes.Member):
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         live = [i for i, p in enumerate(proposals.proposals) if not p.refused]
         answers = await ctx.read(Calls).ask_each(
             {i: prompts.mutation_prompt(ctx, proposals.individuals[i]) for i in live}
@@ -590,7 +579,7 @@ class PopulationRejoin(nodes.Member):
     variation_mode: ClassVar[VariationMode] = "deterministic"
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage})
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         return nodes.Proposals(
             [
                 *(Proposal(individual=m) for m in ctx.read(Lineage).population),
@@ -627,7 +616,7 @@ class PopulationSelector(nodes.Member):
         walked = {cell.key for cell in rows.get(ArmKey(ctx.read(Lineage).parent.id), NO_CELLS)}
         return [s for s in panel.cells if s.key in walked] or panel.cells[: panel.block_size]
 
-    def select(self, ctx: NodeContext, measured: MeasuredRound, proposals: Proposals) -> Selection:
+    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         size = ctx.knobs(PopulationKnobs).size
         survivors = measured.electable
         objective = ctx.slice(CapoObjective)
@@ -664,7 +653,7 @@ class PopulationSelector(nodes.Member):
 
 
 def _replay_paired_t_cut(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> bool:
     rows = ctx.round_data.rows
     objective = _recorded_objective(inputs_ref)
@@ -682,7 +671,7 @@ def _replay_paired_t_cut(
 
 
 def _replay_population_kept(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> list[ArmKey]:
     survivors = [ArmKey(str(key)) for key in inputs_ref["survivors"]]
     return _rank_survivors(
@@ -721,7 +710,7 @@ class CapoRuntime(nodes.OptimizerRuntime):
                     "k_max is inert: CAPO runs as an instruction-only search."
                 ),
                 severity="inert",
-                predicate=lambda c, k, d: (
+                predicate=lambda c, k, _d: (
                     k.k_max > 0 and (c.dataset_split is None or c.dataset_split.demo == 0)
                 ),
             ),

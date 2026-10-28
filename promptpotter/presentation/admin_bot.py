@@ -130,14 +130,14 @@ def _render_install_spend() -> str:
         if r.unreadable:
             lines.append(f"{who}: unreadable — {r.unreadable}")
             continue
-        over_usd, over_tokens = overrun(r.ceilings, r.spent)
+        over = overrun(r.ceilings, r.spent)
         flags = []
         if r.ceilings.usd is None:
             flags.append("host, unmetered")
         if r.spent.unpriced_tokens:
             flags.append(f"{r.spent.unpriced_tokens:,} unpriced")
-        if over_usd or over_tokens:
-            flags.append(f"⚠ ${over_usd:.4f}/{over_tokens:,} past ceiling")
+        if over.usd_amount or over.token_amount:
+            flags.append(f"⚠ ${over.usd_amount:.4f}/{over.token_amount:,} past ceiling")
         lines.append(
             f"{who}: ${r.spent.used_usd:.4f} billed + ${r.spent.rate_priced_usd:.4f} "
             f"{RATE_PRICED_LABEL} / {r.spent.used_tokens:,} tok · "

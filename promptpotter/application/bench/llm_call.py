@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 import uuid
@@ -118,8 +119,7 @@ def _replay(cache: LLMReuseCache, key: str, *, label: str) -> LLMResponse | None
         if payload is None:
             return None
         return LLMResponse.model_validate(payload)
-    except Exception as exc:
-        # Deliberately broad: nothing in a cache may ever cost a run.
+    except (OSError, ValueError) as exc:
         logger.warning("optimizer_reuse entry for %s unusable, re-sampling — %s", label, exc)
         return None
 
@@ -279,16 +279,8 @@ async def _provider_reply(call: _Call) -> LLMResponse:
         raise
     finally:
         heartbeat_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.warning(
-                "heartbeat task for %s raised on teardown",
-                label,
-                exc_info=True,
-            )
 
 
 def _call_record(

@@ -29,7 +29,7 @@ L2Output = dict[str, Any]
 
 
 def _check_rationale_substantive(
-    out: L2Output, audit: RoundAudit, ctx: ValidatorContext
+    out: L2Output, _audit: RoundAudit, _ctx: ValidatorContext
 ) -> tuple[bool, str]:
     rationale = str(out.get("rationale") or "").strip()
     if len(rationale) >= L2_RATIONALE_FLOOR_CHARS:
@@ -38,7 +38,7 @@ def _check_rationale_substantive(
 
 
 def _check_evidence_anchored(
-    out: L2Output, audit: RoundAudit, ctx: ValidatorContext
+    out: L2Output, _audit: RoundAudit, _ctx: ValidatorContext
 ) -> tuple[bool, str]:
     if axis := str(out.get("axis_targeted") or "").strip():
         return True, f"axis_targeted={axis!r}"
@@ -48,7 +48,7 @@ def _check_evidence_anchored(
 
 
 def _check_targets_l1_surface(
-    out: L2Output, audit: RoundAudit, ctx: ValidatorContext
+    out: L2Output, _audit: RoundAudit, _ctx: ValidatorContext
 ) -> tuple[bool, str]:
     """``axis_targeted`` is not a surface: it is prose, and L1 reads its axes from measurement."""
     if touched := [name for name in ("l1_layout", "l1_overrides") if out.get(name)]:

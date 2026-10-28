@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 
 import httpx
@@ -133,7 +133,7 @@ def _replay(cache: LLMReuseCache, key: str, *, judge: str, role: str) -> LLMResp
         if payload is None:
             return None
         response = LLMResponse.model_validate(payload)
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         logger.warning("judge_reuse entry for %s:%s unusable, re-sampling — %s", judge, role, exc)
         return None
     logger.debug("judge_reuse hit for %s:%s (%s)", judge, role, key)
@@ -168,9 +168,5 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
     finally:
         # An in-flight task survives the function exit and appends progress against a closed call.
         beat.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await beat
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.warning("heartbeat task for judge %s raised on teardown", label, exc_info=True)

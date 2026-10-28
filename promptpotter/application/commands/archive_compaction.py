@@ -11,15 +11,13 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import CommandDispatcher
+    from promptpotter.application.commands.dispatcher import Dispatched
     from promptpotter.domain.command_kinds import CompactArchivePayload
 
 
-def compact_archive(
-    dispatcher: CommandDispatcher, payload: CompactArchivePayload
-) -> Applier[ArchiveReport]:
+def compact_archive(dispatched: Dispatched[CompactArchivePayload]) -> Applier[ArchiveReport]:
     """`inventory` has no arm on purpose: this highway records a `CommandRecord` per call, which would bill a read."""
-    stores = dispatcher.stores
+    stores, payload = dispatched.dispatcher.stores, dispatched.payload
 
     def _apply() -> ArchiveReport:
         match payload.mode:

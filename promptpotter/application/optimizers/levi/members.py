@@ -277,13 +277,13 @@ class MapElites(nodes.Member):
 
     def parent_cells(
         self,
-        ctx: NodeContext,
+        _ctx: NodeContext,
         panel: Panel,
-        rows: Mapping[ArmKey, CellSheet],
+        _rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells
 
-    def select(self, ctx: NodeContext, measured: MeasuredRound, proposals: Proposals) -> Selection:
+    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         knobs = ctx.knobs(MapElitesKnobs)
         offered = [
             (key, measured.arms[key].individual, measured.rows[key]) for key in measured.electable
@@ -375,7 +375,7 @@ class LeviSeed(nodes.Member):
     knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         origin = ctx.read(Lineage).origin
         node, calls = ctx.read(Target).prompt_node, ctx.read(Calls)
         shown: list[tuple[OptSearchPoint, float | None]] = [(origin, None)]
@@ -403,7 +403,7 @@ class LeviParadigmShift(nodes.Member):
         {Calls, Children, Lineage, Replay, Target}
     )
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         n_clusters = ctx.knobs(LeviParadigmShiftKnobs).n_clusters
         shift = await self._shift(ctx, n_clusters, len(proposals.proposals))
         return nodes.Proposals([*proposals.proposals, shift])
@@ -479,7 +479,7 @@ class LeviRefine(nodes.Member):
     )
     consults: ClassVar[frozenset[type]] = frozenset({LeviParadigmShift})
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         calibration = ctx.slice(DescriptorCalibration).calibration
         elites = ctx.slice(EliteArchive).elites
         shift = ctx.knobs(LeviParadigmShiftKnobs)
@@ -527,7 +527,7 @@ class LeviRefine(nodes.Member):
 
 
 def _replay_proxy_selected(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> list[str]:
     return choose_proxy(
         ProxyCssKnobs.model_validate({k: inputs_ref[k] for k in ProxyCssKnobs.model_fields}),
@@ -547,7 +547,7 @@ class LeviRuntime(nodes.OptimizerRuntime):
         LeviCheckpointKind.PROXY_SELECTED: _replay_proxy_selected,
     }
 
-    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
         return nodes.rows_read_packages(rounds, _PROPOSERS)
 
     def arms(self, selected: SelectedOptimizer) -> int:
@@ -566,7 +566,7 @@ class LeviRuntime(nodes.OptimizerRuntime):
         return max((seeds + 1) * discovery, (shift.interval + 1) * proxy)
 
     def round_facts(
-        self, selected: SelectedOptimizer, round_result: RoundResult
+        self, _selected: SelectedOptimizer, round_result: RoundResult
     ) -> list[OptimizerFact]:
         state = round_result.closed_state
         if (calibration := state.slice(DescriptorCalibration).calibration) is None:

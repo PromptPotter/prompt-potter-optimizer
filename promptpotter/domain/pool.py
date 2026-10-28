@@ -67,7 +67,7 @@ class Pool(StateSlice, kind=None):
     writers = "many"
 
     @abstractmethod
-    def drawn(self, demo: Mapping[str, Sample]) -> tuple[object, ...]:
+    def drawn(self, demo: Mapping[str, Sample], /) -> tuple[object, ...]:
         """Its entries in draw order, read off this slice and the cycle's demo split alone."""
 
 
@@ -76,7 +76,7 @@ class BlockPool(Pool, kind="block_pool"):
     # Required, so a reader no walked initializer writes for is refused at load.
     entries: tuple[PoolEntry, ...]
 
-    def drawn(self, demo: Mapping[str, Sample]) -> tuple[PoolEntry, ...]:
+    def drawn(self, _demo: Mapping[str, Sample]) -> tuple[PoolEntry, ...]:
         return self.entries
 
 

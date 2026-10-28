@@ -36,6 +36,7 @@ from promptpotter.infrastructure.store.user_store import (
     read_accounts,
 )
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
+from promptpotter.shared.errors import LedgerUnreadableError
 from promptpotter.shared.identity import IdentityContext, acting_principal, default_identity
 
 
@@ -139,7 +140,7 @@ def _scanned(
     for account in accounts:
         try:
             found = list(workspace_lines(CampaignStore(account.workspace)))
-        except Exception:
+        except (OSError, ValueError, LedgerUnreadableError):
             if (who := _who(account)) not in unreadable:
                 unreadable.append(who)
             continue

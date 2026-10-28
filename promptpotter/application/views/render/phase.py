@@ -125,7 +125,6 @@ def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
 
 def render_round_stats(
     round_result: RoundClosedRecord,
-    pipeline_schema: PipelineSchema | None,
     unit: MeasuredUnit = "sample",
 ) -> str:
     lines: list[str] = []

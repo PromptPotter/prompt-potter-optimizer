@@ -236,7 +236,7 @@ async def routing_error_handler(request: Request, exc: HTTPException) -> JSONRes
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, _exc: Exception) -> JSONResponse:
     # `exc_info` logs the traceback beside the `error_id`, the only way back to it.
     return _error_response(
         request,

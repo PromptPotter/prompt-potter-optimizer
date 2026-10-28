@@ -74,7 +74,7 @@ class Propose(nodes.Member):
     knobs: ClassVar[type[StrictModel]] = ProposeKnobs
     sees = frozenset({Calls, Children, Lineage, Target})
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         parent, node = ctx.read(Lineage).parent, ctx.read(Target).prompt_node
         prompt = prompts.rephrase_prompt(ctx, instruction=shown(ctx, parent, node))
         variants = ctx.knobs(ProposeKnobs).variants
@@ -93,13 +93,13 @@ class Keep(nodes.Member):
 
     def parent_cells(
         self,
-        ctx: NodeContext,
+        _ctx: NodeContext,
         panel: Panel,
-        rows: Mapping[str, CellSheet],
+        _rows: Mapping[str, CellSheet],
     ) -> list[Sample]:
         return panel.cells
 
-    def select(self, ctx: NodeContext, measured: MeasuredRound, proposals: Proposals) -> Selection:
+    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         folds = measured.folds
         fitness = {key: folds[key].composite_fitness or 0.0 for key in measured.electable}
         ranked = sorted(measured.electable, key=lambda key: -fitness[key])

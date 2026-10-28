@@ -11,8 +11,7 @@ from promptpotter.shared.errors import PayloadInvalidError
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.domain.campaign import Campaign
+    from promptpotter.application.commands.dispatcher import DispatchedToCycle
     from promptpotter.domain.command_kinds import (
         OriginGateDecisionPayload,
         PauseCyclePayload,
@@ -20,7 +19,6 @@ if TYPE_CHECKING:
         SkipSearchpointPayload,
         SubmitArmsPayload,
     )
-    from promptpotter.domain.cycle_paths import CycleHop
 
 
 def read_payload_file(path: Path) -> Any:
@@ -31,50 +29,38 @@ def read_payload_file(path: Path) -> Any:
         raise PayloadInvalidError(str(exc)) from exc
 
 
-def pause_cycle(
-    dispatcher: CommandDispatcher, payload: PauseCyclePayload, campaign: Campaign, hop: CycleHop
-) -> Applier[object]:
-    return Applier.for_loop(dispatcher.run_state(hop).pause_refusal)
+def pause_cycle(dispatched: DispatchedToCycle[PauseCyclePayload]) -> Applier[object]:
+    return Applier.for_loop(dispatched.dispatcher.run_state(dispatched.hop).pause_refusal)
 
 
 def origin_gate_decision(
-    dispatcher: CommandDispatcher,
-    payload: OriginGateDecisionPayload,
-    campaign: Campaign,
-    hop: CycleHop,
+    dispatched: DispatchedToCycle[OriginGateDecisionPayload],
 ) -> Applier[object]:
-    return Applier.for_loop(dispatcher.run_state(hop).gate_refusal)
+    return Applier.for_loop(dispatched.dispatcher.run_state(dispatched.hop).gate_refusal)
 
 
-def submit_arms(
-    dispatcher: CommandDispatcher, payload: SubmitArmsPayload, campaign: Campaign, hop: CycleHop
-) -> Applier[object]:
-    return refused_on_an_arm(campaign) or Applier.for_loop(
-        dispatcher.run_state(hop).arms_refusal(payload.keep)
+def submit_arms(dispatched: DispatchedToCycle[SubmitArmsPayload]) -> Applier[object]:
+    return refused_on_an_arm(dispatched.campaign) or Applier.for_loop(
+        dispatched.dispatcher.run_state(dispatched.hop).arms_refusal(dispatched.payload.keep)
     )
 
 
-def skip_searchpoint(
-    dispatcher: CommandDispatcher,
-    payload: SkipSearchpointPayload,
-    campaign: Campaign,
-    hop: CycleHop,
-) -> Applier[object]:
-    return refused_on_an_arm(campaign) or Applier.for_loop(
-        dispatcher.run_state(hop).admission.skip_refusal
+def skip_searchpoint(dispatched: DispatchedToCycle[SkipSearchpointPayload]) -> Applier[object]:
+    return refused_on_an_arm(dispatched.campaign) or Applier.for_loop(
+        dispatched.dispatcher.run_state(dispatched.hop).admission.skip_refusal
     )
 
 
 def set_sample_lookahead(
-    dispatcher: CommandDispatcher,
-    payload: SetSampleLookaheadPayload,
-    campaign: Campaign,
-    hop: CycleHop,
+    dispatched: DispatchedToCycle[SetSampleLookaheadPayload],
 ) -> Applier[object]:
+    payload = dispatched.payload
     if payload.cells == 1 and not payload.auto:
         # A disarm leaves the loop nothing to take: the record removes the arming.
         return Applier.silent(lambda: None)
     # `auto` is a mode and stands across launches; one press is spent by its round, so it needs a run.
     return Applier.for_loop(
-        "" if payload.auto else dispatcher.run_state(hop).admission.lookahead_refusal
+        ""
+        if payload.auto
+        else dispatched.dispatcher.run_state(dispatched.hop).admission.lookahead_refusal
     )

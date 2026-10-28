@@ -94,7 +94,7 @@ class _Last:
     def __init__(self) -> None:
         self._found: StrictModel | None = None
 
-    def feed(self, offset: int, record: StrictModel) -> None:
+    def feed(self, record: StrictModel) -> None:
         self._found = record
 
     def value(self) -> StrictModel | None:
@@ -127,7 +127,7 @@ class _ResolvedRun:
     def __init__(self) -> None:
         self._found = ResolvedRun()
 
-    def feed(self, offset: int, record: ResolvedRunRecord) -> None:
+    def feed(self, record: ResolvedRunRecord) -> None:
         self._found = self._found.then(ResolvedRun(record.declaration, record.experiment))
 
     def value(self) -> ResolvedRun:
@@ -140,7 +140,7 @@ class _LaunchClocks:
     def __init__(self) -> None:
         self._found: list[LaunchClockRecord] = []
 
-    def feed(self, offset: int, record: LaunchClockRecord) -> None:
+    def feed(self, record: LaunchClockRecord) -> None:
         self._found.append(record)
 
     def value(self) -> list[LaunchClockRecord]:
@@ -199,7 +199,7 @@ class _CycleFacts:
     def __init__(self) -> None:
         self._held = CycleFacts()
 
-    def feed(self, offset: int, record: _CycleFact) -> None:
+    def feed(self, record: _CycleFact) -> None:
         held = self._held
         match record:
             case CycleMintedRecord():
@@ -273,7 +273,7 @@ class _Controls:
         self._kinds: dict[str, type[LoopPayload]] = {}
         self._declared: RunPhase | None = None
 
-    def feed(self, offset: int, record: CommandRecord | CommandAckRecord | RunPhaseRecord) -> None:
+    def feed(self, record: CommandRecord | CommandAckRecord | RunPhaseRecord) -> None:
         match record:
             case CommandRecord():
                 if record.kind in _LOOP_TAKEN:
@@ -361,9 +361,7 @@ class _LaunchClaim:
     def __init__(self) -> None:
         self._found: LaunchClaimRecord | None = None
 
-    def feed(
-        self, offset: int, record: LaunchClaimRecord | LaunchReleasedRecord | RunPhaseRecord
-    ) -> None:
+    def feed(self, record: LaunchClaimRecord | LaunchReleasedRecord | RunPhaseRecord) -> None:
         match record:
             case RunPhaseRecord():
                 self._found = None
@@ -386,7 +384,7 @@ class _Progress:
     def __init__(self) -> None:
         self._held = Progress()
 
-    def feed(self, offset: int, line: dict[str, Any]) -> None:
+    def feed(self, line: dict[str, Any]) -> None:
         kind = line.get("record_type")
         # A heartbeat proves the process alive, not that it progressed.
         if kind == "llm_call_progress":
@@ -543,16 +541,17 @@ class _Standing:
     records: ClassVar[RecordClasses] = get_args(_RoundStep)
 
     def __init__(self) -> None:
+        self.at_offset = -1
         self._held = StandingRounds.none()
         self._entered_at: dict[int, int] = {}
         self._arms = AnnouncedArms()
         self._cells: dict[tuple[int, ArmKey], dict[str, WalkedCell]] = {}
 
-    def feed(self, offset: int, record: _RoundStep) -> None:
+    def feed(self, record: _RoundStep) -> None:
         rnd = record.round
         if rnd is None:
             return
-        held = self._held
+        held, offset = self._held, self.at_offset
         match record:
             case RoundEnteredRecord():
                 self._entered_at[rnd] = offset
@@ -651,7 +650,7 @@ class _Answers:
         self._found: set[str] = set()
         self._frozen: frozenset[str] | None = frozenset()
 
-    def feed(self, offset: int, record: _Naming) -> None:
+    def feed(self, record: _Naming) -> None:
         match record:
             case SampleScoredRecord():
                 walked = [] if (cell := _walked_cell(record)) is None else [cell]
@@ -689,7 +688,7 @@ class _Verify:
         self._graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]] = {}
         self._passes: list[VerifyPass] = []
 
-    def feed(self, offset: int, record: PhaseRecord) -> None:
+    def feed(self, record: PhaseRecord) -> None:
         if isinstance(banked := record.view, VerifyGradedView):
             self._graded[banked.verify_pass.arm.key] = banked.verify_pass, banked.reading
             self._passes.append(banked.verify_pass)
@@ -718,7 +717,7 @@ class _Spend:
         self._calls = 0
         self._worked_s = 0.0
 
-    def feed(self, offset: int, usage: TokenUsageRecord) -> None:
+    def feed(self, usage: TokenUsageRecord) -> None:
         self._by_round.setdefault(usage.spend_round, SpendRollup()).bank(usage)
         if not usage.cached:
             self._calls += 1
@@ -741,7 +740,7 @@ class _Metered:
         self._usd: dict[CeilingMeter, float] = dict.fromkeys(get_args(CeilingMeter), 0.0)
         self._tokens: dict[CeilingMeter, int] = dict.fromkeys(get_args(CeilingMeter), 0)
 
-    def feed(self, offset: int, usage: TokenUsageRecord) -> None:
+    def feed(self, usage: TokenUsageRecord) -> None:
         for meter in self._usd:
             usd, tokens = metered(usage, meter)
             if usd is not None:
@@ -758,7 +757,7 @@ class _Bench:
     def __init__(self) -> None:
         self._graded: list[BenchGradedView] = []
 
-    def feed(self, offset: int, record: PhaseRecord) -> None:
+    def feed(self, record: PhaseRecord) -> None:
         if record.phase != CampaignPhase.BENCH or record.event != "graded":
             return
         if isinstance(record.view, BenchGradedView):
@@ -774,7 +773,7 @@ class _PricedKeys:
     def __init__(self) -> None:
         self._keys: set[str] = set()
 
-    def feed(self, offset: int, record: PricedKeyRecord) -> None:
+    def feed(self, record: PricedKeyRecord) -> None:
         self._keys.add(record.priced_key)
 
     def value(self) -> frozenset[str]:
@@ -800,7 +799,7 @@ class _Timeline:
     def __init__(self) -> None:
         self._held = Timeline([], [], [], [], [])
 
-    def feed(self, offset: int, record: _Clocked) -> None:
+    def feed(self, record: _Clocked) -> None:
         if (at := epoch_seconds(record.timestamp)) is None:
             return
         held = self._held

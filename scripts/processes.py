@@ -122,7 +122,8 @@ def open_job() -> int | None:
         if not job:
             raise ctypes.WinError(ctypes.get_last_error())
         return job
-    return None
+    else:
+        return None
 
 
 def close_job(job: int | None) -> int | None:
@@ -244,7 +245,7 @@ def free_mb() -> int:
         if not _kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
             raise ctypes.WinError(ctypes.get_last_error())
         return int(status.avail_phys) >> 20
-    if sys.platform == "darwin":
+    elif sys.platform == "darwin":
         # What Linux names MemAvailable: free pages plus the ones the kernel reclaims on demand.
         _, stat = run(["vm_stat"], REPO)
         page = re.search(r"page size of (\d+) bytes", stat)
@@ -252,8 +253,11 @@ def free_mb() -> int:
         if page is None or len(pages) != 3:
             raise RuntimeError(f"vm_stat said what it is not read for:\n{stat}")
         return sum(map(int, pages.values())) * int(page[1]) >> 20
-    with open("/proc/meminfo", encoding="ascii") as info:
-        return next(int(line.split()[1]) >> 10 for line in info if line.startswith("MemAvailable:"))
+    else:
+        with open("/proc/meminfo", encoding="ascii") as info:
+            return next(
+                int(line.split()[1]) >> 10 for line in info if line.startswith("MemAvailable:")
+            )
 
 
 def peak_mb() -> int:
@@ -265,7 +269,8 @@ def peak_mb() -> int:
         if not _kernel32.K32GetProcessMemoryInfo(current, ctypes.byref(counters), counters.cb):
             raise ctypes.WinError(ctypes.get_last_error())
         return int(counters.peak_commit) >> 20
-    import resource
+    else:
+        import resource
 
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS, KiB elsewhere
-    return peak >> 20 if sys.platform == "darwin" else peak >> 10
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS, KiB elsewhere
+        return peak >> 20 if sys.platform == "darwin" else peak >> 10

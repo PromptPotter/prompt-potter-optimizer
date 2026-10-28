@@ -73,7 +73,7 @@ from promptpotter.application.optimizers.capo import prompts as capo_prompts
 from promptpotter.application.optimizers.capo.state import CapoObjective
 from promptpotter.application.optimizers.gepa.members import MinibatchGate
 from promptpotter.application.optimizers.gepa.state import MinibatchBar, MinibatchBars
-from promptpotter.application.optimizers.nodes import Panel, Proposals, ReadArm, RoundContext
+from promptpotter.application.optimizers.nodes import Panel, ReadArm, RoundContext
 from promptpotter.application.optimizers.potter.dispatch.facade import build_bundle
 from promptpotter.application.optimizers.potter.dispatch.injections.panels import _vs_parent
 from promptpotter.application.optimizers.potter.dispatch.layout import (
@@ -105,7 +105,9 @@ from promptpotter.application.optimizers.potter.records import (
     LayerCounters,
 )
 from promptpotter.application.run_callbacks import RunCallbacks
+from promptpotter.application.run_observers import declare_gate
 from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.runner import arm_gate
 from promptpotter.application.runner import bench as bench_runner
 from promptpotter.application.runner.bench import (
     BenchLine,
@@ -912,7 +914,7 @@ def _peer_cycle(
 ) -> Iterator[tuple[Cycle, RunCallbacks]]:
     """Bound as a run seam binds it; the backend answers right where ``solves`` says, errs on None."""
 
-    async def _measure(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:
+    async def _measure(sample: Sample, _session: Any, pipeline_params: Any) -> MeasuredCell:
         prompt = pipeline_params["solve"]["prompt"]
         solved = solves(prompt, sample)
         row: dict[str, Any] = {
@@ -1335,7 +1337,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     class Composed(node_contract.OptimizerRuntime):
         prompt_sources = (paper_templates, capo_prompts)
 
-        def arms(self, selected: Any) -> int:
+        def arms(self, _selected: Any) -> int:
             return 2
 
     Composed.name, Composed.manifest_dir = name, manifest_dir
@@ -1439,7 +1441,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                 theta_book.hold_of = Hold(Budget(usd=0.0), theta_book.reserve)
         return True
 
-    async def unpriced(sample: Sample, _session: Any, *, pipeline_params: Any) -> MeasuredCell:
+    async def unpriced(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
         # No `target_prompt_chars`, so the composite cannot grade the row it files.
         return MeasuredCell.from_wire(
             {
@@ -1574,15 +1576,13 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         phases: list[RunPhase] = []
         acks: list[str] = []
 
-        async def _stopped_mid_pass(
-            sample: Sample, at: Any, *, pipeline_params: Any
-        ) -> MeasuredCell:
+        async def _stopped_mid_pass(sample: Sample, at: Any, pipeline_params: Any) -> MeasuredCell:
             walked.append(sample.id)
             if len(walked) == 2:
                 phases.append(derive_run_state(cycle_dir).run_phase)
                 acks.append((await CommandDispatcher(stores).dispatch(CommandCall(pause))).ack)
                 phases.append(derive_run_state(cycle_dir).run_phase)
-            cell: MeasuredCell = await measure(sample, at, pipeline_params=pipeline_params)
+            cell: MeasuredCell = await measure(sample, at, pipeline_params)
             return cell
 
         async def _bench_pick() -> BenchPass:
@@ -1889,9 +1889,19 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                 with pytest.raises(ConflictError):
                     await submit("arms-before-the-hold")
 
+                held = asyncio.Event()
+
+                def gate_declared(*args: Any, **kwargs: Any) -> None:
+                    declare_gate(*args, **kwargs)
+                    held.set()
+
+                monkeypatch.setattr(arm_gate, "declare_gate", gate_declared)
+
                 async def answer() -> None:
-                    while derive_run_state(cycle_dir).gate != "arms":
-                        await asyncio.sleep(0)
+                    await held.wait()
+                    assert derive_run_state(cycle_dir).gate == "arms", (
+                        "the hold never reached the ledger"
+                    )
                     await submit("arms-at-the-hold")
 
                 (held_round, held_cut), _ = await asyncio.gather(
@@ -2192,7 +2202,6 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     race = gate.race(
         NodeContext(gated, gate),
         Panel(cells=minibatch, order=minibatch, block_size=2),
-        Proposals(proposals=[]),
         no_catch_up,
     )
     level = [measurement(i, 1.0, objective=0.5) for i in range(2)]
@@ -2929,7 +2938,7 @@ def _evidence_campaign(
 
 
 def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_it_is_none(
-    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, tmp_path: Path
 ) -> None:
     # The paired t matches `ttest_rel`, and brackets the same evidence it tests.
     cand = [0.90, 0.10, 0.85, 0.20, 0.75, 0.30, 0.95, 0.05]

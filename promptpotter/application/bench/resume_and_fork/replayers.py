@@ -51,9 +51,7 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
             current = fn(ctx, rec.inputs_ref, rec.data)
         except Exception as exc:
             # A replayer that cannot ANSWER is a third state, never a match: agreement would pass rounds nothing verified.
-            logger.warning(
-                "replayer for decision kind %r could not re-derive its record", kind, exc_info=True
-            )
+            logger.exception("replayer for decision kind %r could not re-derive its record", kind)
             yield ReplayMismatch(
                 round_num=round_data.round,
                 kind=f"replay_error:{kind}",

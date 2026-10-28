@@ -17,6 +17,7 @@ from promptpotter.infrastructure.tracing.events import (
     TraceSink,
 )
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
+from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.domain.arms import Concluded
@@ -41,11 +42,11 @@ class LangfuseSink(TraceSink):
         self._campaign_id = campaign_id
         self._lf = langfuse
 
-        self._trace_ids: dict[str, str] = {}
-        self._round_observation_ids: dict[tuple[str, int], str] = {}
-        self._node_observation_ids: dict[tuple[str, int | None, str], str] = {}
+        self.trace_id: str | None = None
+        self._round_observation_ids: dict[int, str] = {}
+        self._node_observation_ids: dict[tuple[int | None, str], str] = {}
         self._dataset_item_ids: dict[tuple[str, str], str] = {}
-        self._session_ids: dict[str, str] = {}
+        self._session_id: str | None = None
         self._query_trace_ids: dict[tuple[str, str], tuple[str, str, str]] = {}
 
         self._state_cycle_id: str | None = None
@@ -59,14 +60,13 @@ class LangfuseSink(TraceSink):
         self._state_path = cycle_dir_for(self._base, hop) / "langfuse" / "state.json"
         existing = read_json_optional(self._state_path)
         if existing:
-            self._trace_ids.update(existing.get("trace_ids", {}))
-            self._session_ids.update(existing.get("session_ids", {}))
+            self.trace_id = existing.get("trace_id", self.trace_id)
+            self._session_id = existing.get("session_id", self._session_id)
             for key, value in (existing.get("round_observation_ids") or {}).items():
-                cid, rn = key.rsplit("|", 1)
-                self._round_observation_ids[(cid, int(rn))] = value
+                self._round_observation_ids[int(key)] = value
             for key, value in (existing.get("node_observation_ids") or {}).items():
-                cid, rn, nid = key.split("|", 2)
-                self._node_observation_ids[(cid, int(rn) if rn else None, nid)] = value
+                rn, nid = key.split("|", 1)
+                self._node_observation_ids[(int(rn) if rn else None, nid)] = value
             for key, value in (existing.get("dataset_item_ids") or {}).items():
                 dsname, query = key.split("|", 1)
                 self._dataset_item_ids[(dsname, query)] = value
@@ -75,23 +75,18 @@ class LangfuseSink(TraceSink):
         if self._state_path is None:
             return
         state: dict[str, Any] = {
-            "trace_ids": dict(self._trace_ids),
-            "session_ids": dict(self._session_ids),
-            "round_observation_ids": {
-                f"{cid}|{rn}": v for (cid, rn), v in self._round_observation_ids.items()
-            },
+            "trace_id": self.trace_id,
+            "session_id": self._session_id,
+            "round_observation_ids": {str(rn): v for rn, v in self._round_observation_ids.items()},
             "node_observation_ids": {
-                f"{cid}|{'' if rn is None else rn}|{nid}": v
-                for (cid, rn, nid), v in self._node_observation_ids.items()
+                f"{'' if rn is None else rn}|{nid}": v
+                for (rn, nid), v in self._node_observation_ids.items()
             },
             "dataset_item_ids": {
                 f"{dsname}|{query}": v for (dsname, query), v in self._dataset_item_ids.items()
             },
         }
         write_json(self._state_path, state)
-
-    def get_langfuse_trace_id(self, campaign_id: str) -> str | None:
-        return self._trace_ids.get(campaign_id)
 
     def on_campaign_start(self, event: CampaignStart) -> None:
         self._bind_cycle(event.cycle_id)
@@ -102,9 +97,9 @@ class LangfuseSink(TraceSink):
             tags=["campaign", "optimization_loop"],
         )
         if cloud_id:
-            self._trace_ids[event.campaign_id] = cloud_id
+            self.trace_id = cloud_id
             if event.session_id:
-                self._session_ids[event.campaign_id] = event.session_id
+                self._session_id = event.session_id
             self._persist()
 
     def on_dataset_registered(self, event: DatasetRegistered) -> None:
@@ -118,30 +113,29 @@ class LangfuseSink(TraceSink):
 
         # One `update`, never key-by-key: a concurrent `_persist` must not see the dict mid-growth.
         def _register() -> None:
-            self._lf.create_dataset(
-                name=event.dataset_name,
-                description="Ground truth queries for prompt evaluation",
-                metadata={"n_items": len(event.items)},
-            )
-            minted: dict[tuple[str, str], str] = {}
-            for query, ground_truth in event.items:
-                cloud_id = self._lf.create_dataset_item(
-                    dataset_name=event.dataset_name,
-                    input={"query": query},
-                    expected_output=ground_truth,
-                    metadata={"source": "dataset"},
+            with graceful("Langfuse dataset registration failed"):
+                self._lf.create_dataset(
+                    name=event.dataset_name,
+                    description="Ground truth queries for prompt evaluation",
+                    metadata={"n_items": len(event.items)},
                 )
-                if cloud_id:
-                    minted[(event.dataset_name, query)] = cloud_id
-            self._dataset_item_ids.update(minted)
-            self._persist()
+                minted: dict[tuple[str, str], str] = {}
+                for query, ground_truth in event.items:
+                    cloud_id = self._lf.create_dataset_item(
+                        dataset_name=event.dataset_name,
+                        input={"query": query},
+                        expected_output=ground_truth,
+                        metadata={"source": "dataset"},
+                    )
+                    if cloud_id:
+                        minted[(event.dataset_name, query)] = cloud_id
+                self._dataset_item_ids.update(minted)
+                self._persist()
 
         threading.Thread(target=_register, name="langfuse-dataset", daemon=True).start()
 
-    def on_arm_concluded(
-        self, campaign_id: str, round_num: int, arm: Concluded, fold: ScoreSummary | None
-    ) -> None:
-        trace_id = self._trace_ids.get(campaign_id)
+    def on_arm_concluded(self, round_num: int, arm: Concluded, fold: ScoreSummary | None) -> None:
+        trace_id = self.trace_id
         if not trace_id:
             return
         self._lf.create_span(
@@ -152,12 +146,12 @@ class LangfuseSink(TraceSink):
                 "accuracy": None if fold is None else fold.accuracy,
                 "total": 0 if fold is None else fold.total,
             },
-            parent_observation_id=self._round_observation_ids.get((campaign_id, round_num)),
+            parent_observation_id=self._round_observation_ids.get(round_num),
             as_type="span",
         )
 
-    def on_round_entered(self, campaign_id: str, record: RoundEnteredRecord) -> None:
-        trace_id = self._trace_ids.get(campaign_id)
+    def on_round_entered(self, record: RoundEnteredRecord) -> None:
+        trace_id = self.trace_id
         if not trace_id:
             return
         observation_id = self._lf.start_span(
@@ -168,11 +162,10 @@ class LangfuseSink(TraceSink):
             as_type="span",
         )
         if observation_id:
-            self._round_observation_ids[(campaign_id, record.round)] = observation_id
+            self._round_observation_ids[record.round] = observation_id
 
     def on_span_open(
         self,
-        campaign_id: str,
         round_num: int | None,
         span_id: str,
         *,
@@ -181,7 +174,7 @@ class LangfuseSink(TraceSink):
         as_type: str,
         metadata: dict[str, Any],
     ) -> None:
-        trace_id = self._trace_ids.get(campaign_id)
+        trace_id = self.trace_id
         if not trace_id:
             return
         observation_id = self._lf.start_span(
@@ -190,30 +183,26 @@ class LangfuseSink(TraceSink):
             input={},
             metadata={"node_type": node_type, **metadata},
             parent_observation_id=(
-                None
-                if round_num is None
-                else self._round_observation_ids.get((campaign_id, round_num))
+                None if round_num is None else self._round_observation_ids.get(round_num)
             ),
             as_type=as_type,
         )
         if observation_id:
-            self._node_observation_ids[(campaign_id, round_num, span_id)] = observation_id
+            self._node_observation_ids[(round_num, span_id)] = observation_id
 
-    def on_span_close(
-        self, campaign_id: str, round_num: int | None, span_id: str, *, error: str | None
-    ) -> None:
-        observation_id = self._node_observation_ids.pop((campaign_id, round_num, span_id), None)
+    def on_span_close(self, round_num: int | None, span_id: str, *, error: str | None) -> None:
+        observation_id = self._node_observation_ids.pop((round_num, span_id), None)
         if not observation_id:
             return
         self._lf.end_observation(
             observation_id, output=None, metadata={"error": error} if error else None
         )
 
-    def on_round_closed(self, campaign_id: str, record: RoundClosedRecord) -> None:
-        trace_id = self._trace_ids.get(campaign_id)
+    def on_round_closed(self, record: RoundClosedRecord) -> None:
+        trace_id = self.trace_id
         if not trace_id:
             return
-        round_observation_id = self._round_observation_ids.pop((campaign_id, record.round), None)
+        round_observation_id = self._round_observation_ids.pop(record.round, None)
         head, fold = record.head, record.fold
         accuracy = None if fold is None else fold.accuracy
         if head is not None:
@@ -252,10 +241,8 @@ class LangfuseSink(TraceSink):
                 trace_id=trace_id, name=f"{ev_name}_round_{record.round}", value=float(ev_value)
             )
 
-    def on_run_stopped(
-        self, campaign_id: str, record: RunPhaseRecord, *, rounds_closed: int
-    ) -> None:
-        trace_id = self._trace_ids.get(campaign_id)
+    def on_run_stopped(self, record: RunPhaseRecord, *, rounds_closed: int) -> None:
+        trace_id = self.trace_id
         if not trace_id:
             return
         self._lf.update_trace(

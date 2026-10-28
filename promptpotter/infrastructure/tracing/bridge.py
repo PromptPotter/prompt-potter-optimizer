@@ -108,7 +108,7 @@ class TracingProjection(Projection):
     def langfuse_trace_id(self) -> str | None:
         if self._langfuse is None:
             return None
-        return self._langfuse.get_langfuse_trace_id(self._hop.campaign_id)
+        return self._langfuse.trace_id
 
     def drain(self) -> None:
         self._tell("flush", lambda sink: sink.flush())
@@ -127,7 +127,6 @@ class TracingProjection(Projection):
         self._tell(
             f"span {name}",
             lambda sink: sink.on_span_open(
-                self._hop.campaign_id,
                 round_num,
                 span_id,
                 name=name,
@@ -143,15 +142,13 @@ class TracingProjection(Projection):
         self._open.discard((round_num, span_id))
         self._tell(
             f"span {span_id}",
-            lambda sink: sink.on_span_close(self._hop.campaign_id, round_num, span_id, error=error),
+            lambda sink: sink.on_span_close(round_num, span_id, error=error),
         )
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
         self._arms.enter(record)
         self._closed.discard(record.round)
-        self._tell(
-            "round entered", lambda sink: sink.on_round_entered(self._hop.campaign_id, record)
-        )
+        self._tell("round entered", lambda sink: sink.on_round_entered(record))
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         span_id = f"phase:{record.phase}"
@@ -194,7 +191,7 @@ class TracingProjection(Projection):
             fold = self._arms.fold(record.round, record.arm)
             self._tell(
                 "arm concluded",
-                lambda sink: sink.on_arm_concluded(self._hop.campaign_id, record.round, arm, fold),
+                lambda sink: sink.on_arm_concluded(record.round, arm, fold),
             )
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
@@ -202,7 +199,7 @@ class TracingProjection(Projection):
         if record.round in self._closed:
             return
         self._closed.add(record.round)
-        self._tell("round closed", lambda sink: sink.on_round_closed(self._hop.campaign_id, record))
+        self._tell("round closed", lambda sink: sink.on_round_closed(record))
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if record.run_phase not in (RunPhase.PAUSED, RunPhase.TERMINAL):
@@ -210,8 +207,6 @@ class TracingProjection(Projection):
         rounds_closed = max(self._closed, default=0)
         self._tell(
             "run stopped",
-            lambda sink: sink.on_run_stopped(
-                self._hop.campaign_id, record, rounds_closed=rounds_closed
-            ),
+            lambda sink: sink.on_run_stopped(record, rounds_closed=rounds_closed),
         )
         self._tell("flush", lambda sink: sink.flush())

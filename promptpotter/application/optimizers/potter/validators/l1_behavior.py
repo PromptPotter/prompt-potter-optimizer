@@ -87,9 +87,9 @@ Variants = list[dict[str, Any]]
 
 
 def _check_context_object_honored(
-    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+    variants: Variants, _audit: RoundAudit, ctx: ValidatorContext
 ) -> tuple[bool, str]:
-    items = [c for c in ctx.context_object if isinstance(c, str) and c.strip()]
+    items = [c for c in ctx.context_object if c.strip()]
     if not items:
         return True, "no context_object items to honour"
     item_seeds = [_key_phrases(item) for item in items]
@@ -158,7 +158,7 @@ def _check_evidence_grounding_present(
 
 
 def _check_not_only_param_variants(
-    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+    variants: Variants, audit: RoundAudit, _ctx: ValidatorContext
 ) -> tuple[bool, str]:
     shown = _shown_prompt_loci(audit)
     if shown and all(shown.values()):
@@ -169,7 +169,7 @@ def _check_not_only_param_variants(
 
 
 def _check_changes_description_english(
-    variants: Variants, audit: RoundAudit, ctx: ValidatorContext
+    variants: Variants, _audit: RoundAudit, _ctx: ValidatorContext
 ) -> tuple[bool, str]:
     offenders: list[str] = []
     for i, v in enumerate(variants):
@@ -305,8 +305,6 @@ def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: ValidatorCont
 
 
 def _touches_param_scope(pipeline_overlay: dict[str, Any]) -> bool:
-    if not isinstance(pipeline_overlay, dict):
-        return False
     for key, value in pipeline_overlay.items():
         if key in PARAM_SCOPE_KEYS:
             return True

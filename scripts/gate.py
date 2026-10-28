@@ -5,6 +5,7 @@ import ast
 import dataclasses
 import fnmatch
 import json
+import logging
 import os
 import re
 import shutil
@@ -36,6 +37,8 @@ from processes import (
     queue_behind_siblings,
     run,
 )
+
+logger = logging.getLogger(__name__)
 
 _WEBAPP = REPO / "webapp"
 _PINNED = REPO / ".venv"
@@ -1249,6 +1252,7 @@ def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
                 None  # narrowed, or edited while it ran: the verdict is for no tree anyone can name
             )
     except Exception as exc:  # a broken check is a red check, never a silent skip
+        logger.exception("check %s raised", check.name)
         rc, out, key = 1, f"{type(exc).__name__}: {exc}", None
     return Result(check, rc, out, time.monotonic() - began, key)
 

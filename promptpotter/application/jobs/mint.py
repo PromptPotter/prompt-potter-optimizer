@@ -455,7 +455,6 @@ async def _mint_after_framing(
                 session.store,
                 session.dataset_name,
                 description,
-                campaign_id=campaign_id,
                 ledger=checkin_ledger,
             )
         logger.info("Committed task framing for %s from its check-in", session.dataset_name)

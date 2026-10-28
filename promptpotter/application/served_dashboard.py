@@ -129,7 +129,7 @@ def _walk(state: LiveDashboardState, hop: CycleHop, *, live: bool) -> SampleWalk
         if any(r.round == current.round and r.candidates for r in state.rounds)
         else (current.candidates)
     )
-    measured = [s.position for s in rows[-1].samples if s.position is not None] if rows else []
+    measured = [s.position for s in rows[-1].samples] if rows else []
     in_flight = state.current_position
     key = f"{hop.cycle_id}:{current.round}:{len(rows) - 1 if rows else '-'}"
     if axis := state.declared_sample_order:

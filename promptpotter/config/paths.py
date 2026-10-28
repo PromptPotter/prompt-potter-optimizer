@@ -35,11 +35,12 @@ def _os_app_data_dir() -> Path:
         local = os.environ.get("LOCALAPPDATA")
         base = Path(local) if local else Path.home() / "AppData" / "Local"
         return base / "PromptPotter"
-    if sys.platform == "darwin":
+    elif sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "PromptPotter"
-    xdg = os.environ.get("XDG_DATA_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".local" / "share"
-    return base / "promptpotter"
+    else:
+        xdg = os.environ.get("XDG_DATA_HOME")
+        base = Path(xdg) if xdg else Path.home() / ".local" / "share"
+        return base / "promptpotter"
 
 
 def user_data_root() -> Path:

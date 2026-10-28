@@ -103,18 +103,14 @@ async def l1_generate(
         if bundle.block_access == "closed"
         else None
     )
-    output_schema = (
-        build_l1_response_schema(
-            pipeline_schema,
-            citable_fields=citable,
-            inner_cells=bundle.inner_cells,
-            silent_panels=breakdown.silent,
-            schema_field_rename=schema_field_rename,
-            n_variants=n_variants,
-            pooled_fields=None if pooled is None else {f: list(ids) for f, ids in pooled.items()},
-        )
-        if pipeline_schema
-        else None
+    output_schema = build_l1_response_schema(
+        pipeline_schema,
+        citable_fields=citable,
+        inner_cells=bundle.inner_cells,
+        silent_panels=breakdown.silent,
+        schema_field_rename=schema_field_rename,
+        n_variants=n_variants,
+        pooled_fields=None if pooled is None else {f: list(ids) for f, ids in pooled.items()},
     )
     # The wire speaks the DEMO POOL panel's ids; an individual holds sample keys.
     key_of = {s.id: s.key for s in bundle.demo_pool}

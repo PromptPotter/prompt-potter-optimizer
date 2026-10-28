@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 import re
 import threading
@@ -27,8 +26,6 @@ if TYPE_CHECKING:
     import httpx
 
     from promptpotter.infrastructure.ledger import CycleEventLog
-
-logger = logging.getLogger(__name__)
 
 # The first send and each resend after a 5xx or a broken connection; a 429 spends none.
 SEND_ATTEMPTS: int = 5
@@ -169,12 +166,8 @@ def report_throttle_stall(seconds: float) -> None:
         _prune_stalls(now, _STALL_WINDOW_S)
         _stall_events.append((now, seconds))
     sink = _THROTTLE_STALL_SINK.get()
-    if sink is None:
-        return
-    try:
+    if sink is not None:
         sink(seconds)
-    except Exception:  # pragma: no cover - a reporting path may not break the run
-        logger.debug("throttle-stall sink raised; continuing", exc_info=True)
 
 
 def set_abort_check(predicate: Callable[[], bool]) -> None:

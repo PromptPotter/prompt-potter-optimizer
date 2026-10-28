@@ -685,7 +685,8 @@ def _field_args(name: str, field: FieldInfo) -> tuple[Arg, ...]:
         return BUDGET_AXES
     flag = f"--{name.replace('_', '-')}"
     spec: dict[str, Any] = {"help": field.description}
-    if annotation is bool:
+    # Never `is bool`: past a final class, mypy narrows `type[Any]` away and drops every later arm.
+    if isinstance(annotation, type) and issubclass(annotation, bool):
         return (Arg(flag, dest=name, action="store_true", **spec),)
     if get_origin(annotation) is Literal:
         spec["choices"] = get_args(annotation)

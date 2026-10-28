@@ -9,23 +9,18 @@ from promptpotter.application.runner.grade_bench import grade_line_bench
 from promptpotter.domain.spend import Budget
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.domain.campaign import Campaign
+    from promptpotter.application.commands.dispatcher import DispatchedToCycle
     from promptpotter.domain.command_kinds import GradeBenchPayload, VerifyCandidatePayload
-    from promptpotter.domain.cycle_paths import CycleHop
 
 
-def verify_candidate(
-    dispatcher: CommandDispatcher,
-    payload: VerifyCandidatePayload,
-    campaign: Campaign,
-    hop: CycleHop,
-) -> Applier[object]:
+def verify_candidate(dispatched: DispatchedToCycle[VerifyCandidatePayload]) -> Applier[object]:
+    stores, hop, payload = dispatched.dispatcher.stores, dispatched.hop, dispatched.payload
+
     async def _apply_verify() -> verify.VerifyOutcome:
         # Taken HERE, not inside `verify_candidate`: the loop's saturation check calls that under its book.
-        async with paid_pass(stores=dispatcher.stores, verb="verify", hop=hop, declared=Budget()):
+        async with paid_pass(stores=stores, verb="verify", hop=hop, declared=Budget()):
             return await verify.verify_candidate(
-                stores=dispatcher.stores,
+                stores=stores,
                 hop=hop,
                 candidate_id=payload.candidate_id,
                 samples=payload.samples,
@@ -36,7 +31,6 @@ def verify_candidate(
     return Applier.silent(_apply_verify)
 
 
-def grade_bench(
-    dispatcher: CommandDispatcher, payload: GradeBenchPayload, campaign: Campaign, hop: CycleHop
-) -> Applier[object]:
-    return Applier.silent(lambda: grade_line_bench(stores=dispatcher.stores, hop=hop))
+def grade_bench(dispatched: DispatchedToCycle[GradeBenchPayload]) -> Applier[object]:
+    stores, hop = dispatched.dispatcher.stores, dispatched.hop
+    return Applier.silent(lambda: grade_line_bench(stores=stores, hop=hop))

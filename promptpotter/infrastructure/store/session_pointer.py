@@ -12,6 +12,7 @@ from promptpotter.infrastructure.store.io import (
     validate_path_component,
     write_json,
 )
+from promptpotter.shared.errors import LedgerUnreadableError
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -63,7 +64,7 @@ def cleanup_stub_fork_if_empty(*, campaign_store: CampaignStore, hop: CycleHop) 
             )
     try:
         deleted, reason = campaign_store.try_delete_stub_cycle(hop)
-    except Exception as exc:
+    except (OSError, LedgerUnreadableError) as exc:
         logger.warning("Stub cleanup raised for %s: %s", hop.cycle_id, exc)
         if was_active:
             save_active_pointer(workspace, hop)

@@ -69,9 +69,7 @@ class _Trail:
         self._banked: set[BankedSubject] = set()
 
     def feed(
-        self,
-        offset: int,
-        record: AccountEventRecord | CommandRecord | RunPhaseRecord | TrailTombstoneRecord,
+        self, record: AccountEventRecord | CommandRecord | RunPhaseRecord | TrailTombstoneRecord
     ) -> None:
         match record:
             case RunPhaseRecord(stop_reason=StopReason() as reason) if (

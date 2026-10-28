@@ -254,9 +254,7 @@ class BackendClient:
         except httpx.ConnectError as exc:
             logger.warning("Backend unreachable: %s", exc)
             return {"status": "unreachable", "error": str(exc)}
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             logger.warning("Backend status check failed: %s", exc)
             return {"status": "error", "error": str(exc)}
 

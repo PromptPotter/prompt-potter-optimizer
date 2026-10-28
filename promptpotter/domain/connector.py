@@ -56,11 +56,7 @@ class WireAdapter(Protocol):
 class CellEnvelopeSeconds(Protocol):
     """The NUMBER only; the bound it puts in force is ``scoring/cell_envelope.py::CellEnvelope``."""
 
-    def __call__(
-        self,
-        sample: Sample,
-        pipeline_params: dict[str, Any] | None,
-    ) -> float: ...
+    def __call__(self, sample: Sample, pipeline_params: dict[str, Any] | None, /) -> float: ...
 
 
 class CellHop(Protocol):
@@ -77,14 +73,11 @@ class SessionProtocol(Protocol):
     """Also how this backend's error replies READ, so ``BackendClient`` parses no backend's envelope."""
 
     async def set_terms(
-        self,
-        http: httpx.AsyncClient,
-        base_url: str,
-        terms: list[str],
+        self, http: httpx.AsyncClient, base_url: str, terms: list[str], /
     ) -> dict[str, Any]: ...
 
     async def recover(
-        self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response
+        self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response, /
     ) -> bool: ...
 
-    def resend_refused(self, reply: httpx.Response) -> str | None: ...
+    def resend_refused(self, reply: httpx.Response, /) -> str | None: ...

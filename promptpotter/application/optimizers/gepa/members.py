@@ -138,7 +138,7 @@ class GepaReflect(nodes.Member):
         {Calls, Children, Frontier, Lineage, Target}
     )
 
-    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals:
+    async def propose(self, ctx: NodeContext, panel: Panel, _proposals: Proposals) -> Proposals:
         candidates = ctx.slice(ParetoScores)
         parent_id = candidates.parent_id
         # A lineage no longer scored keeps no pointer.
@@ -220,10 +220,10 @@ class _GateRace(nodes.NoCatchUps):
     def block_size(self) -> int:
         return self._block_size
 
-    def rule(self, ahead: Sequence[tuple[ArmKey, Walk | None]]) -> None:
+    def rule(self, _ahead: Sequence[tuple[ArmKey, Walk | None]]) -> None:
         return None
 
-    def open_turn(self, key: ArmKey) -> None:
+    def open_turn(self, _key: ArmKey) -> None:
         return None
 
     def close(self, rows: Mapping[ArmKey, Sequence[GradedCell]]) -> dict[ArmKey, StopSignal]:
@@ -267,12 +267,7 @@ class _GateRace(nodes.NoCatchUps):
         return stops
 
     def judge(
-        self,
-        signal: StopSignal | None,
-        *,
-        key: ArmKey,
-        results: Sequence[GradedCell],
-        labels: Mapping[ArmKey, str],
+        self, signal: StopSignal | None, _key: ArmKey, _labels: Mapping[ArmKey, str]
     ) -> Elimination | None:
         if signal is None or signal.check_name != self.node:
             return None
@@ -294,7 +289,7 @@ class _GateRace(nodes.NoCatchUps):
             },
         )
 
-    def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None:
+    def admit(self, _key: ArmKey, _results: Sequence[GradedCell], _sp: JobSearchPoint) -> None:
         return None
 
 
@@ -306,13 +301,7 @@ class MinibatchGate(nodes.Member):
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
     stop_disqualifies: ClassVar[bool] = True
 
-    def race(
-        self,
-        ctx: NodeContext,
-        panel: Panel,
-        proposals: Proposals,
-        catch_up: CatchUpFn,
-    ) -> _GateRace:
+    def race(self, ctx: NodeContext, panel: Panel, _catch_up: CatchUpFn) -> _GateRace:
         return _GateRace(
             ctx,
             bars=ctx.recall(MinibatchBars, ctx.round_num),
@@ -372,13 +361,13 @@ class Pareto(nodes.Member):
 
     def parent_cells(
         self,
-        ctx: NodeContext,
+        _ctx: NodeContext,
         panel: Panel,
-        rows: Mapping[ArmKey, CellSheet],
+        _rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells[panel.block_size :]
 
-    def select(self, ctx: NodeContext, measured: MeasuredRound, proposals: Proposals) -> Selection:
+    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         pareto_set = ctx.slice(ParetoSet).keys
         candidates = dict(ctx.slice(ParetoScores).scores)
         lineage, replay = ctx.read(Lineage), ctx.read(Replay)
@@ -439,7 +428,7 @@ class Pareto(nodes.Member):
 
 
 def _replay_minibatch_gate(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> bool:
     rows = ctx.round_data.rows(ArmKey(inputs_ref["arm"]))
     accepted, _, _ = minibatch_improves(inputs_ref["parent_scores"], cell_objectives(rows))
@@ -454,15 +443,15 @@ class GepaRuntime(nodes.OptimizerRuntime):
         GepaCheckpointKind.MINIBATCH_GATE: _replay_minibatch_gate,
     }
 
-    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
         # The parent a round reflects on is drawn off every earlier round's Pareto-set scores.
         return nodes.rows_read_packages(rounds, [GepaReflect.name])
 
-    def arms(self, selected: SelectedOptimizer) -> int:
+    def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
 
     def round_facts(
-        self, selected: SelectedOptimizer, round_result: RoundResult
+        self, _selected: SelectedOptimizer, round_result: RoundResult
     ) -> list[OptimizerFact]:
         banked = round_result.closed_state
         if not (scores := banked.slice(ParetoScores).scores):

@@ -41,15 +41,10 @@ def render_review_md(
     bench: BenchScore | None,
     spend: SpendRollup,
 ) -> str:
-    ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
+    ctx_items = [c for c in (context_object or []) if c.strip()]
 
     final = index.final
-    review = optimizer.runtime.review(
-        optimizer,
-        list(rounds),
-        round_audits,
-        context_object=ctx_items,
-    )
+    review = optimizer.runtime.review(list(rounds), round_audits, ctx_items)
     clock = final.wall_clock if final else None
     stats = review.stats if review is not None else None
 

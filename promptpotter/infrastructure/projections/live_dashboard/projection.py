@@ -131,7 +131,7 @@ def _opened(kind: VerificationKind, arm: ArmName, rows: int) -> VerificationMark
 class LiveDashboardProjection(Projection):
     def __init__(self) -> None:
         # No state stands before the first `RunWiringRecord`: what lands earlier waits here.
-        self._unwired: list[tuple[CycleRecord, int]] | None = []
+        self._unwired: list[CycleRecord] | None = []
         self.state: LiveDashboardState
         self._at = ""
         self._standings: dict[int, tuple[LevelSeries | None, RunStanding | None]] = {}
@@ -161,24 +161,23 @@ class LiveDashboardProjection(Projection):
         """`None`: no `RunWiringRecord` yet (a check-in still authoring its origin)."""
         return None if self._unwired is not None else self.composed().model_copy(deep=True)
 
-    def on_record(self, record: CycleRecord, offset: int) -> None:
-        self.at_offset = offset
+    def feed(self, record: CycleRecord) -> None:
         if type(record) not in self._routes:
             return
         if self._unwired is not None:
             if not isinstance(record, RunWiringRecord):
-                self._unwired.append((record, offset))
+                self._unwired.append(record)
                 return
             self.state = LiveDashboardState.declared(record)
             # Folded under the state it opens: a check-in bills its cycle before Start.
             unwired, self._unwired = self._unwired, None
-            for held, at in unwired:
-                self._fold(held, at)
-        self._fold(record, offset)
+            for held in unwired:
+                self._fold(held)
+        self._fold(record)
 
-    def _fold(self, record: CycleRecord, offset: int) -> None:
+    def _fold(self, record: CycleRecord) -> None:
         self._at = record.timestamp
-        super().on_record(record, offset)
+        super().feed(record)
 
     def _set_state(self, name: DashboardState, *, step: str | None = None) -> None:
         self.state.state = name
@@ -608,13 +607,16 @@ class DashboardCheckout(LiveDashboardProjection):
         checkout.drain()
         return checkout
 
-    def on_record(self, record: CycleRecord, offset: int) -> None:
+    def on_record(self, record: CycleRecord, offset: int, *, ledger: Path) -> None:
         with self._lock:
-            super().on_record(record, offset)
-            if type(record) in _AT_ONCE:
-                self._write()
-            else:
-                self._settle()
+            super().on_record(record, offset, ledger=ledger)
+
+    def feed(self, record: CycleRecord) -> None:
+        super().feed(record)
+        if type(record) in _AT_ONCE:
+            self._write()
+        else:
+            self._settle()
 
     def _settle(self) -> None:
         self._dirty = True

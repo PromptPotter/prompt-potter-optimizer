@@ -117,7 +117,7 @@ class LedgerFold[R: StrictModel, V](Protocol):
 
     records: ClassVar[RecordClasses]
 
-    def feed(self, offset: int, record: R) -> None: ...
+    def feed(self, record: R) -> None: ...
 
     def value(self) -> V: ...
 
@@ -125,20 +125,20 @@ class LedgerFold[R: StrictModel, V](Protocol):
 class LineFold[V](Protocol):
     """`feed` takes EVERY line as written, which is what reads an envelope alone; `value` is a snapshot."""
 
-    def feed(self, offset: int, line: dict[str, Any]) -> None: ...
+    def feed(self, line: dict[str, Any]) -> None: ...
 
     def value(self) -> V: ...
 
 
 @runtime_checkable
 class Positioned(Protocol):
-    """A fold whose value names the line it stands at, its own or not: its feeder stamps every line."""
+    """A fold that reads the line it stands at, its own or not: its feeder stamps every line before feeding one."""
 
     at_offset: int
 
 
 class _Feeds[T](Protocol):
-    def feed(self, offset: int, record: T, /) -> None: ...
+    def feed(self, record: T, /) -> None: ...
 
 
 def line_dict(raw: bytes) -> dict[str, Any]:
@@ -177,10 +177,10 @@ def ledger_record[R](
         raise _refusal(ledger, offset, exc) from exc
 
 
-def feed_fold[T](fold: _Feeds[T], offset: int, record: T, *, ledger: Path) -> None:
+def feed_fold[T](fold: _Feeds[T], record: T, *, ledger: Path, offset: int) -> None:
     """A fold that raises on a line folds on past it, so a writer's checkout and a refold stay one value."""
     try:
-        fold.feed(offset, record)
+        fold.feed(record)
     except Exception:
         logger.exception("fold %s skipped offset %d of %s", type(fold).__name__, offset, ledger)
 
@@ -317,7 +317,7 @@ class _Feeder:
             return
         for fold in self.folds.values():
             if type(record) in fold.records:
-                feed_fold(fold, offset, record, ledger=self._ledger)
+                feed_fold(fold, record, ledger=self._ledger, offset=offset)
 
     def vouch(self, fold: LedgerFold[Any, Any]) -> None:
         for model in fold.records:
@@ -476,6 +476,7 @@ class LineIndex(_LedgerTail):
         self._folds: dict[type[Any], LineFold[Any]] = {
             type(fold): fold for fold in (make() for make in self._roster)
         }
+        self._placed = [fold for fold in self._folds.values() if isinstance(fold, Positioned)]
         self._refused: LedgerUnreadableError | None = None
 
     def view[V](self, fold: Callable[[], LineFold[V]]) -> V:
@@ -486,6 +487,8 @@ class LineIndex(_LedgerTail):
             return cast("LineFold[V]", self._folds[cast("type[Any]", fold)]).value()
 
     def _feed(self, raw: bytes) -> None:
+        for placed in self._placed:
+            placed.at_offset = self._lines
         try:
             line = ledger_record(line_dict, raw, ledger=self._path, offset=self._lines)
         except LedgerUnreadableError as refusal:
@@ -494,17 +497,18 @@ class LineIndex(_LedgerTail):
         if line is None:
             return
         for fold in self._folds.values():
-            feed_fold(fold, self._lines, line, ledger=self._path)
+            feed_fold(fold, line, ledger=self._path, offset=self._lines)
 
 
 class _Clock:
     def __init__(self) -> None:
+        self.at_offset = -1
         self._at: list[float] = []
 
-    def feed(self, offset: int, line: dict[str, Any]) -> None:
+    def feed(self, line: dict[str, Any]) -> None:
         last = self._at[-1] if self._at else float("-inf")
         own = epoch_seconds(line.get("timestamp"))
-        self._at.extend([last] * (offset - len(self._at)))
+        self._at.extend([last] * (self.at_offset - len(self._at)))
         self._at.append(last if own is None else max(last, own))
 
     def value(self) -> tuple[float, ...]:

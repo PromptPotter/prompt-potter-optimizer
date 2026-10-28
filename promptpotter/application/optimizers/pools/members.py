@@ -80,7 +80,7 @@ class BlockPoolInitializer(_PoolInitializer):
         return pack_identity(selected.knobs_of(self.name, BlockPoolKnobs).packs)
 
     def refusal(
-        self, selected: SelectedOptimizer, *, closed: bool, mint: MintFacts | None
+        self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None
     ) -> str | None:
         packs = selected.knobs_of(self.name, BlockPoolKnobs).packs
         if absent := missing_packs(packs):
@@ -121,11 +121,11 @@ class DemoPoolInitializer(_PoolInitializer):
     pool: ClassVar[type[Pool]] = DemoPool
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({DemoPool})
 
-    def starting_content(self, selected: SelectedOptimizer) -> object:
+    def starting_content(self, _selected: SelectedOptimizer) -> object:
         return None
 
     def refusal(
-        self, selected: SelectedOptimizer, *, closed: bool, mint: MintFacts | None
+        self, selected: SelectedOptimizer, _closed: bool, mint: MintFacts | None
     ) -> str | None:
         # A partition's size is its split's declaration, so only its names are refused.
         paths = self.active(selected)

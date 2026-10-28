@@ -152,7 +152,7 @@ class CycleRead:
         self._member = member
 
     @classmethod
-    def refusal(cls, member: NodeMember) -> str | None:
+    def refusal(cls, _member: NodeMember) -> str | None:
         return None
 
 
@@ -285,7 +285,7 @@ class LlmNode(Member):
     # Params beyond the prompt fields an L4 override of this node carries, by JSON type.
     outer_levers: ClassVar[Mapping[str, str]] = {}
 
-    def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:
+    def resolved_levers(self, _declared: Mapping[str, Any]) -> dict[str, Any]:
         """The L4 override levers its optimizer resolves itself, as they RESOLVE: the inner cell's identity reads them."""
         return {}
 
@@ -362,7 +362,7 @@ class OptimizerRuntime(ABC):
     replayers: ClassVar[Mapping[str, Replayer]] = {}
     couplings: ClassVar[Mapping[str, tuple[MemberCoupling, ...]]] = {}
 
-    def refuse_origin(self, origin_results: CellSheet) -> None:
+    def refuse_origin(self, _origin_results: CellSheet) -> None:
         """Raise where the origin's measurement holds what this optimizer cannot start from."""
         return None
 
@@ -374,7 +374,7 @@ class OptimizerRuntime(ABC):
         """Overridden only where a round's walks are not every arm plus the parent on the sampler's draw."""
         return (self.arms(selected) + 1) * selected.round_cells(search)
 
-    def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
+    def limits(self, _selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
         return ()
 
     def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
@@ -396,19 +396,21 @@ class OptimizerRuntime(ABC):
         """``roster`` are the built-in packages its manifest's members come from; ``covered`` modules another digest already hashes."""
         return _source_digest(self.prompt_sources, covered, roster)
 
-    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+    def round_packages(
+        self, _cycle: Cycle, _rounds: list[RoundResult]
+    ) -> dict[int, dict[str, str]]:
         """``{round: {node: fingerprint}}`` of what its nodes were handed; a repair moving one forks the rounds after it."""
         return {}
 
     async def rederive(
         self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        cycle: Cycle,
+        _campaign_store: CampaignStore,
+        _hop: CycleHop,
+        _cycle: Cycle,
         rounds: list[RoundResult],
-        drifted: list[int],
+        _drifted: list[int],
     ) -> list[RoundResult]:
-        """Re-derives what the nodes of each *drifted* round wrote and restates it on *hop*'s ledger."""
+        """Re-derives what the nodes of each drifted round wrote and restates it on the hop's ledger."""
         return rounds
 
     async def show_round(self, ctx: RoundContext) -> None:
@@ -417,17 +419,15 @@ class OptimizerRuntime(ABC):
 
     def review(
         self,
-        selected: SelectedOptimizer,
-        rounds: list[RoundResult],
-        audits: list[RoundAudit | None],
-        *,
-        context_object: list[str],
+        _rounds: list[RoundResult],
+        _audits: list[RoundAudit | None],
+        _context_object: list[str],
     ) -> ReviewReading | None:
         """``None`` where the optimizer keeps no reading of its own; ``review.md`` then says N/A."""
         return None
 
     def round_facts(
-        self, selected: SelectedOptimizer, round_result: RoundResult
+        self, _selected: SelectedOptimizer, _round_result: RoundResult
     ) -> list[OptimizerFact]:
         """Read off the round file ALONE; the close stamps it as ``RoundResult.optimizer_facts``."""
         return []
@@ -644,12 +644,7 @@ class Race(CatchUps, Protocol):
     def open_turn(self, key: ArmKey) -> None: ...
 
     def judge(
-        self,
-        signal: StopSignal | None,
-        *,
-        key: ArmKey,
-        results: Sequence[GradedCell],
-        labels: Mapping[ArmKey, str],
+        self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
     ) -> Elimination | None: ...
 
     def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None: ...
@@ -658,22 +653,22 @@ class Race(CatchUps, Protocol):
 class NoCatchUps:
     """The catch-up half of a ``Race`` whose arms all walk one panel, so no prior is paired."""
 
-    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
+    def start_backfill(self, _sample: Sample, _room: int) -> list[asyncio.Future[Any]]:
         return []
 
-    def owed_backfills(self, sample: Sample) -> int:
+    def owed_backfills(self, _sample: Sample) -> int:
         return 0
 
     def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
         return []
 
-    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
+    def backfills_for(self, _sample: Sample) -> list[asyncio.Future[Any]]:
         return []
 
-    def commit_backfills(self, sample: Sample) -> None:
+    def commit_backfills(self, _sample: Sample) -> None:
         return None
 
-    def bank_backfills(self, samples: Sequence[Sample]) -> None:
+    def bank_backfills(self, _samples: Sequence[Sample]) -> None:
         return None
 
     def discard_backfills(self) -> None:
@@ -691,9 +686,7 @@ class Eliminator(NodeMember, Protocol):
         """False where a stop only ends the buying of an arm the selector still reads; True takes it out of ``MeasuredRound.electable``."""
         ...
 
-    def race(
-        self, ctx: NodeContext, panel: Panel, proposals: Proposals, catch_up: CatchUpFn
-    ) -> Race: ...
+    def race(self, ctx: NodeContext, panel: Panel, catch_up: CatchUpFn) -> Race: ...
 
 
 class Selector(NodeMember, Protocol):
@@ -713,9 +706,7 @@ class Selector(NodeMember, Protocol):
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
         ...
 
-    def select(
-        self, ctx: NodeContext, measured: MeasuredRound, proposals: Proposals
-    ) -> Selection: ...
+    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection: ...
 
 
 @runtime_checkable
@@ -748,7 +739,7 @@ class Initializer(NodeMember, Protocol):
     def active(self, selected: SelectedOptimizer) -> list[str]: ...
 
     def refusal(
-        self, selected: SelectedOptimizer, *, closed: bool, mint: MintFacts | None
+        self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None
     ) -> str | None:
         """At load with ``mint`` ``None``, again before the mint."""
         ...
@@ -759,7 +750,7 @@ class Initializer(NodeMember, Protocol):
 class Adapter(NodeMember, Protocol):
     """Writes off the round just absorbed; raises where it lands nothing, which the round survives and the next walk re-runs first."""
 
-    async def adapt(self, ctx: NodeContext, round_result: RoundResult) -> None: ...
+    async def adapt(self, ctx: NodeContext) -> None: ...
 
 
 class Controller(NodeMember, Protocol):

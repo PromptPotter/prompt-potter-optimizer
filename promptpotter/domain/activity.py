@@ -262,6 +262,7 @@ class ActivityFeed:
     records: ClassVar[tuple[type[StrictModel], ...]] = get_args(ActivityRecord)
 
     def __init__(self) -> None:
+        self.at_offset = -1
         self._status: ActivityItem | None = None
         self._notices: list[ActivityItem] = []
         self._round: int | None = None
@@ -283,8 +284,8 @@ class ActivityFeed:
             decision = _arms_gate(self._round, self._offered)
         return ActivityState(status=self._status, notices=list(self._notices), decision=decision)
 
-    def feed(self, offset: int, record: ActivityRecord) -> None:
-        self.read(offset, record)
+    def feed(self, record: ActivityRecord) -> None:
+        self.read(self.at_offset, record)
 
     def value(self) -> ActivityFeed:
         """A private copy, which a tail reads on from."""

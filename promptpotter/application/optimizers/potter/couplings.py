@@ -28,7 +28,7 @@ ADAPTIVE_QUEUE = (
             "A cell missing from a WARM ruler is not that residual — it raises."
         ),
         severity="info",
-        predicate=lambda c, k, d: bool(k.per_round_resubset),
+        predicate=lambda _c, k, _d: bool(k.per_round_resubset),
     ),
     MemberCoupling(
         name="display_subset_relative_under_resubset",
@@ -48,7 +48,7 @@ ADAPTIVE_QUEUE = (
         ),
         # `inert`, not `info`: nothing co-moves; one knob's display choice wastes the other's invariance.
         severity="inert",
-        predicate=lambda c, k, d: bool(k.per_round_resubset) and c.display_metric != "ability",
+        predicate=lambda c, k, _d: bool(k.per_round_resubset) and c.display_metric != "ability",
     ),
 )
 
@@ -69,7 +69,7 @@ POBB = (
             "tested. Keep lock_in_n_min ≥ elimination_n_min."
         ),
         severity="info",
-        predicate=lambda c, k, d: k.lock_in_n_min < c.optimization.elimination_n_min,
+        predicate=lambda c, k, _d: k.lock_in_n_min < c.optimization.elimination_n_min,
     ),
     MemberCoupling(
         name="epsilon_threshold_inert",
@@ -82,7 +82,7 @@ POBB = (
             "OFF, so nothing reads it — the knob is inert and every round runs full budget."
         ),
         severity="inert",
-        predicate=lambda c, k, d: (not k.epsilon_elimination) and k.epsilon != d.epsilon,
+        predicate=lambda _c, k, d: (not k.epsilon_elimination) and k.epsilon != d.epsilon,
     ),
     MemberCoupling(
         name="epsilon_floor_inverted",
@@ -99,7 +99,7 @@ POBB = (
             "is inert and shallow candidates are cut on the deep bar."
         ),
         severity="inert",
-        predicate=lambda c, k, d: k.epsilon_floor > k.epsilon,
+        predicate=lambda _c, k, _d: k.epsilon_floor > k.epsilon,
     ),
     MemberCoupling(
         name="lock_in_threshold_inert",
@@ -114,7 +114,7 @@ POBB = (
             "ever locks in early — the knobs are inert."
         ),
         severity="inert",
-        predicate=lambda c, k, d: (
+        predicate=lambda _c, k, d: (
             (not k.leader_lock_in)
             and (k.lock_in != d.lock_in or k.lock_in_n_min != d.lock_in_n_min)
         ),

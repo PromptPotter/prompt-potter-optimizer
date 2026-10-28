@@ -223,7 +223,7 @@ COUPLINGS: tuple[Coupling, ...] = (
             "once the bank is rich. Turn OFF to pin 1PL everywhere."
         ),
         severity="info",
-        predicate=lambda c: False,
+        predicate=lambda _c: False,
     ),
     Coupling(
         name="lives_no_headroom",

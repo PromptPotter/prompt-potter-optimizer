@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import httpx
 
 from promptpotter import connectors
 from promptpotter.application import optimizers
@@ -64,9 +65,7 @@ async def _verify_connector_revision(
         return
     try:
         actual = await check(client.http, client.base_url)
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         logger.warning(
             "connector[%s]: could not verify backend revision (%s) — expected %s",
             connector.name,

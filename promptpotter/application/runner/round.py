@@ -100,14 +100,14 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
         last: Exception | None = None
         for attempt in range(1, OWED_WRITE_ATTEMPTS + 1):
             try:
-                await adapter.adapt(NodeContext(at_prior, adapter), prior)
+                await adapter.adapt(NodeContext(at_prior, adapter))
                 break
             # A refused send is decided: swallowed, it halts as a PAUSE that `resume` re-enters forever.
             except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
                 raise
             except Exception as exc:
                 last = exc
-                logger.warning(
+                logger.exception(
                     "round %d %s re-run %d/%d failed: %s",
                     prior.round,
                     adapter.name,
@@ -390,14 +390,14 @@ async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -
     return replace(population, proposals=arms)
 
 
-async def _adapt(ctx: RoundContext, plan: RoundPlan, round_result: RoundResult) -> None:
+async def _adapt(ctx: RoundContext, plan: RoundPlan) -> None:
     if not plan.adapters:
         return
     ctx.callbacks.on_phase(CampaignPhase.ADAPT, "enter", round=ctx.round_num)
     for adapter in plan.adapters:
         # Survived here: the next walk re-runs it first (`settle_owed_outputs`).
         with graceful(f"round {ctx.round_num} {adapter.name} landed nothing"):
-            await adapter.adapt(NodeContext(ctx, adapter), round_result)
+            await adapter.adapt(NodeContext(ctx, adapter))
     ctx.callbacks.on_phase(CampaignPhase.ADAPT, "exit", round=ctx.round_num)
 
 
@@ -439,7 +439,7 @@ async def execute_round(
     )
     callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=round_num)
     callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
-    selection = plan.selector.select(NodeContext(ctx, plan.selector), measured, population)
+    selection = plan.selector.select(NodeContext(ctx, plan.selector), measured)
     cycle.population = list(selection.population)
     round_result = _round_result(ctx, measured, selection, elects_on=plan.selector.elects_on)
     callbacks.on_phase(
@@ -466,7 +466,7 @@ async def execute_round(
             or (lives is not None and stalls_left(cycle.rounds, lives.bank) == 0)
         )
         if population.proposals and round_result.results and not will_stop:
-            await _adapt(ctx, plan, round_result)
+            await _adapt(ctx, plan)
     except BaseException:
         overlap.cancel()
         raise
@@ -481,11 +481,7 @@ async def execute_round(
 
 async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) -> None:
     if cycle.origin_round.results:
-        await _adapt(
-            RoundContext(cycle=cycle, round_num=0, callbacks=cb),
-            cycle.optimizer.plan,
-            cycle.origin_round,
-        )
+        await _adapt(RoundContext(cycle=cycle, round_num=0, callbacks=cb), cycle.optimizer.plan)
     round_result = cycle.origin_round
 
     # The origin's cells fold after the election that adopted it, and before the close.

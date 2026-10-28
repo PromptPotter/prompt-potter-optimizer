@@ -17,7 +17,6 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerSpan,
     Moment,
     appended_here,
-    feed_fold,
     ledger_record,
 )
 
@@ -132,7 +131,7 @@ class CycleEventLog:
 
     def _fan_out(self, record: CycleRecord, offset: int) -> None:
         for sub in self._subscribers:
-            feed_fold(sub, offset, record, ledger=self._path)
+            sub.on_record(record, offset, ledger=self._path)
 
     def iter(self, own_limit: int | None = None) -> Iterator[tuple[int, CycleRecord]]:
         """`own_limit` counts OWN records, as `forked_at_offset` does, never a position over the chain."""

@@ -94,8 +94,6 @@ def main() -> None:
         print("  python -m promptpotter resume", file=sys.stderr)
         sys.exit(StopOutcome.PAUSED.exit_code)
     runner.close()
-    if result is None:
-        return
     if args.json_output or result.human is None:
         print(json.dumps(result.data, indent=2, default=str))
     else:

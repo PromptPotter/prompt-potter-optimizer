@@ -118,7 +118,6 @@ class ReadoutProjection(Projection):
         self._round_num = 0
         self._sink = sink
         self.patience = patience
-        self.pipeline_schema = pipeline_schema
         self._display_tags = display_tags(pipeline_schema)
         self.measured_unit = measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
@@ -596,7 +595,7 @@ class ReadoutProjection(Projection):
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))
-        if stats := render_round_stats(round_result, self.pipeline_schema, self.measured_unit):
+        if stats := render_round_stats(round_result, self.measured_unit):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)

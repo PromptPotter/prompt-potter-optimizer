@@ -383,7 +383,7 @@ class SelectedOptimizer:
                 for pool in member.draws
                 if pool in initializer.writes
             )
-            if why := initializer.refusal(self, closed=closed, mint=mint):
+            if why := initializer.refusal(self, closed, mint):
                 refused.append(why)
         return refused
 
@@ -860,8 +860,6 @@ def resolved_overrides(overrides: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """The identity `inner_campaign_id` hashes: what the resolvers drop is dropped here, so declarations rendering ONE prompt hash alike."""
     nodes: dict[str, dict[str, Any]] = {}
     for node, raw in overrides.items():
-        if not isinstance(raw, dict):
-            continue
         prompt_fields, names = _resolved_prompt_parts(raw)
         resolved: dict[str, Any] = dict(prompt_fields)
         if names:

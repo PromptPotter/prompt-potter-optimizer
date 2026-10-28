@@ -389,7 +389,7 @@ async def _walk_population(
     concluded: dict[ArmKey, Concluded] = {}
 
     race: Race | None = (
-        eliminator.race(NodeContext(ctx, eliminator), panel, population, partial(_catch_up, cycle))
+        eliminator.race(NodeContext(ctx, eliminator), panel, partial(_catch_up, cycle))
         if eliminator is not None
         else None
     )
@@ -519,11 +519,7 @@ def _conclude_arm(
 
     scored = close_walk(walk)
     results, signal = scored.sheet, scored.signal
-    elimination = (
-        race.judge(signal, key=key, results=results.cells, labels=labels)
-        if race is not None
-        else None
-    )
+    elimination = race.judge(signal, key, labels) if race is not None else None
     breakage = (
         read_breakage(
             signal,

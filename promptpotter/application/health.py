@@ -136,7 +136,7 @@ class _Standing:
     def __init__(self) -> None:
         self._last: dict[str, HealthRecord] = {}
 
-    def feed(self, offset: int, record: HealthRecord) -> None:
+    def feed(self, record: HealthRecord) -> None:
         self._last[record.probe] = record
 
     def value(self) -> dict[str, HealthRecord]:

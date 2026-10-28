@@ -9,6 +9,7 @@ product.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 import os
@@ -16,7 +17,7 @@ import random
 import sys
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 import pytest
 from factories import (
@@ -565,10 +566,13 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     assert gone is not None and gone.released, "a delegate could not leave its place"
 
     # A check-in is refused before anything of it is kept or fetched.
-    before = sorted(Path(delegate.base_dir).rglob("*"))
+    def tree() -> list[Path]:
+        return sorted(Path(delegate.base_dir).rglob("*"))
+
+    before = await asyncio.to_thread(tree)
     with pytest.raises(NotFoundError):
         await ingest_draft(stores=delegate, blob=b"q,a\nx,y\n", filename="t.csv")
-    assert sorted(Path(delegate.base_dir).rglob("*")) == before, "a refused upload was kept"
+    assert await asyncio.to_thread(tree) == before, "a refused upload was kept"
 
     # A loop command is acted on by the loop it reached, or refused — never acked and dropped.
     hop, cycle_dir = walking_cycle(owner)
@@ -677,6 +681,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     class Answering(GoogleProviderClient):
         refusing: bytes | None = None
 
+        @override
         async def exchange_code(self, *, code: str, expected_nonce: str) -> ProviderIdentity:
             if self.refusing is not None:
                 raise CodeExchangeError.refused("google", 401, self.refusing)

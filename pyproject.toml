@@ -243,6 +243,8 @@ filterwarnings = ["ignore::RuntimeWarning"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
+warn_unreachable = true
+enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code", "redundant-self"]
 plugins = ["pydantic.mypy"]
 namespace_packages = false
 # One SQLite DB instead of ~12.5k tiny JSON files — kills the Windows small-file
@@ -301,12 +303,26 @@ select = [
     "SIM",    # simplify
     "C4",     # flake8-comprehensions
     "RUF",    # ruff-specific
+    "ARG",    # unused arguments
+    "BLE",    # blind except
+    "ASYNC",  # async pitfalls
+    "C901",   # complexity, under the ceiling below
 ]
 ignore = [
     "E501",   # line length (handled by formatter)
     "RUF003", # ambiguous unicode in comments (multiplication sign × is intentional)
     "RUF002", # ambiguous unicode in docstrings
+    "ASYNC109", # `docker()` owns its deadline: it kills its child and names the command on expiry
 ]
+
+[tool.ruff.lint.mccabe]
+# The package's current maximum (`views/render/sample.py::fmt_query_result`): it only falls.
+max-complexity = 23
+
+[tool.ruff.lint.per-file-ignores]
+# A journey test walks a whole run on purpose; the ceiling bounds production code.
+"tests/**" = ["C901"]
+".claude/hooks/**" = ["C901"]
 
 [tool.deptry]
 extend_exclude = [

@@ -20,7 +20,6 @@ from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.plugin_registry import Registry
 
 if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import MeasuredCell
     from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 
@@ -78,7 +77,6 @@ async def _compute(
     judge: Judge,
     spec: JudgeSpec,
     cache: LLMReuseCache | None = None,
-    schema: PipelineSchema | None = None,
     **_: Any,
 ) -> JudgedTerm:
     with bind_cache(cache):

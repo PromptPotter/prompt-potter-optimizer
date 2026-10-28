@@ -362,7 +362,7 @@ def graceful(msg: str) -> Iterator[None]:
     except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
         raise
     except Exception:
-        logger.warning(msg, exc_info=True)
+        logger.exception(msg)
 
 
 @shapes_optimizer_prompt

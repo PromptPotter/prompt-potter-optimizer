@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.intelligence.rasch import RoundAbilities
-    from promptpotter.application.optimizers.nodes import MeasuredRound, Proposals
+    from promptpotter.application.optimizers.nodes import MeasuredRound
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.scoring import CellSheet
 
@@ -76,7 +76,7 @@ def _verdict_reason(
     )
 
 
-def elect_on_theta(ctx: NodeContext, measured: MeasuredRound, proposals: Proposals) -> Selection:
+def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
     ruler = ctx.read(Ruler).difficulty.ruler
     lineage = ctx.read(Lineage)
     electable = measured.electable

@@ -5,19 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.application.commands.dispatcher import Applier, RejectedError
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.domain.campaign import Campaign
+    from promptpotter.application.commands.dispatcher import DispatchedToCycle
     from promptpotter.domain.command_kinds import CleanupEmptyCyclesPayload, DeleteCyclePayload
 
 
-def delete_cycle(
-    dispatcher: CommandDispatcher, payload: DeleteCyclePayload, campaign: Campaign, hop: CycleHop
-) -> Applier[object]:
-    campaigns = dispatcher.stores.campaigns
+def delete_cycle(dispatched: DispatchedToCycle[DeleteCyclePayload]) -> Applier[object]:
+    campaigns, hop = dispatched.dispatcher.stores.campaigns, dispatched.hop
 
     def _apply() -> None:
         deleted, reason = cleanup_stub_fork_if_empty(campaign_store=campaigns, hop=hop)
@@ -28,12 +24,9 @@ def delete_cycle(
 
 
 def cleanup_empty_cycles(
-    dispatcher: CommandDispatcher,
-    payload: CleanupEmptyCyclesPayload,
-    campaign: Campaign,
-    hop: CycleHop,
+    dispatched: DispatchedToCycle[CleanupEmptyCyclesPayload],
 ) -> Applier[object]:
-    campaigns = dispatcher.stores.campaigns
+    campaigns, hop = dispatched.dispatcher.stores.campaigns, dispatched.hop
 
     def _apply() -> None:
         for _pass in range(2):

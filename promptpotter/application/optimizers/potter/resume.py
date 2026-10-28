@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def _replay_round_winner(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> ArmKey | None:
     """The parent is the reference the round BANKED, never a panel rebuilt here: that one re-elects differently."""
     round_data = ctx.round_data

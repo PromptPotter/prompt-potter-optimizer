@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -161,7 +162,7 @@ async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
     try:
         draft = await ingest_draft(
             stores=stores,
-            blob=file_path.read_bytes(),
+            blob=await asyncio.to_thread(file_path.read_bytes),
             filename=file_path.name,
             slug=args.slug,
         )
@@ -265,7 +266,7 @@ def cmd_new(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
 
 async def _new(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
-    if not (args.dataset and Path(args.dataset).is_file()):
+    if not (args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)):
         stores = open_stores(args)
         return await mint_and_run(stores, _named_mint(args, stores), inline_launch(args))
     if args.arm is not None:
