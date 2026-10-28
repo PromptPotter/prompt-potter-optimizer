@@ -13,7 +13,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 ## Cycle stop conditions
 
-**Boundary stops are the bench's** (`runner/termination.py::standing_tripped`); potter's `escalation` node stops only on its own exhaustion (`STOP_L3_PATIENCE`). **The only stop a layer authors is `terminate_proposal`.**
+**Boundary stops are the bench's** (`runner/termination.py::standing_tripped`); potter's `escalation` node stops on its own exhaustion (`STOP_L3_PATIENCE`), and a layer stops through `terminate_proposal`. **Signals come from measurement, never the calendar**: no round-number threshold inside the loops.
 
 ## The ladder's DEPTH is a knob, and it is a real suppression
 
@@ -26,7 +26,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 - **Never reorder `L1Variant` alone**: `evidence_grounding` generates before `changes_description` and the overrides, and the model, `answer_format` prose and `resolved_schemas` move together.
 - **Panel rules the renderers do not state**: `answer_distribution` is `L1_MANDATORY`; `failing_samples` orders on `Cycle.difficulty`, the one δ; `mutation_memory` derives from the payload, never `changes_description`; `axis_memory` and raw cross-run panels stay off the floor until L2 adds them.
 - **A cluster spans two rows** (`l1/critique.py::spanning_clusters`); a variant targets `targets_rows`, and its edit holds for every row — no per-row patch.
-- **The block pool is L1's only channel for reusable prompt material**; reusing a block still needs `evidence_grounding`.
+- **Reusable prompt material reaches L1 through the block pool**; reusing a block still needs `evidence_grounding`.
 - **`repeat_variant` rejects an idea this cycle measured and lost**, inside `l1_invariants`, never at parse: only measured losses count, the reject threshold is stricter than the marking one, a round is never emptied, and every rejection names its round on the wound channel.
 
 ## L2 — what `l2_context` may write
@@ -35,7 +35,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 - **Deterministic rules route; they never diagnose or stop.** L2 judges recoverability, and `terminate_proposal` is its exit for a backend fault.
 - **L2 writes exactly `l1_layout` and `l1_overrides`, as one node overlay on `l1_generate`** (`L2Memory.steer`) — never `pipeline_params`. Each steer cites an axis, sample or yield number (`l2_targets_l1_surface`).
-- **No layer writes `task_context`** — no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`.
+- **No layer writes `task_context`** — no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`. <!-- probe: git grep -cE "task_context:" -- promptpotter/application/optimizers/potter/dispatch/schemas.py == 0 -->
 
 ## L3 — what `l3_plan` may write
 
@@ -43,7 +43,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 ## The layer-control channel — `fork_proposal` + `terminate_proposal`
 
-**These two are the complete layer-control vocabulary**, each gated by a capability bit whose injection renders empty when off; terminate outranks fork.
+**Each is gated by a capability bit whose injection renders empty when off; terminate outranks fork.**
 
 - **`fork_proposal` carries no round offset**: the layer decides whether to rewind, UCB decides where (`application/mask/backprop.py::select_rewind_round`).
 - **`unlock_schema_field_rename` is a bool, never `ConfigOverrides`** — a layer must not move its own spend ceiling.
@@ -63,10 +63,6 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 **`*_strict` / `*_output` / `l1_invariants` reject (a `ValidationFailure` the layer heals); `*_behavior` only scores into `review.md`.**
 **Never teach in prompt text a rejection the reject posture already makes** — say in one clause that it is mechanical.
-
-## Signals come from measurement, not from the calendar
-
-**No round-number thresholds inside the loops**; hardcoded stops sit at the cycle boundary.
 
 ## Add no 4th layer — L4 is a recursion
 

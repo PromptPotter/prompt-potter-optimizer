@@ -43,7 +43,12 @@ def bind_cache(cache: LLMReuseCache | None) -> Iterator[None]:
 
 
 async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
-    """``(reply, error)``, exactly one non-empty: a provider's failure is the error half, any other raises."""
+    """``(reply, error)``, exactly one non-empty: a provider's failure is the error half, any other raises.
+
+    The REPLY is cached, never the verdict — keyed by ``hash_call`` over the rendered prompt and
+    model / provider / temperature / max_tokens, so a changed ``_parse`` or ``to_score`` re-derives.
+    A hit is metered (``cached``); an empty reply is never stored.
+    """
     started = time.monotonic()
     cache = _CACHE.get()
     key: str | None = None

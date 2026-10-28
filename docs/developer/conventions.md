@@ -35,7 +35,7 @@ Rules not derivable from the code. Root [`CLAUDE.md`](../../CLAUDE.md) holds the
 
 ## Auditing for debt
 
-**A review looks for changes that land broken, not old code that decayed.** Over 200 commits (2026-06-11→07-09, 49 fixes) the median gap from a `.py` file's previous change to its fix was 3 commits; 4 of 44 fixes touched code older than ten. The top modes tell one story, the engine reporting a number nobody can check: measurement validity 16/49, silent wrong value 11, exhaustion/hang 11, wrong-scope read 9, untrue reported number 8, fallback hid the bug 7, two owners 5. Ask in order: (1) what enforces the fitness contract (bounded, subset-invariant, candidate-varying)? (2) where does missing data become a plausible number? (3) what is unbounded? (4) what fact has two owners? Read a file's fix ratio, not its churn.
+**A review looks for changes that land broken, not old code that decayed** Ask in order: (1) what enforces the fitness contract (bounded, subset-invariant, candidate-varying)? (2) where does missing data become a plausible number? (3) what is unbounded? (4) what fact has two owners? Read a file's fix ratio, not its churn.
 
 **Report only after verification** — call sites traced, bodies read — and fix it in the pass that found it; only blocked or multi-arc work is filed ([`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md)).
 
@@ -63,6 +63,3 @@ Hunt patterns: a guard for a scenario that cannot happen; two guards where one s
 - **A glob skips `.inner/`** — dot-directories are absent, not empty. `os.walk`.
 - **Ask what CHOSE the rows.** Pairing does not rescue an outcome-selected subset.
 - **Ledger first, mtimes last.** A deliberate pause looks exactly like a crash.
-- **Nothing scopes a commit to your edits** — `add` ships the INDEX, `--only` the WORKTREE. `git diff` every path.
-- **Never `git checkout --` uncommitted work.**
-- **Never regenerate `package-lock.json` on Windows** — it prunes the optional-platform graph (gate `lockfile` catches it after the fact).

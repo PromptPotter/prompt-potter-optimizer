@@ -24,6 +24,9 @@ head-to-head logs are a placeholder — the first run after the bugs they surfac
 replaces them. `notes/ep04-findings.md` is the record of what EP 04 surfaced on its day, not
 current state.
 
+`bbeh-comparison/` is the uncontrolled reference arm — each peer run its own way on BBEH, and the
+shared export its notebooks and `notebooks/bbeh_potter.ipynb` write ([`bbeh-comparison/README.md`](bbeh-comparison/README.md)).
+
 Method sections stay where the code is: `docs/methods/` and `docs/research/benchmarks.md`. Cite
 them; copying one here is what makes two of them.
 
@@ -49,7 +52,7 @@ them; copying one here is what makes two of them.
 Stages close on a verification. **If something has to give, the benchmark count gives, never the
 rigor** — two benchmarks with a held-out split are citable, five with selection-biased numbers are
 the gap this paper writes about. M13's comparability run and budget dimension
-([`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) § The optimizer plug point, stages 5–6) are
+([`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) § The bench (M13), stages 5–6) are
 the matrix; what follows is what the paper needs beside them.
 
 1. **The unlock — nothing runs unattended before it.** The per-cell wall-clock and spend envelope and

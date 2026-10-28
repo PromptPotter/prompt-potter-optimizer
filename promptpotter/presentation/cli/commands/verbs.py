@@ -1,4 +1,10 @@
-"""Imports no ``promptpotter.application`` module and no sibling: a handler is NAMED, so ``--help`` loads no verb."""
+"""Imports no ``promptpotter.application`` module and no sibling: a handler is NAMED, so ``--help`` loads no verb.
+
+``new`` and ``resume`` dispatch their command as DATA (``CommandDispatcher(inline=Inline(…))``), so a
+terminal launch is a ``CommandRecord`` like the browser's; every other command verb derives from its
+payload model (``command_verb``). Run-invocation (``HeldRun.run_inline`` vs ``HeldRun.detach``) is the
+only CLI↔web difference, and each terminal-only flag says why no payload carries it.
+"""
 
 from __future__ import annotations
 

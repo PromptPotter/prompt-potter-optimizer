@@ -129,15 +129,7 @@ knob**, read `controlled` by `evidence`'s head-to-head.
 *A round is a neutral envelope*. **No new I/O kind** — the band record is Persistence, its reading Display,
 `survey_proposal` Control-local, `survey-next-round` Control-remote.
 
-## Precedent
-
-Starts are cheap and many, judged small, then raced: MIPROv2 ([2406.11695](https://arxiv.org/html/2406.11695)
-§3.1), APE ([2211.01910](https://arxiv.org/html/2211.01910) §3.2), CAPO ([2504.16005](https://arxiv.org/html/2504.16005)),
-BOHB ([1807.01774](https://arxiv.org/html/1807.01774v1)). Whether the start matters depends on the model — OPRO
-([2309.03409](https://arxiv.org/html/2309.03409) §5.3), EvoPrompt ([2309.08532](https://arxiv.org/html/2309.08532)
-Table 6) — which is the case for keeping it ablatable. Signal lives near p ≈ 0.5: SFL
-([2408.15099](https://arxiv.org/html/2408.15099v3) §4.1), DAPO ([2503.14476](https://arxiv.org/html/2503.14476)).
-No source measures a mid-accuracy band for prompt optimization.
+**Precedent:** [`../research/external-constraints.md`](../research/external-constraints.md) § Survey round.
 
 ## Build order
 

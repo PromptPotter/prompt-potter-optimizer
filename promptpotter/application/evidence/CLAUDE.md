@@ -8,10 +8,10 @@
 - **The head-to-head reads the BENCH under ONE grader** (`comparison_grader`, served as `Evidence.scorer_id`). **`head_to_head.py::pair_guard` labels a pair (`controlled` / `uncontrolled` / `differs`) and refuses none**; a `differs` pair sits outside the Holm family, and `controlled` and `uncontrolled` never share one ([decisions](../../../docs/decisions.md) § 0009).
 - **Cost ratios price incurred USD, never the bill**; the holdout's reuse is served (`row.bench.status.reads_before`).
 - **A mask rides the address** (`;lens=`, `;samples=`) and ends where the readings part (`mask/divergence.py::scenario_spine`).
-- **Everything is in the selected metric's units under one formula, evaluated per cell, then collapsed**; `cell_channels` is the one row-to-number path.
+- **Everything is in the selected metric's units under one formula, evaluated per cell, then collapsed.**
 - **A row carries who authored the point** (`subjects.py::authorship_of`), its effort (`cached_samples`), and `human_intervened` — a babysat cycle pairs with nothing.
 - **Point facts and cycle facts stay apart**: `round` is the point's; `cycle_spend_usd` / `cycle_rounds_scored` the branch's.
 - **`scored_cells` is the intersection, `covered_cells` the union; every pair is a `PairedReading`** (`comparison.py::pair_subjects`), keyed on `Sample.key`, Holm-corrected across pairs, never across metrics.
 - **A ranked edit is a searchpoint against its own campaign's origin, keyed on `sp_hash`; never pool across campaigns.**
 - **The environment table reads the roster on the variance split's cells**: `snr` over the pooled residual, Friedman on cells every subject scored, a held-out cell never pooled with search rows.
-- **No noise term beside `EditSpread`**: the instrument is content-addressed, so a replicate ARM is the honest noise reading.
+- **Noise is `EditSpread` over a replicate ARM**: the instrument is content-addressed, so a replicate arm is the honest noise reading.

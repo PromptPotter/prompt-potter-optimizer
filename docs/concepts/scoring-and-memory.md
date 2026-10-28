@@ -6,7 +6,7 @@ A trace records what the pipeline did (query, prediction, ground truth, node ran
 
 ## The archive
 
-**The archive is the project's actual database; the per-cycle ledger is the event log layered on top of it.** Ledger ≠ archive, and neither replaces the other. It is the Workspace datastore — a peer of `campaigns/`, never siloed into a campaign dir — cross-cycle, cross-campaign and shared into an L4 sandbox, but rooted per archive home (`build_stores`: `Stores.archive_home`), the tenant's own unless the host names one install-owned `settings.SHARED_ARCHIVE` ([`../decisions.md`](../decisions.md) § 0002 — Identity foundation). Its scopes are **dataset** and **workspace** only — owned by [`../../promptpotter/infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The archive is not scoped by campaign.
+**Archive vs ledger** is [`../architecture.md`](../architecture.md) § Measurement archive's; its scopes and filing are [`../../promptpotter/infrastructure/store/CLAUDE.md`](../../promptpotter/infrastructure/store/CLAUDE.md) § The archive is not scoped by campaign. It is rooted per archive home (`build_stores`: `Stores.archive_home`), the tenant's own unless the host names one install-owned `settings.SHARED_ARCHIVE` ([`../decisions.md`](../decisions.md) § 0002 — Identity foundation).
 
 ```
 ON DISK (the database)                      DERIVED (folded from disk)
@@ -22,11 +22,20 @@ measurements/                               MeasurementArchive
 
 **Every row is FACTS, never a grade** (§ Rescore-on-load). A filed answer is `domain/sample.py::FiledAnswer` — a `MeasuredCell` plus who filed it (`config_key`, `dataset_hash`, `role`, `source`, `provenance`, `created_at`); the index entry is `ArchiveEntry`. **`role` is WHY the scoring pass ran** — the vocabulary is `shared/measurement_context.py::MeasurementRole`; which roles a reading may see is its `RoleScope`, part of its identity, so readings in two scopes never pair.
 
-**No key depends on which optimizer proposed a configuration**, so an arm two optimizers both propose replays free — which is what makes an N-way head-to-head affordable. **No key depends on a row's position or a dataset's name either**: a row is filed by what it is. The archive is tenant-global and **never backend-scoped** — no read or write takes a `backend_id`. `node_configs` is canonical identity and must stay deterministic from pipeline params.
+**No key names an optimizer, a position or a dataset name** — an arm two optimizers both propose replays free, which makes an N-way head-to-head affordable — **nor a backend** — no read or write takes a `backend_id`. `node_configs` is canonical identity and must stay deterministic from pipeline params.
 
 **Write path:** a taken cell → `application/datasets/loaders.py::archive_entry` names the configuration → `MeasurementArchive.file_answers` appends one line per answer the cell did not hold. **A replay files nothing.** **Read paths:** `archive_queries.py`'s `load_population` / `list_populations` (the evidence read, inside the scope `bind_memory_scope` gives the task) and `walked_answers` (the rows one walk took); `MeasurementArchive.measurements_for_config` (ungraded answers under matching configurations).
 
-**Two hashes, and they are not interchangeable.** `config_key(node_configs)` is where a configuration's cells are FILED — one per prefix of its node chain. `PipelineSchema.sp_hash(params)` names the searchpoint over the same resolved node configs; it is stored on every index entry as `prompt_fields_id` and keys a tenant ruler row (`domain/ruler.py::RulerRow`). `JobSearchPoint.content_hash(dataset)` files nothing: it names a campaign's root. **`OptSearchPoint.id` is neither** — the individual's own content, what `CandidateFacts.individual` carries; it leaves out the campaign's framing and the demo pool, so joining a candidate to an archive row on it matches nothing, and the entry serves `reading.sp_hash` beside it, stamped on the `Measuring` arm state as its walk opens. **Never re-derive it downstream:** the config a measured arm carries forward (`resolved_params`) is `config_params`, the node configs with each rendered `prompt` stripped, and the hash covers that prompt — so a recompute yields a well-formed id addressing no cell, and nothing raises.
+**The content hashes are not interchangeable:**
+
+| Hash | Names | Carried on |
+|---|---|---|
+| `config_key(node_configs)` | where a configuration's cells are FILED — one per prefix of its node chain | `cells/{config_key}.jsonl` |
+| `PipelineSchema.sp_hash(params)` | the searchpoint over the same resolved node configs | every index entry's `prompt_fields_id`; a tenant ruler row (`domain/ruler.py::RulerRow`); `reading.sp_hash`, stamped on the `Measuring` arm state as its walk opens |
+| `JobSearchPoint.content_hash(dataset)` | a campaign's root; files nothing | the root |
+| `OptSearchPoint.id` | the individual's own content, less the campaign's framing and the demo pool | `CandidateFacts.individual` — joined to an archive row it matches nothing |
+
+**Never re-derive `sp_hash` downstream:** the config a measured arm carries forward (`resolved_params`) is `config_params`, the node configs with each rendered `prompt` stripped, and the hash covers that prompt — so a recompute yields a well-formed id addressing no cell, and nothing raises.
 
 ## The bench headline
 

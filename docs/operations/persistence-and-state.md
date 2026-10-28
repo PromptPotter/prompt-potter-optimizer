@@ -6,10 +6,12 @@ Your work lives in `.promptpotter/`: one campaign per `campaigns/{campaign_id}/`
 
 **Workspace → Dataset → Campaign → Cycle** — owned by [`../architecture.md`](../architecture.md) § Four entities (outermost → innermost). This page adds only the on-disk shape.
 
-- **Workspace** — `projects/{tenant}/`, partitioned by lifecycle, so "what survives a delete?" is answered by looking.
-- **Dataset** — tenant upload (`projects/{tenant}/datasets/{slug}/`) first, then shipped template (`promptpotter/assets/datasets/{name}/`). An ingested slug is first-class to `new` and `resume`.
-- **Campaign** — `campaign_id = {dataset}__{rand6_hex}`, fresh per `new`; a nested name's `/` is written `.`. `campaign.json` is `domain/campaign.py::Campaign`; none of its fields is the id.
-- **Cycle** — `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_` on branches). Paths always resolve as `(campaign_id, cycle_id)`.
+| Entity | On disk | Id |
+|---|---|---|
+| Workspace | `projects/{tenant}/`, partitioned by lifecycle | the tenant |
+| Dataset | tenant upload `projects/{tenant}/datasets/{slug}/` first, then shipped template `promptpotter/assets/datasets/{name}/` | its content (`shared/hashing.py::dataset_hash`); the slug is a label |
+| Campaign | `campaigns/{campaign_id}/campaign.json` (`domain/campaign.py::Campaign`, no field of it the id) | `{dataset}__{rand6_hex}`, fresh per `new`; a nested name's `/` is written `.` |
+| Cycle | `campaigns/{campaign_id}/cycles/{cycle_id}/` | `cycle_{content_hash[:12]}` (+ `_fork_`/`_diag_`); a path resolves as `(campaign_id, cycle_id)` |
 
 ### The hierarchy address
 

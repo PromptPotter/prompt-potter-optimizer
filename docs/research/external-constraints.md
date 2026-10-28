@@ -159,6 +159,18 @@ Beyond ranked items 1 and 2:
   Module`. `dspy.GEPA` budgets by `auto` (light / medium / heavy), `max_full_evals`,
   `max_metric_calls` — the last is what a budget-matched head-to-head sets.
 
+## Survey round — many cheap starts, the band near p ≈ 0.5
+
+For [`../specs/survey-round.md`](../specs/survey-round.md):
+
+- **Starts are cheap and many, judged small, then raced**: MIPROv2 ([2406.11695](https://arxiv.org/html/2406.11695)
+  §3.1), APE ([2211.01910](https://arxiv.org/html/2211.01910) §3.2), CAPO ([2504.16005](https://arxiv.org/html/2504.16005)),
+  BOHB ([1807.01774](https://arxiv.org/html/1807.01774v1)).
+- **Whether the start matters depends on the model** — OPRO ([2309.03409](https://arxiv.org/html/2309.03409) §5.3),
+  EvoPrompt ([2309.08532](https://arxiv.org/html/2309.08532) Table 6) — so the survey stays ablatable.
+- **Signal lives near p ≈ 0.5**: SFL ([2408.15099](https://arxiv.org/html/2408.15099v3) §4.1), DAPO
+  ([2503.14476](https://arxiv.org/html/2503.14476)). No source measures a mid-accuracy band for prompt optimization.
+
 ## M14 — the preprint
 
 Beyond ranked items 3 and 4:

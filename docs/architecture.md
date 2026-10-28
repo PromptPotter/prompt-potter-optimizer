@@ -238,9 +238,8 @@ A structural invariant that fails loud at import — [`../promptpotter/applicati
 
 #### One rejected re-cut
 
-A concept-first re-hierarchy into per-concept vertical packages was investigated and rejected:
-the multi-directory fix signature is the footprint of changing the central state spine, not a
-defect (analysis in `git log`).
+No concept-first re-hierarchy into per-concept vertical packages: a multi-directory fix is the
+footprint of changing the central state spine, not a defect.
 
 #### The loop is embeddable
 
@@ -290,30 +289,23 @@ A PR touching one states its case.
 **Fitness is never one number — ask "under which formula?"** Formula-relative (the **active**
 formula; a **mask** picked by a **lens**; a **replay**) and mode-relative (`measured` vs `all`);
 the model is [`methods/verdict-resolution.md`](methods/verdict-resolution.md)'s, masks
-[`operations/mask-projection.md`](operations/mask-projection.md)'s.
+[`operations/mask-projection.md`](operations/mask-projection.md)'s, the per-cell composite θ is fit on
+[`concepts/scoring-and-memory.md`](concepts/scoring-and-memory.md) § Composite — recorded, not gating's,
+and the bench headline § The bench score is not an optimizer's selection's.
 
-- **The composite is scored per CELL and folded** (`domain/scoring.py::Scorer`), and that per-cell
-  value is what θ is fit on: a latency or cost term reaches a θ election only by being charged to
-  the cell.
 - **One writer, one resolver** — `compute_composite_fitness` writes it; an arm that read no cell
   has `None`; `order_floor` alone turns absence into a number inside an ordering;
   `scoreboard_rank_key` **is not a selection** — the `selector` node is.
 - **Every score is served, never recomputed in the consumer**, and a `score:F` lens grades the
   way a fresh run under `F` would (`application/mask/load.py`).
-- **The headline is the bench score, and no optimizer computes it** — the passes bank facts and
-  ONE function reads them (`application/runner/bench.py::read_bench`, under a named scorer); a
-  reading is over the population sent, never fewer rows.
 - **A cycle's "best" has two bases** — the optimizer's declared pick and the bench headline — and
   which pick that is, against the origin, is ONE `RunStanding` banked on `RoundClosedRecord`.
 
 **A budget is never one value — ask "at which position?"** One `Budget` (`domain/spend.py`) stands
-at four: asked, admitted (`application/jobs/quota.py::admit_launch`), standing (`set-limits`),
-spent (a fold of spend facts, never a record) — law owned by [`decisions.md`](decisions.md) § 0003.
+at four: asked, admitted, standing (`set-limits`), spent (a fold of spend facts, never a record) —
+admission and the spend book are [`decisions.md`](decisions.md) § 0003's.
 
-- **Declare once, then admit — one value** (`application/jobs/quota.py::declare_run_budget`): the
-  runner sets the admitted budget and never re-bounds it.
-- **Only the run's spend book halts a run, before a call is sent**
-  (`infrastructure/llm/spend_book.py`); an unreported call binds at the most it may cost, never
-  counted spent.
+- **Only the run's spend book halts a run**; an unreported call binds at the most it may cost,
+  never counted spent.
 - **An L4 inner cycle spends under its root's book**, mirrored onto the outer ledger, so the
   account walk never reaches `.inner/` (`infrastructure/store/account_spend.py::account_ledgers`).

@@ -1,3 +1,12 @@
+"""One ``db-llm-bench`` question per cell, run in a container and graded by its harness.
+
+The image (a pinned upstream commit, ``resources/dbllmbench.Dockerfile``) carries the dataset's
+assets, so its tag is measurement identity; ``_check_image`` refuses a mismatched build. A cell is
+billed off the harness's reported tokens (``_spent``), and one execution is read at every retry
+budget (``retry_levels``), never summed across them. A harness without a full verdict set measured
+its provider or database (``_failure``), never the prompt; the database rides ``DBLLMBENCH_DB_*``.
+"""
+
 from __future__ import annotations
 
 import contextlib

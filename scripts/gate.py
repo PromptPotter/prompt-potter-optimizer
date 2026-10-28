@@ -161,7 +161,17 @@ def _sources(root: Path, *patterns: str) -> list[Path]:
     return sorted(p for pattern in patterns for p in root.rglob(pattern))
 
 
-_IMPORTS_POTTER = ("", ("application/optimizers/potter/",), "application/optimizers/")
+_OPTIMIZERS = REPO / "promptpotter/application/optimizers"
+# Every package under `optimizers/`: one reached from outside binds the bench to an optimizer.
+_IMPORTS_OPTIMIZER = (
+    "",
+    tuple(
+        f"application/optimizers/{p.name}/"
+        for p in sorted(_OPTIMIZERS.iterdir())
+        if (p / "__init__.py").is_file()
+    ),
+    "application/optimizers/",
+)
 # `auth.py` is exempt: the Identity adapter, whose subject is the infrastructure it wraps.
 _ROUTER_IMPORTS_INFRASTRUCTURE = (
     "presentation/api/routers/",
@@ -179,7 +189,7 @@ _LAYERING: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("connectors/", ("application/", "presentation/"), ""),
     _ROUTER_IMPORTS_INFRASTRUCTURE,
     _PRESENTATION_IMPORTS_INFRASTRUCTURE,
-    _IMPORTS_POTTER,
+    _IMPORTS_OPTIMIZER,
 )
 
 
@@ -489,7 +499,11 @@ _BACKREFERENCE = re.compile(r"\\[1-9]")
 _TRACKER = "docs/specs/code-debt-cleanup.md"
 # An invariant a doc states as the target while its sentence says what holds today, keyed to the
 # phrase the tracker's URGENT section files it under; once true, the sentence is the invariant.
-_KNOWN_FALSE: dict[str, str] = {}
+_KNOWN_FALSE: dict[str, str] = {
+    'git grep -cE "\\.theta - " -- promptpotter/*.py == 0': "θ differenced without `comparable_to`",
+    'git grep -cE "<table" -- webapp/components/*.tsx == 0': "hand-rolled `<table>`",
+    'git grep -cE "role=.dialog." -- webapp/components/*.tsx <= 1': "a hand-rolled dialog",
+}
 
 
 @cache
@@ -781,7 +795,7 @@ def _doc_claims(_: Selection) -> Outcome:
 
 
 # `--staged` lints staged paths verbatim, so a directory missing here is linted by the hook only.
-_BBEH_DIR = "docs/research/bbeh-comparison"
+_BBEH_DIR = "paper/bbeh-comparison"
 _RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/", "notebooks/", _BBEH_DIR)
 
 

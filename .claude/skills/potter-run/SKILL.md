@@ -146,7 +146,7 @@ Potter's instruments only (`elects_on == "ability"`); the mechanics are
 `README.md` (source, split, sample shape) · `{dataset}/dataset.yaml::campaign` (budget; node knobs
 n_variants, sp_budget_round, patiences) · `{dataset}/dataset.yaml::pipeline` (pipeline, model, caps).
 BBEH's notebook run merges overrides over the campaign block
-(`docs/research/bbeh-comparison/bbeh_potter_runner.py::build_campaign_config`). Model,
+(`paper/bbeh-comparison/bbeh_potter_runner.py::build_campaign_config`). Model,
 `reasoning_effort` and `max_tokens` are [`docs/operations/datasets.md`](../../../docs/operations/datasets.md)
 § The model a dataset runs' — CHECK a campaign's `pipeline_overlay` against it. Don't propose parameter
 tweaks unbidden, classify data volume, or offer leaderboard picks.

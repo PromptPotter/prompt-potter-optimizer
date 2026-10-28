@@ -1,9 +1,9 @@
 # Related work — the landscape, and where the bench sits
 
 Three layers that get collapsed into one, the line behind PromptPotter's own algorithm, and a
-capability comparison against the two closest published peers. Why PoBB and how the lineage search
-maps to MCTS are [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)'s; what a
-number may claim is [`benchmarks.md`](benchmarks.md)'s; tools set aside are [`landscape.md`](landscape.md)'s.
+capability comparison against the two closest published peers. The stop rule itself is
+[`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)'s; what a number may claim
+is [`benchmarks.md`](benchmarks.md)'s; tools set aside are [`landscape.md`](landscape.md)'s.
 
 ## Three layers, routinely mistaken for one
 
@@ -28,8 +28,7 @@ before [`benchmarks.md`](benchmarks.md) publishes one.
 **GEPA**, MIPROv2, PromptWizard; code side AlphaEvolve, OpenEvolve, AlgoTuner, AutoResearch. Code
 systems mutate source, most prompt systems the prompt alone (Opik also sampling parameters and tool
 schemas). **PromptPotter moves a whole declared pipeline jointly with the prompt**, and searches a tree
-rather than a line ([`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)
-§ Comparison to MCTS).
+rather than a line (§ Comparison to MCTS).
 
 The line: [APE](https://arxiv.org/abs/2211.01910) and OPRO (2022–23) showed an LLM can author its own
 instruction; [DSPy](https://github.com/stanfordnlp/dspy) (2023–) made the prompt a *compiled artifact*,
@@ -43,6 +42,35 @@ rollout budgets ([LEVI](https://arxiv.org/abs/2605.09764);
 the economics run its way and SFT and GEPA compound — prompt search comes *before* fine-tuning, not
 instead of it (that page's § Direction and § Cost reporting carry the numbers).
 
+## Why PoBB's family and not another
+
+Mid-round abortion is **best-arm identification**; three choices place PoBB:
+
+- **Every prior, not only the leader** — LUCB (Kalyanakrishnan 2012), Bayes-UCB (Kaufmann 2012) and Hoeffding Races (Maron & Moore 1993) are pairwise too but test against the leader alone, with frequentist bounds.
+- **Bayesian over frequentist** — `P(c is best)` is one operator-readable number.
+- **Fixed-confidence (ε) over fixed-budget** — broken candidates stop at the evidence floor; Successive Rejects (Audibert 2010) and Sequential Halving (Karnin 2013) run them to the phase boundary. "Fixed-confidence" is loose: ε is a bar on a posterior reading, not an anytime-valid error rate, so under optional stopping it carries no frequentist guarantee ([`external-constraints.md`](external-constraints.md) § Ranked, item 3). The anytime-valid form — a confidence sequence from test supermartingales ([Hsu & Shekhar, *Efficient Sequential Evaluation of LLMs*](https://arxiv.org/abs/2607.17409)) — is what the guarantee must take before it is claimed.
+
+**Wilcoxon signed-rank + Holm-Bonferroni is not the stop rule** (pairwise, variance-agnostic); Holm is a *reporting* correction only (`shared/statistics.py::holm_adjusted`). **OCBA** (Chen 2000) is the closest classical relative but allocates where this stops; PoBB keeps Top-Two Thompson Sampling's stop rule and drops its allocation half.
+
+**Prior art — Stockfish's fishtest** runs this loop (patch vs master, SPRT). Two correspondences to know before claiming novelty: their unbalanced opening book is our seed-misses-first order, and Elo is Bradley–Terry, Rasch's logistic family. Not theirs: an automated proposer over structure and text, N-arm best-arm identification, and measurement reuse across a changed instrument.
+
+- **Russo, D. (2016).** *Simple Bayesian Algorithms for Best Arm Identification.* COLT. — the PoBB / Top-Two Thompson Sampling family.
+- **Maurer & Pontil (2009).** *Empirical Bernstein bounds and sample-variance penalization.* COLT.
+- **Kalyanakrishnan et al. (2012).** *PAC subset selection in stochastic multi-armed bandits.* ICML. — LUCB; set aside for testing against the leader alone.
+- **Audibert, Bubeck, Munos (2010).** *Best arm identification in multi-armed bandits.* COLT. — Successive Rejects; set aside for not adapting within-round.
+- **Chen, C.-H. (2000).** *Optimal Computing Budget Allocation.* Operations Research. — allocation rather than a stop rule.
+
+## Comparison to MCTS
+
+PromptPotter **is** AlphaZero-shaped MCTS over the lineage tree:
+
+- **Selection.** L2/L3 emits `fork_proposal: {reason}` — *whether* to rewind; *where* is UCB1 over the backpropagated tree (`application/mask/backprop.py::select_rewind_round`). The layer does not name the round — it never sees the ancestors' fitness.
+- **Expansion.** A round: L1 proposes a population from the selected node.
+- **Simulation.** A deterministic forward pass, not a random rollout (AlphaZero's precedent); within a round PoBB prunes siblings on shared samples.
+- **Backpropagation.** Each round's θ rolls up to every ancestor as visit count + value (`accumulate_node_stats`), every cycle read on ONE fit (`DifficultyView.level_series`); a caveated round is a visit with no value, and a rewind finding no valued ancestor is dropped as a `layer_rebase_dropped` warning.
+
+**Value is θ, never accuracy, and a fork's inherited prefix is not a fresh visit** (`application/mask/backprop.py`) — both naive forms fail silently. A rollout is a full round of LLM calls, so exploration is closer to PUCT than vanilla UCT; it buys **recovery from dead-end branches**.
+
 ## A menu is not a bench — the honest version
 
 **"We can wrap their method" is not on its own a differentiator.** Opik and agent-opt already expose
@@ -51,7 +79,7 @@ the same thing:
 
 - **One grader** — one compiled formula for both sides. Our own head-to-head was bitten:
   `matchers.py::_label_match` strips to the last bold span while the peer notebooks compare whole
-  strings ([`bbeh-comparison/`](bbeh-comparison/README.md)).
+  strings ([`bbeh-comparison/`](../../paper/bbeh-comparison/README.md)).
 - **One budget meter** — GEPA's reflective rollouts and MIPROv2's minibatch trials bill onto one ledger,
   so cost-per-fitness is a quantity, not a claim.
 - **One exam, chosen before anybody proposes** — no method picks the questions it is graded on.

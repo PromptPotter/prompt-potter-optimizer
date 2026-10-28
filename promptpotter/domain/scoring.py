@@ -52,7 +52,14 @@ ANSWER_SPACE_CAP: Annotated[int, shapes_optimizer_prompt] = 10
 
 
 class TurnRecord(TypedDict, total=False):
-    """ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``."""
+    """ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``.
+
+    A connector projects a published turn format, never authors one, and parses it as plain JSON so
+    an upstream field degrades the record instead of raising in a paid cell. A turn carries the STEP
+    it served and never becomes one: per-step rewards ride as terms beside the cell's aggregate, and
+    a turn ordinal is not an item. No ``turns`` key is no turn concept; ``[]`` is none happened.
+    ``reasoning_trace`` holds what the agent DECIDED: ``user`` turns and environment output stay out.
+    """
 
     index: int
     # ``system`` | ``user`` | ``agent`` — ATIF's ``source``.

@@ -4,19 +4,16 @@ A judge grades one cell by asking a model where no deterministic matcher can. Ad
 
 ## A judge is a MEASUREMENT, never a formula term
 
-**A judge runs ONCE, at measure time, and banks its verdict into the row; the pure formula reads that number by name.**
-The formula re-runs offline over archived rows (δ ruler, A/B replay, resume), so a judge inside it would re-bill one LLM call per archived row on every index warm.
+**A judge runs ONCE, at measure time, and banks its verdict into the row; the pure formula reads that number by name** — the formula re-runs offline over archived rows, so a judge inside it would re-bill every archived row.
 
 ## The seam — a judge IS an `Evaluator`
 
-**`build_evaluators(specs)` returns ordinary `per_sample` `Evaluator`s, one per TERM** (`needs_labels=True` skips them on a verifier-graded bank); values land top-level in `pipeline_data`. `_validate_evaluator` refuses an awaitable at `per_round`.
+**`build_evaluators(specs)` returns ordinary `per_sample` `Evaluator`s, one per TERM** (`needs_labels=True` skips them on a verifier-graded bank); values land top-level in `pipeline_data`.
 **Every judge evaluator goes through `validate_campaign_evaluator` — that call is the contract**: it refuses a non-identifier term, one `cell_namespace` binds itself, and one a package evaluator owns.
 
-## Scoring, never the optimizer loop — and it is structural
+## Scoring, never the optimizer loop
 
-**Nothing that sets the loop's LLMs reaches a judge** — models come only from `campaign.judges.{term}.stages`; required fields, exclusion from `param_keys` and the `judge` spend kind enforce it.
-**Every shipped judge asks ONE stage** (`Judge.max_stages`, enforced by `build_evaluators`); a composing judge raises its own.
-
+**Models come only from `campaign.judges.{term}.stages`** — required fields, exclusion from `param_keys` and the `judge` spend kind keep the loop's LLM settings away; `build_evaluators` refuses past `Judge.max_stages`.
 **A grader that FAILED is never bankable as a graded answer** — every declining arm returns `call.py::absent`, and verdicts are shaped through `call.py::graded`.
 A judge reads its cell through `judge_question` / `judge_answer`; `predicted` read raw grades the `NO_RESULT` sentinel.
 
@@ -41,11 +38,3 @@ Steps: retrieve = `evidence_retrieval` (no gold; never reads the answer); ground
 
 **`compute` returns `float | None`; `call.py::ask` returns a provider's failure (transport, status, malformed reply) as `absent`** — it costs the measurement it grades nothing. Any other exception, and a refused send (`CellSendRefusedError`), raises: the cell is an error row, never a no-grade.
 **The SimpleQA judge diverges from upstream** (an unparseable reply is `None`, not `NOT_ATTEMPTED`); record any such divergence in the dataset's `README.md`.
-
-## Registering one
-
-**A connector's rules through the one loader** (`shared/plugin_registry.py::Registry`, the `promptpotter.judges` group, `JUDGES.origins` as audit surface) — owned by [`../../../connectors/CLAUDE.md`](../../../connectors/CLAUDE.md) §§ Registering a connector · A connector is trusted code.
-
-## What is cached is the REPLY, not the verdict
-
-**`call.py::ask` caches the model's REPLY**, keyed by `hash_call` over rendered prompt + model / provider / temperature / max_tokens, so a changed `_parse` or `to_score` re-derives. A hit is metered (`cached`); an empty reply is never stored.

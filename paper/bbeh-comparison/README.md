@@ -2,7 +2,7 @@
 
 The uncontrolled reference arm: **PromptPotter vs CAPO vs DSPy optimizers** on BBEH (Big-Bench
 Extra Hard), each peer run its own way. The controlled arm is `new --arm` —
-[`../../specs/roadmap.md`](../../specs/roadmap.md) § The bench (M13).
+[`../../docs/specs/roadmap.md`](../../docs/specs/roadmap.md) § The bench (M13).
 
 ## The protocol
 
@@ -36,7 +36,7 @@ hyperparameters are unmeasured starting points, tagged in `config.note`.
 |---|---|---|
 | `bbeh_capo.ipynb` | CAPO ([promptolution](https://github.com/automl/promptolution)) | Colab: `GROQ_API_KEY` in Secrets → Run All → download `results_*.json` |
 | `bbeh_dspy.ipynb` | GEPA, MIPROv2, BootstrapFewShot ([DSPy](https://github.com/stanfordnlp/dspy)) | Colab, as above; toggle the `RUN_*` flags |
-| [`../../../notebooks/bbeh_potter.ipynb`](../../../notebooks/bbeh_potter.ipynb) | PromptPotter | Local: `pip install -e ".[dev,jupyter]" datasets`, `GROQ_API_KEY` in `.env`, a TermNorm backend with `llm_only` on `:8000`; `results_potter.json` lands beside it |
+| [`../../notebooks/bbeh_potter.ipynb`](../../notebooks/bbeh_potter.ipynb) | PromptPotter | Local: `pip install -e ".[dev,jupyter]" datasets`, `GROQ_API_KEY` in `.env`, a TermNorm backend with `llm_only` on `:8000`; `results_potter.json` lands beside it |
 
 ## References
 

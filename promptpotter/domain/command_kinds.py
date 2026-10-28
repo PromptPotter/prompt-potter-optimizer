@@ -72,7 +72,7 @@ class CommandKind(StrEnum):
         CAMPAIGN_STEP_CAP,
         "skip-searchpoint",
     )
-    # Browser-only ON PURPOSE: the absence IS the boundary (root `CLAUDE.md` § Conventions).
+    # Browser-only ON PURPOSE: `presentation/CLAUDE.md` § Sample look-ahead.
     SET_SAMPLE_LOOKAHEAD = (
         "set-sample-lookahead",
         "loop_commands:set_sample_lookahead",

@@ -3,12 +3,12 @@
 What we measure on, what it scored, and what we refuse to measure on. Model + `reasoning_effort` pins
 and the selection criteria behind each verdict are [`../operations/datasets.md`](../operations/datasets.md)'s
 (§ The model a dataset runs, § Selection criteria); the BBEH head-to-head protocol is
-[`bbeh-comparison/README.md`](bbeh-comparison/README.md)'s; peers, [`related-work.md`](related-work.md)'s.
+[`../../paper/bbeh-comparison/README.md`](../../paper/bbeh-comparison/README.md)'s; peers, [`related-work.md`](related-work.md)'s.
 
 > **Nothing here is a result — a gate, not an omission.** Every origin figure is an admission screen:
 > what an *origin* scored, deciding whether a dataset is worth wiring. No head-to-head number is
 > published while the optimizer is tuned for measurable lift and the peers and PromptPotter do not yet
-> call the same model ([`bbeh-comparison/README.md`](bbeh-comparison/README.md) owns both blockers).
+> call the same model ([`../../paper/bbeh-comparison/README.md`](../../paper/bbeh-comparison/README.md) owns both blockers).
 > Read the roster as a dated screening log, not a scoreboard.
 
 ## The admission bar — `gpt-oss-20b` must not already solve it
@@ -29,7 +29,7 @@ overlooked**; the roster records what each scored, making the omission checkable
 
 | # | Dataset | Role |
 |---|---|---|
-| 1 | **BBEH** | Headline benchmark — carries the head-to-head. Its 28% was measured at `gpt-oss-20b @ low`, **not the model the dataset runs** ([`bbeh-comparison/README.md`](bbeh-comparison/README.md) § The protocol); re-measure before quoting. |
+| 1 | **BBEH** | Headline benchmark — carries the head-to-head. Its 28% was measured at `gpt-oss-20b @ low`, **not the model the dataset runs** ([`../../paper/bbeh-comparison/README.md`](../../paper/bbeh-comparison/README.md) § The protocol); re-measure before quoting. |
 | 2 | **HotpotQA** | Wired 2026-10-14 (`hotpotqa`, distractor validation, `em_match`), seated in the L4 pool under both solvers. MIPROv2 / GEPA / adv-CoT all use it. |
 | 3 | **AIME 2025** | In band at 30%, wired; limited by size (30 problems, no split). |
 | 4 | **Chess puzzles (imec)** | Candidate, **not wired, unmeasured at the bar**. 1,118 Lichess puzzles, published 559 / 559 dev / test split stratified by length (1–5 moves) and rating (400–2,800), exact-match on the move — [arXiv 2610.00416](https://arxiv.org/abs/2610.00416), [`imec-ailabs/Automatic-Prompt-Optimization-with-Chess`](https://github.com/imec-ailabs/Automatic-Prompt-Optimization-with-Chess) (Apache-2.0; Lichess export CC0). Six DSPy optimizers (GEPA, MIPROv2, SIMBA, COPRO, BootstrapFewShot, BootstrapRandomSearch) already published on that split across eight models (~$800), so one more arm lands beside existing rows. Before wiring: `gpt-oss-20b` is not in their panel, so the bar risk is the **floor** (a rating cut moves it); a multi-move puzzle counts only when every move is right. Abstract, setup, takeaways read 2026-10-11; tables not. |
@@ -141,7 +141,7 @@ observation (`promptpotter/application/scoring/judges/`), so such a row reads on
 
 **Two reference models, two jobs.** `gpt-oss-20b @ low` is the admission bar and focus-iteration model;
 the head-to-head target, identical across PromptPotter and every peer, is
-[`bbeh-comparison/README.md`](bbeh-comparison/README.md)'s.
+[`../../paper/bbeh-comparison/README.md`](../../paper/bbeh-comparison/README.md)'s.
 
 **Tuning numbers and headline numbers do not mix.** Tuning runs at 50–100 samples (one 100-sample ×
 5-variant × 10-round campaign is ~5,000 backend evaluations); headlines use 200+. **A small-sample tuning
@@ -182,7 +182,7 @@ published as an appendix ([`external-constraints.md`](external-constraints.md) �
 Beside it, two round counts from `index.json::final`: **`rounds_to_separable`** (first round whose pick
 separates from the origin on the shared panel) — quote this — and **`rounds_to_improved`** (first round
 that crowned a winner, on `lift > 0.0` with no interval or correction:
-[`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § ⚠️ The crowning bar). A claim
+[`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) § Open — multi-arc). A claim
 not naming which it rests on is not a result.
 
 **No query denominator.** Backend scoring is nearly all the wall clock and spend, so "per optimization
@@ -198,7 +198,7 @@ PoBB compounds it (data-dependent stopping biases the survivor's mean before the
 is no exemption, nor is θ — it corrects *which samples* were scored, not *which candidate was chosen*;
 reaching for θ here is the plausible wrong move.
 
-**Published head-to-head figures are clean** ([`bbeh-comparison/README.md`](bbeh-comparison/README.md)
+**Published head-to-head figures are clean** ([`../../paper/bbeh-comparison/README.md`](../../paper/bbeh-comparison/README.md)
 § The protocol owns the split). **In-campaign figures are not:** `composite_fitness`, the round banner,
 the dashboard headline and `export.json`'s fitness are all read on the selecting rows. The fix is a
 held-out bench set no optimizer node sees, one evaluator — [`../architecture.md`](../architecture.md)

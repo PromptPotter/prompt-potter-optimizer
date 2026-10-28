@@ -132,20 +132,15 @@ kind. `cli/commands/launch.py::divergence_hint` lists the checked kinds off that
 
 ## 5. A connector (backend)
 
-A new backend kind — one file under `connectors/` defining `CONNECTOR`, owned step by step by
-[`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md).
+A new backend kind — one file under `connectors/` defining `CONNECTOR`. Its declarations (the
+measured unit, the answer shape, execution mode, the credential) are
+[`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md)'s.
 
 **The wiring is the easy half**; what decides whether the campaign is worth running is what is
 being improved and how it is graded, and nothing about the backend tells you that. Learn the shape
-cheapest-first (what they have, then ONE live probe they approve), then settle each decision where
-it is owned:
+cheapest-first (what they have, then ONE live probe they approve), then settle what the connector
+does not declare:
 
-- **One measured row** — one request or a whole run: `measured_unit` + `max_cells_in_flight`,
-  [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § The measured unit.
-- **What grades it** — the answer shape, declared in `extract_experiment` alone, where a
-  verifier-graded backend yields `ground_truth: None` (same page, § The answer shape).
-- **Transport and credential** — declare `execution` on the connector (§ Execution mode — never a
-  branch in the core loop) and the `auth_token` hook (§ The credential rides the connector).
 - **The formula** — `{dataset}/dataset.yaml::campaign.scoring` ([`stable-api.md`](stable-api.md)
   § 2). **Start with `per_sample` alone**: a cost term needs a MEASURED anchor, and the first
   campaign is what measures it.

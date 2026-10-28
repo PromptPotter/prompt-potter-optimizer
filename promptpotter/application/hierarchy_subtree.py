@@ -1,4 +1,14 @@
-"""The deep read: a campaign's courses, their rounds and candidates, and the inner campaigns under them."""
+"""The deep read: a campaign's courses, their rounds and candidates, and the inner campaigns under them.
+
+Every course is drawn where it spawned, at any depth. A fork IS a course, hung off the candidate it
+was cut from; ``C{round}.{n}`` is a course's private counter, so nothing is renumbered. A course's
+line is ONE resolution, pure over recorded facts (``_Read.owner``): every name resolves to an
+address on that line, never a search. A cut retires only as far as the branch actually GOT — status
+(``live`` · ``rewound`` · ``retired(by)``) is derived after every line resolves, so no fork writes
+it, and a retired candidate stays, tagged ``superseded``. Identity outranks position: two candidates
+may share an ``individual``, and ``answers_for_id`` marks the one a remembered id resolves to. An
+inner run hangs under the candidate that SPAWNED it (``SpawnedBy``, recorded at launch).
+"""
 
 from __future__ import annotations
 

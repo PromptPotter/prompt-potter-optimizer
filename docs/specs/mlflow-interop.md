@@ -87,14 +87,10 @@ connector and the caller's scorers are the grade.
 MLflow runs the library's defaults where the preset pins the paper's. **The meta-prompt optimizer is the only new
 method**: one proposing `llm` member over the shared measurement (a peer is decomposed, never called as a library —
 [`roadmap.md`](roadmap.md) § The bench (M13)). Undecided: what `paper:` names for a vendor implementation,
-and whether a manifest with no sampler or selector runs a round. Low priority, after step 8.
+and whether a manifest with no sampler or selector runs a round. Low priority. MLflow as a peer:
+[`../research/landscape.md`](../research/landscape.md) § MLflow.
 
-## 8. The landscape entry
-
-`../research/landscape.md` gets an MLflow entry (tracking, Prompt Registry, MCP server, `optimize_prompts`), read
-from MLflow's docs per [`../research/CLAUDE.md`](../research/CLAUDE.md).
-
-## 9. A box that keeps nothing
+## 8. A box that keeps nothing
 
 **The answer wherever a mount is allowed needs no code**: the operator's own volume mounted as `PROMPTPOTTER_HOME`.
 A push/pull mode over a campaign's folder waits for a host that cannot mount. **The bar it is held to:** two hosts,

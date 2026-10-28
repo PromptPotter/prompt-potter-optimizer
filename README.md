@@ -252,7 +252,7 @@ Every round generates, scores and critiques (L1). When L1 stalls, L2 rewrites *h
   </picture>
 </p>
 
-**It searches a tree, not a trail.** When a branch is spent, a UCB rule picks the ancestor to re-expand, so the search climbs a different hill instead of stalling — AlphaZero-shaped MCTS over the lineage, with deterministic evaluation in place of rollouts ([the mapping](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/methods/candidate-elimination.md#comparison-to-mcts)).
+**It searches a tree, not a trail.** When a branch is spent, a UCB rule picks the ancestor to re-expand, so the search climbs a different hill instead of stalling — AlphaZero-shaped MCTS over the lineage, with deterministic evaluation in place of rollouts ([the mapping](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#comparison-to-mcts)).
 
 ## How it compares to GEPA and AlphaEvolve
 
@@ -327,7 +327,7 @@ A percentage in a round banner is an **in-campaign reading, computed on the rows
 - **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/developer/self-healing-internals.md)); stalls escalate L1 → L2 → L3 ([the-loop](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/concepts/the-loop.md)). Stuck for other reasons: [troubleshooting](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/05-troubleshooting.md).
 - **Why not search at request time instead?** PromptPotter finds a configuration once; from then on it is an ordinary call with no search in the path. [Test-time compute, moved out of the request.](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/related-work.md#test-time-compute-moved-out-of-the-request)
 - **Is this a model router?** No. Live model selection per question is a gateway ([OpenRouter](https://openrouter.ai), [OmniRoute](https://github.com/diegosouzapw/OmniRoute)). PromptPotter tunes the thing a gateway ends up calling, so the two compose.
-- **Where are the benchmark numbers?** Not published yet, on purpose: DSPy's optimizers and CAPO on BBEH, every method on the same held-out rows, target model and budget held constant. [`benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md) · [harness](https://github.com/PromptPotter/prompt-potter-optimizer/tree/main/docs/research/bbeh-comparison/)
+- **Where are the benchmark numbers?** Not published yet, on purpose: DSPy's optimizers and CAPO on BBEH, every method on the same held-out rows, target model and budget held constant. [`benchmarks.md`](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/research/benchmarks.md) · [harness](https://github.com/PromptPotter/prompt-potter-optimizer/tree/main/paper/bbeh-comparison/)
 
 </details>
 

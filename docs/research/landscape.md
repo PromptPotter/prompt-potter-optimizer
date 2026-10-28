@@ -196,6 +196,18 @@ commercial meta-prompt optimizer "Prompt Learning") and [Weave](https://github.c
 The platform [Promptim](#promptim-langchain) runs on. **Verdict — weak.** **Checked** 2026-09-24, via
 Promptim only.
 
+## MLflow
+
+A tracking server and Prompt Registry, plus `mlflow.genai.optimize_prompts` (MLflow 3.5.0+) over
+registered prompt versions: `predict_fn`, `train_data`, `prompt_uris`, `scorers` and an `optimizer` —
+`GepaPromptOptimizer` (reflection under a `max_metric_calls` budget), `MetaPromptOptimizer` (zero- or
+few-shot metaprompting) or a `BasePromptOptimizer` subclass
+([docs](https://mlflow.org/docs/latest/genai/prompt-registry/optimize-prompts/)). **Verdict —
+reference:** the registry and tracking server are a viewer we write to
+([`../specs/mlflow-interop.md`](../specs/mlflow-interop.md)). **Worth taking:** the
+`BasePromptOptimizer` seam, through which PromptPotter runs inside `optimize_prompts`. **Checked**
+2026-10-28, the `optimize-prompts` page only; the MCP server not read.
+
 ## AlphaEvolve (Google DeepMind / Google Cloud)
 
 **What.** Gemini proposes edits inside `EVOLVE-BLOCK` markers, a program database keeps the

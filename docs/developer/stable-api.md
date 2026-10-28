@@ -19,13 +19,7 @@ anything = "my_package.connector:CONNECTOR"
 
 The object named must be a `Connector`; **its `name` field is the registry key**, so the entry-point label is free and a package cannot claim a key its connector does not declare. No edits to `domain/campaign_config.py` or `infrastructure/backend.py`. Reference impls: [`connectors/termnorm.py`](../../promptpotter/connectors/termnorm.py), [`application/runner/inner/connector.py`](../../promptpotter/application/runner/inner/connector.py).
 
-**What a plugin is held to** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md); all three rules are enforced when the table completes (`connectors/__init__.py::_validate` and `shared/plugin_registry.py::Registry`, the loader every entry-point group shares), and each raise names its rule. What this page promises is only that they will not tighten within v1.
-
-`connectors.CONNECTORS.origins` traces every registered name to `"built-in"` or the distribution that shipped it.
-
-⚠️ **A connector is trusted code, not sandboxed** — owned by [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md). v1 promises entry points do **not** lower that bar, and no future version makes them a sandbox; the capability scoping of [`decisions.md`](../decisions.md) § 0005 governs API principals, not in-process code.
-
-Adding one *to this repo* is one new file under `promptpotter/connectors/` defining `CONNECTOR`; built-ins are deliberately **not** entry points ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code).
+**What a plugin is held to, and that it is trusted code, not sandboxed** — [`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md) § A connector is trusted code, not sandboxed. v1 promises those rules do not tighten, and that entry points never lower the trust bar nor become a sandbox. Built-ins are not entry points.
 
 **Contracts beyond `protocol.py`:** wire adapters MUST be pure `(query, pipeline_params) → dict` — no I/O, no logging above debug; the `identity_config` layer is removed before the adapter is called, so none strips it · `extract_experiment` MUST return the panel's rows in panel order.
 

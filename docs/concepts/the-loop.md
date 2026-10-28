@@ -36,7 +36,7 @@ Five LLM call sites: `checkin` (runs around the loop and skips the dispatch hub;
   </picture>
 </p>
 
-**It searches a tree, not a trail**: a spent branch rewinds to the ancestor a UCB rule picks — [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md) § Comparison to MCTS.
+**It searches a tree, not a trail**: a spent branch rewinds to the ancestor a UCB rule picks — [`../research/related-work.md`](../research/related-work.md) § Comparison to MCTS.
 
 ## Escalation
 

@@ -1,4 +1,7 @@
-"""A pool is the entries a variation node may draw from, banked so a round reads only what its own state holds."""
+"""A pool is the entries a variation node may draw from, banked so a round reads only what its own state holds.
+
+Each pool is a ``StateSlice`` of one kind from one ``PoolSource``, banking what a reader draws.
+"""
 
 from __future__ import annotations
 

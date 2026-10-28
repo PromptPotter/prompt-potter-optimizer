@@ -25,27 +25,23 @@ the rest of Lane C.
 
 ### Lane A — the hosted beta, usable by a free-tier account end to end
 
-| # | Item | Status |
-|---|---|---|
-| A1 | First-run exhibit — a finished campaign a new account reads before supplying anything (§ First-run exhibit) | no working dataset; the serving mechanism (install-tier campaign root, `demo_mode_enabled` reader) is unbuilt |
-| A2 | Host coupon + BYO per-user API keys (§ Host coupon + BYO keys) | unbuilt; overdue — an account that spends its free ceiling has nowhere to go |
-| A3 | Anonymous preview tier — the public site's chat before sign-in (§ Anonymous preview tier) | blocked on the chat backend |
+- **A1** First-run exhibit — a finished campaign a new account reads before supplying anything (§ First-run exhibit).
+- **A2** Host coupon + BYO per-user API keys (§ Host coupon + BYO keys).
+- **A3** Anonymous preview tier — the public site's chat before sign-in (§ Anonymous preview tier).
 
 ### Lane C — differentiator and capability
 
-| # | Item | Status |
-|---|---|---|
-| C1 | Chat-first front door | Arc 2 (conversation endpoint) open — [`chat-foundation.md`](chat-foundation.md) |
-| C2 | Composite fitness P2–P4 (§ Members the presets need) | open; scatter panel after P3 |
-| C2b | Judged + turn-structured scoring: the per-step ruler (§ Judged and turn-structured scoring) | open |
-| C3 | L4 closure | [`l4-outer-loop.md`](l4-outer-loop.md) § Open |
-| C4 | Cross-user measurement panel | after P3 |
-| C5 | MCP server mode (§ Agent-tool parity) · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit) | open; the read side is served |
-| C6 | Public-service hardening: Docker, metrics, app-level rate limit, billing | open; nothing bounds the NUMBER of accounts |
-| C7 | Non-prompt targets · agent harnesses (§ Evolving agent harnesses) · multimodal | after v1, except agent harnesses |
-| C8 | Mask abstraction — the sample-set half (§ Lineage mask) | open |
-| C9 | Variation and pools (§ Variation and pools) | **next** |
-| C10 | Operator-authored prompt-field order (§ Prompt-field order) | waits on an operator decision |
+- **C1** Chat-first front door — [`chat-foundation.md`](chat-foundation.md).
+- **C2** Composite fitness P2–P4 (§ Members the presets need).
+- **C2b** Judged + turn-structured scoring: the per-step ruler (§ Judged and turn-structured scoring).
+- **C3** L4 closure — [`l4-outer-loop.md`](l4-outer-loop.md) § Open.
+- **C4** Cross-user measurement panel, after P3.
+- **C5** MCP server mode (§ Agent-tool parity) · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit).
+- **C6** Public-service hardening: Docker, metrics, app-level rate limit, billing; a bound on the NUMBER of accounts.
+- **C7** Non-prompt targets · agent harnesses (§ Evolving agent harnesses) · multimodal; all but harnesses after v1.
+- **C8** Mask abstraction — the sample-set half (§ Lineage mask).
+- **C9** Variation and pools (§ Variation and pools).
+- **C10** Operator-authored prompt-field order (§ Prompt-field order).
 
 **M14 (publication)** needs: ablation rows L1 / L1+L2 / full · scan · cross-run archive · critique ·
 zero-signal-filter; competitor and L4 numbers after C3; **endpoint hardening P0** (auth dependency on
@@ -53,6 +49,12 @@ every router, pinned `ALLOWED_ORIGINS`, `extra=forbid` on request models, poll r
 non-localhost open. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
 
 ## The bench (M13)
+
+**M13:** every optimizer, peers included, is a manifest the bench runs, inheriting measurement,
+archive, spend ledger, persistence, the five entry points and the control plane; the headline is the
+held-out bench score. It closes when ONE peer (CAPO first) runs end to end in a head-to-head whose
+only difference is the optimizer. **M14 (the preprint):** the stopping rule and the comparability
+guard are executable here and every peer ran under them ([`../../paper/`](../../paper/README.md)).
 
 The contract is [`../architecture.md`](../architecture.md) § Bench and optimizer; node types are
 [`../developer/node-standard.md`](../developer/node-standard.md) § Optimizer node types. Two rules a
@@ -76,9 +78,6 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
 7. **Third-party reachability**: a scratch-venv example package with one entry point and one
    proposing node. *Closes when* `optimizer: example` runs a round whose arms carry
    `source="example:propose"` with zero edits inside this tree.
-
-- **LEVI defect:** `application/optimizers/paper_templates.py::marked` refuses a `<prompt>` block with
-  no closing tag (`gpt-oss-20b`, ~1 in 6), and its INVALID card names potter's `l1_generate`.
 
 ### Members the presets need
 
@@ -141,20 +140,7 @@ misses; (2) screen library blocks without the optimizer — authored arms, origi
 - A transcript carries the question and the gold paragraph (`potter/dispatch/bundle.py::TRANSCRIPT_QUERY_CAP`);
   `MISS_ROWS_CAP` 40 → 20 once the top-ups are gone.
 
-**Defects:**
-- **A held leader's evidence is discarded**: an arm that leads but misses the bar is never
-  re-scored. Carry it into the next round's draw. The sampler
-  (`adaptive_queue_mechanism.py::pick_value`) draws cells the parent misses, so a mid-distribution lift
-  is invisible to the election.
-- **Whole-reply answer counting** survives `Grade.span`: `domain/scoring.py::modal_answer_share`,
-  `is_answer_collapsed`, `potter/pobb/checks.py`, `live_dashboard/blocks.py`, `bench/round_analysis.py`.
-- **`l1_generate` never edits `answer_format`**: keep the parsed directive locked, free the rest; show
-  the operator the diff first.
-- **A declared bench is not the held-out count**: `dataset_split: {bench: 100}` held out 162 rows.
-- **Stops**: a stopped bench or verify pass acks `rejected`; a pass with no hop stops only on Ctrl+C;
-  a standing pause stops a later bench pass with no result.
-- **One refusal, every entry point**: `seed-screen` skips the reasoning-model token-floor refusal
-  `new` raises; `--set` parses `off` as `False`.
+**Defects** are [`code-debt-cleanup.md`](code-debt-cleanup.md) § Open — optimizer tuning.
 
 **Owed re-run** — the h2h-3 pair on `hotpotqa-closedbook`, the ruler fix's proof:
 `new hotpotqa-closedbook --arm hotpotqa-cb-h2h-4:levi --set optimizer=levi --set
@@ -254,10 +240,13 @@ reference read before designing any ecosystem expansion. The artifact and its re
 ## Judged and turn-structured scoring
 
 What is live is [`../../promptpotter/application/scoring/judges/CLAUDE.md`](../../promptpotter/application/scoring/judges/CLAUDE.md)'s. A
-rubric must vary across arms on the same cell before a campaign funds it. Open: **per-step
-difficulty** ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3); **a
-declared step as a NODE**, so `campaign_config.exclude_nodes` is the step selector (generalizes
-`connectors/harbor.py`'s `AGENT_NODE`); not running later steps (`_unscoreable_step` raises on a truncated one).
+rubric must vary across arms on the same cell before a campaign funds it. Open:
+- **Per-step difficulty**: δ and `a` per step under a testlet model (a person×testlet effect; the cell
+  stays the atom, since a turn is not an item), gated on identifiability at ~20–34 cells a round, a fixed
+  semantic step schema and a new `RulerScope`; it needs each step's term banked as its own `pipeline_data`
+  key, never collapsed to a scalar.
+- **A declared step as a NODE**, so `campaign_config.exclude_nodes` is the step selector (generalizes
+  `connectors/harbor.py`'s `AGENT_NODE`); not running later steps (`_unscoreable_step` raises on a truncated one).
 
 ## Evolving agent harnesses
 
@@ -283,10 +272,9 @@ maintained and measured separately; measured lift is the only admission ticket.
 - **Cheap top-up** — a second `PanelTrigger`, blocked on the rule that prices a missing row against
   the round's marginal draw cell.
 - **CPU-hours** metered per phase beside `SpendRollup`, for every connector.
-- **Free tier offers only what it admits** — `free_tier.py::with_free_tier_layer` narrows each
-  model's params but never the model axis, so a free check-in offers models Start refuses. The
-  per-value lists should name only values known to fail; the spend ceiling bounds the rest.
-  **Check:** a free account's model menu equals `free_tier.yaml::task_models`.
+- **Origin-relative weighting** — each archive observation weighted by its producing candidate's
+  similarity and recency; `Observation` carries a timestamp and lineage hint once archive-wide drift or
+  a per-node capability curve is chosen.
 - **Delegation, open** ([`../decisions.md`](../decisions.md) § 0005): who edits grants; how a
   channel is identified unspoofably; whether the user's own assistant is attenuable; depth beyond
   one level; whether a delegate is its own tenant.
@@ -304,7 +292,8 @@ The demo: write down ten films you like, get better recommendations than the sta
 the prompt. Bars: most people do it; platform-independent; no private data; a right answer
 (held-out titles, scored by `list_rr`). Before a round, compute the chance floor of the draw — the
 first cut's origin read below it. **MovieLens cannot ship** (no commercial use or redistribution):
-collect our own rows, cut under a name nothing has run before.
+collect our own rows, cut under a name nothing has run before. Served from an install-tier campaign
+root behind a `demo_mode_enabled` reader.
 
 ## Host coupon + BYO keys
 
@@ -345,11 +334,8 @@ announcement), commit on drop, the handle the touch target.
 
 ## Run card
 
-The post card of 21.10.2026 (`swiss-invoices-eval__b1b4f5`) is the run card's expanded layer:
-collapsed it is the compact card (round axis, trend glyph, heatmap, subject, hardest samples); `more`
-swaps in before/after against the origin, the evolution chart with the lineage, and the two-row
-sample heatmap. Rendered from the served hierarchy (`domain/hierarchy.py`), a fork drawn as an event at
-its spawn point. Owed: the round that changed each key, served ("changed in C7.3"). Rejected: the
-round rail of hollow/filled bars and the ring readout. Design: the Run Widget Studies artifact,
-§ "The post card", https://claude.ai/artifact/8bra9rCBGvR4p8191YrZEE; source
-`CANVAS_25/Writing/BlogPosts/Published/261021_BestEditNotInPrompt/run-card.html`.
+Collapsed, the run card is the compact card (round axis, trend glyph, heatmap, subject, hardest
+samples); `more` swaps in before/after against the origin, the evolution chart with the lineage, and
+the two-row sample heatmap. Rendered from the served hierarchy (`domain/hierarchy.py`), a fork drawn as
+an event at its spawn point. Owed: the round that changed each key, served ("changed in C7.3").
+Rejected: the round rail of hollow/filled bars and the ring readout.

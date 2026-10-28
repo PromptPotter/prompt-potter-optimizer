@@ -1,3 +1,22 @@
+"""One containerized Harbor trial per cell, graded by the task's verifier.
+
+The candidate prompt ships as ONE Agent Skill per episode with a FIXED frontmatter ``description``,
+its body within the spec's limits (``docs/research/external-constraints.md`` § SKILL);
+``nodes.agent.config.skill_delivery: system_prompt`` is the second channel, fixed per campaign and
+never in ``param_keys``. The Skill reaches the model only if opened, so arrival is MEASURED
+(``_skill_opened`` / ``_skill_in_first_request`` fill ``SKILL_KEY``); no core ``turn_scalars``
+member carries it, since it would be constant ``1.0`` elsewhere.
+
+The panel is the pinned roster file ``pin-roster`` writes, which refuses to overwrite a moved pin;
+no read fetches the registry. A local task's ``path`` is relative to its panel's directory, and the
+panel's ``agent.kwargs`` may set no key ``nodes.agent.config`` owns.
+
+Trial scratch goes to the system temp dir, anything durable to the measurement archive. Never sweep
+the task images, the package cache, or a container not naming our compose overlay: the Docker host
+has other tenants, and ``docker_host.py::reap_dead_producers`` reaps our leftovers. A trial that
+measured the machine is never a cell: ``_infrastructure_failure`` retries, then raises.
+"""
+
 from __future__ import annotations
 
 import asyncio

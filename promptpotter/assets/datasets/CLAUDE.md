@@ -1,8 +1,7 @@
 # assets/datasets/ — the shipped template definitions
 
 **This directory is a template set, not a benchmark library**: each `dataset.yaml` directory is a definition
-named by its path, read-only in the wheel; every other definition is a tenant one, resolved first. **Configs are
-the source of truth** — no parallel default ladder in code.
+named by its path, read-only in the wheel; every other definition is a tenant one, resolved first.
 
 ## Canonical layout
 
@@ -28,7 +27,8 @@ moving a value between layers moves no key. Only install content has a chain: a 
 ## `source:` is where the rows come from
 
 A definition's rows are a recipe (`BANK_RECIPES` / `PANEL_RECIPES`) plus the cut beside it; a new cut is a new
-definition, never a recipe edit. An unpinned fetched source raises at parse.
+definition, never a recipe edit; a split is the source's canonical one, never invented. An unpinned fetched
+source raises at parse.
 
 ## A ceiling is DECLARED, or the clock that needs it reports nothing
 
@@ -51,9 +51,8 @@ owns its task model**: an LLM node declaring no `model` raises at `configure_and
 
 The roster is the directory tree. Special cases:
 
-- **`email-tagging`** — inline rows, the one definition that runs with no network; the browser walk runs on it.
-- **`justlogic/d234`** — the L4 inner benchmark ([§ L4 below](#l4--promptpotter-self)).
-- **`promptpotter-self/`** — `panel`, the only one to read a result off; `e2e`, a one-cell fixture for the browser walk.
+- **`email-tagging`** — inline rows, runs with no network; the browser walk runs on it.
+- **`promptpotter-self/`** — read a result off `panel` alone; `e2e` is a one-cell fixture for the browser walk.
 - **Optimizer prompt homes are `promptpotter/assets/optimizers/`**, operator-owned; graduating a winner there is a hand-edit.
 
 ## A dataset is its content; its name is a label
@@ -68,11 +67,6 @@ llm node of it, so any preset can be an inner and an edit lifts across layers wi
 
 **The inner instrument is `justlogic/d234`, and a cut switch is never advice** — each depth cut has its own δ
 scale; a new cut is a new `justlogic/dNNN/`, never a re-cut of this one.
-
-## Reference points
-
-- Adding a dataset, canonical splits → [`datasets.md`](../../../docs/operations/datasets.md) § Adding a dataset; never invent a split.
-- Per-dataset model, `reasoning_effort`, `max_tokens` → [`datasets.md`](../../../docs/operations/datasets.md) § The model a dataset runs, the canonical source.
 
 ## Conventions
 

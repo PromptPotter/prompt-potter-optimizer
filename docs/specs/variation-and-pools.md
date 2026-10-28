@@ -120,8 +120,8 @@ seed is never a lever.
   origin shape.
 - **The headless control** — a fresh individual as second parent at equal budget — separates recombination
   from macro-mutation.
-- A crossover child positive against its better parent is the promotion clock, never a result (root
-  [`CLAUDE.md`](../../CLAUDE.md) § The closing directive).
+- A crossover child positive against its better parent is the promotion clock, never a result
+  ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Reading a round).
 
 ## Out of scope, deliberately
 

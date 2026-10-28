@@ -42,16 +42,16 @@
 
 ## Polling shape
 
-**One clock** (`useRead` + `intervalMs` on `lib/read-cache.ts`'s beat) **and one invalidation** (`invalidateReads(name?)`).
+**One clock** (`useRead` + `intervalMs` on `lib/read-cache.ts`'s beat) **and one invalidation** (`invalidateReads(name?)`). <!-- probe: git grep -cE "setInterval\(" -- webapp/lib/*.ts <= 1 -->
 
 - **One tree per campaign, fetched once and addressed into** — never a second genealogy read.
 - **The step window (`/hierarchy/{course}/@`) is the chronology**, not a second tree.
 - **Steps and SSE frames arrive READ** (`promptpotter/domain/activity.py::ActivityFeed`); the browser translates no record and reads no `payload`.
-- **One live channel (`useCycleEvents`), one history channel (the step window)** — no SSE join, no `since=`.
+- **One live channel (`useCycleEvents`), one history channel (the step window)** — no SSE join, no `since=`. <!-- probe: git grep -cE "new EventSource" -- webapp/*.ts <= 1 -->
 
 ## Failure handling — classify, don't bucket
 
-**Every read rides `lib/hooks/useRead.ts`, NAMED by one `{ id, load }` descriptor in `lib/api/reads.ts`**; same `id` shares one flight, body and clock. No hand-rolled `useEffect` fetch.
+**Every read rides `lib/hooks/useRead.ts`, NAMED by one `{ id, load }` descriptor in `lib/api/reads.ts`**; same `id` shares one flight, body and clock. No hand-rolled `useEffect` fetch. <!-- probe: git grep -cE "fetch\(" -- webapp/components/*.tsx == 0 -->
 
 **Every write rides `lib/hooks/useCommand.ts`** (`slot.run`) — never throws, retries or reports gone. The sentence is `operatorMessage(e, kind)` (`lib/api/errors.ts`); rendering `err.message` or a per-surface sentence table violates I2.
 

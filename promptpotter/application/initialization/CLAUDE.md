@@ -1,6 +1,6 @@
 # application/initialization/ — run init
 
-**Run init is an ordered chain** — `init_services` → `populate_session_scoring` → `init_cycle` → `init_optimization_loop` → `finalize_loop_state`; each step's preconditions are the prior step's postconditions. Every verb scoring outside the loop takes `arm_diagnostic_scoring` through `loop_start.py::open_diagnostic`, never a copy per verb.
+**Run init is an ordered chain** — `init_services` → `populate_session_scoring` → `init_cycle` → `init_optimization_loop` → `finalize_loop_state`; each step's preconditions are the prior step's postconditions. Every verb scoring outside the loop takes `loop_start.py::arm_diagnostic_scoring` (most through `open_diagnostic`), never a copy per verb.
 
 ## Registries complete at a declared step
 

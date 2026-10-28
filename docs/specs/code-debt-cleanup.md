@@ -10,16 +10,11 @@ acting.
 
 **Rides with:** any pass in the file named.
 
-- **Most doc invariants are still prose no gate checks.** `gate.py --only doc-claims` resolves cited
-  `file::symbol`s and runs probes; every other one-X / no-second-Y claim gains a probe or is deleted.
+- **Three probed invariants the tree breaks** (`gate.py::_KNOWN_FALSE`): θ differenced without
+  `comparable_to` (`escalation/state.py::_improved`, `views/render/phase.py`); hand-rolled `<table>`
+  beside `ui/DataTable` in `components/compare/`, `shell/SpendBuckets`, `ingest/DatasetPreview`; a
+  hand-rolled dialog in `shell/sidebar/SidebarFilterPopover`. Action: route each through its owner.
   **Re-test:** `gate.py --only doc-claims`.
-- **Three "one reader" mechanisms, no roster across layers** — `infrastructure/projections/base.py::Projection`,
-  `infrastructure/store/read_model.py::LedgerFold` + `infrastructure/store/campaign_store/ledger_scan.py::scan_*`,
-  `domain/activity.py::ActivityFeed`. Action: every reader a `LedgerFold`, projections checkouts of
-  folds, `CampaignStore.ledger(hop)` the one ledger-path derivation. **Re-test:** `rg -c
-  "CycleLayout\(stores.campaigns.cycle_dir" promptpotter` → 0; computed `p_record` ≤ 4.
-- **Run state mirrored by test namespaces.** Action: one seat in `tests/factories.py`. **Re-test:**
-  renaming a `Cycle` attribute changes one file under `tests/`.
 
 ## NEXT ARC
 
@@ -56,6 +51,23 @@ acting.
 
 ## Open — multi-arc
 
+- **The crowning bar tests nothing a result can quote.** `application/scoring/selection.py::elect_round_winner`
+  admits with no interval and no multiplicity correction, and `RoundResult.improved` reads any selection
+  past round 0 as a promotion; at panel width `exact_p_floor(6) = 0.031`, Holm across three arms 0.094, so
+  no corrected exact verdict reaches α=0.05. Call any "this round improved" provisional. Action: re-read
+  separability on a run that used the tenant ruler, then choose a bar — never tighten one before. **Rides
+  with:** [`../../paper/README.md`](../../paper/README.md) § The sequence, stage 3. **Re-test:** a
+  tenant-ruler run's `index.json::final.rounds_to_separable` beside its `rounds_to_improved`.
+- **The free tier offers what it refuses.** `application/free_tier.py::with_free_tier_layer` narrows each
+  model's params but never the model axis, so a free check-in offers models Start refuses. Action: the
+  per-value lists name only values known to fail; the spend ceiling bounds the rest. **Rides with:** the
+  host coupon ([`roadmap.md`](roadmap.md) § Host coupon + BYO keys). **Re-test:** a free account's model
+  menu equals `free_tier.yaml::task_models`.
+- **`application/optimizers/paper_templates.py::marked` refuses a `<prompt>` block with no closing tag**
+  (`gpt-oss-20b`, ~1 in 6 LEVI replies), and the INVALID card names potter's `l1_generate`. Action: an
+  unclosed block reads to the reply's end; the card names the node that proposed. **Rides with:** the
+  h2h-3 re-run ([`roadmap.md`](roadmap.md) § Optimizer tuning — the standing board). **Re-test:**
+  `marked("<prompt>x")` is `None`.
 - **NEXT — the default host pin is a trial with no verdict.** `domain/pipeline_overlay.py::pin_default_routes`
   writes each model's default host (`infrastructure/llm/registry.py::_MODEL_PROFILES`) into every
   node config; `route_order: []` opts out. **Decided:** a model keeps its pin only where its realized
@@ -85,6 +97,31 @@ acting.
   labelled as such, with samples only weak candidates measured counted as *unchallenged*. **Rides
   with:** any change to `hit_spread` or the run card. **Re-test:** ask the operator which.
 - **`domain/export.py` carries no optimization spend or tokens**, so a reader cannot compute amortized lifetime cost ([`../research/external-constraints.md`](../research/external-constraints.md) § Cost reporting — binds every run from now, not only the preprint). **Rides with:** the next export shape change. **Re-test:** `grep -n "spend\|token" promptpotter/domain/export.py`.
+
+## Open — optimizer tuning
+
+**Rides with:** arc 3 of [`roadmap.md`](roadmap.md) § Sequence.
+
+- **A held leader's evidence is discarded**: an arm that leads but misses the bar is never re-scored
+  (`optimizers/potter/members.py::AdaptiveQueue.draw`). Action: carry it into the next round's draw.
+  **Re-test:** the round after a leader missed the bar re-scores that arm.
+- **Whole-reply answer counting survives `Grade.span`**: `domain/scoring.py::modal_answer_share` and
+  `::is_answer_collapsed`, `potter/pobb/checks.py`, `live_dashboard/blocks.py`, `bench/round_analysis.py`.
+  Action: each counts the graded span. **Re-test:** `modal_answer_share` reads `Grade.span`.
+- **`l1_generate` edits `answer_format`.** Action: the parsed directive stays locked, the rest free; the
+  operator sees the diff first. **Re-test:** a round file whose `l1_generate` arm's `answer_format`
+  differs from its parent's.
+- **A declared bench is not the held-out count**: `CampaignConfig.dataset_split` `{bench: 100}` held out
+  162 rows. Action: hold out the declared count. **Re-test:** a fresh `{bench: 100}` campaign holds out 100.
+- **A paid pass does not stop on its command**: a stopped bench or verify pass acks `rejected`; a pass with
+  no hop stops only on Ctrl+C; a standing pause stops a later bench pass with no result
+  (`application/runner/grade_bench.py::grade_line_bench`). Action: every pass takes pause and stop at its
+  cell boundary and banks what it graded. **Re-test:** pause a bench pass from a second terminal; it acks
+  `accepted` and banks a result.
+- **One refusal, one entry point**: `seed-screen` skips `application/preflight.py::refuse_below_reasoning_floor`,
+  which `new` raises through `jobs/mint.py`; `presentation/cli/commands/new.py` parses `--set` with
+  `yaml.safe_load`, so `off` reads `False`. Action: the refusal sits where every entry point passes; `--set`
+  keeps `off` a string. **Re-test:** `seed-screen` below a reasoning floor refuses; `--set x=off` lands `"off"`.
 
 ## Open — from the head-to-head arc
 

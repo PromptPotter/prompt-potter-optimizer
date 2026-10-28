@@ -288,8 +288,8 @@ target-version = "py313"
 line-length = 100
 # The peers' Colab notebooks run promptolution and DSPy on Colab, never this repo.
 extend-exclude = [
-    "docs/research/bbeh-comparison/bbeh_capo.ipynb",
-    "docs/research/bbeh-comparison/bbeh_dspy.ipynb",
+    "paper/bbeh-comparison/bbeh_capo.ipynb",
+    "paper/bbeh-comparison/bbeh_dspy.ipynb",
 ]
 
 [tool.ruff.lint]
@@ -326,7 +326,7 @@ max-complexity = 23
 
 [tool.deptry]
 extend_exclude = [
-    "docs/research/bbeh-comparison/.*",
+    "paper/bbeh-comparison/.*",
     "notebooks/bbeh_potter.ipynb",
     "examples/.*",  # each a distribution of its own, with its own dependency list
 ]

@@ -17,6 +17,10 @@ they never disagree about what "better" means.
 **Holm corrects across PAIRS and cannot correct across METRICS.** Any surface reporting a pairwise
 comparison must say so: trying several metrics and keeping the tightest is a comparison no column
 prices. `p` is null where nothing was tested (below two shared cells) — not a test that returned 1.00.
+`holm_adjusted` and `p_floor` reach every pair `application/scoring/paired.py::read_pair` takes, and
+**the floor gates the claim**: `p_value` is `max(Student-t p, p_floor)` and `side` is `spans` wherever
+`p_floor` exceeds `alpha` (`domain/paired_reading.py::interval_side`). `min_detectable_effect` and
+`panel_precision` serve reads only.
 
 **Scope:** fixed pipeline, labelled dataset, scalar fitness. θ is one latent ability per candidate,
 so multi-objective fitness, open-ended synthesis and unlabelled tasks are not supported.
@@ -153,41 +157,12 @@ objective). `overlap.advance` reads neither — it is the pick's lead over C0 on
 (`OverlapReading.lead`) and drives potter's stall ladder. Under `parents` a masked election is
 undecidable rather than guessed (`mask/load.py::_parent`).
 
-## ⚠️ The crowning bar is an OPEN defect — be skeptical of anything resting on it
+**The crowning bar** is [`candidate-elimination.md`](candidate-elimination.md) § The θ rule's.
 
-**A known bug with no fix chosen, not a caveat on a working mechanism.** The bar the election reads θ
-against does not currently test anything, so a crowned winner is weaker evidence than "winner"
-implies. Call any "this round improved" claim provisional.
+## One ruler, one clock
 
-- **The bar is the stopping rule, mirrored.** `selection.py::elect_round_winner` admits on a raw θ
-  lift above `rasch.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND
-  `P(θ_arm > θ_parent)` bounded by those discordant cells
-  ([`candidate-elimination.md`](candidate-elimination.md) § The θ rule, step 4) above `1 − ε`, PoBB's
-  ε. One discordant cell (support 0.75 whatever θ reads) never promotes. A pick's crowning cells are
-  replayed by `rescore_parent` and kept out of later races (`selection.py::crowning_cells`), so the
-  parent's bar needs no winner's-curse credit. Still no interval and no multiplicity correction;
-  `RoundResult.improved` reads any selection past round 0 as a promotion.
-- **Separability is read against C0, not the parent.** A round closes `advanced`
-  (`domain/origin_panel.py::round_advance`) only where its pick leads C0 on the origin panel by an
-  interval clear of 0 and tops every earlier pick there. That `RoundAdvance` resets L1 patience and
-  is the clock a result quotes (`index.json::final.rounds_to_separable`); adoption stays `improved`.
-  A pick whose reading was not taken closes `unread` (neither reset nor stall); a panel with no pair
-  lets the promotion stand alone (`advanced_unpaired`).
-- **The right toolkit is only PARTLY on this path.** `holm_adjusted` and `p_floor` reach every pair
-  `application/scoring/paired.py::read_pair` takes, and **the floor gates the claim**: `p_value` is
-  `max(Student-t p, p_floor)` and `side` is `spans` wherever `p_floor` exceeds `alpha`
-  (`domain/paired_reading.py::interval_side`). `min_detectable_effect` and `panel_precision` serve
-  reads only. `sign_posterior` bounds elimination and the election's ADMISSION (a bar is absolute);
-  the election still RANKS on the unbounded posterior — bounding it moved a banked crown across a
-  0.0007 gap.
-- **At current width it cannot pass.** `exact_p_floor(6) = 0.031`; Holm across three arms takes it to
-  0.094, so no corrected exact verdict reaches α=0.05 at any effect size.
-
-**Why still open:** every number a bar could be designed against predates the tenant ruler. **Re-read
-separability on a run that used it, then choose a bar** — do not tighten one now.
-
-**One ruler, one clock.** The tenant holds ONE δ ruler (`ruler.jsonl`,
-`infrastructure/store/ruler_store.py`), keyed by sample content, versioned by tick: a round's grade-A
+The tenant holds ONE δ ruler (`ruler.jsonl`, `infrastructure/store/ruler_store.py`), keyed by
+sample content, versioned by tick: a round's grade-A
 rows fold in after its walks and BEFORE its election (`DifficultyView.link`). An election reads that
 version less every row of the parent line (`bench/difficulty.py::judging_ruler`) — fit on the
 parent's rows, δ would be its hit pattern and θ would favour it every round.
@@ -220,6 +195,13 @@ Source: **`p1`, [arXiv:2604.08801](https://arxiv.org/abs/2604.08801)** (its *sys
 high-separation subset beats a large one**, and **a later edition of a dated benchmark is a
 contamination-resistant held-out set** (one year's AIME → the next; not a substitute for a canonical
 split). L4 calls it **informative width** ([`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md)).
+
+**Separability is read against C0, not the parent.** A round closes `advanced`
+(`domain/origin_panel.py::round_advance`) only where its pick leads C0 on the origin panel by an
+interval clear of 0 and tops every earlier pick there. That `RoundAdvance` resets L1 patience and is
+the clock a result quotes (`index.json::final.rounds_to_separable`); adoption stays `improved`, which
+reads any selection past round 0 as a promotion. A pick whose reading was not taken closes `unread`
+(neither reset nor stall); a panel with no pair lets the promotion stand alone (`advanced_unpaired`).
 
 ---
 
@@ -321,37 +303,3 @@ graded cells on its ONE ruler (`Cycle.difficulty.ruler`) and the abilities read 
 `::rank_hard_samples`. **Dataset scope is never persisted** (no campaign owns it):
 `GET /datasets/{name}/cells?scope=dataset` anchors a ruler per request on archived cells
 (`bench/difficulty.py::calibrate_delta_ruler`) and serves δ with no pick score.
-
----
-
-## Phase 2 sketch — origin-relative weighting (not shipped)
-
-Weight each archive observation by the producing candidate's relevance (similarity + recency). Needs
-`Observation` to carry a timestamp + lineage hint; the open choice (archive-wide drift vs per-node
-capability curve) fixes that schema.
-
-## Phase 3 sketch — per-STEP difficulty for turn-structured cells (not shipped)
-
-For multi-turn or multi-step cells, fit δ and `a` **per step**: more information per cell, so fewer
-cells for the same SE where a cell costs minutes and dollars. **The gain is a theorem:** one outcome's
-information `a²·p(1−p)` peaks at `θ ≈ δ`, while a step-structured item contributes at each of its
-`k−1` thresholds and covers a wider θ range — which matters because a round's arms are spread.
-
-**A turn is not an item.** Turn 2 is conditioned on turn 1, so scoring turns as items claims `2N`
-observations for `N` — **overstated precision**, and elimination cuts on confidence it never earned.
-**The cell stays the atom; the fix is a testlet model** (Bradlow/Wainer/Wang, or bi-factor):
-per-step `b_j`/`a_j` plus a person×testlet random effect. A graded per-step composite already reaches
-θ today (§ The model); per-step fitting adds thresholds that are **fitted rather than imposed**.
-
-Three gates:
-
-- **Identifiability.** Per-step 2PL plus testlet effects against ~20–34 cells a round fits noise.
-- **Step-schema stability.** "Step 2" must be the same KIND of thing across cells — a fixed SEMANTIC
-  schema decided when the dataset is cut ([`../operations/datasets.md`](../operations/datasets.md)
-  § Adding a dataset); the shipped `retrieve → ground → answer` schema and its graders are
-  [`../../promptpotter/application/scoring/judges/CLAUDE.md`](../../promptpotter/application/scoring/judges/CLAUDE.md) § The step schema's.
-- **A new parameter space is a new `RulerScope`** — nothing before it compares across the line.
-
-**The enabling condition must not be skipped: bank each step's term separately.** Parts persist as
-named keys in `pipeline_data`, and `Scorer.grade` re-grades archived rows under the current formula,
-so a testlet fit later is a re-read, not a re-measure. Collapse to a scalar and that door shuts.

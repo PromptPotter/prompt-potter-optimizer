@@ -16,10 +16,6 @@ Each generation an LLM mutates the parent into a small population; every individ
 
 *N* individuals a round (default 5), each measured on a shared query set **Q** of size *K* (potter's `adaptive_queue.sp_budget_round`), per-sample score in `[0, 1]`, mean composite. *N* × *K* backend calls dominate wall clock; the population is pre-enumerated, so the job is comparison, not search. The model (Rasch θ/δ, graded response, `√φ`) and the **round order** are [`verdict-resolution.md`](verdict-resolution.md)'s; the one property used here is that the order is *shared, never re-ranked per candidate*.
 
-## Prior art — fishtest
-
-**Stockfish's fishtest has run this loop since 2013** (patch vs master, SPRT). Two correspondences to know before claiming novelty: their unbalanced opening book is our seed-misses-first order, and Elo is Bradley–Terry, Rasch's logistic family. Not theirs: an automated proposer over structure and text, N-arm best-arm identification, and measurement reuse across a changed instrument.
-
 ## Why the comparison has to be paired
 
 PoBB (Russo 2016) assumes i.i.d. observation; the shared order front-loads the seed's misses on purpose, so unpaired, a leader that ran the easy prefix reads as unbeatable. **PoBB priors are sample-keyed, and the leader is backfilled onto the candidate's upcoming samples before each comparison.**
@@ -40,6 +36,15 @@ The first candidate runs to completion. Each later one, once read on `eliminatio
 5. Stop when `p_best < ε(n)` (graded by depth: `epsilon_floor`).
 
 The **same ability the round election ranks by**, so the two cannot disagree, valid on partial prefixes. Code: `application/scoring/selection.py::elimination_p_best` under `::paired_p_best` (the one pairing, for live `check()` and the resume replayer), driven by `application/optimizers/potter/pobb/checks.py::PoBBCheck`. Cross-cycle comparison is the `ab` verb (`resume_and_fork/ab_replay.py`) — re-derived decisions, no new measurements.
+
+**The election's bar is this rule, mirrored.** `selection.py::elect_round_winner` admits an arm on a
+raw θ lift above `rasch.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND step 4's
+bounded `P(θ_arm > θ_parent)` above `1 − ε`, PoBB's ε — so one discordant cell (support 0.75 whatever
+θ reads) never promotes. Admission is bounded; the election RANKS on the unbounded posterior
+(bounding it moved a banked crown across a 0.0007 gap). A pick's crowning cells are replayed by
+`rescore_parent` and kept out of later races (`selection.py::crowning_cells`), so the parent's bar
+needs no winner's-curse credit. What the bar does not test is
+[`../specs/code-debt-cleanup.md`](../specs/code-debt-cleanup.md) § Open — multi-arc's.
 
 ## Two regimes
 
@@ -72,7 +77,7 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 
 **Candidates walk at once and decide in turn** (`runner/measurement.py::measure_population`, one loop `scoring/query_loop.py::run_walks`): a later candidate may measure ahead but is checked and cut only once every earlier one is decided, so its priors are a serial round's. That horizon, summed over walks and catch-ups, is the concurrency served (`run_phase_control.py::FlightGauge`).
 
-**One comparator, one stop rule — do not add a sixth.** A paired-margin futility gate was removed: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought back, is one gate **on the θ ruler**.
+**One comparator, one stop rule — do not add a sixth.** No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
 
 ## CAPO's race — the `blocks` sampler and the `paired_t` eliminator
 
@@ -175,33 +180,7 @@ The replayer (`optimizers/potter/resume.py::_pobb_replay_snapshot`) feeds the re
 1. **Tie-breaking at budget cap.** Top 2–3 at similar `P(best)`: ship pick-by-point-estimate; design a cap-extension policy after seeing how often it fires.
 2. **Small-*n* θ.** Few observations do NOT keep the gate conservative — ties narrow both `se` (`p_best` 0.124 at a low base rate, `sealqa/longseal-12`). Step 4 bounds that; the EB hyperprior on ability variance keeps the fit from collapsing.
 
-## Why this family and not another
-
-Mid-round abortion is **best-arm identification**; three choices place PoBB:
-
-- **Every prior, not only the leader** — LUCB (Kalyanakrishnan 2012), Bayes-UCB (Kaufmann 2012) and Hoeffding Races (Maron & Moore 1993) are pairwise too but test against the leader alone, with frequentist bounds.
-- **Bayesian over frequentist** — `P(c is best)` is one operator-readable number.
-- **Fixed-confidence (ε) over fixed-budget** — broken candidates stop at the evidence floor; Successive Rejects (Audibert 2010) and Sequential Halving (Karnin 2013) run them to the phase boundary. "Fixed-confidence" is loose: ε is a bar on a posterior reading, not an anytime-valid error rate, so under optional stopping it carries no frequentist guarantee ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 3). The anytime-valid form — a confidence sequence from test supermartingales ([Hsu & Shekhar, *Efficient Sequential Evaluation of LLMs*](https://arxiv.org/abs/2607.17409)) — is what the guarantee must take before it is claimed.
-
-**It replaced Wilcoxon signed-rank + Holm-Bonferroni** (pairwise, variance-agnostic); Holm survives as a *reporting* correction only (`shared/statistics.py::holm_adjusted`). **OCBA** (Chen 2000) is the closest classical relative but allocates where this stops; PoBB likewise keeps Top-Two Thompson Sampling's stop rule and drops its allocation half.
-
-## Comparison to MCTS
-
-PromptPotter **is** AlphaZero-shaped MCTS over the lineage tree:
-
-- **Selection.** L2/L3 emits `fork_proposal: {reason}` — *whether* to rewind; *where* is UCB1 over the backpropagated tree (`application/mask/backprop.py::select_rewind_round`). The layer does not name the round — it never sees the ancestors' fitness.
-- **Expansion.** A round: L1 proposes a population from the selected node.
-- **Simulation.** A deterministic forward pass, not a random rollout (AlphaZero's precedent); within a round PoBB prunes siblings on shared samples.
-- **Backpropagation.** Each round's θ rolls up to every ancestor as visit count + value (`accumulate_node_stats`), every cycle read on ONE fit (`DifficultyView.level_series`); a caveated round is a visit with no value, and a rewind finding no valued ancestor is dropped as a `layer_rebase_dropped` warning.
-
-**Value is θ, never accuracy, and a fork's inherited prefix is not a fresh visit** (`application/mask/backprop.py`) — both naive forms fail silently. A rollout is a full round of LLM calls, so exploration is closer to PUCT than vanilla UCT; it buys **recovery from dead-end branches**.
-
-## References
-
-- **Russo, D. (2016).** *Simple Bayesian Algorithms for Best Arm Identification.* COLT. — the PoBB / Top-Two Thompson Sampling family.
-- **Maurer & Pontil (2009).** *Empirical Bernstein bounds and sample-variance penalization.* COLT.
-- **Kalyanakrishnan et al. (2012).** *PAC subset selection in stochastic multi-armed bandits.* ICML. — LUCB; rejected for testing against the leader alone.
-- **Audibert, Bubeck, Munos (2010).** *Best arm identification in multi-armed bandits.* COLT. — Successive Rejects; rejected for not adapting within-round.
-- **Chen, C.-H. (2000).** *Optimal Computing Budget Allocation.* Operations Research. — the closest classical relative; allocation rather than a stop rule.
+Why this family of stop rules, its prior art, and the lineage search as MCTS:
+[`../research/related-work.md`](../research/related-work.md) § Why PoBB's family and not another.
 
 The `classify_result()` rule table: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result-fatal-classification). Operator framing: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
