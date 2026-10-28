@@ -38,6 +38,8 @@ class TrailLine(NamedTuple):
     subject: str
     # The acting principal: a delegate's own id on a line in its delegator's workspace.
     actor: str
+    # The campaign a command acted on, blank on the workspace, a draft and an account event.
+    campaign_id: str
 
 
 class _Trail:
@@ -53,16 +55,16 @@ class _Trail:
         match record:
             case AccountEventRecord():
                 self._found.append(
-                    TrailLine(record.timestamp, record.event, record.subject, record.user_id)
+                    TrailLine(record.timestamp, record.event, record.subject, record.user_id, "")
                 )
             case CommandRecord():
                 self._found.append(
-                    TrailLine(record.timestamp, record.kind, "", record.issued_by.id)
+                    TrailLine(record.timestamp, record.kind, "", record.issued_by.id, "")
                 )
             case TrailTombstoneRecord():
                 self._banked.add(record.subject)
                 self._found.extend(
-                    TrailLine(done.at, done.kind, done.subject, done.user_id)
+                    TrailLine(done.at, done.kind, done.subject, done.user_id, record.campaign_id)
                     for done in record.commands
                 )
 
@@ -78,9 +80,15 @@ _TRAIL_FOLDS = (_Trail,)
 def _cycle_lines(cycle_dir: Path, *, inside: str = "") -> list[TrailLine]:
     """``inside`` names the campaign whose inner sandbox holds the cycle; a draft is addressed as one."""
     parent = cycle_dir.parent
-    address = f"{parent.name if parent.name == DRAFTS_DIR else parent.parent.name}/{cycle_dir.name}"
+    campaign_id = "" if parent.name == DRAFTS_DIR else parent.parent.name
+    address = f"{campaign_id or parent.name}/{cycle_dir.name}"
     lines, _ = LedgerIndex.of(CycleLayout(cycle_dir).ledger, _TRAIL_FOLDS).view(_Trail)
-    return [line._replace(subject=f"{inside}>{address}" if inside else address) for line in lines]
+    return [
+        line._replace(
+            subject=f"{inside}>{address}" if inside else address, campaign_id=inside or campaign_id
+        )
+        for line in lines
+    ]
 
 
 def workspace_lines(campaigns: CampaignStore) -> Iterator[TrailLine]:

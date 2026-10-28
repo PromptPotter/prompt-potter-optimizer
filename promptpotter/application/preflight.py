@@ -12,6 +12,7 @@ from promptpotter.application.optimizer_manifest import checkin_manifest, select
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.infrastructure.llm.pricing import route_priced
 from promptpotter.infrastructure.llm.registry import model_profile
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -295,4 +296,51 @@ def refuse_below_reasoning_floor(
             "a reasoning model is configured below its token floor and would emit zero content:"
             "\n  - " + "\n  - ".join(violations),
             code="model_below_reasoning_floor",
+        )
+
+
+Route = tuple[str, str, tuple[str, ...] | None]
+
+
+def task_routes(pipeline_params: Mapping[str, Any], schema: PipelineSchema) -> list[Route]:
+    """Each task node's model, and each model its axis offers: ``(model, provider, hosts)``."""
+    routes: dict[Route, None] = {}
+    for _node, cfg in node_config_items(dict(pipeline_params)):
+        model, provider, hosts = cfg.get("model"), cfg.get("provider"), cfg.get("route_order")
+        if model and provider:
+            routes[str(model), str(provider), tuple(hosts) if hosts else None] = None
+    for node in schema.nodes:
+        if node.provider and "model" in node.param_keys:
+            for model in schema.model_options(node):
+                routes[model, node.provider, None] = None
+    return list(routes)
+
+
+def unpriced_routes(
+    config: CampaignConfig, pipeline_params: Mapping[str, Any], schema: PipelineSchema
+) -> list[str]:
+    """Every route a run may send on, the optimizer's too, that no rate prices — under a dollar
+    ceiling only. An unreachable price list refuses nothing here."""
+    if config.optimization.budget.usd is None:
+        return []
+    selected = select_optimizer(config.optimization)
+    routes = dict.fromkeys(task_routes(pipeline_params, schema))
+    for cfg in (selected.node_config(n) for n in selected.llm_nodes):
+        model, provider, hosts = cfg.get("model"), cfg.get("provider"), cfg.get("route_order")
+        if model and provider:
+            routes[str(model), str(provider), tuple(hosts) if hosts else None] = None
+    return [
+        f"{model} ({provider})"
+        for model, provider, hosts in routes
+        if route_priced(model, provider, hosts=hosts) is False
+    ]
+
+
+def refuse_unpriced(unpriced: Sequence[str]) -> None:
+    if unpriced:
+        raise PayloadInvalidError(
+            f"no rate prices {', '.join(unpriced)}, so a dollar ceiling cannot bound what it "
+            "sends. Pick a model the rate table prices, or drop the dollar cap and bound the run "
+            "in tokens (`budget: {usd: null, tokens: N}`).",
+            code="model_unpriced",
         )

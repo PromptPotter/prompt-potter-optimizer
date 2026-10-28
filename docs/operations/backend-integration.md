@@ -30,7 +30,7 @@ Every key is ABSENT when the backend reported nothing, and PromptPotter reads ab
 | `finish_reason` | a truncation cannot be told from an empty response, and every empty terminal grades as the fatal `empty_response` |
 | `reasoning` | the share of output spent thinking is unreadable, so a slow node reads as a slow provider |
 | `cache_read` | the prefix-cache reading is `unreported` — every surface renders `c?`, distinct from a reported `c0%` (`domain/spend.py::prefix_reading`) |
-| `attempts` | the node reads as one request. **Sending it has a price too:** the counts beside it are one sum, so every attempt past the one they account for is held at one attempt's bound as a send nobody priced (`scoring/sample_measurement.py::_uncounted_attempts`) — answered repair turns included, until the backend says which attempts went unreported |
+| `unreported_attempts` | every request the node sent is read off its sums, so a resend that left and reported no usage (a 5xx, a connection broken after the request went) bills nothing. Each one counted is held at one attempt's bound as a send nobody priced (`scoring/sample_measurement.py::_unreported_attempts`); an answered repair turn is in the sums and is never counted here |
 
 ### What a backend owes a campaign under a spend ceiling — required, not optional
 
@@ -53,9 +53,8 @@ send it serves nothing — its connector derives the bound from what it sends
 - **Every billed attempt is reported**, in `step_tokens`, on a failed request too — an error
   envelope carries `data.step_tokens`. A reply reporting none leaves the cell unreported at its
   whole bound: it binds the ceiling, and no surface shows it as spent. **A backend that retries on
-  its own owes one more fact: how many of a node's `attempts` left and reported no usage** (a 5xx,
-  a connection broken after the request went). Until it says, every attempt beyond the one the
-  node's sum accounts for is held as unreported.
+  its own owes one more fact: how many of a node's requests left and reported no usage**
+  (`unreported_attempts`); each is held as unreported, and nothing else is.
 - **A 4xx says the request was refused before any model generated, and its bound is released** —
   except a 408 (`infrastructure/llm/spend_book.py::replied`), and the 422 a relay answers a model
   whose reply failed validation with: that model generated, so an unreported one stays held

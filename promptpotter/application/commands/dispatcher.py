@@ -34,6 +34,7 @@ from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import (
     Stores,
+    own_campaign,
     owned_campaign,
     owned_draft_data,
     resolve_cycle_path,
@@ -196,7 +197,7 @@ class CommandDispatcher:
                 return await self._record_and_apply(ledger, call, self._applier(call))
 
     async def _on_campaign(self, call: CommandCall[CampaignPayload]) -> CommandOutcome[object]:
-        owned_campaign(self.stores, call.payload.campaign_id)
+        own_campaign(self.stores, call.payload.campaign_id)
         # The WORKSPACE ledger: `delete` REMOVES the campaign tree, and its own ledger with it.
         ledger = CycleEventLog.open_workspace(self.stores.base_dir)
         return await self._record_and_apply(ledger, call, self._applier(call))

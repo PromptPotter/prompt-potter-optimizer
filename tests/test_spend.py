@@ -49,9 +49,14 @@ from factories import (
 from offline_world import Hang, Router, Said, completion
 from pydantic import BaseModel, Field, JsonValue, ValidationError
 
+from promptpotter.application import free_tier
 from promptpotter.application.account import account_of
 from promptpotter.application.bench import llm_call as call_mod
-from promptpotter.application.campaign_config import CampaignConfig, OptimizationConfig
+from promptpotter.application.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    merge_config_layers,
+)
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.limits_and_queue import change_run_limits
 from promptpotter.application.commands.payloads import EditDraftCampaignPayload, StartCheckinPayload
@@ -74,6 +79,7 @@ from promptpotter.application.jobs.quota import (
     admit_launch,
     clamp_budget_change,
     hold_budget_change,
+    on_free_tier,
     paid_call,
     spends_the_hosts_own_key,
 )
@@ -124,6 +130,7 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     WebSpendBound,
@@ -166,7 +173,12 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, heartbeat, pricing, telemetry
 from promptpotter.infrastructure.llm.litellm_sends import ReportedCost
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
-from promptpotter.infrastructure.llm.pricing import PriceTier, Rate, RateCeiling, RateTable
+from promptpotter.infrastructure.llm.pricing import (
+    PriceTier,
+    Rate,
+    RateCeiling,
+    RateTable,
+)
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -2146,8 +2158,20 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     # A backend cell is never sent again while it may still bill.
     cell_ledger = CycleEventLog(tmp_path / "termnorm.jsonl")
     billed_step = {
-        "step_tokens": {"n": {"attempts": 3, "input": 10, "output": 5, "cost_usd": 0.001}}
+        "step_tokens": {
+            "n": {
+                "attempts": 3,
+                "unreported_attempts": 2,
+                "input": 10,
+                "output": 5,
+                "cost_usd": 0.001,
+            }
+        }
     }
+    # A repaired node's resend is IN its sums: holding it again halted runs short of their cap.
+    repaired = {"step_tokens": {"n": {"attempts": 2, "input": 10, "output": 5, "cost_usd": 0.001}}}
+    bill, _ = cell_billing(pipeline_schema([]), {}, {"n": SendBound(40, 20, 0.004)})(repaired)
+    assert bill is not None and bill.unknown is None, "an answered attempt was held as unreported"
     attempt = SendBound(input_tokens=40, output_tokens=20, usd=0.004)
     deadline = {
         "detail": {"error_code": "llm_timeout", "retryable": False, "message": "no reply in 164s"},
@@ -2380,7 +2404,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             return await agent.run_query(
                 Sample(id=sample_id, query="q", ground_truth=None),
                 bound=whole,
-                billed=lambda _data, _refused: (None, None),
+                billed=lambda _data: (None, None),
             )
 
     async def cancel_mid_episode() -> None:
@@ -2427,7 +2451,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
 
 
 _WEB = "https://accounts.google.com"
-_STEP_USD = settings.FREE_TIER_LAUNCH_STEP_USD
+_GRANT_USD = settings.FREE_TIER_SPEND_CAP_USD
 _TOKENS = settings.FREE_TIER_TOKEN_CAP
 _GENEROUS = {"spend_budget_usd_total": 50.0, "token_budget_total": 50_000}
 _HELD_HOP = CycleHop(campaign_id="camp", cycle_id="cycle_x")
@@ -2543,7 +2567,9 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
 
     for n, (door, issuer, budget, declared, grant, running, spent, admitted_caps) in enumerate(
         (
-            ("launch", _WEB, {}, None, None, None, None, Budget(usd=_STEP_USD, tokens=_TOKENS)),
+            ("launch", _WEB, {}, None, None, None, None, Budget(usd=_GRANT_USD, tokens=_TOKENS)),
+            # A free-tier run is admitted whole at its campaign's own ceiling, never a ration under it.
+            ("launch", _WEB, {}, 0.15, None, None, None, Budget(usd=0.15, tokens=_TOKENS)),
             ("launch", _WEB, {}, 10.0, None, None, None, None),
             (
                 "launch",
@@ -2567,7 +2593,7 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                 None,
                 None,
                 _UNPRICEABLE,
-                Budget(usd=_STEP_USD, tokens=_TOKENS - 500_000),
+                Budget(usd=settings.UNPRICED_GRACE_USD, tokens=_TOKENS - 500_000),
             ),
             ("launch", None, {}, None, None, None, None, Budget(usd=None, tokens=None)),
             ("launch", _WEB, _GENEROUS, 10.0, 2.0, None, None, Budget(usd=2.0, tokens=50_000)),
@@ -2616,6 +2642,70 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
             assert knocked == admitted_caps, (
                 f"door {n} ({door}): an account was admitted under another ceiling than it holds"
             )
+
+    # The free tier bounds what a run may ask for, off one table; paid and host accounts are not on it.
+    for n, (issuer, budget, on_tier) in enumerate(
+        ((_WEB, {}, True), (None, {}, False), (_WEB, _GENEROUS, False))
+    ):
+        at = tmp_path / f"tier-{n}"
+        at.mkdir()
+        user = User.model_validate(
+            {"user_id": "sub-9", "tenant_id": "sub-9", "created_at": "2026-01-01", **budget}
+        )
+        stores = _account_stores(at, issuer=issuer, user=user, spent=None)
+        assert on_free_tier(stores) is on_tier, f"account {n} sits on the wrong side of the tier"
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            pricing, "load_rates", lambda: RateTable({("openai", "dear"): Rate(5e-8, 6e-7)})
+        )
+        assert (pricing.route_priced("x", "openai"), pricing.route_priced("dear", "openai")) == (
+            False,
+            True,
+        ), "a dollar ceiling would admit a route no rate prices"
+    oss = "openai/gpt-oss-20b:nitro"
+    config = _budgeted(Budget(usd=None))
+    layered = free_tier.with_free_tier_layer(config, {"llm_only": {"model": oss}})
+    assert (
+        layered.sp_budget_origin,
+        layered.optimization.nodes["adaptive_queue"].config["sp_budget_round"],
+        layered.pipeline_overlay,
+    ) == (20, 20, {"llm_only": {"reasoning_effort": "low"}}), (
+        "a free check-in measured on more cells, or launched above its model's lowest rung"
+    )
+    schema = parse_pipeline_response(
+        {
+            "nodes": {
+                "llm_only": {
+                    "config": {"model": oss},
+                    "optimizer": {"param_keys": ["reasoning_effort"]},
+                }
+            },
+            "pipelines": {"default": ["llm_only"]},
+        }
+    )
+
+    def optimizer_on(effort: str) -> CampaignConfig:
+        luna = {"model": "openai/gpt-6-luna", "reasoning_effort": effort}
+        overlay = {"optimization": {"nodes": {"l1_generate": {"config": luna}}}}
+        return CampaignConfig.model_validate(
+            merge_config_layers(layered.model_dump(mode="json", exclude_unset=True), overlay)
+        )
+
+    for run, effort, steps, outside in (
+        (layered, "low", ["llm_only"], 0),
+        (layered, "none", ["llm_only"], 1),
+        # The axis left open: the optimizer could search any rung, so Start refuses it.
+        (config, "low", ["llm_only"], 1),
+        (layered, "low", ["web_search", "llm_only"], 1),
+        (optimizer_on("medium"), "low", ["llm_only"], 0),
+        (optimizer_on("high"), "low", ["llm_only"], 1),
+    ):
+        params = {"steps": steps, "llm_only": {"model": oss, "reasoning_effort": effort}}
+        off = free_tier.outside_free_tier(run, params, schema)
+        assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
+    with pytest.raises(PayloadInvalidError) as said:
+        free_tier.refuse_outside_free_tier(off)
+    assert said.value.code == "not_on_free_tier", "a free-tier refusal named another cause"
 
     # A paid verb never bills a cycle its producer still holds.
     operator = User(user_id="op", tenant_id="op", created_at="")
@@ -2696,30 +2786,6 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         "a pass kept its slot past its exit"
     )
     assert launch_beside().usd == pytest.approx(1.0), "the pass kept its reservation past its exit"
-
-    # A free-tier step is its share: the account reserves more for it, and it meters the step.
-    stepper = build_stores(
-        IdentityContext(
-            user_id=UserId("sub-6"),
-            tenant_id=TenantId("sub-6"),
-            issuer=Issuer(_WEB),
-            claims={},
-            capabilities=frozenset(),
-        ),
-        projects_root=built_stores.projects_root,
-        install_datasets_root=built_stores.install_datasets_root,
-    )
-
-    async def step_pass() -> None:
-        async with paid_pass(stores=stepper, verb="verify", hop=None, declared=Budget()) as book:
-            assert book.reserve.usd is not None and book.reserve.usd > _STEP_USD, (
-                "the setup lost its point: the account reserves the step alone"
-            )
-            assert book.money_left().usd == pytest.approx(_STEP_USD), (
-                "a free-tier step may meter past its step, up to what the account reserves"
-            )
-
-    asyncio.run(step_pass())
 
     # A budget change leaves the arm it did not touch alone.
     def web_account(sub: str) -> Stores:

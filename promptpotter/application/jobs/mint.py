@@ -18,7 +18,8 @@ from promptpotter.application.campaign_config import (
     effective_config,
 )
 from promptpotter.application.datasets.draft_campaign import mint_draft_id
-from promptpotter.application.jobs.quota import paid_call
+from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
+from promptpotter.application.jobs.quota import on_free_tier, paid_call
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.nodes import MintFacts
@@ -28,6 +29,8 @@ from promptpotter.application.preflight import (
     check_search_split_holds_round,
     refuse_below_reasoning_floor,
     refuse_unfit_pipeline,
+    refuse_unpriced,
+    unpriced_routes,
 )
 from promptpotter.application.run_observers import declare_run_wiring
 from promptpotter.application.runner.campaign_ids import (
@@ -84,6 +87,8 @@ def refuse_unrunnable(
     dataset: Sequence[Sample],
     pipeline_params: Mapping[str, Any],
     schema: PipelineSchema,
+    *,
+    free: bool,
 ) -> BankPartition:
     """Every refusal a run owes, before anything is paid or written; an upload's Start asks it of the draft."""
     refuse_unfit_pipeline(campaign_config, schema)
@@ -98,6 +103,9 @@ def refuse_unrunnable(
     if pools := select_optimizer(campaign_config.optimization).pool_refusals(mint=mint):
         raise PayloadInvalidError("; ".join(pools), code="optimizer_overlay")
     refuse_below_reasoning_floor(campaign_config, pipeline_params)
+    refuse_unpriced(unpriced_routes(campaign_config, pipeline_params, schema))
+    if free:
+        refuse_outside_free_tier(outside_free_tier(campaign_config, pipeline_params, schema))
     return partition
 
 
@@ -187,7 +195,11 @@ def resolve_cycle_plan(
         origin_override = (root_seed.origin_prompts or None) if root_seed else None
         runs_under = campaigns.read_cycle_seed(hop)
     partition = refuse_unrunnable(
-        apply_cycle_seed(campaign_config, runs_under), dataset, pipeline_params, schema
+        apply_cycle_seed(campaign_config, runs_under),
+        dataset,
+        pipeline_params,
+        schema,
+        free=on_free_tier(session.store),
     )
     seed = (
         CycleSeed(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
@@ -291,9 +303,8 @@ def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
             )
     taken = [
         other.campaign_id
-        for campaign_dir in campaigns.iter_campaign_dirs()
-        if (other := campaigns.load_campaign(campaign_dir.name)) is not None
-        and other.declaration.purpose == Compare(arm=request)
+        for other in campaigns.list_campaigns(lifecycle="all")
+        if other.declaration.purpose == Compare(arm=request)
     ]
     if taken:
         raise ConflictError(

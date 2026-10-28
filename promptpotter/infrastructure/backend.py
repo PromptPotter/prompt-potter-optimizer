@@ -53,8 +53,8 @@ _OUTAGE_POLL_S = 5.0
 _OUTAGE_WAIT_S = 600.0
 _HTTP_TIMEOUT_S = 30.0
 
-# (reply data, refused before generation) -> (what it billed, `None` = reports nothing; caller's read).
-type CellBilling[S] = Callable[[dict[str, Any], bool], tuple[Reported | None, S]]
+# reply data -> (what it billed, `None` = reports nothing; caller's read).
+type CellBilling[S] = Callable[[dict[str, Any]], tuple[Reported | None, S]]
 # The 4xx a backend answers a model that generated nothing gradeable with: answered, so billed.
 _ANSWERED_STATUSES = frozenset({422})
 CELL = CallLabel("backend_cell", "backend")
@@ -406,7 +406,7 @@ class BackendClient:
                             answered_on=_ANSWERED_STATUSES,
                         )
                         data = _reply_data(resp)
-                        reported, spent = billed(data or {}, not outcome.may_have_billed)
+                        reported, spent = billed(data or {})
                         outcome = outcome._replace(reported=reported)
                         admission.close(outcome)
                         if outcome.failure is ErrorCategory.PROVIDER_THROTTLED:
@@ -492,7 +492,7 @@ class BackendClient:
                     if exc.spent is not None:
                         timings = dict.fromkeys(exc.spent, time.monotonic() - started)
                         paid = {"step_tokens": dict(exc.spent), "step_timings": timings}
-                        reported, _ = billed(paid, False)
+                        reported, _ = billed(paid)
                     admission.close(
                         SendOutcome(
                             sent=True, may_have_billed=True, reported=reported, failure=exc.category
@@ -503,7 +503,7 @@ class BackendClient:
             data: dict[str, Any] = result["data"]
             data["total_time"] = spent_s
             data["step_timings"] = {data["terminal_node"]: spent_s}
-            reported, spent = billed(data, False)
+            reported, spent = billed(data)
             if admission is not None:
                 admission.close(SendOutcome(sent=True, may_have_billed=True, reported=reported))
             return data, spent

@@ -126,10 +126,19 @@ def _scanned(
         try:
             found = list(workspace_lines(CampaignStore(account.workspace)))
         except Exception:
-            if account.workspace.name not in unreadable:
-                unreadable.append(account.workspace.name)
+            if (who := _who(account)) not in unreadable:
+                unreadable.append(who)
             continue
         yield account, found
+
+
+def _who(account: AccountDir) -> str:
+    """The email, else the id: an account no provider vouched an address for still acted."""
+    return (
+        account.workspace.name
+        if isinstance(account.user, Torn)
+        else (account.user.email or account.user.user_id)
+    )
 
 
 def trail_by_email(projects_root: Path, email: str) -> Trail:
@@ -162,9 +171,10 @@ def trail_by_email(projects_root: Path, email: str) -> Trail:
 
 
 class AccountTrail(NamedTuple):
-    # The email, else the id: an account no provider vouched an address for still acted.
-    who: str
+    who: str  # `_who`
     trail: Trail
+    # Campaign id -> the dataset it optimizes, for each campaign a line names that still exists.
+    datasets: dict[str, str]
 
 
 def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail], list[str]]:
@@ -179,10 +189,16 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
     for account, found in _scanned(accounts, unreadable):
         recent = [line for line in found if (epoch_seconds(line.at) or 0.0) >= since]
         if recent and not isinstance(account.user, Torn):
+            store = CampaignStore(account.workspace)
+            campaigns = {
+                campaign_id: store.load_campaign(campaign_id)
+                for campaign_id in {line.campaign_id for line in recent if line.campaign_id}
+            }
             trails.append(
                 AccountTrail(
-                    account.user.email or account.user.user_id,
+                    _who(account),
                     Trail(frozenset({account.user.user_id}), in_time_order(recent), []),
+                    {key: c.dataset_name for key, c in campaigns.items() if c is not None},
                 )
             )
     return trails, unreadable

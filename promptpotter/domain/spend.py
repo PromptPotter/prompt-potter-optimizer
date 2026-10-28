@@ -44,8 +44,8 @@ class StepUsage:
     reasoning: int | None = None
     # THEY discounted the call; the `cached` flag beside it says WE replayed it.
     cache_read: int | None = None
-    # The counts above are ONE sum over every attempt: nothing says which attempt billed what.
-    attempts: int | None = None
+    # The counts above sum every request the node sent; these left and reported no usage (a 5xx).
+    unreported_attempts: int = 0
 
     @classmethod
     def from_wire(cls, entry: Mapping[str, object]) -> StepUsage:

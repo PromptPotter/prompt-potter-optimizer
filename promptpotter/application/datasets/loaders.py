@@ -308,13 +308,15 @@ def _justlogic_rows(src: Source, *, held: bool) -> list[Row]:
     for row in from_hub(src, split=src["split"]):
         if row["depth"] in depths:
             by_depth[row["depth"]].append(row)
-    train, held_n = int(src["train_per_depth"]), int(src["held_per_depth"])
+    train = int(src["train_per_depth"])
+    # The tail's size is the held cut's alone: the training cut declares none.
+    end = train + int(src["held_per_depth"]) if held else train
     picked: list[Row] = []
     for depth in sorted(by_depth):
         rows = by_depth[depth]
         indices = list(range(len(rows)))
         random.Random(_BANK_SEED).shuffle(indices)
-        drawn = indices[train : train + held_n] if held else indices[:train]
+        drawn = indices[train:end] if held else indices[:train]
         picked.extend(rows[i] for i in drawn)
     return picked
 

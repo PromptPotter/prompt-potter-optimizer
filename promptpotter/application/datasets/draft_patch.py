@@ -15,8 +15,11 @@ from promptpotter.application.datasets.draft_campaign import (
 )
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
+from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
+from promptpotter.application.jobs.quota import on_free_tier
 from promptpotter.application.optimizer_manifest import resolve_optimizer
-from promptpotter.application.pipeline_resolve import draft_pipeline
+from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
+from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
 from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.origin_provenance import Provenance
@@ -132,12 +135,27 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
                 f"patch.{label} {col!r} is not one of the uploaded headers {list(draft.headers)}."
             )
 
+    if changes.keys() & {"pipeline_overlay", "optimization_overrides"}:
+        # Only what THIS edit adds: a route already on the draft is the Start's to refuse.
+        free = on_free_tier(stores)
+        was_unpriced, was_outside = _refusals(stores, draft, free=free)
+        unpriced, outside = _refusals(stores, draft.patch(**changes), free=free)
+        refuse_unpriced([r for r in unpriced if r not in was_unpriced])
+        refuse_outside_free_tier([o for o in outside if o not in was_outside])
+
     return DraftPatchPlan(
         changes=changes,
         provenance=provenance,
         column_query=patch.column_query,
         column_ground_truth=patch.column_ground_truth,
     )
+
+
+def _refusals(stores: Stores, draft: DraftCampaign, *, free: bool) -> tuple[list[str], list[str]]:
+    params, _rows, schema = draft_pipeline(stores, draft)
+    config = draft_config(stores, draft)
+    outside = outside_free_tier(config, params, schema) if free else []
+    return unpriced_routes(config, params, schema), outside
 
 
 def _block(value: object) -> dict[str, Any]:

@@ -317,19 +317,13 @@ def admit_launch(
     if wallet.exhausted:
         raise _refused("This account has nothing left to spend.")
     delegated = _delegated_spend_ceiling(stores)
-    step = _launch_step(user, wallet, delegated)
     room = wallet.headroom
     tokens = declared.tokens
     if declared.usd is None:
         # Declaring nothing declares the headroom under the grant, never the grant itself.
-        usd = _lowest(room.usd, delegated, step)
+        usd = _lowest(room.usd, delegated)
     else:
         usd = _lowest(declared.usd, delegated)
-        if step is not None and usd is not None and usd > step:
-            raise _refused(
-                f"A run on this account is admitted at ${step:.2f} and this one declares "
-                f"${usd:.2f}.",
-            )
         if room.usd is not None and usd is not None and usd > room.usd:
             raise _refused(
                 f"This account funds a ceiling of ${room.usd:.2f} for this campaign and the run "
@@ -509,8 +503,7 @@ def launch_usd_bound(stores: Stores) -> float | None:
     if lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores)).usd is None:
         return None
     wallet = read_account_wallet(user=user, stores=stores, job_registry=JobRegistry.attach())
-    step = _launch_step(user, wallet, _delegated_spend_ceiling(stores))
-    return _lowest(None if wallet.contended else wallet.headroom.usd, step)
+    return None if wallet.contended else wallet.headroom.usd
 
 
 def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
@@ -618,11 +611,10 @@ def clamp_budget_change(
         raise _contended("this campaign's ceiling")
     delegated = _delegated_spend_ceiling(stores)
     room = wallet.headroom
-    step = _launch_step(user, wallet, delegated)
     # Per named axis: the clamped ceiling, and the bound the account reserves against.
     bounds: dict[str, tuple[float | int | None, float | int | None]] = {}
     if "usd" in requested.named:
-        room_usd = _lowest(room.usd, delegated, step)
+        room_usd = _lowest(room.usd, delegated)
         usd = None if requested.usd is None else _lowest(requested.usd, room_usd)
         bounds["usd"] = (usd, room_usd if usd is None else usd)
     if "tokens" in requested.named:
@@ -774,15 +766,15 @@ def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
     return updated
 
 
-def _launch_step(user: User, wallet: AccountWallet, delegated: float | None) -> float | None:
-    """Rations the ANONYMOUS grant only: the host, a delegate and a hand-raised account are outside."""
-    if (
-        wallet.ceilings.usd is None
-        or delegated is not None
-        or user.spend_budget_usd_total is not None
-    ):
-        return None
-    return settings.FREE_TIER_LAUNCH_STEP_USD
+def on_free_tier(stores: Stores) -> bool:
+    """The ANONYMOUS grant: the host, a delegate and a hand-raised account are outside it."""
+    user = account_of(stores)
+    return (
+        lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores)).usd
+        is not None
+        and user.spend_budget_usd_total is None
+        and _delegated_spend_ceiling(stores) is None
+    )
 
 
 def _delegated_spend_ceiling(stores: Stores) -> float | None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Any, Literal, TypedDict, Unpack, assert_never
 
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from promptpotter.domain.bench import DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
@@ -295,8 +295,19 @@ class CampaignEdit(TypedDict, total=False):
     standing_budget: Budget
 
 
-class Campaign(FrozenModel):
+class CampaignOwner(FrozenModel):
+    """Read off a manifest of ANY shape, so its owner can delete one this build cannot read whole."""
+
+    # `extra="ignore"`: the rest of the manifest is the part whose shape may have moved.
+    model_config = ConfigDict(extra="ignore")
+
+    owner_user_id: str = "default"
+
+
+class Campaign(CampaignOwner):
     """Identity, declaration and visibility INTENT only, never run state."""
+
+    model_config = ConfigDict(extra="forbid")
 
     campaign_id: str
     dataset_name: str
@@ -310,7 +321,6 @@ class Campaign(FrozenModel):
     backend_id: str = ""
     # Every later launch of any of its cycles runs here.
     backend_url: str = ""
-    owner_user_id: str = "default"
     lifecycle_status: LifecycleStatus = "active"
     lifecycle_changed_at: str = ""
     lifecycle_reason: str = ""
