@@ -85,7 +85,7 @@ from promptpotter.infrastructure.store.archive_queries import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.dataset_access import resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
-from promptpotter.infrastructure.store.layout import CycleLayout, dataset_id_prefix
+from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import ConflictError
@@ -416,14 +416,14 @@ def edited_proposer(config: CampaignConfig) -> dict[str, dict[str, Any]]:
 
 
 def closed_a_round(stores: Stores, hop: CycleHop) -> bool:
-    ledger = CycleLayout(stores.campaigns.cycle_dir(hop)).ledger
+    ledger = stores.campaigns.layout(hop).ledger
     return any(r.get("record_type") == "round_closed" for r in _jsonl(ledger))
 
 
 def forked_at_init(stores: Stores, parent: CycleHop, fork: CycleHop) -> None:
     if fork == parent:
         raise SystemExit("offline run: a diverged resume ran on in the cycle it diverged from")
-    layout = CycleLayout(stores.campaigns.cycle_dir(parent))
+    layout = stores.campaigns.layout(parent)
     rebased = [
         r
         for r in _jsonl(layout.ledger)
@@ -514,7 +514,7 @@ async def run_one(
         if result.stop_reason != StopReason.PAUSED:
             raise SystemExit(f"offline run: {optimizer} ended {result.stop_reason}, never paused")
         # The resume reads its rounds off the ledger and the archive: their checkouts are gone.
-        shutil.rmtree(CycleLayout(stores.campaigns.cycle_dir(session.hop)).rounds)
+        shutil.rmtree(stores.campaigns.layout(session.hop).rounds)
         paused = session.hop
         session = await rebound_session(stores, paused)
         with binding_prompt_overrides(edited_proposer(config) if diverge else None):

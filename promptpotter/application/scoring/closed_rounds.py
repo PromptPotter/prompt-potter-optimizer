@@ -19,7 +19,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.io import unlink_robust, write_json
-from promptpotter.infrastructure.store.layout import ROUND_GLOB, CycleLayout, round_number
+from promptpotter.infrastructure.store.layout import ROUND_GLOB, round_number
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, derived
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError, graceful
@@ -152,7 +152,7 @@ class RoundFileProjection(Projection):
 
     def __init__(self, stores: Stores, hop: CycleHop, state: LaunchState) -> None:
         self._stores, self._hop, self._state = stores, hop, state
-        self._layout = CycleLayout(stores.campaigns.cycle_dir(hop))
+        self._layout = stores.campaigns.layout(hop)
         self._ledger = stores.campaigns.ledger(hop)
         self._synced = False
 

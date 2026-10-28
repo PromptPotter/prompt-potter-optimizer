@@ -23,7 +23,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_verify,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -65,12 +64,8 @@ class _Reads:
         return self._campaigns[key]
 
 
-def _layout(stores: Stores, hop: CycleHop) -> CycleLayout:
-    return CycleLayout(cycle_dir_for(stores.base_dir, hop))
-
-
 def _read_index(stores: Stores, hop: CycleHop) -> CycleIndex | None:
-    return read_cycle_index(_layout(stores, hop).cycle_dir, moment=None)
+    return read_cycle_index(stores.campaigns.cycle_dir(hop), moment=None)
 
 
 def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
@@ -160,7 +155,7 @@ def _course_spans(
 ) -> list[LedgerSpan]:
     """A sibling fork's lifted rounds are its parent's, so it reads its own ledger; a cycle cut from
     ANOTHER tree has no parent course here, and its prefix is its own record."""
-    layout = _layout(stores, hop)
+    layout = stores.campaigns.layout(hop)
     if index.parent is not None and index.parent_cycle_id is None:
         return ledger_chain(CycleDir(layout.cycle_dir), moment=moment)
     return [LedgerSpan(layout.ledger) if moment is None else moment.span(layout.ledger)]
@@ -185,7 +180,7 @@ def read_course(
         if moment is not None
         else {
             key: read
-            for key, (_, read) in scan_ledger_verify(_layout(stores, hop).ledger).graded.items()
+            for key, (_, read) in scan_ledger_verify(stores.campaigns.ledger(hop)).graded.items()
         }
     )
     bench = scan_bench_readings(spans)

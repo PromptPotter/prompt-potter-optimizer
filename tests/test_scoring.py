@@ -137,6 +137,7 @@ from promptpotter.application.scoring.formula.compiler import (
     realize_dials,
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
+from promptpotter.application.scoring.judges.grounding import ANSWER_GROUNDING
 from promptpotter.application.scoring.metrics import compute_composite_fitness, fold_cells
 from promptpotter.application.scoring.paired import (
     MemberRows,
@@ -168,6 +169,7 @@ from promptpotter.domain.bench import (
 from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
 from promptpotter.domain.command_kinds import PauseCyclePayload, SubmitArmsPayload, SubmittedArm
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -257,8 +259,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.measurement_archive import config_key
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.judges.grounding import ANSWER_GROUNDING
-from promptpotter.judges.protocol import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.shared.answer_text import extract_gsm8k_number
 from promptpotter.shared.errors import (
     BadRequestError,

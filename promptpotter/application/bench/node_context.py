@@ -320,10 +320,6 @@ class NodeContext[K: StrictModel]:
     def round_num(self) -> int:
         return self._round.round_num
 
-    @property
-    def is_final_round(self) -> bool:
-        return self._round.is_final_round
-
     def banked_proposals(self) -> list[Proposal] | None:
         return self._round.cycle.banked_proposals(self.round_num)
 

@@ -6,7 +6,7 @@ import logging
 from contextvars import Token
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import select_optimizer
@@ -15,6 +15,7 @@ from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
+from promptpotter.domain.activity import ActivityFeed
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.dashboard_rows import RunLimits
@@ -26,7 +27,7 @@ from promptpotter.domain.phases import (
     StopReason,
     stop_reason_outcome,
 )
-from promptpotter.domain.run_records import RunPhaseRecord, RunWiringRecord
+from promptpotter.domain.run_records import CycleRecord, RunPhaseRecord, RunWiringRecord
 from promptpotter.infrastructure.ledger import CycleEventLog, open_with_history
 from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
 from promptpotter.infrastructure.llm.spend_book import (
@@ -38,6 +39,7 @@ from promptpotter.infrastructure.llm.spend_book import (
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.projections.racing_stream import RacingStreamProjection
@@ -53,6 +55,54 @@ if TYPE_CHECKING:
     from promptpotter.domain.results import Proposal
 
 logger = logging.getLogger(__name__)
+
+#: Kinds no projection routes and no feed reads, each with the reader that does take it.
+UNREPORTED_KINDS: frozenset[str] = frozenset(
+    {
+        "decision",  # replayed on resume (`resume_and_fork/replayers.py`)
+        "account_event",  # the account trail's (`store/account_trail.py`)
+        "trail_tombstone",  # the account trail's (`store/account_trail.py`)
+        "spend_hold",  # the account spend book's (`store/account_spend.py`)
+        "spend_tombstone",  # the account spend book's (`store/account_spend.py`)
+        "health",  # the box health report's (`application/health.py`)
+        "priced_key",  # scanned off the ledger (`ledger_scan.py`)
+        "bank_partition",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "cycle_final",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "cycle_minted",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "cycle_superseded",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "fork_graded",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "intervention",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "launch_claim",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "launch_clock",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "launch_released",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "resolved_run",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "scoring_locked",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "spawned",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "standing_budget",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+    }
+)
+
+
+def check_every_record_reported() -> None:
+    """Every CycleRecord arm is routed by a projection, read by the feed, or listed unreported."""
+    reported = set(ActivityFeed.records)
+    pending = [Projection]
+    while pending:
+        projection = pending.pop()
+        reported.update(projection.records)
+        pending.extend(projection.__subclasses__())
+    kinds = {
+        arm.model_fields["record_type"].default: arm for arm in get_args(get_args(CycleRecord)[0])
+    }
+    dropped = sorted(
+        k for k, arm in kinds.items() if arm not in reported and k not in UNREPORTED_KINDS
+    )
+    stale = sorted(k for k in UNREPORTED_KINDS if k not in kinds or kinds[k] in reported)
+    if dropped or stale:
+        raise RuntimeError(
+            "A CycleRecord kind reaches no projection and no feed: route it, read it in "
+            f"ActivityFeed, or list it in UNREPORTED_KINDS — dropped {dropped}, stale {stale}."
+        )
 
 
 def declare_running(session: Session) -> None:

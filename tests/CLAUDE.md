@@ -28,11 +28,12 @@ Downtime is affordable; dragging effectless tests through every refactor is not.
 | `infrastructure/store/layout.py` path builders, `config/log_redaction.py`, the dispatch fence, `infrastructure/identity/grants.py`, `application/jobs/reaper.py` | `test_security.py` | leaks · delegation · unattended deletes |
 
 The command is `python scripts/tests_owning.py --run`: the tests owning everything moved since the
-last whole run. **Six files** — a subject with no row is a SECTION in its owner's file (ledger `test_files`).
+last whole run. **Six files** — a subject with no row is a SECTION in its owner's file; the
+`surface-ledger` rows `test_files` and `test_functions` hold both counts.
 
 ## One journey per section
 
-**Each `# N.` section is ONE test function** (ledger `test_functions`): a journey down the production
+**Each `# N.` section is ONE test function**: a journey down the production
 path it owns, asserting every decision along the way. A fact is an `assert` with a message naming the
 invariant; a table of values is a `for` inside that function, never a `parametrize`. A path that forks
 (live vs. folded back on resume, root vs. fork) may take a second function named for the fork.

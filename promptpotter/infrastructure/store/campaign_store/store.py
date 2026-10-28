@@ -51,6 +51,7 @@ from promptpotter.domain.run_records import (
     parent_address,
 )
 from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
@@ -59,18 +60,20 @@ from promptpotter.infrastructure.projections.cycle_index import (
     write_cycle_index,
 )
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
-from promptpotter.infrastructure.runtime_flags import derive_run_state, run_state_stamps
+from promptpotter.infrastructure.runtime_flags import (
+    derive_run_state,
+    run_state_stamps,
+    standing_budget,
+)
 from promptpotter.infrastructure.store.account_spend import banked_metered, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ResolvedRun,
     StandingRounds,
-    scan_bank_partition,
     scan_cycle_facts,
+    scan_last,
     scan_launch_claim,
-    scan_ledger_cycle_seed,
     scan_ledger_metered,
-    scan_ledger_standing_budget,
     scan_resolved_run,
     scan_standing_rounds,
 )
@@ -164,11 +167,11 @@ class CampaignStore:
     def _manifest_path(self, campaign_id: str) -> Path:
         return self._campaign_layout(campaign_id).manifest
 
-    def _layout(self, hop: CycleHop) -> CycleLayout:
+    def layout(self, hop: CycleHop) -> CycleLayout:
         return CycleLayout(self.cycle_dir(hop))
 
     def ledger(self, hop: CycleHop) -> Path:
-        return self._layout(hop).ledger
+        return self.layout(hop).ledger
 
     def _append(self, hop: CycleHop, record: CycleRecord) -> int:
         cycle_dir = self.cycle_dir(hop)
@@ -559,7 +562,7 @@ class CampaignStore:
                 self._write_export(hop, export)
 
     def _write_export(self, hop: CycleHop, export: PromptExport) -> None:
-        write_text(self._layout(hop).export, export.to_json())
+        write_text(self.layout(hop).export, export.to_json())
 
     def restate_export_bench(self, hop: CycleHop, bench: BenchScore) -> None:
         export = self.read_export(hop)
@@ -567,7 +570,7 @@ class CampaignStore:
             self._write_export(hop, export.model_copy(update={"bench": bench}))
 
     def read_export(self, hop: CycleHop) -> PromptExport | None:
-        text = read_text_optional(self._layout(hop).export)
+        text = read_text_optional(self.layout(hop).export)
         return parse_prompt_export(text) if text else None
 
     def mark_superseded(self, hop: CycleHop, successor_cycle_id: str) -> None:
@@ -630,7 +633,7 @@ class CampaignStore:
             self._append(hop, LaunchReleasedRecord(job_id=job_id, detail=detail))
 
     def _declare_ended(self, hop: CycleHop, reason: StopReason) -> bool:
-        lock = self._layout(hop).producer_lock
+        lock = self.layout(hop).producer_lock
         # A held cycle's producer declares its own stop; asked first, so no caller waits out a live hold.
         if producer_lock.held(lock) or not producer_lock.take(lock):
             return False
@@ -710,8 +713,13 @@ class CampaignStore:
         cycle_dir = self.cycle_dir(hop)
         CycleEventLog.open(CycleDir(cycle_dir)).append(CycleSeedRecord(seed=seed))
 
+    def last[R: StrictModel](self, hop: CycleHop, record: type[R]) -> R | None:
+        """The cycle's OWN last *record*: a fork inherits none from its parent's prefix."""
+        return scan_last([LedgerSpan(self.ledger(hop))], record)
+
     def read_cycle_seed(self, hop: CycleHop) -> CycleSeed | None:
-        return scan_ledger_cycle_seed(self.ledger(hop))
+        record = self.last(hop, CycleSeedRecord)
+        return None if record is None else record.seed
 
     def write_standing_budget(
         self, hop: CycleHop, budget: Budget, *, pause_at_round: int | None
@@ -722,7 +730,7 @@ class CampaignStore:
         )
 
     def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
-        return scan_ledger_standing_budget(self.ledger(hop))
+        return standing_budget(self.cycle_dir(hop))
 
     def _chain(self, hop: CycleHop) -> list[LedgerSpan]:
         return ledger_chain(CycleDir(self.cycle_dir(hop)), moment=None)
@@ -752,7 +760,7 @@ class CampaignStore:
         return scan_resolved_run(self._chain(hop))
 
     def read_bank_partition(self, hop: CycleHop) -> PartitionRecord | None:
-        return scan_bank_partition(self._chain(hop))
+        return scan_last(self._chain(hop), PartitionRecord)
 
     def write_bank_partition(self, hop: CycleHop, record: PartitionRecord) -> None:
         self._append(hop, record)
@@ -783,7 +791,7 @@ class CampaignStore:
                 for leaf in group
             ]
             lines.append("")
-        write_text(self._layout(hop).optimized_surface, "\n".join(lines))
+        write_text(self.layout(hop).optimized_surface, "\n".join(lines))
 
 
 def _indexed(cycle_dirs: list[Path]) -> list[tuple[CycleHop, CycleIndex]]:

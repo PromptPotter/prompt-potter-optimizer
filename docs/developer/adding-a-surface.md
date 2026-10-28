@@ -8,7 +8,7 @@ beside it proves nothing fell out of it** — never a standing `test_structure` 
 
 | You want to add… | Recipe | What actually catches you |
 |---|---|---|
-| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Import-time: `Projection._route_table` (`projections/base.py`) must answer for every `CycleRecord` arm — the trace is a subscriber under the same table |
+| A telemetry event / ledger record | [§1](#1-a-ledger-record--telemetry-event) | Import-time: `Projection.__init_subclass__` (`projections/base.py`) refuses a `_handle_*` whose annotation names no `CycleRecord` arm |
 | A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Init-time: the `injection_table()` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
@@ -39,10 +39,9 @@ The step-by-step is [`application/CLAUDE.md`](../../promptpotter/application/CLA
 § Conventions. The one step it does not spell out: **override `_handle_xxx` on each projection
 that surfaces the fact** (`LiveDashboardProjection`, `AuditTrailProjection`, `ReadoutProjection`).
 
-**Guard (import-time):** `Projection._route_table` must answer for every `CycleRecord` arm; which
-arms are deliberately unfolded is stated there with each one's reason. **A missing arm does NOT
-break loud** — a record no fold answers for reaches no artifact and nothing raises, which is why
-the claim is checked at import.
+**Guard (import-time):** `Projection.__init_subclass__` routes each `_handle_*` by its `record`
+annotation and refuses one that names no `CycleRecord` arm. **A record no projection handles does
+NOT break loud** — it reaches no artifact and nothing raises.
 
 **A trace is a fold of the same record, not a second home for the fact**: one `_handle_*` on
 `infrastructure/tracing/bridge.py::TracingProjection` and one `tracing/events.py::TraceSink` hook;

@@ -27,6 +27,7 @@ from promptpotter.application.runner.inner.spawn_context import (
 )
 from promptpotter.application.scoring.classification import build_degradation_checks
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
+from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.application.views.ingress import init_enter, init_exit
 from promptpotter.domain.bench import BankPartition, partition_bank
@@ -58,7 +59,6 @@ from promptpotter.infrastructure.store.archive_queries import (
     bind_memory_scope,
     memory_scope,
 )
-from promptpotter.judges.registry import build_evaluators
 from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:

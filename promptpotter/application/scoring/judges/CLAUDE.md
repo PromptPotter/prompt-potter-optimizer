@@ -29,7 +29,7 @@ A judge reads its cell through `judge_question` / `judge_answer`; `predicted` re
 Steps: retrieve = `evidence_retrieval` (no gold; never reads the answer); ground = `answer_grounding` (no gold; answer traceable to the cell's own evidence); answer = `sealqa` / `simpleqa` or the backend's verifier.
 **On a verifier-graded backend the answer step needs no judge** — `env_reward` is the answer term.
 **"What the cell DID" is `pipeline_data::turns` where present, else the `reasoning_trace` digest** (`grounding.py::_trace`), never a config key; turns render labelled.
-**A missing input is absent and costs no call** — [`conventions.md`](../../docs/developer/conventions.md) § Code shape.
+**A missing input is absent and costs no call** — [`conventions.md`](../../../../docs/developer/conventions.md) § Code shape.
 **Our rubrics (and `PARTIAL = 0.5`) are invented: screen them (`seed-screen`, `noise-floor`) before funding a campaign, and record the reading in the dataset's `README.md`.**
 
 ## Identity — a judge that changed must re-cut the key
@@ -44,7 +44,7 @@ Steps: retrieve = `evidence_retrieval` (no gold; never reads the answer); ground
 
 ## Registering one
 
-**A connector's rules through the one loader** (`shared/plugin_registry.py`, the `promptpotter.judges` group, `judge_origins()` as audit surface) — owned by [`../connectors/CLAUDE.md`](../connectors/CLAUDE.md) §§ Registering a connector · A connector is trusted code.
+**A connector's rules through the one loader** (`shared/plugin_registry.py`, the `promptpotter.judges` group, `judge_origins()` as audit surface) — owned by [`../../../connectors/CLAUDE.md`](../../../connectors/CLAUDE.md) §§ Registering a connector · A connector is trusted code.
 
 ## What is cached is the REPLY, not the verdict
 

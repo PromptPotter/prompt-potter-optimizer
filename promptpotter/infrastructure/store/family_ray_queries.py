@@ -18,7 +18,6 @@ from promptpotter.domain.hierarchy import MAX_STEP_LIMIT, HierarchyStep, Hierarc
 from promptpotter.domain.projection_envelope import RECORD_KINDS, bearing_record
 from promptpotter.domain.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.store.layout import (
-    CycleLayout,
     course_validator_ns,
     cycle_dir_for,
 )
@@ -176,7 +175,7 @@ def build_family_ray(
     truncated = False
 
     for course in courses:
-        ledger = CycleLayout(cycle_dir_for(course.store.base_dir, course.path[-1])).ledger
+        ledger = course.store.campaigns.ledger(course.path[-1])
         key = encode_cycle_path(course.path)
         rows, dropped = _read_curated(
             ledger, encoded_path=key, depth=course.depth, keep=limit, bound=before

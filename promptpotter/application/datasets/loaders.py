@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
+from types import CodeType, FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.datasets.sealqa_panel import write_longseal_panel
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-RECIPE_CODE = module_source_digest(sys.modules[__name__])
+_PACKAGE = __name__.rpartition(".")[0]
 
 Row = dict[str, Any]
 Drawn = tuple[str, str]
@@ -103,9 +104,16 @@ class Source:
 
     @property
     def identity(self) -> str:
-        """A new ``rev``, cut parameter or edit to this module's code cuts a bank of its own."""
+        """A new ``rev``, cut parameter or edit to its recipe's code cuts a bank of its own."""
         return stable_hash(
-            [RECIPE_CODE, self.recipe, self.kind.value, self.repo, self.rev, dict(self.params)],
+            [
+                recipe_code(self.recipe),
+                self.recipe,
+                self.kind.value,
+                self.repo,
+                self.rev,
+                dict(self.params),
+            ],
             length=ADDRESS_HEX,
         )
 
@@ -480,6 +488,34 @@ PANEL_RECIPES: dict[str, Callable[[Source, Path], int]] = {
     "dbllmbench_questions": _dbllmbench_questions,
 }
 """A recipe that BUILDS a connector-owned panel and the task directories it names, into the tenant tier."""
+
+
+def _reached(value: object, seen: set[object]) -> set[ModuleType]:
+    """The modules of this package, beside this one, whose code *value* runs: through every
+    function, lambda, closure and class of this module it names."""
+    if not isinstance(value, FunctionType | type) or value in seen:
+        return set()
+    seen.add(value)
+    if value.__module__ != __name__:
+        named = value.__module__.startswith(f"{_PACKAGE}.")
+        return {sys.modules[value.__module__]} if named else set()
+    if isinstance(value, type):
+        return set().union(*(_reached(v, seen) for v in vars(value).values()))
+    cells = [cell.cell_contents for cell in value.__closure__ or ()]
+    codes = [value.__code__]
+    names: set[object] = set()
+    while codes:
+        code = codes.pop()
+        names.update(value.__globals__[n] for n in code.co_names if n in value.__globals__)
+        codes.extend(c for c in code.co_consts if isinstance(c, CodeType))
+    return set().union(*(_reached(v, seen) for v in (*names, *cells)))
+
+
+def recipe_code(recipe: str) -> str:
+    """What a recipe's code IS: this module and every module of this package it runs."""
+    run = (BANK_RECIPES | PANEL_RECIPES)[recipe]
+    imported = sorted(_reached(run, set()), key=lambda m: m.__name__)
+    return module_source_digest(sys.modules[__name__], *imported)
 
 
 def definition_source(dataset_dir: Path) -> Source | None:

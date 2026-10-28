@@ -29,7 +29,7 @@ data: {"kind": "phase", "cycle_id": "cycle_abc123",
 | `payload` | object | Per-kind body. For record-derived kinds, the record's `model_dump` content; for `stream_snapshot`, the cycle's served dashboard. |
 | `activity` | object | The run's current state as of this frame: `status`, the one line saying what it is doing, `notices`, what was said that still holds, and `decision`, the choice it is held on — worded, with each answer as the command to send. Whole on every frame — see § Current state. |
 
-A new kind: `ProjectionKind`, then the record on `CycleRecord` (or `_PROJECTION_ONLY` for a synthesized one), then its answer in `domain/activity.py` — a case in `ActivityFeed._item`, or a place in `SilentRecord` (what the step window drops). Skipping a step raises at import or fails the type check; `gate.py --only specs` refuses a stale spec.
+A new kind: `ProjectionKind`, then the record on `CycleRecord` (or `_PROJECTION_ONLY` for a synthesized one), then its answer in `domain/activity.py` — an arm in `ActivityRecord` and a case in `ActivityFeed._item`, or nothing for a record the step window drops. Skipping a step raises at import or fails the type check; `gate.py --only specs` refuses a stale spec.
 
 ## Subscription contract — snapshot-then-tail
 

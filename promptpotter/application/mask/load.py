@@ -21,6 +21,7 @@ from promptpotter.application.scoring.formula.compiler import (
     realize_dials,
     split_scoring_block,
 )
+from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -48,7 +49,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:

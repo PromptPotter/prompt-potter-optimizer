@@ -103,6 +103,8 @@ from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.formula.compiler import cell_channels_of, compile_scorer
+from promptpotter.application.scoring.judges import call as judge_call
+from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.application.scoring.sample_measurement import (
     cell_billing,
     emit_replayed_step_tokens,
@@ -119,6 +121,7 @@ from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.command_kinds import ChangeRunLimitsPayload, DiscardDraftPayload
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.proxies import inner_cell_facts
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, RunSource
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
@@ -210,7 +213,7 @@ from promptpotter.infrastructure.store.account_spend import (
     sum_user_spend,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_cycle_seed,
+    scan_last,
     scan_ledger_priced_keys,
     scan_ledger_spend,
     scan_ledger_spend_by_round,
@@ -226,9 +229,6 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.judges import call as judge_call
-from promptpotter.judges.protocol import JudgeSpec, JudgeStage
-from promptpotter.judges.registry import build_evaluators
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellInfrastructureError,
@@ -1302,7 +1302,8 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
         spend, calls, _worked_s = scan_ledger_spend([LedgerSpan(index.path)])
         wallet = iter_user_token_usage(ledgers=[index.path], since=0.0, until=float("inf"))
         charted = sum(row.billed_usd or 0.0 for row in wallet)
-        return spend.total_used_usd, calls, scan_ledger_cycle_seed(index.path), charted
+        seeded = scan_last([LedgerSpan(index.path)], CycleSeedRecord)
+        return spend.total_used_usd, calls, None if seeded is None else seeded.seed, charted
 
     def cold() -> tuple[float, int, CycleSeed | None, float]:
         rows = iter_jsonl(index.path)

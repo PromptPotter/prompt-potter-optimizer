@@ -20,7 +20,7 @@
 - A stop rule's verdict flows by return value (`QueryLoopResult.stop_signal`), never an exception.
 - **An optimizer's working state is typed `StatePart`s** (`domain/optimizer_state.py`) banked as `optimizer_state` — never a field of the individual, never a sidecar.
 - **An await that can outlast `RUN_FRESH_S` and writes nothing heartbeats** (`infrastructure/llm/heartbeat.py`), or it is served `wedged`. Create the task unconditionally: it also carries `on_suspend`.
-- **Per-call telemetry from deep async chains uses `emit_*`, not `RunCallbacks`**: a `*Record` in `domain/run_records.py`, its `CycleRecord` arm, a `_handle_*` no-op on `Projection` (`infrastructure/projections/base.py`), a kwargs-only `emit_*` in `infrastructure/llm/telemetry.py`, the subscriber.
+- **Per-call telemetry from deep async chains uses `emit_*`, not `RunCallbacks`**: a `*Record` in `domain/run_records.py`, its `CycleRecord` arm, a kwargs-only `emit_*` in `infrastructure/llm/telemetry.py`, a `_handle_*` on each projection that reads it.
 
 ## Backend overlay
 

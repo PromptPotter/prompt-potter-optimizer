@@ -954,8 +954,6 @@ class Check:
     product: tuple[str, ...] = ()
     # Returns `None` where ownership cannot be told, and then the whole check runs.
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
-    # Environment variables naming a git revision its verdict reads: each one's COMMIT is in its key.
-    revs: tuple[str, ...] = ()
 
     def inputs(self) -> tuple[str, ...] | None:
         if self.kind == "release":  # the answer lives on the network
@@ -967,14 +965,7 @@ class Check:
         prefixes = self.inputs()
         if prefixes is None:
             return None
-        commits = []
-        for name in self.revs:
-            if asked := os.environ.get(name):
-                code, commit = git("rev-parse", "--verify", "--quiet", f"{asked}^{{commit}}")
-                if code:  # nothing to key on: the check runs and names the bad revision itself
-                    return None
-                commits.append(f"{name}={commit}".encode())
-        return digest(store.key(prefixes, self.product).encode(), *commits).hex()
+        return digest(store.key(prefixes, self.product).encode()).hex()
 
     def kept(self, store: LastGreen, key: str | None) -> bool:
         standing = not self.builds or (REPO / self.builds).exists()
@@ -1106,13 +1097,11 @@ CHECKS: tuple[Check, ...] = (
         reads=(
             "promptpotter/",
             "tests/",
-            "examples/",
             "scripts/",
             "docs/specs/",
             *(f"webapp/{root}/" for root in ("app", "components", "lib")),
             "pyproject.toml",
         ),
-        revs=("ARC_BASE",),
     ),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent.
     Check("undiffable", "py", _undiffable, staged=True, reads=_TREE),

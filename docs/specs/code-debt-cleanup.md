@@ -49,7 +49,7 @@ acting.
   it is imported). **Re-test:** the payload table is whole at `import promptpotter.domain`.
 - **No offline leg rebases mid-run:** `scripts/offline_run.py` strips every `fork_proposal`, so
   `runner/entry.py::_run_line`'s later passes are reached only by patched privates. **Re-test:**
-  `test_private_reach` back to 6.
+  no test under `tests/` patches a private of `runner/entry.py`.
 - **Ledger and readout shapes left standing:** the operator's seat is not a `Member`; the rebase
   clock has no test; `LiveCandidate.samples` has no reader; `round_restated` carries the whole round;
   `RunStanding.after` recomputes the fold; the readout filters on `resumed_from_round`;
@@ -113,10 +113,10 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
 
 - **Two "waiting" predicates** — `useRemoteModel.ts::waitNote` and `lib/derivations/time-ray.ts`.
   **Decided:** a call is open AND its wait target is known; serve `dash.wait_line` once.
-- **`judges/call.py::ask` returns the unbound-ledger raise as an absent grade.** **Re-test:**
-  `grep -n "except" promptpotter/judges/call.py`.
-- **`judges/` and `application/` import each other**, and three hand-written loaders sit over
-  `shared/plugin_registry.py`. **Re-test:** `grep -rn "from promptpotter.application" promptpotter/judges`.
+- **`application/scoring/judges/call.py::ask` returns the unbound-ledger raise as an absent grade.**
+  **Re-test:** `grep -n "except" promptpotter/application/scoring/judges/call.py`.
+- **Three hand-written loaders sit over `shared/plugin_registry.py`.** **Re-test:** three
+  `load_registry(` callers.
 - **`domain/results.py::RoundOutcome.health` is optional** and `potter/dispatch/facade.py` tolerates
   `None`. **Re-test:** `grep -n "health: DegradationHealth | None" promptpotter/domain/results.py`.
 - **Four seams owed a re-read:** `webapp/lib/poll.tsx::CycleStreamState` fields nothing reads;

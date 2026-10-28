@@ -18,6 +18,7 @@ import zipfile
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
+from types import ModuleType
 from typing import Any, cast
 
 import openpyxl
@@ -56,7 +57,7 @@ from promptpotter.application.campaign_config import (
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.commands.payloads import MintCampaignPayload, StartCheckinPayload
-from promptpotter.application.datasets import ingest, loaders
+from promptpotter.application.datasets import ingest, loaders, tabular_ingest
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, new_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
 from promptpotter.application.datasets.loaders import archive_entry, samples_from_dicts
@@ -129,6 +130,7 @@ from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimiz
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.command_kinds import ForkSeed, SubmittedArm
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
+from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.opt_search_point import (
     TEMPLATE_TOKEN_RE,
     Locus,
@@ -178,7 +180,6 @@ from promptpotter.infrastructure.store.io import read_yaml, write_yaml
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.tracing.bridge import TracingProjection
-from promptpotter.judges.protocol import JudgeSpec, JudgeStage
 from promptpotter.shared.errors import (
     ConflictError,
     ManifestUnreadableError,
@@ -722,7 +723,22 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert held_cut is not None and held_cut.dataset_hash == hub_bank.dataset_hash, (
         "a recorded cut was not held"
     )
-    monkeypatch.setattr(loaders, "RECIPE_CODE", "an edited recipe")
+
+    def edit_code(module: ModuleType) -> None:
+        edited = tmp_path / f"edited_{module.__name__}.py"
+        edited.write_text(
+            Path(str(module.__file__)).read_text("utf-8") + "\n_EDITED = 1\n", "utf-8"
+        )
+        monkeypatch.setattr(module, "__file__", str(edited))
+
+    table = loaders.Source.of({"recipe": "table", "upload": "t.csv", "query": "q", "truth": "t"})
+    assert table is not None
+    cut_before = table.identity
+    edit_code(tabular_ingest)
+    assert table.identity != cut_before and loaders.held_bank(built_stores, hubcut) is not None, (
+        "a recipe's identity missed code it imports, or took code it does not"
+    )
+    edit_code(loaders)
     assert loaders.held_bank(built_stores, hubcut) is None, (
         "a recipe whose code changed served the bank its old code cut"
     )

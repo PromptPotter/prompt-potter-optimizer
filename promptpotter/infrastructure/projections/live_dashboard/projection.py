@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 from pathlib import Path
-from typing import ClassVar, assert_never
+from typing import assert_never
 
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.cycle_paths import Cut, CycleDir
@@ -39,6 +39,7 @@ from promptpotter.domain.run_records import (
     CycleRecord,
     ElectionRecord,
     FlightRecord,
+    LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
@@ -46,10 +47,8 @@ from promptpotter.domain.run_records import (
     ProviderHoldRecord,
     RaceCatchUpRecord,
     RaceStandingRecord,
-    ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
-    RoundProposedRecord,
     RoundRestatedRecord,
     RoundStatement,
     RoundWarningRecord,
@@ -63,7 +62,7 @@ from promptpotter.domain.scoring import GradedCell, MeasuredCell, fitness_bands
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
-from promptpotter.infrastructure.projections.base import Projection, RouteHandler
+from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.blocks import (
     build_candidate_rows,
     build_racing_block,
@@ -81,7 +80,6 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
-    RecordClasses,
     folded,
 )
 
@@ -130,16 +128,6 @@ def _opened(kind: VerificationKind, arm: ArmName, rows: int) -> VerificationMark
 
 
 class LiveDashboardProjection(Projection):
-    records: ClassVar[RecordClasses]
-
-    @classmethod
-    def _route_table(cls) -> dict[type[CycleRecord], RouteHandler | None]:
-        # Unread here, so never validated for it: an optimizer's state needs its package to read.
-        return super()._route_table() | {
-            ResumeCheckpointRecord: None,
-            RoundProposedRecord: None,
-        }
-
     def __init__(self) -> None:
         # No state stands before the first `RunWiringRecord`: what lands earlier waits here.
         self._unwired: list[tuple[CycleRecord, int]] | None = []
@@ -174,7 +162,7 @@ class LiveDashboardProjection(Projection):
 
     def on_record(self, record: CycleRecord, offset: int) -> None:
         self.at_offset = offset
-        if self._routes[type(record)] is None:
+        if type(record) not in self._routes:
             return
         if self._unwired is not None:
             if not isinstance(record, RunWiringRecord):
@@ -487,6 +475,10 @@ class LiveDashboardProjection(Projection):
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
         self._in_flight = (record.call_id, record.node)
 
+    def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
+        # Taken so a streaming call moves `at_time`, which `_fold` stamps before every handler.
+        del record
+
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
         self._sticky_llm_calls[record.node] = (self.state.round, build_node_block(record))
         if self._in_flight is not None and record.call_id and self._in_flight[0] == record.call_id:
@@ -591,11 +583,6 @@ class LiveDashboardProjection(Projection):
                 "at_time": self._at,
             }
         )
-
-
-LiveDashboardProjection.records = tuple(
-    arm for arm, handler in LiveDashboardProjection._routes.items() if handler is not None
-)
 
 
 class DashboardCheckout(LiveDashboardProjection):

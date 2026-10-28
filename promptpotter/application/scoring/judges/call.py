@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+from promptpotter.domain.judges import JudgeStage, JudgeVerdict
 from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
 from promptpotter.infrastructure.llm.registry import get_llm_client
@@ -22,7 +23,6 @@ from promptpotter.infrastructure.llm.telemetry import (
     emit_token_usage,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
-from promptpotter.judges.protocol import JudgeStage, JudgeVerdict
 from promptpotter.shared.errors import CellSendRefusedError, SendRefusedError
 
 logger = logging.getLogger(__name__)

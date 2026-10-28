@@ -11,7 +11,7 @@ A focus dataset for L1 optimizer prompt evolution must satisfy:
 2. **Reachable ceiling** of **50–75%** under strong prompt engineering — the gap L1 climbs.
 3. **N ≥ 400, preferably 800+**; smaller N needs per-subtask stratification.
 4. **Multiple distinct subtask categories** — each is an independent L1 lever.
-5. **Deterministic per-sample grading** (exact match, MC, F1, regex). An LLM judge is admissible only through `promptpotter/judges/`: beside an episodic cell its cost is rounding error, but it adds model-dependent measurement error, so wire one only where no matcher can grade, validate it against the published grader before quoting a number, and never compare a judged dataset with a deterministic one until that check is done.
+5. **Deterministic per-sample grading** (exact match, MC, F1, regex). An LLM judge is admissible only through `promptpotter/application/scoring/judges/`: beside an episodic cell its cost is rounding error, but it adds model-dependent measurement error, so wire one only where no matcher can grade, validate it against the published grader before quoting a number, and never compare a judged dataset with a deterministic one until that check is done.
 6. **No mode-collapse on one gold class** — a modal answer over 40% of gold, or a 3-class task read as 2-class, coasts into an inflated origin; stratify by `prop` / `category` / `subtask` before committing.
 7. **HF-loadable** — a custom scraper is real plumbing cost.
 8. **Contamination-resistant** — 2024+ or synthetic.
@@ -104,7 +104,7 @@ A new dataset is a tenant definition (`.promptpotter/projects/{tenant}/datasets/
 
 **2. Record it in `README.md`** — a **Data** section quoting the protocol verbatim with citations, sample counts and any sister training set.
 
-**2b. A TURN-STRUCTURED task decides its step schema now.** A multi-turn task is ONE cell ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3 sketch): name a fixed SEMANTIC step schema, never a turn index, and bank each step as its own named term for the `scoring` formula to collapse — the one part that cannot be added later. Adopt the schema for the task's shape (`retrieve → ground → answer` for search-augmented, `open → adhere` for an agent harness); **a schema that does not fit is worse than a new one** ([`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md) § The step schema).
+**2b. A TURN-STRUCTURED task decides its step schema now.** A multi-turn task is ONE cell ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3 sketch): name a fixed SEMANTIC step schema, never a turn index, and bank each step as its own named term for the `scoring` formula to collapse — the one part that cannot be added later. Adopt the schema for the task's shape (`retrieve → ground → answer` for search-augmented, `open → adhere` for an agent harness); **a schema that does not fit is worse than a new one** ([`../../promptpotter/application/scoring/judges/CLAUDE.md`](../../promptpotter/application/scoring/judges/CLAUDE.md) § The step schema).
 
 **3. The operator confirms the cut before any wire.** **Never invent a split. Never consume a canonical test set as an optimization pool** without the operator accepting the number is not leaderboard-comparable; any deviation is stated in `README.md`.
 

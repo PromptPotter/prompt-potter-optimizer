@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from functools import cache
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, get_args
+from typing import Any, ClassVar, NamedTuple, cast, get_args
 
 from promptpotter.domain.bench import BenchPasses, BenchReading, PartitionRecord
 from promptpotter.domain.command_kinds import (
@@ -43,7 +44,6 @@ from promptpotter.domain.run_records import (
     CycleFinalRecord,
     CycleMintedRecord,
     CycleRecord,
-    CycleSeed,
     CycleSeedRecord,
     CycleSupersededRecord,
     ElectionRecord,
@@ -81,6 +81,7 @@ from promptpotter.domain.spend import (
     SpendRollup,
     metered,
 )
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
@@ -94,30 +95,22 @@ from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import MeasurementRole
 
 
-class _CycleSeed:
-    records: ClassVar[RecordClasses] = (CycleSeedRecord,)
+class _Last:
+    records: ClassVar[RecordClasses]
 
     def __init__(self) -> None:
-        self._found: CycleSeed | None = None
+        self._found: StrictModel | None = None
 
-    def feed(self, offset: int, record: CycleSeedRecord) -> None:
-        self._found = record.seed
-
-    def value(self) -> CycleSeed | None:
-        return self._found
-
-
-class _Partition:
-    records: ClassVar[RecordClasses] = (PartitionRecord,)
-
-    def __init__(self) -> None:
-        self._found: PartitionRecord | None = None
-
-    def feed(self, offset: int, record: PartitionRecord) -> None:
+    def feed(self, offset: int, record: StrictModel) -> None:
         self._found = record
 
-    def value(self) -> PartitionRecord | None:
+    def value(self) -> StrictModel | None:
         return self._found
+
+
+@cache
+def _last(record: type[StrictModel]) -> type[_Last]:
+    return type(f"_Last{record.__name__}", (_Last,), {"records": (record,)})
 
 
 class ResolvedRun(NamedTuple):
@@ -159,19 +152,6 @@ class _LaunchClocks:
 
     def value(self) -> list[LaunchClockRecord]:
         return list(self._found)
-
-
-class _StandingBudget:
-    records: ClassVar[RecordClasses] = (StandingBudgetRecord,)
-
-    def __init__(self) -> None:
-        self._found = StandingBudgetRecord()
-
-    def feed(self, offset: int, record: StandingBudgetRecord) -> None:
-        self._found = record
-
-    def value(self) -> StandingBudgetRecord:
-        return self._found.model_copy()
 
 
 class CycleFacts(NamedTuple):
@@ -703,19 +683,6 @@ class _Answers:
         return self._frozen
 
 
-class _DeclaredPhase:
-    records: ClassVar[RecordClasses] = (RunPhaseRecord,)
-
-    def __init__(self) -> None:
-        self._declared: RunPhaseRecord | None = None
-
-    def feed(self, offset: int, record: RunPhaseRecord) -> None:
-        self._declared = record
-
-    def value(self) -> RunPhaseRecord | None:
-        return self._declared
-
-
 class VerifyLedger(NamedTuple):
     graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]]
     # EVERY graded pass, oldest first: a later one buys other cells and retires none.
@@ -792,19 +759,6 @@ class _Metered:
         return {meter: Budget.amount(self._usd[meter], self._tokens[meter]) for meter in self._usd}
 
 
-class _RunWiring:
-    records: ClassVar[RecordClasses] = (RunWiringRecord,)
-
-    def __init__(self) -> None:
-        self._found: RunWiringRecord | None = None
-
-    def feed(self, offset: int, record: RunWiringRecord) -> None:
-        self._found = record
-
-    def value(self) -> RunWiringRecord | None:
-        return self._found
-
-
 class _Bench:
     records: ClassVar[RecordClasses] = (PhaseRecord,)
 
@@ -819,19 +773,6 @@ class _Bench:
 
     def value(self) -> list[BenchGradedView]:
         return list(self._graded)
-
-
-class _ScoringLock:
-    records: ClassVar[RecordClasses] = (ScoringLockedRecord,)
-
-    def __init__(self) -> None:
-        self._found: ScoringLockedRecord | None = None
-
-    def feed(self, offset: int, record: ScoringLockedRecord) -> None:
-        self._found = record
-
-    def value(self) -> ScoringLockedRecord | None:
-        return self._found
 
 
 class _PricedKeys:
@@ -896,23 +837,28 @@ class _Timeline:
 
 
 LEDGER_FOLDS = (
-    _CycleSeed,
-    _Partition,
+    *map(
+        _last,
+        (
+            CycleSeedRecord,
+            PartitionRecord,
+            StandingBudgetRecord,
+            RunPhaseRecord,
+            RunWiringRecord,
+            ScoringLockedRecord,
+        ),
+    ),
     _ResolvedRun,
     _LaunchClocks,
-    _StandingBudget,
     _CycleFacts,
     _Controls,
     _LaunchClaim,
     _Standing,
     _Answers,
-    _DeclaredPhase,
     _Verify,
     _Spend,
     _Metered,
-    _RunWiring,
     _Bench,
-    _ScoringLock,
     _PricedKeys,
     _Timeline,
 )
@@ -922,14 +868,12 @@ def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[Any, V]]) -> V:
     return LedgerIndex.of(ledger_path, LEDGER_FOLDS).view(fold)
 
 
-def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
-    return _view(ledger_path, _CycleSeed)
-
-
-def scan_bank_partition(spans: Iterable[LedgerSpan]) -> PartitionRecord | None:
-    found: PartitionRecord | None = None
+def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R | None:
+    """The last *record* the spans hold, a later span's over an earlier one's."""
+    found: R | None = None
     for span in spans:
-        found = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Partition, span.until) or found
+        own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_last(record), span.until)
+        found = found if own is None else cast("R", own)
     return found
 
 
@@ -951,20 +895,12 @@ def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
     ]
 
 
-def scan_ledger_standing_budget(ledger_path: Path) -> StandingBudgetRecord:
-    return _view(ledger_path, _StandingBudget)
-
-
 def scan_ledger_controls(ledger_path: Path) -> Controls:
     return _view(ledger_path, _Controls)
 
 
 def scan_launch_claim(ledger_path: Path) -> LaunchClaimRecord | None:
     return _view(ledger_path, _LaunchClaim)
-
-
-def scan_ledger_scoring_lock(ledger_path: Path) -> ScoringLockedRecord | None:
-    return _view(ledger_path, _ScoringLock)
 
 
 def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
@@ -1047,10 +983,6 @@ def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[Walked
         banked = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Verify, span.until)
         walks += [verify_pass.walk() for verify_pass in banked.passes]
     return walks
-
-
-def scan_ledger_declared_phase(ledger_path: Path) -> RunPhaseRecord | None:
-    return _view(ledger_path, _DeclaredPhase)
 
 
 _Span = tuple[float, float]
@@ -1205,14 +1137,6 @@ def scan_ledger_spend_by_round(spans: Iterable[LedgerSpan]) -> dict[int, SpendRo
         for n, held in own.by_round.items():
             by_round.setdefault(n, SpendRollup()).absorb(held)
     return dict(sorted(by_round.items()))
-
-
-def scan_ledger_run_wiring(spans: Iterable[LedgerSpan]) -> RunWiringRecord | None:
-    found: RunWiringRecord | None = None
-    for span in spans:
-        own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_RunWiring, span.until)
-        found = found if own is None else own
-    return found
 
 
 def scan_ledger_wall_clock(

@@ -47,6 +47,7 @@ from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
+from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import render_prompt
@@ -81,13 +82,12 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import Access, PoolSource
 from promptpotter.domain.results import Concluded
-from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin
+from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin, ScoringLockedRecord
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.pricing import route_priced
 from promptpotter.infrastructure.llm.registry import default_routes
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_scoring_lock
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     dataset_connector,
@@ -100,7 +100,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import descend_store, owned_campaign
-from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import (
     BadRequestError,
     DatasetAccessError,
@@ -116,10 +115,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.judges import JudgeSpec
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.judges.protocol import JudgeSpec
 
 logger = logging.getLogger(__name__)
 
@@ -644,7 +643,7 @@ def _dataset_of(stores: Stores, campaign: Campaign) -> ResolvedDataset | None:
 
 
 def _criterion_locked[S](stores: Stores, hop: CycleHop, scoring: S) -> S | dict[str, str]:
-    lock = scan_ledger_scoring_lock(stores.campaigns.ledger(hop))
+    lock = stores.campaigns.last(hop, ScoringLockedRecord)
     return lock.locked if lock is not None and lock.declared == scoring else scoring
 
 
@@ -1355,7 +1354,7 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     # VALUES, never the ledger's stat: a running root appends there on every sample.
     seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
     declaration = stores.campaigns.read_resolved_run(campaign.root_hop).declaration
-    lock = scan_ledger_scoring_lock(stores.campaigns.ledger(campaign.root_hop))
+    lock = stores.campaigns.last(campaign.root_hop, ScoringLockedRecord)
     return (
         campaign.declaration.digest,
         None if lock is None else stable_hash(lock.locked),

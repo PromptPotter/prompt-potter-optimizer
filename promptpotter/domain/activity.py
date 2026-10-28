@@ -5,7 +5,6 @@ from typing import Any, ClassVar, Literal, NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
-from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import BenchEnterView
@@ -25,91 +24,28 @@ from promptpotter.domain.results import (
     candidate_label,
 )
 from promptpotter.domain.run_records import (
-    AccountEventRecord,
     AnnouncedArms,
     ArmRecord,
-    BackendWarningRecord,
     CommandAckRecord,
     CommandRecord,
-    CycleFinalRecord,
-    CycleMintedRecord,
-    CycleRecord,
     CycleSeedRecord,
-    CycleSupersededRecord,
-    ElectionRecord,
-    FlightRecord,
-    ForkGradedRecord,
-    HealthRecord,
-    InterventionRecord,
-    LaunchClaimRecord,
-    LaunchClockRecord,
-    LaunchReleasedRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
     PhaseRecord,
-    PricedKeyRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
-    RaceCatchUpRecord,
-    RaceStandingRecord,
-    ResolvedRunRecord,
-    ResumeCheckpointRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
-    RoundProposedRecord,
-    RoundRestatedRecord,
     RoundWarningRecord,
     RunPhaseRecord,
-    RunWiringRecord,
     SampleScoredRecord,
-    SampleStartedRecord,
-    ScoringLockedRecord,
-    SpawnedRecord,
-    SpendHoldRecord,
-    SpendTombstoneRecord,
-    StandingBudgetRecord,
-    TokenUsageRecord,
-    TrailTombstoneRecord,
 )
 from promptpotter.domain.spend import TokenAccount, prefix_reading
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import duration_words
 
-# A tail never validates one (`projection_envelope.py::NON_ACTIVITY_KINDS`).
-SilentRecord = (
-    AccountEventRecord
-    | BackendWarningRecord
-    | CycleFinalRecord
-    | CycleMintedRecord
-    | CycleSupersededRecord
-    | ElectionRecord
-    | FlightRecord
-    | ForkGradedRecord
-    | HealthRecord
-    | InterventionRecord
-    | LaunchClaimRecord
-    | LaunchClockRecord
-    | LaunchReleasedRecord
-    | PartitionRecord
-    | PricedKeyRecord
-    | RaceCatchUpRecord
-    | RaceStandingRecord
-    | ResolvedRunRecord
-    | ResumeCheckpointRecord
-    | RoundProposedRecord
-    | RoundRestatedRecord
-    | RunWiringRecord
-    | SampleStartedRecord
-    | ScoringLockedRecord
-    | SpawnedRecord
-    | SpendHoldRecord
-    | SpendTombstoneRecord
-    | StandingBudgetRecord
-    | TokenUsageRecord
-    | TrailTombstoneRecord
-)
-# What a feed reads, `_item` total over it: with `SilentRecord`, every arm placed exactly once.
+# What a feed reads, `_item` total over it; a tail never validates any other arm.
 ActivityRecord = (
     LLMCallStartRecord
     | LLMCallRecord
@@ -128,11 +64,6 @@ ActivityRecord = (
     | CommandAckRecord
     | CycleSeedRecord
 )
-_arms = get_args(get_args(CycleRecord)[0])
-_placed = [*get_args(SilentRecord), *get_args(ActivityRecord)]
-if sorted(map(str, _placed)) != sorted(map(str, _arms)):
-    raise RuntimeError("SilentRecord and ActivityRecord must place every CycleRecord arm once")
-del _arms, _placed
 
 ActivityKind = Literal[
     "running",

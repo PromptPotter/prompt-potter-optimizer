@@ -24,6 +24,8 @@ from promptpotter.application.pipeline_resolve import (
     overlay_dataset_pipeline,
     resolve_campaign_config,
 )
+from promptpotter.application.run_observers import check_every_record_reported
+from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
@@ -41,7 +43,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
-from promptpotter.judges import registry as judge_registry
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext
 
@@ -222,6 +223,7 @@ def complete_registries(*, every_treatment: bool = True) -> None:
         if every_treatment:
             resolve_optimizer(runtime.name, {}, gate="off").treatment()
     replayers()
+    check_every_record_reported()
     for connector in table.values():
         if connector.completion_check is not None:
             connector.completion_check()

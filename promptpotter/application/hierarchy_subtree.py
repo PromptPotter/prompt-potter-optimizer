@@ -59,7 +59,6 @@ from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.run_records import ForkDirection, SpawnedBy
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_queries import (
     MAX_COURSE_DEPTH,
     CourseArm,
@@ -373,9 +372,7 @@ class _Build:
             moment = (
                 self.moment
                 if offset is None
-                else Moment(
-                    CycleLayout(cycle_dir_for(stores.base_dir, course.hop)).ledger, offset - 1
-                )
+                else Moment(stores.campaigns.ledger(course.hop), offset - 1)
             )
             got = read_course(stores, course.hop, course.index, moment=moment)
             cut, parent = course.index.forked_at_offset, course.parent
@@ -655,10 +652,10 @@ def subtree_moment(
         return None
     path = at_cycle or _root_path(stores, address)
     leaf_store, leaf = resolve_cycle_path(stores, path)
-    cycle_dir = cycle_dir_for(leaf_store.base_dir, leaf)
-    if not cycle_dir.is_dir():
+    layout = leaf_store.campaigns.layout(leaf)
+    if not layout.cycle_dir.is_dir():
         raise NotFoundError(f"Cycle '{leaf.campaign_id}/{leaf.cycle_id}' not found")
-    return Moment(CycleLayout(cycle_dir).ledger, at)
+    return Moment(layout.ledger, at)
 
 
 def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:

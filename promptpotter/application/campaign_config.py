@@ -15,13 +15,13 @@ from promptpotter.domain.campaign import (
     RunDeclaration,
     StoppingRule,
 )
+from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
 from promptpotter.domain.results import DisplayMetric, HardSampleOrder
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.judges.protocol import JudgeSpec
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import ConfigOverrides, CycleSeed

@@ -239,7 +239,7 @@ reference read before designing any ecosystem expansion. The artifact and its re
 
 ## Judged and turn-structured scoring
 
-What is live is [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md)'s. A
+What is live is [`../../promptpotter/application/scoring/judges/CLAUDE.md`](../../promptpotter/application/scoring/judges/CLAUDE.md)'s. A
 rubric must vary across arms on the same cell before a campaign funds it. Open: **per-step
 difficulty** ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Phase 3); **a
 declared step as a NODE**, so `campaign_config.exclude_nodes` is the step selector (generalizes
