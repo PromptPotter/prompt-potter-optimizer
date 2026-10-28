@@ -24,7 +24,6 @@ export const TrendChart = memo(function TrendChart(props: Props) {
   const { dash, isLive } = useCycleStream();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   useThemeVersion();
-  const bench = dash?.bench_score;
   const { points } = useMemo(
     () => fitnessTrend(dash?.rounds),
     [dash?.rounds],
@@ -60,11 +59,11 @@ export const TrendChart = memo(function TrendChart(props: Props) {
         enabled: !glyph,
         callbacks: {
           afterBody: (items: { dataIndex: number; datasetIndex: number }[]) => {
-            const n = points[items[0]?.dataIndex ?? -1]?.n;
-            const lines = typeof n === "number" ? [`n = ${n} on the search split`] : [];
+            const point = points[items[0]?.dataIndex ?? -1];
+            const lines = point ? [`n = ${point.n} on the search split`] : [];
             // The bench series is dataset 0 whenever it draws.
-            if (bench && hasBench && items.some((i) => i.datasetIndex === 0)) {
-              lines.push(`bench: ${bench.bench_size} held-out rows`);
+            if (point?.benchN != null && hasBench && items.some((i) => i.datasetIndex === 0)) {
+              lines.push(`bench: ${point.benchN} held-out rows`);
             }
             return lines;
           },

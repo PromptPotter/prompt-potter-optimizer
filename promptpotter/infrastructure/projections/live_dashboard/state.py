@@ -5,7 +5,6 @@ from typing import Any
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.dashboard_rows import (
     LiveCandidate,
@@ -109,8 +108,6 @@ class DashboardFacts(StrictModel):
 
     rounds: list[RoundSummary] = Field(default_factory=list)
 
-    # As the run last DECLARED it; the served body reads it anew (`served_dashboard`).
-    bench_score: BenchScore | None = None
     verification: list[VerificationMark] = Field(
         default_factory=list,
         description="Each arm's latest verify and held-out bench pass on this cycle's ledger, "
@@ -213,8 +210,6 @@ class LiveDashboardState(DashboardFacts):
             "state_since": wiring.timestamp,
             "stop_reason": None,
             "error": None,
-            # A resumed run grades its selection again; the prior pass graded a stale one.
-            "bench_score": None,
             "current_query_payload": None,
             "current_position": None,
             "open_positions": [],

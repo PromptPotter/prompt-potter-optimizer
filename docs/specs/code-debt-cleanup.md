@@ -31,14 +31,8 @@ acting.
   `webapp/components/candidates/forest-layout.ts::extentKeys` walks spawn cuts client-side while each
   `HierarchyCandidate` serves `main_line`; the cut is by proposal round, not line position. Action:
   an extent is the served line; the client walk dies.
-- **The dashboard still carries the bench.** `ServedDashboard.bench_score` stays because the
-  course's Bench stat lacks `status`, `vs_origin`, `cost.lift_per_usd`. Order: serve those three →
-  move every reader → delete `bench_score`. One formatter needs `LevelUnit` below `domain/bench.py`.
 - **A round's reference is recorded at SELECT**, so a measuring round serves `RoundFacts.reference`
   null. Action: record it at round entry. Blocker: a repair fork's restated rounds must write one first.
-- **Hierarchy reads that pay twice:** an inner campaign's root index is read in `_inner` and again
-  in `campaign_courses`; `campaign_entry` takes `held` and `moment` though one decides the other;
-  `export_cycle` builds the whole top subtree to read one course's standing.
 - **A round-0 fork whose parent's round 0 elected nobody is refused** (`ConflictError`), for both a
   resume-divergence fork and a diag sibling, where the origin is the only candidate to hang on.
 - **The dev loop serializes where it need not:** sibling gates queue whole runs, `next-build` peaks
@@ -52,10 +46,11 @@ acting.
 - **No offline leg rebases mid-run:** `scripts/offline_run.py` strips every `fork_proposal`, so
   `runner/entry.py::_run_line`'s later passes are reached only by patched privates. **Re-test:**
   no test under `tests/` patches a private of `runner/entry.py`.
-- **Ledger and readout shapes left standing:** the operator's seat is not a `Member`; the rebase
-  clock has no test; `LiveCandidate.samples` has no reader; `round_restated` carries the whole round;
-  `RunStanding.after` recomputes the fold; the readout filters on `resumed_from_round`;
-  `InnerCellFacts` keeps no unread rounds. **Re-test:** each symbol deleted, read, or tested.
+- **Ledger shapes left standing:** `optimizers/nodes.py::OperatorSeat` duck-types a member
+  instead of being one; the rebase clock has no test (blocked by the offline-rebase item above);
+  `round_restated` carries the whole round; `runner/round.py::announce_opening` re-derives
+  `RunStanding.after` over every round where the last close stated it. **Re-test:** each symbol
+  deleted, read, or tested.
 
 ## Open — multi-arc
 

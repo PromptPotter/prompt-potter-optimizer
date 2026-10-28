@@ -183,6 +183,7 @@ export type {
   HierarchyResponse,
   HierarchySpan,
   HierarchyStat,
+  BenchStat,
   HierarchyState,
   HierarchyTag,
   SubtreeCampaign,

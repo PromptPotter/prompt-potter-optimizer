@@ -7,6 +7,7 @@ import { useOriginEvidence } from "@/lib/hooks/useOriginEvidence";
 import { useSearchpointRead } from "@/lib/hooks/useSearchpointRead";
 import { useSelection } from "@/lib/SelectionContext";
 import {
+  benchStat,
   readSpend,
   searchpointCopyChoices,
   searchpointText,
@@ -27,7 +28,8 @@ export function SubjectBox() {
   const { point, reading } = subject;
   const shown = useSearchpointRead(point);
   const origin = useOrigin();
-  const standing = useViewedCourse()?.facts.standing ?? null;
+  const course = useViewedCourse();
+  const standing = course?.facts.standing ?? null;
 
   const cfg = shown.cfg;
   const evidence = useOriginEvidence(point);
@@ -41,7 +43,7 @@ export function SubjectBox() {
         <SubjectHeadline
           spend={readSpend(dash)}
           reading={row?.reading ?? null}
-          bench={subject.state === "best" ? (dash.bench_score?.vs_origin ?? null) : null}
+          bench={subject.state === "best" ? (benchStat(course)?.vs_origin ?? null) : null}
         />
         {subject.options.length > 1 ? (
           <SegmentedControl<ObserveState>

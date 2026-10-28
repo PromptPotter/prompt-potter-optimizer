@@ -582,8 +582,8 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "the headline — the pass a `bench_trigger: manual` campaign (the default) sends only "
         "when asked, on the cycle holding its line. Reuses a pass the line already holds; refuses "
         "a line with a run in flight, a split holding nothing out and a selection already graded "
-        "— the served status's own answer (`bench_score.status`). Spends: two passes over the "
-        "bench rows.",
+        "— the served status's own answer (the course's `BenchStat.status`). Spends: two passes "
+        "over the bench rows.",
         args=(ACTIVE_CAMPAIGN,),
     ),
     Verb(

@@ -6,9 +6,11 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from promptpotter.domain.activity import ActivityItem
+from promptpotter.domain.bench import BenchStatus
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
+from promptpotter.domain.paired_reading import PairedReading
 from promptpotter.domain.phases import (
     PauseReading,
     RunAdmission,
@@ -33,9 +35,8 @@ type TagKind = Literal[
     "superseded",
     "verdict",
 ]
-type StatKey = Literal[
-    "spend_lifetime", "spend", "bench", "rounds", "accuracy", "lives", "ability", "lift"
-]
+# A plain alias: a discriminator reads through no `type` statement.
+StatKey = Literal["spend_lifetime", "spend", "rounds", "accuracy", "lives", "ability", "lift"]
 type RankMove = Literal["up", "down", "unchanged"]
 
 # A step window: what one request is served, and the most a store's fold keeps.
@@ -61,6 +62,27 @@ class HierarchyStat(FrozenModel):
     label: str
     value: str = Field(description="The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`.")
     sub: str | None = Field(description="The second line under the value; null where none.")
+
+
+class BenchStat(FrozenModel):
+    """The bench as one stat: its wording, and the readings a control or a headline acts on."""
+
+    key: Literal["bench"] = "bench"
+    label: str
+    value: str
+    sub: str | None = Field(description="`BenchScore.line`, or why the bench is not read here.")
+    status: BenchStatus | None = Field(
+        description="Null on a course beside the line, which no command grades."
+    )
+    vs_origin: PairedReading | None = Field(
+        description="`BenchScore.vs_origin`; null with `status`."
+    )
+    lift_per_usd: float | None = Field(
+        description="`BenchScore.cost.lift_per_usd`; null where the lift is unpriced or unread."
+    )
+
+
+type EntryStat = Annotated[HierarchyStat | BenchStat, Field(discriminator="key")]
 
 
 class HierarchySpan(FrozenModel):
@@ -316,7 +338,7 @@ class _HierarchyEntry(_HierarchyNode):
     lede: str | None = Field(description="The one sentence under the title: the selection line.")
     caveat: str | None = Field(description="What could not be read; null where all was.")
     tags: list[HierarchyTag]
-    stats: list[HierarchyStat] = Field(description="Server-ordered; `stats[0]` is the headline.")
+    stats: list[EntryStat] = Field(description="Server-ordered; `stats[0]` is the headline.")
 
     def tag(self, kind: TagKind) -> HierarchyTag | None:
         return next((t for t in self.tags if t.kind == kind), None)

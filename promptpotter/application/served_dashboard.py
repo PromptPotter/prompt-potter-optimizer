@@ -8,9 +8,7 @@ from pydantic import Field
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.domain.backend import ServedBackpressure
-from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
@@ -255,7 +253,6 @@ class _Standing(NamedTuple):
     # A pass still running on the ledger that no attached run and no paid pass's job scores.
     orphaned: bool
     fork_remainder: ForkRemainder
-    bench_score: BenchScore | None
     # ``None`` where the manifest, and so the meter, is gone.
     campaign_metered: Budget | None
     at: float
@@ -342,9 +339,6 @@ def _serve(
     banked["backpressure"] = None
     if standing is not None:
         banked["run_limits"] = standing.run_limits
-        if standing.bench_score is not None:
-            # The stored one is as the run last declared it; askability moves with the producer.
-            banked["bench_score"] = standing.bench_score
         if not run.producer.appending:
             # A killed run never publishes its closing zero, so it would go on reporting calls out.
             banked.update(in_flight=0, lookahead_allowed=0, waiting_on=None)
@@ -461,9 +455,6 @@ def served_dashboard(
             and not run.producer.attached
             and JobRegistry.attach().pass_on(stores.campaigns.workspace, hop) is None,
             fork_remainder=_remainder(stores, hop, limits),
-            bench_score=None
-            if campaign is None or config is None
-            else cycle_bench(stores, campaign, hop, config),
             campaign_metered=None
             if meter is None
             else stores.campaigns.metered_spend(hop.campaign_id, meter),

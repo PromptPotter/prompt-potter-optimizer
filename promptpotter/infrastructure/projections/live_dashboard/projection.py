@@ -291,7 +291,6 @@ class LiveDashboardProjection(Projection):
                 self._in_pass = True
                 self._mark(_opened("verify", view.arm, view.rows))
             case BenchScoredView():
-                s.bench_score = view.bench
                 for reading in (view.bench.origin, view.bench.selected):
                     if reading is not None:
                         self._place_bench(reading)

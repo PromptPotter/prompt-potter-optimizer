@@ -209,18 +209,12 @@ class ReadoutProjection(Projection):
             self._round_best_acc = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
-        # `> 1`, not `> 0`: `resumed_from_round` counts the NEXT round, so a fresh mint is 1.
-        if (
-            isinstance(view, InitExitView)
-            and view.resumed_from_round > 1
-            and self._cycle_dir is not None
-        ):
+        # A `--from` retracted its rounds before INIT exits, so what stands is exactly the prior line.
+        if isinstance(view, InitExitView) and self._cycle_dir is not None:
             standing = scan_standing_rounds(
                 ledger_chain(CycleDir(self._cycle_dir), moment=None)
             ).rounds
-            self._closed = {
-                n: held.close for n, held in standing.items() if n < view.resumed_from_round
-            }
+            self._closed = {n: held.close for n, held in standing.items()}
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if record.spend is not None:

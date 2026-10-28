@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from promptpotter.application.pipeline_resolve import campaign_runs_with, line_config
@@ -26,6 +27,7 @@ from promptpotter.domain.cycle_paths import (
     hierarchy_address,
 )
 from promptpotter.domain.hierarchy import (
+    BenchStat,
     CampaignFacts,
     CourseFacts,
     CourseKind,
@@ -183,23 +185,27 @@ def _line_stats(index: CycleIndex, cap: int | None, *, on_theta: bool) -> list[H
 
 
 # The bench grades the course holding the line and no other, so every other course reads this.
-_HELD_BENCH = HierarchyStat(
-    key="bench",
+_HELD_BENCH = BenchStat(
     label="Bench",
     value=READING_STATE_INFO[ReadingState.HELD_ELSEWHERE].label,
     sub=BENCH_STATE_INFO[ReadingState.HELD_ELSEWHERE].sentence,
+    status=None,
+    vs_origin=None,
+    lift_per_usd=None,
 )
 
 
-def _bench_stat(bench: BenchScore) -> HierarchyStat:
+def _bench_stat(bench: BenchScore) -> BenchStat:
     level = None if bench.selected is None else bench.selected.level
-    return HierarchyStat(
-        key="bench",
+    return BenchStat(
         label="Bench",
         value=READING_STATE_INFO[bench.status.state].label
         if level is None
         else level_text(DISPLAY_METRIC_INFO[bench.headline].unit, level.value),
         sub=bench.line,
+        status=bench.status,
+        vs_origin=bench.vs_origin,
+        lift_per_usd=bench.cost.lift_per_usd,
     )
 
 
@@ -214,7 +220,7 @@ def course_entry(
     moment: Moment | None,
     runs_with: CampaignRunsWith | None,
     config: CampaignConfig | None,
-    bench: HierarchyStat | None,
+    bench: BenchStat | None,
 ) -> HierarchyCourse:
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
     # The producer as it is now: a moment replays the record, never a process.
@@ -311,23 +317,31 @@ def _campaign_tags(campaign: Campaign, runs_with: CampaignRunsWith | None) -> li
     return tags
 
 
-def campaign_courses(
-    stores: Stores, campaign: Campaign, *, moment: Moment | None
-) -> list[tuple[CycleHop, CycleIndex, CycleIndex]]:
-    """Each course's index read once — as of *moment*, and at its head — root first: a course
-    minted after the moment is not among them."""
-    return sorted(
-        (
-            (hop, index, now)
-            for hop, now in stores.campaigns.campaign_cycles(campaign.campaign_id)
-            if (
-                index := now
-                if moment is None
-                else read_cycle_index(stores.campaigns.cycle_dir(hop), moment=moment)
-            )
-            is not None
+@dataclass(frozen=True)
+class CourseReads:
+    """A campaign's courses as of one moment: each index at it and at its head, root first."""
+
+    moment: Moment | None
+    courses: list[tuple[CycleHop, CycleIndex, CycleIndex]]
+
+
+def campaign_courses(stores: Stores, campaign: Campaign, *, moment: Moment | None) -> CourseReads:
+    """Each course's index read once: a course minted after the moment is not among them."""
+    return CourseReads(
+        moment,
+        sorted(
+            (
+                (hop, index, now)
+                for hop, now in stores.campaigns.campaign_cycles(campaign.campaign_id)
+                if (
+                    index := now
+                    if moment is None
+                    else read_cycle_index(stores.campaigns.cycle_dir(hop), moment=moment)
+                )
+                is not None
+            ),
+            key=lambda entry: (entry[0].cycle_id != campaign.root_cycle_id, entry[1].created_at),
         ),
-        key=lambda entry: (entry[0].cycle_id != campaign.root_cycle_id, entry[1].created_at),
     )
 
 
@@ -335,12 +349,11 @@ def campaign_entry(
     stores: Stores,
     inside: CyclePath,
     campaign: Campaign,
-    held: list[tuple[CycleHop, CycleIndex, CycleIndex]],
+    held: CourseReads,
     *,
     depth: int,
-    moment: Moment | None,
 ) -> HierarchyCampaign:
-    """*held* is `campaign_courses` read under the same *moment*."""
+    moment = held.moment
     holder = stores.campaigns.line_holder(campaign.root_hop, moment=moment)
     runs_with = campaign_runs_with(stores, campaign)
     config = line_config(stores, campaign, holder)
@@ -352,7 +365,7 @@ def campaign_entry(
         else None
     )
     courses: dict[str, HierarchyCourse] = {}
-    for hop, index, now in held:
+    for hop, index, now in held.courses:
         if depth == 0 and hop != holder:
             continue
         courses[hop.cycle_id] = course_entry(
@@ -395,7 +408,9 @@ def campaign_entry(
         stats=[_lifetime_stat(spend_lifetime), *([] if line is None else line.stats[1:])],
         span=HierarchySpan(
             opened_at=campaign.created_at,
-            last_at=max((index.updated_at for _, index, _ in held), default=campaign.created_at),
+            last_at=max(
+                (index.updated_at for _, index, _ in held.courses), default=campaign.created_at
+            ),
         ),
         children=list(courses.values()) if depth > 0 else [],
         facts=CampaignFacts(
@@ -458,7 +473,6 @@ def list_hierarchy(
                 campaign,
                 campaign_courses(leaf, campaign, moment=None),
                 depth=depth,
-                moment=None,
             ),
         )
         for campaign in leaf.campaigns.list_campaigns(

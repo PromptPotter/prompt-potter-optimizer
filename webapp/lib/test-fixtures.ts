@@ -15,6 +15,7 @@ import type {
   HierarchyState,
   HierarchyStep,
   HierarchyStat,
+  BenchStat,
   HierarchyTag,
   LiveCandidate,
   Measured,
@@ -35,7 +36,7 @@ function envelope(): {
   lede: null;
   caveat: null;
   tags: HierarchyTag[];
-  stats: HierarchyStat[];
+  stats: (HierarchyStat | BenchStat)[];
   children: never[];
 } {
   return { lede: null, caveat: null, tags: [], stats: [], children: [] };
@@ -449,7 +450,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     rounds: [],
     overlap_line_round: null,
     overlap_line_n: null,
-    bench_score: null,
     verification: [],
     composite_fitness_formula: null,
     composite_fitness_weights: null,

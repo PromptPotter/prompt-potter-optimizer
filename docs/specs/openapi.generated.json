@@ -1615,6 +1615,82 @@
         "title": "BenchSet",
         "type": "object"
       },
+      "BenchStat": {
+        "additionalProperties": false,
+        "description": "The bench as one stat: its wording, and the readings a control or a headline acts on.",
+        "properties": {
+          "key": {
+            "const": "bench",
+            "default": "bench",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lift_per_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`BenchScore.cost.lift_per_usd`; null where the lift is unpriced or unread.",
+            "title": "Lift Per Usd"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null on a course beside the line, which no command grades."
+          },
+          "sub": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`BenchScore.line`, or why the bench is not read here.",
+            "title": "Sub"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          },
+          "vs_origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairedReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`BenchScore.vs_origin`; null with `status`."
+          }
+        },
+        "required": [
+          "label",
+          "value",
+          "sub",
+          "status",
+          "vs_origin",
+          "lift_per_usd"
+        ],
+        "title": "BenchStat",
+        "type": "object"
+      },
       "BenchStatus": {
         "additionalProperties": false,
         "description": "Where a campaign's bench stands, and whether asking for its pass would be admitted.",
@@ -5666,6 +5742,29 @@
         "title": "Elimination",
         "type": "object"
       },
+      "EntryStat": {
+        "discriminator": {
+          "mapping": {
+            "ability": "#/components/schemas/HierarchyStat",
+            "accuracy": "#/components/schemas/HierarchyStat",
+            "bench": "#/components/schemas/BenchStat",
+            "lift": "#/components/schemas/HierarchyStat",
+            "lives": "#/components/schemas/HierarchyStat",
+            "rounds": "#/components/schemas/HierarchyStat",
+            "spend": "#/components/schemas/HierarchyStat",
+            "spend_lifetime": "#/components/schemas/HierarchyStat"
+          },
+          "propertyName": "key"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/HierarchyStat"
+          },
+          {
+            "$ref": "#/components/schemas/BenchStat"
+          }
+        ]
+      },
       "EnvironmentReading": {
         "additionalProperties": false,
         "description": "One cell as an ENVIRONMENT, the block the subjects are compared within. ``snr`` is the\nsubjects' spread at this cell over the roster's pooled residual — which environments tell the\nsubjects apart, read without a replicate, which the content-addressed instrument cannot give.\nA held-out cell reads the subjects' bench passes, which only a round's selection has.",
@@ -7175,7 +7274,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"
@@ -7273,7 +7372,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"
@@ -7368,7 +7467,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"
@@ -7489,7 +7588,17 @@
         "description": "One number an entry shows, worded by the server in the order it is served.",
         "properties": {
           "key": {
-            "$ref": "#/components/schemas/StatKey"
+            "enum": [
+              "spend_lifetime",
+              "spend",
+              "rounds",
+              "accuracy",
+              "lives",
+              "ability",
+              "lift"
+            ],
+            "title": "Key",
+            "type": "string"
           },
           "label": {
             "title": "Label",
@@ -13498,16 +13607,6 @@
               }
             ]
           },
-          "bench_score": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchScore"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "campaign_id": {
             "title": "Campaign Id",
             "type": "string"
@@ -14710,19 +14809,6 @@
         "title": "StartRunPayload",
         "type": "object"
       },
-      "StatKey": {
-        "enum": [
-          "spend_lifetime",
-          "spend",
-          "bench",
-          "rounds",
-          "accuracy",
-          "lives",
-          "ability",
-          "lift"
-        ],
-        "type": "string"
-      },
       "StatusMark": {
         "enum": [
           "archived",
@@ -15425,7 +15511,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"
@@ -15606,7 +15692,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"

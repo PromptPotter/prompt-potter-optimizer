@@ -92,8 +92,8 @@ invariants:
                       point: the served `RunStanding.vs_origin` pair, both rates on the
                       origin panel (the masthead''s BEST, ForestRows, PanelCellRow,
                       run-summary) and never either member''s own level; `origin_accuracy` on
-                      the origins listing (DatasetPickList), `bench_score.vs_origin`
-                      (headline-stats), and run_card.flips'' per-sample rows. PARENT is the round''s
+                      the origins listing (DatasetPickList), the course's
+                      `BenchStat.vs_origin` (headline-stats), and run_card.flips'' per-sample rows. PARENT is the round''s
                       own floor — the origin at round 0, the prior winner after: every
                       `vs_reference` reading, wherever it surfaces (the searchpoint drill-in,
                       OuterSignalPanel, RoundFileView, run_card''s percent pair). The engine
