@@ -208,14 +208,17 @@ PREFIXES_MAX = 16
 DERIVED_MAX = 4096
 
 
-def _registered[K, I](registry: OrderedDict[K, I], key: K, make: Callable[[], I]) -> I:
+def _registered[K, I: _LedgerTail](registry: OrderedDict[K, I], key: K, make: Callable[[], I]) -> I:
     index = registry.get(key)
-    if index is None:
-        index = registry[key] = make()
-        while len(registry) > LEDGER_INDEX_MAX:
-            registry.popitem(last=False)
-    else:
+    if index is not None:
         registry.move_to_end(key)
+        return index
+    # No fold outlives its ledger: a deleted tree's indexes leave before another joins.
+    for gone in [held for held, tail in registry.items() if not tail._path.exists()]:
+        del registry[gone]
+    index = registry[key] = make()
+    while len(registry) > LEDGER_INDEX_MAX:
+        registry.popitem(last=False)
     return index
 
 
