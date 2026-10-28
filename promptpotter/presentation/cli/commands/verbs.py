@@ -358,10 +358,12 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "every dropped key is reported with the value its file held. (2) Re-project each "
         "finished cycle's ledger onto the current record shape, dropping what the archive "
         "and the round files already hold. A cycle with a live producer is left alone. (3) "
-        "REPORT whether every banked round file still loads, grouped by what drifted — "
+        "Walk every file the measurement archive writes: prune retired keys, and remove a "
+        "record its model still refuses with what it alone describes. (4) "
+        "REPORT whether every ledger, manifest and archive file still loads — "
         "read-only, because "
         "pruning cannot restore a renamed field's value, so a repair there would be silently "
-        "wrong. The sanctioned remedy after a field rename or a record-shape change, and (3) is "
+        "wrong. The sanctioned remedy after a field rename or a record-shape change, and (4) is "
         "how you find out you need one. Dry-run by default. Pure disk work, zero spend.",
         args=(
             Arg("--apply", action="store_true", help="Rewrite the files (default: report only)."),

@@ -4,8 +4,8 @@ import json
 import pathlib
 import types
 from collections import Counter
-from collections.abc import Callable
-from functools import reduce
+from collections.abc import Callable, Iterator
+from functools import partial, reduce
 from typing import Annotated, Any, Literal, NamedTuple, Union, get_args, get_origin
 
 import yaml
@@ -14,6 +14,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from promptpotter.application.datasets.authored import campaign_file_block
 from promptpotter.application.jobs.registry import Job
 from promptpotter.application.maintenance.archive_maintenance import (
+    archive_writers,
     iter_cycle_ledgers,
     workspace_trees,
 )
@@ -25,6 +26,7 @@ from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.run_records import CycleRecord
+from promptpotter.domain.sample import ArchiveConfig, FiledAnswer
 from promptpotter.domain.scoring import GradedCell
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.cycle_index import (
@@ -32,18 +34,36 @@ from promptpotter.infrastructure.projections.cycle_index import (
     write_cycle_index,
 )
 from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.store.archive_queries import SampleFoldRow, read_sample_fold
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import definition_files
 from promptpotter.infrastructure.store.io import (
+    HeldLock,
+    probe_lock,
     read_json_optional,
     rewrite_lines,
+    take_lock,
+    unlink_robust,
+    write_json,
+    write_jsonl,
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
+    archive_homes,
     inner_sandboxes_dir,
     read_sandbox_owner,
 )
+from promptpotter.infrastructure.store.measurement_archive import (
+    ArchiveFile,
+    CellClaim,
+    CellRewrite,
+    MeasurementArchive,
+    MovedFields,
+    answer_line,
+    indexed_entry,
+)
+from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import LedgerUnreadableError, ManifestUnreadableError
@@ -174,15 +194,21 @@ def _prune_to_schema(
 class _Tally:
     def __init__(self) -> None:
         self.rewritten = self.unchanged = self.empty = self.skipped = self.failed = 0
+        self.removed = 0
         self.gone: Counter[str] = Counter()
 
     def report(self, title: str, *, apply: bool) -> None:
         print(f"\n{title}")
         print(f"  {'pruned' if apply else 'would be pruned':>18}: {self.rewritten}")
         print(f"  {'already current':>18}: {self.unchanged}")
-        print(f"  {'no config':>18}: {self.empty}")
-        print(f"  {'skipped':>18}: {self.skipped}")
-        print(f"  {'still invalid':>18}: {self.failed}")
+        for label, n in (
+            ("no config", self.empty),
+            ("skipped", self.skipped),
+            ("still invalid", self.failed),
+            ("removed" if apply else "would be removed", self.removed),
+        ):
+            if n:
+                print(f"  {label:>18}: {n}")
 
 
 def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tally) -> None:
@@ -436,6 +462,305 @@ def prune_finished_jobs(*, apply: bool) -> dict[str, int]:
     return {"jobs_finished": finished, "jobs_invalid": invalid}
 
 
+class _Pruned(NamedTuple):
+    # ``None``: its model still refuses the pruned record, so nothing can key it.
+    record: dict[str, Any] | None
+    dropped: list[tuple[str, Any]]
+
+
+def _pruned(raw: object, model_cls: type[BaseModel]) -> _Pruned:
+    if not isinstance(raw, dict):
+        return _Pruned(None, [])
+    pruned, dropped = _prune_to_schema(raw, model_cls)
+    try:
+        model_cls.model_validate(pruned)
+    except ValidationError:
+        return _Pruned(None, dropped)
+    return _Pruned(pruned, dropped)
+
+
+class _ArchivePass:
+    """One home in `_ARCHIVE_WALKS` order: a later kind's dependents name what an earlier one removed."""
+
+    def __init__(self, archive: MeasurementArchive, *, apply: bool) -> None:
+        self.archive = archive
+        self.apply = apply
+        self.tallies = {kind: _Tally() for kind in ArchiveFile}
+        # The configurations a kept answer names: a config or fold row outside it describes nothing.
+        self.named: set[str] = set()
+        self.removed_configs: set[str] = set()
+        self._configs: dict[str, _Pruned | None] = {}
+
+    def config(self, key: str) -> _Pruned | None:
+        """``None``: no file describes *key*, so its answers stand undescribed, as `reindex` counts them."""
+        if key not in self._configs:
+            try:
+                raw = read_json_optional(self.archive.path(ArchiveFile.CONFIG, key))
+                held = None if raw is None else _pruned(raw, ArchiveConfig)
+            except ValueError:
+                held = _Pruned(None, [])
+            self._configs[key] = held
+        return self._configs[key]
+
+    def refused(self, config_key: str) -> bool:
+        return (held := self.config(config_key)) is not None and held.record is None
+
+
+def _walk_cold(run: _ArchivePass) -> None:
+    archive, tally = run.archive, run.tallies[ArchiveFile.COLD]
+    for key in archive.keys(ArchiveFile.COLD):
+        try:
+            archive.read_cold(key)
+            held = archive.cell_path(key).exists()
+        except (OSError, EOFError, ValueError, KeyError):
+            held = False
+        if held:
+            tally.unchanged += 1
+            continue
+        tally.removed += 1
+        if run.apply:
+            unlink_robust(archive.cold_path(key))
+
+
+class _CellsKept(NamedTuple):
+    named: frozenset[str]
+    current: int
+    pruned: int
+    removed: int
+
+
+def _filed(line: str) -> tuple[dict[str, Any], FiledAnswer] | None:
+    """The row and the answer its reader takes from it; ``None`` where no address can key it."""
+    try:
+        row = json.loads(line)
+        answer = FiledAnswer.from_wire(row) if isinstance(row, dict) else None
+    except (ValueError, TypeError, KeyError):
+        return None
+    return None if answer is None or answer.cell.answer is None else (row, answer)
+
+
+def _restamped_cells(
+    lines: list[str],
+    cold: list[MovedFields],
+    *,
+    refused: Callable[[str], bool],
+    apply: bool,
+) -> tuple[CellRewrite | None, _CellsKept]:
+    out: list[str] = []
+    named: set[str] = set()
+    kept: set[str] = set()
+    pruned = removed = 0
+    for line in lines:
+        filed = _filed(line)
+        if filed is None or refused(filed[1].config_key):
+            removed += 1
+            continue
+        row, answer = filed
+        named.add(answer.config_key)
+        kept.add(answer.answer)
+        if row.keys() <= answer.wire().keys():
+            out.append(line)
+        else:
+            pruned += 1
+            out.append(answer_line(answer))
+    outcome = _CellsKept(frozenset(named), len(out) - pruned, pruned, removed)
+    if not apply or not (pruned or removed):
+        return None, outcome
+    return CellRewrite(out, [m for m in cold if m.answer in kept]), outcome
+
+
+def _walk_cells(run: _ArchivePass) -> None:
+    archive, tally = run.archive, run.tallies[ArchiveFile.CELLS]
+    transform = partial(_restamped_cells, refused=run.refused, apply=run.apply)
+    for key in archive.keys(ArchiveFile.CELLS):
+        kept = archive.rewrite_cell_file(key, transform)
+        run.named |= kept.named
+        tally.unchanged += kept.current
+        tally.rewritten += kept.pruned
+        tally.removed += kept.removed
+        path = archive.cell_path(key)
+        if run.apply and not (kept.current or kept.pruned) and path.stat().st_size == 0:
+            unlink_robust(path)
+
+
+def _walk_configs(run: _ArchivePass) -> None:
+    archive, tally = run.archive, run.tallies[ArchiveFile.CONFIG]
+    for key in archive.keys(ArchiveFile.CONFIG):
+        path = archive.path(ArchiveFile.CONFIG, key)
+        held = run.config(key)
+        if held is None or held.record is None or key not in run.named:
+            tally.removed += 1
+            run.removed_configs.add(key)
+            if run.apply:
+                unlink_robust(path)
+        elif held.dropped:
+            tally.rewritten += 1
+            tally.gone.update(f"{dotted} = {value!r}" for dotted, value in held.dropped)
+            if run.apply:
+                write_json(path, held.record)
+        else:
+            tally.unchanged += 1
+
+
+def _walk_index(run: _ArchivePass) -> None:
+    archive, tally = run.archive, run.tallies[ArchiveFile.INDEX]
+    for row in iter_jsonl(archive.path(ArchiveFile.INDEX)):
+        try:
+            entry = indexed_entry(row)
+        except ValidationError:
+            tally.removed += 1
+            continue
+        if entry.config_key in run.removed_configs:
+            tally.removed += 1
+        else:
+            tally.unchanged += 1
+    if run.apply and (tally.removed or run.tallies[ArchiveFile.CELLS].removed):
+        archive.reindex()
+
+
+def _walk_sample_folds(run: _ArchivePass) -> None:
+    archive, tally = run.archive, run.tallies[ArchiveFile.SAMPLE_FOLD]
+    for key in archive.keys(ArchiveFile.SAMPLE_FOLD):
+        path = archive.path(ArchiveFile.SAMPLE_FOLD, key)
+        kept: list[dict[str, Any]] = []
+        changed = False
+        for row in iter_jsonl(path):
+            record, dropped = _pruned(row, SampleFoldRow)
+            if record is None or record["config_key"] not in run.named:
+                tally.removed += 1
+                changed = True
+                continue
+            kept.append(record)
+            if dropped:
+                tally.rewritten += 1
+                tally.gone.update(f"{dotted} = {value!r}" for dotted, value in dropped)
+                changed = True
+            else:
+                tally.unchanged += 1
+        if run.apply and changed:
+            if kept:
+                write_jsonl(path, kept)
+            else:
+                unlink_robust(path)
+
+
+def _dead_claims(run: _ArchivePass, kind: ArchiveFile) -> Iterator[tuple[str, HeldLock | None]]:
+    """Each claim no walk holds, its lock taken under ``--apply``: a live holder's is never touched."""
+    tally = run.tallies[kind]
+    for key in run.archive.keys(kind):
+        lock_path = run.archive.path(ArchiveFile.CLAIM_LOCK, key)
+        lock: HeldLock | None = None
+        if run.apply:
+            lock = take_lock(lock_path, wait_s=0)
+            held = lock is None
+        else:
+            with probe_lock(lock_path) as probed:
+                held = probed
+        if held:
+            tally.skipped += 1
+            continue
+        tally.removed += 1
+        yield key, lock
+
+
+def _walk_claim_rows(run: _ArchivePass) -> None:
+    for key, lock in _dead_claims(run, ArchiveFile.CLAIM_ROW):
+        if lock is not None:
+            try:
+                unlink_robust(run.archive.path(ArchiveFile.CLAIM_ROW, key))
+            finally:
+                lock.release()
+
+
+def _walk_claim_locks(run: _ArchivePass) -> None:
+    for key, lock in _dead_claims(run, ArchiveFile.CLAIM_LOCK):
+        if lock is not None:
+            CellClaim(lock, run.archive.path(ArchiveFile.CLAIM_ROW, key)).release()
+
+
+class _ArchiveWalk(NamedTuple):
+    title: str
+    walk: Callable[[_ArchivePass], None]
+
+
+# Dependency order: cold before the cells that rewrite it, every answer before the configs it names.
+_ARCHIVE_WALKS: dict[ArchiveFile, _ArchiveWalk] = {
+    ArchiveFile.COLD: _ArchiveWalk("cold payloads — undecodable or with no cell file", _walk_cold),
+    ArchiveFile.CELLS: _ArchiveWalk("filed answers (rows)", _walk_cells),
+    ArchiveFile.CONFIG: _ArchiveWalk("configurations — refused or naming no answer", _walk_configs),
+    ArchiveFile.INDEX: _ArchiveWalk(
+        "index rows — rebuilt from the cells when one goes", _walk_index
+    ),
+    ArchiveFile.SAMPLE_FOLD: _ArchiveWalk("sample folds (rows)", _walk_sample_folds),
+    ArchiveFile.CLAIM_ROW: _ArchiveWalk("claim rows a dead walk left", _walk_claim_rows),
+    ArchiveFile.CLAIM_LOCK: _ArchiveWalk("claim locks a dead walk left", _walk_claim_locks),
+}
+assert _ARCHIVE_WALKS.keys() == set(ArchiveFile), (
+    "a file kind the archive writes and no re-stamp walks keeps its old shape through every deploy"
+)
+
+
+def restamp_measurement_archives(*, apply: bool) -> dict[str, int]:
+    """A record its model refuses after pruning cannot be keyed: it goes with what it alone describes."""
+    homes = archive_homes(DEFAULT_PROJECTS_ROOT)
+    writers = archive_writers(DEFAULT_PROJECTS_ROOT)
+    if homes and writers:
+        print(f"\nMeasurement archives — {writers} cycle(s) can still append, so none was walked")
+        return {
+            "archive_records_pruned": 0,
+            "archive_records_removed": 0,
+            "archive_writers": writers,
+        }
+    pruned = removed = 0
+    gone: Counter[str] = Counter()
+    for home in homes:
+        run = _ArchivePass(MeasurementArchive.at(home), apply=apply)
+        for walk in _ARCHIVE_WALKS.values():
+            walk.walk(run)
+        for kind, walk in _ARCHIVE_WALKS.items():
+            tally = run.tallies[kind]
+            if tally.rewritten or tally.unchanged or tally.removed or tally.skipped:
+                tally.report(f"Measurement archive {home}: {walk.title}", apply=apply)
+            pruned += tally.rewritten
+            removed += tally.removed
+            gone += tally.gone
+    if gone:
+        print("\nDropped — archive keys the engine no longer declares, and the value each held:")
+        for entry, n in gone.most_common():
+            print(f"  {n:4d}x  {entry}")
+    if not apply and (pruned or removed):
+        print("\nDry run. Re-run with --apply to rewrite.")
+    return {
+        "archive_records_pruned": pruned,
+        "archive_records_removed": removed,
+        "archive_writers": 0,
+    }
+
+
+def _archive_refusals(archive: MeasurementArchive) -> Iterator[str]:
+    """Each file the store's own reader refuses; a claim is read only by its live holder."""
+    for path in archive.unwalked():
+        yield f"{path} — no re-stamp walker reads this file"
+    folds = partial(archive.path, ArchiveFile.SAMPLE_FOLD)
+    readers: tuple[tuple[ArchiveFile, Callable[[str], object]], ...] = (
+        (ArchiveFile.INDEX, lambda _key: archive.list_all()),
+        (ArchiveFile.CONFIG, archive.config),
+        (ArchiveFile.CELLS, archive.answers),
+        (ArchiveFile.COLD, archive.read_cold),
+        (ArchiveFile.SAMPLE_FOLD, lambda key: read_sample_fold(folds(key))),
+    )
+    for kind, read in readers:
+        for key in archive.keys(kind):
+            try:
+                read(key)
+            except (OSError, EOFError, ValueError, TypeError, KeyError) as exc:
+                cause = str(exc).partition("\n")[0]
+                yield (
+                    f"{archive.path(kind, key)} — {type(exc).__name__}: {cause}; "
+                    "python -m promptpotter restamp --apply removes it while no cycle appends"
+                )
+
+
 class _CampaignOf(NamedTuple):
     tenant_id: str
     campaign_id: str
@@ -451,7 +776,7 @@ def _campaign_of(tree: pathlib.Path, path: pathlib.Path) -> _CampaignOf | None:
 
 
 def check_readable() -> dict[str, int]:
-    """Read-only, after every rewrite: a campaign still refusing its reader is named with its remedy."""
+    """Read-only, after every rewrite: a campaign or archive file still refusing its reader is named."""
     refused: dict[_CampaignOf, None] = {}
     ledgers: list[str] = []
     manifests: list[str] = []
@@ -476,6 +801,11 @@ def check_readable() -> dict[str, int]:
                     if campaign := _campaign_of(tree, store.campaign_root_dir(campaign_id)):
                         refused[campaign] = None
 
+    homes = archive_homes(DEFAULT_PROJECTS_ROOT)
+    archive_refused = [
+        cause for home in homes for cause in _archive_refusals(MeasurementArchive.at(home))
+    ]
+
     print(f"\nCycle ledgers — {checked} checked, {checked - len(ledgers)} read")
     for cause in (*ledgers, *manifests):
         print(f"  {cause}")
@@ -487,9 +817,13 @@ def check_readable() -> dict[str, int]:
             f"  UNREADABLE campaign {campaign_id} (tenant {tenant_id}) — "
             f"python -m promptpotter --tenant {tenant_id} delete {campaign_id}"
         )
+    print(f"\nMeasurement archives — {len(homes)} home(s), {len(archive_refused)} file(s) refused")
+    for cause in archive_refused:
+        print(f"  UNREADABLE archive {cause}")
     return {
         "ledgers_checked": checked,
         "ledgers_refused": len(ledgers),
         "manifests_refused": len(manifests),
         "campaigns_unreadable": len(refused),
+        "archive_refused": len(archive_refused),
     }

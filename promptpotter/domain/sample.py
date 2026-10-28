@@ -93,8 +93,8 @@ def sample_key(
     )
 
 
-class ArchiveEntry(FrozenModel):
-    """A configuration under ONE dataset; ``name`` and ``created_at`` are its first answer's."""
+class ArchiveConfig(FrozenModel):
+    """A configuration as its archive file holds it: nothing any dataset or answer says of it."""
 
     config_key: str
     # ``PipelineSchema.sp_hash``: empty where the searchpoint resolves no node config.
@@ -102,13 +102,18 @@ class ArchiveEntry(FrozenModel):
     # Empty with it, and its cells are then never replayed.
     node_configs: list[tuple[str, dict[str, Any]]]
     pipeline_params: dict[str, Any]
-    dataset_hash: str
-    name: str = ""
-    created_at: str = ""
 
     @property
     def individual(self) -> str:
         return self.prompt_fields_id or self.config_key
+
+
+class ArchiveEntry(ArchiveConfig):
+    """A configuration under ONE dataset; ``name`` and ``created_at`` are its first answer's."""
+
+    dataset_hash: str
+    name: str = ""
+    created_at: str = ""
 
 
 def _stated(row: Mapping[str, object], key: str) -> str:

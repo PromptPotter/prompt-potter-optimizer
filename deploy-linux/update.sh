@@ -107,14 +107,14 @@ fi
 # moved a field takes `resume` with it until the ledger carrying that field is
 # migrated. A cycle with a live producer is skipped, so a deploy landing mid-run
 # leaves that cycle's ledger untouched and picks it up on the next one.
-say "data: re-stamp configs + compact cycle ledgers onto the synced schema"
+say "data: re-stamp configs, cycle ledgers + the measurement archive onto the synced schema"
 # PROMPTPOTTER_HOME is on the UNIT, not in the environment of a shell run from the checkout — so
 # without it this resolves to $INSTALL_DIR/.promptpotter, finds no workspace on a box whose data
 # root moved to $DATA_DIR, and reports "nothing to re-stamp" over campaigns it never opened.
 # The prefix is spelled LITERALLY and defaulted rather than as `${DATA_DIR:+VAR=…}`: bash decides
 # what is an assignment while parsing, so one arriving from an expansion is taken as the command
 # NAME instead, and the line dies 127 on a box that had the root set all along.
-# Its output is kept: a campaign it still cannot read is the health verdict's, at the end.
+# Its output is kept: a campaign or archive file it still cannot read is the health verdict's.
 restamp_log="$(mktemp)"
 trap 'rm -f "$restamp_log"' EXIT
 if ! ( cd "$INSTALL_DIR" && PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" .venv/bin/python -m promptpotter restamp --apply ) | tee "$restamp_log"; then
@@ -144,9 +144,10 @@ fi
 # These decide the EXIT CODE, and they are the only things that do. `bad` only prints, so
 # until this counter existed the script ended 0 while announcing `✗ app down` — a deploy that left
 # the service dead reported success to whoever ran it and to anything reading `$?`. The restamp
-# above deliberately stays advisory (see its comment) EXCEPT for a campaign it still cannot read:
-# that account's list is broken while the app answers, so the deploy finishes and then fails, naming
-# each one and its delete. Nothing deletes it for the operator — it is a user's data.
+# above deliberately stays advisory (see its comment) EXCEPT for a campaign or archive file it still
+# cannot read: that account's list, or its next run, breaks while the app answers, so the deploy
+# finishes and then fails, naming each one and its remedy. Nothing deletes a campaign for the
+# operator — it is a user's data.
 say "health"
 down=0
 if wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH"; then ok "app up ($BIND_PORT)"; else bad "app down — journalctl -u $SERVICE_NAME -e"; down=1; fi
@@ -168,8 +169,8 @@ done <<< "$health_out"
 if [[ -n "$BACKEND_DIR" ]]; then
   if wait_healthy "http://127.0.0.1:$BACKEND_PORT/status"; then ok "backend up ($BACKEND_PORT)"; else bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"; down=1; fi
 fi
-# The verb's own prefix (`application/maintenance/restamp.py::check_readable`). The delete runs as
-# the restamp did: from $INSTALL_DIR, its venv, under the data root.
+# The verb's own prefix (`application/maintenance/restamp.py::check_readable`), on a campaign and an
+# archive file alike. Each remedy runs as the restamp did: from $INSTALL_DIR, its venv, the data root.
 while IFS= read -r unreadable; do
   bad "$unreadable  [in $INSTALL_DIR, PROMPTPOTTER_HOME=${DATA_DIR:-$INSTALL_DIR/.promptpotter}]"; down=1
 done < <(sed -n 's/^  UNREADABLE //p' "$restamp_log")

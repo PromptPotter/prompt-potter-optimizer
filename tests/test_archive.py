@@ -148,6 +148,7 @@ from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import probe_lock, rewrite_lines, take_lock
 from promptpotter.infrastructure.store.layout import CycleLayout, campaigns_root_dir_for
 from promptpotter.infrastructure.store.measurement_archive import (
+    ArchiveFile,
     MeasurementArchive,
     ReplayFeed,
     config_key,
@@ -630,6 +631,54 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert bench_reads(built_stores, bank=recut, sample_keys=frozenset({q2.key})) == 1, (
         "a holdout read under the bank before a re-cut was not counted on the re-cut"
     )
+
+    # A re-stamp walks every file the archive writes. An answer filed before rows were keyed by
+    # bank cannot be keyed, so it goes with the configuration and index row it alone described.
+    monkeypatch.setattr(restamp, "DEFAULT_PROJECTS_ROOT", built_stores.projects_root)
+    assert restamp.check_readable()["archive_refused"] == 0, (
+        "a file this journey's writers left is one no re-stamp walker reads"
+    )
+    stale = "0" * 32
+    before_reshape = {
+        "config_key": stale,
+        "prompt_fields_id": "pf_old",
+        "rendered_prompt_hash": "r_old",
+        "dataset_name": "justlogic/d234",
+        "node_configs": [["llm_only", {"model": "X"}]],
+        "pipeline_params": {},
+    }
+    stale_config = archive.path(ArchiveFile.CONFIG, stale)
+    stale_config.write_text(json.dumps(before_reshape), encoding="utf-8")
+    append_row(
+        archive.cell_path(stale),
+        {
+            "sample_id": 0,
+            "sample_key": "k_old",
+            "predicted": "p",
+            "answer": f"{stale}.0",
+            "config_key": stale,
+            "dataset_name": "justlogic/d234",
+            "role": "panel",
+            "source": "optimization_loop",
+            "provenance": "A",
+            "created_at": "2026-10-16T00:00:00Z",
+        },
+    )
+    append_row(
+        archive.path(ArchiveFile.INDEX),
+        {"k": f"{stale}|", **before_reshape, "name": "panel", "created_at": "2026-10-16"},
+    )
+    with pytest.raises(ValueError):
+        archive.list_all()
+    assert restamp.check_readable()["archive_refused"] == 3, "guard: each old file refuses"
+    paid = {ref: archive.answer(ref) for ref in refs}
+    restamp.restamp_measurement_archives(apply=True)
+    assert not stale_config.exists() and not archive.cell_path(stale).exists(), (
+        "an unkeyable answer, or the configuration it alone described, survived the re-stamp"
+    )
+    assert stale not in {e.config_key for e in archive.list_all()}
+    assert restamp.check_readable()["archive_refused"] == 0, "the re-stamp left a refused file"
+    assert {ref: archive.answer(ref) for ref in refs} == paid, "a re-stamp lost a paid answer"
 
 
 # 3. Replayed decisions, and forks

@@ -8,6 +8,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal, NamedTuple
 
+from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.infrastructure.store.io import (
@@ -67,6 +68,18 @@ def archive_home(
         return ArchiveHome(tenant, tenant_workspace(shared_root, tenant), "tenant")
     named = validate_path_component(shared_archive)
     return ArchiveHome(named, shared_root.parent / _ARCHIVE_HOMES_DIR / named, "install")
+
+
+def archive_homes(projects_root: Path) -> list[Path]:
+    """Every root `archive_home` can name that holds an archive: a tenant's, or a named home."""
+    parents = (projects_root, projects_root.parent / _ARCHIVE_HOMES_DIR)
+    return sorted(
+        home
+        for parent in parents
+        if parent.is_dir()
+        for home in parent.iterdir()
+        if (home / MEASUREMENTS_DIR).is_dir()
+    )
 
 
 def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:

@@ -85,6 +85,7 @@ Each row's contract is its model; this table says only what the type cannot.
 | `readout.log` | Every launch writes it, whatever started it; one file per cycle, each launch opening with a `Readout:` line. A fork mid-run moves it to the fork. `logs/latest-readout-path.txt` names only the newest terminal launch's. |
 | `rounds/round_NNNN.json` | A checkout of the round's last statement for the operator; no code reads it back. One writer, `closed_rounds.py::RoundFileProjection`. |
 | `.runtime/ledger.jsonl` | The only surface that says which optimizer node RAN (`llm_call` records); an `arm` record carries the individual's whole `lineage`. |
+| `measurements/*` | Each file is one `store/measurement_archive.py::ArchiveFile`; `restamp` walks every kind, removing a record its model still refuses with what it alone describes, and `check_readable` names any file no kind owns. |
 
 **What the cycle runs on is ledger records, read over the fork chain.** `bank_partition` (`domain/bench.py::PartitionRecord`) is appended at mint; a fork reads its parent's, so a re-cut never moves a cycle off its draw (`loop_start.py::cycle_partition`). `resolved_run` holds two halves at opposite cadences: its `declaration` (search SPACE) — the LAST wins; its `experiment` (CELLS) — the FIRST wins, a later disagreeing resolution logged, never adopted (`pipeline_resolve.py::resolve_pipeline_for_campaign`).
 

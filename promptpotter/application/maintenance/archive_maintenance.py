@@ -16,6 +16,7 @@ from promptpotter.infrastructure.identity.migration import is_host
 from promptpotter.infrastructure.runtime_flags import derive_run_state
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.measurement_archive import (
+    ArchiveFile,
     CellRewrite,
     MovedFields,
     answer_line,
@@ -264,7 +265,7 @@ def inventory_measurement_archive(
     total = _Tally()
     held: set[tuple[str, str]] = set()
 
-    for file_key in archive.file_keys():
+    for file_key in archive.keys(ArchiveFile.CELLS):
         answers = [(line, a) for line, a in _parsed(archive.detail_lines(file_key)) if a]
         moved = sum(1 for _, answer in answers if _moved(answer))
         cold_each = archive.cold_bytes_on_disk(file_key) / moved if moved else 0.0
@@ -438,7 +439,8 @@ def compact_measurement_archive(
     if writers:
         return _blocked(writers)
     transform = partial(_compacted, dataset_hash=_scope(stores, dataset), stamped_at=utcnow_iso())
-    return _each_file(stores, stores.archive.file_keys(), "compact", transform, apply=apply)
+    cells = stores.archive.keys(ArchiveFile.CELLS)
+    return _each_file(stores, cells, "compact", transform, apply=apply)
 
 
 _Split = tuple[dict[str, MovedFields], list[MovedFields]]
@@ -494,7 +496,8 @@ def restore_measurement_archive(
     if writers:
         return _blocked(writers)
     transform = partial(_restored, dataset_hash=_scope(stores, dataset))
-    return _each_file(stores, stores.archive.file_keys(), "restore", transform, apply=apply)
+    cells = stores.archive.keys(ArchiveFile.CELLS)
+    return _each_file(stores, cells, "restore", transform, apply=apply)
 
 
 def _purged(
@@ -526,7 +529,8 @@ def purge_cold_store(
     if writers:
         return _blocked(writers)
     transform = partial(_purged, dataset_hash=_scope(stores, dataset), stamped_at=utcnow_iso())
-    return _each_file(stores, stores.archive.cold_file_keys(), "purge", transform, apply=apply)
+    cold = stores.archive.keys(ArchiveFile.COLD)
+    return _each_file(stores, cold, "purge", transform, apply=apply)
 
 
 def reindex_measurement_archive(stores: Stores) -> dict[str, int]:
