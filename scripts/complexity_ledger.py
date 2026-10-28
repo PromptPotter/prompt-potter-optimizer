@@ -462,15 +462,12 @@ def _is_reexport_shim(init_file: Path) -> bool:
 def compute_ledger() -> dict[str, int]:
     from promptpotter.application import optimizers
     from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.commands import payloads
     from promptpotter.application.knobs import KNOBS, member_knob_count
     from promptpotter.application.optimizers.nodes import CycleRead
     from promptpotter.config.settings import Settings
     from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
     from promptpotter.domain.run_records import CycleRecord
 
-    # Imported for the table it completes: the kinds whose payload holds an application type.
-    del payloads
     py_files = _package_files("*.py")
     source = _source_counts(py_files)
     sites = _sites()

@@ -7,11 +7,11 @@ from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.bench.task_context import OriginNextAction
-from promptpotter.application.commands.payloads import EditDraftCampaignPayload
 from promptpotter.application.datasets.draft_campaign import (
     DraftCampaign,
     merge_pipeline_overlay,
 )
+from promptpotter.domain.command_kinds import EditDraftCampaignPayload
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.search_point import PARAM_SCOPE_KEYS, WHO_ANSWERS_KEYS
 from promptpotter.domain.strict_model import StrictModel

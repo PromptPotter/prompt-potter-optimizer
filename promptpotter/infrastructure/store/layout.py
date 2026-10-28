@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal, NamedTuple
 
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.infrastructure.store.io import (
     newest_mtime_ns,
     read_json_optional,
@@ -21,18 +22,6 @@ logger = logging.getLogger(__name__)
 
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag)_")
 _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag)_(?!.*_(fork|diag)_)")
-_DATASET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*$")
-
-
-def validate_dataset_name(name: str) -> str:
-    """The name IS the dataset's path under its tier, ``/``-separated; lowercase-only, since both
-    shipped filesystems fold case."""
-    if not name or not _DATASET_NAME_RE.match(name):
-        raise ValueError(
-            f"Invalid dataset name: {name!r}. `/`-separated segments of lowercase alphanumerics, "
-            "hyphens and underscores, each starting with a letter or digit."
-        )
-    return name
 
 
 def dataset_id_prefix(name: str) -> str:

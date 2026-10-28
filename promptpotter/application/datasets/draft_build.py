@@ -7,10 +7,7 @@ from pydantic import Field
 
 from promptpotter import connectors
 from promptpotter.application.datasets.draft_campaign import (
-    MAX_EDITED_ROUNDS,
     DraftCampaign,
-    EditDraftPatch,
-    OptimizationOverrides,
     default_campaign_config,
     owned_drafts,
 )
@@ -22,6 +19,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.draft_edit import MAX_EDITED_ROUNDS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,

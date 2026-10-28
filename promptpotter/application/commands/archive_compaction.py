@@ -12,7 +12,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import CommandDispatcher
-    from promptpotter.application.commands.payloads import CompactArchivePayload
+    from promptpotter.domain.command_kinds import CompactArchivePayload
 
 
 def compact_archive(

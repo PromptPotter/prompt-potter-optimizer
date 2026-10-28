@@ -742,31 +742,22 @@ class ForkDirection(enum.StrEnum):
     EQUIVALENT = "equivalent"
 
 
-class ForkTraits(NamedTuple):
-    """What a cut implies, each half independent of the others."""
-
-    direction: ForkDirection
-    # The δ scale read through the cut is the child's OWN, extended in place: the child derives
-    # and grows it as its parent would have, where any other fork reads none of its parent's.
-    continues_scale: bool
-
-
 # Derived from the trigger, never stored. Exhaustiveness is checked at import below.
-FORK_TRAITS: dict[ForkTrigger, ForkTraits] = {
-    ForkTrigger.OPERATOR_DIAG: ForkTraits(ForkDirection.OFFSHOOT, False),
-    ForkTrigger.OPERATOR_STEERED: ForkTraits(ForkDirection.OFFSHOOT, False),
-    ForkTrigger.OPERATOR_REWIND: ForkTraits(ForkDirection.SUPERSEDE, True),
-    ForkTrigger.OPTIMIZER_REBASE: ForkTraits(ForkDirection.SUPERSEDE, True),
-    ForkTrigger.SCORING_DIVERGENCE: ForkTraits(ForkDirection.SUPERSEDE, True),
+FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
+    ForkTrigger.OPERATOR_DIAG: ForkDirection.OFFSHOOT,
+    ForkTrigger.OPERATOR_STEERED: ForkDirection.OFFSHOOT,
+    ForkTrigger.OPERATOR_REWIND: ForkDirection.SUPERSEDE,
+    ForkTrigger.OPTIMIZER_REBASE: ForkDirection.SUPERSEDE,
+    ForkTrigger.SCORING_DIVERGENCE: ForkDirection.SUPERSEDE,
 }
 
-_untraited = [t for t in ForkTrigger if t not in FORK_TRAITS]
-if _untraited:
+_undirected = [t for t in ForkTrigger if t not in FORK_DIRECTION]
+if _undirected:
     raise RuntimeError(
-        f"ForkTrigger members missing from FORK_TRAITS: {_untraited}. A cut whose "
+        f"ForkTrigger members missing from FORK_DIRECTION: {_undirected}. A cut whose "
         "direction nobody declared renders as an offshoot, which is a lie half the time."
     )
-del _untraited
+del _undirected
 
 
 class ConfigOverrides(FrozenModel):
@@ -992,16 +983,12 @@ class ForkSpec(FrozenModel):
     # the one its caller named, else the pick the parent's line stood on going into the cut round.
     from_candidate: RoundArm
     seed: CycleSeed | None = None
-    # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_TRAITS`).
+    # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_DIRECTION`).
     direction: ForkDirection | None = None
 
     @property
-    def traits(self) -> ForkTraits:
-        return FORK_TRAITS[self.trigger]
-
-    @property
     def resolved_direction(self) -> ForkDirection:
-        return self.direction or self.traits.direction
+        return self.direction or FORK_DIRECTION[self.trigger]
 
 
 class SpawnedBy(StrictModel):

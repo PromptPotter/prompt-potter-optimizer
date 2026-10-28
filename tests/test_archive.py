@@ -40,7 +40,6 @@ from factories import (
     sheet,
     workspace,
 )
-from filelock import FileLock
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
@@ -155,7 +154,7 @@ from promptpotter.infrastructure.store.archive_queries import (
     write_sample_fold,
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
-from promptpotter.infrastructure.store.io import rewrite_lines
+from promptpotter.infrastructure.store.io import probe_lock, rewrite_lines, take_lock
 from promptpotter.infrastructure.store.layout import CycleLayout, campaigns_root_dir_for
 from promptpotter.infrastructure.store.measurement_archive import (
     MeasurementArchive,
@@ -1196,9 +1195,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     # Held as a server-launched run holds it, from a lock of its own process.
     lock = CycleLayout(store.cycle_dir(displaced)).producer_lock
-    producer = FileLock(str(lock))
-    producer.acquire()
-    with producer_lock.probe(lock) as seen:
+    producer = take_lock(lock, wait_s=0)
+    assert producer is not None
+    with probe_lock(lock) as seen:
         assert seen, "a reader's probe missed the producer holding the cycle"
     asked = time.monotonic()
     store.mark_superseded(displaced, fork_hop.cycle_id)
@@ -1207,7 +1206,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert ended(displaced) is None, "a supersede ended its parent under the producer running it"
     assert waited < 0.5, f"a supersede waited {waited:.2f}s out a live producer's hold"
     lock.touch()
-    with producer_lock.probe(lock):
+    with probe_lock(lock):
         assert not producer_lock.held(lock), (
             "a reader's probe in flight read as a producer, so a supersede would skip its stop"
         )

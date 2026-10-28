@@ -225,7 +225,7 @@ lazy CLI `--help`, a ledger fold — cannot all afford to import the dispatcher.
 
 | The row's column | What it is | What refuses a wrong one |
 |---|---|---|
-| the kind | the wire name; its payload model declares it (`class …(CyclePayload, kind=CommandKind.…)`), which files the model in `PAYLOAD_MODEL_FOR_KIND` — beside the row, or in `application/commands/payloads.py` where it holds an application type | `payloads.py` fails at import on a kind with no model, the declaration on a second one |
+| the kind | the wire name; its payload model declares it (`class …(CyclePayload, kind=CommandKind.…)`), which files the model in `PAYLOAD_MODEL_FOR_KIND`, beside the row; a type it holds moves down into `domain/` with it | `command_kinds.py` fails at import on a kind with no model, the declaration on a second one |
 | `handler` | `module:handler`, in the `application/commands/` module named for what the kind does; the dispatcher imports it when the kind is dispatched, never at its own import | `gate.py --only handler-tables` |
 | `capability` | the rung the dispatcher's `require_capability` asks | the row cannot be written without one |
 | **`cli_verb`** | the terminal verb that reaches it, derived from the payload model unless `verbs.py` writes it | the row cannot be written without one |

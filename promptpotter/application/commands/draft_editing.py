@@ -13,8 +13,7 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.payloads import EditDraftCampaignPayload
-    from promptpotter.domain.command_kinds import DiscardDraftPayload
+    from promptpotter.domain.command_kinds import DiscardDraftPayload, EditDraftCampaignPayload
     from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
 

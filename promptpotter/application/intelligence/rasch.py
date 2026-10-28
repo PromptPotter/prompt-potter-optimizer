@@ -71,14 +71,12 @@ class RaschPosterior:
     theta_se: dict[str, float]
     delta: dict[str, float]
     delta_se: dict[str, float]
-    n_iterations: int = 0
     converged: bool = False
     sigma_theta: float = _INIT_SIGMA_THETA
     sigma_delta: float = _INIT_SIGMA_DELTA
     mu_delta: float = 0.0
     # Empty under 1PL (a ≡ 1).
     discrimination: dict[str, float] = field(default_factory=dict)
-    discrimination_se: dict[str, float] = field(default_factory=dict)
 
     def anchored(self, calibration_model: CalibrationModel) -> DeltaRuler:
         """Carries the fit's priors, without which an extension bends the scale; the anchor id is stamped once, here."""
@@ -116,7 +114,7 @@ def _map_fit(
     mu_delta: float,
     max_iter: int,
     tol: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, bool]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, bool]:
     theta = np.zeros(n_c)
     delta = np.full(n_s, mu_delta)
 
@@ -124,9 +122,7 @@ def _map_fit(
     inv_var_delta = 1.0 / (sigma_delta * sigma_delta)
 
     converged = False
-    iteration = 0
-    for it in range(1, max_iter + 1):
-        iteration = it
+    for _ in range(max_iter):
         old_theta = theta.copy()
         old_delta = delta.copy()
 
@@ -164,7 +160,7 @@ def _map_fit(
     info_delta = np.bincount(cols, weights=w, minlength=n_s) + inv_var_delta
     se_theta = 1.0 / np.sqrt(np.maximum(info_theta, 1e-9))
     se_delta = 1.0 / np.sqrt(np.maximum(info_delta, 1e-9))
-    return theta, delta, se_theta, se_delta, iteration, converged
+    return theta, delta, se_theta, se_delta, converged
 
 
 def fit_rasch(
@@ -192,10 +188,9 @@ def fit_rasch(
 
     sigma_theta, sigma_delta, mu_delta = _INIT_SIGMA_THETA, _INIT_SIGMA_DELTA, 0.0
     theta = delta = se_theta = se_delta = np.empty(0)
-    iteration = 0
     converged = False
     for _ in range(eb_max_iter):
-        theta, delta, se_theta, se_delta, iteration, converged = _map_fit(
+        theta, delta, se_theta, se_delta, converged = _map_fit(
             rows, cols, responses, n_c, n_s, sigma_theta, sigma_delta, mu_delta, max_iter, tol
         )
         new_mu_delta = float(delta.mean())
@@ -218,7 +213,7 @@ def fit_rasch(
         if change < eb_tol:
             break
 
-    theta, delta, se_theta, se_delta, iteration, converged = _map_fit(
+    theta, delta, se_theta, se_delta, converged = _map_fit(
         rows, cols, responses, n_c, n_s, sigma_theta, sigma_delta, mu_delta, max_iter, tol
     )
 
@@ -227,7 +222,6 @@ def fit_rasch(
         theta_se=dict(zip(candidate_ids, se_theta.tolist(), strict=True)),
         delta=dict(zip(keys, delta.tolist(), strict=True)),
         delta_se=dict(zip(keys, se_delta.tolist(), strict=True)),
-        n_iterations=iteration,
         converged=converged,
         sigma_theta=sigma_theta,
         sigma_delta=sigma_delta,
@@ -387,9 +381,7 @@ def fit_rasch_2pl(
     mu_delta = base.mu_delta
 
     converged = False
-    iteration = 0
-    for it in range(1, max_iter + 1):
-        iteration = it
+    for _ in range(max_iter):
         old_theta, old_delta, old_log_a = theta.copy(), delta.copy(), log_a.copy()
         a = np.exp(log_a)
 
@@ -441,24 +433,19 @@ def fit_rasch_2pl(
     w = p * (1.0 - p)
     info_t = np.bincount(rows, weights=a[cols] ** 2 * w, minlength=n_c) + inv_var_theta
     info_d = np.bincount(cols, weights=a[cols] ** 2 * w, minlength=n_s) + inv_var_delta
-    info_la = np.bincount(cols, weights=w * eta * eta, minlength=n_s) + inv_var_a
     se_theta = 1.0 / np.sqrt(np.maximum(info_t, 1e-9))
     se_delta = 1.0 / np.sqrt(np.maximum(info_d, 1e-9))
-    se_log_a = 1.0 / np.sqrt(np.maximum(info_la, 1e-9))
-    se_a = a * se_log_a
 
     return RaschPosterior(
         theta=dict(zip(candidate_ids, theta.tolist(), strict=True)),
         theta_se=dict(zip(candidate_ids, se_theta.tolist(), strict=True)),
         delta=dict(zip(keys, delta.tolist(), strict=True)),
         delta_se=dict(zip(keys, se_delta.tolist(), strict=True)),
-        n_iterations=iteration,
         converged=converged,
         sigma_theta=base.sigma_theta,
         sigma_delta=base.sigma_delta,
         mu_delta=mu_delta,
         discrimination=dict(zip(keys, a.tolist(), strict=True)),
-        discrimination_se=dict(zip(keys, se_a.tolist(), strict=True)),
     )
 
 

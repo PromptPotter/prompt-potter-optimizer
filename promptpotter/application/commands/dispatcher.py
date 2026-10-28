@@ -7,11 +7,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, assert_never
 
-from promptpotter.application.commands.payloads import CommandAcceptedBody
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.campaign import Compare, Optimize
 from promptpotter.domain.command_kinds import (
     CampaignPayload,
+    CommandAcceptedBody,
     CommandKind,
     CommandPayload,
     CyclePayload,

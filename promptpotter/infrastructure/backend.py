@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from filelock import BaseFileLock, FileLock, Timeout
 
 from promptpotter.config.paths import default_jobs_dir
 from promptpotter.domain.connector import BackendUnreachableError
@@ -39,6 +38,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     reserved,
 )
 from promptpotter.infrastructure.llm.telemetry import emit_backend_warning
+from promptpotter.infrastructure.store.io import HeldLock, take_lock
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellThrottledError,
@@ -108,21 +108,16 @@ class MachineSlots:
         self._capacity = capacity
         self._compose_overlay = compose_overlay
 
-    def _lock(self, name: str) -> BaseFileLock | None:
-        held = FileLock(str(self._root / f"{name}.lock"), timeout=0)
-        try:
-            held.acquire()
-        except Timeout:
-            return None
-        return held
+    def _lock(self, name: str) -> HeldLock | None:
+        return take_lock(self._root / f"{name}.lock", wait_s=0)
 
-    def _take(self) -> BaseFileLock | None:
+    def _take(self) -> HeldLock | None:
         for i in range(self._capacity):
             if (slot := self._lock(str(i))) is not None:
                 return slot
         return None
 
-    async def _wait(self, take: Callable[[], BaseFileLock | None]) -> BaseFileLock:
+    async def _wait(self, take: Callable[[], HeldLock | None]) -> HeldLock:
         abort = get_abort_check()
         while (held := take()) is None:
             if abort is not None and abort():
@@ -134,7 +129,6 @@ class MachineSlots:
 
     @asynccontextmanager
     async def hold(self) -> AsyncIterator[None]:
-        self._root.mkdir(parents=True, exist_ok=True)
         with machine_step():
             await claim_machine(compose_overlay=self._compose_overlay)
         # One turn at a time: without it a run armed to the pool's depth holds every slot all round.

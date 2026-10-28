@@ -55,8 +55,7 @@ from promptpotter.application.account import account_of
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.limits_and_queue import change_run_limits
-from promptpotter.application.commands.payloads import EditDraftCampaignPayload, StartCheckinPayload
-from promptpotter.application.datasets.draft_campaign import EditDraftPatch, new_draft
+from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.application.diagnostics.probe_reasoning import probe_reasoning
@@ -120,8 +119,14 @@ from promptpotter.domain.campaign_config import (
     OptimizationConfig,
     merge_config_layers,
 )
-from promptpotter.domain.command_kinds import ChangeRunLimitsPayload, DiscardDraftPayload
+from promptpotter.domain.command_kinds import (
+    ChangeRunLimitsPayload,
+    DiscardDraftPayload,
+    EditDraftCampaignPayload,
+    StartCheckinPayload,
+)
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.proxies import inner_cell_facts
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, RunSource

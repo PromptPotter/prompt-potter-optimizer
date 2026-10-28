@@ -12,20 +12,20 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple
 
-from filelock import BaseFileLock, FileLock, Timeout
-
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, meets_grade
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import ArchiveEntry, FiledAnswer
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, MeasuredCell, PipelineData
 from promptpotter.infrastructure.store.io import (
+    HeldLock,
     PairWrite,
     read_bytes_optional,
     read_json_optional,
     read_lines,
     replace_lines,
     rewrite_pair,
+    take_lock,
     unlink_robust,
     write_json,
 )
@@ -555,7 +555,7 @@ class MeasurementArchive:
 class CellClaim:
     """An OS lock the kernel drops with its holder: no expiry, so none can time a live holder out."""
 
-    def __init__(self, lock: BaseFileLock, row_path: Path) -> None:
+    def __init__(self, lock: HeldLock, row_path: Path) -> None:
         self._lock = lock
         self.row_path = row_path
 
@@ -572,8 +572,7 @@ class CellClaim:
         try:
             _drop_row(self.row_path)
         finally:
-            if self._lock.is_locked:
-                self._lock.release()
+            self._lock.retire()
 
 
 def _drop_row(path: Path) -> None:
@@ -619,10 +618,8 @@ class ReplayFeed:
 
     def claim(self, sample_key: str) -> CellClaim | None:
         path = self._archive._claim_path(self._node_configs, sample_key)
-        lock = FileLock(f"{path}.lock", timeout=0, thread_local=False)
-        try:
-            lock.acquire()
-        except Timeout:
+        lock = take_lock(path.with_name(f"{path.name}.lock"), wait_s=0)
+        if lock is None:
             return None
         claim = CellClaim(lock, path.with_suffix(".json"))
         # A holder unlinks its row before it unlocks, so a row found here outlived its holder.

@@ -6,6 +6,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_schema import CANDIDATE_LIBRARY_FILE
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.search_point import TaskDecomposition
@@ -25,7 +26,6 @@ from promptpotter.infrastructure.store.io import (
     write_text,
     write_yaml,
 )
-from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.read_model import append_row, derived, file_sig, fold_jsonl
 from promptpotter.shared.clock import utcnow_iso
 

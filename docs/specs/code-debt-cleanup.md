@@ -37,10 +37,6 @@ acting.
   near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
   green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:**
   five builders plus one full gate with no reap and no gate waiting longer than its own run.
-- **The payload table completes only once `application/commands/payloads.py` is imported**: its
-  four models need `EditDraftPatch` / `OptimizationOverrides` (`application/datasets/draft_campaign.py`)
-  and `infrastructure/store/layout.py::validate_dataset_name`. **Re-test:** the payload table is whole at
-  `import promptpotter.domain.command_kinds`.
 - **No offline leg rebases mid-run:** `scripts/offline_run.py` strips every `fork_proposal`, so
   `runner/entry.py::_run_line`'s later passes are reached only by patched privates. **Re-test:**
   no test under `tests/` patches a private of `runner/entry.py`.
@@ -113,9 +109,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   sums spend; `presentation/cli/commands/resume_command.py::_steer_overlay` builds its own overlay.
 - **`domain/phases.py` is two fifths stop-reason table**; a split was measured and declined, a
   rename re-points ~46 files. **Rides with:** a pass that moves the table.
-- **`infrastructure/store/io.py::append_line` takes a sidecar `FileLock` per line**, the offline
-  run's dominant cost (stat, open, mkdir, unlink per append). **Re-test:** profile one potter child
-  of `scripts/offline_run.py`.
 
 ## Bypasses — held for one holistic pass
 

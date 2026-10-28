@@ -12,10 +12,10 @@ import yaml
 
 from promptpotter import connectors
 from promptpotter.connectors.protocol import Connector
+from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.io import read_yaml_optional
-from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.read_model import file_sig
 from promptpotter.shared.errors import DatasetAccessError, PayloadInvalidError
 

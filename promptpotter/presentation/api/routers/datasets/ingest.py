@@ -7,9 +7,7 @@ from pydantic import Field
 
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
-from promptpotter.application.commands.payloads import EditDraftCampaignPayload
 from promptpotter.application.datasets.draft_build import DraftCampaignWire, draft_wire
-from promptpotter.application.datasets.draft_campaign import EditDraftPatch
 from promptpotter.application.datasets.draft_patch import candidate_library_from_column
 from promptpotter.application.datasets.ingest import (
     MAX_UPLOAD_BYTES,
@@ -17,6 +15,8 @@ from promptpotter.application.datasets.ingest import (
     ingest_draft,
 )
 from promptpotter.application.datasets.tabular_ingest import parse_candidate_library
+from promptpotter.domain.command_kinds import EditDraftCampaignPayload
+from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import IdempotencyKeyDep, StoresDep
 from promptpotter.presentation.api.routers.datasets._router import datasets_router

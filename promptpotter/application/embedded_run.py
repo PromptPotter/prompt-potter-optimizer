@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import CompactArchivePayload
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
 from promptpotter.application.jobs.launcher.admission import embedded_share, probe_backend
@@ -31,6 +30,7 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Compare, Optimize, Purpose
 from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.command_kinds import (
+    CompactArchivePayload,
     GradeBenchPayload,
     OriginGateDecisionPayload,
     SubmitArmsPayload,

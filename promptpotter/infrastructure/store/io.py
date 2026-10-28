@@ -4,18 +4,75 @@ import json
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterable, Iterator
+from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import IO, Any, NamedTuple
 
 import yaml
-from filelock import FileLock
 
 from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.domain.cycle_paths import ALL_DOTS_RE, ID_COMPONENT_RE
 from promptpotter.shared.errors import ConflictError
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _try_lock(fd: int) -> bool:
+        try:
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        except PermissionError:
+            return False
+        return True
+
+    def _unlock(fd: int) -> None:
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+    def _excluded(fd: int) -> bool:
+        # The holder's byte-0 lock refuses a read of it, and a read takes no lock.
+        try:
+            os.read(fd, 1)
+        except PermissionError:
+            return True
+        return False
+
+    def _retire(fd: int, name: str) -> None:
+        _unlock(fd)
+        os.close(fd)
+        # Refused while another taker has it open, which keeps it for that taker.
+        with contextlib.suppress(OSError):
+            os.unlink(name)
+
+else:
+    import fcntl
+
+    def _try_lock(fd: int) -> bool:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        return True
+
+    def _unlock(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+    def _excluded(fd: int) -> bool:
+        # Shared, so probes never exclude each other; it lasts until the probe closes the file.
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        return False
+
+    def _retire(fd: int, name: str) -> None:
+        # Unlinked while held, so a waiter on this inode finds it unlinked and reopens the name.
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(name)
+        _unlock(fd)
+        os.close(fd)
 
 
 def validate_path_component(name: str) -> str:
@@ -266,10 +323,92 @@ def read_yaml_optional(path: Path) -> Any | None:
         return None
 
 
-def _write_lock(path: Path) -> FileLock:
+_LOCK_POLL_S = 0.005
+
+
+class HeldLock:
+    """An OS lock on a file: the kernel drops it with its holder, and it shuts out every other handle,
+    this process's included. Released from any thread; never reentrant."""
+
+    def __init__(self, name: str, fd: int) -> None:
+        self._name = name
+        self._fd: int | None = fd
+
+    @property
+    def held(self) -> bool:
+        return self._fd is not None
+
+    def release(self) -> None:
+        if self._fd is not None:
+            fd, self._fd = self._fd, None
+            _unlock(fd)
+            os.close(fd)
+
+    def retire(self) -> None:
+        """`release`, and the file goes too: for a name taken once, whose files would pile up."""
+        if self._fd is not None:
+            fd, self._fd = self._fd, None
+            _retire(fd, self._name)
+
+
+def _open_lock(name: str) -> int:
+    try:
+        return os.open(name, os.O_RDWR | os.O_CREAT)
+    except FileNotFoundError:
+        os.makedirs(os.path.dirname(name), exist_ok=True)
+        return os.open(name, os.O_RDWR | os.O_CREAT)
+
+
+def take_lock(path: Path, *, wait_s: float) -> HeldLock | None:
+    """Polls for up to *wait_s*, so ``0`` is one try; ``None`` is another holder's."""
+    name = _long_path(path)
+    deadline = time.monotonic() + wait_s
+    while True:
+        fd = _open_lock(name)
+        if _try_lock(fd):
+            # A retired file's waiter holds an unlinked inode: the name is reopened instead.
+            if os.fstat(fd).st_nlink:
+                return HeldLock(name, fd)
+            _unlock(fd)
+        os.close(fd)
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(_LOCK_POLL_S)
+
+
+@contextlib.contextmanager
+def held_lock(path: Path, *, wait_s: float) -> Iterator[None]:
+    lock = take_lock(path, wait_s=wait_s)
+    if lock is None:
+        raise TimeoutError(f"{path} stayed locked past {wait_s} s")
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+@contextlib.contextmanager
+def probe_lock(path: Path) -> Iterator[bool]:
+    """Whether *path* is held, asked without an exclusive hold another probe would read as one."""
+    try:
+        fd = os.open(_long_path(path), os.O_RDONLY)
+    except FileNotFoundError:
+        yield False
+        return
+    try:
+        yield _excluded(fd)
+    finally:
+        os.close(fd)
+
+
+def write_lock_name(name: str) -> str:
+    """Dot-named, which the cycle file listing skips; never retired, since making it per line is the cost."""
+    return f".{name}.lock"
+
+
+def _write_lock(path: Path) -> AbstractContextManager[None]:
     """Windows runs `O_APPEND` as seek-then-write, so two unlocked appends overwrite one record."""
-    # Dot-named, which the cycle file listing skips; acquiring it makes the directory.
-    return FileLock(_long_path(path.with_name(f".{path.name}.lock")), timeout=LOCK_TIMEOUT)
+    return held_lock(path.with_name(write_lock_name(path.name)), wait_s=LOCK_TIMEOUT)
 
 
 def append_line(path: Path, line: bytes) -> range:

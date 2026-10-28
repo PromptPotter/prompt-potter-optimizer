@@ -8,7 +8,12 @@ from typing import NamedTuple
 from promptpotter.config.paths import SHARED_CACHE_DIRS
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.io import iter_files, rmtree_robust, unlink_robust
+from promptpotter.infrastructure.store.io import (
+    iter_files,
+    rmtree_robust,
+    unlink_robust,
+    write_lock_name,
+)
 from promptpotter.infrastructure.store.layout import (
     SandboxOwner,
     inner_sandboxes_dir,
@@ -87,8 +92,14 @@ def _plan_tenant(workspace: WorkspaceDir) -> TenantReset:
     drop: list[Path] = []
     preserve: list[Path] = []
     unrecognized: list[Path] = []
-    for entry in sorted(workspace.iterdir()) if workspace.is_dir() else ():
-        if entry.name in _DROP_NAMES:
+    entries = sorted(workspace.iterdir()) if workspace.is_dir() else []
+    locks = {write_lock_name(entry.name): entry.name for entry in entries}
+    for entry in entries:
+        # A write lock goes with the file it locks, and is never listed apart from it.
+        if (locked := locks.get(entry.name)) is not None:
+            if locked in _DROP_NAMES:
+                drop.append(entry)
+        elif entry.name in _DROP_NAMES:
             if entry.exists():
                 drop.append(entry)
         elif entry.name in _PRESERVE_NAMES:

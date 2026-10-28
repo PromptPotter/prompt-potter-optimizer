@@ -8,7 +8,7 @@
 campaign fact rides a side file beside it** — a campaign's result is a fold of its line's ledgers. <!-- probe: git grep -cE "result\.json" -- promptpotter/infrastructure/store/layout.py == 0 -->
 A fork's file holds only its own appends; the parent's prefix is walked from the cut, never copied.
 **Every append to or rewrite of a shared file serializes inside `store/io.py`** — Windows runs `O_APPEND` as
-seek-then-write and loses the overwritten record silently.
+seek-then-write and loses the overwritten record silently. **`store/io.py::take_lock` is the one OS file lock.** <!-- probe: git grep -cE "filelock" -- *.py == 0 -->
 
 **The ledger is a CHRONOLOGY: a field earns its place only if ordering is what makes it findable.** A value
 the archive addresses by `(node_configs, sample_key)` does not, which is why a round's close carries each

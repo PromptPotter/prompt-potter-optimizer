@@ -17,7 +17,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import PotterError, ServiceUnavailableError
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.payloads import ResolveOriginPayload
+    from promptpotter.domain.command_kinds import ResolveOriginPayload
     from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
 
