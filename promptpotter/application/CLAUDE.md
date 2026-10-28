@@ -42,7 +42,7 @@ which is visible immediately ([`../../tests/CLAUDE.md`](../../tests/CLAUDE.md)).
 | `commands/` | The control-plane write path: `CommandDispatcher`. | [`commands/CLAUDE.md`](commands/CLAUDE.md) |
 | `runner/` | The master orchestrator and optimize-loop entry point; `inner/` is the L4 recursion's machinery. | [`runner/CLAUDE.md`](runner/CLAUDE.md) |
 | `evidence/` | What ANY SET of SUBJECTS jointly says, reduced per read (`GET /evidence`, CLI `evidence --subject`). | [`evidence/CLAUDE.md`](evidence/CLAUDE.md) |
-| `datasets/` | Dataset loaders, the per-dataset prompt store, the check-in's draft. | [`datasets/CLAUDE.md`](datasets/CLAUDE.md) |
+| `datasets/` | Dataset loaders, the per-dataset prompt store, the check-in's draft. | [`promptpotter/assets/datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) |
 
 ## Top-level modules
 

@@ -84,7 +84,7 @@ The arc's method is the session protocol in memory (`feedback_arc_of_arcs_loop`)
 - **The dev loop serializes where it need not.** Sibling gates queue whole runs (a `gate --py` waited
   9 min behind two others before its own 5); `next-build` peaks near 4 GB; a builder spends ~100k
   tokens of tool output, most of it whole-file reads and whole-tree content greps; Turbopack
-  refuses a junctioned `webapp/node_modules`, so web checks run only in the integration tree; at
+  refuses a junctioned webapp/node_modules, so web checks run only in the integration tree; at
   five builders plus a full gate the host reaped the gate's shell. Action: attribute each (scout
   first, read-only), then cut what OUR code wastes — gate lanes that overlap, a lighter build
   check, briefs that read by section. Vitest's fixed worker START_TIMEOUT counts jsdom setup, so a
@@ -151,7 +151,7 @@ A leading `NEXT` marks the one to take up cold when nothing else is in hand.
 
 - **The dashboard is a single-page React app that carries Next.js as its build tool.**
   `webapp/next.config.ts` sets `output: "export"`, so no Next server runs anywhere: FastAPI serves
-  `webapp/out`. The source reaches the framework through `next/dynamic` in
+  webapp/out. The source reaches the framework through `next/dynamic` in
   `components/shell/AppShell.tsx` and through type imports in `app/layout.tsx` and
   `app/manifest.ts`; the route tree is `/` and `/login` under one layout, with no API route, no
   server action, no middleware, and neither `next/link`, `next/navigation` nor `next/image`. What
