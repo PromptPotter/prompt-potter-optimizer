@@ -25,6 +25,7 @@ ProjectionKind = Literal[
     "error",
     "flight",
     "fork_graded",
+    "health",
     "intervention",
     "launch_claim",
     "launch_clock",

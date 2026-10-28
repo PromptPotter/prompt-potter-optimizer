@@ -8,7 +8,10 @@ from urllib.parse import urlencode
 import httpx
 
 from promptpotter.infrastructure.identity.google import ProviderIdentity
-from promptpotter.infrastructure.identity.provider_config import OIDCProviderConfig
+from promptpotter.infrastructure.identity.provider_config import (
+    CodeExchangeError,
+    OIDCProviderConfig,
+)
 from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)
@@ -18,10 +21,6 @@ GITHUB_AUTH_URL = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_USER_URL = "https://api.github.com/user"
 GITHUB_EMAIL_URL = "https://api.github.com/user/emails"
-
-
-class GitHubTokenExchangeError(RuntimeError):
-    pass
 
 
 class GitHubProviderClient:
@@ -50,16 +49,15 @@ class GitHubProviderClient:
                 },
                 headers={"Accept": "application/json"},
             )
-            if token_response.status_code != 200:
-                raise GitHubTokenExchangeError(
-                    f"GitHub token endpoint returned {token_response.status_code}: "
-                    f"{token_response.text[:200]}"
-                )
-            token_body = token_response.json()
-            access_token = token_body.get("access_token")
+            # GitHub refuses with a 200 whose body names the `error`, not with a 4xx.
+            access_token = (
+                token_response.json().get("access_token")
+                if token_response.status_code == 200
+                else None
+            )
             if not isinstance(access_token, str) or not access_token:
-                raise GitHubTokenExchangeError(
-                    f"GitHub token response missing access_token: {token_body!r}"
+                raise CodeExchangeError.refused(
+                    "github", token_response.status_code, token_response.content
                 )
 
             auth_headers = {
@@ -69,15 +67,10 @@ class GitHubProviderClient:
             }
             user_response = await client.get(GITHUB_USER_URL, headers=auth_headers)
             if user_response.status_code != 200:
-                raise GitHubTokenExchangeError(
-                    f"GitHub user endpoint returned {user_response.status_code}"
-                )
-            user = user_response.json()
-            user_id = user.get("id")
+                raise CodeExchangeError("github", f"user_http_{user_response.status_code}")
+            user_id = user_response.json().get("id")
             if not isinstance(user_id, int):
-                raise GitHubTokenExchangeError(
-                    f"GitHub /user response missing numeric id: {user!r}"
-                )
+                raise CodeExchangeError("github", "user_without_id")
 
             # Only the verified list: `/user`'s `email` is unchecked, and the blocklist and host-admin claim match on it.
             email = None

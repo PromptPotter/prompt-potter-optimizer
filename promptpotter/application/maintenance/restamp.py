@@ -9,15 +9,18 @@ from functools import reduce
 from typing import Annotated, Any, Literal, NamedTuple, Union, get_args, get_origin
 
 import yaml
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.application.datasets.authored import campaign_file_block
+from promptpotter.application.jobs.registry import Job
 from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
+    workspace_trees,
 )
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, default_jobs_dir
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
 from promptpotter.domain.results import DiagnosticRunRecord
@@ -29,15 +32,21 @@ from promptpotter.infrastructure.projections.cycle_index import (
     write_cycle_index,
 )
 from promptpotter.infrastructure.runtime_flags import derive_run_state
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import definition_files
 from promptpotter.infrastructure.store.io import (
     read_json_optional,
     rewrite_lines,
     write_yaml,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout, inner_sandboxes_dir
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    inner_sandboxes_dir,
+    read_sandbox_owner,
+)
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.shared.errors import LedgerUnreadableError
+from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import LedgerUnreadableError, ManifestUnreadableError
 
 
 def _whole(_path: pathlib.Path) -> dict[str, Any]:
@@ -405,17 +414,82 @@ def reproject_cycle_indexes(*, apply: bool) -> dict[str, int]:
     return {"cycle_indexes": len(cycle_dirs), "cycle_indexes_reprojected": touched}
 
 
-def check_cycle_ledgers() -> dict[str, int]:
-    ledgers = list(iter_cycle_ledgers(DEFAULT_PROJECTS_ROOT))
-    refused: list[LedgerUnreadableError] = []
-    for ledger in ledgers:
+def prune_finished_jobs(*, apply: bool) -> dict[str, int]:
+    """A job released before today has no reader (the quota and the refusals count today's only),
+    and the registry validates every file it lists, so one left in an old shape 500s admission."""
+    today = utcnow_iso()[:10]
+    finished = invalid = 0
+    for path in sorted(default_jobs_dir().glob("*.json")):
+        raw = read_json_optional(path)
+        if raw and raw.get("released_at") and str(raw.get("created_at", ""))[:10] < today:
+            finished += 1
+            if apply:
+                path.unlink()
+            continue
         try:
-            for _ in CycleEventLog(ledger).iter():
-                pass
-        except LedgerUnreadableError as refusal:
-            refused.append(refusal)
+            TypeAdapter(Job).validate_python(raw)
+        except ValidationError as exc:
+            invalid += 1
+            print(f"  FAIL  {path}: {exc.error_count()} error(s) — this job blocks every admission")
+    verb = "deleted" if apply else "would delete"
+    print(f"\nJob records — {verb} {finished} released before today; {invalid} still invalid")
+    return {"jobs_finished": finished, "jobs_invalid": invalid}
 
-    print(f"\nCycle ledgers — {len(ledgers)} checked, {len(ledgers) - len(refused)} read")
-    for cause in refused:
+
+class _CampaignOf(NamedTuple):
+    tenant_id: str
+    campaign_id: str
+
+
+def _campaign_of(tree: pathlib.Path, path: pathlib.Path) -> _CampaignOf | None:
+    """A sandbox's file is its owner's campaign, whose delete takes the sandbox; a draft's is none."""
+    if tree != DEFAULT_PROJECTS_ROOT:
+        owner = read_sandbox_owner(tree)
+        return None if owner is None else _CampaignOf(owner.tenant_id, owner.campaign_id)
+    parts = path.relative_to(tree).parts
+    return _CampaignOf(parts[0], parts[2]) if len(parts) > 2 and parts[1] == "campaigns" else None
+
+
+def check_readable() -> dict[str, int]:
+    """Read-only, after every rewrite: a campaign still refusing its reader is named with its remedy."""
+    refused: dict[_CampaignOf, None] = {}
+    ledgers: list[str] = []
+    manifests: list[str] = []
+    checked = 0
+    for tree in workspace_trees(DEFAULT_PROJECTS_ROOT):
+        for ledger in sorted(tree.glob("**/.runtime/ledger.jsonl")):
+            checked += 1
+            try:
+                for _ in CycleEventLog(ledger).iter():
+                    pass
+            except LedgerUnreadableError as refusal:
+                ledgers.append(str(refusal))
+                if (campaign := _campaign_of(tree, ledger)) is not None:
+                    refused[campaign] = None
+        for workspace in sorted(p for p in tree.iterdir() if p.is_dir()):
+            store = CampaignStore(WorkspaceDir(workspace))
+            for campaign_id in store.list_campaign_ids():
+                try:
+                    store.load_campaign(campaign_id)
+                except (ManifestUnreadableError, ValueError, OSError) as exc:
+                    manifests.append(str(exc))
+                    if campaign := _campaign_of(tree, store.campaign_root_dir(campaign_id)):
+                        refused[campaign] = None
+
+    print(f"\nCycle ledgers — {checked} checked, {checked - len(ledgers)} read")
+    for cause in (*ledgers, *manifests):
         print(f"  {cause}")
-    return {"ledgers_checked": len(ledgers), "ledgers_refused": len(refused)}
+    if refused:
+        print(f"\nUnreadable campaigns — {len(refused)}; deleting each is the remedy:")
+    # `deploy-linux/update.sh` lifts these lines into its health verdict by their prefix.
+    for tenant_id, campaign_id in refused:
+        print(
+            f"  UNREADABLE campaign {campaign_id} (tenant {tenant_id}) — "
+            f"python -m promptpotter --tenant {tenant_id} delete {campaign_id}"
+        )
+    return {
+        "ledgers_checked": checked,
+        "ledgers_refused": len(ledgers),
+        "manifests_refused": len(manifests),
+        "campaigns_unreadable": len(refused),
+    }

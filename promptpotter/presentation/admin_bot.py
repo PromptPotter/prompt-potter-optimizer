@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 import time
@@ -7,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from promptpotter.application import health
 from promptpotter.application.account import (
     block_email,
     blocked_emails,
@@ -21,10 +23,11 @@ from promptpotter.application.account import (
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
 from promptpotter.application.jobs.quota import overrun
-from promptpotter.application.views.trail import trail_notes, trail_rows
+from promptpotter.application.views.trail import trail_fields, trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
 from promptpotter.config.settings import settings
+from promptpotter.domain.run_records import Device
 from promptpotter.domain.spend import RATE_PRICED_LABEL
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
@@ -215,8 +218,17 @@ def notify_operator(text: str) -> bool:
     return True
 
 
+def check_health_and_tell() -> list[health.Checked]:
+    """Every entry point's health check, each change of state already told. Blocking."""
+    checked = asyncio.run(health.check(DEFAULT_PROJECTS_ROOT))
+    for one in checked:
+        if (said := health.notice(one)) is not None:
+            notify_operator(said)
+    return checked
+
+
 def forward_new_account_to_crm(
-    email: str | None, name: str | None, user_id: str, account_count: int
+    email: str | None, name: str | None, user_id: str, account_count: int, device: Device | None
 ) -> bool:
     url = settings.N8N_SIGNUP_WEBHOOK_URL.get_secret_value().strip()
     if not url:
@@ -232,6 +244,7 @@ def forward_new_account_to_crm(
                     "use_case": "",
                     "signup_source": "promptpotter-app",
                     "account_count": account_count,
+                    "device": device or "",
                 },
             )
     except httpx.HTTPError:
@@ -241,9 +254,10 @@ def forward_new_account_to_crm(
 
 
 def forward_trail_to_briefing() -> bool:
-    """What every account did in the last day, sent OUT for the operator's briefing to print.
+    """What every account did in the last day, and the box's health, sent OUT to n8n.
 
-    Sent whole each time: the receiver keeps the newest, so a missed send costs freshness only.
+    Sent whole each time: the receiver keeps the newest, so a missed send costs freshness only,
+    and a send that stops arriving is itself the box going quiet.
     """
     url = settings.N8N_TRAIL_WEBHOOK_URL.get_secret_value().strip()
     if not url:
@@ -259,8 +273,11 @@ def forward_trail_to_briefing() -> bool:
                 json={
                     "as_of": utcnow_iso(),
                     "window_hours": _TRAIL_WINDOW_H,
-                    "accounts": [{"who": who, "rows": trail_rows(trail)} for who, trail in trails],
+                    "accounts": [
+                        {"who": account.who, "lines": trail_fields(account)} for account in trails
+                    ],
                     "unreadable": unreadable,
+                    "health": health.briefing(DEFAULT_PROJECTS_ROOT),
                 },
             )
     except httpx.HTTPError:
@@ -310,9 +327,11 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
             if time.monotonic() >= forward_due:
                 forward_due = time.monotonic() + _TRAIL_FORWARD_EVERY_S
                 try:
+                    # Checked first, so the briefing carries what this check just found.
+                    check_health_and_tell()
                     forward_trail_to_briefing()
                 except Exception:
-                    logger.exception("trail forward failed; channel stays up")
+                    logger.exception("health check or trail forward failed; channel stays up")
             try:
                 params: dict[str, Any] = {"timeout": _POLL_TIMEOUT_S}
                 if offset is not None:

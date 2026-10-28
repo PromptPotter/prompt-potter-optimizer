@@ -139,8 +139,8 @@ outcome is CORRECT depends on what the payload carries:
   the union arm the value IS and, inside `optimizer_state`, from each part's registered kind, so no
   field delete needs a migration of its own; a line that would not load pruned is kept as it was.
 
-A renamed or newly required field cannot be pruned back: `application/maintenance/restamp.py::check_cycle_ledgers` lists
-each refused cycle, and deleting its campaign is the remedy.
+A renamed or newly required field cannot be pruned back: `application/maintenance/restamp.py::check_readable` lists
+each refused cycle and manifest, and names the `delete` of each campaign holding one — the remedy.
 
 ## Conventions
 

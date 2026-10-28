@@ -19,6 +19,7 @@ from promptpotter.domain.run_records import (
     ElectionRecord,
     FlightRecord,
     ForkGradedRecord,
+    HealthRecord,
     InterventionRecord,
     LaunchClaimRecord,
     LaunchClockRecord,
@@ -123,6 +124,7 @@ class Projection:
             # Banked by `store/account_trail.py`, likewise.
             TrailTombstoneRecord: None,
             AccountEventRecord: None,
+            HealthRecord: None,
             PricedKeyRecord: None,
             # Read off the ledger by `spend_book.py`: money moves on the bill alone.
             SpendHoldRecord: None,

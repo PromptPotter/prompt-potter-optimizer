@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.domain.run_records import AccountEvent, AccountEventRecord
+from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.infrastructure.identity import blocklist, migration
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
@@ -39,12 +39,20 @@ from promptpotter.shared.clock import epoch_seconds, utcnow_iso
 from promptpotter.shared.identity import IdentityContext, acting_principal, default_identity
 
 
-def _record(stores: Stores, event: AccountEvent, *, at: str, subject: str = "") -> None:
+def _record(
+    stores: Stores,
+    event: AccountEvent,
+    *,
+    at: str,
+    subject: str = "",
+    device: Device | None = None,
+) -> None:
     CycleEventLog.open_workspace(stores.base_dir).append(
         AccountEventRecord(
             event=event,
             user_id=acting_principal(stores.identity).id,
             subject=subject,
+            device=device,
             timestamp=at,
         )
     )
@@ -56,7 +64,7 @@ class Arrival(NamedTuple):
     opened: bool
 
 
-def arrive(stores: Stores) -> Arrival:
+def arrive(stores: Stores, *, device: Device | None) -> Arrival:
     """The ONE place an account comes into being, whichever request reaches it first."""
     existing = stores.users.load()
     if existing is not None:
@@ -68,18 +76,24 @@ def arrive(stores: Stores) -> Arrival:
         email=identity.email,
         created_at=utcnow_iso(),
     )
-    _record(stores, "account_created", at=user.created_at)
+    _record(stores, "account_created", at=user.created_at, device=device)
     stores.users.save(user)
     return Arrival(user, opened=True)
 
 
 def account_of(stores: Stores) -> User:
-    return arrive(stores).user
+    return arrive(stores, device=None).user
 
 
-def sign_in(stores: Stores) -> Arrival:
-    arrival = arrive(stores)
-    _record(stores, "signed_in", at=utcnow_iso(), subject=stores.identity.provider or "")
+def sign_in(stores: Stores, *, device: Device | None) -> Arrival:
+    arrival = arrive(stores, device=device)
+    _record(
+        stores,
+        "signed_in",
+        at=utcnow_iso(),
+        subject=stores.identity.provider or "",
+        device=device,
+    )
     return arrival
 
 
@@ -126,10 +140,19 @@ def _scanned(
         try:
             found = list(workspace_lines(CampaignStore(account.workspace)))
         except Exception:
-            if account.workspace.name not in unreadable:
-                unreadable.append(account.workspace.name)
+            if (who := _who(account)) not in unreadable:
+                unreadable.append(who)
             continue
         yield account, found
+
+
+def _who(account: AccountDir) -> str:
+    """The email, else the id: an account no provider vouched an address for still acted."""
+    return (
+        account.workspace.name
+        if isinstance(account.user, Torn)
+        else (account.user.email or account.user.user_id)
+    )
 
 
 def trail_by_email(projects_root: Path, email: str) -> Trail:
@@ -162,9 +185,10 @@ def trail_by_email(projects_root: Path, email: str) -> Trail:
 
 
 class AccountTrail(NamedTuple):
-    # The email, else the id: an account no provider vouched an address for still acted.
-    who: str
+    who: str  # `_who`
     trail: Trail
+    # Campaign id -> the dataset it optimizes, for each campaign a line names that still exists.
+    datasets: dict[str, str]
 
 
 def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail], list[str]]:
@@ -179,10 +203,16 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
     for account, found in _scanned(accounts, unreadable):
         recent = [line for line in found if (epoch_seconds(line.at) or 0.0) >= since]
         if recent and not isinstance(account.user, Torn):
+            store = CampaignStore(account.workspace)
+            campaigns = {
+                campaign_id: store.load_campaign(campaign_id)
+                for campaign_id in {line.campaign_id for line in recent if line.campaign_id}
+            }
             trails.append(
                 AccountTrail(
-                    account.user.email or account.user.user_id,
+                    _who(account),
                     Trail(frozenset({account.user.user_id}), in_time_order(recent), []),
+                    {key: c.dataset_name for key, c in campaigns.items() if c is not None},
                 )
             )
     return trails, unreadable

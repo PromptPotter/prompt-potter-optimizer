@@ -29,9 +29,10 @@ from factories import (
     walking_cycle,
 )
 from fastapi import BackgroundTasks, FastAPI, Request
+from offline_world import Router
 from pydantic import SecretStr
 
-from promptpotter.application import account, site_records
+from promptpotter.application import account, health, site_records
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.jobs.launcher.admission import (
@@ -57,6 +58,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import load_opt
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.scoring.sample_measurement import emit_replayed_step_tokens
+from promptpotter.application.views.trail import trail_fields
 from promptpotter.config import log_redaction
 from promptpotter.config import settings as settings_mod
 from promptpotter.config.logging import setup_logging
@@ -85,7 +87,13 @@ from promptpotter.domain.pipeline_overlay import (
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.results import ArmSlot
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
-from promptpotter.domain.run_records import CommandAckRecord, CommandRecord, RunPhaseRecord
+from promptpotter.domain.run_records import (
+    CommandAckRecord,
+    CommandRecord,
+    Device,
+    RunPhaseRecord,
+    device_of,
+)
 from promptpotter.domain.sample import ArchiveEntry
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.search_point import TaskDecomposition
@@ -103,6 +111,7 @@ from promptpotter.infrastructure.identity.grants import (
 from promptpotter.infrastructure.identity.jwks import JWKSCache
 from promptpotter.infrastructure.identity.paths import IdentityPaths
 from promptpotter.infrastructure.identity.provider_config import (
+    CodeExchangeError,
     OIDCProviderConfig,
     ProviderConfigBundle,
 )
@@ -458,7 +467,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
 
 
 async def test_a_delegate_acts_only_within_what_its_owner_granted(
-    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     grant_paths = IdentityPaths(root=tmp_path)
     grants, audit = grant_paths.grants, grant_paths.grants_audit
@@ -666,7 +675,11 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         monkeypatch.setattr(module, "DEFAULT_PROJECTS_ROOT", projects)
 
     class Answering(GoogleProviderClient):
+        refusing: bytes | None = None
+
         async def exchange_code(self, *, code: str, expected_nonce: str) -> ProviderIdentity:
+            if self.refusing is not None:
+                raise CodeExchangeError.refused("google", 401, self.refusing)
             return ProviderIdentity(
                 issuer="https://accounts.example",
                 subject="s1",
@@ -675,14 +688,20 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
             )
 
     paths = IdentityPaths(root=tmp_path / "identity")
+    for module in (account, health):
+        monkeypatch.setattr(module, "default_identity_paths", lambda: paths)
     sessions = OIDCSessionStore(paths.sessions_dir)
-    google = OIDCProviderConfig(client_id="c", client_secret="s", redirect_uri="https://r")
+    google = OIDCProviderConfig(
+        client_id="c", client_secret="the-old-secret", redirect_uri="https://r"
+    )
+    write_json(paths.provider_config, {"google": dataclasses.asdict(google)})
+    answering = Answering(google, JWKSCache())
     bundle = IdentityBundle(
         paths=paths,
         config=ProviderConfigBundle(google=google, github=None),
         session_store=sessions,
         jwks_cache=JWKSCache(),
-        google=Answering(google, JWKSCache()),
+        google=answering,
         github=None,
     )
     app = FastAPI()
@@ -698,7 +717,10 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
                 "server": ("testserver", 443),
                 "path": "/auth/callback/google",
                 "query_string": b"state=st&code=co",
-                "headers": [(b"cookie", held.encode())] if held else [],
+                "headers": [
+                    (b"user-agent", b"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)"),
+                    *([(b"cookie", held.encode())] if held else []),
+                ],
             }
         )
 
@@ -727,7 +749,30 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         assert SESSION_COOKIE_NAME not in cookies(refused_flow), why
     assert not paths.sessions_dir.exists(), "a refused flow left a session"
     request = browser({auth.OAUTH_FLOW_COOKIE_NAME: "google.st.n"})
+
+    # The box's health tells a CHANGE once, and nothing else; a sign-in provider is asked to redeem
+    # a code it never issued, and whom it blames is the reading.
+    async def checked(status: int, error: str | None) -> str | None:
+        said = {"error": error, "error_description": "secret is invalid"} if error else {}
+        offline.token_endpoints["oauth2.googleapis.com/token"] = (status, said)
+        (signin,) = [c for c in await health.check(projects) if c.probe.name == "signin:google"]
+        return health.notice(signin)
+
+    told = [
+        await checked(*answer)
+        for answer in ((401, "invalid_client"), (401, "invalid_client"), (400, "invalid_grant"))
+    ]
+    told += [await checked(503, None), await checked(401, "invalid_client")]
+    assert [said is not None for said in told] == [True, False, True, False, True], told
+    assert "the-old-secret" not in str(told) and "secret is invalid" not in str(told)
+    answering.refusing = b'{"error": "invalid_client"}'
+    dead = await auth.callback(request, BackgroundTasks(), "google")
+    assert dead.headers["location"] == "/?auth_error=signin_unavailable", (
+        "a provider refusing this server asked the user to retry"
+    )
+
     announcing = BackgroundTasks()
+    answering.refusing = None
     welcomed = await auth.callback(request, announcing, "google")
     set_by_sign_in = cookies(welcomed)
     assert set_by_sign_in[auth.OAUTH_FLOW_COOKIE_NAME] in ('""', ""), (
@@ -782,6 +827,21 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         ada.terms_accepted.accepted_at,
     ), "one fact carries two times: the account file says one and its record another"
     assert {line.actor for line in trail.lines[2:5]} == trail.own == {str(identity.user_id)}
+    for hint, agent, device in (
+        ("?1", None, Device.PHONE),
+        ("?0", "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)", Device.TABLET),
+        (None, "Mozilla/5.0 (Linux; Android 15) Mobile", Device.PHONE),
+        (None, "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", Device.COMPUTER),
+        (None, None, None),
+    ):
+        assert device_of(hint, agent) is device, f"{hint!r} {agent!r} read as the wrong device"
+    assert [
+        (row["what"], row["device"])
+        for row in trail_fields(account.AccountTrail("ada", trail, {}))
+        if row["device"]
+    ] == [("account_created", "phone"), ("signed_in", "phone")], (
+        "a sign-in's device left no trace on the trail, or landed on a line no request carried"
+    )
     for keep_results in (True, False):
         stores.campaigns.delete_campaign(
             trail_hop.campaign_id,
@@ -799,8 +859,8 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     bob = IdentityContext(
         user_id=UserId("bob-id"), tenant_id=TenantId("bob-id"), email="bob@x.com", provider="google"
     )
-    assert account.arrive(build_stores(bob, projects_root=projects)).opened
-    assert not account.arrive(build_stores(bob, projects_root=projects)).opened
+    assert account.arrive(build_stores(bob, projects_root=projects), device=None).opened
+    assert not account.arrive(build_stores(bob, projects_root=projects), device=None).opened
     for_ada = IdentityContext(
         user_id=identity.user_id,
         tenant_id=identity.tenant_id,
@@ -808,7 +868,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         provider="google",
         claims={"principal": "bob-id"},
     )
-    account.sign_in(build_stores(for_ada, projects_root=projects))
+    account.sign_in(build_stores(for_ada, projects_root=projects), device=None)
     delegated = account.tenant_trail(build_stores(for_ada, projects_root=projects)).lines
     assert [line.actor for line in delegated if line.what == "signed_in"] == [
         str(identity.user_id),
@@ -862,7 +922,7 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
         else:
             assert not refused, "an account purged an archive home every account's cells live in"
 
-    def unrecordable(_: object) -> None:
+    def unrecordable(_: object, **__: object) -> None:
         raise OSError("disk full")
 
     monkeypatch.setattr(account, "sign_in", unrecordable)

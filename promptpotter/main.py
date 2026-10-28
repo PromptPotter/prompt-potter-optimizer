@@ -17,6 +17,7 @@ from scalar_fastapi import get_scalar_api_reference
 from starlette.exceptions import HTTPException
 from starlette.middleware.gzip import GZipMiddleware
 
+from promptpotter.application import health
 from promptpotter.application.account import record_refusal
 from promptpotter.application.datasets.startability import offer_faults
 from promptpotter.application.initialization.wiring import complete_registries
@@ -33,7 +34,7 @@ from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
-from promptpotter.presentation.admin_bot import notify_operator
+from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
 from promptpotter.presentation.api.deps import (
     auth_is_open,
     build_stores_from_identity,
@@ -82,6 +83,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     complete_registries()
     bundle = build_identity_bundle(default_identity_paths())
     app.state.identity_bundle = bundle
+    # Before any user can find out: what is broken is told now, not at its first use.
+    checked = await asyncio.to_thread(check_health_and_tell)
     print(
         render_server_banner(
             brand_name=settings.BRAND_SERVICE_NAME,
@@ -89,6 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             data_root=user_data_root(),
             auth_open=auth_is_open(),
             providers=bundle.config.configured,
+            broken=[health.row(c) for c in checked if c.reading.state == "broken"],
             non_utf8=non_utf8_encoding(),
             offer=settings.dataset_offer,
             offer_faults=offer_faults(),

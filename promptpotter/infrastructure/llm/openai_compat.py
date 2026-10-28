@@ -142,6 +142,8 @@ class ProviderSpec:
     timeout: float = WIRE_TIMEOUT_S
     # False by default: a gateway body extension is a 400 on a provider that lacks it.
     gateway: bool = False
+    # A GET under `base_url` that needs the key and spends nothing: how a dead key is told apart.
+    key_check: str = "/models"
 
 
 def _gateway_body(

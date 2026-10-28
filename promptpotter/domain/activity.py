@@ -39,6 +39,7 @@ from promptpotter.domain.run_records import (
     ElectionRecord,
     FlightRecord,
     ForkGradedRecord,
+    HealthRecord,
     InterventionRecord,
     LaunchClaimRecord,
     LaunchClockRecord,
@@ -85,6 +86,7 @@ SilentRecord = (
     | ElectionRecord
     | FlightRecord
     | ForkGradedRecord
+    | HealthRecord
     | InterventionRecord
     | LaunchClaimRecord
     | LaunchClockRecord

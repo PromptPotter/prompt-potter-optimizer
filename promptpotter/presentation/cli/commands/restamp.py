@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 
 from promptpotter.application.maintenance.restamp import (
-    check_cycle_ledgers,
+    check_readable,
     compact_cycle_ledgers,
+    prune_finished_jobs,
     prune_stored_documents,
     reproject_cycle_indexes,
 )
@@ -16,8 +17,9 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     counts = prune_stored_documents(apply=apply)
     ledgers = compact_cycle_ledgers(apply=apply)
     indexes = reproject_cycle_indexes(apply=apply)
+    jobs = prune_finished_jobs(apply=apply)
     # Read-only, so --apply does not change what it does.
-    read = check_cycle_ledgers()
+    read = check_readable()
     verb = "pruned" if apply else "would prune"
     human = (
         f"restamp: {verb} {counts['rewritten']} file(s); "
@@ -29,10 +31,13 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"({ledgers['skipped_producing']} producing, left alone). "
         f"Cycles: {read['ledgers_checked'] - read['ledgers_refused']}"
         f"/{read['ledgers_checked']} read. "
+        f"Campaigns unreadable: {read['campaigns_unreadable']}. "
         f"Cycle indexes: {indexes['cycle_indexes_reprojected']}"
-        f"/{indexes['cycle_indexes']} re-derived from their ledgers."
+        f"/{indexes['cycle_indexes']} re-derived from their ledgers. "
+        f"Jobs: {jobs['jobs_finished']} finished {'deleted' if apply else 'to delete'}, "
+        f"{jobs['jobs_invalid']} invalid."
     )
     return CommandResult(
-        data={**counts, **ledgers, **read, **indexes},
+        data={**counts, **ledgers, **read, **indexes, **jobs},
         human=human,
     )

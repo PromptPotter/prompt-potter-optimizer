@@ -7,7 +7,10 @@ from urllib.parse import urlencode
 import httpx
 
 from promptpotter.infrastructure.identity.jwks import JWKSCache
-from promptpotter.infrastructure.identity.provider_config import OIDCProviderConfig
+from promptpotter.infrastructure.identity.provider_config import (
+    CodeExchangeError,
+    OIDCProviderConfig,
+)
 from promptpotter.infrastructure.identity.verifier import (
     IDTokenInvalidError,
     VerifiedIDToken,
@@ -21,10 +24,6 @@ GOOGLE_ISSUER = "https://accounts.google.com"
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
-
-
-class GoogleTokenExchangeError(RuntimeError):
-    pass
 
 
 @dataclass(frozen=True)
@@ -71,13 +70,10 @@ class GoogleProviderClient:
                 headers={"Accept": "application/json"},
             )
         if response.status_code != 200:
-            raise GoogleTokenExchangeError(
-                f"token endpoint returned {response.status_code}: {response.text[:200]}"
-            )
-        body = response.json()
-        id_token_raw = body.get("id_token")
+            raise CodeExchangeError.refused("google", response.status_code, response.content)
+        id_token_raw = response.json().get("id_token")
         if not isinstance(id_token_raw, str):
-            raise GoogleTokenExchangeError("token response missing id_token")
+            raise CodeExchangeError("google", "missing_id_token")
 
         verified: VerifiedIDToken = await verify_id_token(
             id_token_raw,

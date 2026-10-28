@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from promptpotter.application.account import Trail
+from promptpotter.application.account import AccountTrail, Trail
 
 
 def trail_rows(trail: Trail) -> list[str]:
@@ -8,9 +8,27 @@ def trail_rows(trail: Trail) -> list[str]:
     rows = []
     for line in trail.lines:
         stamp = line.at[:19].replace("T", " ")
-        actor = "" if line.actor in trail.own else f"by {line.actor}"
-        rows.append(" ".join(part for part in (stamp, line.what, line.subject, actor) if part))
+        actor = "" if not line.actor or line.actor in trail.own else f"by {line.actor}"
+        parts = (stamp, line.what, line.subject, actor, line.device or "")
+        rows.append(" ".join(part for part in parts if part))
     return rows
+
+
+def trail_fields(account: AccountTrail) -> list[dict[str, str]]:
+    """The rows as fields, for a receiver that words them itself."""
+    own = account.trail.own
+    return [
+        {
+            "at": line.at,
+            "what": line.what,
+            "subject": line.subject,
+            "campaign": line.campaign_id,
+            "dataset": account.datasets.get(line.campaign_id, ""),
+            "by": "" if line.actor in own else line.actor,
+            "device": line.device or "",
+        }
+        for line in account.trail.lines
+    ]
 
 
 def trail_notes(trail: Trail) -> list[str]:

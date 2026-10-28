@@ -114,7 +114,10 @@ say "data: re-stamp configs + compact cycle ledgers onto the synced schema"
 # The prefix is spelled LITERALLY and defaulted rather than as `${DATA_DIR:+VAR=…}`: bash decides
 # what is an assignment while parsing, so one arriving from an expansion is taken as the command
 # NAME instead, and the line dies 127 on a box that had the root set all along.
-if ! ( cd "$INSTALL_DIR" && PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" .venv/bin/python -m promptpotter restamp --apply ); then
+# Its output is kept: a campaign it still cannot read is the health verdict's, at the end.
+restamp_log="$(mktemp)"
+trap 'rm -f "$restamp_log"' EXIT
+if ! ( cd "$INSTALL_DIR" && PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" .venv/bin/python -m promptpotter restamp --apply ) | tee "$restamp_log"; then
   bad "re-stamp reported skips/failures (above) — deploy continues; check them"
 fi
 # Brand rides every update: a sync overwrites tracked files, and the webapp bakes
@@ -138,11 +141,12 @@ if [[ -n "$BACKEND_DIR" ]]; then
 fi
 
 # --- health -----------------------------------------------------------------
-# These three decide the EXIT CODE, and they are the only things that do. `bad` only prints, so
+# These decide the EXIT CODE, and they are the only things that do. `bad` only prints, so
 # until this counter existed the script ended 0 while announcing `✗ app down` — a deploy that left
 # the service dead reported success to whoever ran it and to anything reading `$?`. The restamp
-# above deliberately stays advisory (see its comment); "the data pass reported skips" and "the app
-# is not serving" are different questions, and only the second one means the deploy failed.
+# above deliberately stays advisory (see its comment) EXCEPT for a campaign it still cannot read:
+# that account's list is broken while the app answers, so the deploy finishes and then fails, naming
+# each one and its delete. Nothing deletes it for the operator — it is a user's data.
 say "health"
 down=0
 if wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH"; then ok "app up ($BIND_PORT)"; else bad "app down — journalctl -u $SERVICE_NAME -e"; down=1; fi
@@ -150,7 +154,23 @@ if wait_healthy "http://127.0.0.1:$BIND_PORT$HEALTH_PATH"; then ok "app up ($BIN
 if systemctl cat "$BOT_SERVICE_NAME.service" >/dev/null 2>&1; then
   if systemctl is-active --quiet "$BOT_SERVICE_NAME"; then ok "admin bot up"; else bad "admin bot down — journalctl -u $BOT_SERVICE_NAME -e"; down=1; fi
 fi
+# Everything the box answers for that /health cannot see (a backend, a sign-in provider's view of
+# oidc.json): the verb exits 1 on a broken one, and records and tells it as the bot would. It runs
+# under the unit's EnvironmentFile: this shell holds neither its keys nor its bot token, so a probe
+# run here would judge whatever the checkout's .env happens to hold instead of what the app serves.
+health_out="$(sudo systemd-run --quiet --wait --pipe --collect --uid="$(id -un)" \
+  -p EnvironmentFile="$ENV_FILE" -p WorkingDirectory="$INSTALL_DIR" \
+  -E PROMPTPOTTER_HOME="${DATA_DIR:-$INSTALL_DIR/.promptpotter}" \
+  "$INSTALL_DIR/.venv/bin/python" -m promptpotter health)" || down=1
+while read -r state row; do
+  if [[ "$state" == held ]]; then ok "$row"; elif [[ -n "$state" ]]; then bad "$row"; fi
+done <<< "$health_out"
 if [[ -n "$BACKEND_DIR" ]]; then
   if wait_healthy "http://127.0.0.1:$BACKEND_PORT/status"; then ok "backend up ($BACKEND_PORT)"; else bad "backend down — journalctl -u ${BACKEND_SERVICE:-?} -e"; down=1; fi
 fi
+# The verb's own prefix (`application/maintenance/restamp.py::check_readable`). The delete runs as
+# the restamp did: from $INSTALL_DIR, its venv, under the data root.
+while IFS= read -r unreadable; do
+  bad "$unreadable  [in $INSTALL_DIR, PROMPTPOTTER_HOME=${DATA_DIR:-$INSTALL_DIR/.promptpotter}]"; down=1
+done < <(sed -n 's/^  UNREADABLE //p' "$restamp_log")
 exit "$down"

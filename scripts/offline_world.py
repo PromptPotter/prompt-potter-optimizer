@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
+from promptpotter.infrastructure.llm.registry import keyed_specs
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -315,15 +316,21 @@ def _harbor_registry() -> str:
     return url
 
 
+def _key_checks() -> set[str]:
+    return {spec.base_url + spec.key_check for spec, _ in keyed_specs().values()}
+
+
 class Router:
-    """The world: the backend at its address, an LLM on any of its wires, an empty model
-    catalogue, Harbor's registry once one is published; anything else is named in `unrouted`
-    and refused."""
+    """The world: the backend at its address, an LLM on any of its wires and its key check, an
+    empty model catalogue, Harbor's registry once one is published, a sign-in provider's token
+    endpoint once a journey says what it answers; anything else is named in `unrouted` and refused."""
 
     def __init__(self, llm: FakeLLM, backend: FakeBackend) -> None:
         self.llm = llm
         self.backend = backend
         self.registry: list[dict[str, Any]] | None = None
+        # `host/path` of a token endpoint -> the (status, body) it answers every code with.
+        self.token_endpoints: dict[str, tuple[int, dict[str, Any]]] = {}
         self.unrouted: set[str] = set()
 
     def route(
@@ -338,8 +345,13 @@ class Router:
         elif f"{u.netloc}{u.path}" == "openrouter.ai/api/v1/models":
             # No model claims a capability, so a run reads the measured profiles alone.
             answered = _json(200, {"data": []}, request)
+        elif request.method == "GET" and f"{u.scheme}://{u.netloc}{u.path}" in _key_checks():
+            # Every key the world holds is one its provider accepts.
+            answered = _json(200, {"data": []}, request)
         elif self.registry is not None and f"{u.scheme}://{u.netloc}{u.path}" == _harbor_registry():
             answered = _json(200, self.registry, request)
+        elif (token := self.token_endpoints.get(f"{u.netloc}{u.path}")) is not None:
+            answered = _json(*token, request)
         if answered is None:
             self.unrouted.add(f"{request.method} {u.scheme}://{u.netloc}{u.path}")
             return _json(404, {"error": "offline run: no route"}, request)

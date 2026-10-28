@@ -71,6 +71,7 @@ def render_server_banner(
     data_root: Path,
     auth_open: bool,
     providers: tuple[str, ...],
+    broken: list[str],
     non_utf8: str | None,
     offer: frozenset[str] | None,
     offer_faults: list[str],
@@ -86,6 +87,7 @@ def render_server_banner(
         "",
         f"{DIM}Data: {data_root}{RESET}",
         *_auth_lines(auth_open=auth_open, providers=providers),
+        *(f"{YELLOW}  BROKEN: {row}{RESET}" for row in broken),
         *_encoding_lines(non_utf8),
         *_offer_lines(offer, offer_faults),
     )

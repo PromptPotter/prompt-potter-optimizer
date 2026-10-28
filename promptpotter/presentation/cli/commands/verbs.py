@@ -651,6 +651,13 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Read-only.",
     ),
     Verb(
+        "health",
+        "machine_status:cmd_health",
+        help="Check everything this box answers for — each remote backend, each configured "
+        "sign-in provider — one line each, led by held / broken / unverified; exits 1 on a broken "
+        "one. A change of state is recorded and told to the admin bot. Network only, zero LLM spend.",
+    ),
+    Verb(
         "pin-roster",
         "pin_roster:cmd_pin_roster",
         help="Pin a published Harbor dataset's task roster into the harbor connector's resources "

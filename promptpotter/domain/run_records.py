@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import enum
 import os
+import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, NamedTuple, Self
@@ -528,6 +529,8 @@ class SpendTombstoneRecord(FrozenModel):
 
 
 class BankedCommand(FrozenModel):
+    """A cycle's trail line — a command, or the run's abnormal stop — banked before the cycle went."""
+
     at: str
     kind: str
     # The campaign and cycle it addressed, as the trail read it before they went.
@@ -612,6 +615,39 @@ AccountEvent = Literal[
     "account_created", "signed_in", "terms_accepted", "uploaded", "request_refused"
 ]
 
+HealthState = Literal["held", "broken", "unverified"]
+
+
+class HealthRecord(FrozenModel):
+    """On the box's own WORKSPACE ledger: a probe's state CHANGED. ``unverified`` never is one."""
+
+    record_type: Literal["health"] = "health"
+    probe: str
+    state: Literal["held", "broken"]
+    said: str
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class Device(enum.StrEnum):
+    PHONE = "phone"
+    TABLET = "tablet"
+    COMPUTER = "computer"
+
+
+_TABLET_UA = re.compile(r"iPad|Tablet")
+_PHONE_UA = re.compile(r"Mobi|Android|iPhone")
+
+
+def device_of(mobile_hint: str | None, user_agent: str | None) -> Device | None:
+    """The site's visit-log classes; ``None`` where the request sent no user-agent to read."""
+    if mobile_hint == "?1":
+        return Device.PHONE
+    if not user_agent:
+        return None
+    if _TABLET_UA.search(user_agent):
+        return Device.TABLET
+    return Device.PHONE if _PHONE_UA.search(user_agent) else Device.COMPUTER
+
 
 class AccountEventRecord(FrozenModel):
     """On the WORKSPACE ledger; ``user_id`` is the acting principal, a delegate's own id in its delegator's tenant."""
@@ -622,6 +658,8 @@ class AccountEventRecord(FrozenModel):
     # The provider of a sign-in, the version of a terms acceptance, the file an upload was kept as,
     # what a refused request asked and was told.
     subject: str = ""
+    # What a sign-in or an opening came from; unset where no request carried one.
+    device: Device | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1130,6 +1168,7 @@ CycleRecord = Annotated[
     | ElectionRecord
     | ErrorRecord
     | ForkGradedRecord
+    | HealthRecord
     | InterventionRecord
     | LaunchClaimRecord
     | LaunchClockRecord

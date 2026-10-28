@@ -351,7 +351,7 @@ HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
 Three placement rules:
 
 - **`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file, not the app's**, once `BOT_ENV_FILE` is split out. It is the second factor on inbound `/block` and `/grant`, and only the bot daemon reads it — a copy in the API's environment turns a read of that process into command authority.
-- **Token and chat id must stay in BOTH files.** The API sends on the same bot (`auth.py` on a new sign-in, `main.py` on shutdown), and without them `notify_operator` returns False and logs while the bot keeps answering commands — so nothing reports the loss. `install-admin-bot.sh` warns when a split leaves them out.
+- **Token and chat id must stay in BOTH files.** The API sends on the same bot (`auth.py` on a new sign-in, `main.py` on a health change at start and on shutdown), and without them `notify_operator` returns False and logs while the bot keeps answering commands — so nothing reports the loss. `install-admin-bot.sh` warns when a split leaves them out.
 - **`HOST_ADMIN_EMAIL` is required on a hosted box** — it names the one sign-in allowed to write the claim marker (§ The perimeter). Unset, the terminal also stays on the `default` tenant while every browser session resolves its own; the app logs a warning saying so.
 
 **Daily use** — message your bot:
@@ -378,7 +378,9 @@ It does not contradict the one rule: the traffic is outbound-only and carries co
 
 ### What accounts did, into your morning briefing (optional)
 
-Set `N8N_TRAIL_WEBHOOK_URL` and `N8N_TRAIL_WEBHOOK_SECRET` in the **bot's** env file and the admin bot POSTs, every half hour, what every account did in the last 24 hours: `{as_of, window_hours, accounts: [{who, rows}], unreadable}`, each row one `/trail` line. The secret travels as the `X-Trail-Secret` header, so the receiver can refuse a stranger who learned the address. Each send is the whole window, so the receiver keeps only the newest and a box that was offline shows as an old `as_of`, never as a quiet day (`admin_bot.py::forward_trail_to_briefing`).
+Set `N8N_TRAIL_WEBHOOK_URL` and `N8N_TRAIL_WEBHOOK_SECRET` in the **bot's** env file and the admin bot POSTs, every half hour, what every account did in the last 24 hours: `{as_of, window_hours, accounts: [{who, lines}], unreadable, health}`, each line one `/trail` line, and `health` the box's own: `{probe: {state, since, fix}}`. The secret travels as the `X-Trail-Secret` header, so the receiver can refuse a stranger who learned the address. Each send is the whole window, so the receiver keeps only the newest and a box that was offline shows as an old `as_of`, never as a quiet day (`admin_bot.py::forward_trail_to_briefing`).
+
+**The box's health** is what no `/health` answer can see: each remote backend, and each configured sign-in provider's view of `oidc.json` (asked to redeem a code it never issued, a provider that keeps this server's credentials refuses only the code), and each LLM key the box holds (`ProviderSpec.key_check`, a GET that spends nothing). `promptpotter health` checks every probe (`application/health.py::probes`); a change of state — held to broken, broken to held — is recorded on the box's own workspace ledger and told to the bot's chat, and nothing else is. It runs at app start (a line per broken probe in the boot banner), before each briefing send, and in `update.sh`'s health, where a broken probe fails the deploy.
 
 A briefing that wants this section cannot ask for it: asking would be an inbound read across every tenant, which the one rule forbids. So the box tells, and the briefing prints what it was last told.
 
