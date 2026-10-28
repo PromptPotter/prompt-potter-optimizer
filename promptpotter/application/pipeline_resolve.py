@@ -40,6 +40,7 @@ from promptpotter.application.optimizer_manifest import (
     resolve_optimizer,
     select_optimizer,
 )
+from promptpotter.application.optimizers.nodes import KnobDraw
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.domain.arms import Concluded
@@ -856,7 +857,7 @@ def optimizer_setup(cfg: CampaignConfig) -> OptimizerSetup:
                         switch=KnobSwitch(node=selected.knob_owner(m, draw.knobs), knob=draw.knob),
                     )
                     for m in members
-                    if (draw := m.draws.get(initializer.pool)) is not None
+                    if isinstance(draw := m.draws.get(initializer.pool), KnobDraw)
                 ],
             )
             for initializer in selected.plan.initializers

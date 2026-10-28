@@ -40,7 +40,7 @@ async def heartbeat(
     inner_fn: Callable[[], CycleHop | None] | None = None,
     on_suspend: Callable[[float], None] | None = None,
 ) -> None:
-    """Raises only its cancellation, so a beat's fault never replaces the awaited call's reply or raise; ``ledger=None`` still ticks, so a missing ledger cannot disarm ``on_suspend``."""
+    """A beat's I/O fault is logged, never raised, so it never replaces the awaited call's reply or raise; ``ledger=None`` still ticks, so a missing ledger cannot disarm ``on_suspend``."""
     while True:
         overshoot = await sleep_measuring_suspend(HEARTBEAT_INTERVAL_S)
         try:
@@ -57,7 +57,7 @@ async def heartbeat(
                         inner=_safe_read(inner_fn),
                     )
                 )
-        except Exception:
+        except (OSError, LedgerUnreadableError):
             logger.exception("heartbeat of %s (call %s) failed a beat", node, call_id)
 
 

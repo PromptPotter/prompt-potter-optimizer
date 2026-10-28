@@ -7,9 +7,8 @@ from pathlib import Path
 
 from promptpotter.application.optimizers.nodes import (
     BUILTIN_PACKAGES,
-    AccessKnob,
-    CountKnob,
     CycleRead,
+    KnobDraw,
     LlmNode,
     NodeMember,
     PromptArity,
@@ -91,7 +90,7 @@ def _validate(obj: object, origin: str) -> NodeMember:
         isinstance(pool, type)
         and issubclass(pool, Pool)
         and pool.__dict__.get("kind")
-        and isinstance(draw, AccessKnob | CountKnob)
+        and isinstance(draw, KnobDraw)
         and draw.knobs in reached
         and draw.knob in draw.knobs.model_fields
         for pool, draw in draws.items()

@@ -187,7 +187,7 @@ call is an automatic block at review, not a test.
 its manifest is a directory holding `pipeline.yaml` (a plugin ships both through the two
 entry-point groups, the directory as a `ManifestDir`), each kind of state it banks is a `StateSlice`
 (across rounds) or a `RoundOutput` (one round's) registered under its own `kind`, and its decision
-kinds a `CheckpointKind` its members' `replayers` gate. A mix of other optimizers' members is a
+kinds a `CheckpointKind` its members' `replayers` gate. A switch over other optimizers' members is a
 manifest alone. [`examples/optimizer-plugin/`](../../examples/optimizer-plugin/)
 is that package, and the [offline run](offline-run.md) runs it as the proof.
 

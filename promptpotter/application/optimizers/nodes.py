@@ -30,6 +30,7 @@ from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, 
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.pipeline_schema import NodeKind
+from promptpotter.domain.pool import DemoPool
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
@@ -124,8 +125,8 @@ class AccessKnob:
     knobs: type[StrictModel]
     knob: str
 
-    def access(self, values: StrictModel) -> Access:
-        return cast("Access", getattr(values, self.knob))
+    def access(self, selected: SelectedOptimizer, member: NodeMember) -> Access:
+        return cast("Access", getattr(selected.reached_knobs(member, self.knobs), self.knob))
 
 
 @dataclass(frozen=True)
@@ -135,14 +136,24 @@ class CountKnob:
     knobs: type[StrictModel]
     knob: str
 
-    def count(self, values: StrictModel) -> int:
-        return cast("int", getattr(values, self.knob))
+    def count(self, selected: SelectedOptimizer, member: NodeMember) -> int:
+        return cast("int", getattr(selected.reached_knobs(member, self.knobs), self.knob))
 
-    def access(self, values: StrictModel) -> Access:
-        return "closed" if self.count(values) > 0 else "off"
+    def access(self, selected: SelectedOptimizer, member: NodeMember) -> Access:
+        return "closed" if self.count(selected, member) > 0 else "off"
 
 
-Draw = AccessKnob | CountKnob
+@dataclass(frozen=True)
+class ShotCap:
+    """The bench seat's draw: as many shots as any proposer of the round may draw (``SelectedOptimizer.shot_cap``)."""
+
+    def access(self, selected: SelectedOptimizer, _member: NodeMember) -> Access:
+        return "closed" if selected.shot_cap > 0 else "off"
+
+
+# A manifest member's draw: one knob sets it.
+KnobDraw = AccessKnob | CountKnob
+Draw = KnobDraw | ShotCap
 
 
 class CycleRead:
@@ -172,7 +183,7 @@ class NodeMember(Protocol):
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
     # Every read beyond its own state, knobs and pools it is handed (`NodeContext.read`).
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
-    # The pools it draws from, each under the knob that sets its access; read only through `NodeContext.drawn`.
+    # The pools it draws from, each under the draw that sets its access; read only through `NodeContext.drawn`.
     draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType({})
     # The modules deciding what its prompts SAY; `source_digest` hashes them beside its own module.
     prompt_sources: ClassVar[tuple[ModuleType, ...]] = ()
@@ -761,11 +772,12 @@ class Reviewer(NodeMember, Protocol):
 
 
 class OperatorSeat(NodeMember):
-    """The arm gate's seat, the bench's own and no manifest's: an operator's arm is a child it admits as any other (`runner/arm_gate.py`); its draw is the round's proposers' (``SelectedOptimizer.draws``)."""
+    """The arm gate's seat, the bench's own and no manifest's: an operator's arm is a child it admits as any other (`runner/arm_gate.py`)."""
 
     name: ClassVar[str] = "operator_seat"
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     variation_mode: ClassVar[VariationMode] = "operator"
+    draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType({DemoPool: ShotCap()})
 
 
 OPERATOR_SEAT = OperatorSeat()

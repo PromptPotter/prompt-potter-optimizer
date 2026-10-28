@@ -316,7 +316,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.mccabe]
-# The package's current maximum (`views/render/sample.py::fmt_query_result`): it only falls.
+# A ceiling on package code: lowered as complexity falls, never raised.
 max-complexity = 23
 
 [tool.ruff.lint.per-file-ignores]

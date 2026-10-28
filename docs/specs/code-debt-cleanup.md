@@ -27,12 +27,13 @@ acting.
 
 - **A sampler's cells ceiling states other members' reads.** `Sampler.round_cells_ceiling` overrides
   in `Blocks`, `ProxyCss` and `AdaptiveQueue` hold facts the backbone should sum. The formula
-  `arms × round_cells + parent_cells` misses gepa's proposer parent read (`Frontier.measure_parent`,
-  3 cells short) and levi's seeding draw (5×150, 420 short), which under-prices
+  `arms × round_cells + parent_cells` misses gepa's proposer parent read (`Frontier.measure_parent`)
+  and levi's seeding draw, which under-prices
   `preflight._check_cap_funds_round`. Action: the sampler states its draw per walk; the parent read is the
   union of the selector's `parent_cells` and every proposer's `measure_parent`, both bounded by the
   panel; then delete the overrides. **Rides with:** recombination's pools stage. **Re-test:** the
-  derived ceiling equals today's for every optimizer at search sizes 40, 200 and 1000.
+  derived ceiling equals each `round_cells_ceiling` override's for every optimizer at search sizes
+  40, 200 and 1000.
 
 - **The cladogram re-derives fork lineage the server resolves.**
   `webapp/components/candidates/forest-layout.ts::extentKeys` walks spawn cuts client-side while each

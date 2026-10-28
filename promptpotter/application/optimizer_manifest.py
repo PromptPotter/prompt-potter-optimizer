@@ -123,7 +123,7 @@ class ManifestSwap(FrozenModel):
 
 
 class ManifestSwitch(FrozenModel):
-    """A mix: the whole manifest ``extends`` names, each node ``swap`` names replaced by another manifest's node of its type."""
+    """A switch: the whole manifest ``extends`` names, each node ``swap`` names replaced by another manifest's node of its type."""
 
     name: str
     version: str
@@ -398,12 +398,10 @@ class SelectedOptimizer:
             raise KeyError(
                 f"{member.name!r} draws from the {pool.kind!r} pool and does not declare it"
             )
-        return draw.access(self.reached_knobs(member, draw.knobs))
+        return draw.access(self, member)
 
     def draws(self, member: NodeMember) -> frozenset[type[Pool]]:
-        """The pools *member* reads entries of: an ``off`` draw reads none, and the bench's seat the demo pool where ``shot_cap`` admits a shot."""
-        if member is OPERATOR_SEAT:
-            return frozenset({DemoPool}) if self.shot_cap else frozenset()
+        """The pools *member* reads entries of: an ``off`` draw reads none."""
         return frozenset(pool for pool in member.draws if self.access(member, pool) != "off")
 
     @property
@@ -411,7 +409,7 @@ class SelectedOptimizer:
         """The most shots an operator's arm may carry: the most any proposer of a round may draw, 0 where none draws the demo pool."""
         return max(
             (
-                draw.count(self.reached_knobs(proposer, draw.knobs))
+                draw.count(self, proposer)
                 for proposer in (*self.plan.initial_population, *self.plan.proposers)
                 if isinstance(draw := proposer.draws.get(DemoPool), CountKnob)
             ),

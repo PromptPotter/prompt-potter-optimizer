@@ -1423,11 +1423,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             )
         }
     )
-    wire = build_l1_response_schema(axes_only, citable_fields=["critique"], inner_cells=None)
-    offered = wire["properties"]["variants"]["items"]["properties"]["prompt_fields_updates"]
-    assert set(offered["properties"]["review"]["properties"]) == {"instruction", "rubric"}, (
-        "a config-axis narrowing withdrew a prompt field from L1"
-    )
+    axes_review = axes_only.get_node("review")
+    assert axes_review is not None and axes_review.open_prompt_fields == [
+        "instruction",
+        "rubric",
+    ], "a config-axis narrowing withdrew a prompt field from L1"
     one_held = two.narrow({"review": NodeSearchNarrowing(prompt_fields_held=["rubric"])})
     review = one_held.get_node("review")
     assert review is not None and review.open_prompt_fields == ["instruction"], (

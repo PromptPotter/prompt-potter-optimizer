@@ -35,7 +35,7 @@ def author_arm(ctx: RoundContext, parent: OptSearchPoint, arm: SubmittedArm) -> 
     shots = {Locus(node, SHOTS_KEY): keys for node, keys in arm.shots.items()}
     over = [
         ValidationFailure(
-            axis=locus.name, value=str(len(keys)), allowed=[str(cap)], reason="shots_over_k_max"
+            axis=locus.name, value=str(len(keys)), allowed=[str(cap)], reason="shots_over_cap"
         )
         for locus, keys in shots.items()
         if len(keys) > cap

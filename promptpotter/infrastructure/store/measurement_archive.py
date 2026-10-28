@@ -92,6 +92,11 @@ assert all(
     for other in ArchiveFile
     if other.folder == kind.folder
 ), "two archive kinds name one file, so one kind's walker rewrites the other's"
+assert all(
+    kind.key_of(kind.file_name(key)) == key and not kind._admits(f"{key}/")
+    for kind in ArchiveFile
+    for key in ["f" * ADDRESS_HEX if kind.keyed else ""]
+), "an archive kind names a file it does not enumerate, or a key holding a separator names one"
 
 
 def config_key(node_configs: list[tuple[str, dict[str, Any]]]) -> str:

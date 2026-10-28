@@ -357,7 +357,7 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
 
 
 def test_the_archive_on_disk_keeps_every_paid_answer(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     archive = built_stores.archive
     entry = _entry(_LLM_ONLY, "kept")
@@ -632,67 +632,36 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
         "a holdout read under the bank before a re-cut was not counted on the re-cut"
     )
 
-    # A re-stamp walks every file the archive writes. An answer filed before rows were keyed by
-    # bank cannot be keyed, so it goes with the configuration and index row it alone described.
+    # A re-stamp walks every file the archive writes.
     monkeypatch.setattr(restamp, "DEFAULT_PROJECTS_ROOT", built_stores.projects_root)
     assert restamp.check_readable()["archive_refused"] == 0, (
         "a file this journey's writers left is one no re-stamp walker reads"
     )
-    # Every kind's file is a key it enumerates, and a key holding a separator names no file.
-    probe = MeasurementArchive(tmp_path / "probe")
-    for kind in ArchiveFile:
-        key = "f" * 32 if kind.keyed else ""
-        probe.path(kind, key).parent.mkdir(parents=True, exist_ok=True)
-        probe.path(kind, key).write_text("", encoding="utf-8")
-        assert probe.keys(kind) == [key], f"{kind.name} does not enumerate the file it names"
-        with pytest.raises(ValueError):
-            probe.path(kind, "justlogic/d234")
-    assert probe.unwalked() == [], "a file an archive kind names is one no walker reads"
-    # A fold filed under its dataset's NAME: one holding '/' nested it, out of every reader's reach.
-    derived = archive.base_dir / MEASUREMENTS_DIR / "derived"
-    by_name = derived / "sample_fold__justlogic" / "d234.jsonl"
-    by_name.parent.mkdir(parents=True)
-    by_name.write_text(fold_row("x").model_dump_json() + "\n", encoding="utf-8")
-    stale = "0" * 32
-    before_reshape = {
-        "config_key": stale,
-        "prompt_fields_id": "pf_old",
-        "rendered_prompt_hash": "r_old",
-        "dataset_name": "justlogic/d234",
-        "node_configs": [["llm_only", {"model": "X"}]],
-        "pipeline_params": {},
-    }
-    stale_config = archive.path(ArchiveFile.CONFIG, stale)
-    stale_config.write_text(json.dumps(before_reshape), encoding="utf-8")
-    append_row(
-        archive.cell_path(stale),
-        {
-            "sample_id": 0,
-            "sample_key": "k_old",
-            "predicted": "p",
-            "answer": f"{stale}.0",
-            "config_key": stale,
-            "dataset_name": "justlogic/d234",
-            "role": "panel",
-            "source": "optimization_loop",
-            "provenance": "A",
-            "created_at": "2026-10-16T00:00:00Z",
-        },
+    # A row its model refuses after pruning cannot be keyed: it goes with the configuration and
+    # index row it alone described.
+    refused: Configs = [("llm_only", {"model": "R"})]
+    _file(archive, [_row("q_refused")], dataset_hash="refused", node_configs=refused)
+    refused_key = config_key(refused)
+    refused_cells = archive.cell_path(refused_key)
+    refused_cells.write_text(
+        "".join(
+            json.dumps({k: v for k, v in json.loads(line).items() if k != "dataset_hash"}) + "\n"
+            for line in archive.detail_lines(refused_key)
+        ),
+        encoding="utf-8",
     )
-    append_row(
-        archive.path(ArchiveFile.INDEX),
-        {"k": f"{stale}|", **before_reshape, "name": "panel", "created_at": "2026-10-16"},
-    )
-    with pytest.raises(ValueError):
-        archive.list_all()
-    assert restamp.check_readable()["archive_refused"] == 4, "guard: each old file refuses"
+    # A file no archive kind names is removed, its emptied folders with it.
+    unnamed = archive.base_dir / MEASUREMENTS_DIR / "unnamed" / "nested" / "rows.jsonl"
+    unnamed.parent.mkdir(parents=True)
+    unnamed.write_text(fold_row("x").model_dump_json() + "\n", encoding="utf-8")
+    assert restamp.check_readable()["archive_refused"] == 2, "guard: each unkeyable file refuses"
     paid = {ref: archive.answer(ref) for ref in refs}
     restamp.restamp_measurement_archives(apply=True)
-    assert not derived.exists(), "a fold under its dataset's name survived the re-stamp"
-    assert not stale_config.exists() and not archive.cell_path(stale).exists(), (
-        "an unkeyable answer, or the configuration it alone described, survived the re-stamp"
-    )
-    assert stale not in {e.config_key for e in archive.list_all()}
+    assert not unnamed.parent.parent.exists(), "a file no archive kind names survived the re-stamp"
+    assert (
+        not archive.path(ArchiveFile.CONFIG, refused_key).exists() and not refused_cells.exists()
+    ), "an unkeyable answer, or the configuration it alone described, survived the re-stamp"
+    assert refused_key not in {e.config_key for e in archive.list_all()}
     assert restamp.check_readable()["archive_refused"] == 0, "the re-stamp left a refused file"
     assert {ref: archive.answer(ref) for ref in refs} == paid, "a re-stamp lost a paid answer"
 

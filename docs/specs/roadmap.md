@@ -6,6 +6,20 @@ Any new endpoint is multi-tenant by default.
 
 ## Sequence
 
+**Arc order, auto-dev runs it top to bottom** (each arc closes on the operator's word):
+
+1. **Reset and shrink.** Docs and rules cut to what governs: shallow modules, knowledge at the
+   caller, the deletion test, name what varies, test through the interface. Pytest consolidated;
+   the URGENT items of [`code-debt-cleanup.md`](code-debt-cleanup.md) closed. Every `CLAUDE.md` rule is in scope.
+2. **Recombination at $0** (C9, § Variation and pools): pools; recombination on a host; parent
+   choice and survival as members; `pair_guard` naming the swapped member; the three surfaces.
+3. **The optimizer climbs** (§ Optimizer tuning — the standing board):
+   - L1 quality: answer_format is never edited; a held leader is never re-scored; whole-reply counting.
+   - L4 validation (~$1).
+   - Early stop when C1.1 clearly beats C0.
+   - Δ per time, per candidate and per $, served in chat.
+   - Then recombination's paid comparability run.
+
 Lanes by dependency. Front priority: Lane A and the bench lane (M13), concurrently; C9 ahead of
 the rest of Lane C.
 
@@ -269,6 +283,10 @@ maintained and measured separately; measured lift is the only admission ticket.
 - **Cheap top-up** — a second `PanelTrigger`, blocked on the rule that prices a missing row against
   the round's marginal draw cell.
 - **CPU-hours** metered per phase beside `SpendRollup`, for every connector.
+- **Free tier offers only what it admits** — `free_tier.py::with_free_tier_layer` narrows each
+  model's params but never the model axis, so a free check-in offers models Start refuses. The
+  per-value lists should name only values known to fail; the spend ceiling bounds the rest.
+  **Check:** a free account's model menu equals `free_tier.yaml::task_models`.
 - **Delegation, open** ([`../decisions.md`](../decisions.md) § 0005): who edits grants; how a
   channel is identified unspoofably; whether the user's own assistant is attenuable; depth beyond
   one level; whether a delegate is its own tenant.

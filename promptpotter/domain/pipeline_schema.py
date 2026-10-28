@@ -310,8 +310,10 @@ class PipelineNode(FrozenModel):
     kind: NodeKind | None = None
     role: NodeRole | None = None
     param_keys: set[str] = Field(default_factory=set)
-    # What ``narrow`` TOOK AWAY — a lock — as against axes the dataset never offered.
+    # The config axes ``narrow`` TOOK AWAY — a lock — as against axes the dataset never offered.
     param_keys_held: set[str] = Field(default_factory=set)
+    # The prompt fields ``narrow`` held, which no search may write.
+    prompt_fields_held: set[str] = Field(default_factory=set)
     # Params a CAMPAIGN narrowed: a model's ladder replaces a dataset default, never these.
     param_values_narrowed: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
@@ -342,7 +344,7 @@ class PipelineNode(FrozenModel):
     @shapes_optimizer_prompt
     def open_prompt_fields(self) -> list[str]:
         """The ones a search may write: every declared field the operator did not hold."""
-        return [f for f in self.prompt_fields if f not in self.param_keys_held]
+        return [f for f in self.prompt_fields if f not in self.prompt_fields_held]
 
     @property
     def provider(self) -> str:
@@ -804,7 +806,7 @@ class PipelineSchema(FrozenModel):
                         movable_by=movable,
                         source=stamped.get(key, "unset"),
                         # A key that could never be an axis is never HELD: there was none to close.
-                        held=not never and key in n.param_keys_held,
+                        held=not never and key in n.param_keys_held | n.prompt_fields_held,
                     )
                 )
             if n.name == model_carrier and self.available_models:
@@ -863,9 +865,6 @@ class PipelineSchema(FrozenModel):
                     out.append(n)
                     continue
                 keys = n.param_keys if nv.param_keys is None else n.param_keys & set(nv.param_keys)
-                held = (n.param_keys - keys) | (
-                    set(n.open_prompt_fields) & set(nv.prompt_fields_held)
-                )
                 allowed = {
                     **n.param_allowed_values,
                     **{k: list(v) for k, v in nv.param_allowed_values.items()},
@@ -875,7 +874,9 @@ class PipelineSchema(FrozenModel):
                         update={
                             "param_keys": keys,
                             # Accumulated: narrowing composes (config, frozen snapshot, fork seed).
-                            "param_keys_held": n.param_keys_held | held,
+                            "param_keys_held": n.param_keys_held | (n.param_keys - keys),
+                            "prompt_fields_held": n.prompt_fields_held
+                            | (set(n.prompt_fields) & set(nv.prompt_fields_held)),
                             "param_allowed_values": allowed,
                             # A list restating the declaration closed nothing.
                             "param_values_narrowed": n.param_values_narrowed

@@ -153,10 +153,10 @@ An `algorithm` node before the measurement proposes too, and so do the nodes of 
 `default` (`initial_population_walks: alone`) or ahead of it, into the population `default` reads
 (`before_default`). **An operator's arms are written through the bench's own seat**
 (`nodes.py::OPERATOR_SEAT`, `runner/arm_gate.py`), in no manifest; it may write as many shots as
-the round's proposers may draw (`SelectedOptimizer.shot_cap`). **A mix is a switch, never a copy**:
-a manifest declaring `extends: <manifest>` and `swap: {<node>: {node: <name>, of: <manifest>}}`
-is the one it extends with each swapped node replaced, in every walk, by `of`'s node of the same
-type at `of`'s configuration (`capo-pobb`). An eliminator's `Race` stops a walk on its own rows (`rule`) or every live walk
+the round's proposers may draw (`SelectedOptimizer.shot_cap`). **A switch, never a copy**:
+recombine members by a manifest declaring `extends: <manifest>` and
+`swap: {<node>: {node: <name>, of: <manifest>}}`; it is the one it extends with each swapped node
+replaced, in every walk, by `of`'s node of the same type at `of`'s configuration (`capo-pobb`). An eliminator's `Race` stops a walk on its own rows (`rule`) or every live walk
 together at each block's close (`blocks`); its catch-ups are the calls pairing a prior with the arm
 on turn.
 
