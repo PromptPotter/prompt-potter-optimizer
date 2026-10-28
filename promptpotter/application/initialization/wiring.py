@@ -47,8 +47,8 @@ from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.cycle_paths import CycleHop
 
 logger = logging.getLogger(__name__)
@@ -214,17 +214,17 @@ def _session_bank(
 
 def complete_registries(*, every_treatment: bool = True) -> None:
     """Every process calls it once, before it reads a ledger; one running ONE campaign passes ``False``."""
-    table = connectors.registered()
-    judge_registry.registered()
-    optimizers.registered()
-    for runtime in optimizers.runtimes().values():
+    connectors.CONNECTORS.complete()
+    judge_registry.JUDGES.complete()
+    optimizers.NODE_MEMBERS.complete()
+    for runtime in optimizers.RUNTIMES.table.values():
         runtime.complete()
         # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
         if every_treatment:
             resolve_optimizer(runtime.name, {}, gate="off").treatment()
     replayers()
     check_every_record_reported()
-    for connector in table.values():
+    for connector in connectors.CONNECTORS.table.values():
         if connector.completion_check is not None:
             connector.completion_check()
 
@@ -244,7 +244,7 @@ async def init_services(
     await ensure_model_capabilities(Path(stores.base_dir))
 
     dataset = resolve_dataset(stores, dataset_name)
-    connector = connectors.get(declared_backend_type(dataset.directory))
+    connector = connectors.CONNECTORS.get(declared_backend_type(dataset.directory))
     panel = dataset_experiment(stores, dataset, connector)
     if panel is None and connector.owns_panel and build_panel(stores, dataset):
         panel = dataset_experiment(stores, dataset, connector)

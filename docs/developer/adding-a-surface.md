@@ -12,7 +12,7 @@ beside it proves nothing fell out of it** — never a standing `test_structure` 
 | A prompt injection (`{{slot}}`) | [§2](#2-a-prompt-injection) | Init-time: the `injection_table()` guard + `validate_template()` |
 | A dashboard / view field | [§3](#3-a-dashboard--view-field) | Breaks loud — a wrong/empty dashboard |
 | A resume / decision checkpoint | [§4](#4-a-resume--decision-checkpoint-kind) | Import-time: `decisions.py` + `replayers.py` asserts |
-| A connector (backend) | [§5](#5-a-connector-backend) | Init-time: the `registered()` registry guard |
+| A connector (backend) | [§5](#5-a-connector-backend) | Init-time: the `CONNECTORS` registry guard |
 | An optimizer node | [§6](#6-an-optimizer-node) | `validate_template()` at prompt load |
 | A CLI verb | [§7](#7-a-cli-verb) | `gate.py --only handler-tables` over `commands/verbs.py::VERBS` |
 | A control-plane command kind | [§8](#8-a-control-plane-command-kind) | None to satisfy: cap, handler **and the CLI verb** are columns of the kind's one row, its payload model the class named for it |

@@ -75,8 +75,8 @@ from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadIn
 from promptpotter.shared.measurement_context import RoleScope
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.bench import PartitionRecord
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
     from promptpotter.domain.scoring import GradedCell, PipelineData, Scorer

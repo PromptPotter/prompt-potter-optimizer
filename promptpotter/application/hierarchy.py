@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.pipeline_resolve import campaign_runs_with, line_config
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
@@ -17,6 +16,7 @@ from promptpotter.domain.campaign import (
     LifecycleFilter,
     ceiling_meter,
 )
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import (
     CycleHop,

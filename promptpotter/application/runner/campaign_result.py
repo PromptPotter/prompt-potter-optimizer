@@ -32,9 +32,9 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import LaunchClock, Session
     from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.scoring import Scorer
     from promptpotter.domain.search_point import JobSearchPoint

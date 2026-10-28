@@ -10,7 +10,7 @@ from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell, MeasuredCell

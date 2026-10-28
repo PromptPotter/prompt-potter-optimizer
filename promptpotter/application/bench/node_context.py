@@ -340,7 +340,9 @@ class NodeContext[K: StrictModel]:
         """The context a fired member runs under, its own, declared by this controller's ``fires``."""
         if member not in cast("Controller", self._member).fires:
             raise KeyError(f"{self.node!r} fires {member.__name__} and does not declare it")
-        return NodeContext(self._round, optimizers.member(self._selected.roster_one(member)))
+        return NodeContext(
+            self._round, optimizers.NODE_MEMBERS.get(self._selected.roster_one(member))
+        )
 
     def slice[S: StateSlice](self, kind: type[S]) -> S:
         self._declares(kind, writes=False)

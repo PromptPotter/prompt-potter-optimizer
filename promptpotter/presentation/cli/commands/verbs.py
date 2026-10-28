@@ -267,6 +267,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 help="List the paths that would be removed; touch nothing. Recommended first run.",
             ),
         ),
+        needs_registries=False,
     ),
     Verb(
         "verify",
@@ -316,6 +317,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         help="Rebuild the measurement index (measurements/index.jsonl) from the detail "
         "files and GC orphaned runs. The index is derived, so this loses nothing — use "
         "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
+        needs_registries=False,
     ),
     Verb(
         "compact-archive",
@@ -643,12 +645,14 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "the server refused and every command, the terminal's own included. Bare, this tenant's; "
         "with an EMAIL, every account on the box that carries it. Read-only, zero spend.",
         args=(Arg("email", nargs="?", default="", help="An account's email address."),),
+        needs_registries=False,
     ),
     Verb(
         "offer-extras",
         "offer:cmd_offer_extras",
         help="The pyproject extras the datasets this deployment offers (DATASET_OFFER) need to "
         "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Read-only.",
+        needs_registries=False,
     ),
     Verb(
         "health",
@@ -669,6 +673,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             Arg("dataset", help="The dataset's registry name (`harbor dataset list`)."),
             Arg("version", help="Its published version — a pin names one, never 'latest'."),
         ),
+        needs_registries=False,
     ),
 )
 

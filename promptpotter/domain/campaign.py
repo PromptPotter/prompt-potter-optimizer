@@ -255,16 +255,6 @@ def ceiling_meter(purpose: Purpose) -> CeilingMeter:
             assert_never(purpose)
 
 
-def comparison_line(purpose: Purpose) -> str:
-    match purpose:
-        case Optimize():
-            return "not controlled — optimizes with every measurement and steer"
-        case Compare(arm=arm):
-            return f"controlled — arm {arm.arm_key} of head-to-head {arm.head_to_head_id}"
-        case _:
-            assert_never(purpose)
-
-
 def worked_seconds(launches: Sequence[LaunchClockRecord]) -> float | None:
     """Less each launch's gates, a human's, and the time its cells were not allowed to spend."""
     worked = [

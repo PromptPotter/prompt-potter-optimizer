@@ -2924,7 +2924,8 @@
             "enum": [
               "healthy",
               "degraded",
-              "critical"
+              "critical",
+              "unmeasured"
             ],
             "title": "Grade",
             "type": "string"
@@ -6359,15 +6360,7 @@
             "type": "object"
           },
           "health": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DegradationHealth"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
+            "$ref": "#/components/schemas/DegradationHealth"
           },
           "level_series": {
             "$ref": "#/components/schemas/LevelSeries"
@@ -6425,6 +6418,7 @@
           "folds",
           "election",
           "overlap",
+          "health",
           "optimizer_state",
           "cells",
           "positions",
@@ -6730,15 +6724,7 @@
             "type": "object"
           },
           "health": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DegradationHealth"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
+            "$ref": "#/components/schemas/DegradationHealth"
           },
           "level_series": {
             "$ref": "#/components/schemas/LevelSeries"
@@ -6796,6 +6782,7 @@
           "folds",
           "election",
           "overlap",
+          "health",
           "optimizer_state",
           "cells",
           "positions",

@@ -43,43 +43,69 @@ def load_plugins(group: str) -> Iterator[tuple[str, str, object]]:
         yield ep.name, origin, obj
 
 
-def load_registry[M: _Named](
-    group: str,
-    builtins: Iterable[tuple[str, object]],
-    validate: Callable[[object, str], M],
-) -> tuple[Mapping[str, M], Mapping[str, str]]:
-    """``(members, origins)`` by each member's own ``name``; rules: ``connectors/CLAUDE.md``."""
-    table: dict[str, M] = {}
-    origins: dict[str, str] = {}
+class Registry[M: _Named]:
+    """Members by their own ``name``, loaded on first read; rules: ``connectors/CLAUDE.md``."""
 
-    def add(member: M, origin: str, label: str) -> None:
-        if member.name in table:
-            raise RuntimeError(
-                f"{group}: {member.name!r} declared twice: [{origins[member.name]}] and [{origin}]."
-            )
-        table[member.name] = member
-        origins[member.name] = label
+    def __init__(
+        self,
+        group: str,
+        builtins: Callable[[], Iterable[tuple[str, object]]],
+        validate: Callable[[object, str], M],
+        *,
+        shipped: frozenset[str] = frozenset(),
+    ) -> None:
+        self.group = group
+        self._builtins = builtins
+        self._validate = validate
+        self._shipped = shipped
 
-    for where, obj in builtins:
-        origin = f"{BUILT_IN}: {where}"
-        add(validate(obj, origin), origin, BUILT_IN)
-    shipped = frozenset(table)
+    @functools.cached_property
+    def _loaded(self) -> tuple[Mapping[str, M], Mapping[str, str]]:
+        table: dict[str, M] = {}
+        origins: dict[str, str] = {}
 
-    for label, origin, obj in load_plugins(group):
-        member = validate(obj, origin)
-        if member.name in shipped:
-            raise RuntimeError(
-                f"{group} entry point {label!r} [{origin}] declares {member.name!r}, which "
-                "ships with PromptPotter. A plugin may not replace a built-in: which object "
-                "answers a built-in key is read by name inside the loop. Rename it."
-            )
-        add(member, origin, origin)
-    return MappingProxyType(table), MappingProxyType(origins)
+        def add(member: M, origin: str, label: str) -> None:
+            if member.name in table:
+                raise RuntimeError(
+                    f"{self.group}: {member.name!r} declared twice: "
+                    f"[{origins[member.name]}] and [{origin}]."
+                )
+            table[member.name] = member
+            origins[member.name] = label
 
+        for where, obj in self._builtins():
+            origin = f"{BUILT_IN}: {where}"
+            add(self._validate(obj, origin), origin, BUILT_IN)
+        if absent := sorted(self._shipped - table.keys()):
+            raise RuntimeError(f"{self.group}: {absent} must be built-in and are not.")
+        built_in = frozenset(table)
 
-def lookup[M](group: str, registry: tuple[Mapping[str, M], Mapping[str, str]], name: str) -> M:
-    table, origins = registry
-    if name not in table:
-        known = ", ".join(f"{k} [{origins[k]}]" for k in sorted(table)) or "(none)"
-        raise KeyError(f"{name!r} is not registered in {group}. Known: {known}")
-    return table[name]
+        for label, origin, obj in load_plugins(self.group):
+            member = self._validate(obj, origin)
+            if member.name in built_in:
+                raise RuntimeError(
+                    f"{self.group} entry point {label!r} [{origin}] declares {member.name!r}, "
+                    "which ships with PromptPotter. A plugin may not replace a built-in: which "
+                    "object answers a built-in key is read by name inside the loop. Rename it."
+                )
+            add(member, origin, origin)
+        return MappingProxyType(table), MappingProxyType(origins)
+
+    def complete(self) -> None:
+        """Loads now, so a member that cannot load stops the boot rather than the first read."""
+        _ = self._loaded
+
+    @property
+    def table(self) -> Mapping[str, M]:
+        return self._loaded[0]
+
+    @property
+    def origins(self) -> Mapping[str, str]:
+        return self._loaded[1]
+
+    def get(self, name: str) -> M:
+        table, origins = self._loaded
+        if name not in table:
+            known = ", ".join(f"{k} [{origins[k]}]" for k in sorted(table)) or "(none)"
+            raise KeyError(f"{name!r} is not registered in {self.group}. Known: {known}")
+        return table[name]

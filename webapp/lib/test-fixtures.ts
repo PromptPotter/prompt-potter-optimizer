@@ -538,7 +538,7 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
     verdict_reason: null,
     candidates: [],
     selection: [],
-    health: null,
+    health: health("healthy"),
     health_alert: null,
     overlap: unreadOverlap(),
     overlap_line: [],

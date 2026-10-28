@@ -84,7 +84,7 @@ Exceptions keep their own word: the **evidence** surface (spans backends) and **
 ## A connector is trusted code, not sandboxed — and that is stated, not implied
 
 **Loading a connector imports it into this process with the API keys, tenant tree and identity store in reach; installing one trusts its publisher completely.** Capability scoping ([`decisions.md`](../../docs/decisions.md) § 0005) governs API principals, not in-process code.
-**`connector_origins()` is the audit surface.** No plugin shadows a built-in; a broken plugin is fatal (`shared/plugin_registry.py::load_registry`).
+**`CONNECTORS.origins` is the audit surface.** No plugin shadows a built-in; a broken plugin is fatal (`shared/plugin_registry.py::Registry`).
 
 ## The credential rides the connector
 

@@ -24,9 +24,9 @@ from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.difficulty import DifficultyView
-    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.application.optimizers.nodes import RaceSnapshot
     from promptpotter.application.run_phase_control import Flight
+    from promptpotter.domain.campaign_config import LivesConfig
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.phase_views import PhaseView
     from promptpotter.domain.ruler import LevelSeries

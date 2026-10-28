@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 import importlib
 import typing
 from collections.abc import Mapping
@@ -21,7 +20,7 @@ from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind
 from promptpotter.domain.pool import Pool
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-from promptpotter.shared.plugin_registry import load_registry, lookup
+from promptpotter.shared.plugin_registry import Registry
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterator
@@ -119,42 +118,19 @@ def _builtins() -> Iterator[tuple[str, object]]:
             yield module.__name__, obj
 
 
-@functools.cache
-def _load() -> tuple[Mapping[str, NodeMember], Mapping[str, str]]:
-    return load_registry(ENTRY_POINT_GROUP, _builtins(), _validate)
-
-
-@functools.cache
-def _load_runtimes() -> tuple[Mapping[str, OptimizerRuntime], Mapping[str, str]]:
+def _runtimes() -> Iterator[tuple[str, object]]:
     # A preset shipping members alone declares no runtime; a manifest without one fails at lookup.
-    runtimes = (
-        (module.__name__, module.RUNTIME) for module in _members() if hasattr(module, "RUNTIME")
-    )
-    return load_registry(RUNTIME_ENTRY_POINT_GROUP, runtimes, _validate_runtime)
+    for module in _members():
+        if hasattr(module, "RUNTIME"):
+            yield module.__name__, module.RUNTIME
 
 
-def registered() -> Mapping[str, NodeMember]:
-    return _load()[0]
-
-
-def member(name: str) -> NodeMember:
-    return lookup(ENTRY_POINT_GROUP, _load(), name)
+NODE_MEMBERS = Registry(ENTRY_POINT_GROUP, _builtins, _validate)
+RUNTIMES = Registry(RUNTIME_ENTRY_POINT_GROUP, _runtimes, _validate_runtime)
 
 
 def llm_nodes() -> Mapping[str, LlmNode]:
-    return {name: found for name, found in registered().items() if isinstance(found, LlmNode)}
-
-
-def runtimes() -> Mapping[str, OptimizerRuntime]:
-    return _load_runtimes()[0]
-
-
-def runtime(name: str) -> OptimizerRuntime:
-    return lookup(RUNTIME_ENTRY_POINT_GROUP, _load_runtimes(), name)
-
-
-def runtime_origins() -> Mapping[str, str]:
-    return _load_runtimes()[1]
+    return {name: found for name, found in NODE_MEMBERS.table.items() if isinstance(found, LlmNode)}
 
 
 def unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> str | None:
@@ -162,7 +138,7 @@ def unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> str |
     prompt_nodes = schema.prompt_nodes()
     roster = [node.name for node in prompt_nodes]
     for name in selected.member_nodes:
-        arity = member(name).prompt_arity
+        arity = NODE_MEMBERS.get(name).prompt_arity
         if arity == "one" and len(prompt_nodes) != 1:
             return (
                 f"optimizer {selected.name!r} node {name!r} rewrites the pipeline's one prompt "

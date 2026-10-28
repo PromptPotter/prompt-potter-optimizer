@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from promptpotter.application.bench.cycle import Cycle
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.run_observers import RunObservers, declare_run_stop
@@ -19,6 +18,7 @@ from promptpotter.application.runner.round import flush_pending_decisions
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.export import PromptExport, build_prompt_export
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,

@@ -134,7 +134,7 @@ def served_round(
 def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFiles:
     """Every surface's export: the served tree, the served dashboard and ``export.json``, read once."""
     # A banked round names its optimizer's state kinds, which register as their packages import.
-    optimizers.registered()
+    optimizers.NODE_MEMBERS.complete()
     cycle = view_cycle(stores, path)
     hop = cycle.hop
     campaign = cycle.stores.campaigns.load_campaign(hop.campaign_id)

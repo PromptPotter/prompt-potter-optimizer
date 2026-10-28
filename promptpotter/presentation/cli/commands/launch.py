@@ -72,7 +72,7 @@ def log_startup_summary(
 
 def backend_reach_line(backend_type: str, backend_url: str) -> str:
     """An ``in_process`` connector was never contacted: claim no reachable URL for it."""
-    if connectors.get(backend_type).execution == "in_process":
+    if connectors.CONNECTORS.get(backend_type).execution == "in_process":
         return f"in-process ({backend_type}) — no wire"
     return f"reachable at {backend_url}"
 
@@ -130,7 +130,7 @@ def ctrl_c_pauses(
 
     interrupted = False
 
-    def on_sigint(signum: int, frame: object) -> None:
+    def on_sigint(_signum: int, _frame: object) -> None:
         nonlocal interrupted
         if interrupted:
             raise KeyboardInterrupt

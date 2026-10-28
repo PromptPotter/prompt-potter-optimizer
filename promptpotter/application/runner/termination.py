@@ -30,8 +30,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.application.campaign_config import OriginGateMode, PanelGateMode
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.campaign_config import OriginGateMode, PanelGateMode
     from promptpotter.domain.results import DegradationHealth, RunStanding
     from promptpotter.domain.scoring import GradedCell
 
@@ -94,10 +94,8 @@ def end_run_on(
     )
 
 
-def origin_gate_tripped(
-    health: DegradationHealth | None, mode: OriginGateMode
-) -> StopReason | None:
-    if mode == "off" or health is None:
+def origin_gate_tripped(health: DegradationHealth, mode: OriginGateMode) -> StopReason | None:
+    if mode == "off":
         return None
     if health.grade == "critical":
         return StopReason.ORIGIN_GATE

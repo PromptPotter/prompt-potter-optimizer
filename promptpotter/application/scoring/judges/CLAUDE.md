@@ -39,12 +39,12 @@ Steps: retrieve = `evidence_retrieval` (no gold; never reads the answer); ground
 
 ## Emit absence, never zero
 
-**`compute` returns `float | None`; `call.py::ask` never raises, and `registry.py::_compute` catches any grader failure and returns `absent`** — no grader failure costs the measurement it grades. A refused send (`CellSendRefusedError`) is the one exception.
+**`compute` returns `float | None`; `call.py::ask` returns a provider's failure (transport, status, malformed reply) as `absent`** — it costs the measurement it grades nothing. Any other exception, and a refused send (`CellSendRefusedError`), raises: the cell is an error row, never a no-grade.
 **The SimpleQA judge diverges from upstream** (an unparseable reply is `None`, not `NOT_ATTEMPTED`); record any such divergence in the dataset's `README.md`.
 
 ## Registering one
 
-**A connector's rules through the one loader** (`shared/plugin_registry.py`, the `promptpotter.judges` group, `judge_origins()` as audit surface) — owned by [`../../../connectors/CLAUDE.md`](../../../connectors/CLAUDE.md) §§ Registering a connector · A connector is trusted code.
+**A connector's rules through the one loader** (`shared/plugin_registry.py::Registry`, the `promptpotter.judges` group, `JUDGES.origins` as audit surface) — owned by [`../../../connectors/CLAUDE.md`](../../../connectors/CLAUDE.md) §§ Registering a connector · A connector is trusted code.
 
 ## What is cached is the REPLY, not the verdict
 

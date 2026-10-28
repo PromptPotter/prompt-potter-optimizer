@@ -316,7 +316,7 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
             critique=ctx.recall(Critique, latest_round.round).readout,
             l1_yield=readout.l1_yield,
             l1_parse_failure=readout.l1_parse_failure,
-            node_failure_rates=health.node_failure_rates if health else {},
+            node_failure_rates=health.node_failure_rates,
             latest_sample_keys=_sample_keys(latest_round),
             prev_sample_keys=_sample_keys(prior[-1]) if prior else frozenset(),
             composite_fitness=None if latest_fold is None else latest_fold.composite_fitness,

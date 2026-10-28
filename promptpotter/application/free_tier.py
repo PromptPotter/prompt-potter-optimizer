@@ -5,10 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.paths import free_tier_path
 from promptpotter.config.settings import settings
+from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.strict_model import FrozenModel

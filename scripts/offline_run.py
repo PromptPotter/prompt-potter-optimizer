@@ -43,10 +43,6 @@ from processes import end_children_with_this_process, queue_behind_siblings
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_operator_fork
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
-)
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.loaders import definition_source
@@ -65,6 +61,10 @@ from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, install_datasets_ro
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import Arm, Compare, Optimize, Purpose
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+)
 from promptpotter.domain.command_kinds import SkipSearchpointPayload
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
@@ -933,7 +933,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
 def digests() -> dict[str, str]:
     complete_registries()
     out = {"estimator": module_source_digest(*measurement_modules())}
-    for name in sorted(optimizers.runtimes()):
+    for name in sorted(optimizers.RUNTIMES.table):
         out[f"treatment:{name}"] = resolve_optimizer(name, {}, gate="off").treatment().digest
     return out
 
@@ -1090,7 +1090,9 @@ def main() -> int:
     end_children_with_this_process()
     complete_registries()
     arm_names = args.optimizer or ["potter", "capo"]
-    names = list(CONTROLLED) if args.controlled else args.optimizer or sorted(optimizers.runtimes())
+    names = (
+        list(CONTROLLED) if args.controlled else args.optimizer or sorted(optimizers.RUNTIMES.table)
+    )
     stamp["workspaces"] = names
     (home / STAMP).write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
     # One workspace each: a shared archive and δ ruler let one optimizer's run move another's.

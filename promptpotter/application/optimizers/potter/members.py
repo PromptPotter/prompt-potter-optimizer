@@ -506,10 +506,7 @@ class Escalation(nodes.Member):
         # The same structural fault with an empty panel, so it rides `l1_parse_failure`.
         l1_zero_candidates = ctx.recall(L1Readout, round_result.round).l1_parse_failure is not None
         # The stamped grade's own rates, so routing and verdict cannot diverge.
-        health = round_result.health
-        evidence_starved = (
-            health is not None and evidence_starved_node(health.node_failure_rates) is not None
-        )
+        evidence_starved = evidence_starved_node(round_result.health.node_failure_rates) is not None
         ladder, event = observe(
             ctx.slice(Ladder),
             advance=round_result.overlap.advance,

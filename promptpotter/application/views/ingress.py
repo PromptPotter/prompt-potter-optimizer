@@ -36,10 +36,10 @@ from promptpotter.shared.answer_text import truncate
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizers.nodes import RoundOpening
     from promptpotter.application.preflight import PreflightWarning
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import NodePrompt
     from promptpotter.domain.sample import Sample
 

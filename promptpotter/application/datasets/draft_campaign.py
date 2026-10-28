@@ -7,11 +7,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import Field, field_validator
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import (
-    ArmGateMode,
-    CampaignConfig,
-    OptimizationConfig,
-)
 from promptpotter.application.scoring.formula.compiler import (
     DIALS_KEY,
     parse_dials,
@@ -19,6 +14,11 @@ from promptpotter.application.scoring.formula.compiler import (
     split_scoring_block,
 )
 from promptpotter.connectors import DEFAULT_CONNECTOR
+from promptpotter.domain.campaign_config import (
+    ArmGateMode,
+    CampaignConfig,
+    OptimizationConfig,
+)
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks, parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -241,7 +241,9 @@ class DraftCampaign:
         return self.column_label_sets.get(self.column_ground_truth)
 
     def active_steps(self) -> list[str]:
-        return self.pipeline_steps or list(connectors.get(self.connector).default_pipeline)
+        return self.pipeline_steps or list(
+            connectors.CONNECTORS.get(self.connector).default_pipeline
+        )
 
     def authored_prompts(self) -> bool:
         # Wiped strings count as blank, so the fallback is not keyed on the map being empty.
@@ -339,7 +341,7 @@ def draft_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str
         "backend_name": draft.connector,
         "nodes": nodes,
     }
-    connector = connectors.get(draft.connector)
+    connector = connectors.CONNECTORS.get(draft.connector)
     steps = draft.pipeline_steps or list(connector.default_pipeline)
     if steps:
         pipeline["pipelines"] = {"default": list(steps)}
@@ -350,17 +352,19 @@ def draft_pipeline_json(draft: DraftCampaign, nodes: dict[str, Any]) -> dict[str
 
 def committed_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     return draft_pipeline_json(
-        draft, merge_pipeline_overlay(draft, connectors.get(draft.connector))
+        draft, merge_pipeline_overlay(draft, connectors.CONNECTORS.get(draft.connector))
     )
 
 
 def rendered_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
-    return draft_pipeline_json(draft, resolved_node_schema(draft, connectors.get(draft.connector)))
+    return draft_pipeline_json(
+        draft, resolved_node_schema(draft, connectors.CONNECTORS.get(draft.connector))
+    )
 
 
 def declared_pipeline_json(draft: DraftCampaign) -> dict[str, Any]:
     """Without the operator's layer: ``narrow`` REPLACES allowed values, so unticking needs this."""
-    connector = connectors.get(draft.connector)
+    connector = connectors.CONNECTORS.get(draft.connector)
     return draft_pipeline_json(
         draft, merge_node_blocks(dict(draft.backend_nodes), dict(connector.default_node_config))
     )
@@ -383,7 +387,7 @@ def scoring_choice(scoring: str | dict[str, str] | None) -> tuple[str, str]:
 
 
 def default_campaign_config(draft: DraftCampaign) -> CampaignConfig:
-    connector = connectors.get(draft.connector)
+    connector = connectors.CONNECTORS.get(draft.connector)
     overrides = draft.optimization_overrides
     optimization: dict[str, Any] = {
         "budget": overrides["budget"],

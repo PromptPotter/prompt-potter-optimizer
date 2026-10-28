@@ -54,7 +54,6 @@ from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
 from promptpotter.application.evidence.head_to_head import GuardDifference
@@ -168,6 +167,7 @@ from promptpotter.domain.bench import (
     partition_bank,
 )
 from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.command_kinds import PauseCyclePayload, SubmitArmsPayload, SubmittedArm
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
@@ -1345,9 +1345,9 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
             return 2
 
     Composed.name, Composed.manifest_dir = name, manifest_dir
-    shipped, origins = optimizers.runtimes(), optimizers.runtime_origins()
-    monkeypatch.setattr(
-        optimizers, "_load_runtimes", lambda: ({**shipped, name: Composed()}, origins)
+    shipped, origins = optimizers.RUNTIMES.table, optimizers.RUNTIMES.origins
+    monkeypatch.setitem(
+        vars(optimizers.RUNTIMES), "_loaded", ({**shipped, name: Composed()}, origins)
     )
     open_rosters: dict[str, tuple[list[str], tuple[str, ...]]] = {
         "a race reading its μ off a selector the roster lacks": (
@@ -1884,7 +1884,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             offline.llm.says = lambda _body: "ok"
             at_origin = RoundContext(cycle=cycle, round_num=0, callbacks=callbacks)
             origin_read = build_bundle(
-                NodeContext(at_origin, optimizers.member("l1_critique")), Ladder()
+                NodeContext(at_origin, optimizers.NODE_MEMBERS.get("l1_critique")), Ladder()
             )
             assert [b.text for b in origin_read.block_window().get("persona", ())[:1]] == [
                 "Answer tersely."
@@ -1910,7 +1910,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             offline.llm.sent.clear()
             closed = jumping_clock(at_the_hold())
             # The critique still reads the round; every other call it made filled the seat.
-            critique_node = optimizers.member("l1_critique")
+            critique_node = optimizers.NODE_MEMBERS.get("l1_critique")
             assert isinstance(critique_node, node_contract.LlmNode)
             assert critique_node.response_model is not None
             critique = critique_node.response_model.__name__
@@ -1927,14 +1927,15 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             cycle.replay_priors([banked])
             resumed = build_bundle(
                 NodeContext(
-                    dataclasses.replace(at_origin, round_num=2), optimizers.member("l1_generate")
+                    dataclasses.replace(at_origin, round_num=2),
+                    optimizers.NODE_MEMBERS.get("l1_generate"),
                 ),
                 Ladder(),
             )
             assert [b.text for b in resumed.block_window().get("persona", ())[:1]] == [
                 "Answer tersely."
             ], "a resumed run handed its proposer a pool its banked round does not name"
-            l3: Any = optimizers.member("l3_plan")
+            l3: Any = optimizers.NODE_MEMBERS.get("l3_plan")
             replanning: NodeContext[StrictModel] = NodeContext(at_origin, l3)
             set_cycle(cycle, slices=[L3Memory(plan="attack the default label")])
             l3.land(replanning, l3.parse(replanning, L3PlanOutput(plan="")))

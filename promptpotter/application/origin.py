@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.loaders import sample_dataset
 from promptpotter.application.datasets.prompts import declared_origin_prompts
 from promptpotter.application.initialization.loop_start import populate_session_scoring
@@ -26,6 +25,7 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.search_point_scorer import ScoredWalk, score_search_point
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey

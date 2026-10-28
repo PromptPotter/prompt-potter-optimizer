@@ -71,8 +71,8 @@ from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
+    from promptpotter.domain.campaign_config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingE
     # A campaign that outlived its dataset dir: ``connectors.get`` is strict and would raise.
     if not backend_type:
         return None
-    connector = connectors.get(backend_type)
+    connector = connectors.CONNECTORS.get(backend_type)
     if connector.extra is not None and (absent := missing(connector.extra)):
         return MissingExtraError(connector.extra, absent)
     if connector.preflight is None:

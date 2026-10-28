@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, NamedTuple, Self
 
 from pydantic import Field, model_validator
 
-from promptpotter.application.campaign_config import over_the_default
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.evidence.subjects import SubjectReading
 from promptpotter.application.jobs.quota import next_launch_budget
@@ -34,6 +33,7 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
     worked_seconds,
 )
+from promptpotter.domain.campaign_config import over_the_default
 from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.paired_reading import PairedReading, ReadingState
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
@@ -43,7 +43,7 @@ from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.scoring import Scorer
     from promptpotter.infrastructure.store.stores import Stores
 

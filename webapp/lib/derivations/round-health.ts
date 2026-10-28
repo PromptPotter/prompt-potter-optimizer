@@ -9,7 +9,7 @@ export interface DegradedRoundNotice {
 export function degradedRoundNotices(rounds: readonly ServedRound[] | undefined): DegradedRoundNotice[] {
   const out: DegradedRoundNotice[] = [];
   for (const r of rounds ?? []) {
-    if (r.health?.grade !== "degraded" || !r.health.suggested_action) continue;
+    if (r.health.grade !== "degraded" || !r.health.suggested_action) continue;
     out.push({ round: r.round, detail: r.health.suggested_action });
   }
   return out;

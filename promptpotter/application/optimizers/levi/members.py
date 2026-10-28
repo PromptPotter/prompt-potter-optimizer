@@ -11,7 +11,6 @@ import numpy as np
 from pydantic import Field, model_validator
 
 from promptpotter.application.bench.node_context import Lineage, Target
-from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import (
     DescriptorFeature,
@@ -30,6 +29,7 @@ from promptpotter.application.optimizers.levi.state import (
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child
 from promptpotter.config.paths import optimizers_root
+from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import OptimizerFact

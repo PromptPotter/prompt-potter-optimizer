@@ -23,6 +23,7 @@ from factories import (
     arm_state,
     arm_walk,
     close_round,
+    degradation_health,
     election,
     inner_sandbox,
     loop_session,
@@ -50,11 +51,6 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     mint_operator_fork,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
-    apply_config_overrides,
-)
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_reads import open_family_ray
 from promptpotter.application.hierarchy import list_hierarchy
@@ -93,6 +89,11 @@ from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.bench import DatasetSplit, partition_bank
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    apply_config_overrides,
+)
 from promptpotter.domain.command_kinds import DeleteCampaignPayload
 from promptpotter.domain.cycle_paths import (
     CycleDir,
@@ -650,6 +651,7 @@ def _round(**kw: Any) -> RoundResult:
             "folds": {},
             "election": None,
             "overlap": OverlapReading.unpaired(ReadingState.NOT_HELD, 0, False),
+            "health": degradation_health(),
             "optimizer_state": optimizer_state(),
         }
         | kw
@@ -744,9 +746,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
 
     def race_of() -> PoBBRace:
         return PoBBRace(
-            NodeContext(racing, optimizers.member("pobb")),
+            NodeContext(racing, optimizers.NODE_MEMBERS.get("pobb")),
             Panel(cells=ten, order=ten, block_size=len(ten)),
-            lambda sp, sample, prior_id: None,  # type: ignore[arg-type, return-value]
+            lambda _sp, _sample, _prior_id: None,  # type: ignore[arg-type, return-value]
             measured_unit="sample",
         )
 
@@ -809,7 +811,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     child_arm = arm_state("child", slot=ArmSlot(round=1, idx=0, total=1), individual=child)
     read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)
     selection = elect_on_theta(
-        NodeContext(electing, optimizers.member("theta_election")),
+        NodeContext(electing, optimizers.NODE_MEMBERS.get("theta_election")),
         MeasuredRound(
             arms={walked_child: child_arm},
             rows={walked_child: arm},

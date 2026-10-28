@@ -763,7 +763,7 @@ def round_clocks(rounds: Sequence[RoundResult], *, accuracy_ceiling: float | Non
     )
 
 
-HealthGrade = Literal["healthy", "degraded", "critical"]
+HealthGrade = Literal["healthy", "degraded", "critical", "unmeasured"]
 
 HealthCause = Literal[
     "origin_unmeasured",
@@ -783,7 +783,7 @@ class DegradationHealth(FrozenModel):
     """A round's degradation verdict from the backend's warning stamps; it never stops the run."""
 
     grade: HealthGrade
-    # `None` is the `healthy` grade.
+    # `None` on `healthy` and on `unmeasured`, a non-origin round that measured nothing.
     cause: HealthCause | None = None
     samples: int
     structural_count: int
@@ -985,7 +985,7 @@ class RoundOutcome(FrozenModel):
     overlap: OverlapReading
     diagnostics: RoundDiagnostics | None = None
     # Graded against the rounds before it, so it is stamped, never re-derived from this one.
-    health: DegradationHealth | None = None
+    health: DegradationHealth
     # Built once, at the round's close (`Cycle.close_state`); `None` from its election until then.
     optimizer_state: OptimizerState | None = None
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)

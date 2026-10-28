@@ -6,7 +6,6 @@ from dataclasses import dataclass, replace
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
-from promptpotter.application.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.application.initialization.loop_start import (
     cycle_partition,
     finalize_loop_state,
@@ -42,6 +41,7 @@ from promptpotter.application.runner.termination import (
     end_run_on,
     run_stop_reason,
 )
+from promptpotter.domain.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import STOP_REASON_INFO, PauseCause, StopReason
 from promptpotter.domain.results import CycleResult

@@ -91,7 +91,7 @@ def replay_all_mismatches(
 @functools.cache
 def replayers() -> Mapping[str, Replayer]:
     table: dict[str, Replayer] = {}
-    for runtime in optimizers.runtimes().values():
+    for runtime in optimizers.RUNTIMES.table.values():
         if clash := sorted(set(table) & set(runtime.replayers)):
             raise RuntimeError(f"{runtime.name} registers replayers another holds: {clash}")
         table.update(runtime.replayers)

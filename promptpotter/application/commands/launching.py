@@ -7,7 +7,6 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     mint_diag_sibling,
     mint_operator_fork,
 )
-from promptpotter.application.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.application.commands.dispatcher import (
     Applier,
     CommandCall,
@@ -36,6 +35,7 @@ from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
     resolve_pipeline_for_campaign,
 )
+from promptpotter.domain.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of

@@ -97,7 +97,7 @@ from promptpotter.shared.measurement_context import MeasurementRole
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import Grade, MeasuredCell
 

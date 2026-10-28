@@ -155,9 +155,9 @@ def render_round_stats(
     )
 
     h = round_result.health
-    if h is not None and h.grade == "critical":
+    if h.grade == "critical":
         lines.append(_node_line(f"{BOLD}{RED}⛔ CRITICAL — {h.suggested_action}{RESET}"))
-    elif h is not None and h.grade == "degraded":
+    elif h.grade == "degraded":
         lines.append(_node_line(f"{YELLOW}⚠ DEGRADED — {h.suggested_action}{RESET}"))
 
     # No per-node tally: `terminal_node` is the deepest node each sample REACHED, constant on a healthy round.

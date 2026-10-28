@@ -102,9 +102,6 @@ class RunPhase(enum.StrEnum):
     TERMINAL = "terminal"
 
 
-# What a RUNNER can say of itself (``RunPhaseRecord``): the others are derived at the read.
-DeclaredRunPhase = Literal[RunPhase.RUNNING, RunPhase.PAUSED, RunPhase.GATE, RunPhase.TERMINAL]
-
 LaunchStage = Literal[RunPhase.QUEUED, RunPhase.STARTING]
 
 GateDecision = Literal["rescore", "proceed", "abort"]

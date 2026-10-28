@@ -49,12 +49,6 @@ from promptpotter.application.bench.children import (
 )
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
-    declare_run,
-    effective_config,
-)
 from promptpotter.application.commands.dispatcher import CommandCall
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_seed
 from promptpotter.application.commands.payloads import MintCampaignPayload, StartCheckinPayload
@@ -123,11 +117,17 @@ from promptpotter.application.runner.inner.tasks import (
 )
 from promptpotter.config.paths import block_pack_path, install_datasets_root
 from promptpotter.config.settings import settings
-from promptpotter.connectors import DEFAULT_CONNECTOR, get
+from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
 from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, RunDeclaration
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    declare_run,
+    effective_config,
+)
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.command_kinds import ForkSeed, SubmittedArm
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
@@ -208,7 +208,7 @@ _SPEC = InnerTaskSpec(
 
 
 def _connector_config(**fields: Any) -> CampaignConfig:
-    defaults = dict(get(DEFAULT_CONNECTOR).default_optimization)
+    defaults = dict(CONNECTORS.get(DEFAULT_CONNECTOR).default_optimization)
     optimization = {**defaults, **fields.pop("optimization", {})}
     return CampaignConfig.model_validate({"optimization": optimization, **fields})
 
@@ -309,7 +309,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     # An L4 override moves the prompt and the hash of every preset, and the inner campaign it runs.
     capo = resolve_optimizer("capo", {}, gate="off")
     capo_seat = seat(built_stores, optimization={"optimizer": "capo"})
-    ctx: NodeContext[Any] = NodeContext(capo_seat, optimizers.member("capo_mutate"))
+    ctx: NodeContext[Any] = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate"))
     values = {"task_description": "sort the list", "instruction": "Sort it."}
     mutated = {
         "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
@@ -790,7 +790,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     # The draft's CHAIN reaches the mint on a reused dataset.
     pinned = {"per_sample": "label_match(predicted, ground_truth)", "per_cell": "correct"}
     root = built_stores.tenant_datasets.dataset_dir("ds")
-    optimization = dict(get(DEFAULT_CONNECTOR).default_optimization)
+    optimization = dict(CONNECTORS.get(DEFAULT_CONNECTOR).default_optimization)
     schema = parse_pipeline_response(
         {
             "nodes": {n: {"type": "llm"} for n in ("llm_only", "web_search", "rerank")},
@@ -1408,7 +1408,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
 
     reflected: list[set[str]] = []
     for _ in range(3):
-        reflecting = _Reflecting(reflected_on, optimizers.member("gepa_reflect"))
+        reflecting = _Reflecting(reflected_on, optimizers.NODE_MEMBERS.get("gepa_reflect"))
         no_cells = Panel(cells=[], order=[], block_size=0)
         reflection = asyncio.run(GepaReflect().propose(reflecting, no_cells, Proposals([])))
         (child,) = reflection.proposals
@@ -1439,7 +1439,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
 
     # The endpoint is the operator's config: a request that names one is refused, not followed.
-    termnorm = BackendClient(get("termnorm"), workload=PROBE_WORKLOAD)
+    termnorm = BackendClient(CONNECTORS.get("termnorm"), workload=PROBE_WORKLOAD)
     assert termnorm.base_url == settings.TERMNORM_URL.rstrip("/"), "the client left its config"
     for payload_model, named in (
         (StartCheckinPayload, {"draft_id": "d" * 8}),
@@ -1892,7 +1892,9 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
             schema=mixed_schema,
             optimization={"optimizer": mixed.owners[node].name},
         )
-        return NodeContext(proposing, optimizers.member(node)).child([parent], overlay=overlay)
+        return NodeContext(proposing, optimizers.NODE_MEMBERS.get(node)).child(
+            [parent], overlay=overlay
+        )
 
     proposals = parse_population(
         [proposed(overlay) for overlay in (edit, severed, severed_potter)],
@@ -1915,7 +1917,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     )
     with binding_prompt_overrides(payload["optimizer_prompt_overrides"]):
         capo_seat = seat(built_stores, optimization={"optimizer": "capo"})
-        sent = NodeContext(capo_seat, optimizers.member("capo_mutate")).fill(
+        sent = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate")).fill(
             task_description="sort the list", instruction="Sort it."
         )
     assert sent.endswith("Keep the rewrite under 80 words."), "the inner cell ran the parent"

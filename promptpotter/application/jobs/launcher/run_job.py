@@ -39,9 +39,9 @@ from promptpotter.shared.identity import IdentityContext
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import CycleResult
 
 logger = logging.getLogger(__name__)

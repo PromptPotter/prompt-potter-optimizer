@@ -168,7 +168,7 @@ def _check_confirmed(
 
 def _check_node_models(draft: DraftCampaign, *, gaps: list[FieldGap]) -> None:
     try:
-        connector = connectors.get(draft.connector)
+        connector = connectors.CONNECTORS.get(draft.connector)
     except KeyError:
         return
     active = set(draft.pipeline_steps or connector.default_pipeline)

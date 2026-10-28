@@ -209,6 +209,7 @@ _YAML_FOLD_OVER = 90
 
 class _YamlDumper(yaml.SafeDumper):
     def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
+        del indentless
         super().increase_indent(flow, False)
 
 

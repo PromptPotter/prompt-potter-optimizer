@@ -6,7 +6,6 @@ from typing import Any, Literal
 from pydantic import Field
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import (
     MAX_EDITED_ROUNDS,
     DraftCampaign,
@@ -22,6 +21,7 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_draft,
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
@@ -169,7 +169,11 @@ def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
 def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependency, ...]:
     active = set(draft.active_steps())
     return dependencies_from_node_roles(
-        {n: r for n, r in connectors.get(draft.connector).node_roles.items() if n in active}
+        {
+            n: r
+            for n, r in connectors.CONNECTORS.get(draft.connector).node_roles.items()
+            if n in active
+        }
     )
 
 
@@ -182,7 +186,11 @@ def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool
 def _draft_schema_source(draft: DraftCampaign) -> SchemaSource:
     if draft.backend_nodes:
         return "backend"
-    return "local" if connectors.get(draft.connector).execution == "in_process" else "unreachable"
+    return (
+        "local"
+        if connectors.CONNECTORS.get(draft.connector).execution == "in_process"
+        else "unreachable"
+    )
 
 
 def _wire_overrides(draft: DraftCampaign) -> OptimizationOverrides:

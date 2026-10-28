@@ -51,7 +51,7 @@ from promptpotter.shared.measurement_context import instrument_depth
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import Proposal
 
 logger = logging.getLogger(__name__)

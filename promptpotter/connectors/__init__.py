@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import functools
 import importlib
 import pkgutil
 import typing
 
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.connector import ConnectorExecution
-from promptpotter.shared.plugin_registry import BUILT_IN, load_registry, lookup
+from promptpotter.shared.plugin_registry import Registry
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator
 
 
 ENTRY_POINT_GROUP = "promptpotter.connectors"
@@ -69,21 +68,6 @@ def _builtins() -> Iterator[tuple[str, object]]:
         yield module.__name__, getattr(module, "CONNECTOR", None)
 
 
-@functools.cache
-def _load() -> tuple[Mapping[str, Connector], Mapping[str, str]]:
-    loaded = load_registry(ENTRY_POINT_GROUP, _builtins(), _validate)
-    if loaded[1].get(DEFAULT_CONNECTOR) != BUILT_IN:
-        raise RuntimeError(f"DEFAULT_CONNECTOR {DEFAULT_CONNECTOR!r} is not a built-in connector.")
-    return loaded
-
-
-def registered() -> Mapping[str, Connector]:
-    return _load()[0]
-
-
-def connector_origins() -> Mapping[str, str]:
-    return _load()[1]
-
-
-def get(name: str) -> Connector:
-    return lookup(ENTRY_POINT_GROUP, _load(), name)
+CONNECTORS = Registry(
+    ENTRY_POINT_GROUP, _builtins, _validate, shipped=frozenset({DEFAULT_CONNECTOR})
+)

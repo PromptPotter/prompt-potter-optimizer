@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.mask.record import (
     Lens,
@@ -23,6 +22,7 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.application.scoring.metrics import fold_cells
+from promptpotter.domain.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey

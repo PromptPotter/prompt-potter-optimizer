@@ -243,8 +243,8 @@ class RoundSummary(FrozenModel):
     candidates: list[DashboardCandidate] = Field(default_factory=list)
     # Measurement order, off the longest candidate sequence: PoBB truncates losers.
     selection: list[int] = Field(default_factory=list)
-    # ``None`` only when the round measured zero samples. Rendered, never recomputed.
-    health: RoundHealth | None = None
+    # Rendered, never recomputed.
+    health: RoundHealth
     health_alert: str | None = Field(
         default=None,
         description="The alert a `critical` `health` raises, worded "
@@ -288,9 +288,7 @@ class RoundSummary(FrozenModel):
                 if reading.role != MeasurementRole.PARENT
             ],
             selection=list(dict.fromkeys(closed.positions[key] for key, _, _ in longest)),
-            health=None
-            if health is None
-            else RoundHealth(grade=health.grade, suggested_action=health.suggested_action),
+            health=RoundHealth(grade=health.grade, suggested_action=health.suggested_action),
             health_alert=critical_health_title(closed.round, health),
             overlap=closed.overlap,
             panel_precision=closed.panel_precision,

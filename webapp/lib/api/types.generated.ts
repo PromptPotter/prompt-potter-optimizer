@@ -191,7 +191,7 @@ export interface ServedRound {
   verdict_reason: string | null;
   candidates: DashboardCandidate[];
   selection: number[];
-  health: RoundHealth | null;
+  health: RoundHealth;
   /** The alert a `critical` `health` raises, worded
    * (`results_health.py::critical_health_title`); null on every other grade. */
   health_alert: string | null;
@@ -555,7 +555,7 @@ export interface LineRate {
 
 /** A round's degradation grade as a surface reads it; the whole verdict stays on its close. */
 export interface RoundHealth {
-  grade: 'healthy' | 'degraded' | 'critical';
+  grade: 'healthy' | 'degraded' | 'critical' | 'unmeasured';
   suggested_action: string | null;
 }
 

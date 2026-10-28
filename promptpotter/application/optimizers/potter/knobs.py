@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from promptpotter.application.campaign_config import Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.pool import Access
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.strict_model import StrictModel

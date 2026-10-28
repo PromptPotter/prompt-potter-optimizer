@@ -339,36 +339,6 @@ class LangfuseLogger:
                     return None
                 time.sleep(asked or wait)
 
-    def get_dataset(self, name: str) -> object | None:
-        if not self.enabled or not self.client:
-            return None
-        try:
-            dataset: object = self.client.get_dataset(name=name)
-            return dataset
-        except Exception:
-            logger.debug("Failed to get Langfuse dataset", exc_info=True)
-            return None
-
-    def update_dataset_item(
-        self,
-        item_id: str,
-        expected_output: Any = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        if not self.enabled or not self.client:
-            return False
-        try:
-            kwargs: dict[str, Any] = {"id": item_id}
-            if expected_output is not None:
-                kwargs["expected_output"] = expected_output
-            if metadata is not None:
-                kwargs["metadata"] = metadata
-            self.client.create_dataset_item(**kwargs)
-            return True
-        except Exception:
-            logger.debug("Failed to update Langfuse dataset item", exc_info=True)
-            return False
-
     @property
     def rate_limited(self) -> bool:
         return time.time() < self._rate_limit_until

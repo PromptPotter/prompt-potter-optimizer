@@ -530,13 +530,6 @@ def _loader(stores: Stores, src: Source) -> BankLoader:
     return BANK_RECIPES[src.recipe](src)
 
 
-def dataset_loader(stores: Stores, dataset_dir: Path) -> BankLoader | None:
-    src = definition_source(dataset_dir)
-    if src is None or src.recipe not in BANK_RECIPES:
-        return None
-    return _loader(stores, src)
-
-
 def cut_bank(stores: Stores, section: Mapping[str, Any]) -> list[Sample]:
     """What a ``source:`` section cuts, read before any definition names it."""
     src = Source.of(section)
@@ -563,14 +556,6 @@ def no_dataset_hint(stores: Stores) -> str:
     ]
     body = "\n".join(lines) if lines else "  (no datasets readable here)"
     return "Available datasets:\n\n" + body
-
-
-def loadable_dataset_names(stores: Stores) -> list[str]:
-    return sorted(
-        ref.dataset.name
-        for ref in list_readable_datasets(stores)
-        if has_source(ref.dataset.directory)
-    )
 
 
 def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:

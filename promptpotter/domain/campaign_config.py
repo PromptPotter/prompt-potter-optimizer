@@ -446,14 +446,14 @@ class CampaignConfig(StrictModel):
 
     optimization: OptimizationConfig
 
-    def identity(self) -> dict[str, Any]:
+    def identity(self) -> dict[str, object]:
         """What this config adds to a cell's identity beside its optimizer's ``Treatment``, which
         resolves ``optimizer`` and ``nodes`` against the manifest: less those, and less every
         default, so which file states a value — or whether one restates a default — moves no cell."""
         return self.model_dump(mode="json", exclude_defaults=True, exclude=_TREATMENT_OWNED)
 
 
-def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
+def merge_config_layers(base: dict[str, object], over: Mapping[str, object]) -> dict[str, object]:
     """Depth-first; a layer naming another ``optimizer`` drops the base's ``nodes``, which addressed the old one."""
     base_opt = base.get("optimization")
     over_opt = over.get("optimization")
@@ -464,7 +464,7 @@ def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[s
     return _merge_dicts(base, over)
 
 
-def _merge_dicts(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
+def _merge_dicts(base: dict[str, object], over: Mapping[str, object]) -> dict[str, object]:
     out = dict(base)
     for key, value in over.items():
         current = out.get(key)

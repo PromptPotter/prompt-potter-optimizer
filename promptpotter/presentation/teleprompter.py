@@ -24,7 +24,6 @@ else:
                 getattr(_parked, "__file__", None)
 
 from promptpotter.application.account import local_stores
-from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
@@ -35,6 +34,7 @@ from promptpotter.connectors.dspy_module import (
     DspyProgram,
     dataset_pipeline,
 )
+from promptpotter.domain.campaign_config import OptimizationConfig
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.search_point import TaskDecomposition

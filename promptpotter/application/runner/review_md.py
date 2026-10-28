@@ -113,7 +113,7 @@ def _halt_info(index: CycleIndex, rounds: list[RoundResult]) -> dict[str, str] |
     last_health: DegradationHealth | None = None
     last_critical: DegradationHealth | None = None
     for r in rounds:
-        if r.health is not None:
+        if r.health.grade != "unmeasured":
             last_health = r.health
             if r.health.grade == "critical":
                 last_critical = r.health

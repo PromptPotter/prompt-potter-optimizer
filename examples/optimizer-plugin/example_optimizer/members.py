@@ -11,10 +11,10 @@ from pydantic import Field
 
 from example_optimizer import prompts
 from promptpotter.application.bench.node_context import Lineage
-from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
+from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.strict_model import StrictModel
 

@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.difficulty import DifficultyView
-    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.campaign_config import LivesConfig
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore

@@ -10,7 +10,6 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.bench.task_context import campaign_framing
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.initialization.loop_start import (
     arm_diagnostic_scoring,
@@ -22,6 +21,7 @@ from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.scoring import (
     all_verifier_graded,

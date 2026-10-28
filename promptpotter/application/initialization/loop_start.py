@@ -62,11 +62,11 @@ from promptpotter.infrastructure.store.archive_queries import (
 from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.origin import CampaignOrigin
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.store.stores import Stores

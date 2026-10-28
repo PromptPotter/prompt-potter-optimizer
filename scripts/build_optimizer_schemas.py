@@ -18,7 +18,7 @@ def _manifests() -> dict[Path, Mapping[str, type[BaseModel]]]:
     out: dict[Path, Mapping[str, type[BaseModel]]] = {
         checkin_assets_root(): {"checkin": CheckinOutput}
     }
-    for runtime in optimizers.runtimes().values():
+    for runtime in optimizers.RUNTIMES.table.values():
         declared = read_yaml(runtime.manifest_dir / "pipeline.yaml").get("nodes") or {}
         # Manifest order: the file's key order is the committed artifact's.
         out[runtime.manifest_dir] = {

@@ -23,8 +23,8 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import CellSheet, Scorer
 

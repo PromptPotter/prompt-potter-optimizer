@@ -3,7 +3,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 from pydantic import Field
 
-from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.cycle_addressing import active_pointer
 from promptpotter.application.jobs.machine_status import MachineStatusResponse, machine_status
 from promptpotter.application.pipeline_resolve import (
@@ -14,6 +13,7 @@ from promptpotter.application.pipeline_resolve import (
     optimizer_roster,
     resolve_pipeline_for_optimizer,
 )
+from promptpotter.domain.campaign_config import OptimizationConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.presentation.api.deps import (
     IdentityDep,

@@ -558,15 +558,6 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
     ]
 
 
-def dedup_observations(*groups: Sequence[Observation]) -> list[Observation]:
-    """LAST wins, so callers pass groups oldest-first; every path into a fit passes through here."""
-    cells: dict[tuple[str, str], Observation] = {}
-    for group in groups:
-        for o in group:
-            cells[(o.candidate_id, o.key)] = o
-    return list(cells.values())
-
-
 def theta_cells[V](
     own: Mapping[str, V], parent: Collection[str], ruler: DeltaRuler | None
 ) -> dict[str, V]:

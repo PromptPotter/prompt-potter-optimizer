@@ -9,12 +9,6 @@ from pydantic import Field, ValidationError
 
 from promptpotter import connectors
 from promptpotter.application import optimizers
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
-    apply_cycle_seed,
-    effective_config,
-)
 from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
     scorer_of,
@@ -49,6 +43,12 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    apply_cycle_seed,
+    effective_config,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey
@@ -333,7 +333,7 @@ def dataset_pipeline_declaration(
     definition = read_dataset_definition(dataset.directory)
     if definition is None:
         return None
-    connector = connectors.registered().get(definition.backend_type)
+    connector = connectors.CONNECTORS.table.get(definition.backend_type)
     if connector is None or connector.pipeline_declaration is None:
         return definition.pipeline
     return overlay_dataset_pipeline(
@@ -838,7 +838,7 @@ def _served_menu(m: _Merge, params: dict[str, Any], workspace: Path | None) -> C
 
 def optimizer_setup(cfg: CampaignConfig) -> OptimizerSetup:
     selected = select_optimizer(cfg.optimization)
-    members = [optimizers.member(n) for n in selected.member_nodes]
+    members = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes]
     return OptimizerSetup(
         knobs={n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes},
         arms_per_round=selected.arms_per_round,
@@ -1257,7 +1257,7 @@ def optimizer_knobs(name: str) -> OptimizerKnobsResponse:
     selected = resolve_optimizer(name, {}, gate="off")
     nodes: list[NodeKnobs] = []
     for node in selected.member_nodes:
-        schema = optimizers.member(node).knobs.model_json_schema()
+        schema = optimizers.NODE_MEMBERS.get(node).knobs.model_json_schema()
         declared = selected.declared_knobs(node).model_dump(mode="json")
         rows = [
             _knob_row(key, prop, schema.get("$defs") or {}, declared[key])
@@ -1292,8 +1292,8 @@ class OptimizerRoster(StrictModel):
 
 def optimizer_roster() -> OptimizerRoster:
     default = OptimizationConfig.model_fields["optimizer"].default
-    names = sorted(optimizers.runtimes(), key=lambda n: (n != default, n))
-    origins = optimizers.runtime_origins()
+    names = sorted(optimizers.RUNTIMES.table, key=lambda n: (n != default, n))
+    origins = optimizers.RUNTIMES.origins
     entries = []
     for name in names:
         selected = resolve_optimizer(name, {}, gate="off")

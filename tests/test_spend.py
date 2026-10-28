@@ -53,11 +53,6 @@ from pydantic import BaseModel, Field, JsonValue, ValidationError
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of
 from promptpotter.application.bench import llm_call as call_mod
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
-    merge_config_layers,
-)
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.limits_and_queue import change_run_limits
 from promptpotter.application.commands.payloads import EditDraftCampaignPayload, StartCheckinPayload
@@ -120,6 +115,11 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    merge_config_layers,
+)
 from promptpotter.domain.command_kinds import ChangeRunLimitsPayload, DiscardDraftPayload
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
@@ -371,8 +371,9 @@ _EVERY_FIELD: dict[str, Any] = {
 }
 
 
+@pytest.mark.usefixtures("run_bound")
 async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_bound: None, offline: Router
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     def row(input_usd: float, output_usd: float, lister: str, **tiers: float) -> dict[str, Any]:
         return {
@@ -727,7 +728,7 @@ async def _walk(
             bill.settle(Billed(TokenAccount(), 1.0))
         return row
 
-    def _backfill(sp: Any, sample: Sample, prior_id: str) -> Any:
+    def _backfill(sp: Any, sample: Sample, _prior_id: str) -> Any:
         call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
 
         def _commit() -> list[Any]:
@@ -875,12 +876,12 @@ async def _round(
     }
 
 
+@pytest.mark.usefixtures("run_bound")
 @on_jumping_clock
 async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resume(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     built_stores: Stores,
-    run_bound: None,
     offline: Router,
 ) -> None:
     # An identity rebuilt from the tenant alone carries no issuer, and no issuer IS the operator.
@@ -1126,9 +1127,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     monkeypatch.setattr(spawn, "OUTER_SAMPLE_WALL_S_PER_ROUND", 0.02)
     started, cancelled = asyncio.Event(), asyncio.Event()
 
-    async def _hanging_inner(
-        cell: Any, cycle_dir_box: dict[str, Path], spawned_by: dict[str, Any]
-    ) -> Any:
+    async def _hanging_inner(cell: Any, _minted: list[Any], spawned_by: dict[str, Any]) -> Any:
         """SWALLOWS the cancellation and returns normally: a stub that re-raises cannot catch that."""
         started.set()
         try:
@@ -1827,8 +1826,9 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
 # 4. What a send is held at
 
 
+@pytest.mark.usefixtures("run_bound")
 def test_a_send_is_held_at_its_bound_until_its_bill_lands(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_bound: None, offline: Router
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     """A record of spend is only ever a BILL: an unreported send binds from its open hold."""
     # A remote cell still open at the run's wall clock is CUT: the clock bounds every cell.
@@ -2543,8 +2543,9 @@ _UNPRICEABLE = {
 }
 
 
+@pytest.mark.usefixtures("run_bound")
 def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, run_bound: None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
 ) -> None:
     """TWO units, because a price needs a rate on file and a token count never does (decisions.md § 0003)."""
     with monkeypatch.context() as patched:

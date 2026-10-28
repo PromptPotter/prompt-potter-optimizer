@@ -53,7 +53,7 @@ Each entry is a boundary, why it sits there, and the symbol that enforces it; wh
 ## 0007 — One loop, shared members
 
 - **One loop**: generate, score, critique. A paper preset is a named configuration of it, never a second framework, and it states each departure from its paper.
-- **A member is shared.** It declares the typed slice of state it reads, so any manifest may name any registered member (`application/optimizers/__init__.py::registered`). A feature built inside one optimizer's package alone is the defect.
+- **A member is shared.** It declares the typed slice of state it reads, so any manifest may name any registered member (`application/optimizers/__init__.py::NODE_MEMBERS`). A feature built inside one optimizer's package alone is the defect.
 - **A capability is built once; which node exercises it is a setting.**
 - **Variation draws from pools the operator can see and shape** (`domain/pool.py::Pool`), and a value on a child traces to the entry it came from.
 - **A choice with two defensible answers is a knob**; a preset picks the value measured to perform. Every entry point controls it, and each control writes the one node overlay.
@@ -64,7 +64,7 @@ Each entry is a boundary, why it sits there, and the symbol that enforces it; wh
 - **A dataset is its content** (`shared/hashing.py::dataset_hash`, over rows in order); its name is a tenant's label. An answer is filed under `(config_key, sample_key)` and the dataset hash, never a position or a name, so a rename rewrites no row.
 - **An individual is `{locus: value}`** over the roster its pipeline declares (`domain/opt_search_point.py::Locus`); a prompt node declaring no fields is refused at parse.
 - **Optimizer state is a map of typed parts** (`domain/optimizer_state.py::StatePart`, `StateSlice`, `RoundOutput`); a roster leaving a part open is refused at load.
-- **One run declaration** (`domain/campaign.py::RunDeclaration`), one derivation of what it runs (`application/campaign_config.py::effective_config`), and every door declares through `application/jobs/mint.py::declare`. **One `domain/spend.py::Budget`** bounds USD, tokens, rounds and wall clock; a per-send bound prices one hold and is not a run budget.
+- **One run declaration** (`domain/campaign.py::RunDeclaration`), one derivation of what it runs (`domain/campaign_config.py::effective_config`), and every door declares through `application/jobs/mint.py::declare`. **One `domain/spend.py::Budget`** bounds USD, tokens, rounds and wall clock; a per-send bound prices one hold and is not a run budget.
 - **A round's headline is derived** off its `domain/results.py::Election` and rows, never stored beside them in `RoundOutcome`.
 - **Cross-tenant measurement sharing is a policy, refused by default.** The content-addressed caches root at `infrastructure/store/layout.py::archive_home`: the tenant's own tree, unless the host names one install-wide home (`config/settings.py::Settings.SHARED_ARCHIVE`). Off by default because a hit tells one account what another ran and every memory read enumerates every account's populations. Rewriting a home's cells is its owner's, the host alone for a shared one. A replay of another account's cell is priced on `search_incurred` and billed nothing. A store keyed by what one account holds or decided (labels, the δ ruler) stays the tenant's; sharing is safe only because a row names a hash, never a label.
 

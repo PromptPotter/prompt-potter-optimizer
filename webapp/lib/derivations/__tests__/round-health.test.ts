@@ -7,14 +7,14 @@ const ADVICE =
   "web_search degraded on 25% of samples, all transient. The numbers are soft but " +
   "usable; no action needed if the next round comes back clean.";
 
-const rounds = (...healths: (RoundHealth | null)[]) =>
+const rounds = (...healths: RoundHealth[]) =>
   healths.map((h, i) => summaryRound({ round: i + 1, health: h }));
 
 describe("degradedRoundNotices", () => {
-  it("returns nothing for null / empty / all-healthy", () => {
+  it("returns nothing for undefined / all-healthy / unmeasured", () => {
     expect(degradedRoundNotices(undefined)).toEqual([]);
     expect(degradedRoundNotices(rounds(health("healthy")))).toEqual([]);
-    expect(degradedRoundNotices(rounds(null))).toEqual([]);
+    expect(degradedRoundNotices(rounds(health("unmeasured")))).toEqual([]);
   });
 
   it("surfaces only `degraded` rounds — `critical` is owned by the banner", () => {

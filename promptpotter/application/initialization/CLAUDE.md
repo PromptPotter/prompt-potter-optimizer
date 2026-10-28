@@ -4,7 +4,7 @@
 
 ## Registries complete at a declared step
 
-**A registry whose members import back up the stack completes in `wiring.py::complete_registries`, never at import**; every process calls it once at entry.
+**A registry whose members import back up the stack completes in `wiring.py::complete_registries`, never at import**; every process calls it once at entry. **A CLI verb that parses no ledger, banked round or registered member declares `Verb.needs_registries=False`** and skips it.
 
 ## A schemaless pipeline is a 422
 

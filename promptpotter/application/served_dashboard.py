@@ -5,7 +5,6 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
@@ -13,6 +12,7 @@ from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import ceiling_meter
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits, ServedRound, served_rounds
 from promptpotter.domain.paired_reading import ArmName

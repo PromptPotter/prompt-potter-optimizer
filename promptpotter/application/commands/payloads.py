@@ -4,9 +4,9 @@ from typing import Any, Literal
 
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer, model_validator
 
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.campaign import Optimize, Purpose
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CommandKind,

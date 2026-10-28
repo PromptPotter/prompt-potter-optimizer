@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, ClassVar, Literal, NamedTuple, assert_never, get_args
+from typing import ClassVar, Literal, NamedTuple, assert_never, get_args
 
 from pydantic import Field
 
@@ -246,10 +246,6 @@ class _BenchPass(NamedTuple):
     label: str | None
     who: str
     rows: int | None
-
-
-def _rec(value: object) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
 
 
 def _num(value: object) -> float | None:

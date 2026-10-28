@@ -25,7 +25,7 @@ from typing import (
 
 from pydantic import Field
 
-from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob, Scope
+from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, Scope
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.results import ArmSlot, Proposed, election_rows, rounds_without_advance

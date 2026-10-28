@@ -6,12 +6,6 @@ from typing import Any, get_args
 
 from pydantic import Field
 
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    Estimand,
-    estimand_doc,
-    knob_label,
-)
 from promptpotter.application.knobs import (
     CouplingSeverity,
     check_couplings,
@@ -19,6 +13,12 @@ from promptpotter.application.knobs import (
     resolve_knob_states,
 )
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    Estimand,
+    estimand_doc,
+    knob_label,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 

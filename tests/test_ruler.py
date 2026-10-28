@@ -37,7 +37,6 @@ from promptpotter.application.bench.difficulty import (
     session_ruler_scope,
 )
 from promptpotter.application.bench.node_context import NodeContext
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
@@ -57,6 +56,7 @@ from promptpotter.application.runner.bench import pair_on_bench
 from promptpotter.application.runner.inner.tasks import inner_instrument_config, parse_panel
 from promptpotter.application.scoring.paired import MemberRows
 from promptpotter.config.paths import install_datasets_root
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import (
     compute_outer_proxies,

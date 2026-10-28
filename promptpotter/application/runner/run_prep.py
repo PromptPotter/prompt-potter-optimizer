@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from promptpotter.application.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.admission import open_spend_book
@@ -18,6 +17,7 @@ from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import ceiling_meter
+from promptpotter.domain.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.pipeline_overlay import (

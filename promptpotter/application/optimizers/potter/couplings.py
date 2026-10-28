@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from promptpotter.application.campaign_config import Estimand
 from promptpotter.application.optimizers.nodes import MemberCoupling
+from promptpotter.domain.campaign_config import Estimand
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 # Their prose reaches the optimizer prompt's `confounds` panel.

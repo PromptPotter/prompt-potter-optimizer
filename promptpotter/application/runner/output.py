@@ -49,9 +49,9 @@ from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.cells import HardSamples
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore

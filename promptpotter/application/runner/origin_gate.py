@@ -18,9 +18,9 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.application.campaign_config import CampaignConfig, OriginGateMode
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.domain.campaign_config import CampaignConfig, OriginGateMode
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ async def run_origin_gate(
 ) -> StopReason | None:
     """``None`` proceeds into L1; a ``rescore`` re-emits round 0 and a still-unhealthy verdict waits again."""
     while True:
-        grade = cycle.origin_round.health.grade if cycle.origin_round.health else "unknown"
+        grade = cycle.origin_round.health.grade
         logger.warning(
             "Origin gate (%s): round-0 verdict is %s — holding before L1. Decide via "
             "the webapp modal, the TTY prompt, or `python -m promptpotter origin-gate %s`.",
@@ -82,7 +82,7 @@ async def run_origin_gate(
             )
             continue
         if origin_gate_tripped(cycle.origin_round.health, mode) is None:
-            new_grade = cycle.origin_round.health.grade if cycle.origin_round.health else "unknown"
+            new_grade = cycle.origin_round.health.grade
             logger.warning("Origin gate: re-scored origin is %s — entering L1.", new_grade)
             declare_running(session)
             return None

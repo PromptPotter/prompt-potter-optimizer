@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING
 from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
-from promptpotter.application.campaign_config import effective_config
 from promptpotter.application.served_dashboard import fork_remainder
+from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_overlay import node_config_items

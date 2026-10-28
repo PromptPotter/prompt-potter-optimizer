@@ -11,13 +11,13 @@ from typing import NamedTuple
 from pydantic import Field
 
 from promptpotter.application.account import account_of
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
     Job,
     JobRegistry,
 )
 from promptpotter.config.settings import settings
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,

@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 async def fetch_backend_nodes(connector_name: str) -> dict[str, Any]:
-    connector = connectors.get(connector_name)
+    connector = connectors.CONNECTORS.get(connector_name)
     if connector.execution == "in_process":
         return {}
     client = BackendClient(connector, workload=PROBE_WORKLOAD)

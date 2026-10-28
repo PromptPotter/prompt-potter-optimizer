@@ -96,7 +96,7 @@ def dataset_extra(dataset_dir: Path) -> Extra | None:
         backend_type = declared_backend_type(dataset_dir)
     except PayloadInvalidError:
         backend_type = ""
-    connector = connectors.registered().get(backend_type)
+    connector = connectors.CONNECTORS.table.get(backend_type)
     if connector is not None and connector.extra is not None:
         return connector.extra
     return source_extra(dataset_dir)

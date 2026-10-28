@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, Annotated, ClassVar
 from pydantic import Field
 
 from promptpotter.application.bench.node_context import Target
-from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.config.paths import block_packs_root
 from promptpotter.config.prompt_blocks import missing_packs, pack_entries, pack_identity
+from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
 from promptpotter.domain.pool import (
     EARNED_SOURCE,

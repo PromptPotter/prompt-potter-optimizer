@@ -33,7 +33,7 @@ The **record** is the realized lineage — a tree, not a line. A mask splits it:
 
 The round a `score:` mask parts at is the round the fork is cut at: `fork-cycle` with `keep_rounds` mints an `OPERATOR_REWIND` (rounds `0..N-1` lifted) and `ConfigOverrides.scoring` carries `{per_cell: F}` over the parent's block. Preview and action are one fact, so the apply affordance sits beside the mask editor.
 
-**Two settings preview; everything else forks blind.** A criterion and a sample subset re-project measured rows; a node parameter, a model or a prompt field has no measurement at the edited value, so the honest render is unknown. Budget and look-ahead alone move a RUNNING cycle in place. A surface offering a change says which of the three it is. **A knob's `Scope` (`application/campaign_config.py`)** decides resume: `POLICY` resumes in place; `DATA` and `IDENTITY` run divergence detection.
+**Two settings preview; everything else forks blind.** A criterion and a sample subset re-project measured rows; a node parameter, a model or a prompt field has no measurement at the edited value, so the honest render is unknown. Budget and look-ahead alone move a RUNNING cycle in place. A surface offering a change says which of the three it is. **A knob's `Scope` (`domain/campaign_config.py`)** decides resume: `POLICY` resumes in place; `DATA` and `IDENTITY` run divergence detection.
 
 `ab` reads through the typed round loader, so an unparseable round file stops it loudly; a `score:` or `abort:` lens reads summary fields and still serves such a cycle.
 

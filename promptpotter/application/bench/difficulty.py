@@ -34,7 +34,7 @@ from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.shared.measurement_context import RoleScope
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import CellSheet, GradedCell
     from promptpotter.infrastructure.store.ruler_store import RulerStore

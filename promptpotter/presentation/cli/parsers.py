@@ -25,6 +25,8 @@ class Verb:
     handler: str
     help: str
     args: tuple[Arg, ...] = ()
+    # False only for a verb that parses no ledger, banked round or registered member.
+    needs_registries: bool = True
 
 
 GLOBAL_ARGS = (

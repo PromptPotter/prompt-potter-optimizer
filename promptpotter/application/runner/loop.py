@@ -6,7 +6,6 @@ from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.run_callbacks import RunCallbacks
@@ -23,6 +22,7 @@ from promptpotter.application.runner.termination import (
     origin_gate_tripped,
     target_tripped,
 )
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.phases import ErrorRecord, StopLoop, StopReason
 from promptpotter.domain.run_records import RebaseRequest
 from promptpotter.domain.sample import Sample

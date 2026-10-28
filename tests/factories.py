@@ -14,11 +14,6 @@ from offline_world import FakeBackend
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import DifficultyView
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
-    declare_run,
-)
 from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
@@ -53,6 +48,11 @@ from promptpotter.domain.bench import (
     partition_bank,
 )
 from promptpotter.domain.campaign import Campaign, Optimize, Purpose
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    declare_run,
+)
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.measurement_provenance import RunSource

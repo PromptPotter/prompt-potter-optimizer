@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
     with_optimization,
@@ -39,6 +38,7 @@ from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
 )
 from promptpotter.domain.campaign import Campaign, Purpose
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import (

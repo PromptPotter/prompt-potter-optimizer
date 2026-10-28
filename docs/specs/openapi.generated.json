@@ -12596,7 +12596,8 @@
             "enum": [
               "healthy",
               "degraded",
-              "critical"
+              "critical",
+              "unmeasured"
             ],
             "title": "Grade",
             "type": "string"
@@ -14040,14 +14041,7 @@
             "title": "Composite Fitness"
           },
           "health": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RoundHealth"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/RoundHealth"
           },
           "health_alert": {
             "anyOf": [
@@ -14209,6 +14203,7 @@
           "accuracy",
           "composite_fitness",
           "total",
+          "health",
           "overlap",
           "overlap_line",
           "panel_precision_verdict",

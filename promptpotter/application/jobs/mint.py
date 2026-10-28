@@ -12,11 +12,6 @@ from promptpotter.application.bench.task_context import (
     commit_task_framing,
     committed_task_context,
 )
-from promptpotter.application.campaign_config import (
-    apply_cycle_seed,
-    declare_run,
-    effective_config,
-)
 from promptpotter.application.datasets.draft_campaign import mint_draft_id
 from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
 from promptpotter.application.jobs.quota import on_free_tier, paid_call
@@ -50,6 +45,11 @@ from promptpotter.domain.campaign import (
     RunDeclaration,
     SharedPart,
 )
+from promptpotter.domain.campaign_config import (
+    apply_cycle_seed,
+    declare_run,
+    effective_config,
+)
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
@@ -70,8 +70,8 @@ from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample

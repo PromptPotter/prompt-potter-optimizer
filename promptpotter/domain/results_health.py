@@ -246,7 +246,7 @@ def compute_degradation_health(
     node_failure_rates: dict[str, float] | None = None,
     node_warnings: dict[str, list[str]] | None = None,
     is_origin: bool = False,
-) -> DegradationHealth | None:
+) -> DegradationHealth:
     """Never add a PRECISION clause: a Wilson width is not a failure RATE, and grades every small-n round degraded."""
     counts = _RoundCounts(
         attempted=attempted,
@@ -264,11 +264,9 @@ def compute_degradation_health(
     )
     # A PRECONDITION for the ORIGIN alone: a later short round is re-measured, the origin never is.
     if attempted <= 0 or (is_origin and attempted < counts.panel * MEASURED_COVERAGE_FLOOR):
-        if not is_origin:
-            return None
         return DegradationHealth(
-            grade="critical",
-            cause="origin_unmeasured",
+            grade="critical" if is_origin else "unmeasured",
+            cause="origin_unmeasured" if is_origin else None,
             samples=attempted,
             structural_count=structural_count,
             transient_count=transient_count,
@@ -280,7 +278,9 @@ def compute_degradation_health(
             degraded_rate=0.0,
             consecutive_degraded_rounds=0,
             prior_clean_rounds=prior_clean_rounds,
-            suggested_action=_suggested_action(counts, "origin_unmeasured", None),
+            suggested_action=(
+                _suggested_action(counts, "origin_unmeasured", None) if is_origin else None
+            ),
         )
 
     grade, cause = _grade(counts)
@@ -489,8 +489,8 @@ def _suggested_action(
             )
 
 
-def critical_health_title(round_num: int, health: DegradationHealth | None) -> str | None:
-    if health is None or health.grade != "critical":
+def critical_health_title(round_num: int, health: DegradationHealth) -> str | None:
+    if health.grade != "critical":
         return None
     who = "Degraded origin" if round_num == 0 else f"Round {round_num} degraded"
     return f"{who} — pipeline may be structurally broken"
@@ -499,7 +499,7 @@ def critical_health_title(round_num: int, health: DegradationHealth | None) -> s
 def assemble_prior_healths(
     rounds: Sequence[RoundResult],
     round_num: int,
-) -> list[DegradationHealth | None]:
+) -> list[DegradationHealth]:
     """Oldest→newest: ``_trailing_degraded`` walks it reversed."""
     return [r.health for r in rounds if r.round != round_num]
 
@@ -535,10 +535,10 @@ def _collect_node_warnings(results: Sequence[GradedCell]) -> dict[str, list[str]
     return {step: list(by_code.values()) for step, by_code in seen.items()}
 
 
-def _trailing_degraded(prior_healths: Sequence[DegradationHealth | None]) -> int:
+def _trailing_degraded(prior_healths: Sequence[DegradationHealth]) -> int:
     count = 0
     for h in reversed(prior_healths):
-        if h is None:
+        if h.grade == "unmeasured":
             continue
         if h.grade not in ("degraded", "critical"):
             break
@@ -549,13 +549,13 @@ def _trailing_degraded(prior_healths: Sequence[DegradationHealth | None]) -> int
 def compute_round_health(
     *,
     results: Sequence[GradedCell],
-    prior_healths: Sequence[DegradationHealth | None],
+    prior_healths: Sequence[DegradationHealth],
     is_origin: bool = False,
     # Cells the walk never sent: they have no row in ``results``.
     not_attempted: int = 0,
     # Passed in, never recounted off ``results``: ``runner/round.py`` owns the number the round file carries.
     unscored: int = 0,
-) -> DegradationHealth | None:
+) -> DegradationHealth:
     structural = transient = no_result = holes = 0
     ceiling = sum(1 for r in results if ran_to_output_ceiling(r.facts))
     structural_nodes: dict[str, int] = {}
@@ -585,8 +585,8 @@ def compute_round_health(
     node_failure_rates = compute_node_failure_rates(results)
     node_warnings = _collect_node_warnings(results)
 
-    # A ``None`` prior (a probe round, zero samples) is TRANSPARENT: neither clean nor a chain break.
-    prior_clean = sum(1 for h in prior_healths if h is not None and h.grade == "healthy")
+    # An ``unmeasured`` prior (a probe round, zero samples) is TRANSPARENT: neither clean nor a chain break.
+    prior_clean = sum(1 for h in prior_healths if h.grade == "healthy")
     consecutive = 1 + _trailing_degraded(prior_healths) if structural + transient + holes > 0 else 0
 
     return compute_degradation_health(

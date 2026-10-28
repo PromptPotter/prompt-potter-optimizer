@@ -347,7 +347,7 @@ def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
         backend_type = declared_backend_type(dataset.directory)
     except PayloadInvalidError:
         return None
-    connector = connectors.registered().get(backend_type)
+    connector = connectors.CONNECTORS.table.get(backend_type)
     if connector is None:
         raise ValueError(
             f"Dataset {dataset.name!r} declares backend_type {backend_type!r}, which this "

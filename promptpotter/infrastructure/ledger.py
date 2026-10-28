@@ -28,17 +28,15 @@ def _fork_link(cycle_dir: Path) -> tuple[CycleMintedRecord, Path] | None:
     return None if minted is None or parent is None else (minted, parent)
 
 
-def _fork_prefix(cycle_dir: CycleDir, *, continued: bool = False) -> list[tuple[Path, int]]:
+def _fork_prefix(cycle_dir: CycleDir) -> list[tuple[Path, int]]:
     prefix: list[tuple[Path, int]] = []
     child_dir = Path(cycle_dir)
     # By resolved dir: two trees can hold the same cycle id.
     seen = {child_dir.resolve()}
     while (link := _fork_link(child_dir)) is not None:
         minted, parent_dir = link
-        cut, spec = minted.forked_at_offset, minted.fork
-        assert cut is not None and spec is not None
-        if continued and not spec.traits.continues_scale:
-            break
+        cut = minted.forked_at_offset
+        assert cut is not None
         if parent_dir.resolve() in seen:
             raise ValueError(
                 f"{child_dir}: parent {parent_dir} is already on this fork chain — "
@@ -53,15 +51,6 @@ def _fork_prefix(cycle_dir: CycleDir, *, continued: bool = False) -> list[tuple[
 def ledger_chain(cycle_dir: CycleDir, *, moment: Moment | None) -> list[LedgerSpan]:
     chain = [
         *(LedgerSpan(path, cut) for path, cut in _fork_prefix(cycle_dir)),
-        LedgerSpan(CycleLayout(Path(cycle_dir)).ledger),
-    ]
-    return chain if moment is None else moment.spans(chain)
-
-
-def continued_chain(cycle_dir: CycleDir, *, moment: Moment | None) -> list[LedgerSpan]:
-    """Stops at a cut that continues no scale: what only a continuation inherits (the δ scale) is read over it."""
-    chain = [
-        *(LedgerSpan(path, cut) for path, cut in _fork_prefix(cycle_dir, continued=True)),
         LedgerSpan(CycleLayout(Path(cycle_dir)).ledger),
     ]
     return chain if moment is None else moment.spans(chain)

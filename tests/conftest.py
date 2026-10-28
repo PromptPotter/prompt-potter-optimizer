@@ -8,10 +8,10 @@ from factories import workspace
 from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
 from pydantic import SecretStr
 
-from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.optimizer_manifest import binding_optimizer
 from promptpotter.config.settings import settings
+from promptpotter.domain.campaign_config import OptimizationConfig
 from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
 from promptpotter.infrastructure.store.stores import Stores

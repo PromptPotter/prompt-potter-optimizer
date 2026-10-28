@@ -45,8 +45,10 @@ acting.
   near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
   green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:**
   five builders plus one full gate with no reap and no gate waiting longer than its own run.
-- **`application/campaign_config.py` belongs in `domain/`** (the payload table completes only once
-  it is imported). **Re-test:** the payload table is whole at `import promptpotter.domain`.
+- **The payload table completes only once `application/commands/payloads.py` is imported**: its
+  four models need `EditDraftPatch` / `OptimizationOverrides` (`application/datasets/draft_campaign.py`)
+  and `infrastructure/store/layout.py::validate_dataset_name`. **Re-test:** the payload table is whole at
+  `import promptpotter.domain.command_kinds`.
 - **No offline leg rebases mid-run:** `scripts/offline_run.py` strips every `fork_proposal`, so
   `runner/entry.py::_run_line`'s later passes are reached only by patched privates. **Re-test:**
   no test under `tests/` patches a private of `runner/entry.py`.
@@ -113,19 +115,11 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
 
 - **Two "waiting" predicates** — `useRemoteModel.ts::waitNote` and `lib/derivations/time-ray.ts`.
   **Decided:** a call is open AND its wait target is known; serve `dash.wait_line` once.
-- **`application/scoring/judges/call.py::ask` returns the unbound-ledger raise as an absent grade.**
-  **Re-test:** `grep -n "except" promptpotter/application/scoring/judges/call.py`.
-- **Three hand-written loaders sit over `shared/plugin_registry.py`.** **Re-test:** three
-  `load_registry(` callers.
-- **`domain/results.py::RoundOutcome.health` is optional** and `potter/dispatch/facade.py` tolerates
-  `None`. **Re-test:** `grep -n "health: DegradationHealth | None" promptpotter/domain/results.py`.
 - **Four seams owed a re-read:** `webapp/lib/poll.tsx::CycleStreamState` fields nothing reads;
   `webapp/lib/hooks/useCompareWithOrigin.ts` picks the best pointer; `webapp/lib/derivations/spend.ts::readSpend`
   sums spend; `presentation/cli/commands/resume_command.py::_steer_overlay` builds its own overlay.
 - **`domain/phases.py` is two fifths stop-reason table**; a split was measured and declined, a
   rename re-points ~46 files. **Rides with:** a pass that moves the table.
-- **Every CLI verb completes the registries at entry** (`presentation/cli/campaign_runner.py::main`,
-  ~1 s). **Re-test:** time `python -m promptpotter cycles`.
 - **`infrastructure/store/io.py::append_line` takes a sidecar `FileLock` per line**, the offline
   run's dominant cost (stat, open, mkdir, unlink per append). **Re-test:** profile one potter child
   of `scripts/offline_run.py`.

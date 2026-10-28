@@ -46,7 +46,9 @@ def _backend(name: str) -> Probe:
             return Reading("broken", str(refused))
         return Reading("held", "reachable")
 
-    return Probe(f"backend:{name}", check, f"bring {name} up at {connectors.get(name).base_url()}")
+    return Probe(
+        f"backend:{name}", check, f"bring {name} up at {connectors.CONNECTORS.get(name).base_url()}"
+    )
 
 
 def signin_probe(provider: str) -> str:
@@ -120,7 +122,7 @@ def probes() -> list[Probe]:
     return [
         *(
             _backend(name)
-            for name, connector in connectors.registered().items()
+            for name, connector in connectors.CONNECTORS.table.items()
             if connector.execution == "remote_http"
         ),
         *(_signin(provider, call, paths.provider_config) for provider, call in redeem.items()),

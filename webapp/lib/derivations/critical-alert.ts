@@ -61,7 +61,7 @@ export function criticalAlert({
     return {
       severity: "critical",
       title: latest.health_alert,
-      detail: latest.health?.suggested_action ?? undefined,
+      detail: latest.health.suggested_action ?? undefined,
       action: "pause",
     };
   }

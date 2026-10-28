@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any
 from pydantic import Field, ValidationError, model_validator
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import (
+from promptpotter.application.datasets.authored import dataset_campaign_block
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
+from promptpotter.domain.bench import DatasetSplit
+from promptpotter.domain.campaign import DeterminismClamp
+from promptpotter.domain.campaign_config import (
     DEFAULT_ORIGIN_BUDGET,
     ArmGateMode,
     CampaignConfig,
@@ -20,10 +24,6 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     merge_node_overlays,
 )
-from promptpotter.application.datasets.authored import dataset_campaign_block
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
-from promptpotter.domain.bench import DatasetSplit
-from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
@@ -296,11 +296,11 @@ assert set(InnerTaskSpec.model_fields) >= DEPTH_FIELDS
 
 
 def _recursion_connector() -> Connector:
-    return connectors.get("promptpotter")
+    return connectors.CONNECTORS.get("promptpotter")
 
 
 def is_self_optimization(backend_type: str) -> bool:
-    return connectors.registered().get(backend_type) is _recursion_connector()
+    return connectors.CONNECTORS.table.get(backend_type) is _recursion_connector()
 
 
 INNER_ARM_GATE: ArmGateMode = "off"

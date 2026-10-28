@@ -33,9 +33,9 @@ BASELINE = {
     # `Settings` fields — what the environment can set.
     "settings_env": 42,
     # Parameters annotated `Any`.
-    "any_params": 44,
+    "any_params": 43,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 66,
+    "domain_any_maps": 65,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 9,
     # Injections the optimizers' runtimes price — each a block an optimizer prompt can carry.
@@ -58,7 +58,7 @@ BASELINE = {
     "p_command_drift": 0,
     # What an optimizer member is handed: `NodeContext`'s public members, inherited ones included,
     # and the public members of each object one of its properties exposes; each `CycleRead` alike.
-    "p_member": 308,
+    "p_member": 307,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.
@@ -484,7 +484,7 @@ def compute_ledger() -> dict[str, int]:
         ],
     )
     priced: collections.Counter[str] = collections.Counter()
-    for runtime in optimizers.runtimes().values():
+    for runtime in optimizers.RUNTIMES.table.values():
         priced.update(runtime.priced_surface)
     read = _read_names(sites)
     test_files, test_functions = _count_tests()

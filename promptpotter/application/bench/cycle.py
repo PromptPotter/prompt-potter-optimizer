@@ -44,10 +44,10 @@ from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_c
 from promptpotter.infrastructure.store.read_model import Moment
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.bench import BenchPasses
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import GradedCell
 

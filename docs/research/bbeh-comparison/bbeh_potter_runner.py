@@ -10,7 +10,6 @@ from typing import Any
 
 from shared_config import Record, export_results
 
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
     with_optimization,
@@ -27,6 +26,7 @@ from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     priced_pairs,
 )
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample

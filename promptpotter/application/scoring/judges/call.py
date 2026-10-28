@@ -8,6 +8,8 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+import httpx
+
 from promptpotter.domain.judges import JudgeStage, JudgeVerdict
 from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
@@ -23,7 +25,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     emit_token_usage,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
-from promptpotter.shared.errors import CellSendRefusedError, SendRefusedError
+from promptpotter.shared.errors import CellSendRefusedError, RequestTooLargeError, SendRefusedError
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ def bind_cache(cache: LLMReuseCache | None) -> Iterator[None]:
 
 
 async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
-    """``(reply, error)``, exactly one non-empty; raises nothing but ``CellSendRefusedError``."""
+    """``(reply, error)``, exactly one non-empty: a provider's failure is the error half, any other raises."""
     started = time.monotonic()
     cache = _CACHE.get()
     key: str | None = None
@@ -65,7 +67,7 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         except SendRefusedError as exc:
             # `spent` is empty: `measure_sample` bills the backend spend before any judge runs.
             raise CellSendRefusedError(str(exc), category=exc.category, spent={}) from exc
-        except Exception as exc:
+        except (httpx.HTTPError, RequestTooLargeError, ValueError) as exc:
             logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
             return "", f"{type(exc).__name__}: {exc}"
 

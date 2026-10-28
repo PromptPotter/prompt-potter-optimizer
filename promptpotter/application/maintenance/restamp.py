@@ -11,7 +11,6 @@ from typing import Annotated, Any, Literal, NamedTuple, Union, get_args, get_ori
 import yaml
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.application.datasets.authored import campaign_file_block
 from promptpotter.application.jobs.registry import Job
 from promptpotter.application.maintenance.archive_maintenance import (
@@ -20,6 +19,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, default_jobs_dir
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
