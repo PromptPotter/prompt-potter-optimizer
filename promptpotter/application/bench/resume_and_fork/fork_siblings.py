@@ -220,8 +220,8 @@ def declare_steered_values(
             steered = str(value)
             values[param] = [steered, *(v for v in listed.get(param) or () if v != steered)]
         if values:
-            declared[node] = NodeSearchNarrowing(
-                param_keys=own.param_keys if own else None, param_allowed_values=values
+            declared[node] = (own or NodeSearchNarrowing()).model_copy(
+                update={"param_allowed_values": values}
             )
     return seed.model_copy(update={"optimizer_narrowing": declared})
 

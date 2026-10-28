@@ -2040,7 +2040,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/NodeSearchNarrowing"
             },
-            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
+            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
             "title": "Optimizer Narrowing",
             "type": "object"
           },
@@ -10186,7 +10186,7 @@
       },
       "NodeSearchNarrowing": {
         "additionalProperties": false,
-        "description": "A campaign's own declaration over the dataset's, whose two halves compose differently.\n\n``param_keys`` SUBSETS the dataset's tunable surface, prompt fields included;\n``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.",
+        "description": "A campaign's own declaration over the dataset's, whose three parts compose differently.\n\n``param_keys`` SUBSETS the dataset's config axes and never touches a prompt field;\n``prompt_fields_held`` holds the prompt fields it names, and only those;\n``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.",
         "properties": {
           "param_allowed_values": {
             "additionalProperties": {
@@ -10211,6 +10211,13 @@
               }
             ],
             "title": "Param Keys"
+          },
+          "prompt_fields_held": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prompt Fields Held",
+            "type": "array"
           }
         },
         "title": "NodeSearchNarrowing",

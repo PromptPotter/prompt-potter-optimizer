@@ -522,9 +522,7 @@ def inner_instrument_config(
         # The solver's SPEND AXES — model, effort, output cap, temperature — are the instrument, so the
         # inner generator writes prompt text alone: a lift bought with tokens is not optimizer learning.
         own = narrowing.get(prompt_node.name) or NodeSearchNarrowing()
-        narrowing[prompt_node.name] = own.model_copy(
-            update={"param_keys": list(prompt_node.prompt_fields)}
-        )
+        narrowing[prompt_node.name] = own.model_copy(update={"param_keys": []})
     return base.model_copy(
         update={
             "sp_budget_origin": n_search,

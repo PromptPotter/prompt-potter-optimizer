@@ -174,7 +174,7 @@ def build_l1_response_schema(
         }
 
     # Keyed by the roster's prompt nodes, each by ITS open fields; a node with none is write-only,
-    # so it is absent. `minLength` because "" is not an edit.
+    # so it is absent. `minLength` and `minProperties` because "" and `{}` are not edits.
     prompt_nodes = pipeline_schema.prompt_nodes()
     open_by_node = {
         n.name: {
@@ -191,10 +191,16 @@ def build_l1_response_schema(
     if open_by_node := {node: fields for node, fields in open_by_node.items() if fields}:
         variant_props["prompt_fields_updates"].update(
             properties={
-                node: {"type": "object", "properties": fields, "additionalProperties": False}
+                node: {
+                    "type": "object",
+                    "properties": fields,
+                    "additionalProperties": False,
+                    "minProperties": 1,
+                }
                 for node, fields in open_by_node.items()
             },
             additionalProperties=False,
+            minProperties=1,
         )
         if pooled_fields is not None:
             variant_props["prompt_fields_updates"]["description"] = BLOCK_ID_INSTRUCTION
@@ -222,8 +228,11 @@ def build_l1_response_schema(
     required = variant_items.setdefault("required", [])
     if "evidence_grounding" not in required:
         required.insert(0, "evidence_grounding")
-    if "targets_rows" not in required:
-        required.append("targets_rows")
+    required.extend(
+        slot
+        for slot in ("targets_rows", "prompt_fields_updates")
+        if slot in variant_props and slot not in required
+    )
 
     # Rename LAST: every key above is addressed by its real field name.
     field_names = effective_l1_field_names()

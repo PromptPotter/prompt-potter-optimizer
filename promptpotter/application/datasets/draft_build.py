@@ -155,6 +155,8 @@ def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
         # `[]` is a real answer (every axis closed), so `is not None`, never truthiness.
         if narrowing.param_keys is not None:
             optimizer["param_keys"] = list(narrowing.param_keys)
+        if narrowing.prompt_fields_held:
+            optimizer["prompt_fields_held"] = list(narrowing.prompt_fields_held)
         if narrowing.param_allowed_values:
             optimizer["param_allowed_values"] = {
                 k: list(v) for k, v in narrowing.param_allowed_values.items()

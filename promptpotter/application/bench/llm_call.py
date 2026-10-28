@@ -65,7 +65,6 @@ class OptimizerResponseModel(StrictModel):
 class InjectionBreakdown:
     chars: dict[str, int] = field(default_factory=dict)
     dropped: dict[str, int] = field(default_factory=dict)
-    silent: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -205,7 +204,6 @@ def _announce(call: _Call) -> None:
         prompt_chars=prompt_chars,
         injection_chars=dict(injections.chars),
         injection_dropped=dict(injections.dropped),
-        injection_silent=list(injections.silent),
     )
     if context.ledger is not None:
         context.ledger.append(start_record)

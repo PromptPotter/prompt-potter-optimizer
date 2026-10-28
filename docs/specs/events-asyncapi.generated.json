@@ -4041,13 +4041,6 @@
             "title": "Injection Dropped",
             "type": "object"
           },
-          "injection_silent": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Injection Silent",
-            "type": "array"
-          },
           "model": {
             "anyOf": [
               {
@@ -4829,7 +4822,7 @@
       },
       "NodeSearchNarrowing": {
         "additionalProperties": false,
-        "description": "A campaign's own declaration over the dataset's, whose two halves compose differently.\n\n``param_keys`` SUBSETS the dataset's tunable surface, prompt fields included;\n``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.",
+        "description": "A campaign's own declaration over the dataset's, whose three parts compose differently.\n\n``param_keys`` SUBSETS the dataset's config axes and never touches a prompt field;\n``prompt_fields_held`` holds the prompt fields it names, and only those;\n``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.",
         "properties": {
           "param_allowed_values": {
             "additionalProperties": {
@@ -4855,6 +4848,13 @@
             ],
             "default": null,
             "title": "Param Keys"
+          },
+          "prompt_fields_held": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prompt Fields Held",
+            "type": "array"
           }
         },
         "title": "NodeSearchNarrowing",

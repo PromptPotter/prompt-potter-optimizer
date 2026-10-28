@@ -931,6 +931,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         assert (key in (out.param_keys or []), out.param_allowed_values.get(key)) == drawn, (
             f"{key} {ticks} {'open' if unlocked else 'locked'}: a row drew another search space"
         )
+    # A padlocked prompt row holds that field alone and opens no config axis.
+    prompt_row = narrowing_of(
+        [NodeConfigParam(key="persona", kind="prompt")],
+        [ParamIntent(key="persona", open=False, allowed=[])],
+    )
+    assert (prompt_row.param_keys, prompt_row.prompt_fields_held) == ([], ["persona"]), (
+        "a padlocked prompt row drew another search space"
+    )
 
     # A campaign runs the config it froze, whatever its dataset file says later.
     stores = built_stores
@@ -1407,6 +1415,34 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         "a member rewriting the one prompt node was admitted on a chain of two"
     )
     assert optimizers.unfit_pipeline(gepa, two) is None, "GEPA was refused a chain it can walk"
+    # The shipped defaults' config-axis narrowing leaves every prompt field to L1; only
+    # `prompt_fields_held` withdraws one, and a surface with nothing open is refused pre-spend.
+    axes_only = two.narrow(
+        {
+            "review": NodeSearchNarrowing(
+                param_keys=["temperature", "max_tokens", "reasoning_effort"]
+            )
+        }
+    )
+    wire = build_l1_response_schema(axes_only, citable_fields=["critique"], inner_cells=None)
+    offered = wire["properties"]["variants"]["items"]["properties"]["prompt_fields_updates"]
+    assert set(offered["properties"]["review"]["properties"]) == {"instruction", "rubric"}, (
+        "a config-axis narrowing withdrew a prompt field from L1"
+    )
+    one_held = two.narrow({"review": NodeSearchNarrowing(prompt_fields_held=["rubric"])})
+    review = one_held.get_node("review")
+    assert review is not None and review.open_prompt_fields == ["instruction"], (
+        "a held prompt field withdrew another than itself"
+    )
+    all_held = two.narrow(
+        {
+            n.name: NodeSearchNarrowing(param_keys=[], prompt_fields_held=list(n.prompt_fields))
+            for n in two.declared_nodes
+        }
+    )
+    assert optimizers.unfit_pipeline(gepa, all_held) is not None, (
+        "a campaign leaving its optimizer nothing to edit was admitted"
+    )
 
     # Round 0 measured each parent a reflection re-reads; the bench resolves it by id.
     def measured(*held: OptSearchPoint) -> list[RoundResult]:

@@ -12,6 +12,8 @@ PARSE_FAILURE_MALFORMED: Annotated[str, shapes_optimizer_prompt] = "optimizer_pr
 PARSE_FAILURE_WRONG_TYPE = "optimizer_prompt_unexpected_type"
 # Empty or truncated content is missing data, not a verdict: the round is EXCLUDED, never charged.
 PARSE_FAILURE_TOOLING: Annotated[str, shapes_optimizer_prompt] = "l1_provider_empty_response"
+# A response whose every variant leaves its parent unchanged: zero candidates, never charged.
+PARSE_FAILURE_ALL_NO_OP: Annotated[str, shapes_optimizer_prompt] = "l1_all_no_op_variants"
 # Ask this predicate, never `is not None`, which reads TOOLING as a verdict.
 PARSE_FAILURE_CHARGED: frozenset[str] = frozenset(
     {PARSE_FAILURE_MALFORMED, PARSE_FAILURE_WRONG_TYPE}

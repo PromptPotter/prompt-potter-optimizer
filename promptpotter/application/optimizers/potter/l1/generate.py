@@ -107,7 +107,7 @@ async def l1_generate(
         pipeline_schema,
         citable_fields=citable,
         inner_cells=bundle.inner_cells,
-        silent_panels=breakdown.silent,
+        silent_panels=bundle.silent_l1_panels,
         schema_field_rename=schema_field_rename,
         n_variants=n_variants,
         pooled_fields=None if pooled is None else {f: list(ids) for f, ids in pooled.items()},

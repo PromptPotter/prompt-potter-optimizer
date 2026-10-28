@@ -38,7 +38,7 @@ Cycle root: `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cyc
 | 1 | `promptpotter/assets/optimizers/potter/pipeline.yaml` → `resolved_prompts["l1_generate/1"]` (outer: the `*_self_optimizing/1` families beside it, picked by `promptpotter-self`'s `optimization.nodes`) | The template you will edit |
 | 2 | `{cycle_dir}/rounds/round_NNNN.json` | Parsed candidates, scores, `overlap` (its `advance`), critique, each candidate's `prompts` (the target, read-only). **No rendered prompt** |
 | 3 | `{cycle_dir}/.runtime/streams/round_NNNN_pobb.jsonl` | Did variants stratify or collapse; who was cut first |
-| 4 | `{cycle_dir}/.runtime/ledger.jsonl` | Escalations, decisions, spend. **The ONLY place the rendered optimizer prompt survives**: each `payload_kind: "llm_call"` record's `template_fields` + `variables`; the `llm_call_start` beside it carries `prompt_chars`, `injection_chars`, `injection_dropped`, `injection_silent` |
+| 4 | `{cycle_dir}/.runtime/ledger.jsonl` | Escalations, decisions, spend. **The ONLY place the rendered optimizer prompt survives**: each `payload_kind: "llm_call"` record's `template_fields` + `variables`; the `llm_call_start` beside it carries `prompt_chars`, `injection_chars`, `injection_dropped` |
 | 5 | `{cycle_dir}/dashboard.json` | Composite trajectory + recent rules |
 
 On a replayed round the round cache's `l1_generate` entry is a `payload_kind: "synthesized"` stub — useless as evidence. The read VERBS are root `CLAUDE.md` § Commands'.

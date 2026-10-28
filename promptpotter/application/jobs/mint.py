@@ -198,7 +198,7 @@ def resolve_cycle_plan(
         apply_cycle_seed(campaign_config, runs_under),
         dataset,
         pipeline_params,
-        schema,
+        configured.pipeline_schema,
         free=on_free_tier(session.store),
     )
     seed = (
@@ -316,14 +316,12 @@ def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
 def _prompt_axes_only(
     session: Session, campaign_config: CampaignConfig
 ) -> dict[str, NodeSearchNarrowing]:
-    narrowing: dict[str, NodeSearchNarrowing] = {}
-    for node in session.pipeline_schema.declared_nodes:
-        held = campaign_config.optimizer_narrowing.get(node.name, NodeSearchNarrowing())
-        still_open = node.prompt_fields if held.param_keys is None else held.param_keys
-        narrowing[node.name] = held.model_copy(
-            update={"param_keys": [key for key in node.prompt_fields if key in still_open]}
-        )
-    return narrowing
+    return {
+        node.name: campaign_config.optimizer_narrowing.get(
+            node.name, NodeSearchNarrowing()
+        ).model_copy(update={"param_keys": []})
+        for node in session.pipeline_schema.declared_nodes
+    }
 
 
 def fresh_campaign_id(session: Session) -> str:

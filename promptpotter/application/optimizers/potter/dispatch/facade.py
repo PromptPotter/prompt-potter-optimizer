@@ -129,7 +129,6 @@ class FilledPrompt(NamedTuple):
         return InjectionBreakdown(
             chars={name: len(text) for name, text in shown.items() if text},
             dropped={name: c.dropped for name, c in self.coverage.items() if c.dropped > 0},
-            silent=tuple(sorted(name for name, c in self.coverage.items() if c.produced == 0)),
         )
 
 

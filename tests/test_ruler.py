@@ -687,7 +687,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_pa
             "1/a while the rest of the panel is in logits, and the outer verdict pools them anyway"
         )
         assert [derived.optimizer_narrowing[n.name].param_keys for n in solver] == [
-            list(n.prompt_fields) for n in solver
+            [] for _ in solver
         ], "the solver's spend axes are the instrument: the inner search writes prompt text alone"
         assert derived.bench_trigger == "each_round" and derived.dataset_split is not None
         own = CampaignConfig.model_validate(

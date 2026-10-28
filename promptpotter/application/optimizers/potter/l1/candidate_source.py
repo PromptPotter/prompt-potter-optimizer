@@ -20,8 +20,10 @@ from promptpotter.application.optimizers.potter.l1.population import parse_popul
 from promptpotter.application.optimizers.potter.records import L1Readout, L2Memory
 from promptpotter.application.optimizers.potter.validators.l1_invariants import detect_invariants
 from promptpotter.domain.arms import candidate_label
+from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.wounds import fatal_validation_failures
+from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.node_context import NodeContext
@@ -80,6 +82,24 @@ async def propose_l1_population(ctx: NodeContext) -> Proposals:
     checked = detect_invariants(
         generation.proposals, lineage.parent, parent_point.pipeline_params, lineage.rounds
     )
+    # Every variant a no-op is missing data, not N proposer wounds the stall would count.
+    if checked and all(
+        any(vf.reason == "no_op_variant" for vf in cp.validation_failures) for cp in checked
+    ):
+        model = ctx.read(Calls).model
+        logger.error("L1 R%d: every variant is a no-op — zero candidates", ctx.round_num)
+        emit_round_warning(
+            kind="l1_zero_candidates",
+            severity="error",
+            message=(
+                f"Optimizer produced 0 candidates this round — each of its {len(checked)} "
+                f"variant(s) leaves its parent unchanged (model {model})."
+            ),
+            detail={"reason": PARSE_FAILURE_ALL_NO_OP, "model": model},
+        )
+        generation = replace(generation, proposals=[], parse_failure=PARSE_FAILURE_ALL_NO_OP)
+        ctx.emit(l1_readout(ctx, generation))
+        return Proposals(proposals=[])
     parsed = parse_population(
         checked,
         lineage.parent,

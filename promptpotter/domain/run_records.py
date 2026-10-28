@@ -567,7 +567,6 @@ class LLMCallStartRecord(FrozenModel):
     injection_chars: dict[str, int] = Field(default_factory=dict)
     # What the node's ceiling REFUSED, per panel; `injection_chars` reports only what SURVIVED.
     injection_dropped: dict[str, int] = Field(default_factory=dict)
-    injection_silent: list[str] = Field(default_factory=list)
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property

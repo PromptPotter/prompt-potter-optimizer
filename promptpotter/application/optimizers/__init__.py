@@ -145,6 +145,15 @@ def llm_nodes() -> Mapping[str, LlmNode]:
 def unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> str | None:
     """Why *selected* cannot write *schema*'s prompt nodes, asked before a mint spends; ``None`` where it can."""
     prompt_nodes = schema.prompt_nodes()
+    if not any(n.open_prompt_fields for n in prompt_nodes) and not any(
+        schema.node_param_keys().values()
+    ):
+        return (
+            "this campaign leaves its optimizer nothing to edit: every prompt field is held and "
+            "no config axis is open on any node, so each variant would be a no-op. Open a "
+            "prompt field (`prompt_fields_held`) or a config axis (`param_keys`) in "
+            "`optimizer_narrowing`."
+        )
     roster = [node.name for node in prompt_nodes]
     for name in selected.member_nodes:
         arity = NODE_MEMBERS.get(name).prompt_arity

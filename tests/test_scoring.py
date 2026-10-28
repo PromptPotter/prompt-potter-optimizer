@@ -95,8 +95,10 @@ from promptpotter.application.optimizers.potter.escalation.state import (
     observe,
 )
 from promptpotter.application.optimizers.potter.knobs import EscalationLadder
+from promptpotter.application.optimizers.potter.members import L1Generate
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate, PoBBCheck
 from promptpotter.application.optimizers.potter.records import (
+    L1Readout,
     L2Memory,
     L3Memory,
     Ladder,
@@ -175,6 +177,7 @@ from promptpotter.domain.command_kinds import PauseCyclePayload, SubmitArmsPaylo
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
+from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
 from promptpotter.domain.origin_panel import (
     OverlapReading,
     PanelTrigger,
@@ -206,6 +209,7 @@ from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.ruler import DeltaRuler, anchor_id_of
 from promptpotter.domain.run_records import (
     PhaseRecord,
+    RoundWarningRecord,
     TokenUsageRecord,
 )
 from promptpotter.domain.run_standing import RunStanding, rounds_without_advance, stalls_left
@@ -2266,7 +2270,7 @@ _TIED_PANEL: Sequence[float | None] = [1.0, 0.0] + [0.0] * 6 + [1.0]
 
 
 def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # A θ-stall verdict must clear its own error: θ advances once for real (+0.467), then by noise.
     stall_rounds = [
@@ -2655,6 +2659,46 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
             "100% accuracy under a cost-aware objective: accuracy is spent, the objective is not"
         )
         assert outcome(1.0, RoundAdvance.ADVANCED) is StopReason.PERFECT
+
+    # A response whose every variant restates its parent is zero candidates, booked once as
+    # that: never one proposer wound per variant, which the ladder would read as L1's yield.
+    with _peer_cycle(
+        workspace(tmp_path / "restated"),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {},
+        lambda _p, _s: True,
+    ) as (cycle, callbacks):
+        restated = {"solve": dict(cycle.parent.prompts["solve"].fields)}
+        variant = {
+            "evidence_grounding": {"field": "critique", "citation": "the parent"},
+            "targets_rows": [],
+            "prompt_fields_updates": restated,
+            "changes_description": "restate the parent",
+        }
+        offline.llm.says = lambda _body: json.dumps({"variants": [variant, variant]})
+        generating = NodeContext(
+            RoundContext(cycle=cycle, round_num=1, callbacks=callbacks),
+            optimizers.NODE_MEMBERS.get("l1_generate"),
+        )
+        no_cells = Panel(cells=[], order=[], block_size=0)
+        member = optimizers.NODE_MEMBERS.get("l1_generate")
+        assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
+        proposed = asyncio.run(member.propose(generating, no_cells, node_contract.Proposals([])))
+        readout = cycle.output(L1Readout, 1)
+        warned = [
+            record.detail.get("reason")
+            for _, record in callbacks.ledger.iter()
+            if isinstance(record, RoundWarningRecord) and record.kind == "l1_zero_candidates"
+        ]
+    assert proposed.proposals == [], "a round of no-op variants measured a candidate"
+    assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
+        PARSE_FAILURE_ALL_NO_OP,
+        0,
+        {},
+    ), "a round of no-op variants was booked as proposer wounds, not as zero candidates"
+    assert warned == [PARSE_FAILURE_ALL_NO_OP], "the operator was not told the round was empty"
 
     # Folded back on resume: a layer fires AFTER the round it reads has closed, so what it
     # authors is on no close.

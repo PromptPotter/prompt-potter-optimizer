@@ -510,13 +510,15 @@ _EFFORT_LADDER_ORDER: tuple[str, ...] = ("none", "minimal", "low", "medium", "hi
 
 
 class NodeSearchNarrowing(FrozenModel):
-    """A campaign's own declaration over the dataset's, whose two halves compose differently.
+    """A campaign's own declaration over the dataset's, whose three parts compose differently.
 
-    ``param_keys`` SUBSETS the dataset's tunable surface, prompt fields included;
+    ``param_keys`` SUBSETS the dataset's config axes and never touches a prompt field;
+    ``prompt_fields_held`` holds the prompt fields it names, and only those;
     ``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.
     """
 
     param_keys: list[str] | None = None
+    prompt_fields_held: list[str] = Field(default_factory=list)
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
 
 
@@ -532,18 +534,25 @@ def narrowing_of(params: list[NodeConfigParam], intents: list[ParamIntent]) -> N
     """A value space is written where it DIFFERS from the menu, never "is a subset": axes may widen."""
     served = {p.key: p for p in params}
     keys: list[str] = []
+    held: list[str] = []
     allowed: dict[str, list[str]] = {}
     for intent in intents:
         param = served.get(intent.key)
         if param is None:
             raise ValueError(f"{intent.key!r} is not a param of this node")
+        if param.kind == "prompt":
+            if not intent.open:
+                held.append(intent.key)
+            continue
         axis = param.kind in ("enum", "model")
         if (len(intent.allowed) > 1) if axis else intent.open:
             keys.append(intent.key)
         stated = param.permitted_stated or set(intent.allowed) != set(param.options)
         if axis and intent.allowed and stated:
             allowed[intent.key] = intent.allowed
-    return NodeSearchNarrowing(param_keys=keys, param_allowed_values=allowed)
+    return NodeSearchNarrowing(
+        param_keys=keys, prompt_fields_held=held, param_allowed_values=allowed
+    )
 
 
 class ManifestNodeOverlay(FrozenModel):
@@ -853,11 +862,10 @@ class PipelineSchema(FrozenModel):
                 if nv is None:
                     out.append(n)
                     continue
-                # A prompt field is narrowed as an axis is, and held beside them; never a config key.
-                fields = set(n.open_prompt_fields)
-                surface = n.param_keys | fields
-                kept = surface if nv.param_keys is None else surface & set(nv.param_keys)
-                keys = kept - fields
+                keys = n.param_keys if nv.param_keys is None else n.param_keys & set(nv.param_keys)
+                held = (n.param_keys - keys) | (
+                    set(n.open_prompt_fields) & set(nv.prompt_fields_held)
+                )
                 allowed = {
                     **n.param_allowed_values,
                     **{k: list(v) for k, v in nv.param_allowed_values.items()},
@@ -867,7 +875,7 @@ class PipelineSchema(FrozenModel):
                         update={
                             "param_keys": keys,
                             # Accumulated: narrowing composes (config, frozen snapshot, fork seed).
-                            "param_keys_held": n.param_keys_held | (surface - kept),
+                            "param_keys_held": n.param_keys_held | held,
                             "param_allowed_values": allowed,
                             # A list restating the declaration closed nothing.
                             "param_values_narrowed": n.param_values_narrowed

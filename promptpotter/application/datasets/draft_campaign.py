@@ -329,6 +329,7 @@ def split_overlay(
         if isinstance(optimizer, dict) and optimizer:
             narrowing[node] = NodeSearchNarrowing(
                 param_keys=optimizer.get("param_keys"),
+                prompt_fields_held=optimizer.get("prompt_fields_held", []),
                 param_allowed_values=optimizer.get("param_allowed_values", {}),
             )
     return overrides, narrowing

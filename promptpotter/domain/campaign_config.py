@@ -355,9 +355,10 @@ class CampaignConfig(StrictModel):
         default_factory=dict,
         description="Per-node declaration over the dataset's optimizer search space — the "
         "per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). "
-        "`provider`/`route_order` are always locked. **`param_keys` SUBSETS and "
-        "`param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline "
-        "setup): a campaign may only close axes the dataset opened, but the value space is "
+        "`provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, "
+        "`prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` "
+        "REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only "
+        "close axes the dataset opened, but the value space is "
         "its own statement — which is what lets an operator ADD a model or a reasoning rung "
         "no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE "
         "permitted model set: what the optimizer may pick, and what a human fork may steer to "

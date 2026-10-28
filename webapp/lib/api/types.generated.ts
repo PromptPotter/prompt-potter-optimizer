@@ -3892,6 +3892,7 @@ export interface CampaignConfig {
   /** Per-node declaration over the dataset's optimizer search space — the per-
    * campaign param-lock + value-space lever beside `exclude_nodes` (whole
    * node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS
+   * the config axes, `prompt_fields_held` holds the prompt fields it names,
    * and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied
    * at pipeline setup): a campaign may only close axes the dataset opened,
    * but the value space is its own statement — which is what lets an operator
@@ -3975,9 +3976,10 @@ export interface CampaignConfig {
   optimization: OptimizationConfig;
 }
 
-/** A campaign's own declaration over the dataset's, whose two halves compose differently. */
+/** A campaign's own declaration over the dataset's, whose three parts compose differently. */
 export interface NodeSearchNarrowing {
   param_keys: string[] | null;
+  prompt_fields_held: string[];
   param_allowed_values: Record<string, string[]>;
 }
 
