@@ -126,6 +126,9 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   rename re-points ~46 files. **Rides with:** a pass that moves the table.
 - **Every CLI verb completes the registries at entry** (`presentation/cli/campaign_runner.py::main`,
   ~1 s). **Re-test:** time `python -m promptpotter cycles`.
+- **`infrastructure/store/io.py::append_line` takes a sidecar `FileLock` per line**, the offline
+  run's dominant cost (stat, open, mkdir, unlink per append). **Re-test:** profile one potter child
+  of `scripts/offline_run.py`.
 
 ## Bypasses — held for one holistic pass
 

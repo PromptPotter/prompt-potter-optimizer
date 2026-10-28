@@ -44,7 +44,7 @@ The contract is [`../architecture.md`](../architecture.md) § Bench and optimize
 [`../developer/node-standard.md`](../developer/node-standard.md) § Optimizer node types. Two rules a
 member must keep: **it is handed its node's `NodeContext`, never `Cycle`** (a store handle or live
 client in its input moves the core boundary and the trusted-code story); **its own sends are
-admitted before they leave** (`infrastructure/llm/litellm_sends.py::litellm_sends_billed_as`).
+admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
 
 - **The compare pane does not render the head-to-head headline** (`GET /evidence::head_to_head` serves it).
 

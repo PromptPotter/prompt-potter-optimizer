@@ -37,9 +37,10 @@ from factories import (
     pobb_knobs,
     prompted,
     round_result,
+    samples,
     score_summary,
     seat,
-    set_line,
+    set_cycle,
     sheet,
     spend_book,
     walking_cycle,
@@ -59,7 +60,7 @@ from promptpotter.application.diagnostics.verify import verify_member, verify_re
 from promptpotter.application.evidence.head_to_head import GuardDifference
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
-from promptpotter.application.initialization.session import LaunchClock
+from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
     responses_of,
@@ -198,7 +199,6 @@ from promptpotter.domain.results import (
     Measured,
     OverlapReading,
     PanelTrigger,
-    PointContext,
     RoundAdvance,
     RoundResult,
     RunStanding,
@@ -898,7 +898,7 @@ def _charged_by_length() -> tuple[CellSheet, CellSheet]:
     return walked(set(range(17)), 2768), walked(set(range(14, 18)), 692)
 
 
-_PEER_BANK = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(16)]
+_PEER_BANK = samples(16)
 # Each search row's place in the order the search reads it, under the peer cycle's own split.
 _PEER_READ_ORDER = {
     s.id: n
@@ -946,33 +946,20 @@ def _peer_cycle(
         name=f"{optimizer}-e2e",
         nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)],
     )
-    framing = TaskDecomposition(pipeline_purpose="Answer each query with its letter.")
+    origin = OptSearchPoint(
+        prompts={
+            "solve": NodePrompt(
+                fields={"instruction": "Answer.", "answer_format": "Reply with the letter."}
+            )
+        }
+    ).configured(None, schema)
 
-    def measured_origin(session: Any) -> ReadArm:
-        origin = OptSearchPoint(
-            prompts={
-                "solve": NodePrompt(
-                    fields={"instruction": "Answer.", "answer_format": "Reply with the letter."}
-                )
-            }
-        ).configured(None, schema)
-        partition = session.state.scoring.require_partition()
+    def measured_origin(session: Session) -> CellSheet:
         rows = [
             asyncio.run(_measure(s, session, pipeline_params={"solve": {"prompt": "Answer."}}))
-            for s in list(partition.search)[:4]
+            for s in list(session.state.scoring.require_partition().search)[:4]
         ]
-        sp = PointContext(schema=schema, framing=framing, demo=partition.demo).job(origin)
-        return ReadArm(
-            ArmKey(origin.id),
-            arm_state(
-                "C0",
-                slot=ArmSlot(round=0, idx=0, total=1),
-                individual=origin,
-                resolved_params=sp.config_params or {},
-                sp_hash=sp.sp_hash(schema),
-            ),
-            session.state.scoring.require_scorer().sheet(rows),
-        )
+        return session.state.scoring.require_scorer().sheet(rows)
 
     with at_round(1):
         seated = seat(
@@ -997,8 +984,8 @@ def _peer_cycle(
             backend_id=backend_id,
             control=control,
             hop=hop,
-            origin=measured_origin,
-            framing=framing,
+            origin=(origin, measured_origin),
+            framing=TaskDecomposition(pipeline_purpose="Answer each query with its letter."),
         )
         cycle, callbacks = seated.cycle, seated.callbacks
         bound = set_cycle_ledger(callbacks.ledger)
@@ -1020,7 +1007,7 @@ def _asked(body: dict[str, Any]) -> str:
 def _bench_pass(
     stores: Stores, individual: str, reward: float, *, cells: int = 4, stop: PassStop | None = None
 ) -> BenchPass:
-    held_out = [Sample(id=i, query=f"b{i}", ground_truth="a") for i in range(4)]
+    held_out = samples(4, query="b")
     rows = [
         measurement(
             s.id,
@@ -1936,7 +1923,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             )
             # A resume re-seats the pool its banked round names, never one a later write left.
             banked = closed.model_copy(update={"optimizer_state": cycle.close_state(1)})
-            cycle.slices.put(BlockPool(entries=()))
+            set_cycle(cycle, slices=[BlockPool(entries=())])
             cycle.replay_priors([banked])
             resumed = build_bundle(
                 NodeContext(
@@ -1949,7 +1936,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             ], "a resumed run handed its proposer a pool its banked round does not name"
             l3: Any = optimizers.member("l3_plan")
             replanning: NodeContext[StrictModel] = NodeContext(at_origin, l3)
-            cycle.slices.put(L3Memory(plan="attack the default label"))
+            set_cycle(cycle, slices=[L3Memory(plan="attack the default label")])
             l3.land(replanning, l3.parse(replanning, L3PlanOutput(plan="")))
             assert cycle.slices.get(L3Memory).plan == "", (
                 "an empty replan kept the plan it replaced: every later prompt read a dropped strategy"
@@ -2202,7 +2189,7 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     gated = seat(built_stores, optimization={"optimizer": "gepa"})
     gated.cycle.emit(bars, gated.round_num)
     gate = MinibatchGate()
-    minibatch = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(2)]
+    minibatch = samples(2)
 
     def no_catch_up(*_: Any) -> Any:
         raise AssertionError("the gate caught up a cell")
@@ -2233,7 +2220,7 @@ def _line_read(
     ids: dict[str, str] | None = None,
     triggered: Sequence[tuple[str, Sequence[float | None]]] = (),
 ) -> OverlapReading:
-    bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(len(c0))]
+    bank = samples(len(c0), "t")
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
 
     def member(label: str, grades: Sequence[float | None]) -> MemberRows:
@@ -2630,7 +2617,7 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
                     for n, (improved, electable) in enumerate(closes, 1)
                 ),
             ]
-            set_line(cycle, line)
+            set_cycle(cycle, line=line)
             standing = RunStanding.after(line, lives=lives.bank)
             return stalls_left(line, lives.bank), standing_tripped(cycle, standing)
 
@@ -2660,9 +2647,9 @@ def test_the_ladder_climbs_and_the_run_stops_only_on_evidence_it_resolved(
         def outcome(objective: float, advance: RoundAdvance) -> StopReason | None:
             closing = round_result(1, improved=True, overlap=readings[advance])
             folds = {key: score_summary(composite_fitness=objective) for key in closing.folds}
-            set_line(
+            set_cycle(
                 cycle,
-                [round_result(0, improved=False), closing.model_copy(update={"folds": folds})],
+                line=[round_result(0, improved=False), closing.model_copy(update={"folds": folds})],
             )
             return standing_tripped(cycle, RunStanding.opening(None))
 
@@ -2744,7 +2731,7 @@ def _reference_reading(
     *,
     cut: CutKind | None,
 ) -> PairedReading:
-    bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(len(reference))]
+    bank = samples(len(reference), "t")
     scorer = compile_scorer("label_match(predicted, ground_truth)", verifier_graded=False)
 
     def rows(grades: Sequence[float | None]) -> CellSheet:
@@ -2770,7 +2757,7 @@ def _reference_reading(
     return pairs.read(ReadArm(key, scored, rows(arm)), against, reference_arm)
 
 
-_H2H_BANK = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(12)]
+_H2H_BANK = samples(12)
 
 
 def _h2h_config(
@@ -3023,7 +3010,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert estimate.p_floor == 0.25, "three cells differ, so no exact test can read below 2/2**3"
     assert lift.flips is not None
     assert (lift.flips.gained, lift.flips.lost, lift.flips.unchanged) == (2, 1, 2)
-    sparse = [Sample(id=i, query=f"w{i}", ground_truth="t") for i in range(34)]
+    sparse = samples(34, "t", query="w")
     gained = _read_pair(
         _pair_member("a", measurements([0.0] * 34), sparse),
         _pair_member("b", measurements([1.0] * 4 + [0.0] * 30), sparse),
@@ -3066,7 +3053,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
     assert spanning.headline.family.p_adjusted == pytest.approx(p_wide)
 
     # A cell measured twice is one standing row to every reader.
-    four = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(4)]
+    four = samples(4, "t")
 
     def unanswered(sid: int) -> GradedCell:
         return measurement(sid, None, error="HTTP 502", error_category="SERVER")
@@ -3113,7 +3100,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         ROW_GRADES["fitness"].read(ungraded.sheet.cells[-1])
 
     # A pair that cannot be read says which way instead of reading zero.
-    six = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(6)]
+    six = samples(6, "t")
     panel = six[:4]
     left = _pair_member("a", measurements([1.0, 0.0, 1.0, 0.0]), six)
 

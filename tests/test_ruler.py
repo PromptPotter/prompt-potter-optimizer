@@ -24,6 +24,7 @@ from factories import (
     pipeline_schema,
     prompted,
     round_result,
+    samples,
     seat,
     sheet,
     workspace,
@@ -38,6 +39,7 @@ from promptpotter.application.bench.difficulty import (
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     covered_prefix,
     stratum_shares,
@@ -51,7 +53,6 @@ from promptpotter.application.intelligence.rasch import (
     graduate_ruler_model,
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.optimizers.nodes import ReadArm
 from promptpotter.application.runner.bench import pair_on_bench
 from promptpotter.application.runner.inner.tasks import inner_instrument_config, parse_panel
 from promptpotter.application.scoring.paired import MemberRows
@@ -81,7 +82,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell, Scorer
+from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -256,7 +257,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     assert warm is not None and warm.calibration_model == "1PL", "a second arm left δ flat"
 
     # One tenant ruler, versioned by its folds. C0 hits a quarter of the bank; its child changed nothing.
-    pool40 = [Sample(id=i, query=f"r{i}", ground_truth="t") for i in range(40)]
+    pool40 = samples(40, "t", query="r")
     c0_hits = {s.key for s in pool40 if s.id % 4 == 3}
     race_rows = [
         (cid, s.key, float(s.key in c0_hits)) for cid in ("c0-address", "child") for s in pool40
@@ -307,21 +308,18 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     # Drawn blind: the parent hits the easiest 16 of 40 cells on a graded ruler, and each round's
     # cells must still be the pool's, or the election reads rows the held-out bench never would.
-    graded_pool = [Sample(id=i, query=f"d{i}", ground_truth="t") for i in range(40)]
+    graded_pool = samples(40, "t", query="d")
 
-    def hits_easiest(session: Any) -> ReadArm:
-        origin = prompted(instruction="Answer.")
-        rows = sheet(
+    def hits_easiest(session: Session) -> CellSheet:
+        return sheet(
             (measurement(s.id, float(s.id < 16), sample_key=s.key) for s in graded_pool),
             session.state.scoring.require_scorer().id,
         )
-        c0 = arm_state("C0", slot=ArmSlot(round=0, idx=0, total=1), individual=origin)
-        return ReadArm(ArmKey(origin.id), c0, rows)
 
     drawing = seat(
         workspace(tmp_path / "draw"),
         bank=graded_pool,
-        origin=hits_easiest,
+        origin=(prompted(instruction="Answer."), hits_easiest),
         framing=TaskDecomposition(pipeline_purpose="Answer each query."),
     )
     session = drawing.cycle.session
@@ -489,7 +487,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     assert stratum_shares([30], 20) == [20]
 
     # Traced: every round's ended-on individual re-read on ONE scale, whatever its election read.
-    bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(12)]
+    bank = samples(12, "t")
     scorer = Scorer(
         id="acc",
         per_cell=None,

@@ -42,6 +42,7 @@ from factories import (
     on_jumping_clock,
     pipeline_schema,
     pobb_knobs,
+    samples,
     score_summary,
     spend_book,
     workspace,
@@ -174,7 +175,6 @@ from promptpotter.domain.validators import StopSignal
 from promptpotter.infrastructure.backend import CELL, BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, heartbeat, pricing, telemetry
-from promptpotter.infrastructure.llm.litellm_sends import ReportedCost
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
 from promptpotter.infrastructure.llm.pricing import (
     PriceTier,
@@ -1201,7 +1201,7 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     with _billing_on(CycleEventLog(tmp_path / "other.jsonl"), unbounded_spend_book()):
         await round_calls()
 
-    reread = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(4)]
+    reread = samples(4)
     step = {"solve": StepUsage(input=10, output=5, cost_usd=0.01)}
     banked = {
         s.id: MeasuredCell(
@@ -2371,7 +2371,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         assert hole.value.category is category, f"{fail!r}: a provider's failure scored a cell"
 
     # A cell billed send by send reserves its bound and holds only what is out.
-    spoke, mixed = ReportedCost(), ReportedCost()
+    spoke, mixed = harbor.ReportedCost(), harbor.ReportedCost()
     for cost, heard in ((0.01, (spoke, mixed)), (None, (mixed,))):
         for block in heard:
             block.count(answered(Billed(TokenAccount(input=10, output=5), cost)))
@@ -3153,7 +3153,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         stores.tenant_datasets.dataset_dir("drafted") / DEFINITION_FILE,
         {"pipeline": {"backend_type": "termnorm"}, "campaign": unframed},
     )
-    rows = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(30)]
+    rows = samples(30)
     solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
     framing = loop_session(
         stores,

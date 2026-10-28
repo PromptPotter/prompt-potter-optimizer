@@ -341,7 +341,7 @@ DEP002 = [
 ]
 # `ipython` ([jupyter]) is in no gate env, so deptry cannot map it to the module it installs.
 DEP001 = ["IPython"]
-# Imported directly and deliberately left transitive: `infrastructure/llm/litellm_sends.py` wraps
+# Imported directly and deliberately left transitive: `connectors/harbor.py::_meter` wraps
 # the entry point HARBOR calls, so it must be the litellm Harbor resolved — a pin of our own could
 # split the two, and the meter would wrap a copy the agent never sends through.
 # `pydantic_core` likewise: pydantic pins it to one exact version, so the `core_schema` a model

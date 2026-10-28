@@ -57,7 +57,7 @@ from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
-from promptpotter.domain.optimizer_state import Critique, OptimizerState
+from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
 from promptpotter.domain.paired_reading import ArmKey, PairedReading, ReadingState
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
@@ -94,6 +94,7 @@ from promptpotter.domain.ruler import (
 from promptpotter.domain.run_records import RunPhaseRecord, SampleScoredRecord
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer, WalkedCell
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget, CeilingMeter, SpendBucket, SpendRollup
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
@@ -349,7 +350,13 @@ def loop_session(
 
 PROMPT_INFO = NodePromptInfo(fields=PROMPT_FIELDS)
 
-_SEAT_BANK = (Sample(id=0, query="q0", ground_truth="a"),)
+
+def samples(n: int, truth: str | None = "a", *, query: str = "q") -> list[Sample]:
+    """Ids ``0..n-1``, each asking *query* spelled with its id."""
+    return [Sample(id=i, query=f"{query}{i}", ground_truth=truth) for i in range(n)]
+
+
+_SEAT_BANK = tuple(samples(1))
 _SEATS = count()
 
 
@@ -367,12 +374,13 @@ def seat(
     backend_id: str = "",
     control: RunControl | None = None,
     hop: CycleHop | None = None,
-    origin: Callable[[Session], ReadArm] | None = None,
-    **cycle: Any,
+    origin: tuple[OptSearchPoint, Callable[[Session], CellSheet]] | None = None,
+    framing: TaskDecomposition | None = None,
 ) -> RoundContext:
-    """Round *round_num* of a cycle started from *origin*'s reading of its session, else of one
-    whose origin was never measured; *cycle* bends its fields. It is bound to *hop*, else to a
-    cycle of its own."""
+    """Round *round_num* of a cycle started from *origin*, an individual and its reading of the
+    session, else of one whose origin was never measured. It is bound to *hop*, else to a cycle of
+    its own."""
+    framing = framing or TaskDecomposition()
     schema = schema or pipeline_schema(
         [PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)]
     )
@@ -403,15 +411,40 @@ def seat(
             config=config,
             slices=SliceMap(select_optimizer(config.optimization).slices),
             difficulty=DifficultyView.open(session, config, origin="origin"),
-            **cycle,
+            framing=framing,
         )
     else:
-        seated = Cycle.start(origin(session), session=session, config=config, **cycle)
+        individual, read = origin
+        sp = session.points(framing).job(individual)
+        c0 = arm_state(
+            "C0",
+            slot=ArmSlot(round=0, idx=0, total=1),
+            individual=individual,
+            resolved_params=sp.config_params or {},
+            sp_hash=sp.sp_hash(session.pipeline_schema),
+        )
+        seated = Cycle.start(
+            ReadArm(ArmKey(individual.id), c0, read(session)),
+            framing=framing,
+            session=session,
+            config=config,
+        )
     return RoundContext(seated, round_num, callbacks=RunCallbacks(ledger))
 
 
-def set_line(cycle: Cycle, line: Sequence[RoundResult]) -> None:
-    cycle.rounds = list(line)
+def set_cycle(
+    cycle: Cycle,
+    *,
+    line: Sequence[RoundResult] | None = None,
+    population: Sequence[OptSearchPoint] | None = None,
+    slices: Iterable[StateSlice] = (),
+) -> None:
+    if line is not None:
+        cycle.rounds = list(line)
+    if population is not None:
+        cycle.population = list(population)
+    for held in slices:
+        cycle.slices.put(held)
 
 
 def minted_campaign(

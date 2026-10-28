@@ -48,6 +48,7 @@ Each entry is a boundary, why it sits there, and the symbol that enforces it; wh
 - **Why:** an embedder pays for and must audit every dependency it did not ask for, and a distribution per consumer multiplies CI, releases and drift. One distribution, so an embedded adapter lives here and accepts the release coupling.
 - **An extra's import is guarded where a non-installer would hit it**, and the guard names the extra: function-local when the default path imports the module, module-level when only the caller who asked does. `scripts/complexity_ledger.py` counts an unguarded one as debt.
 - **A capability that needs a package in core is a design question first**; the answer is usually that it belongs in an extra.
+- **LiteLLM is in no core install**: the providers post over httpx, and litellm arrives only behind the `dspy` and `harbor` extras, metered where the `harbor` connector sends (`connectors/harbor.py::litellm_sends_billed_as`). <!-- probe: git grep -cE "import litellm|from litellm" -- promptpotter/infrastructure == 0 -->
 
 ## 0007 — One loop, shared members
 

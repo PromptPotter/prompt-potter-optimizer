@@ -33,8 +33,9 @@ from factories import (
     pipeline_schema,
     prompted,
     round_result,
+    samples,
     seat,
-    set_line,
+    set_cycle,
 )
 from offline_world import Router
 from pydantic import ValidationError
@@ -1017,7 +1018,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             "campaign": {"optimization": {"degradation_threshold": 0.4}},
         },
     )
-    rows_30 = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(30)]
+    rows_30 = samples(30, "TRUE", query="claim ")
     solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
     opened = loop_session(
         stores,
@@ -1363,11 +1364,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         bank=[Sample(id=7, query="q", ground_truth="a"), Sample(id=8, query="r", ground_truth="b")],
         demo=1,
         optimization={"optimizer": "gepa"},
-        population=[origin],
     )
-    set_line(
+    population = [origin]
+    set_cycle(
         reflected_on.cycle,
-        [round_result(0, arms={PARENT: arm_state("parent", individual=origin)}, improved=False)],
+        line=[
+            round_result(0, arms={PARENT: arm_state("parent", individual=origin)}, improved=False)
+        ],
+        population=population,
     )
     arm = SubmittedArm(
         prompt_fields={"review": {"rubric": "Cite the clause."}},
@@ -1397,7 +1401,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             return []
 
         async def ask(self, prompt: str, idx: int | None = None) -> str:
-            return f"```\nRewritten in round {len(reflected_on.cycle.population)}.\n```"
+            return f"```\nRewritten in round {len(population)}.\n```"
 
         def emit(self, output: Any) -> None:
             return None
@@ -1411,9 +1415,11 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         reflected.append(
             {locus.split(".")[0] for locus in child.individual.lineage.variations[0].loci}
         )
-        reflected_on.cycle.population = [*reflected_on.cycle.population, child.individual]
-        reflected_on.cycle.slices.put(
-            ParetoScores(scores={child.individual.id: {}}, parent_id=child.individual.id)
+        population.append(child.individual)
+        set_cycle(
+            reflected_on.cycle,
+            population=population,
+            slices=[ParetoScores(scores={child.individual.id: {}}, parent_id=child.individual.id)],
         )
     assert reflected == [{"draft"}, {"review"}, {"draft"}], (
         "GEPA's reflection did not round-robin a lineage across the prompt nodes"
@@ -1560,7 +1566,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert caught.value.reason == "too_large", "a run of blank Excel rows went uncounted"
 
     # No held-out row reaches a round panel or an archive view.
-    bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(60)]
+    bank = samples(60, "TRUE", query="claim ")
     split = DatasetSplit(bench=12, demo=6)
     part = partition_bank(bank, split, seed=0)
     held = {s.id for s in (*part.bench, *part.demo)}
@@ -1706,7 +1712,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
     assert not index.records(), "a held-out row reached the index the optimizer's panels read"
 
     # The check-in model reads no held-out row.
-    checkin_bank = [Sample(id=i, query=f"claim {i}", ground_truth="TRUE") for i in range(40)]
+    checkin_bank = samples(40, "TRUE", query="claim ")
     built_stores.tenant_datasets.put_bank(heldout := Bank.of(checkin_bank))
     built_stores.tenant_datasets.relabel("heldout", heldout.dataset_hash)
     dataset_dir = built_stores.tenant_datasets.dataset_dir("heldout")

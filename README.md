@@ -187,6 +187,8 @@ python -m promptpotter resume
 
 Bring a **labeled dataset** — input/output pairs as any delimited text, JSON, JSONL or a spreadsheet (`.xlsx`, `.xls`, `.ods`) — and say what the job is. No key set yet? `new` offers to write one on first run. `resume` picks up wherever the last run stopped: Ctrl+C pauses a campaign rather than losing it.
 
+The DSPy and Harbor connectors are opt-in: `pip install "promptpotter[dspy]"` or `"promptpotter[harbor]"`. Only these bring LiteLLM in.
+
 > [!IMPORTANT]
 > **`new` needs a pipeline backend to score against** — the default is [TermNorm](https://github.com/runfish5/TermNorm-excel) on `:8000`, and a campaign refuses to start without one ([setting it up by hand](https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/docs/manual/03-first-campaign.md#what-if-i-dont-have-a-backend)).
 >

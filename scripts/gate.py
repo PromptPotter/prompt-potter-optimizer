@@ -45,9 +45,9 @@ _REEXEC = "PROMPTPOTTER_GATE_REEXEC"
 # What one unit of each fan-out commits: the slope of its check's job peak across widths.
 _OFFLINE_RUN_CHILD_MB = 108
 _NEXT_WORKER_MB = 80
-# Each lane's heaviest check at full width (offline-run; a cold next-build): below their sum, in turn.
+# Each lane's heaviest check at full width (offline-run; a cold eslint): below their sum, in turn.
 _PY_LANE_MB = 1200
-_WEB_LANE_MB = 3700
+_WEB_LANE_MB = 1000
 # Past these, free memory is no reason to widen: the OS kills concurrent processes on low memory.
 OFFLINE_RUN_CHILDREN_MAX = 8
 NEXT_WORKERS_MAX = 4
@@ -941,7 +941,8 @@ class Check:
     run: Callable[[Selection], Outcome]
     staged: bool = False  # in the pre-commit fast set
     landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
-    # Its tool hard-codes a worker timeout that a busy machine trips, so it runs after both lanes.
+    # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
+    # or its peak (next-build's) is more than any lane beside it leaves free.
     alone: bool = False
     # The check that builds what it reads: earlier in its lane, and brought along by `--only`.
     after: str = ""
@@ -1186,6 +1187,7 @@ CHECKS: tuple[Check, ...] = (
             _WEBAPP,
             NEXT_BUILD_CPUS=str(RamBudget.read().next_workers()),
         ),
+        alone=True,
         builds="webapp/out/index.html",
     ),
     # `npm run typecheck` runs `next typegen` first, rewriting `.next/types` and the gitignored

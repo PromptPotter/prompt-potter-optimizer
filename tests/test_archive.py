@@ -32,9 +32,10 @@ from factories import (
     optimizer_state,
     pipeline_schema,
     prompted,
+    samples,
     score_summary,
     seat,
-    set_line,
+    set_cycle,
     sheet,
     workspace,
 )
@@ -337,7 +338,7 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     beside.release()
 
     # Rows banked under one formula read under another exactly as a fresh run would.
-    wider_panel = [Sample(id=i, query=f"q{i}", ground_truth="a") for i in range(10)]
+    wider_panel = samples(10)
     panel = wider_panel[:6]
     banked_under = ("label_match(predicted, ground_truth)", None)
     read_under = ("0.5 * label_match(predicted, ground_truth)", "0.5 * fitness + 0.25")
@@ -738,8 +739,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     }
     # The frontier holds every cell, answered by an individual that is not the parent.
     line = [_round(round=0, cells={ArmKey("origin"): hits}, **on_parent)]
-    set_line(racing.cycle, line)
-    ten = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(10)]
+    set_cycle(racing.cycle, line=line)
+    ten = samples(10, "g")
 
     def race_of() -> PoBBRace:
         return PoBBRace(
@@ -758,7 +759,9 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     assert race_of().rule([]).check(walked.cells) is None, (
         "the parent's prior borrowed cells another individual answered"
     )
-    set_line(racing.cycle, [*line, _round(round=1, cells={ArmKey(parent.id): hits}, **on_parent)])
+    set_cycle(
+        racing.cycle, line=[*line, _round(round=1, cells={ArmKey(parent.id): hits}, **on_parent)]
+    )
     race = race_of()
     reading = race.judge(
         race.rule([]).check(walked.cells),
@@ -800,8 +803,8 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     bar = filed("P", {**answered, 9: None})
     arm = filed("C", {**answered, 5: "g", 6: "g", 9: "g"})
     assert bar.cells[9].scored and bar.cells[9].grade.fitness == 0.0, "guard"
-    electing = seat(stores, population=[parent])
-    set_line(electing.cycle, [_round(round=0, **on_parent)])
+    electing = seat(stores)
+    set_cycle(electing.cycle, line=[_round(round=0, **on_parent)], population=[parent])
     walked_child = ArmKey(child.id)
     child_arm = arm_state("child", slot=ArmSlot(round=1, idx=0, total=1), individual=child)
     read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)
@@ -845,9 +848,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 cells={walked_child: arm, read_parent.key: bar},
             ),
         ],
-        cycle=seat(
-            stores, bank=[Sample(id=sid, query=f"q{sid}", ground_truth="g") for sid in range(10)]
-        ).cycle,
+        cycle=seat(stores, bank=samples(10, "g")).cycle,
     )
     [closed_on_disk] = closed_rounds(stores, charged, scorer, moment=None)
     [decided] = electing.cycle.pending_decisions
@@ -1103,7 +1104,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     scenario_pick = ArmKey(
         [_emit_round(closing, scenario_log, scenario_rounds, f"s{n}") for n in range(2)][-1]
     )
-    bank = [Sample(id=n, query=f"q{n}", ground_truth="g") for n in range(4)]
+    bank = samples(4, "g")
     drawn = partition_bank(bank, DatasetSplit(bench=0), seed=0).record(dataset_hash="bank")
     store.write_bank_partition(scenario, drawn)
     criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
