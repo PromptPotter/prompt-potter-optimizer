@@ -10727,7 +10727,7 @@
       },
       "OptimizerRoster": {
         "additionalProperties": false,
-        "description": "The optimizers this install can run, the default first: one per runtime the registry holds.",
+        "description": "The optimizers this install can run, the default first: one per manifest the registry holds.",
         "properties": {
           "default": {
             "description": "What a campaign naming no `optimization.optimizer` runs",
@@ -20613,7 +20613,7 @@
     },
     "/api/v1/optimizers": {
       "get": {
-        "description": "The optimizers this install can run, one per registered runtime: what ``optimization.optimizer`` accepts.",
+        "description": "The optimizers this install can run, one per registered manifest: what ``optimization.optimizer`` accepts.",
         "operationId": "get_optimizers_api_v1_optimizers_get",
         "responses": {
           "200": {

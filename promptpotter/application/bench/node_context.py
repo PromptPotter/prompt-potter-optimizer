@@ -506,7 +506,7 @@ class Replay(CycleRead):
     def decide(
         self, kind: str, inputs: dict[str, Any], outcome: Any, *, data: dict[str, Any] | None = None
     ) -> Any:
-        """A resume re-derives it only where the runtime registers a replayer for *kind*; else it is archived."""
+        """A resume re-derives it only where a member registers a replayer for *kind*; else it is archived."""
         return record_decision(
             self._cycle.pending_decisions,
             kind,

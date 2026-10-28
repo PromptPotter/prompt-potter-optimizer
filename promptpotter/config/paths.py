@@ -83,7 +83,7 @@ def _shadowed(relative: Path, shipped: Path) -> Path:
 
 
 def optimizer_manifest_path(shipped: Path) -> Path:
-    """Keyed by the registered runtime's own directory, so no requested name ever reaches a path."""
+    """Keyed by the registered manifest's own directory, so no requested name ever reaches a path."""
     return _shadowed(Path("optimizers") / shipped.name / "pipeline.yaml", shipped / "pipeline.yaml")
 
 

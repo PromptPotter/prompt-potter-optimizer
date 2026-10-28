@@ -2681,7 +2681,7 @@ export interface StartPrompt {
   versions_declared: number;
 }
 
-/** The optimizers this install can run, the default first: one per runtime the registry holds. */
+/** The optimizers this install can run, the default first: one per manifest the registry holds. */
 export interface OptimizerRoster {
   /** What a campaign naming no `optimization.optimizer` runs */
   default: string;

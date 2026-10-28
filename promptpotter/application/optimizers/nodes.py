@@ -6,7 +6,7 @@ import functools
 import hashlib
 import json
 import pkgutil
-from abc import ABC, abstractmethod
+import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -180,10 +180,38 @@ class NodeMember(Protocol):
     # The members whose knobs it reads (`NodeContext.knobs`), and nothing else of theirs.
     @property
     def consults(self) -> frozenset[type]: ...
+    # The modules deciding what its prompts SAY; `source_digest` hashes them beside its own module.
+    @property
+    def prompt_sources(self) -> tuple[ModuleType, ...]: ...
+    # By decision kind, pure over one round; registering one is what makes a resume re-derive that kind.
+    @property
+    def replayers(self) -> Mapping[str, Replayer]: ...
+    @property
+    def couplings(self) -> tuple[MemberCoupling, ...]: ...
+    # `{row: count}` of declared surface no manifest shows, which `complexity_ledger` sums.
+    @property
+    def priced_surface(self) -> Mapping[str, int]: ...
+    def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]: ...
+    def round_facts(
+        self, selected: SelectedOptimizer, round_result: RoundResult
+    ) -> list[OptimizerFact]: ...
+    def refuse_origin(self, origin_results: CellSheet) -> None: ...
+    def round_packages(
+        self, cycle: Cycle, rounds: list[RoundResult]
+    ) -> dict[int, dict[str, str]]: ...
+    async def rederive(
+        self,
+        campaign_store: CampaignStore,
+        hop: CycleHop,
+        cycle: Cycle,
+        rounds: list[RoundResult],
+        drifted: list[int],
+    ) -> list[RoundResult]: ...
+    def complete(self) -> None: ...
 
 
 class Member:
-    """What a member declares where it states nothing: no prompt, no state, no cycle read, no pool, no other member."""
+    """What a member declares where it states nothing: no prompt, no state, no cycle read, no pool, no other member, no fact of the round."""
 
     name: ClassVar[str]
     kind: ClassVar[NodeKind]
@@ -193,10 +221,67 @@ class Member:
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
     draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType({})
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = ()
+    replayers: ClassVar[Mapping[str, Replayer]] = MappingProxyType({})
+    couplings: ClassVar[tuple[MemberCoupling, ...]] = ()
+    priced_surface: ClassVar[Mapping[str, int]] = MappingProxyType({})
 
     @property
     def consults(self) -> frozenset[type]:
         return frozenset()
+
+    def arms(self, _selected: SelectedOptimizer) -> int:
+        """The arms it adds to the walk it proposes in; an editor of arms another made adds none."""
+        return 0
+
+    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
+        return RoundOpening(
+            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
+            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
+            arms=None
+            if walk.pipeline == INITIAL_POPULATION
+            else ctx.cycle.optimizer.arms_per_round,
+            proposer=walk.proposer,
+            replayed=False,
+        )
+
+    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
+        """Overridden only where a round's walks are not every arm plus the parent on the sampler's draw."""
+        return (selected.arms_per_round + 1) * selected.round_cells(search)
+
+    def limits(self, _selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
+        return ()
+
+    def round_facts(
+        self, _selected: SelectedOptimizer, _round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        """Read off the round file ALONE; the close stamps the roster's as ``RoundResult.optimizer_facts``."""
+        return []
+
+    def refuse_origin(self, _origin_results: CellSheet) -> None:
+        """Raise where the origin's measurement holds what this member cannot start from."""
+        return None
+
+    def round_packages(
+        self, _cycle: Cycle, _rounds: list[RoundResult]
+    ) -> dict[int, dict[str, str]]:
+        """``{round: {node: fingerprint}}`` of what the nodes it speaks for were handed; a repair moving one forks the rounds after it."""
+        return {}
+
+    async def rederive(
+        self,
+        _campaign_store: CampaignStore,
+        _hop: CycleHop,
+        _cycle: Cycle,
+        rounds: list[RoundResult],
+        _drifted: list[int],
+    ) -> list[RoundResult]:
+        """Re-derives what it wrote in each *drifted* round and restates it on *hop*'s ledger."""
+        return rounds
+
+    def complete(self) -> None:
+        """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
+        return None
 
 
 @dataclass(frozen=True)
@@ -338,99 +423,30 @@ def member_package(member: object) -> str | None:
     return package if package in BUILTIN_PACKAGES else None
 
 
+def source_digest(members: Iterable[NodeMember], *covered: ModuleType) -> str:
+    """Every member's own module and its ``prompt_sources``, then the prompt shapers their packages hold; ``covered`` modules another digest already hashes."""
+    held = list(members)
+    own = {sys.modules[type(member).__module__] for member in held}
+    spoken = {source for member in held for source in member.prompt_sources}
+    roster = frozenset(p for member in held if (p := member_package(member)) is not None)
+    return _source_digest(_by_name(own - spoken), _by_name(spoken), covered, roster)
+
+
+def _by_name(modules: Iterable[ModuleType]) -> tuple[ModuleType, ...]:
+    return tuple(sorted(modules, key=lambda module: module.__name__))
+
+
 @functools.cache
 def _source_digest(
-    sources: tuple[ModuleType, ...], covered: tuple[ModuleType, ...], roster: frozenset[str]
+    own: tuple[ModuleType, ...],
+    spoken: tuple[ModuleType, ...],
+    covered: tuple[ModuleType, ...],
+    roster: frozenset[str],
 ) -> str:
-    own = sources[-1].__name__.removeprefix(f"{_PACKAGE}.").split(".")[0]
-    foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - {own} - roster)
-    return module_source_digest(
-        *sources, *optimizer_prompt_shapers(sources, covered=covered, foreign=foreign)
-    )
-
-
-class OptimizerRuntime(ABC):
-    """Every non-abstract member answers "none": the bench reads the same member of every optimizer and branches on no name."""
-
-    name: ClassVar[str]
-    manifest_dir: ClassVar[Path]
-    # The modules deciding what its prompts SAY, its own package's last: ``Treatment.source``.
-    prompt_sources: ClassVar[tuple[ModuleType, ...]]
-    # ``{row: count}`` of declared surface no manifest shows, which ``complexity_ledger`` sums.
-    priced_surface: ClassVar[Mapping[str, int]] = {}
-    # By decision kind, pure over one round; registering one is what makes a resume re-derive that kind.
-    replayers: ClassVar[Mapping[str, Replayer]] = {}
-    couplings: ClassVar[Mapping[str, tuple[MemberCoupling, ...]]] = {}
-
-    def refuse_origin(self, _origin_results: CellSheet) -> None:
-        """Raise where the origin's measurement holds what this optimizer cannot start from."""
-        return None
-
-    @abstractmethod
-    def arms(self, selected: SelectedOptimizer) -> int:
-        """The most arms one round races."""
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        """Overridden only where a round's walks are not every arm plus the parent on the sampler's draw."""
-        return (self.arms(selected) + 1) * selected.round_cells(search)
-
-    def limits(self, _selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
-        return ()
-
-    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
-        return RoundOpening(
-            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
-            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
-            arms=None
-            if walk.pipeline == INITIAL_POPULATION
-            else ctx.cycle.optimizer.arms_per_round,
-            proposer=walk.proposer,
-            replayed=False,
-        )
-
-    def complete(self) -> None:
-        """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
-        return None
-
-    def source_digest(self, roster: frozenset[str], *covered: ModuleType) -> str:
-        """``roster`` are the built-in packages its manifest's members come from; ``covered`` modules another digest already hashes."""
-        return _source_digest(self.prompt_sources, covered, roster)
-
-    def round_packages(
-        self, _cycle: Cycle, _rounds: list[RoundResult]
-    ) -> dict[int, dict[str, str]]:
-        """``{round: {node: fingerprint}}`` of what its nodes were handed; a repair moving one forks the rounds after it."""
-        return {}
-
-    async def rederive(
-        self,
-        _campaign_store: CampaignStore,
-        _hop: CycleHop,
-        _cycle: Cycle,
-        rounds: list[RoundResult],
-        _drifted: list[int],
-    ) -> list[RoundResult]:
-        """Re-derives what the nodes of each drifted round wrote and restates it on the hop's ledger."""
-        return rounds
-
-    async def show_round(self, ctx: RoundContext) -> None:
-        """Propose *ctx*'s round and bank it UNMEASURED: ``--diag``'s last step."""
-        raise NotImplementedError(f"optimizer {self.name!r} shows no unmeasured round")
-
-    def review(
-        self,
-        _rounds: list[RoundResult],
-        _audits: list[RoundAudit | None],
-        _context_object: list[str],
-    ) -> ReviewReading | None:
-        """``None`` where the optimizer keeps no reading of its own; ``review.md`` then says N/A."""
-        return None
-
-    def round_facts(
-        self, _selected: SelectedOptimizer, _round_result: RoundResult
-    ) -> list[OptimizerFact]:
-        """Read off the round file ALONE; the close stamps it as ``RoundResult.optimizer_facts``."""
-        return []
+    # The members' own modules are hashed whole; only `spoken` is scanned for the shapers it reads.
+    foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - roster)
+    shapers = optimizer_prompt_shapers(spoken, covered=(*own, *covered), foreign=foreign)
+    return module_source_digest(*spoken, *own, *shapers)
 
 
 def rows_read_packages(
@@ -599,6 +615,10 @@ class Sampler(NodeMember, Protocol):
         """Cells a round after the first asks for under its own *knobs*, read BEFORE any round runs; 0 where the search split holds no panel."""
         ...
 
+    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
+        """The most cells one round's walks read, the parent's among them; 0 where ``round_cells`` is."""
+        ...
+
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel: ...
 
 
@@ -614,6 +634,12 @@ class Proposer(NodeMember, Protocol):
     def variation_mode(self) -> VariationMode:
         """How it makes a child, which every child it writes records."""
         ...
+
+    # A walk's arms are the sum over its proposers, a round's the most of any walk it runs alone.
+    def arms(self, selected: SelectedOptimizer) -> int: ...
+
+    # Asked of a walk's first member.
+    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening: ...
 
     async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals: ...
 
@@ -770,3 +796,20 @@ class Controller(NodeMember, Protocol):
     async def diagnose(self, ctx: NodeContext) -> None:
         """``--diag``: act on the round just closed; the bench then shows the next round unmeasured."""
         ...
+
+    async def show_round(self, ctx: RoundContext) -> None:
+        """Propose *ctx*'s round and bank it UNMEASURED: ``--diag``'s last step."""
+        ...
+
+
+@runtime_checkable
+class Reviewer(NodeMember, Protocol):
+    """The member whose reading ``review.md`` prints; a roster holds at most one, and none says N/A."""
+
+    def review(
+        self,
+        rounds: list[RoundResult],
+        audits: list[RoundAudit | None],
+        *,
+        context_object: list[str],
+    ) -> ReviewReading: ...

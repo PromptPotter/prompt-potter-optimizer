@@ -56,7 +56,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 
 ## Editing a renderer's PROSE is a measurement change
 
-**`OptimizerRuntime.source_digest` hashes the prompt-shaping set AST-normalized, so rewording a directive voids banked origins — expect the re-measure.** A pool's starting content is hashed as data (`nodes.py::Initializer.starting_content`).
+**`nodes.py::source_digest` hashes the prompt-shaping set AST-normalized, so rewording a directive voids banked origins — expect the re-measure.** A pool's starting content is hashed as data (`nodes.py::Initializer.starting_content`).
 **A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else**, and its module is in the hashed set or carries `shared/hashing.py::shapes_optimizer_prompt`.
 
 ## A validator either REJECTS or SCORES — never both

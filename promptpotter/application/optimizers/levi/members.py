@@ -1,4 +1,4 @@
-"""LEVI (arXiv 2605.09764): its node members and its runtime."""
+"""LEVI (arXiv 2605.09764): its node members."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from promptpotter.application.optimizers.descriptors import (
 )
 from promptpotter.application.optimizers.levi import prompts
 from promptpotter.application.optimizers.levi.state import (
-    LEVI_MANIFEST,
     DescriptorCalibration,
     DescriptorStats,
     EliteArchive,
@@ -28,7 +27,6 @@ from promptpotter.application.optimizers.levi.state import (
 )
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child
-from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
@@ -38,7 +36,6 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import greedy_column_subset, logistic
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from types import ModuleType
 
     from promptpotter.application.bench.cycle import Cycle
@@ -135,6 +132,16 @@ class ProxyCss(nodes.Member):
     def round_cells(self, knobs: ProxyCssKnobs, search: int) -> int:
         # The proxy is chosen among the discovery set, which the search split must hold whole.
         return knobs.size if knobs.discovery <= search else 0
+
+    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
+        # The calibration round reads its seeds and the origin on the discovery set.
+        if not (proxy := selected.round_cells(search)):
+            return 0
+        discovery = selected.knobs_of(self.name, ProxyCssKnobs).discovery
+        seeds = selected.walk_arms(selected.plan.initial_population)
+        return max(
+            (seeds + 1) * discovery, (selected.walk_arms(selected.plan.proposers) + 1) * proxy
+        )
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         calibration = ctx.slice(DescriptorCalibration).calibration
@@ -264,6 +271,16 @@ def _calibrate(
     return LeviCalibration(proxy=proxy, centroids=centres.tolist(), stats=stats)
 
 
+def _replay_proxy_selected(
+    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
+) -> list[str]:
+    return choose_proxy(
+        ProxyCssKnobs.model_validate({k: inputs_ref[k] for k in ProxyCssKnobs.model_fields}),
+        {cid: ctx.round_data.sheet_of(cid) for cid in inputs_ref["calibration_ids"]},
+        list(inputs_ref["order"]),
+    )
+
+
 class MapElites(nodes.Member):
     name: ClassVar[str] = "map_elites"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
@@ -274,6 +291,27 @@ class MapElites(nodes.Member):
     consults: ClassVar[frozenset[type]] = frozenset({ProxyCss})
     elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
+    replayers: ClassVar[Mapping[str, Replayer]] = {
+        LeviCheckpointKind.PROXY_SELECTED: _replay_proxy_selected
+    }
+
+    def round_facts(
+        self, _selected: SelectedOptimizer, round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        state = round_result.closed_state
+        if (calibration := state.slice(DescriptorCalibration).calibration) is None:
+            return []
+        elites, k = len(state.slice(EliteArchive).elites), len(calibration.proxy)
+        return [
+            OptimizerFact(
+                key="archive",
+                label="Archive",
+                text=f"{elites} of {len(calibration.centroids)} cells",
+                value=elites,
+                kind="stat",
+            ),
+            OptimizerFact(key="proxy", label="Proxy K", text=str(k), value=k, kind="stat"),
+        ]
 
     def parent_cells(
         self,
@@ -374,6 +412,13 @@ class LeviSeed(nodes.Member):
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+
+    def arms(self, selected: SelectedOptimizer) -> int:
+        return selected.knobs_of(self.name, LeviSeedKnobs).n_diverse_seeds
+
+    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+        return nodes.rows_read_packages(rounds, [self.name])
 
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         origin = ctx.read(Lineage).origin
@@ -402,6 +447,30 @@ class LeviParadigmShift(nodes.Member):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
         {Calls, Children, Lineage, Replay, Target}
     )
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+
+    def arms(self, _selected: SelectedOptimizer) -> int:
+        return 1
+
+    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+        return nodes.rows_read_packages(rounds, [self.name])
+
+    def round_facts(
+        self, _selected: SelectedOptimizer, round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        if round_result.closed_state.slice(DescriptorCalibration).calibration is None:
+            return []
+        # Calibration is round 1, and every round after it runs one paradigm shift.
+        shifts = round_result.round - 1
+        return [
+            OptimizerFact(
+                key="paradigm_shifts",
+                label="Paradigm shifts",
+                text=str(shifts),
+                value=shifts,
+                kind="stat",
+            )
+        ]
 
     async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         n_clusters = ctx.knobs(LeviParadigmShiftKnobs).n_clusters
@@ -478,6 +547,13 @@ class LeviRefine(nodes.Member):
         {Calls, Children, Lineage, Replay, Target}
     )
     consults: ClassVar[frozenset[type]] = frozenset({LeviParadigmShift})
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+
+    def arms(self, selected: SelectedOptimizer) -> int:
+        return selected.reached_knobs(self, LeviParadigmShiftKnobs).interval - 1
+
+    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+        return nodes.rows_read_packages(rounds, [self.name])
 
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         calibration = ctx.slice(DescriptorCalibration).calibration
@@ -526,72 +602,4 @@ class LeviRefine(nodes.Member):
         return held[parent.individual_id], prompt
 
 
-def _replay_proxy_selected(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
-) -> list[str]:
-    return choose_proxy(
-        ProxyCssKnobs.model_validate({k: inputs_ref[k] for k in ProxyCssKnobs.model_fields}),
-        {cid: ctx.round_data.sheet_of(cid) for cid in inputs_ref["calibration_ids"]},
-        list(inputs_ref["order"]),
-    )
-
-
-_PROPOSERS = (LeviSeed.name, LeviParadigmShift.name, LeviRefine.name)
-
-
-class LeviRuntime(nodes.OptimizerRuntime):
-    name: ClassVar[str] = LEVI_MANIFEST
-    manifest_dir: ClassVar[Path] = optimizers_root() / LEVI_MANIFEST
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
-    replayers: ClassVar[Mapping[str, Replayer]] = {
-        LeviCheckpointKind.PROXY_SELECTED: _replay_proxy_selected,
-    }
-
-    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        return nodes.rows_read_packages(rounds, _PROPOSERS)
-
-    def arms(self, selected: SelectedOptimizer) -> int:
-        seeds = selected.knobs_of(LeviSeed.name, LeviSeedKnobs).n_diverse_seeds
-        return max(
-            seeds, selected.knobs_of(LeviParadigmShift.name, LeviParadigmShiftKnobs).interval
-        )
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        shift = selected.knobs_of(LeviParadigmShift.name, LeviParadigmShiftKnobs)
-        seeds = selected.knobs_of(LeviSeed.name, LeviSeedKnobs).n_diverse_seeds
-        discovery = selected.knobs_of(ProxyCss.name, ProxyCssKnobs).discovery
-        proxy = selected.round_cells(search)
-        if not proxy:
-            return 0
-        return max((seeds + 1) * discovery, (shift.interval + 1) * proxy)
-
-    def round_facts(
-        self, _selected: SelectedOptimizer, round_result: RoundResult
-    ) -> list[OptimizerFact]:
-        state = round_result.closed_state
-        if (calibration := state.slice(DescriptorCalibration).calibration) is None:
-            return []
-        elites, k = len(state.slice(EliteArchive).elites), len(calibration.proxy)
-        # Calibration is round 1, and every round after it runs one paradigm shift.
-        shifts = round_result.round - 1
-        return [
-            OptimizerFact(
-                key="archive",
-                label="Archive",
-                text=f"{elites} of {len(calibration.centroids)} cells",
-                value=elites,
-                kind="stat",
-            ),
-            OptimizerFact(key="proxy", label="Proxy K", text=str(k), value=k, kind="stat"),
-            OptimizerFact(
-                key="paradigm_shifts",
-                label="Paradigm shifts",
-                text=str(shifts),
-                value=shifts,
-                kind="stat",
-            ),
-        ]
-
-
 MEMBERS = (ProxyCss(), LeviSeed(), LeviParadigmShift(), LeviRefine(), MapElites())
-RUNTIME = LeviRuntime()

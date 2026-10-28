@@ -11,7 +11,7 @@ from pydantic import Field
 
 from example_optimizer import prompts
 from promptpotter.application.bench.node_context import Calls, Children, Lineage, Replay, Target
-from promptpotter.application.optimizers import nodes, paper_templates
+from promptpotter.application.optimizers import ManifestDir, nodes, paper_templates
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.campaign_config import Estimand, Knob, Scope
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import CellSheet
 
-MANIFEST = "example"
+MANIFEST = ManifestDir("example", Path(__file__).parent)
 
 
 class DrawKnobs(StrictModel):
@@ -73,6 +73,10 @@ class Propose(nodes.Member):
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = ProposeKnobs
     sees = frozenset({Calls, Children, Lineage, Target})
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+
+    def arms(self, selected: SelectedOptimizer) -> int:
+        return selected.knobs_of(self.name, ProposeKnobs).variants
 
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         parent, node = ctx.read(Lineage).parent, ctx.read(Target).prompt_node
@@ -116,14 +120,4 @@ class Keep(nodes.Member):
         )
 
 
-class ExampleRuntime(nodes.OptimizerRuntime):
-    name: ClassVar[str] = MANIFEST
-    manifest_dir: ClassVar[Path] = Path(__file__).parent
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
-
-    def arms(self, selected: SelectedOptimizer) -> int:
-        return selected.knobs_of(Propose.name, ProposeKnobs).variants
-
-
 DRAW, PROPOSE, KEEP = RandomDraw(), Propose(), Keep()
-RUNTIME = ExampleRuntime()

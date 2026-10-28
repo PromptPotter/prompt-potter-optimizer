@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import typing
 from collections.abc import Mapping
+from pathlib import Path
 
 from promptpotter.application.optimizers.nodes import (
     BUILTIN_PACKAGES,
@@ -11,10 +12,10 @@ from promptpotter.application.optimizers.nodes import (
     CycleRead,
     LlmNode,
     NodeMember,
-    OptimizerRuntime,
     PromptArity,
     RewriteKnobs,
 )
+from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind
 from promptpotter.domain.pool import Pool
@@ -34,8 +35,15 @@ shapes_optimizer_prompt(__name__)
 ENTRY_POINT_GROUP = "promptpotter.optimizer_nodes"
 """Published, keyed by manifest node name: renaming it un-registers every plugin at once."""
 
-RUNTIME_ENTRY_POINT_GROUP = "promptpotter.optimizer_runtimes"
+MANIFEST_ENTRY_POINT_GROUP = "promptpotter.optimizer_manifests"
 """Published, keyed by manifest name: renaming it un-registers every plugin at once."""
+
+
+class ManifestDir(typing.NamedTuple):
+    # What `optimization.optimizer` selects.
+    name: str
+    directory: Path
+
 
 _MEMBER_KINDS = MEMBER_KINDS | {NodeKind.LLM}
 
@@ -100,12 +108,11 @@ def _validate(obj: object, origin: str) -> NodeMember:
     return member
 
 
-def _validate_runtime(obj: object, origin: str) -> OptimizerRuntime:
-    name = getattr(obj, "name", None)
-    if not isinstance(obj, OptimizerRuntime) or not isinstance(name, str) or not name:
+def _validate_manifest(obj: object, origin: str) -> ManifestDir:
+    if not isinstance(obj, ManifestDir) or not obj.name or not obj.directory.is_dir():
         raise RuntimeError(
-            f"[{origin}] resolved to {obj!r}: an optimizer runtime is an `OptimizerRuntime` "
-            "instance naming the manifest it implements in `name`."
+            f"[{origin}] resolved to {obj!r}: an optimizer manifest is a `ManifestDir` naming "
+            "what `optimization.optimizer` selects and the directory holding its pipeline.yaml."
         )
     return obj
 
@@ -121,15 +128,14 @@ def _builtins() -> Iterator[tuple[str, object]]:
             yield module.__name__, obj
 
 
-def _runtimes() -> Iterator[tuple[str, object]]:
-    # A preset shipping members alone declares no runtime; a manifest without one fails at lookup.
-    for module in _members():
-        if hasattr(module, "RUNTIME"):
-            yield module.__name__, module.RUNTIME
+def _manifests() -> Iterator[tuple[str, object]]:
+    for directory in sorted(optimizers_root().iterdir()):
+        if (directory / "pipeline.yaml").is_file():
+            yield str(directory), ManifestDir(directory.name, directory)
 
 
 NODE_MEMBERS = Registry(ENTRY_POINT_GROUP, _builtins, _validate)
-RUNTIMES = Registry(RUNTIME_ENTRY_POINT_GROUP, _runtimes, _validate_runtime)
+MANIFESTS = Registry(MANIFEST_ENTRY_POINT_GROUP, _manifests, _validate_manifest)
 
 
 def llm_nodes() -> Mapping[str, LlmNode]:

@@ -215,12 +215,12 @@ def complete_registries(*, every_treatment: bool = True) -> None:
     """Every process calls it once, before it reads a ledger; one running ONE campaign passes ``False``."""
     connectors.CONNECTORS.complete()
     judge_registry.JUDGES.complete()
-    optimizers.NODE_MEMBERS.complete()
-    for runtime in optimizers.RUNTIMES.table.values():
-        runtime.complete()
-        # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
-        if every_treatment:
-            resolve_optimizer(runtime.name, {}, gate="off").treatment()
+    optimizers.MANIFESTS.complete()
+    for member in optimizers.NODE_MEMBERS.table.values():
+        member.complete()
+    # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
+    for name in optimizers.MANIFESTS.table if every_treatment else ():
+        resolve_optimizer(name, {}, gate="off").treatment()
     replayers()
     check_every_record_reported()
     for connector in connectors.CONNECTORS.table.values():

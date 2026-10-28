@@ -162,7 +162,7 @@ class Cycle:
         schema = session.pipeline_schema
         origin_sheet = origin.rows
         selected = select_optimizer(config.optimization)
-        selected.runtime.refuse_origin(origin_sheet)
+        selected.refuse_origin(origin_sheet)
         slices = SliceMap(selected.slices)
         sp = session.points(framing).job(origin.individual)
         _assert_overlay_preserved(sp, session.pipeline_params)

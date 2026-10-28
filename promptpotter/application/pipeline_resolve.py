@@ -1284,7 +1284,7 @@ class OptimizerEntry(StrictModel):
 
 
 class OptimizerRoster(StrictModel):
-    """The optimizers this install can run, the default first: one per runtime the registry holds."""
+    """The optimizers this install can run, the default first: one per manifest the registry holds."""
 
     default: str = Field(description="What a campaign naming no `optimization.optimizer` runs")
     optimizers: list[OptimizerEntry] = Field(description="The roster, the default first")
@@ -1292,8 +1292,8 @@ class OptimizerRoster(StrictModel):
 
 def optimizer_roster() -> OptimizerRoster:
     default = OptimizationConfig.model_fields["optimizer"].default
-    names = sorted(optimizers.RUNTIMES.table, key=lambda n: (n != default, n))
-    origins = optimizers.RUNTIMES.origins
+    names = sorted(optimizers.MANIFESTS.table, key=lambda n: (n != default, n))
+    origins = optimizers.MANIFESTS.origins
     entries = []
     for name in names:
         selected = resolve_optimizer(name, {}, gate="off")

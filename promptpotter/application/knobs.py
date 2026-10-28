@@ -250,9 +250,10 @@ COUPLINGS: tuple[Coupling, ...] = (
 
 def _member_couplings(config: CampaignConfig) -> Iterator[Coupling]:
     selected = select_optimizer(config.optimization)
-    for node in selected.member_nodes:
+    for member in selected.members:
+        node = member.name
         knobs, declared = selected.knobs(node), selected.declared_knobs(node)
-        for mc in selected.runtime.couplings.get(node, ()):
+        for mc in member.couplings:
             if ghosts := sorted(set(mc.knobs) - set(type(knobs).model_fields)):
                 raise RuntimeError(f"{node}: coupling {mc.name!r} names unknown knobs {ghosts}.")
             yield Coupling(

@@ -18,8 +18,9 @@ from promptpotter.application.optimizers.nodes import (
     RUN_INIT,
     ArmAuthor,
     Initializer,
+    Reviewer,
     RoundWalk,
-    member_package,
+    source_digest,
 )
 from promptpotter.config.paths import (
     checkin_assets_root,
@@ -50,22 +51,28 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizers.nodes import (
         Adapter,
         Controller,
         Eliminator,
         MintFacts,
         NodeMember,
-        OptimizerRuntime,
         Proposer,
+        ReviewReading,
         Sampler,
         Selector,
     )
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.campaign_config import ArmGateMode
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pool import Access
+    from promptpotter.domain.results import OptimizerFact, RoundResult
+    from promptpotter.domain.round_audit import RoundAudit
+    from promptpotter.domain.scoring import CellSheet
+    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 shapes_optimizer_prompt(__name__)
 
@@ -150,6 +157,11 @@ class RoundPlan:
     selector: Selector
     adapters: tuple[Adapter, ...]
     controller: Controller | None
+
+    @property
+    def round_walks(self) -> tuple[tuple[Proposer, ...], ...]:
+        """The proposers of each walk that is a round of its own: seeds heading round 1 are its."""
+        return (self.proposers, *((self.initial_population,) if self.seeds_alone else ()))
 
     def walk(self, population: Sequence[OptSearchPoint]) -> RoundWalk:
         """A round seeds only where no population stands: a resumed one restores its own."""
@@ -317,7 +329,7 @@ class SelectedOptimizer:
         return self.sampler.round_cells(self.knobs(self.sampler.name), search)
 
     def round_cells_ceiling(self, search: int) -> int:
-        return self.runtime.round_cells_ceiling(self, search)
+        return self.sampler.round_cells_ceiling(self, search)
 
     def node_config(self, name: str) -> dict[str, Any]:
         return dict(self.node(name).current_config)
@@ -391,16 +403,58 @@ class SelectedOptimizer:
         return _knobs(name, self.node(name).kind, self.file_config(name))
 
     @property
-    def runtime(self) -> OptimizerRuntime:
-        return optimizers.RUNTIMES.get(self.name)
+    def members(self) -> tuple[NodeMember, ...]:
+        return tuple(map(optimizers.NODE_MEMBERS.get, self.member_nodes))
+
+    def walk_arms(self, walk: Sequence[Proposer]) -> int:
+        return sum(proposer.arms(self) for proposer in walk)
 
     @property
     def arms_per_round(self) -> int:
-        return self.runtime.arms(self)
+        return max(map(self.walk_arms, self.plan.round_walks))
 
     @property
     def limits(self) -> tuple[OptimizerLimit, ...]:
-        return self.runtime.limits(self)
+        return tuple(limit for member in self.members for limit in member.limits(self))
+
+    def round_facts(self, round_result: RoundResult) -> list[OptimizerFact]:
+        return [fact for member in self.members for fact in member.round_facts(self, round_result)]
+
+    def refuse_origin(self, origin_results: CellSheet) -> None:
+        for member in self.members:
+            member.refuse_origin(origin_results)
+
+    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+        out: dict[int, dict[str, str]] = {}
+        for member in self.members:
+            for round_num, packages in member.round_packages(cycle, rounds).items():
+                out.setdefault(round_num, {}).update(packages)
+        return out
+
+    async def rederive(
+        self,
+        campaign_store: CampaignStore,
+        hop: CycleHop,
+        cycle: Cycle,
+        rounds: list[RoundResult],
+        drifted: list[int],
+    ) -> list[RoundResult]:
+        for member in self.members:
+            rounds = await member.rederive(campaign_store, hop, cycle, rounds, drifted)
+        return rounds
+
+    def review(
+        self,
+        rounds: list[RoundResult],
+        audits: list[RoundAudit | None],
+        *,
+        context_object: list[str],
+    ) -> ReviewReading | None:
+        """``None`` where no member keeps a reading of its own; ``review.md`` then says N/A."""
+        reviewer = next((m for m in self.members if isinstance(m, Reviewer)), None)
+        if reviewer is None:
+            return None
+        return reviewer.review(rounds, audits, context_object=context_object)
 
     @property
     def phases(self) -> frozenset[str]:
@@ -463,11 +517,6 @@ class SelectedOptimizer:
 
     def treatment(self) -> Treatment:
         """Under the bound L4 edit too: two inner cells under two arms are two treatments."""
-        roster = frozenset(
-            package
-            for n in self.member_nodes
-            if (package := member_package(optimizers.NODE_MEMBERS.get(n))) is not None
-        )
         return Treatment(
             optimizer=self.name,
             version=self.version,
@@ -490,7 +539,7 @@ class SelectedOptimizer:
             # What an initializer seeds its pool from is prompt MATERIAL stored as data, which no module digest reads.
             source=stable_hash(
                 [
-                    self.runtime.source_digest(roster, proxies),
+                    source_digest(self.members, proxies),
                     {i.name: i.starting_content(self) for i in self.plan.initializers},
                 ]
             ),
@@ -704,6 +753,11 @@ def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
                 + (f" under `arm_gate: {gate}`" if gate == "author" else "")
             )
         written |= member.writes
+    for walk in selected.plan.round_walks:
+        if not selected.walk_arms(walk):
+            open_.append(f"{[p.name for p in walk]} add no arm: no member answers a round's arms")
+    if len(reviewers := sorted(n for n, m in members.items() if isinstance(m, Reviewer))) > 1:
+        open_.append(f"{reviewers} each answer review.md's reading, which one member answers")
     return open_
 
 
@@ -712,7 +766,7 @@ def resolve_optimizer(
 ) -> SelectedOptimizer:
     """The roster must close as *gate* walks it: under ``author``, the seat in its proposers' place."""
     try:
-        shipped = optimizers.RUNTIMES.get(name).manifest_dir
+        shipped = optimizers.MANIFESTS.get(name).directory
     except KeyError as exc:
         raise NotFoundError(f"No optimizer named {name!r}", code="optimizer_unknown") from exc
     path = optimizer_manifest_path(shipped)

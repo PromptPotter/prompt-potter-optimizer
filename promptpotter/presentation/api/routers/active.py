@@ -75,7 +75,7 @@ def get_optimizer_pipeline(
 
 @active_router.get("/optimizers", tags=["Optimizer"], response_model=OptimizerRoster)
 def get_optimizers() -> OptimizerRoster:
-    """The optimizers this install can run, one per registered runtime: what ``optimization.optimizer`` accepts."""
+    """The optimizers this install can run, one per registered manifest: what ``optimization.optimizer`` accepts."""
     return optimizer_roster()
 
 

@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import Field
 
 from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
 from promptpotter.domain.strict_model import FrozenModel
-
-GepaManifest = Literal["gepa"]
-GEPA_MANIFEST: GepaManifest = "gepa"
 
 
 class ParetoSet(StateSlice, kind="pareto_set"):

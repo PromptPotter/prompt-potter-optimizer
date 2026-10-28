@@ -121,11 +121,11 @@ A decision a resume re-derives, or one it only archives.
    `PotterCheckpointKind`, `optimizers/potter/records.py`) — or, for a plugin, its own string.
 2. A member records it with `ctx.read(Replay).decide(kind, inputs, outcome)` (`bench/node_context.py`), which
    stamps its node and round; the bench's own go through `record_decision`.
-3. If a resume must re-derive it, register a replayer for the kind on the optimizer runtime's
+3. If a resume must re-derive it, register a replayer for the kind on the deciding member's
    `replayers`. **Registering one IS the gating**: a kind with none is archived and never compared.
 
 **Guard (no standing test), run where the registries complete
-(`wiring.py::complete_registries`):** `replayers.py::replayers` refuses two runtimes claiming one
+(`wiring.py::complete_registries`):** `replayers.py::replayers` refuses two members claiming one
 kind. `cli/commands/launch.py::divergence_hint` lists the checked kinds off that table.
 
 ---
@@ -183,11 +183,12 @@ through the same `DispatchHub` fill path as every other node — adding a slot i
 `injection_table()`. Keep every optimizer LLM call on `bench/llm_call.py::llm_call` — an unwrapped
 call is an automatic block at review, not a test.
 
-**A whole optimizer is one package and edits nothing outside it:** `members.py` exports `MEMBERS`
-and `RUNTIME` (a plugin ships them through the two entry-point groups), the runtime's
-`manifest_dir` holds its `pipeline.yaml`, each kind of state it banks is a `StateSlice` (across
-rounds) or a `RoundOutput` (one round's) registered under its own `kind`, and its decision kinds a
-`CheckpointKind` its runtime gates. [`examples/optimizer-plugin/`](../../examples/optimizer-plugin/)
+**A whole optimizer is one package and edits nothing outside it:** `members.py` exports `MEMBERS`,
+its manifest is a directory holding `pipeline.yaml` (a plugin ships both through the two
+entry-point groups, the directory as a `ManifestDir`), each kind of state it banks is a `StateSlice`
+(across rounds) or a `RoundOutput` (one round's) registered under its own `kind`, and its decision
+kinds a `CheckpointKind` its members' `replayers` gate. A mix of other optimizers' members is a
+manifest alone. [`examples/optimizer-plugin/`](../../examples/optimizer-plugin/)
 is that package, and the [offline run](offline-run.md) runs it as the proof.
 
 ---

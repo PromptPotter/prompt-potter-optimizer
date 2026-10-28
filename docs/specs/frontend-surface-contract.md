@@ -140,8 +140,8 @@ invariants:
                       `run_limits.optimizer`), never from a default or a name test; the check-in
                       picks from `GET /optimizers`. What an optimizer says in its own words rides
                       its declarations — the manifest''s `phases`
-                      (application/optimizer_manifest.py), the runtime''s `opening` and
-                      `round_facts` (optimizers/nodes.py::OptimizerRuntime), its eliminator''s
+                      (application/optimizer_manifest.py), its members'' `opening` and
+                      `round_facts` (optimizers/nodes.py::Member), its eliminator''s
                       `Elimination.reason` (domain/arms.py::arm_elimination) and its
                       manifest''s node `description`s — rendered as served.'
 ```

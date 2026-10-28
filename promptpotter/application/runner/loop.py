@@ -143,9 +143,7 @@ async def run_round_loop(
                     diagnosed = RoundContext(cycle=cycle, round_num=round_num, callbacks=cb)
                     await controller.diagnose(NodeContext(diagnosed, controller))
                     with at_round(round_num + 1):
-                        await cycle.optimizer.runtime.show_round(
-                            replace(diagnosed, round_num=round_num + 1)
-                        )
+                        await controller.show_round(replace(diagnosed, round_num=round_num + 1))
                     return LoopEnd(StopReason.DIAG_COMPLETE)
             round_num += 1
 

@@ -44,7 +44,7 @@ def render_review_md(
     ctx_items = [c for c in (context_object or []) if c.strip()]
 
     final = index.final
-    review = optimizer.runtime.review(list(rounds), round_audits, ctx_items)
+    review = optimizer.review(list(rounds), round_audits, context_object=ctx_items)
     clock = final.wall_clock if final else None
     stats = review.stats if review is not None else None
 

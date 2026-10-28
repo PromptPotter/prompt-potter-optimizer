@@ -44,7 +44,7 @@ and survival are members registered once and named by any manifest, so "does rec
   `closed` readers becomes an entry first), **arity** (the child carries every parent edge).
 - **Loci**: it reads the open set and never widens it — owned by [`../architecture.md`](../architecture.md) § The controlled comparison.
 - **Lineage**: every node that shaped a child is on it, in walk order, never overwritten.
-- **Treatment**: a deterministic member's code is in its optimizer's `Treatment` — owned by [`../architecture.md`](../architecture.md) § Three identities.
+- **Treatment**: every roster member's module, and every module shaping its prompts, is in its optimizer's `Treatment` (`optimizers/nodes.py::source_digest`) — owned by [`../architecture.md`](../architecture.md) § Three identities.
 
 **Parent choice is the opening node's, survival the selector's** — never a variation node's; each takes a
 rule knob (uniform · tournament · softmax · Pareto-lead · complementary; top-μ · one-to-one · archive insert).

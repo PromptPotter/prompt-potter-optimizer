@@ -6,7 +6,7 @@ This page is the node model and the **strict wire shape** PromptPotter parses fr
 
 ## Pipeline declaration format
 
-Both backends and every optimizer declare pipelines in this shape (shown as JSON, the wire form; authored as YAML). An optimizer's lives in its runtime's `manifest_dir` (a built-in's is `promptpotter/assets/optimizers/{name}/pipeline.yaml`); a backend's is served by `GET /pipeline`.
+Both backends and every optimizer declare pipelines in this shape (shown as JSON, the wire form; authored as YAML). An optimizer's lives in its registered manifest directory (`optimizers/__init__.py::ManifestDir`; a built-in's is `promptpotter/assets/optimizers/{name}/pipeline.yaml`); a backend's is served by `GET /pipeline`.
 
 ```json
 {
@@ -131,8 +131,9 @@ manifests reads that context alone** — the readings it declares it `sees`, the
 `reads` / `writes`, the members it `consults`. A roster where any of those is not closed by exactly
 one member is refused at load, and so is a read the member cannot hold (`CycleRead.refusal`). A
 child is made through `Children.child` / `Children.edit`, so its lineage
-names every node that wrote it and the loci each moved. What an optimizer needs of the harness
-itself is its runtime's (`OptimizerRuntime`).
+names every node that wrote it and the loci each moved. What an optimizer tells the harness
+itself — its arms, prompt sources, replayers, limits, facts — is a declaration of the member that
+owns it (`nodes.py::Member`), and a backbone fact no member answers, or two do, is refused at load.
 
 | Type | Reads | Returns | Binds it |
 |---|---|---|---|

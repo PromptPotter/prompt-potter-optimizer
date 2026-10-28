@@ -132,7 +132,7 @@ async def _replay_line(
     prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)
 
     # Fingerprinted BEFORE the repair, so the corrected set differs by exactly what it changed.
-    packages_before = cycle.optimizer.runtime.round_packages(cycle, prior)
+    packages_before = cycle.optimizer.round_packages(cycle, prior)
     cycle.replay_priors(prior)
     # Over the cycle's whole history: a fork's lifted rounds made theirs on its parent's ledger.
     standing = campaign_store.standing_rounds(hop, moment=None)

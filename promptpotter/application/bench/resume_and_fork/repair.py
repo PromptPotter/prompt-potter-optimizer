@@ -272,7 +272,7 @@ async def apply_correction(
     corrected = [*mended, *prior[cut.resume_at :]]
     mismatches, drifted = _package_drift(
         packages_before,
-        cycle.optimizer.runtime.round_packages(cycle, corrected),
+        cycle.optimizer.round_packages(cycle, corrected),
         {t.round for t in corrected},
         campaign_store,
         hop,
@@ -296,7 +296,7 @@ async def apply_correction(
         repair_target,
     )
     if drifted:
-        corrected = await cycle.optimizer.runtime.rederive(
+        corrected = await cycle.optimizer.rederive(
             campaign_store, branch, cycle, corrected, drifted
         )
 

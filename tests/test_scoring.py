@@ -68,8 +68,6 @@ from promptpotter.application.intelligence.rasch import (
 from promptpotter.application.jobs.launcher.admission import PassStoppedError, paid_pass
 from promptpotter.application.optimizer_manifest import binding_optimizer, resolve_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
-from promptpotter.application.optimizers import paper_templates
-from promptpotter.application.optimizers.capo import prompts as capo_prompts
 from promptpotter.application.optimizers.capo.state import CapoObjective
 from promptpotter.application.optimizers.gepa.members import MinibatchGate
 from promptpotter.application.optimizers.gepa.state import MinibatchBar, MinibatchBars
@@ -1290,14 +1288,15 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     ], "a decision reads a survey start off the same cells"
 
     # One round composes a peer's crossover and its state-reading selector with potter's race.
-    name = "ga-composition"
+    name = "capo-pobb"
     capo = yaml.safe_load((optimizers_root() / "capo" / "pipeline.yaml").read_text("utf-8"))
     potter = yaml.safe_load((optimizers_root() / "potter" / "pipeline.yaml").read_text("utf-8"))
     seed = ["capo_init"]
     walk = ["blocks", "mating", "capo_crossover", "pobb", "score", "population"]
-    manifest_dir = tmp_path / name
-    manifest_dir.mkdir()
-    (manifest_dir / "resolved_schemas.json").write_text("{}", "utf-8")
+    # Each variant shadows the shipped mix from the operator's home, as an install's edit does.
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "home"))
+    manifest_dir = tmp_path / "home" / "optimizers" / name
+    manifest_dir.mkdir(parents=True)
 
     writes = count(1)
 
@@ -1334,17 +1333,6 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         stamp = manifest.stat().st_mtime_ns + next(writes) * 1_000_000_000
         os.utime(manifest, ns=(stamp, stamp))
 
-    class Composed(node_contract.OptimizerRuntime):
-        prompt_sources = (paper_templates, capo_prompts)
-
-        def arms(self, _selected: Any) -> int:
-            return 2
-
-    Composed.name, Composed.manifest_dir = name, manifest_dir
-    shipped, origins = optimizers.RUNTIMES.table, optimizers.RUNTIMES.origins
-    monkeypatch.setitem(
-        vars(optimizers.RUNTIMES), "_loaded", ({**shipped, name: Composed()}, origins)
-    )
     open_rosters: dict[str, tuple[list[str], tuple[str, ...]]] = {
         "a race reading its μ off a selector the roster lacks": (
             ["blocks", "mating", "capo_crossover", "paired_t", "score", "theta_election"],

@@ -1,4 +1,4 @@
-"""GEPA's node members and runtime; every ``Alg.`` reference is arXiv 2507.19457's."""
+"""GEPA's node members; every ``Alg.`` reference is arXiv 2507.19457's."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import cell_objectives
 from promptpotter.application.optimizers.gepa import prompts
 from promptpotter.application.optimizers.gepa.state import (
-    GEPA_MANIFEST,
     MinibatchBar,
     MinibatchBars,
     ParetoScores,
@@ -29,7 +28,6 @@ from promptpotter.application.optimizers.gepa.state import (
 )
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
-from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.arms import Cut, Elimination, Measured
 from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.paired_reading import ArmKey
@@ -40,7 +38,6 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from types import ModuleType
 
     from promptpotter.application.bench.cycle import Cycle
@@ -137,6 +134,14 @@ class GepaReflect(nodes.Member):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
         {Calls, Children, Frontier, Lineage, Target}
     )
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
+
+    def arms(self, _selected: SelectedOptimizer) -> int:
+        return 1
+
+    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+        # The parent a round reflects on is drawn off every earlier round's Pareto-set scores.
+        return nodes.rows_read_packages(rounds, [self.name])
 
     async def propose(self, ctx: NodeContext, panel: Panel, _proposals: Proposals) -> Proposals:
         candidates = ctx.slice(ParetoScores)
@@ -293,6 +298,14 @@ class _GateRace(nodes.NoCatchUps):
         return None
 
 
+def _replay_minibatch_gate(
+    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
+) -> bool:
+    rows = ctx.round_data.rows(ArmKey(inputs_ref["arm"]))
+    accepted, _, _ = minibatch_improves(inputs_ref["parent_scores"], cell_objectives(rows))
+    return accepted
+
+
 class MinibatchGate(nodes.Member):
     name: ClassVar[str] = "minibatch_gate"
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
@@ -300,6 +313,9 @@ class MinibatchGate(nodes.Member):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Replay})
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = {}
     stop_disqualifies: ClassVar[bool] = True
+    replayers: ClassVar[Mapping[str, Replayer]] = {
+        GepaCheckpointKind.MINIBATCH_GATE: _replay_minibatch_gate
+    }
 
     def race(self, ctx: NodeContext, panel: Panel, _catch_up: CatchUpFn) -> _GateRace:
         return _GateRace(
@@ -358,6 +374,33 @@ class Pareto(nodes.Member):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
     elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
+
+    def round_facts(
+        self, _selected: SelectedOptimizer, round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        banked = round_result.closed_state
+        if not (scores := banked.slice(ParetoScores).scores):
+            return []
+        arms = round_result.panel.values()
+        accepted = sum(1 for arm in arms if isinstance(arm, Measured))
+        rejected = sum(1 for arm in arms if isinstance(arm, Cut) and arm.kind == "eliminated")
+        leading = len(pareto_frequencies(scores, banked.slice(ParetoSet).keys))
+        return [
+            OptimizerFact(
+                key="minibatch",
+                label="Minibatch",
+                text=f"{accepted} accepted · {rejected} rejected",
+                value=accepted,
+                kind="stat",
+            ),
+            OptimizerFact(
+                key="pareto_front",
+                label="Pareto front",
+                text=f"{leading} of {len(scores)} scored",
+                value=leading,
+                kind="stat",
+            ),
+        ]
 
     def parent_cells(
         self,
@@ -427,56 +470,4 @@ class Pareto(nodes.Member):
         )
 
 
-def _replay_minibatch_gate(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
-) -> bool:
-    rows = ctx.round_data.rows(ArmKey(inputs_ref["arm"]))
-    accepted, _, _ = minibatch_improves(inputs_ref["parent_scores"], cell_objectives(rows))
-    return accepted
-
-
-class GepaRuntime(nodes.OptimizerRuntime):
-    name: ClassVar[str] = GEPA_MANIFEST
-    manifest_dir: ClassVar[Path] = optimizers_root() / GEPA_MANIFEST
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
-    replayers: ClassVar[Mapping[str, Replayer]] = {
-        GepaCheckpointKind.MINIBATCH_GATE: _replay_minibatch_gate,
-    }
-
-    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        # The parent a round reflects on is drawn off every earlier round's Pareto-set scores.
-        return nodes.rows_read_packages(rounds, [GepaReflect.name])
-
-    def arms(self, _selected: SelectedOptimizer) -> int:
-        return 1
-
-    def round_facts(
-        self, _selected: SelectedOptimizer, round_result: RoundResult
-    ) -> list[OptimizerFact]:
-        banked = round_result.closed_state
-        if not (scores := banked.slice(ParetoScores).scores):
-            return []
-        arms = round_result.panel.values()
-        accepted = sum(1 for arm in arms if isinstance(arm, Measured))
-        rejected = sum(1 for arm in arms if isinstance(arm, Cut) and arm.kind == "eliminated")
-        leading = len(pareto_frequencies(scores, banked.slice(ParetoSet).keys))
-        return [
-            OptimizerFact(
-                key="minibatch",
-                label="Minibatch",
-                text=f"{accepted} accepted · {rejected} rejected",
-                value=accepted,
-                kind="stat",
-            ),
-            OptimizerFact(
-                key="pareto_front",
-                label="Pareto front",
-                text=f"{leading} of {len(scores)} scored",
-                value=leading,
-                kind="stat",
-            ),
-        ]
-
-
 MEMBERS = (Minibatch(), GepaReflect(), MinibatchGate(), Pareto())
-RUNTIME = GepaRuntime()

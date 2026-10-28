@@ -38,7 +38,7 @@ BASELINE = {
     "domain_any_maps": 65,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 9,
-    # Injections the optimizers' runtimes price — each a block an optimizer prompt can carry.
+    # Injections the optimizers' members price — each a block an optimizer prompt can carry.
     "injections": 29,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
     # transition written as a branch beside the tables was policy the count could not see.
@@ -483,8 +483,8 @@ def compute_ledger() -> dict[str, int]:
         ],
     )
     priced: collections.Counter[str] = collections.Counter()
-    for runtime in optimizers.RUNTIMES.table.values():
-        priced.update(runtime.priced_surface)
+    for member in optimizers.NODE_MEMBERS.table.values():
+        priced.update(member.priced_surface)
     read = _read_names(sites)
     test_files, test_functions = _count_tests()
 

@@ -287,7 +287,7 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
 
 def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     cycle = ctx.cycle
-    opening = cycle.optimizer.runtime.opening(ctx, walk)
+    opening = walk.members[0].opening(ctx, walk)
     fold = cycle.parent_fold
     node = walk.proposer
     cb = ctx.callbacks
@@ -508,7 +508,7 @@ async def close_round(
     cb: RunCallbacks,
 ) -> RoundResult:
     stood = round_result.model_copy(update={"optimizer_state": cycle.close_state(round_num)})
-    facts = cycle.optimizer.runtime.round_facts(cycle.optimizer, stood)
+    facts = cycle.optimizer.round_facts(stood)
     closing = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
     flush_pending_decisions(cycle, cb.ledger)
     offset, cycle.standing = cb.on_round_close(

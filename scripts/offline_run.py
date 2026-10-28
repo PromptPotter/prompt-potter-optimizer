@@ -116,22 +116,18 @@ BENCH: dict[str, Any] = {
 }
 ROUND_CELLS = 20
 # Paper configurations scaled to a few-hundred-row bank, so a race cuts within a few rounds.
-SCALED: dict[str, dict[str, dict[str, Any]]] = {
-    "capo": {
-        "blocks": {"config": {"block_size": 5, "max_blocks": 4}},
-        "paired_t": {"config": {"alpha": 0.2}},
-        "population": {"config": {"size": 4}},
-        "capo_init": {"config": {"size": 4, "k_max": 2}},
-        "mating": {"config": {"offspring": 2}},
-        "few_shot": {"config": {"k_max": 2}},
-    },
-    "gepa": {"minibatch": {"config": {"pareto_size": 20}}},
-    "levi": {
-        "proxy_css": {"config": {"discovery": 40, "size": 10}},
-        "levi_paradigm_shift": {"config": {"interval": 4}},
-        "levi_seed": {"config": {"n_diverse_seeds": 2}},
-        "map_elites": {"config": {"centroids": 8, "cvt_samples": 400}},
-    },
+SCALED: dict[str, dict[str, Any]] = {
+    "blocks": {"config": {"block_size": 5, "max_blocks": 4}},
+    "paired_t": {"config": {"alpha": 0.2}},
+    "population": {"config": {"size": 4}},
+    "capo_init": {"config": {"size": 4, "k_max": 2}},
+    "mating": {"config": {"offspring": 2}},
+    "few_shot": {"config": {"k_max": 2}},
+    "minibatch": {"config": {"pareto_size": 20}},
+    "proxy_css": {"config": {"discovery": 40, "size": 10}},
+    "levi_paradigm_shift": {"config": {"interval": 4}},
+    "levi_seed": {"config": {"n_diverse_seeds": 2}},
+    "map_elites": {"config": {"centroids": 8, "cvt_samples": 400}},
 }
 LISTED = 15
 
@@ -390,7 +386,8 @@ def campaign_config(optimizer: str, rounds: int, *, bench_trigger: BenchTrigger)
         determinism={"seed": 0},
     )
     if optimizer != templated:
-        opt["nodes"] = SCALED.get(optimizer, {})
+        roster = resolve_optimizer(optimizer, {}, gate="off").manifest.nodes
+        opt["nodes"] = {node: block for node, block in SCALED.items() if node in roster}
     sampler = select_optimizer(CampaignConfig.model_validate(raw).optimization).sampler
     if sampler.size_knob is not None:
         nodes = opt.setdefault("nodes", {})
@@ -933,7 +930,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
 def digests() -> dict[str, str]:
     complete_registries()
     out = {"estimator": module_source_digest(*measurement_modules())}
-    for name in sorted(optimizers.RUNTIMES.table):
+    for name in sorted(optimizers.MANIFESTS.table):
         out[f"treatment:{name}"] = resolve_optimizer(name, {}, gate="off").treatment().digest
     return out
 
@@ -1091,7 +1088,9 @@ def main() -> int:
     complete_registries()
     arm_names = args.optimizer or ["potter", "capo"]
     names = (
-        list(CONTROLLED) if args.controlled else args.optimizer or sorted(optimizers.RUNTIMES.table)
+        list(CONTROLLED)
+        if args.controlled
+        else args.optimizer or sorted(optimizers.MANIFESTS.table)
     )
     stamp["workspaces"] = names
     (home / STAMP).write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")

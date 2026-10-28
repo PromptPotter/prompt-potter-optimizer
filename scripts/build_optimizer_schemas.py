@@ -18,10 +18,10 @@ def _manifests() -> dict[Path, Mapping[str, type[BaseModel]]]:
     out: dict[Path, Mapping[str, type[BaseModel]]] = {
         checkin_assets_root(): {"checkin": CheckinOutput}
     }
-    for runtime in optimizers.RUNTIMES.table.values():
-        declared = read_yaml(runtime.manifest_dir / "pipeline.yaml").get("nodes") or {}
+    for manifest in optimizers.MANIFESTS.table.values():
+        declared = read_yaml(manifest.directory / "pipeline.yaml").get("nodes") or {}
         # Manifest order: the file's key order is the committed artifact's.
-        out[runtime.manifest_dir] = {
+        out[manifest.directory] = {
             node: model
             for node in declared
             if node in stated and (model := stated[node].response_model) is not None

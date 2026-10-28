@@ -1,4 +1,4 @@
-"""Potter's half of resume and fork; the generic half, ``bench/resume_and_fork/``, reaches it only through ``OptimizerRuntime``."""
+"""Potter's half of resume and fork; the generic half, ``bench/resume_and_fork/``, reaches it only through its members' declarations."""
 
 from __future__ import annotations
 
@@ -107,8 +107,10 @@ def _replay_leader_lock_in(
 
 
 # The two escalation triggers are archived: each folds the cycle's escalation history, which no replayer holds.
-POTTER_REPLAYERS: dict[str, Replayer] = {
+ELECTION_REPLAYERS: dict[str, Replayer] = {
     PotterCheckpointKind.ROUND_WINNER: _replay_round_winner,
+}
+RACE_REPLAYERS: dict[str, Replayer] = {
     PotterCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
     PotterCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
 }
