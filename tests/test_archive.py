@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import httpx
 import pytest
 from factories import (
     LLM_ONLY,
@@ -168,7 +169,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
-from promptpotter.shared.errors import LedgerUnreadableError, PayloadInvalidError
+from promptpotter.shared.errors import ConflictError, LedgerUnreadableError, PayloadInvalidError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -1594,7 +1595,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     # hole: its fingerprints decide EQUIVALENT against SUPERSEDE.
     repair_bank = samples(4, "g")
     repair_origin, holed = prompted(instruction="origin"), ArmKey(prompted(instruction="c1").id)
-    offline.llm.says = lambda _body: json.dumps({"priority_fix": "framing: re-read the claim"})
 
     async def _answered(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
         return MeasuredCell(
@@ -1681,6 +1681,18 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         assert readout is not None, "guard: round 1 banked a critique"
         return readout["priority_fix"]
 
+    offline.llm.says = lambda _body: httpx.Response(400, json={"error": "refused"})
+    with pytest.raises(ConflictError):
+        repaired("cycle_unrederived", consumed=False)
+    cycles = Path(
+        stores.campaigns.cycle_dir(
+            CycleHop(campaign_id="cycle_unrederived__20260101-000000", cycle_id="cycle_unrederived")
+        )
+    ).parent
+    assert [d.name for d in cycles.iterdir()] == ["cycle_unrederived"], (
+        "a round its member could not re-derive was graded on a branch holding the stale state"
+    )
+    offline.llm.says = lambda _body: json.dumps({"priority_fix": "framing: re-read the claim"})
     ran, unread_branch = repaired("cycle_unread", consumed=False)
     assert fork_direction(unread_branch) is ForkDirection.EQUIVALENT, (
         "a correction no later round read forked the line off its parent"

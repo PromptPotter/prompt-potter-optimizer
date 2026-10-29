@@ -107,7 +107,7 @@ acting.
   `NodeContext.bank_proposals` returns silently on an unbound ledger where `_bank` asserts one.
   Action: one restatement seam taking the hop; one posture on a missing ledger. **Re-test:**
   `git grep -n "restated_state(" -- promptpotter` names one caller.
-- **Fingerprinting a repair moves the live `Cycle`**: `repair.py::round_packages` and `_rederive`
+- **Fingerprinting a repair moves the live `Cycle`**: `repair.py::round_packages` and `_rederived`
   seat the run's own cycle round by round (`Cycle.replay_priors`, which reseats `rounds`,
   `population`, `slices` and the ruler) and reseat it after; `round_packages` holds no `finally`, so a
   raising member leaves the cycle on a past round. Each seat also re-copies every round
@@ -117,11 +117,6 @@ acting.
 - **A repair takes `session` beside `cycle`** (`apply_correction`, `repair_incomplete_rounds`):
   `cycle.session` is that session, two doors into one state. The re-bank warning also fires on zero
   retired candidates. **Re-test:** neither takes a `Session`.
-- **`RoundPlan` holds each role in its own field beside the `RoundRole` that orders them**:
-  `RoundPlan.first_walk` maps a role to its field by `match`, and `runner/round.py::_Walking` carries
-  each role's output in an optional slot narrowed by asserts. Action: the plan keyed by role, each
-  role's output typed for the role that reads it. **Re-test:** `git grep -c "assert self\." --
-  promptpotter/application/runner/round.py` is 0.
 - **`default` names two walks**: the optimizer manifest's round walk (a bare `"default"` at each
   `optimizer_manifest.py` site, beside the `INITIAL_POPULATION` / `RUN_INIT` constants) and the
   backend's pipeline (`domain/pipeline_schema.py`). **Re-test:** the round walk read through one

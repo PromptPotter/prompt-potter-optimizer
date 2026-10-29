@@ -7,7 +7,7 @@ import json
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import Field
 
@@ -176,19 +176,20 @@ class RoundPlan:
     """What the bench walks, by role: built once, at load, so a walk the bench cannot run is refused before a mint."""
 
     initializers: tuple[Initializer, ...]
-    measurement: str
-    sampler: Sampler
     initial_population: tuple[Proposer, ...]
     # Its own round, read against C0 (LEVI's calibration); else the seeds race round 1's offspring (CAPO).
     seeds_alone: bool
+    gate: ArmGateMode
+    # `default`'s walk, a field per role in `RoundRole`'s order.
+    sampler: Sampler
     proposers: tuple[Proposer, ...]
+    measurement: str
     eliminator: Eliminator | None
     selector: Selector
-    # Absent, the selector's `ranked` is the next population whole.
+    # Absent, the selector's ``ranked`` is the next population whole.
     survivor: Survivor | None
     adapters: tuple[Adapter, ...]
     controller: Controller | None
-    gate: ArmGateMode
 
     @property
     def round_walks(self) -> dict[str, tuple[Proposer, ...]]:
@@ -204,27 +205,13 @@ class RoundPlan:
             return RoundWalk(INITIAL_POPULATION, (), self.initial_population, self.gate)
         return RoundWalk("default", self.initial_population, self.proposers, self.gate)
 
-    def first_walk(self, role: RoundRole) -> tuple[NodeMember, ...]:
-        """*role*'s members as the first rounds walk them: seeds alone walk a round of their own, and the arms' proposers after it close as if it wrote nothing."""
-        match role:
-            case RoundRole.SAMPLER:
-                return (self.sampler,)
-            case RoundRole.PROPOSER:
-                first = self.walk(stands=False)
-                after = self.walk(stands=True).steps if first.pipeline == INITIAL_POPULATION else ()
-                return (*first.steps, *after)
-            case RoundRole.MEASUREMENT:
-                return () if self.eliminator is None else (self.eliminator,)
-            case RoundRole.SELECTOR:
-                return (self.selector,)
-            case RoundRole.SURVIVOR:
-                return () if self.survivor is None else (self.survivor,)
-            case RoundRole.ADAPTER:
-                return self.adapters
-            case RoundRole.CONTROLLER:
-                return () if self.controller is None else (self.controller,)
-            case unreachable:
-                assert_never(unreachable)
+    @property
+    def first_walk(self) -> tuple[NodeMember, ...]:
+        """Every role's members as the first rounds walk them: seeds alone walk a round of their own, and the arms' proposers after it close as if it wrote nothing."""
+        first = self.walk(stands=False)
+        after = self.walk(stands=True).steps if first.pipeline == INITIAL_POPULATION else ()
+        walked = (self.sampler, *first.steps, *after, self.eliminator, self.selector, self.survivor)
+        return tuple(m for m in (*walked, *self.adapters, self.controller) if m is not None)
 
 
 def _walk_refused(name: str, why: str) -> PayloadInvalidError:
@@ -246,7 +233,7 @@ def _round_plan(
     at = 0
     for node in walk:
         kind = declared[node]
-        rank = next((i for i in range(at, len(roles)) if kind in roles[i].value), None)
+        rank = next((i for i in range(at, len(roles)) if kind in roles[i].admits), None)
         if rank is None:
             raise _walk_refused(
                 name,
@@ -258,25 +245,19 @@ def _round_plan(
         held[roles[at]].append(node)
 
     gateways = [n for n in held[RoundRole.MEASUREMENT] if declared[n] is NodeKind.GATEWAY]
-
-    def members_of(role: RoundRole) -> list[Any]:
-        return [optimizers.NODE_MEMBERS.get(n) for n in held[role] if n not in gateways]
-
-    samplers: list[Sampler] = members_of(RoundRole.SAMPLER)
-    proposers: list[Proposer] = members_of(RoundRole.PROPOSER)
-    eliminators: list[Eliminator] = members_of(RoundRole.MEASUREMENT)
-    selectors: list[Selector] = members_of(RoundRole.SELECTOR)
-    survivors: list[Survivor] = members_of(RoundRole.SURVIVOR)
-    adapters: list[Adapter] = members_of(RoundRole.ADAPTER)
-    controllers: list[Controller] = members_of(RoundRole.CONTROLLER)
+    members = {
+        role: tuple(optimizers.NODE_MEMBERS.get(n) for n in held[role] if n not in gateways)
+        for role in roles
+    }
+    counts = {role: len(walked) for role, walked in members.items()}
     if (
         len(gateways) != 1
-        or len(samplers) != 1
-        or len(selectors) != 1
-        or not proposers
-        or len(eliminators) > 1
-        or len(survivors) > 1
-        or len(controllers) > 1
+        or counts[RoundRole.SAMPLER] != 1
+        or counts[RoundRole.SELECTOR] != 1
+        or not counts[RoundRole.PROPOSER]
+        or counts[RoundRole.MEASUREMENT] > 1
+        or counts[RoundRole.SURVIVOR] > 1
+        or counts[RoundRole.CONTROLLER] > 1
     ):
         raise _walk_refused(
             name,
@@ -288,7 +269,12 @@ def _round_plan(
         cast("Proposer", optimizers.NODE_MEMBERS.get(n))
         for n in schema.pipelines.get(INITIAL_POPULATION, ())
     ]
-    for pipeline, walked in (("default", proposers), (INITIAL_POPULATION, initial)):
+    proposers = cast("tuple[Proposer, ...]", members[RoundRole.PROPOSER])
+    walks: tuple[tuple[str, Sequence[Proposer]], ...] = (
+        ("default", proposers),
+        (INITIAL_POPULATION, initial),
+    )
+    for pipeline, walked in walks:
         if misplaced := [
             p.name for at, p in enumerate(walked) if p.proposes == ("edits" if at == 0 else "opens")
         ]:
@@ -312,19 +298,23 @@ def _round_plan(
             f"`{RUN_INIT}` walks {strays}, which are no pool initializer: it seeds pools alone.",
         )
     return RoundPlan(
+
+    def one(role: RoundRole) -> Any:
+        return next(iter(members[role]), None)
+
         initializers=tuple(cast("Initializer", m) for m in initializers),
-        measurement=gateways[0],
-        sampler=samplers[0],
         initial_population=tuple(initial),
         seeds_alone=seeds_walk == "alone",
-        proposers=tuple(proposers),
-        eliminator=eliminators[0] if eliminators else None,
-        selector=selectors[0],
-        survivor=survivors[0] if survivors else None,
-        adapters=tuple(adapters),
-        controller=controllers[0] if controllers else None,
         gate=gate,
     )
+        sampler=one(RoundRole.SAMPLER),
+        proposers=proposers,
+        measurement=gateways[0],
+        eliminator=one(RoundRole.MEASUREMENT),
+        selector=one(RoundRole.SELECTOR),
+        survivor=one(RoundRole.SURVIVOR),
+        adapters=cast("tuple[Adapter, ...]", members[RoundRole.ADAPTER]),
+        controller=one(RoundRole.CONTROLLER),
 
 
 @dataclass(frozen=True)
@@ -892,7 +882,7 @@ def _walk(selected: SelectedOptimizer) -> tuple[NodeMember, ...]:
     reached = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes if n not in named]
     return (
         *plan.initializers,
-        *(member for role in RoundRole for member in plan.first_walk(role)),
+        *plan.first_walk,
         *reached,
     )
 
