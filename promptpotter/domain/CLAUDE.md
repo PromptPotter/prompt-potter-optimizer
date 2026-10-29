@@ -54,4 +54,5 @@ migration**, fatal one way or the other; which way is correct depends on the pay
 
 A renamed or newly required field cannot be pruned: `application/maintenance/restamp.py::check_readable`
 names each refused cycle's campaign `delete`. **A commit moving a ledger key names `restamp` in its
-body** — the commit-msg hook's `scripts/gate.py::_ledger_fields` refuses it otherwise.
+body** — the commit-msg hook's `scripts/gate.py::_restamp` refuses it otherwise, and so for a
+`BlockPack` key (`docs/specs/block-pack.generated.json`).

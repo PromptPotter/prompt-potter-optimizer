@@ -1,0 +1,369 @@
+{
+  "components": {
+    "schemas": {
+      "Authored": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "experiment": {
+            "title": "Experiment",
+            "type": "string"
+          },
+          "kind": {
+            "const": "authored",
+            "title": "Kind",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
+          },
+          "version": {
+            "minimum": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "author",
+          "date",
+          "experiment",
+          "version",
+          "supersedes",
+          "notes"
+        ],
+        "title": "Authored",
+        "type": "object"
+      },
+      "BlockPack": {
+        "additionalProperties": false,
+        "properties": {
+          "snippets": {
+            "items": {
+              "$ref": "#/components/schemas/Snippet"
+            },
+            "title": "Snippets",
+            "type": "array"
+          },
+          "works": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Work"
+            },
+            "title": "Works",
+            "type": "object"
+          }
+        },
+        "required": [
+          "works",
+          "snippets"
+        ],
+        "title": "BlockPack",
+        "type": "object"
+      },
+      "Cited": {
+        "additionalProperties": false,
+        "properties": {
+          "evolved_on_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evolved On Model"
+          },
+          "evolved_or_authored": {
+            "enum": [
+              "evolved",
+              "authored",
+              "selected"
+            ],
+            "title": "Evolved Or Authored",
+            "type": "string"
+          },
+          "kind": {
+            "const": "cited",
+            "title": "Kind",
+            "type": "string"
+          },
+          "locator": {
+            "title": "Locator",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "reported": {
+            "$ref": "#/components/schemas/Reported"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "technique_family": {
+            "title": "Technique Family",
+            "type": "string"
+          },
+          "verbatim": {
+            "title": "Verbatim",
+            "type": "boolean"
+          },
+          "via": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Via",
+            "type": "array"
+          },
+          "work": {
+            "title": "Work",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "work",
+          "locator",
+          "verbatim",
+          "via",
+          "technique_family",
+          "role",
+          "evolved_or_authored",
+          "evolved_on_model",
+          "reported",
+          "notes"
+        ],
+        "title": "Cited",
+        "type": "object"
+      },
+      "Presumption": {
+        "description": "What a block's text takes for granted of the run it lands in; a run lacking one makes it noise.",
+        "enum": [
+          "ranking",
+          "last_line_answer"
+        ],
+        "title": "Presumption",
+        "type": "string"
+      },
+      "PromptPart": {
+        "description": "A prompt field a snippet suits, one name for a target and an optimizer prompt alike: a drop elsewhere is shown, never refused.",
+        "enum": [
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format"
+        ],
+        "title": "PromptPart",
+        "type": "string"
+      },
+      "Reported": {
+        "additionalProperties": false,
+        "properties": {
+          "baseline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baseline"
+          },
+          "benchmark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark"
+          },
+          "evaluated_on_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evaluated On Models",
+            "type": "array"
+          },
+          "lift": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lift"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "task_family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Family"
+          }
+        },
+        "required": [
+          "task_family",
+          "benchmark",
+          "evaluated_on_models",
+          "score",
+          "lift",
+          "baseline"
+        ],
+        "title": "Reported",
+        "type": "object"
+      },
+      "Snippet": {
+        "additionalProperties": false,
+        "properties": {
+          "presumes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/Presumption"
+            },
+            "title": "Presumes",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "provenance": {
+            "discriminator": {
+              "mapping": {
+                "authored": "#/components/schemas/Authored",
+                "cited": "#/components/schemas/Cited"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Cited"
+              },
+              {
+                "$ref": "#/components/schemas/Authored"
+              }
+            ],
+            "title": "Provenance"
+          },
+          "suits": {
+            "items": {
+              "$ref": "#/components/schemas/PromptPart"
+            },
+            "minItems": 1,
+            "title": "Suits",
+            "type": "array",
+            "uniqueItems": true
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "suits",
+          "tags",
+          "provenance"
+        ],
+        "title": "Snippet",
+        "type": "object"
+      },
+      "Work": {
+        "additionalProperties": false,
+        "properties": {
+          "first_author": {
+            "title": "First Author",
+            "type": "string"
+          },
+          "license": {
+            "title": "License",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "first_author",
+          "year",
+          "title",
+          "license"
+        ],
+        "title": "Work",
+        "type": "object"
+      }
+    }
+  },
+  "description": "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`.\n\nThe shape a `block_packs/{name}/pack.json` must hold to be read, install's and account's alike:\nwhat `python -m promptpotter restamp` prunes an account's pack against, and what the gate's\n`restamp` check compares across a commit.\n",
+  "title": "Block pack"
+}

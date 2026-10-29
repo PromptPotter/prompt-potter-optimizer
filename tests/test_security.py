@@ -419,7 +419,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     assert [s.text for s in library(eve.block_packs).snippets] == [seed.text], (
         "one account's edit reached another account's library"
     )
-    assert eve.block_packs.missing([ACCOUNT_PACK]) == [ACCOUNT_PACK], (
+    assert eve.block_packs.unread([ACCOUNT_PACK]).keys() == {ACCOUNT_PACK}, (
         "a run naming its account's pack drew another account's"
     )
 

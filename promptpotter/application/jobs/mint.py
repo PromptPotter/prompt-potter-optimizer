@@ -26,6 +26,8 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.preflight import (
     check_search_split_holds_round,
+    measured_cell_usd,
+    refuse_arm_below_round,
     refuse_below_reasoning_floor,
     refuse_unfit_pipeline,
     refuse_unpriced,
@@ -79,6 +81,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import TaskDecomposition
+    from promptpotter.domain.spend import Budget
     from promptpotter.domain.treatment import Treatment
     from promptpotter.infrastructure.store.stores import Stores
 
@@ -509,9 +512,11 @@ async def mint_framed_cycle(
     *,
     campaign_id: str,
     task_text: str | None,
+    admitted: Budget,
     origin_override: dict[str, NodePrompt] | None = None,
 ) -> MintedCycle:
-    """An L4 inner cell mints through ``mint``, so cells never race to decompose."""
+    """An L4 inner cell mints through ``mint``, so cells never race to decompose. *admitted* is
+    what the launch's admission held, the ceiling an arm is refused under before it takes a key."""
     campaign_config = effective_config(declaration)
     if isinstance(declaration.purpose, Compare):
         if task_text or origin_override:
@@ -525,6 +530,14 @@ async def mint_framed_cycle(
             )
     # Every refusal the mint owes, before the check-in below bills.
     plan = resolve_cycle_plan(session, declaration, dataset, origin_override=origin_override)
+    refuse_arm_below_round(
+        declaration.purpose,
+        plan.optimizer,
+        cap_usd=admitted.usd,
+        search=len(plan.partition.search),
+        measured_cell_usd=measured_cell_usd(plan.session, plan.pipeline_params),
+        minted=None,
+    )
     description = _description_to_decompose(session, campaign_config, task_text)
     if description is None:
         minted = _mint_door(plan, campaign_id=campaign_id, billed=None)

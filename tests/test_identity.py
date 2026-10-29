@@ -1149,7 +1149,14 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
 
     def minted(declaration: RunDeclaration, campaign_id: str) -> object:
         return asyncio.run(
-            mint_framed_cycle(arming, declaration, rows_30, campaign_id=campaign_id, task_text=None)
+            mint_framed_cycle(
+                arming,
+                declaration,
+                rows_30,
+                campaign_id=campaign_id,
+                task_text=None,
+                admitted=Budget(),
+            )
         )
 
     minted(armed, "decl__0000h1")

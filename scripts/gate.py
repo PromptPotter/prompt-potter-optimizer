@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from functools import cache
 from importlib import metadata
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import tests_owning
 import yaml
@@ -1133,13 +1133,43 @@ def _extras(_: Selection) -> Outcome:
     return 0, ""
 
 
-# The ledger's wire shape, kept fresh by the `specs` check: what `restamp` prunes a line against.
-_EVENTS_SPEC = "docs/specs/events-asyncapi.generated.json"
+class _StoredShape(NamedTuple):
+    """An on-disk document `restamp` prunes, by the generated spec the `specs` check keeps fresh."""
+
+    spec: str
+    what: str
+    # What a written-before document stays until `restamp --apply` runs, and its remedy past it.
+    unreadable: str
+
+    def roots(self, schemas: dict[str, Any]) -> dict[str, str]:
+        """Each root a document may be, by the name its key paths sit under → its schema ref."""
+        if "CycleRecord" in schemas:
+            return dict(schemas["CycleRecord"]["discriminator"]["mapping"])
+        return {"pack": "#/components/schemas/BlockPack"}
 
 
-def _ledger_shape(text: str) -> dict[str, bool]:
-    """Every key path a ledger line may carry → whether its reader requires it, walked from
-    `CycleRecord`'s discriminator; a list's or a mapping's members sit at their holder's path."""
+_STORED_SHAPES = (
+    _StoredShape(
+        "docs/specs/events-asyncapi.generated.json",
+        "a ledger record",
+        "a campaign on disk written before it is unreadable until `python -m promptpotter "
+        "restamp --apply` prunes a dropped key (a newly required one it cannot: its report "
+        "names the campaign to delete)",
+    ),
+    _StoredShape(
+        "docs/specs/block-pack.generated.json",
+        "a block pack",
+        "a pack on disk written before it is refused, that pack alone, until `python -m "
+        "promptpotter restamp --apply` prunes a dropped key off an account's pack (a newly "
+        "required one it cannot: its report names the pack to fix or delete; the install's "
+        "and the live box's packs are migrated by hand)",
+    ),
+)
+
+
+def _stored_shape(text: str, stored: _StoredShape) -> dict[str, bool]:
+    """Every key path a document may carry → whether its reader requires it, walked from each
+    root; a list's or a mapping's members sit at their holder's path."""
     schemas = json.loads(text)["components"]["schemas"]
     shape: dict[str, bool] = {}
 
@@ -1159,42 +1189,53 @@ def _ledger_shape(text: str) -> dict[str, bool]:
             if isinstance(held, dict):
                 walk(held, path, seen)
 
-    for kind, ref in schemas["CycleRecord"]["discriminator"]["mapping"].items():
-        shape[kind] = True
-        walk({"$ref": ref}, f"{kind}.", frozenset())
+    for root, ref in stored.roots(schemas).items():
+        shape[root] = True
+        walk({"$ref": ref}, f"{root}.", frozenset())
     return shape
 
 
-def _ledger_fields(sel: Selection) -> Outcome:
-    """A commit that drops a ledger key, or requires one an older line lacks, leaves every
-    campaign written before it unreadable until `restamp` runs: its body says so."""
-    code, before = git("show", f"HEAD:{_EVENTS_SPEC}")
+def _shape_moved(sel: Selection, stored: _StoredShape) -> Outcome | list[str]:
+    code, before = git("show", f"HEAD:{stored.spec}")
     if code:
-        return code, before
+        # A spec HEAD does not hold yet has no document written before it.
+        return [] if git("cat-file", "-e", f"HEAD:{stored.spec}")[0] else (code, before)
     if sel.commit_msg is None:
-        after = (REPO / _EVENTS_SPEC).read_text(encoding="utf-8")
-    elif (shown := git("show", f":{_EVENTS_SPEC}"))[0]:
+        after = (REPO / stored.spec).read_text(encoding="utf-8")
+    elif (shown := git("show", f":{stored.spec}"))[0]:
         return shown
     else:
         after = shown[1]
-    was, now = _ledger_shape(before), _ledger_shape(after)
-    moved = [f"  dropped {key}" for key in sorted(was.keys() - now.keys())] + [
+    return _moved(_stored_shape(before, stored), _stored_shape(after, stored))
+
+
+def _moved(was: dict[str, bool], now: dict[str, bool]) -> list[str]:
+    """Each key path a document written under *was* fails a reader of *now* on."""
+    return [f"  dropped {key}" for key in sorted(was.keys() - now.keys())] + [
         f"  newly required {key}"
         for key, required in sorted(now.items())
-        # Under a key the older line lacks, nothing is newly missing.
+        # Under a key the older document lacks, nothing is newly missing.
         if required and not was.get(key) and key.rpartition(".")[0] in was
     ]
+
+
+def _restamp(sel: Selection) -> Outcome:
+    """A commit that drops a stored key, or requires one an older document lacks, leaves every
+    document written before it unreadable until `restamp` runs: its body says so."""
     body = "\n".join(
         line for line in (sel.commit_msg or "").splitlines() if not line.startswith("#")
     )
-    if not moved or "restamp" in body:
-        return 0, ""
-    return 1, (
-        "a ledger record's shape moved, so a campaign on disk written before it is unreadable "
-        "until `python -m promptpotter restamp --apply` prunes a dropped key (a newly required "
-        "one it cannot: its report names the campaign to delete). Name `restamp` in the commit "
-        "body:\n" + "\n".join(moved)
-    )
+    refusals: list[str] = []
+    for stored in _STORED_SHAPES:
+        moved = _shape_moved(sel, stored)
+        if isinstance(moved, tuple):
+            return moved
+        if moved and "restamp" not in body:
+            refusals.append(
+                f"{stored.what}'s shape moved, so {stored.unreadable}. Name `restamp` in the "
+                "commit body:\n" + "\n".join(moved)
+            )
+    return (1, "\n".join(refusals)) if refusals else (0, "")
 
 
 CHECKS: tuple[Check, ...] = (
@@ -1286,7 +1327,11 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _Probe(
             "scripts/build_specs.py",
-            ("docs/specs/openapi.generated.json", "docs/specs/events-asyncapi.generated.json"),
+            (
+                "docs/specs/openapi.generated.json",
+                "docs/specs/events-asyncapi.generated.json",
+                "docs/specs/block-pack.generated.json",
+            ),
         ),
         hook="pre-commit",
     ),
@@ -1348,7 +1393,7 @@ CHECKS: tuple[Check, ...] = (
     Check("npm-audit", "release", _npm_audit),
     Check("pip-audit", "release", _pip_audit),
     Check("advisories", "release", _advisories),
-    Check("ledger-fields", "commit", _ledger_fields),
+    Check("restamp", "commit", _restamp),
 )
 # A lane runs in this order, so what a check reads is built before it.
 assert all(any(b.name == c.after for b in CHECKS[:i]) for i, c in enumerate(CHECKS) if c.after)

@@ -12,12 +12,14 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
+from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.main import app
 
 _SPECS = _REPO / "docs" / "specs"
 _OPENAPI_PATH = _SPECS / "openapi.generated.json"
 _ASYNCAPI_PATH = _SPECS / "events-asyncapi.generated.json"
+_BLOCK_PACK_PATH = _SPECS / "block-pack.generated.json"
 
 _REGENERATE = "GENERATED — do not edit. Regenerate with `python scripts/build_specs.py`."
 
@@ -37,6 +39,25 @@ record-derived frame's `payload` is the `CycleRecord` its `kind` names. The
 subscription contract (snapshot first, then the live tail; gap recovery; no replay)
 is `docs/developer/event-stream.md`.
 """
+
+
+_BLOCK_PACK_DESCRIPTION = f"""\
+{_REGENERATE}
+
+The shape a `block_packs/{{name}}/pack.json` must hold to be read, install's and account's alike:
+what `python -m promptpotter restamp` prunes an account's pack against, and what the gate's
+`restamp` check compares across a commit.
+"""
+
+
+def block_pack() -> dict[str, Any]:
+    root = TypeAdapter(BlockPack).json_schema(ref_template="#/components/schemas/{model}")
+    defs = root.pop("$defs", {})
+    return {
+        "title": "Block pack",
+        "description": _BLOCK_PACK_DESCRIPTION,
+        "components": {"schemas": {**defs, "BlockPack": root}},
+    }
 
 
 def openapi() -> dict[str, Any]:
@@ -93,6 +114,7 @@ def main() -> int:
     for path, document in (
         (_OPENAPI_PATH, contract),
         (_ASYNCAPI_PATH, asyncapi(contract["paths"])),
+        (_BLOCK_PACK_PATH, block_pack()),
     ):
         # `sort_keys` so a registration reorder is not a diff.
         content = json.dumps(document, indent=2, ensure_ascii=False, sort_keys=True) + "\n"

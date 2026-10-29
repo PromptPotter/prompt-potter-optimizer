@@ -154,6 +154,7 @@ async def hold_fresh_mint(
             session.bank.samples,
             campaign_id=fresh_campaign_id(session),
             task_text=request.task_text,
+            admitted=held.admitted,
         )
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
         job_registry.update_target(job.job_id, hop=hop)

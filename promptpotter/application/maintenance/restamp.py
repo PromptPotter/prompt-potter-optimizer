@@ -18,13 +18,15 @@ from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
     workspace_trees,
 )
-from promptpotter.config.paths import default_projects_root, jobs_dir
+from promptpotter.config.paths import BLOCK_PACKS_DIR, default_projects_root, jobs_dir
+from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.sample import ArchiveConfig, FiledAnswer
 from promptpotter.domain.scoring import GradedCell
@@ -116,6 +118,13 @@ _SURFACES: tuple[_Surface, ...] = (
         key_path=(),
         model_cls=DiagnosticRunRecord,
     ),
+    _Surface(
+        # The account tier only: the install's packs are source, which `check_readable` names.
+        title=f"Your block packs ({BLOCK_PACKS_DIR}/*/pack.json)",
+        workspace_globs=(f"*/{BLOCK_PACKS_DIR}/*/pack.json",),
+        key_path=(),
+        model_cls=BlockPack,
+    ),
 )
 
 
@@ -144,6 +153,16 @@ def _nested_model(ann: object, value: dict[str, object]) -> type[BaseModel] | No
         return arms[0]
     # Ambiguous: only an arm declaring every key may prune, and then it drops nothing.
     return next((arm for arm in arms if value.keys() <= arm.model_fields.keys()), None)
+
+
+def _member_annotation(ann: object) -> object | None:
+    """What one member of a list or tuple field is, so a pack's snippets prune each by its own model."""
+    if get_origin(ann) is Annotated:
+        return _member_annotation(get_args(ann)[0])
+    if get_origin(ann) in (list, tuple):
+        member: object = get_args(ann)[0]
+        return member
+    return None
 
 
 def _holds_parts(ann: object) -> bool:
@@ -185,6 +204,16 @@ def _prune_to_schema(
             sub, sub_dropped = _prune_to_schema(value, nested, path)
             pruned[key] = sub
             dropped.extend(sub_dropped)
+        elif isinstance(value, list) and (member := _member_annotation(field.annotation)):
+            pruned[key] = []
+            for item in value:
+                arm = _nested_model(member, item) if isinstance(item, dict) else None
+                if arm is None:
+                    pruned[key].append(item)
+                    continue
+                sub, sub_dropped = _prune_to_schema(item, arm, path)
+                pruned[key].append(sub)
+                dropped.extend(sub_dropped)
         else:
             pruned[key] = value
     return pruned, dropped
@@ -788,6 +817,7 @@ def check_readable() -> dict[str, int]:
     refused: dict[_CampaignOf, None] = {}
     ledgers: list[str] = []
     manifests: list[str] = []
+    packs = [refusal.reason for refusal in PackShelf(account=None).shelved().refused]
     checked = 0
     for tree in workspace_trees(default_projects_root()):
         for ledger in sorted(tree.glob("**/.runtime/ledger.jsonl")):
@@ -800,6 +830,13 @@ def check_readable() -> dict[str, int]:
                 if (campaign := _campaign_of(tree, ledger)) is not None:
                     refused[campaign] = None
         for workspace in sorted(p for p in tree.iterdir() if p.is_dir()):
+            own = workspace / BLOCK_PACKS_DIR
+            packs.extend(
+                f"{refusal.reason} (tenant {workspace.name})"
+                for refusal in PackShelf(account=own).shelved().refused
+                # The install's own refusal is named once, below, never per account.
+                if (own / refusal.pack).is_dir()
+            )
             store = CampaignStore(WorkspaceDir(workspace))
             for campaign_id in store.list_campaign_ids():
                 try:
@@ -828,10 +865,15 @@ def check_readable() -> dict[str, int]:
     print(f"\nMeasurement archives — {len(homes)} home(s), {len(archive_refused)} file(s) refused")
     for cause in archive_refused:
         print(f"  UNREADABLE archive {cause}")
+    # Only that pack is refused: every library and draft serves the rest and names it.
+    print(f"\nBlock packs — {len(packs)} refused")
+    for cause in packs:
+        print(f"  UNREADABLE pack {cause}")
     return {
         "ledgers_checked": checked,
         "ledgers_refused": len(ledgers),
         "manifests_refused": len(manifests),
         "campaigns_unreadable": len(refused),
         "archive_refused": len(archive_refused),
+        "packs_refused": len(packs),
     }

@@ -95,8 +95,8 @@ class BlockPoolInitializer(_PoolInitializer):
         # A pack resolves in the run's account, so a pool drawing one is judged at the mint alone.
         if packs and mint is None:
             return None
-        if mint is not None and (absent := mint.shelf.missing(packs)):
-            return f"{self.name}.packs names {absent}, which neither the install nor this account holds"
+        if mint is not None and (unread := mint.shelf.unread(packs)):
+            return f"{self.name}.packs names {'; '.join(unread.values())}"
         paths = self.active(selected)
         held = [(e.id, e.group) for e in self.held(selected, mint)]
         named = [p for p in paths if p.partition("/")[2] != EARNED_SOURCE]

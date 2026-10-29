@@ -8275,6 +8275,14 @@
             "title": "Parts",
             "type": "array"
           },
+          "refused": {
+            "description": "Each pack this account holds a name for but cannot read, by name: none of its snippets is listed, and every other pack's are",
+            "items": {
+              "$ref": "#/components/schemas/PackRefusal"
+            },
+            "title": "Refused",
+            "type": "array"
+          },
           "snippets": {
             "description": "By pack name, then each pack's own order",
             "items": {
@@ -8295,7 +8303,8 @@
         "required": [
           "parts",
           "sources",
-          "snippets"
+          "snippets",
+          "refused"
         ],
         "title": "LibraryResponse",
         "type": "object"
@@ -11658,6 +11667,38 @@
         "title": "PackOffer",
         "type": "object"
       },
+      "PackRefusal": {
+        "additionalProperties": false,
+        "description": "One pack the account does not read, and why: the rest of its library still serves.",
+        "properties": {
+          "code": {
+            "description": "`block_pack_collision`: the install and this account both hold the name; `block_pack_unreadable`: its `pack.json` does not validate against this build's shape",
+            "enum": [
+              "block_pack_collision",
+              "block_pack_unreadable"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "pack": {
+            "description": "The pack's name, as a `packs` knob would name it",
+            "title": "Pack",
+            "type": "string"
+          },
+          "reason": {
+            "description": "What refuses it, and the remedy",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pack",
+          "code",
+          "reason"
+        ],
+        "title": "PackRefusal",
+        "type": "object"
+      },
       "PairGuard": {
         "additionalProperties": false,
         "description": "The comparability guard: whether the bench headlines it is taken over — a pair's, a row's\nagainst the table's standard, the whole table's — are one quantity. It LABELS a comparison\nand refuses none: a pair that differs is still read, and says on what.",
@@ -12335,6 +12376,14 @@
             "title": "Pool",
             "type": "string"
           },
+          "refused": {
+            "description": "Each pack it could draw from that this account cannot read, by name, never among `packs`: a pool naming one is refused at Start; the others serve. Empty whenever `packs` is",
+            "items": {
+              "$ref": "#/components/schemas/PackRefusal"
+            },
+            "title": "Refused",
+            "type": "array"
+          },
           "source": {
             "$ref": "#/components/schemas/PoolSource",
             "description": "Where its entries come from"
@@ -12348,7 +12397,8 @@
           "offered",
           "drawn_by",
           "fills",
-          "packs"
+          "packs",
+          "refused"
         ],
         "title": "PoolRow",
         "type": "object"

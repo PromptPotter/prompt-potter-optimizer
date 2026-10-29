@@ -4,7 +4,7 @@ import logging
 from collections.abc import Awaitable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import TYPE_CHECKING, assert_never
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.resume_and_fork.resume import (
@@ -15,9 +15,11 @@ from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import ScorerSetup, Session
 from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
+from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.preflight import (
+    measured_cell_usd,
     refuse_arm_below_round,
     run_preflight_checks,
 )
@@ -27,7 +29,6 @@ from promptpotter.application.runner.inner.spawn_context import (
     retarget_inner_spawn,
 )
 from promptpotter.application.scoring.classification import build_degradation_checks
-from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.application.views.ingress import init_enter, init_exit
@@ -240,25 +241,6 @@ def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
         yield
 
 
-_PRICED_RUNS = 32
-
-
-def measured_cell_usd(
-    session: Session, node_configs: list[tuple[str, dict[str, Any]]]
-) -> float | None:
-    on_models = {name: {"model": cfg["model"]} for name, cfg in node_configs if cfg.get("model")}
-    total, cells = 0.0, 0
-    for m in session.store.archive.measurements_for_config(
-        on_models, dataset_hash=session.bank.dataset_hash, newest=_PRICED_RUNS
-    ):
-        # An archive row carries no grade, and the price is no formula's reading.
-        cost = cell_channels_of(m.cell, None).get("cost")
-        if cost is not None:
-            total += cost
-            cells += 1
-    return total / cells if cells else None
-
-
 def _campaigns_on_origin(session: Session) -> list[str]:
     campaigns = session.store.campaigns
     own = campaigns.load_campaign(session.campaign_id) if session.campaign_id else None
@@ -300,7 +282,9 @@ async def _emit_preflight_and_init_session(
     target_models = tuple(str(v["model"]) for _, v in target_node_configs if v.get("model"))
 
     bound = await cell_bound(session, session.pipeline_params or {})
-    measured_usd = measured_cell_usd(session, target_node_configs)
+    measured_usd = measured_cell_usd(session, session.pipeline_params or {})
+    # Re-read, not the launch's: a `set-limits` landing during the origin pass is armed here.
+    cap_usd = next_launch_budget(config, stores=session.store, hop=session.hop).usd
     instrument = inner_origin_of(session.pipeline_params)
     preflight_warnings = run_preflight_checks(
         config,
@@ -308,6 +292,7 @@ async def _emit_preflight_and_init_session(
         dataset,
         target_models,
         framing=origin.framing,
+        cap_usd=cap_usd,
         cell_usd=None if bound is None else bound.usd,
         measured_cell_usd=measured_usd,
         origin_campaigns=_campaigns_on_origin(session),
@@ -316,7 +301,14 @@ async def _emit_preflight_and_init_session(
     )
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
-    refuse_arm_below_round(session.purpose, preflight_warnings, measured_cell_usd=measured_usd)
+    refuse_arm_below_round(
+        session.purpose,
+        selected,
+        cap_usd=cap_usd,
+        search=len(dataset),
+        measured_cell_usd=measured_usd,
+        minted=session.hop,
+    )
     cb.on_phase(
         CampaignPhase.INIT,
         "enter",

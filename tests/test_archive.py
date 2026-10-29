@@ -13,10 +13,12 @@ import json
 import threading
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import gate
 import pytest
 from factories import (
     LLM_ONLY,
@@ -65,6 +67,7 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_version,
 )
 from promptpotter.application.initialization import loop_start
+from promptpotter.application.library import library
 from promptpotter.application.maintenance import restamp
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
@@ -87,7 +90,7 @@ from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
-from promptpotter.config.paths import MEASUREMENTS_DIR
+from promptpotter.config.paths import MEASUREMENTS_DIR, block_packs_root
 from promptpotter.domain.arms import ArmSlot, PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.campaign import Arm, Compare
@@ -115,6 +118,7 @@ from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
+from promptpotter.domain.prompt_block import ACCOUNT_PACK, Authored, PromptPart, Snippet
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import (
     AnnouncedArms,
@@ -619,6 +623,72 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert refused_key not in {e.config_key for e in archive.list_all()}
     assert restamp.check_readable()["archive_refused"] == 0, "the re-stamp left a refused file"
     assert {ref: archive.answer(ref) for ref in refs} == paid, "a re-stamp lost a paid answer"
+
+    # A pack's shape moving is the gate's to name: a key dropped, or one newly required.
+    pack_spec = next(s for s in gate._STORED_SHAPES if s.spec.endswith("block-pack.generated.json"))
+    spec_text = (Path(__file__).parents[1] / pack_spec.spec).read_text(encoding="utf-8")
+    moved_spec = json.loads(spec_text)
+    written = moved_spec["components"]["schemas"]["Authored"]
+    del written["properties"]["experiment"]
+    written["properties"]["reviewer"] = {"type": "string"}
+    written["required"] = [k for k in written["required"] if k != "experiment"] + ["reviewer"]
+    assert gate._moved(
+        gate._stored_shape(spec_text, pack_spec),
+        gate._stored_shape(json.dumps(moved_spec), pack_spec),
+    ) == [
+        "  dropped pack.snippets.provenance.experiment",
+        "  newly required pack.snippets.provenance.reviewer",
+    ], "a pack's shape moved and the gate's restamp check named another key, or none"
+
+    # One bad pack refuses itself alone, and a re-stamp migrates the account's pack it can.
+    def pack_of(text: str, **extra: object) -> str:
+        authored = Authored(
+            kind="authored",
+            author="ada",
+            date=date(2026, 1, 1),
+            experiment="setup",
+            version=1,
+            supersedes=None,
+            notes=None,
+        )
+        snippet = Snippet(
+            text=text, suits=frozenset({PromptPart.INSTRUCTION}), tags=(), provenance=authored
+        ).model_dump(mode="json")
+        snippet["provenance"] |= extra
+        return json.dumps({"works": {}, "snippets": [snippet]})
+
+    shelf = built_stores.block_packs
+    assert shelf.account is not None
+    install_root = block_packs_root()
+    for root, name, body in (
+        (install_root, "served", pack_of("Read the claim twice.")),
+        (install_root, "twice", pack_of("Held by the install.")),
+        (shelf.account, "twice", pack_of("Held by the account too.")),
+        (shelf.account, ACCOUNT_PACK, pack_of("Answer last.", retired_key="old")),
+    ):
+        (root / name).mkdir(parents=True)
+        (root / name / "pack.json").write_text(body, encoding="utf-8")
+    served = library(shelf)
+    assert {s.text for s in served.snippets} == {"Read the claim twice."}, (
+        "a malformed or colliding pack failed the whole library, or served its own snippets"
+    )
+    assert {(r.pack, r.code) for r in served.refused} == {
+        ("twice", "block_pack_collision"),
+        (ACCOUNT_PACK, "block_pack_unreadable"),
+    }, "a refused pack was not served beside the library that still reads"
+    assert shelf.unread(["served", ACCOUNT_PACK]).keys() == {ACCOUNT_PACK}, (
+        "a pool naming a refused pack would draw it, or one naming a good pack is refused"
+    )
+    assert restamp.check_readable()["packs_refused"] == 2, "a refused pack went unnamed"
+    restamp.prune_stored_documents(apply=True)
+    migrated = library(shelf)
+    assert {s.text for s in migrated.snippets} == {"Read the claim twice.", "Answer last."}, (
+        "a re-stamp lost an authored snippet, or left the pack it migrates refused"
+    )
+    assert [r.pack for r in migrated.refused] == ["twice"], (
+        "a re-stamp rewrote a pack it cannot fix: a collision is the operator's rename"
+    )
+    assert restamp.check_readable()["packs_refused"] == 1
 
 
 # 3. Replayed decisions, and forks

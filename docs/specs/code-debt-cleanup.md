@@ -212,30 +212,12 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `finish_reason=error` then pass one schema repair; unknown whether the row banks the answer or a
   miss. **Rides with:** the next head-to-head read. **Re-test:** per arm, the hit rate of error rows
   against the arm's other rows.
-- **An arm refused at run init keeps its key, and its config can no longer be changed.**
-  `preflight.py::refuse_arm_below_round` advises "size the round down with the optimizer's own
-  knobs", but a node knob is fixed at mint. `new --arm <h2h>:<key>` on that key is refused ("is
-  campaign … already"), so the operator mints under a second key and the head-to-head keeps a dead
-  arm that never searched. Seen on h2h-7: capo `__bca431` was refused at its $0.03 cap; `capo-b5`
-  `__530ab2` was minted with `max_blocks=5`. Also seen there: `set-limits --max-usd 0.20` on
-  `__bca431` did not arm before init read $0.03. Open: should an arm that never closed a round be
-  re-mintable under its own key, or should the refusal run before the mint so no key is taken?
-  **Re-test:** `promptpotter evidence` on h2h-7 lists `capo` beside `capo-b5`.
 - **CAPO's race ends after its first block whenever offspring equal the cut.** The fixed blocks follow
   the paper (App. C.4), but with 4 offspring and μ 10 every h2h-7 round cut 4 on block 1 and stopped.
   The population was then judged only on those 30 cells: the crown held C1.7 (36.7% there, 27.5% on
   the origin panel), and the selection benched 0.110 against the origin's 0.140. `max_blocks` was inert.
   Open: is this the paper's behaviour at these sizes, or does our eliminator stop where the paper races
   on? **Re-test:** the per-round "Blocks raced" fact on a CAPO run with offspring < μ.
-- **One bad pack fails the whole library.** `config/prompt_blocks.py::PackShelf.read` raises on a
-  malformed `pack.json`, and a name both roots hold raises `block_pack_collision`. Either one is a 500
-  or 409 for every `GET /library` and every draft edit, not just for that pack. Seen: the e2e fixture
-  kept the old `Authored` shape. Action: refuse the pack, serve the rest.
-- **A pack's on-disk shape moved with nothing to migrate it.** `Authored.version: int` and a required
-  `supersedes` landed with the packs commit. The account's `starter` pack still held git-sha versions,
-  so `GET /library` returned 500 until it was migrated by hand (2026-10-29). `gate.py`'s `restamp` check
-  guards ledger records only. Action: packs ride the same shape-moved check, or `restamp` migrates them.
-  The live box holds packs too. **Re-test:** change a field of `Authored` and see the gate name the packs.
 - **A selection is still made in three places outside a launch.** `config_map`, `draft_patch` and
   `checkin` each call `select_optimizer` themselves. The launch path now resolves one selection and
   hands it down.
@@ -259,6 +241,18 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   derived by verbatim equality with the donor, not recorded on the lineage, so an LLM edit that lands on
   the donor's value reads as donated. The capo offline bench turns on one seed: lift +0.700 or none
   after a draw-order change, so the fixture cannot tell a mating-law change from a reshuffle.
+- **INVESTIGATE — a `set-limits` between a fresh mint and its preparation may be overwritten.**
+  `runner/run_prep.py::prepare_run` writes the launch's `HeldBudget.standing` as the campaign's
+  ceiling (`move_campaign_money`) after the mint, so a raise landing in that window may be replaced
+  by the launch's own. Init re-reads the ceiling (`loop_start.py::_emit_preflight_and_init_session`),
+  so this only matters if the write is not a merge. **Re-test:** `set-limits --max-usd` while a
+  fresh `new` is at `init_services`, then `promptpotter cycles`.
+- **`restamp` migrates account-tier packs only.** `maintenance/restamp.py`'s `BlockPack` surface
+  globs `*/block_packs/*/pack.json` under the projects root; an install-tier pack
+  (`config/paths.py::block_packs_root`) that a shape change leaves unreadable is reported by
+  `check_readable` but never pruned. Open: is the install tier operator-written data, or shipped?
+- **A pool row reads every pack each time.** `pipeline_resolve.py::_pack_offers` calls
+  `PackShelf.shelved()` once per drawn pool row, which re-parses every `pack.json` on both tiers.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 

@@ -29,6 +29,7 @@ import pytest
 from factories import (
     PROMPT_INFO,
     SANDBOX_CAMPAIGN,
+    archive_row,
     arm_state,
     arm_walk,
     backend_client,
@@ -44,9 +45,11 @@ from factories import (
     on_jumping_clock,
     pipeline_schema,
     pobb_knobs,
+    prompted,
     samples,
     score_summary,
     scorer_of,
+    sheet,
     spend_book,
     workspace,
 )
@@ -67,6 +70,7 @@ from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.application.diagnostics.probe_reasoning import probe_reasoning
 from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
+from promptpotter.application.initialization import loop_start
 from promptpotter.application.jobs import mint
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_share,
@@ -74,6 +78,7 @@ from promptpotter.application.jobs.launcher.admission import (
     open_spend_book,
     paid_pass,
 )
+from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
@@ -94,8 +99,10 @@ from promptpotter.application.jobs.registry import (
 )
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
 from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.application.optimizers.nodes import ReadArm
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
+from promptpotter.application.origin import CampaignOrigin
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.grade_bench import grade_line_bench
@@ -121,7 +128,7 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import CutKind
-from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.campaign import Arm, Compare, Optimize
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -132,6 +139,7 @@ from promptpotter.domain.command_kinds import (
     ChangeRunLimitsPayload,
     DiscardDraftPayload,
     EditDraftCampaignPayload,
+    MintCampaignPayload,
     StartCheckinPayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
@@ -139,7 +147,7 @@ from promptpotter.domain.diagnostic_run import RescoreCount
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.proxies import inner_cell_facts
-from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE
+from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, RunSource
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
@@ -173,9 +181,9 @@ from promptpotter.domain.run_records import (
     SpendTombstoneRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.sample import Sample
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, PipelineData, Scorer
-from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import (
     CYCLE_AXES,
     MONEY_AXES,
@@ -242,6 +250,7 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
+from promptpotter.presentation.cli.commands.new import mint_and_run
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellInfrastructureError,
@@ -1437,7 +1446,7 @@ def _token_bills(ledger: CycleEventLog) -> list[TokenUsageRecord]:
 
 
 def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Router
 ) -> None:
     # The declared ceiling lives on the ledger alone, so a launch's flag sweep cannot take it.
     campaigns = built_stores.campaigns
@@ -1799,6 +1808,111 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     )
     assert claim_held.reserve.usd == pytest.approx(2.0), "the delegate's claim did not bind it"
     shared.release(claim.job_id)
+
+    # An arm whose cap a cell of its models, as billed, cannot fund one round of is refused
+    # before its key is taken, at the terminal and REST doors alike; init re-reads the ceiling.
+    stores = built_stores
+    rows = samples(30, "TRUE", query="claim ")
+    stores.tenant_datasets.put_bank(bank := Bank.of(rows))
+    stores.tenant_datasets.relabel("armed", bank.dataset_hash)
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("armed") / DEFINITION_FILE,
+        {
+            "pipeline": {
+                "backend_type": "termnorm",
+                "nodes": {"llm_only": {"config": {"model": "X"}}},
+            },
+            "campaign": {
+                "task_framing": "off",
+                "scoring": "label_match(predicted, ground_truth)",
+                "optimization": {"degradation_threshold": 0.4},
+            },
+        },
+    )
+    # A cell of this bank on model X has billed $0.01, so one round (120 cells) needs $1.20.
+    priced = {"step_tokens": {"llm_only": {"input": 1, "output": 1, "cost_usd": 0.01}}}
+    filed(
+        stores.archive,
+        [archive_row(s.query, truth="TRUE", pipeline_data=priced) for s in rows],
+        filed_under(dataset_hash=bank.dataset_hash),
+    )
+    arming = JobRegistry(stores.jobs_dir, capacity=lambda _live: 8)
+    arm = Compare(arm=Arm(head_to_head_id="h2h", arm_key="capo"))
+    running = {j.job_id for j in arming.list_running()}
+
+    def arm_mint(usd: float) -> MintCampaignPayload:
+        return MintCampaignPayload(dataset_name="armed", purpose=arm, budget=Budget(usd=usd))
+
+    # The terminal's `new --arm h2h:capo --max-usd 0.50`, and the REST mint beside it.
+    doors: dict[str, Callable[[], object]] = {
+        "cli": lambda: asyncio.run(mint_and_run(stores, arm_mint(0.50), Inline())),
+        "rest": lambda: asyncio.run(
+            CommandDispatcher(stores, arming).dispatch(CommandCall(arm_mint(0.50)))
+        ),
+    }
+    for door, refused_at in doors.items():
+        with pytest.raises((SystemExit, PayloadInvalidError)):
+            refused_at()
+        assert not stores.campaigns.list_campaigns("armed", lifecycle="all"), (
+            f"the {door} door minted an arm one round of which its cap cannot fund"
+        )
+        assert "/matches" not in offline.backend.asked, (
+            f"the {door} door paid the origin pass of an arm it then refused"
+        )
+        assert {j.job_id for j in arming.list_running()} == running, (
+            f"the {door} door's refused arm kept its slot"
+        )
+    launched = asyncio.run(
+        CommandDispatcher(stores, arming, inline=Inline()).dispatch(CommandCall(arm_mint(2.0)))
+    ).result
+    assert isinstance(launched, Launched) and launched.held is not None, (
+        "a refused arm's key stayed taken: the same key under a cap that funds a round was refused"
+    )
+    armed_run = launched.held
+    (armed_campaign,) = stores.campaigns.list_campaigns("armed", lifecycle="all")
+    assert armed_campaign.declaration.purpose == arm, "the relaunch minted under another key"
+
+    # Init re-reads the ceiling: a `set-limits` landing after the launch froze its config is the one
+    # a resumed arm is refused or admitted under.
+    individual = prompted("llm_only", instruction="Label the claim.").model_copy(
+        update={"pipeline_params": armed_run.session.pipeline_params}
+    )
+    origin = CampaignOrigin(
+        ReadArm(ArmKey("origin"), arm_state("origin", individual=individual), sheet([])),
+        TaskDecomposition(),
+    )
+
+    def init(frozen_usd: float) -> object:
+        return asyncio.run(
+            loop_start.init_optimization_loop(
+                origin,
+                list(armed_run.session.bank.samples),
+                _budgeted(Budget(usd=frozen_usd)),
+                cb=RunCallbacks(CycleEventLog(stores.projects_root / f"init-{frozen_usd}.jsonl")),
+                no_divergence_check=True,
+                fork_on_divergence=False,
+                resume_from_round_override=None,
+                session=armed_run.session,
+            )
+        )
+
+    # What the run's preparation populates before its init.
+    loop_start.populate_session_scoring(
+        armed_run.session,
+        armed_run.campaign_config,
+        source=RunSource.ORIGIN,
+        partition=loop_start.cycle_partition(
+            armed_run.session, armed_run.session.bank.samples, armed_run.campaign_config
+        ),
+    )
+    limits = CommandDispatcher(stores, arming)
+    _change_run_limits(limits, armed_run.session.hop, Budget(usd=0.50))
+    with pytest.raises(PayloadInvalidError):
+        init(2.0)
+    _change_run_limits(limits, armed_run.session.hop, Budget(usd=2.0))
+    # Refused here, the raise was never armed: init read the launch's frozen $0.50.
+    init(0.50)
+    armed_run.job_registry.release(armed_run.job_id)
 
 
 # 4. What a send is held at
@@ -3129,7 +3243,12 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     with pytest.raises(PayloadInvalidError):
         asyncio.run(
             mint.mint_framed_cycle(
-                framing, declared, rows, campaign_id="framed__000001", task_text="frame this"
+                framing,
+                declared,
+                rows,
+                campaign_id="framed__000001",
+                task_text="frame this",
+                admitted=Budget(),
             )
         )
     assert not draft_dirs(stores.campaigns.workspace), "an unminted framing left its ledger"

@@ -2277,6 +2277,10 @@ export interface PoolRow {
    * order; none for a pool no pack feeds or no member draws, and none before
    * the facts a Start mints against are known */
   packs: PackOffer[];
+  /** Each pack it could draw from that this account cannot read, by name, never
+   * among `packs`: a pool naming one is refused at Start; the others serve.
+   * Empty whenever `packs` is */
+  refused: PackRefusal[];
 }
 
 /** One path an initializer's `active` knob may name, with what it keeps. */
@@ -2325,6 +2329,18 @@ export interface PackOffer {
   entries: number;
   /** Whether `packs` names it under this config */
   on: boolean;
+}
+
+/** One pack the account does not read, and why: the rest of its library still serves. */
+export interface PackRefusal {
+  /** The pack's name, as a `packs` knob would name it */
+  pack: string;
+  /** `block_pack_collision`: the install and this account both hold the name;
+   * `block_pack_unreadable`: its `pack.json` does not validate against this
+   * build's shape */
+  code: 'block_pack_collision' | 'block_pack_unreadable';
+  /** What refuses it, and the remedy */
+  reason: string;
 }
 
 /** The graph projection derived from a manifest's nodes and pipelines; no manifest declares one. */
@@ -2853,6 +2869,9 @@ export interface LibraryResponse {
   sources: LibrarySource[];
   /** By pack name, then each pack's own order */
   snippets: LibrarySnippet[];
+  /** Each pack this account holds a name for but cannot read, by name: none of its
+   * snippets is listed, and every other pack's are */
+  refused: PackRefusal[];
 }
 
 /** One source a snippet names: a cited work as its pack declares it, or the authored one. */

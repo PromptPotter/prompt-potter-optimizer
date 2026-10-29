@@ -119,6 +119,17 @@ class Snippet(FrozenModel):
         return self.provenance.version if isinstance(self.provenance, Authored) else 0
 
 
+class PackRefusal(FrozenModel):
+    """One pack the account does not read, and why: the rest of its library still serves."""
+
+    pack: str = Field(description="The pack's name, as a `packs` knob would name it")
+    code: Literal["block_pack_collision", "block_pack_unreadable"] = Field(
+        description="`block_pack_collision`: the install and this account both hold the name; "
+        "`block_pack_unreadable`: its `pack.json` does not validate against this build's shape"
+    )
+    reason: str = Field(description="What refuses it, and the remedy")
+
+
 class BlockPack(FrozenModel):
     works: dict[str, Work]
     snippets: tuple[Snippet, ...]

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application import optimizers
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
+from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -17,7 +18,9 @@ from promptpotter.infrastructure.llm.registry import model_profile
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
+    from promptpotter.application.initialization.session import Session
     from promptpotter.domain.campaign import Purpose
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
 
@@ -122,15 +125,36 @@ def _check_task_context_present(
     )
 
 
+_PRICED_RUNS = 32
+
+
+def measured_cell_usd(session: Session, pipeline_params: Mapping[str, Any]) -> float | None:
+    """What a cell of the session's bank has billed on these target models, off the archive."""
+    on_models = {
+        name: {"model": cfg["model"]}
+        for name, cfg in node_config_items(dict(pipeline_params))
+        if cfg.get("model")
+    }
+    total, cells = 0.0, 0
+    for m in session.store.archive.measurements_for_config(
+        on_models, dataset_hash=session.bank.dataset_hash, newest=_PRICED_RUNS
+    ):
+        # An archive row carries no grade, and the price is no formula's reading.
+        cost = cell_channels_of(m.cell, None).get("cost")
+        if cost is not None:
+            total += cost
+            cells += 1
+    return total / cells if cells else None
+
+
 def _check_cap_funds_round(
-    config: CampaignConfig,
+    cap: float | None,
     selected: SelectedOptimizer,
     search: int,
     cell_usd: float | None,
     measured_cell_usd: float | None,
 ) -> PreflightWarning | None:
     """Priced at what a cell BILLED where the archive says; the ``cell_usd`` bound alone warns on every run."""
-    cap = config.optimization.budget.usd
     price = cell_usd if measured_cell_usd is None else measured_cell_usd
     if cap is None or price is None:
         return None
@@ -217,6 +241,7 @@ def run_preflight_checks(
     target_models: tuple[str, ...] = (),
     *,
     framing: TaskDecomposition,
+    cap_usd: float | None,
     cell_usd: float | None,
     measured_cell_usd: float | None,
     origin_campaigns: Sequence[str],
@@ -226,7 +251,7 @@ def run_preflight_checks(
     warnings: list[PreflightWarning] = []
     if (w := _check_sp_budget_vs_dataset(selected, dataset)) is not None:
         warnings.append(w)
-    funds = _check_cap_funds_round(config, selected, len(dataset), cell_usd, measured_cell_usd)
+    funds = _check_cap_funds_round(cap_usd, selected, len(dataset), cell_usd, measured_cell_usd)
     if funds is not None:
         warnings.append(funds)
     if (w := _check_optimizer_below_target(selected.model(), target_models)) is not None:
@@ -242,20 +267,38 @@ def run_preflight_checks(
 
 
 def refuse_arm_below_round(
-    purpose: Purpose, warnings: Iterable[PreflightWarning], *, measured_cell_usd: float | None
+    purpose: Purpose,
+    selected: SelectedOptimizer,
+    *,
+    cap_usd: float | None,
+    search: int,
+    measured_cell_usd: float | None,
+    minted: CycleHop | None,
 ) -> None:
-    """An arm alone: stopped inside round 1 it is still graded beside the arms that searched."""
+    """An arm alone: stopped inside round 1 it is still graded beside the arms that searched.
+    Asked before the mint (*minted* None), so a refused arm takes no key and every knob it names
+    can still move; asked again at a resume of *minted*, where only its ceiling still moves."""
     if not isinstance(purpose, Compare) or measured_cell_usd is None:
         return
+    w = _check_cap_funds_round(cap_usd, selected, search, None, measured_cell_usd)
+    if w is None:
+        return
     arm = purpose.arm
-    for w in warnings:
-        if w.code == "spend_cap_below_round":
-            raise PayloadInvalidError(
-                f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id} cannot close one round: "
-                f"{w.title}. {w.detail} Raise this arm's cap with `set-limits --max-usd`, which "
-                "moves this arm alone, or size the round down with the optimizer's own knobs.",
-                code="spend_cap_below_round",
-            )
+    need = selected.round_cells_ceiling(search) * measured_cell_usd
+    head = f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id} cannot close one round: {w.title}."
+    if minted is None:
+        remedy = (
+            f" Nothing is minted, so {arm.arm_key} stays free: launch it again under a cap of at "
+            f"least ${need:.2f} (the launch's `budget.usd`; `new --arm "
+            f"{arm.head_to_head_id}:{arm.arm_key} --max-usd {need:.2f}`), or size the round down "
+            "with the optimizer's own knobs (`optimization.nodes`; `new --set`)."
+        )
+    else:
+        remedy = (
+            f" Raise campaign {minted.campaign_id}'s ceiling to at least ${need:.2f} "
+            f"(`set-limits --max-usd {need:.2f}`), then `resume`."
+        )
+    raise PayloadInvalidError(head + remedy, code="spend_cap_below_round")
 
 
 def refuse_unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> None:

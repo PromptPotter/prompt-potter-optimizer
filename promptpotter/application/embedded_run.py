@@ -200,6 +200,7 @@ async def run_campaign(
                 session.bank.samples,
                 campaign_id=fresh_campaign_id(session),
                 task_text=None,
+                admitted=held.admitted,
             )
             session, optimizer = minted.session, minted.optimizer
             JobRegistry.attach(session.store.jobs_dir).update_target(job_id, hop=session.hop)
