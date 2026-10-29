@@ -364,6 +364,12 @@ class AbilityReading(FrozenModel):
     def comparable_to(self, other: AbilityReading) -> bool:
         return self.ruler.id == other.ruler.id
 
+    def minus(self, other: AbilityReading) -> float | None:
+        """θ less `other`'s θ; ``None`` where the two sit on different scales."""
+        if not self.comparable_to(other):
+            return None
+        return self.theta - other.theta
+
     def scale(self, *, named: bool = True) -> str:
         if self.ruler.cold:
             return f"{self.cells} cells, cold ruler"

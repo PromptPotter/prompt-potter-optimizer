@@ -43,6 +43,40 @@ describe("DataTable", () => {
     expect(screen.getByText("x")).toBeTruthy();
   });
 
+  it("opens a group its own `open` names, whatever the table's default", () => {
+    render(
+      <DataTable
+        ariaLabel="t"
+        columns={COLS}
+        groups={[
+          { key: "a", header: "Group a", open: true, rows: [{ id: "x", v: 1 }] },
+          { key: "b", header: "Group b", rows: [{ id: "y", v: 2 }] },
+        ]}
+        getRowId={rowId}
+      />,
+    );
+    expect(screen.getByText("x")).toBeTruthy();
+    expect(screen.queryByText("y")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Group a/ }));
+    expect(screen.queryByText("x")).toBeNull();
+  });
+
+  it("lets a wrapping column grow its row instead of fixing its height", () => {
+    render(
+      <DataTable
+        ariaLabel="t"
+        columns={[...COLS, { id: "w", label: "W", width: "80px", wrap: true, cell: () => "long" }]}
+        rows={[{ id: "a", v: 1 }]}
+        getRowId={rowId}
+      />,
+    );
+    const row = screen.getAllByRole("row")[1]!;
+    expect(row.style.height).toBe("");
+    expect(row.style.minHeight).not.toBe("");
+    const cells = screen.getAllByRole("cell");
+    expect(cells[2]!.className).not.toBe(cells[0]!.className);
+  });
+
   it("marks the active row and reports a click", () => {
     const onRowClick = vi.fn();
     render(

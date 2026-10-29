@@ -37,7 +37,9 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.runtime_flags import standing_budget
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_share
 from promptpotter.infrastructure.store.io import read_json
+from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     HOLD_TRAIL,
     HeldSends,
@@ -169,24 +171,26 @@ class Hold(NamedTuple):
     reserve: Budget
 
 
-class JobHold:
-    """A registry job's hold, re-read whenever its file changes: a reshare moves it mid-run."""
+class LiveHold:
+    """Each half off its one store, re-read live: the share off the cycle's ledger, which a reshare
+    moves, and the reserve off the registry job, which a set-limits moves."""
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
+    def __init__(self, cycle_dir: Path, job_file: Path) -> None:
+        self.cycle_dir = cycle_dir
+        self.job_file = job_file
         self._stamp: tuple[int, int, int] | None = None
-        self._hold = Hold(Budget(), Budget())
+        self._reserve = Budget()
 
     def read(self) -> Hold:
-        stat = self.path.stat()
+        share = scan_cycle_share(CycleLayout(self.cycle_dir).ledger)
+        if share is None:
+            raise RuntimeError(f"no share landed on {self.cycle_dir} before its book opened")
+        stat = self.job_file.stat()
         stamp = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
         if stamp != self._stamp:
-            job = read_json(self.path)
-            self._hold = Hold(
-                Budget.model_validate(job["allotment"]), Budget.model_validate(job["reserve"])
-            )
+            self._reserve = Budget.model_validate(read_json(self.job_file)["reserve"])
             self._stamp = stamp
-        return self._hold
+        return Hold(share.allotment, self._reserve)
 
 
 # What an enclosing book files a nested run's sends as, as its ledger's copy of them does.
@@ -198,7 +202,7 @@ class SpendBook(Projection):
         self,
         *,
         declared: Budget,
-        hold: Hold | JobHold,
+        hold: Hold | LiveHold,
         meters: CeilingMeter,
         opened: float,
         cycle_dir: Path | None = None,

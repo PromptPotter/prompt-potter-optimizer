@@ -1120,7 +1120,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     )
                 )
             else:
-                _, uncut = asyncio.run(execute_round(cycle, 1, callbacks))
+                uncut = asyncio.run(execute_round(cycle, 1, callbacks)).cut
                 assert uncut is None, f"{case}: round 1 ran inside its budget"
             paid.clear()
             parent = ArmKey(cycle.parent.id)
@@ -1136,7 +1136,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     f"{case}: an arm was crowned on a holed panel"
                 )
                 return
-            closed, cut = asyncio.run(cut_walk)
+            closed, cut, _ = asyncio.run(cut_walk)
             assert cut is StopReason.SPEND_BUDGET, f"{case}: the round names its cut"
             rows = {key: closed.rows(key) for key in closed.panel}
             assert sum(len(closed.rows(key)) for key in closed.arms) == (
@@ -1170,6 +1170,56 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     for cut_round, budget, replayed, parent_cells in ((1, 17, 0, 2), (2, 5, 12, 0)):
         for panel_gate in ("strict", "off"):
             cut_by_budget(cut_round, budget, replayed, parent_cells, panel_gate)
+
+    # CAPO races block after block while more than μ arms stand (App. B), and stops at μ.
+    def raced(failing: str) -> RoundResult:
+        minted: list[str] = []
+
+        def capo_says(body: dict[str, Any]) -> str:
+            if "Create overall 15 prompts" in _asked(body):
+                return json.dumps(
+                    ["Solve the task, A.", "Solve the task, B.", "Solve the task, C."]
+                )
+            minted.append(f"Go {len(minted)}.")
+            return f"<prompt>{minted[-1]}</prompt>"
+
+        def misses_after_block_one(prompt: str, sample: Sample) -> bool:
+            block = _PEER_READ_ORDER[sample.id] // 4
+            return block == 0 or not any(f"task, {arm}." in prompt for arm in failing)
+
+        with _peer_cycle(
+            workspace(tmp_path / f"race-{failing}"),
+            _PEER_HOP,
+            monkeypatch,
+            "capo",
+            capo_nodes,
+            misses_after_block_one,
+        ) as (cycle, callbacks):
+            offline.llm.says = capo_says
+            return asyncio.run(execute_round(cycle, 1, callbacks)).result
+
+    def fates(closed: RoundResult) -> dict[str, list[int]]:
+        out: dict[str, list[int]] = {}
+        for key in closed.panel:
+            arm = closed.arms[key]
+            state = (
+                arm.kind
+                if isinstance(arm, Cut)
+                else "locked_in"
+                if isinstance(arm, Measured) and arm.locked_in is not None
+                else "measured"
+            )
+            out.setdefault(state, []).append(len(closed.rows(key)))
+        return out
+
+    # Five arms, μ 3: nobody falls on block 1; C falls on block 2, and four still race block 3.
+    assert fates(raced("C")) == {"eliminated": [8], "measured": [12] * 4}, (
+        "a survivor set above μ stopped racing before max_blocks"
+    )
+    # B and C fall together on block 2, which leaves μ: the race is settled there.
+    assert fates(raced("BC")) == {"eliminated": [8, 8], "locked_in": [8] * 3}, (
+        "a race at μ survivors walked on, or settled before its cut"
+    )
 
     # A survey round's K starts and its reference are arms, and its banked matrix is their cells.
     starts = {ArmKey(f"c{i}"): sheet(measurements([1.0, 0.0, float(i % 2)])) for i in range(3)} | {
@@ -1266,7 +1316,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         offline.llm.says = crossover_says
         session = cycle.session
         assert not cycle.population
-        closed, cut = asyncio.run(execute_round(cycle, 1, callbacks))
+        closed, cut, _ = asyncio.run(execute_round(cycle, 1, callbacks))
     assert cut is None
     assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
         "a crossover saw one parent"
@@ -1396,7 +1446,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     ) as (cycle, callbacks):
         offline.llm.says = bench_says
         session = cycle.session
-        picked = asyncio.run(execute_round(cycle, 1, callbacks))[0]
+        picked = asyncio.run(execute_round(cycle, 1, callbacks)).result
         head, fold = picked.head, picked.fold
         assert head is not None and fold is not None and fold.accuracy is not None
         assert picked.election is not None
@@ -1727,7 +1777,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                     )
                     await submit("arms-at-the-hold")
 
-                (held_round, held_cut), _ = await asyncio.gather(
+                (held_round, held_cut, _), _ = await asyncio.gather(
                     execute_round(cycle, 1, callbacks), answer()
                 )
                 assert held_cut is None

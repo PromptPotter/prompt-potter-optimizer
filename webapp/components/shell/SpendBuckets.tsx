@@ -1,8 +1,42 @@
 "use client";
+import { DataTable, type Column } from "@/components/ui";
 import type { MeteredSpend } from "@/lib/api";
 import { CEILING_METER_LABELS, RATE_PRICED_LABEL } from "@/lib/api/types.generated";
 import { replayShareLine, spendLines } from "@/lib/derivations";
 import { fmtUsd } from "@/lib/format";
+
+interface BucketRow {
+  key: string;
+  label: string;
+  usd: Pick<MeteredSpend, "billed_usd" | "rate_priced_usd" | "incurred_usd">;
+  total: boolean;
+}
+
+const usd = (r: BucketRow, n: number) => (r.total ? <strong>{fmtUsd(n)}</strong> : fmtUsd(n));
+
+const COLUMNS: readonly Column<BucketRow>[] = [
+  {
+    id: "bucket",
+    label: "By bucket",
+    width: "minmax(10ch, 1fr)",
+    cell: (r) => (r.total ? <strong>{r.label}</strong> : r.label),
+  },
+  { id: "billed", label: "Billed", width: "9ch", align: "end", cell: (r) => usd(r, r.usd.billed_usd) },
+  {
+    id: "priced",
+    label: RATE_PRICED_LABEL,
+    width: "9ch",
+    align: "end",
+    cell: (r) => usd(r, r.usd.rate_priced_usd),
+  },
+  {
+    id: "incurred",
+    label: "Incurred",
+    width: "9ch",
+    align: "end",
+    cell: (r) => usd(r, r.usd.incurred_usd),
+  },
+];
 
 // `campaignUsd`: served `campaign_metered_usd`, every cycle of the campaign; null on a replay or with no manifest.
 export function SpendBuckets({
@@ -16,34 +50,15 @@ export function SpendBuckets({
   const meter = CEILING_METER_LABELS[metered.meter];
   return (
     <div className="spend-buckets">
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">By bucket</th>
-            <th scope="col">Billed</th>
-            <th scope="col" className="spend-buckets-priced">{RATE_PRICED_LABEL}</th>
-            <th scope="col">Incurred</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((l) => (
-            <tr key={l.key}>
-              <th scope="row">{l.label}</th>
-              <td>{fmtUsd(l.kind.billed_usd)}</td>
-              <td>{fmtUsd(l.kind.rate_priced_usd)}</td>
-              <td>{fmtUsd(l.kind.incurred_usd)}</td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="spend-buckets-total">
-            <th scope="row">Total</th>
-            <td>{fmtUsd(metered.billed_usd)}</td>
-            <td>{fmtUsd(metered.rate_priced_usd)}</td>
-            <td>{fmtUsd(metered.incurred_usd)}</td>
-          </tr>
-        </tfoot>
-      </table>
+      <DataTable
+        ariaLabel="Spend by bucket"
+        columns={COLUMNS}
+        rows={[
+          ...lines.map((l) => ({ key: l.key, label: l.label, usd: l.kind, total: false })),
+          { key: "total", label: "Total", usd: metered, total: true },
+        ]}
+        getRowId={(r) => r.key}
+      />
       <p className="spend-buckets-replay">{replayShareLine(metered)}</p>
       <dl>
         {campaignUsd !== null && (

@@ -31,6 +31,7 @@ from promptpotter.application.jobs.mint import (
     fresh_campaign_id,
     mint_framed_cycle,
 )
+from promptpotter.application.jobs.quota import land_job
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP, Job, JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.campaign import Campaign, Purpose
@@ -156,7 +157,7 @@ async def hold_fresh_mint(
             task_text=request.task_text,
         )
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
-        job_registry.update_target(job.job_id, hop=hop)
+        land_job(stores, job_registry, job.job_id, hop, held.share)
         claim_cycle(stores, job_registry, job, hop)
 
     except BaseException as exc:

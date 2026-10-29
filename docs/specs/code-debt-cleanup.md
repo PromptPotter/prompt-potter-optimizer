@@ -25,11 +25,10 @@ acting.
     (`initialization/wiring.py::_verify_connector_revision`); only a resume whose origin moved names it.
   **Re-test:** each input either hashed into the declaration or written as a record.
 
-- **Three probed invariants the tree breaks** (`gate.py::_KNOWN_FALSE`): θ differenced without
-  `comparable_to` (`escalation/state.py::_improved`, `views/render/phase.py`); hand-rolled `<table>`
-  beside `ui/DataTable` in `components/compare/`, `shell/SpendBuckets`, `ingest/DatasetPreview`; a
-  hand-rolled dialog in `shell/sidebar/SidebarFilterPopover`. Action: route each through its owner.
-  **Re-test:** `gate.py --only doc-claims`.
+- **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
+  `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
+  `/hierarchy`, `/auth/*`, `/datasets`. Action: the limit admits one tab's own polling cadence.
+  **Re-test:** `npx playwright test --project=cold` logs no 429.
 - **Left by the check-in address (unstarted campaigns)**:
   - `components/chat/README.md` still describes one global `ThreadProvider` (another session's file).
   - **A promoted Start is unserved**: `application/hierarchy.py::queued_drafts` serves a draft `queued` only while
@@ -76,8 +75,7 @@ acting.
   `prompt-fields`, `origin-readiness`; to `prefs/` — `run-card-prefs`, once that unlanded file lands.
   Chrome still holding a surface: `shell/searchpoint/`, `shell/scoring/` (ingest imports it),
   `shell/node-surface/`, root `PairedLift` / `SummaryBlock`. Hard samples and compare each spread over
-  several folders (`git ls-files webapp/components | grep -i -E "hard-?sample|compare"`); hand
-  `<table>`s at `git grep -l "<table" -- webapp/components` (tracked `_KNOWN_FALSE`).
+  several folders (`git ls-files webapp/components | grep -i -E "hard-?sample|compare"`).
   **Re-test:** `git ls-files ':(glob)webapp/lib/*.tsx'` lists none.
 - **Adapters over a flat served shape**: `useCandidatesModel.ts` joins every source it imports;
   `.facts.` opened at `git grep -c "\.facts\." -- webapp/components webapp/lib`; liveness
@@ -89,19 +87,6 @@ acting.
 
 ### The member backbone
 
-- **A repair reads the cycle past `sees`.** `round_packages` and `rederive` are handed the `Cycle` and a
-  `CampaignStore`: `potter/resume.py::_seat_on` builds its own `RoundContext` off the session ledger, and
-  `rederive_critiques` restates the round itself. Action: the bench seats one `NodeContext` per repaired
-  round and restates onto the branch hop: a member answers `round_packages(ctx)` and `rederive(ctx)`
-  for that one round, and gepa's and levi's `rows_read_packages` read `Lineage.rounds`. It moves the
-  repair path's package fingerprints, which decide EQUIVALENT vs SUPERSEDE, a path the offline run
-  does not walk and no test reaches, so its proof is a repair-fork test first.
-  **Re-test:** `git grep -c "RoundContext(" -- promptpotter/application/optimizers` is 0.
-- **A round role is ordered three times**: `optimizer_manifest.py::_round_plan` admits each role by
-  its position against the gateway and selector, `::_walk` places every role for the closure check,
-  and `runner/round.py::execute_round` calls them. A static order cannot derive from calls, so one
-  order needs the executor to walk the plan's. **Re-test:** two of the three orders deleted.
-
 - **The cladogram re-derives fork lineage the server resolves.**
   `webapp/components/candidates/forest-layout.ts::extentKeys` walks spawn cuts client-side while each
   `HierarchyCandidate` serves `main_line`; the cut is by proposal round, not line position. Action:
@@ -112,10 +97,37 @@ acting.
   resume-divergence fork and a diag sibling, where the origin is the only candidate to hang on.
 - **The dev loop serializes where it need not:** sibling gates queue whole runs, `next-build` peaks
   near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
-  green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:**
-  five builders plus one full gate with no reap and no gate waiting longer than its own run.
+  green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:** five builders plus one full gate with no reap and no gate waiting
+  longer than its own run.
 - **Ledger shapes left standing:** `round_restated` carries the whole round. **Re-test:** the
   symbol deleted, read, or tested.
+- **A restatement has two writers** (backbone arc, 2026-10-29): `node_context.py::NodeContext._bank`
+  appends a `RoundRestatedRecord` to the run's own `CycleEventLog` on `session.hop`, while
+  `resume_and_fork/repair.py` writes one through `CampaignStore.restate_round` onto the branch. And
+  `NodeContext.bank_proposals` returns silently on an unbound ledger where `_bank` asserts one.
+  Action: one restatement seam taking the hop; one posture on a missing ledger. **Re-test:**
+  `git grep -n "restated_state(" -- promptpotter` names one caller.
+- **Fingerprinting a repair moves the live `Cycle`**: `repair.py::round_packages` and `_rederive`
+  seat the run's own cycle round by round (`Cycle.replay_priors`, which reseats `rounds`,
+  `population`, `slices` and the ruler) and reseat it after; `round_packages` holds no `finally`, so a
+  raising member leaves the cycle on a past round. Each seat also re-copies every round
+  (`Lineage.rounds`), and `_package_drift` / `restated_state` re-fold the ledger chain per round.
+  Action: a round's seat is a view, not the cycle. **Re-test:** `round_packages` leaves `Cycle` as
+  handed in.
+- **A repair takes `session` beside `cycle`** (`apply_correction`, `repair_incomplete_rounds`):
+  `cycle.session` is that session, two doors into one state. The re-bank warning also fires on zero
+  retired candidates. **Re-test:** neither takes a `Session`.
+- **`RoundPlan` holds each role in its own field beside the `RoundRole` that orders them**:
+  `RoundPlan.first_walk` maps a role to its field by `match`, and `runner/round.py::_Walking` carries
+  each role's output in an optional slot narrowed by asserts. Action: the plan keyed by role, each
+  role's output typed for the role that reads it. **Re-test:** `git grep -c "assert self\." --
+  promptpotter/application/runner/round.py` is 0.
+- **`default` names two walks**: the optimizer manifest's round walk (a bare `"default"` at each
+  `optimizer_manifest.py` site, beside the `INITIAL_POPULATION` / `RUN_INIT` constants) and the
+  backend's pipeline (`domain/pipeline_schema.py`). **Re-test:** the round walk read through one
+  constant.
+- **`Escalation.observe` writes the `Ladder`** (`ctx.put`): a controller's observation mutates state
+  under a read's name. **Re-test:** the write named for what it does, or moved to `act`.
 
 ## Open — multi-arc
 
@@ -221,12 +233,13 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `__bca431` did not arm before init read $0.03. Open: should an arm that never closed a round be
   re-mintable under its own key, or should the refusal run before the mint so no key is taken?
   **Re-test:** `promptpotter evidence` on h2h-7 lists `capo` beside `capo-b5`.
-- **CAPO's race ends after its first block whenever offspring equal the cut.** The fixed blocks follow
-  the paper (App. C.4), but with 4 offspring and μ 10 every h2h-7 round cut 4 on block 1 and stopped.
-  The population was then judged only on those 30 cells: the crown held C1.7 (36.7% there, 27.5% on
-  the origin panel), and the selection benched 0.110 against the origin's 0.140. `max_blocks` was inert.
-  Open: is this the paper's behaviour at these sizes, or does our eliminator stop where the paper races
-  on? **Re-test:** the per-round "Blocks raced" fact on a CAPO run with offspring < μ.
+- **INVESTIGATE — CAPO's survivors are ranked on another reading than the reference ranks them on.**
+  `population` keeps μ best-first by mean objective on the cells all survivors measured; promptolution's
+  CAPO sorts survivors on raw score over every cell each has been evaluated on, cached across rounds,
+  so an incumbent's deeper blocks from earlier races count. After a one-block race (the paper's rule,
+  `candidate-elimination.md` § CAPO's race) the two can crown differently. Open: which reading the
+  bench compares. **Rides with:** any change to `capo/members.py::_rank_survivors`. **Re-test:** on a CAPO
+  run with offspring < μ, rank one round's survivors both ways.
 - **One bad pack fails the whole library.** `config/prompt_blocks.py::PackShelf.read` raises on a
   malformed `pack.json`, and a name both roots hold raises `block_pack_collision`. Either one is a 500
   or 409 for every `GET /library` and every draft edit, not just for that pack. Seen: the e2e fixture

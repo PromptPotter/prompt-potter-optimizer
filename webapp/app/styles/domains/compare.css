@@ -340,46 +340,22 @@
 }
 
 .cmp-cfg-wrap {
-  overflow-x: auto;
+  min-width: 0;
 }
-.cmp-cfg {
-  border-collapse: collapse;
-  font-size: var(--text-xs);
-  width: 100%;
+.cmp-cfg-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
 }
-.cmp-cfg th,
-.cmp-cfg td {
-  text-align: left;
-  padding: var(--space-4) var(--space-8);
-  vertical-align: top;
-  border-bottom: 1px solid var(--color-border);
-}
-.cmp-cfg thead th {
-  color: var(--color-text-secondary);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.cmp-cfg-band th {
-  color: var(--color-text-secondary);
-  font-weight: inherit;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding-top: var(--space-12);
-}
-.cmp-cfg-key {
-  font-family: var(--font-mono);
-  color: var(--color-text-secondary);
-  font-weight: inherit;
-  white-space: nowrap;
-}
+.cmp-cfg-key,
 .cmp-cfg-val {
   font-family: var(--font-mono);
+  font-size: var(--text-xs);
   color: var(--color-text-secondary);
-  /* No line-clamp: a `-webkit-box` would take the restore button with it. */
-  max-width: 22rem;
 }
-.cmp-cfg-differs .cmp-cfg-key,
-.cmp-cfg-differs .cmp-cfg-val {
+/* No line-clamp on a value: a `-webkit-box` would take the restore button with it. */
+.cmp-cfg-key.cmp-cfg-differs,
+.cmp-cfg-val.cmp-cfg-differs {
   color: var(--color-text-primary);
 }
 .cmp-channel-setup > summary {
@@ -561,23 +537,14 @@
   margin: var(--space-12) 0;
 }
 .cmp-coverage-grid {
-  border-collapse: collapse;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
-.cmp-coverage-grid caption {
-  text-align: left;
-  padding-bottom: var(--space-6);
-}
 .cmp-coverage-name {
-  text-align: left;
-  font-weight: inherit;
   color: var(--color-text-secondary);
-  padding-right: var(--space-8);
-  white-space: nowrap;
 }
 .cmp-coverage-cell {
-  width: 1.1rem;
+  display: block;
   text-align: center;
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
@@ -642,12 +609,7 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
-.l4-factor-grid {
-  min-width: max-content;
-}
-.l4-factor-grid th[scope="row"] {
-  text-align: left;
-  font-weight: 400;
+.l4-factor-level {
   color: var(--color-text-secondary);
 }
 .l4-margin {

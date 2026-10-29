@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api";
-import { CardFrame, Empty, Loading } from "@/components/ui";
+import { CardFrame, DataTable, Empty, Loading, type Column } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { indexLineage } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
@@ -17,7 +17,6 @@ function configured(evidence: Evidence): SubjectReading[] {
 
 function ConfigPanels({ evidence, loading }: { evidence: Evidence; loading: boolean }) {
   const rows = configured(evidence);
-  const [showSame, setShowSame] = useState(false);
 
   const differs = evidence.config_keys?.differs ?? [];
   const oneSided = evidence.config_keys?.one_sided ?? [];
@@ -57,103 +56,84 @@ function ConfigPanels({ evidence, loading }: { evidence: Evidence; loading: bool
         be re-read from what was measured are the scoring criterion and the sample subset, and both
         ride the scoring mask beside the chart above.
       </p>
-      <table className="cmp-cfg">
-        <thead>
-          <tr>
-            <th scope="col">key</th>
-            {rows.map((r) => (
-              <th scope="col" key={r.key} title={r.key}>
-                <span
-                  className="cmp-swatch"
-                  style={{ background: seriesVar(evidence.subjects.indexOf(r)) }}
-                  aria-hidden="true"
-                />
-                {r.kind === "campaign" ? shortId(r.label) : r.label}
-                <ChannelRestore subjectKey={pointKeyOf(r)} />
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          <Band n={differs.length} colSpan={rows.length + 1}>
-            {differs.length} key{differs.length === 1 ? "" : "s"} set differently
-          </Band>
-          {differs.map((key) => (
-            <Row key={key} name={key} rows={rows} differing />
-          ))}
-          <Band n={oneSided.length} colSpan={rows.length + 1}>
-            {oneSided.length} only one of these configures — not a disagreement, a different
-            pipeline
-          </Band>
-          {oneSided.map((key) => (
-            <Row key={key} name={key} rows={rows} />
-          ))}
-          <tr className="cmp-cfg-band">
-            <th scope="row" colSpan={rows.length + 1}>
-              <button
-                type="button"
-                className="cmp-link"
-                aria-expanded={showSame}
-                onClick={() => setShowSame((v) => !v)}
-                disabled={same.length === 0}
-              >
-                {showSame ? "▾" : "▸"} {same.length} identical
-              </button>
-            </th>
-          </tr>
-          {showSame &&
-            same.map((key) => <Row key={key} name={key} rows={rows} />)}
-        </tbody>
-      </table>
+      <DataTable
+        ariaLabel="Configuration by searchpoint"
+        className="cmp-cfg"
+        columns={configColumns(rows, evidence.subjects)}
+        groups={[
+          {
+            key: "differs",
+            open: true,
+            header: `${differs.length} key${differs.length === 1 ? "" : "s"} set differently`,
+            rows: differs.map((name) => ({ name, differing: true })),
+          },
+          {
+            key: "one-sided",
+            open: true,
+            header: `${oneSided.length} only one of these configures — not a disagreement, a different pipeline`,
+            rows: oneSided.map((name) => ({ name, differing: false })),
+          },
+          {
+            key: "same",
+            header: `${same.length} identical`,
+            rows: same.map((name) => ({ name, differing: false })),
+          },
+        ].filter((g) => g.rows.length > 0)}
+        getRowId={(k) => k.name}
+      />
     </div>
   );
 }
 
-function Band({
-  n,
-  colSpan,
-  children,
-}: {
-  n: number;
-  colSpan: number;
-  children: React.ReactNode;
-}) {
-  if (n === 0) return null;
-  return (
-    <tr className="cmp-cfg-band">
-      <th scope="row" colSpan={colSpan}>
-        {children}
-      </th>
-    </tr>
-  );
+interface ConfigKey {
+  name: string;
+  differing: boolean;
 }
 
-function Row({
-  name,
-  rows,
-  differing,
-}: {
-  name: string;
-  rows: readonly SubjectReading[];
-  differing?: boolean;
-}) {
-  return (
-    <tr className={cx("l4-row", differing && "cmp-cfg-differs")}>
-      <th scope="row" className="cmp-cfg-key" title={name}>
-        {name}
-      </th>
-      {rows.map((r) => (
-        <td key={r.key} className="cmp-cfg-val">
-          <ConfigCell
-            name={name}
-            subjectKey={pointKeyOf(r)}
-            label={r.label}
-            served={r.config?.[name]}
-          />
-        </td>
-      ))}
-    </tr>
-  );
+function configColumns(
+  rows: readonly SubjectReading[],
+  subjects: readonly SubjectReading[],
+): Column<ConfigKey>[] {
+  return [
+    {
+      id: "key",
+      label: "key",
+      width: "minmax(14ch, 1fr)",
+      cell: (k) => (
+        <span className={cx("cmp-cfg-key", k.differing && "cmp-cfg-differs")} title={k.name}>
+          {k.name}
+        </span>
+      ),
+    },
+    ...rows.map(
+      (r): Column<ConfigKey> => ({
+        id: r.key,
+        label: (
+          <span className="cmp-cfg-head" title={r.key}>
+            <span
+              className="cmp-swatch"
+              style={{ background: seriesVar(subjects.indexOf(r)) }}
+              aria-hidden="true"
+            />
+            {r.kind === "campaign" ? shortId(r.label) : r.label}
+            <ChannelRestore subjectKey={pointKeyOf(r)} />
+          </span>
+        ),
+        width: "minmax(16ch, 22rem)",
+        wrap: true,
+        cell: (k) => (
+          <span className={cx("cmp-cfg-val", k.differing && "cmp-cfg-differs")}>
+            <ConfigCell
+              name={k.name}
+              subjectKey={pointKeyOf(r)}
+              label={r.label}
+              served={r.config?.[k.name]}
+            />
+          </span>
+        ),
+      }),
+    ),
+  ];
 }
 
 interface Spine {

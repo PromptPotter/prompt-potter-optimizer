@@ -322,9 +322,11 @@ class HeldBudget(FrozenModel):
 
     admitted: Budget
     standing: Budget
-    # The registry job holding its reservation and its share of the campaign's ceiling.
+    # The registry job holding its reservation.
     job_id: str
     step_rounds: int | None
+    # Its share of the campaign's ceiling as admitted: lands on its cycle once that cycle is known.
+    share: Budget
 
 
 def bill_is_floor(unpriced_tokens: int) -> bool:

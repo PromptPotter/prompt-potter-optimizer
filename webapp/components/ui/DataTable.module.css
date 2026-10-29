@@ -88,6 +88,12 @@
   color: var(--color-text-primary);
 }
 
+.wrap {
+  white-space: normal;
+  overflow: visible;
+  padding-block: var(--space-4);
+}
+
 .end {
   text-align: end;
   font-variant-numeric: tabular-nums;

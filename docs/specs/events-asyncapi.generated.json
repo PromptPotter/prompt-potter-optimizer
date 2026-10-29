@@ -2730,7 +2730,7 @@
       },
       "CycleShareRecord": {
         "additionalProperties": false,
-        "description": "The hold a book spending on this cycle binds, LAST wins and never inherited: written as the book\nopens and wherever a running change moves it (`jobs/quota.py::hold_moved`).",
+        "description": "The cycle's share of its campaign's ceiling, LAST wins and never inherited: its ONE store, which\nthe book spending on the cycle and every sibling's admission read. Every move lands through\n`jobs/quota.py::hold_moved`; the account's reserve is the job's (`Job.reserve`).",
         "properties": {
           "allotment": {
             "$ref": "#/components/schemas/Budget"
@@ -2741,17 +2741,13 @@
             "title": "Record Type",
             "type": "string"
           },
-          "reserve": {
-            "$ref": "#/components/schemas/Budget"
-          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
           }
         },
         "required": [
-          "allotment",
-          "reserve"
+          "allotment"
         ],
         "title": "CycleShareRecord",
         "type": "object"

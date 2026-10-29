@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_fork
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
-from promptpotter.application.run_callbacks import stated_line
+from promptpotter.application.optimizers.nodes import RoundContext
+from promptpotter.application.run_callbacks import RunCallbacks, stated_line
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
@@ -17,7 +19,8 @@ from promptpotter.domain.run_records import (
     RoundRestatedRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.shared.errors import ErrorCategory
+from promptpotter.infrastructure.llm.telemetry import at_round
+from promptpotter.shared.errors import ErrorCategory, graceful
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -190,6 +193,67 @@ async def repair_incomplete_rounds(
     return corrected
 
 
+def _seat_on(cycle: Cycle, rounds: list[RoundResult], rr: RoundResult) -> RoundContext:
+    """*rr*'s round as the run stood in it: the trajectory up to it, *rr* closed."""
+    cycle.replay_priors([*(p for p in rounds if p.round < rr.round), rr])
+    ledger = cycle.session.state.ledger
+    assert ledger is not None, "a resume replays its rounds under the run's observers"
+    return RoundContext(cycle=cycle, round_num=rr.round, callbacks=RunCallbacks(ledger=ledger))
+
+
+def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+    """``{round: {node: fingerprint}}``, each member asked in ITS OWN round, then the cycle reseated on *rounds*."""
+    out: dict[int, dict[str, str]] = {}
+    for rr in rounds:
+        seat = _seat_on(cycle, rounds, rr)
+        out[rr.round] = {
+            node: fingerprint
+            for member in cycle.optimizer.members
+            for node, fingerprint in member.round_packages(NodeContext(seat, member)).items()
+        }
+    cycle.replay_priors(rounds)
+    return out
+
+
+async def _rederive(
+    campaign_store: CampaignStore,
+    branch: CycleHop,
+    cycle: Cycle,
+    rounds: list[RoundResult],
+    drifted: list[int],
+) -> list[RoundResult]:
+    """A repair, not a rewind: measurements and winner untouched; round 0's state is the origin path's."""
+    restated = list(rounds)
+    try:
+        for slot, rr in enumerate(rounds):
+            if rr.round not in drifted or rr.round == 0:
+                continue
+            seat = _seat_on(cycle, restated, rr)
+            # Outside the round loop this ContextVar still holds whatever the last round set.
+            with at_round(rr.round), graceful(f"round {rr.round} re-derivation failed"):
+                parts = [
+                    part
+                    for member in cycle.optimizer.members
+                    for part in await member.rederive(NodeContext(seat, member))
+                ]
+                if not parts:
+                    continue
+                state = rr.closed_state.holding(*parts)
+                restated[slot] = rr.model_copy(update={"optimizer_state": state})
+                campaign_store.restate_round(
+                    branch, campaign_store.restated_state(branch, restated[slot])
+                )
+                logger.warning(
+                    "Round %d %s re-derived: its input package drifted when the round was "
+                    "repaired, so what it recorded described evidence that no longer exists.",
+                    rr.round,
+                    ", ".join(part.kind for part in parts),
+                )
+    finally:
+        cycle.replay_priors(restated)
+    return restated
+
+
 def _package_drift(
     before: dict[int, dict[str, str]],
     after: dict[int, dict[str, str]],
@@ -272,7 +336,7 @@ async def apply_correction(
     corrected = [*mended, *prior[cut.resume_at :]]
     mismatches, drifted = _package_drift(
         packages_before,
-        cycle.optimizer.round_packages(cycle, corrected),
+        round_packages(cycle, corrected),
         {t.round for t in corrected},
         campaign_store,
         hop,
@@ -296,9 +360,7 @@ async def apply_correction(
         repair_target,
     )
     if drifted:
-        corrected = await cycle.optimizer.rederive(
-            campaign_store, branch, cycle, corrected, drifted
-        )
+        corrected = await _rederive(campaign_store, branch, cycle, corrected, drifted)
 
     equivalent = not mismatches
     campaign_store.grade_fork(

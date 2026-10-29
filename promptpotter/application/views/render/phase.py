@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import CycleResult, RoundOutcome
+    from promptpotter.domain.ruler import AbilityReading
     from promptpotter.domain.run_records import RoundClosedRecord
 
 
@@ -63,14 +64,15 @@ def render_progress_table(rounds: Sequence[RoundOutcome], series: LevelSeries) -
     lines: list[str] = [_node_line(header)]
 
     # Trend reads ABILITY, never accuracy: under `per_round_resubset` consecutive accuracies sit different exams.
-    prev: float | None = None
+    prev: AbilityReading | None = None
     for rr in rounds:
         read = series.reading(rr.round)
         th_str = "---" if read is None else f"{read.reading.theta:+.3f}"
         level = series.level(rr.round)
-        trend = "-" if level is None or prev is None else f"{level.theta - prev:+.3f}"
+        step = None if level is None or prev is None else level.minus(prev)
+        trend = "-" if step is None else f"{step:+.3f}"
         if level is not None:
-            prev = level.theta
+            prev = level
         fold = rr.fold
         row = (
             f"  {rr.round!s:<5s} {fmt_pct(None if fold is None else fold.accuracy):>8s} "

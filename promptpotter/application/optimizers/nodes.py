@@ -9,6 +9,7 @@ import pkgutil
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -59,7 +60,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.arms import Concluded, Elimination, Proposal
     from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.cell_fold import ScoreSummary
-    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
     from promptpotter.domain.paired_reading import ArmKey
@@ -72,7 +72,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import StopRule, StopSignal
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
     # (the call already started, the commit writing its row once a walk takes the cell, the discard).
     CatchUp = tuple[asyncio.Future[Any], Callable[[], Sequence[GradedCell]], Callable[[], None]]
@@ -215,22 +214,13 @@ class NodeMember(Protocol):
         """Raise where the origin's measurement holds what this member cannot start from."""
         return None
 
-    def round_packages(
-        self, _cycle: Cycle, _rounds: list[RoundResult]
-    ) -> dict[int, dict[str, str]]:
-        """``{round: {node: fingerprint}}`` of what the nodes it speaks for were handed; a repair moving one forks the rounds after it."""
+    def round_packages(self, _ctx: NodeContext) -> dict[str, str]:
+        """``{node: fingerprint}`` of what the nodes it speaks for were handed in *ctx*'s round; a repair moving one forks the rounds after it."""
         return {}
 
-    async def rederive(
-        self,
-        _campaign_store: CampaignStore,
-        _hop: CycleHop,
-        _cycle: Cycle,
-        rounds: list[RoundResult],
-        _drifted: list[int],
-    ) -> list[RoundResult]:
-        """Re-derives what it wrote in each *drifted* round and restates it on *hop*'s ledger."""
-        return rounds
+    async def rederive(self, _ctx: NodeContext) -> tuple[StatePart, ...]:
+        """What it wrote in *ctx*'s round, re-derived off the repaired rows; the bench restates it on the branch."""
+        return ()
 
     def complete(self) -> None:
         """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
@@ -341,6 +331,19 @@ INITIAL_POPULATION = "initial_population"
 RUN_INIT = "run_init"
 
 
+class RoundRole(Enum):
+    """The ONE order a round's members run in, each role by the node kinds it admits: ``_round_plan`` admits a `default` walk in it, ``runner/round.py::execute_round`` walks it."""
+
+    SAMPLER = frozenset({NodeKind.SAMPLER})
+    PROPOSER = frozenset({NodeKind.LLM, NodeKind.ALGORITHM})
+    # The gateway's walk, raced by the eliminator.
+    MEASUREMENT = frozenset({NodeKind.ELIMINATOR, NodeKind.GATEWAY})
+    SELECTOR = frozenset({NodeKind.SELECTOR})
+    SURVIVOR = frozenset({NodeKind.ALGORITHM})
+    ADAPTER = frozenset({NodeKind.LLM})
+    CONTROLLER = frozenset({NodeKind.CONTROLLER})
+
+
 @dataclass(frozen=True)
 class RoundWalk:
     """``pipeline`` makes the round's arms; ``seeds`` walk ahead of it into the population it reads; ``gate`` says what of it walks."""
@@ -426,14 +429,12 @@ def _source_digest(
     return module_source_digest(*spoken, *own, *shapers)
 
 
-def rows_read_packages(
-    rounds: Sequence[RoundResult], proposers: Sequence[str]
-) -> dict[int, dict[str, str]]:
-    """A round's package digests all rows before it, so a repair drifts every round after the one it hit."""
-    out: dict[int, dict[str, str]] = {}
+def rows_read(rounds: Sequence[RoundResult], round_num: int) -> str:
+    """Every row of the rounds before *round_num*, so a repair drifts every round after the one it hit."""
     digest = hashlib.sha256()
     for rr in sorted(rounds, key=lambda r: r.round):
-        out[rr.round] = dict.fromkeys(proposers, digest.hexdigest()[:16])
+        if rr.round >= round_num:
+            break
         for sheet in rr.cells.values():
             seen = [
                 [
@@ -445,7 +446,7 @@ def rows_read_packages(
                 for cell in sheet
             ]
             digest.update(json.dumps(seen, default=str).encode("utf-8"))
-    return out
+    return digest.hexdigest()[:16]
 
 
 @dataclass(frozen=True)
@@ -455,7 +456,6 @@ class RoundContext:
     cycle: Cycle
     round_num: int
     callbacks: RunCallbacks
-    is_final_round: bool = False
     # Each arm the round walked, its panel walk and every read of it as a reference, whoever asked.
     walks: dict[ArmKey, ArmWalk] = field(default_factory=dict, init=False)
 

@@ -110,10 +110,15 @@ class Keep(nodes.Selector):
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         folds = measured.folds
-        fitness = {key: folds[key].composite_fitness or 0.0 for key in measured.electable}
-        ranked = sorted(measured.electable, key=lambda key: -fitness[key])
-        bar = folds[measured.parent.key].composite_fitness or 0.0
-        selected = ranked[0] if ranked and fitness[ranked[0]] > bar else None
+        # An arm with no composite is unread, never ranked; a parent with none sets no bar.
+        fitness = {
+            key: value
+            for key in measured.electable
+            if (value := folds[key].composite_fitness) is not None
+        }
+        ranked = sorted(fitness, key=lambda key: -fitness[key])
+        bar = folds[measured.parent.key].composite_fitness
+        selected = ranked[0] if ranked and (bar is None or fitness[ranked[0]] > bar) else None
         ctx.read(Replay).decide(
             "example_kept", {"round_num": ctx.round_num, "ranked": ranked}, selected or ""
         )

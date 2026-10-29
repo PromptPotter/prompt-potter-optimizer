@@ -115,13 +115,12 @@ async def run_round_loop(
                 # The cap's half only; the controller's is known once the round is scored (`execute_round`).
                 is_final_round = cap is not None and clean_rounds + 1 >= cap
 
-                round_result, cut = await execute_round(
-                    cycle, round_num, cb, is_final_round=is_final_round
-                )
+                walked = await execute_round(cycle, round_num, cb, is_final_round=is_final_round)
                 open_round = None
+                cut = walked.cut
                 await post_round(
                     cycle,
-                    round_result,
+                    walked,
                     round_num,
                     session,
                     cb,

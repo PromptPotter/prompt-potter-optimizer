@@ -40,7 +40,6 @@ from promptpotter.domain.validators import StopSignal
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.bench.resume_and_fork.replayers import (
         ReplayContext,
@@ -143,9 +142,9 @@ class GepaReflect(nodes.Proposer):
     def parent_read(self, panel: nodes.PanelSize) -> int:
         return panel.block_size
 
-    def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
+    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
         # The parent a round reflects on is drawn off every earlier round's Pareto-set scores.
-        return nodes.rows_read_packages(rounds, [self.name])
+        return {self.name: nodes.rows_read(ctx.read(Lineage).rounds, ctx.round_num)}
 
     async def propose(self, ctx: NodeContext, panel: Panel, _proposals: Proposals) -> Proposals:
         candidates = ctx.slice(ParetoScores)

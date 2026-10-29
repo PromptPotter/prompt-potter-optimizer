@@ -965,14 +965,13 @@ class StandingBudgetRecord(FrozenModel):
 
 
 class CycleShareRecord(FrozenModel):
-    """The hold a book spending on this cycle binds, LAST wins and never inherited: written as the book
-    opens and wherever a running change moves it (`jobs/quota.py::hold_moved`)."""
+    """The cycle's share of its campaign's ceiling, LAST wins and never inherited: its ONE store, which
+    the book spending on the cycle and every sibling's admission read. Every move lands through
+    `jobs/quota.py::hold_moved`; the account's reserve is the job's (`Job.reserve`)."""
 
     record_type: Literal["cycle_share"] = "cycle_share"
     # The most the cycle may have metered of its campaign's ceiling, in all.
     allotment: Budget
-    # What the account holds back for it, on the axes an account bounds.
-    reserve: Budget
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
