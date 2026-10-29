@@ -248,8 +248,7 @@ COUPLINGS: tuple[Coupling, ...] = (
 )
 
 
-def _member_couplings(config: CampaignConfig) -> Iterator[Coupling]:
-    selected = select_optimizer(config.optimization)
+def _member_couplings(selected: SelectedOptimizer) -> Iterator[Coupling]:
     for member in selected.members:
         node = member.name
         knobs, declared = selected.knobs(node), selected.declared_knobs(node)
@@ -276,12 +275,12 @@ def _member_predicate(
     return coupling.predicate(config, knobs, declared)
 
 
-def declared_couplings(config: CampaignConfig) -> list[Coupling]:
-    return [*COUPLINGS, *_member_couplings(config)]
+def declared_couplings(selected: SelectedOptimizer) -> list[Coupling]:
+    return [*COUPLINGS, *_member_couplings(selected)]
 
 
-def check_couplings(config: CampaignConfig) -> list[Coupling]:
-    return [c for c in declared_couplings(config) if c.predicate(config)]
+def check_couplings(config: CampaignConfig, selected: SelectedOptimizer) -> list[Coupling]:
+    return [c for c in declared_couplings(selected) if c.predicate(config)]
 
 
 @dataclass(frozen=True)

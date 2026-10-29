@@ -349,7 +349,7 @@ def open_spend_book(
     live: bool,
 ) -> SpendBook:
     """Its money is read off the job, which a reshare moves; a *live* book reads the cycle's standing axes too."""
-    return SpendBook(
+    book = SpendBook(
         declared=held.admitted,
         hold=JobHold(job_registry.job_file(held.job_id)),
         meters=meters,
@@ -357,6 +357,9 @@ def open_spend_book(
         cycle_dir=stores.campaigns.cycle_dir(hop) if live and hop is not None else None,
         metered=NOTHING_METERED if hop is None else stores.campaigns.cycle_metered(hop, meters),
     )
+    if hop is not None:
+        stores.campaigns.write_cycle_share(hop, allotment=book.allotment, reserve=book.reserve)
+    return book
 
 
 @asynccontextmanager

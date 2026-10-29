@@ -889,6 +889,35 @@
         "title": "ArmSlot",
         "type": "object"
       },
+      "ArmedCeilingEffect": {
+        "additionalProperties": false,
+        "description": "``change-run-limits``: the ceiling a budget stop fires at once the clamped change stands.",
+        "properties": {
+          "armed": {
+            "$ref": "#/components/schemas/Budget"
+          }
+        },
+        "required": [
+          "armed"
+        ],
+        "title": "ArmedCeilingEffect",
+        "type": "object"
+      },
+      "ArmsTakenEffect": {
+        "additionalProperties": false,
+        "description": "``submit-arms``: how many arms the round banked.",
+        "properties": {
+          "arms": {
+            "title": "Arms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "arms"
+        ],
+        "title": "ArmsTakenEffect",
+        "type": "object"
+      },
       "BackendWarningRecord": {
         "additionalProperties": false,
         "description": "An attempt that failed and will be retried: a transport fault or a 5xx, never a 429.",
@@ -1884,9 +1913,33 @@
             "type": "string"
           },
           "effect": {
-            "additionalProperties": true,
-            "title": "Effect",
-            "type": "object"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoEffect"
+              },
+              {
+                "$ref": "#/components/schemas/PausedEffect"
+              },
+              {
+                "$ref": "#/components/schemas/SkippedEffect"
+              },
+              {
+                "$ref": "#/components/schemas/GateDecidedEffect"
+              },
+              {
+                "$ref": "#/components/schemas/ArmsTakenEffect"
+              },
+              {
+                "$ref": "#/components/schemas/LookaheadTakenEffect"
+              },
+              {
+                "$ref": "#/components/schemas/ArmedCeilingEffect"
+              },
+              {
+                "$ref": "#/components/schemas/OriginEditedEffect"
+              }
+            ],
+            "title": "Effect"
           },
           "record_type": {
             "const": "command_ack",
@@ -2425,6 +2478,7 @@
             "cycle_final": "#/components/schemas/CycleFinalRecord",
             "cycle_minted": "#/components/schemas/CycleMintedRecord",
             "cycle_seed": "#/components/schemas/CycleSeedRecord",
+            "cycle_share": "#/components/schemas/CycleShareRecord",
             "cycle_superseded": "#/components/schemas/CycleSupersededRecord",
             "decision": "#/components/schemas/ResumeCheckpointRecord",
             "election": "#/components/schemas/ElectionRecord",
@@ -2499,6 +2553,9 @@
           },
           {
             "$ref": "#/components/schemas/CycleSeedRecord"
+          },
+          {
+            "$ref": "#/components/schemas/CycleShareRecord"
           },
           {
             "$ref": "#/components/schemas/CycleSupersededRecord"
@@ -2669,6 +2726,34 @@
           "seed"
         ],
         "title": "CycleSeedRecord",
+        "type": "object"
+      },
+      "CycleShareRecord": {
+        "additionalProperties": false,
+        "description": "The hold a book spending on this cycle binds, LAST wins and never inherited: written as the book\nopens and wherever a running change moves it (`jobs/quota.py::hold_moved`).",
+        "properties": {
+          "allotment": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "record_type": {
+            "const": "cycle_share",
+            "default": "cycle_share",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "reserve": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "allotment",
+          "reserve"
+        ],
+        "title": "CycleShareRecord",
         "type": "object"
       },
       "CycleSupersededRecord": {
@@ -3605,6 +3690,26 @@
         "title": "ForkTrigger",
         "type": "string"
       },
+      "GateDecidedEffect": {
+        "additionalProperties": false,
+        "description": "``origin-gate-decision``, taken by the loop.",
+        "properties": {
+          "decision": {
+            "enum": [
+              "rescore",
+              "proceed",
+              "abort"
+            ],
+            "title": "Decision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "GateDecidedEffect",
+        "type": "object"
+      },
       "HealthRecord": {
         "additionalProperties": false,
         "description": "On the box's own WORKSPACE ledger: a probe's state CHANGED. ``unverified`` never is one.",
@@ -4415,6 +4520,26 @@
         "title": "LivesReading",
         "type": "object"
       },
+      "LookaheadTakenEffect": {
+        "additionalProperties": false,
+        "description": "``set-sample-lookahead``, spent by the round that took it.",
+        "properties": {
+          "auto": {
+            "title": "Auto",
+            "type": "boolean"
+          },
+          "cells": {
+            "title": "Cells",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cells",
+          "auto"
+        ],
+        "title": "LookaheadTakenEffect",
+        "type": "object"
+      },
       "ManifestNodeOverlay": {
         "additionalProperties": false,
         "description": "One optimizer node's delta over its manifest's ``config``.",
@@ -4979,6 +5104,13 @@
         "title": "NearMiss",
         "type": "object"
       },
+      "NoEffect": {
+        "additionalProperties": false,
+        "description": "An ack whose command names no effect beyond having happened.",
+        "properties": {},
+        "title": "NoEffect",
+        "type": "object"
+      },
       "NodePrompt": {
         "additionalProperties": false,
         "description": "One prompt node's loci: its fields by name and its shots, both written only through ``derive`` / ``edited``.",
@@ -5303,6 +5435,22 @@
           "audit"
         ],
         "title": "OptimizerStepExitView",
+        "type": "object"
+      },
+      "OriginEditedEffect": {
+        "additionalProperties": {
+          "additionalProperties": true,
+          "propertyNames": {
+            "enum": [
+              "from",
+              "to"
+            ]
+          },
+          "type": "object"
+        },
+        "description": "A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new.",
+        "minProperties": 1,
+        "title": "OriginEditedEffect",
         "type": "object"
       },
       "OriginSource": {
@@ -5682,6 +5830,22 @@
         "title": "PauseCause",
         "type": "string"
       },
+      "PausedEffect": {
+        "additionalProperties": false,
+        "description": "``pause-cycle``, taken by the loop.",
+        "properties": {
+          "run_phase": {
+            "const": "paused",
+            "title": "Run Phase",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_phase"
+        ],
+        "title": "PausedEffect",
+        "type": "object"
+      },
       "PhaseRecord": {
         "additionalProperties": false,
         "properties": {
@@ -5903,6 +6067,7 @@
               "cycle_final",
               "cycle_minted",
               "cycle_seed",
+              "cycle_share",
               "cycle_superseded",
               "election",
               "error",
@@ -8082,6 +8247,21 @@
           }
         },
         "title": "Skipped",
+        "type": "object"
+      },
+      "SkippedEffect": {
+        "additionalProperties": false,
+        "description": "``skip-sample``, taken by the loop.",
+        "properties": {
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "skipped"
+        ],
+        "title": "SkippedEffect",
         "type": "object"
       },
       "SpDiffView": {

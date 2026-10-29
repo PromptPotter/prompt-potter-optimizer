@@ -466,9 +466,24 @@ def _reshare_campaign_ceiling(
             if other.job_id != job.job_id:
                 beside = beside.plus(_held(other, own[other.job_id]))
         share = _allotment(_left(moved, spent=spent, beside=beside), own=own[job.job_id])
-        job.allotment = job.allotment.over(share.only(moved.named))
-        # A run's book reads its hold off the job file, live.
-        job_registry.set_held(job.job_id, job.reserve, job.allotment)
+        hold_moved(
+            stores,
+            job_registry,
+            job,
+            reserve=job.reserve,
+            allotment=job.allotment.over(share.only(moved.named)),
+        )
+
+
+def hold_moved(
+    stores: Stores, job_registry: JobRegistry, job: Job, *, reserve: Budget, allotment: Budget
+) -> None:
+    """A running book reads its hold off the job file, live; the cycle's ledger records each move."""
+    if (job.reserve, job.allotment) == (reserve, allotment):
+        return
+    job.reserve, job.allotment = reserve, allotment
+    job_registry.set_held(job.job_id, reserve, allotment)
+    stores.campaigns.write_cycle_share(job.hop, allotment=allotment, reserve=reserve)
 
 
 def move_campaign_money(
@@ -655,7 +670,13 @@ def hold_budget_change(
     with job_registry.admission_gate():
         job = job_registry.running_job_for(stores.campaigns.workspace, hop)
         if job is not None:
-            job_registry.set_held(job.job_id, job.reserve.over(reserve), job.allotment)
+            hold_moved(
+                stores,
+                job_registry,
+                job,
+                reserve=job.reserve.over(reserve),
+                allotment=job.allotment,
+            )
         move_campaign_money(
             change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
         )

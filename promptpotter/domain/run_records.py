@@ -7,7 +7,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, NamedTuple, Self
 
-from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import ConfigDict, Field, RootModel, TypeAdapter, field_validator, model_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmState, Proposal, Proposed
@@ -25,6 +25,7 @@ from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     ErrorRecord,
+    GateDecision,
     GateKind,
     LaunchStage,
     PauseCause,
@@ -674,6 +675,67 @@ class CommandRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class NoEffect(FrozenModel):
+    """An ack whose command names no effect beyond having happened."""
+
+
+class PausedEffect(FrozenModel):
+    """``pause-cycle``, taken by the loop."""
+
+    run_phase: Literal[RunPhase.PAUSED]
+
+
+class SkippedEffect(FrozenModel):
+    """``skip-sample``, taken by the loop."""
+
+    skipped: int
+
+
+class GateDecidedEffect(FrozenModel):
+    """``origin-gate-decision``, taken by the loop."""
+
+    decision: GateDecision
+
+
+class ArmsTakenEffect(FrozenModel):
+    """``submit-arms``: how many arms the round banked."""
+
+    arms: int
+
+
+class LookaheadTakenEffect(FrozenModel):
+    """``set-sample-lookahead``, spent by the round that took it."""
+
+    cells: int
+    auto: bool
+
+
+class ArmedCeilingEffect(FrozenModel):
+    """``change-run-limits``: the ceiling a budget stop fires at once the clamped change stands."""
+
+    armed: Budget
+
+
+class OriginEditedEffect(RootModel[dict[str, dict[Literal["from", "to"], Any]]]):
+    """A check-in draft edit: each origin field it moved, by key, ``from`` its old value ``to`` its new."""
+
+    model_config = ConfigDict(frozen=True)
+    root: dict[str, dict[Literal["from", "to"], Any]] = Field(min_length=1)
+
+
+# Told apart by their fields, so an ack written before any tag still reads as its kind.
+CommandEffect = (
+    NoEffect
+    | PausedEffect
+    | SkippedEffect
+    | GateDecidedEffect
+    | ArmsTakenEffect
+    | LookaheadTakenEffect
+    | ArmedCeilingEffect
+    | OriginEditedEffect
+)
+
+
 class CommandAckRecord(FrozenModel):
     """``applied`` = it HAPPENED; a loop command is ``accepted`` first, and stays so if untaken."""
 
@@ -681,7 +743,7 @@ class CommandAckRecord(FrozenModel):
     command_id: str
     status: CommandAckStatus
     detail: str = ""
-    effect: dict[str, Any] = Field(default_factory=dict)
+    effect: CommandEffect = Field(default_factory=NoEffect)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -900,6 +962,18 @@ class StandingBudgetRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
     _cycle_axes = field_validator("budget")(cycle_axes_only)
+
+
+class CycleShareRecord(FrozenModel):
+    """The hold a book spending on this cycle binds, LAST wins and never inherited: written as the book
+    opens and wherever a running change moves it (`jobs/quota.py::hold_moved`)."""
+
+    record_type: Literal["cycle_share"] = "cycle_share"
+    # The most the cycle may have metered of its campaign's ceiling, in all.
+    allotment: Budget
+    # What the account holds back for it, on the axes an account bounds.
+    reserve: Budget
+    timestamp: str = Field(default_factory=utcnow_iso)
 
 
 class DefaultsPin(FrozenModel):
@@ -1173,6 +1247,7 @@ CycleRecord = Annotated[
     | CycleFinalRecord
     | CycleMintedRecord
     | CycleSeedRecord
+    | CycleShareRecord
     | CycleSupersededRecord
     | ElectionRecord
     | ErrorRecord

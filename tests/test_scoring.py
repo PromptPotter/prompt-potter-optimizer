@@ -877,7 +877,9 @@ def _peer_cycle(
         bound = set_cycle_ledger(callbacks.ledger)
         try:
             publish_inner_spawn_context(cycle.session)
-            with binding_optimizer(cycle.config.optimization):
+            with binding_optimizer(
+                cycle.optimizer, determinism=cycle.config.optimization.determinism
+            ):
                 run_init(cycle, callbacks)
                 with spending_under(cycle.session.state.control.book):
                     yield cycle, callbacks

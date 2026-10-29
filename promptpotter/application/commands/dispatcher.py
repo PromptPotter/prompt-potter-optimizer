@@ -21,7 +21,12 @@ from promptpotter.domain.command_kinds import (
     PauseCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, decode_cycle_path
-from promptpotter.domain.run_records import CommandAckRecord, CommandAckStatus, CommandRecord
+from promptpotter.domain.run_records import (
+    CommandAckRecord,
+    CommandAckStatus,
+    CommandEffect,
+    CommandRecord,
+)
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
@@ -104,7 +109,7 @@ class Applier[R]:
 
     run: Callable[[], Awaitable[R]] | Callable[[], R]
     replay: Callable[[], R] | None
-    effect_fn: Callable[[], dict[str, Any]] | None = None
+    effect_fn: Callable[[], CommandEffect] | None = None
     ack: CommandAckStatus = "applied"
     # The draft claim this command holds through its ack; a Start hands its claim to the launch.
     claim: DraftClaim | None = None
@@ -113,7 +118,7 @@ class Applier[R]:
     def silent(
         run: Callable[[], Awaitable[object]] | Callable[[], object],
         *,
-        effect_fn: Callable[[], dict[str, Any]] | None = None,
+        effect_fn: Callable[[], CommandEffect] | None = None,
     ) -> Applier[object]:
         return Applier(run, _no_body, effect_fn=effect_fn)
 

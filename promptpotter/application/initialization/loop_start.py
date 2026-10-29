@@ -15,7 +15,7 @@ from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import ScorerSetup, Session
 from promptpotter.application.initialization.wiring import bind_cycle_session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.optimizer_manifest import bound_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, bound_optimizer
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline
 from promptpotter.application.preflight import (
     refuse_arm_below_round,
@@ -289,6 +289,7 @@ def _banked_instruments(session: Session) -> list[str]:
 
 async def _emit_preflight_and_init_session(
     config: CampaignConfig,
+    selected: SelectedOptimizer,
     dataset: list[Sample],
     cb: RunCallbacks,
     session: Session,
@@ -303,6 +304,7 @@ async def _emit_preflight_and_init_session(
     instrument = inner_origin_of(session.pipeline_params)
     preflight_warnings = run_preflight_checks(
         config,
+        selected,
         dataset,
         target_models,
         framing=origin.framing,
@@ -346,8 +348,9 @@ async def init_optimization_loop(
 
     INIT stays open: its caller moves onto a fork first, then closes it (`finalize_loop_state`).
     """
+    selected = bound_optimizer()
     init_cycle(session, resume_from_round_override=resume_from_round_override)
-    await _emit_preflight_and_init_session(config, dataset, cb, session, origin)
+    await _emit_preflight_and_init_session(config, selected, dataset, cb, session, origin)
     if resume_from_round_override is not None:
         # Only an admitted launch retracts rounds: a refused arm or preflight raised above.
         session.store.campaigns.rewind_to_round(session.hop, resume_from_round_override)
@@ -359,7 +362,7 @@ async def init_optimization_loop(
         framing=origin.framing,
         session=session,
         config=config,
-        optimizer=bound_optimizer(),
+        optimizer=selected,
     )
     forked_from: CycleHop | None = None
     # =1 is fresh (origin only); real resumes are >=2 (>=1 L1 round on disk).

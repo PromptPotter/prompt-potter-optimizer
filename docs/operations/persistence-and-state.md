@@ -135,7 +135,7 @@ A failed cell's `ErrorCategory` and message land in the latest `rounds/round_NNN
 | **Rewind** | `resume --from N` | Same `cycle_id`; rounds after N displaced; resume at N+1. |
 | **Fork on divergence** | `resume --fork-on-divergence` | Mint a sibling cycle rooted at the divergent round and continue. |
 
-**Until an L1 round closes, a resume re-enters round 0** and holds at the origin gate again. Refusals, from every way in: `409 cycle_busy` (one live run per cycle), `409 config_drift` (the dataset no longer resolves to the minted origin, unless policy-only — `application/jobs/mint.py::refuse_drifted_resume`), `409 ledger_unreadable` (a line this build cannot read; remedy `delete <campaign>`, which keeps the caches; `restamp` lists every such cycle).
+**Until an L1 round closes, a resume re-enters round 0** and holds at the origin gate again. Refusals, from every way in: `409 cycle_busy` (one live run per cycle), `409 config_drift` (the dataset no longer resolves to the minted origin, unless policy-only — `application/jobs/mint.py::resolve_resume`), `409 ledger_unreadable` (a line this build cannot read; remedy `delete <campaign>`, which keeps the caches; `restamp` lists every such cycle).
 
 ### The primitive
 

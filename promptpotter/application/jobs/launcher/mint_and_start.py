@@ -19,24 +19,20 @@ from promptpotter.application.datasets.draft_campaign import (
     committed_pipeline_json,
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
-from promptpotter.application.initialization.wiring import bind_cycle_session, init_services
+from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
     claim_cycle,
     release_slot,
 )
-from promptpotter.application.jobs.launcher.run_job import HeldRun
+from promptpotter.application.jobs.launcher.run_job import HeldRun, open_held_cycle
 from promptpotter.application.jobs.mint import (
     declare,
     fresh_campaign_id,
     mint_framed_cycle,
-    refuse_drifted_resume,
 )
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP, Job, JobRegistry
-from promptpotter.application.pipeline_resolve import (
-    configure_and_apply_pipeline,
-    resolve_campaign_config,
-)
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.campaign import Campaign, Purpose
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
@@ -174,7 +170,7 @@ async def hold_fresh_mint(
         stores.identity.user_id,
         job.job_id,
     )
-    return HeldRun.of(job_registry, job.job_id, minted.session, held)
+    return HeldRun.of(job_registry, job.job_id, minted, held)
 
 
 def commit_upload_definition(
@@ -206,9 +202,7 @@ async def hold_existing_cycle(
     campaign, hop = request.campaign, request.hop
     try:
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
-        bound, campaign_config = await bind_cycle_session(stores, campaign, hop)
-        refuse_drifted_resume(bound, campaign, bound.bank.samples)
-        session = configure_and_apply_pipeline(bound, campaign_config)
+        session, campaign_config, optimizer = await open_held_cycle(stores, campaign, hop)
     except BaseException as exc:
         # `hop=None`: a refusal stamps nothing on the cycle, so it stays as resumable as it was.
         release_slot(job_registry, job.job_id, exc, stores=stores, hop=None)
@@ -219,4 +213,5 @@ async def hold_existing_cycle(
         session=session,
         campaign_config=campaign_config,
         budget=held,
+        optimizer=optimizer,
     )

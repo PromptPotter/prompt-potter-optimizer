@@ -12,20 +12,17 @@ acting.
 
 - **Inputs that change a run but leave no event** (audit 2026-10-29, `decisions.md` § 0009's last
   bullets). Left:
-  - **INIT selects the optimizer apart from the launch's binding**: `jobs/mint.py::refuse_unrunnable`'s
-    pool refusals and INIT's preflight call `select_optimizer` on the mtime-keyed manifest cache, so a
-    `pipeline.yaml` edit during INIT is read by them and not by `bound_optimizer()`.
-  - **A running job's allotment share is read live** from the job registry; only the armed ceiling
-    lands, on `change-run-limits`'s ack effect.
-  - **`ResolvedRunRecord.model_capabilities` / `backend_revision` have no served reader** beyond
-    `refuse_drifted_resume`'s capability cause.
   - **An arm's fork, `submit_arms` and skip are refused** (`refused_on_an_arm`) while a rewind,
     `fork_on_divergence` and `no_divergence_check` are admitted as a `LeftComparisonRecord`: one door
     shape per act is `decisions.md` § 0009's open proposal.
-  - **The new `ResolvedRunRecord` fields default so today's ledgers read** (data kept through
-    2026-10-30): make them required with the wipe.
-  - **`CommandAckRecord.effect` is an untyped `dict[str, Any]`**, now carrying the armed ceiling.
+  - **Today's ledgers are read by tolerance until the 2026-10-30 wipe**: the new `ResolvedRunRecord`
+    fields default, and `CommandEffect`'s arms are told apart by their fields, not a tag. Make the
+    fields required and tag the union with the wipe.
   - **`campaign.standing_budget`'s money lives in `campaign.json`**, beside the ledger.
+  - **A cycle's share has two stores**: the job file arbitrates siblings and feeds the book live, and
+    `CycleShareRecord` records each move. Action: the book and the sibling sums read the record.
+  - **A backend revision unlike the connector's expected one is a log warning**
+    (`initialization/wiring.py::_verify_connector_revision`); only a resume whose origin moved names it.
   **Re-test:** each input either hashed into the declaration or written as a record.
 
 - **Three probed invariants the tree breaks** (`gate.py::_KNOWN_FALSE`): θ differenced without

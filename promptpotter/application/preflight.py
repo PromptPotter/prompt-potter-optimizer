@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application import optimizers
 from promptpotter.application.knobs import check_couplings
-from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_overlay import node_config_items
@@ -30,11 +30,11 @@ class PreflightWarning:
 
 
 def _check_sp_budget_vs_dataset(
-    config: CampaignConfig, dataset: list[Sample]
+    selected: SelectedOptimizer, dataset: list[Sample]
 ) -> PreflightWarning | None:
     # Only the PER-ROUND draw: an origin budget above the bank is fine (`sample_dataset` slices).
     m = len(dataset)
-    n = select_optimizer(config.optimization).round_cells(m)
+    n = selected.round_cells(m)
     if m > 0 and n > m:
         return PreflightWarning(
             code="sp_budget_exceeds_dataset",
@@ -81,14 +81,16 @@ def _check_optimizer_below_target(
     )
 
 
-def _check_config_couplings(config: CampaignConfig) -> list[PreflightWarning]:
+def _check_config_couplings(
+    config: CampaignConfig, selected: SelectedOptimizer
+) -> list[PreflightWarning]:
     return [
         PreflightWarning(
             code=f"config_coupling.{c.name}",
             title=f"config coupling [{c.severity}]: {', '.join(c.knobs)}",
             detail=f"{c.relation} {c.consequence}",
         )
-        for c in check_couplings(config)
+        for c in check_couplings(config, selected)
     ]
 
 
@@ -122,6 +124,7 @@ def _check_task_context_present(
 
 def _check_cap_funds_round(
     config: CampaignConfig,
+    selected: SelectedOptimizer,
     search: int,
     cell_usd: float | None,
     measured_cell_usd: float | None,
@@ -131,7 +134,6 @@ def _check_cap_funds_round(
     price = cell_usd if measured_cell_usd is None else measured_cell_usd
     if cap is None or price is None:
         return None
-    selected = select_optimizer(config.optimization)
     cells = selected.round_cells_ceiling(search)
     need = cells * price
     if need <= cap:
@@ -197,9 +199,8 @@ def _check_instrument_replays(
     )
 
 
-def check_search_split_holds_round(config: CampaignConfig, search: int) -> str | None:
+def check_search_split_holds_round(selected: SelectedOptimizer, search: int) -> str | None:
     """Asked before a mint: the sampler raises on such a pool at round 1, after the origin is paid."""
-    selected = select_optimizer(config.optimization)
     if selected.round_cells_ceiling(search) > 0:
         return None
     return (
@@ -211,6 +212,7 @@ def check_search_split_holds_round(config: CampaignConfig, search: int) -> str |
 
 def run_preflight_checks(
     config: CampaignConfig,
+    selected: SelectedOptimizer,
     dataset: list[Sample],
     target_models: tuple[str, ...] = (),
     *,
@@ -222,12 +224,12 @@ def run_preflight_checks(
     banked_instruments: Sequence[str],
 ) -> list[PreflightWarning]:
     warnings: list[PreflightWarning] = []
-    if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
+    if (w := _check_sp_budget_vs_dataset(selected, dataset)) is not None:
         warnings.append(w)
-    if (w := _check_cap_funds_round(config, len(dataset), cell_usd, measured_cell_usd)) is not None:
-        warnings.append(w)
-    opt_model = select_optimizer(config.optimization).model()
-    if (w := _check_optimizer_below_target(opt_model, target_models)) is not None:
+    funds = _check_cap_funds_round(config, selected, len(dataset), cell_usd, measured_cell_usd)
+    if funds is not None:
+        warnings.append(funds)
+    if (w := _check_optimizer_below_target(selected.model(), target_models)) is not None:
         warnings.append(w)
     if (w := _check_task_context_present(config, framing)) is not None:
         warnings.append(w)
@@ -235,7 +237,7 @@ def run_preflight_checks(
         warnings.append(w)
     if (w := _check_instrument_replays(instrument, banked_instruments)) is not None:
         warnings.append(w)
-    warnings.extend(_check_config_couplings(config))
+    warnings.extend(_check_config_couplings(config, selected))
     return warnings
 
 
@@ -256,19 +258,16 @@ def refuse_arm_below_round(
             )
 
 
-def refuse_unfit_pipeline(config: CampaignConfig, schema: PipelineSchema) -> None:
+def refuse_unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> None:
     """A member that cannot write the chain's prompt nodes would raise inside round 1, after the origin is paid."""
-    if (
-        unfit := optimizers.unfit_pipeline(select_optimizer(config.optimization), schema)
-    ) is not None:
+    if (unfit := optimizers.unfit_pipeline(selected, schema)) is not None:
         raise PayloadInvalidError(unfit, code="optimizer_unfit_pipeline")
 
 
 def refuse_below_reasoning_floor(
-    config: CampaignConfig, pipeline_params: Mapping[str, Any] | None
+    selected: SelectedOptimizer, pipeline_params: Mapping[str, Any] | None
 ) -> None:
     """An ABSENT ``max_tokens`` is the sanctioned default, never a violation."""
-    selected = select_optimizer(config.optimization)
     node_configs: Iterable[tuple[str, Mapping[str, Any]]] = [
         *node_config_items(dict(pipeline_params or {})),
         # Every llm node DECLARED, off the `default` chain too, or an escalation node escapes.
@@ -330,13 +329,15 @@ def task_routes(pipeline_params: Mapping[str, Any], schema: PipelineSchema) -> l
 
 
 def unpriced_routes(
-    config: CampaignConfig, pipeline_params: Mapping[str, Any], schema: PipelineSchema
+    config: CampaignConfig,
+    selected: SelectedOptimizer,
+    pipeline_params: Mapping[str, Any],
+    schema: PipelineSchema,
 ) -> list[str]:
     """Every route a run may send on, the optimizer's too, that no rate prices — under a dollar
     ceiling only. An unreachable price list refuses nothing here."""
     if config.optimization.budget.usd is None:
         return []
-    selected = select_optimizer(config.optimization)
     routes = dict.fromkeys(task_routes(pipeline_params, schema))
     for cfg in (selected.node_config(n) for n in selected.llm_nodes):
         model, provider, hosts = cfg.get("model"), cfg.get("provider"), cfg.get("route_order")

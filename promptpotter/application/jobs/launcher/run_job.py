@@ -21,6 +21,7 @@ from promptpotter.application.jobs.launcher.admission import (
     launch_interrupted,
     release_slot,
 )
+from promptpotter.application.jobs.mint import resolve_resume
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
@@ -43,7 +44,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.jobs.mint import MintedCycle
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_observers import RunObservers
+    from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import CycleResult
 
@@ -134,6 +138,7 @@ async def run_held_job(
     *,
     mode: RunMode,
     budget: HeldBudget,
+    optimizer: SelectedOptimizer,
     readout_sink: Callable[[str], None] | None = None,
 ) -> tuple[CycleResult, RunObservers]:
     job_registry.mark_started(job_id)
@@ -153,6 +158,7 @@ async def run_held_job(
             observers=observers,
             mode=mode,
             budget=budget,
+            optimizer=optimizer,
         )
     except BaseException as exc:
         # An interrupt is the pause flag's SYNTHETIC one, its pause already declared; anything else
@@ -181,16 +187,18 @@ class HeldRun:
     session: Session
     campaign_config: CampaignConfig
     budget: HeldBudget
+    optimizer: SelectedOptimizer
 
     @classmethod
     def of(
         cls,
         job_registry: JobRegistry,
         job_id: str,
-        session: Session,
+        minted: MintedCycle,
         budget: HeldBudget,
     ) -> HeldRun:
         """For a preamble that MINTS the manifest: the config it reads back as, which a detached run rebuilds, not the one it was made from."""
+        session = minted.session
         stores, hop = session.store, session.hop
         campaign = stores.campaigns.load_campaign(hop.campaign_id)
         assert campaign is not None, "a preamble minted or loaded it"
@@ -200,6 +208,7 @@ class HeldRun:
             session=session,
             campaign_config=resolve_campaign_config(stores, campaign, hop),
             budget=budget,
+            optimizer=minted.optimizer,
         )
 
     def job_spec(self, mode: RunMode) -> JobSpec:
@@ -233,16 +242,17 @@ class HeldRun:
             self.campaign_config,
             mode=mode,
             budget=self.budget,
+            optimizer=self.optimizer,
             readout_sink=readout_sink,
         )
 
 
-async def _bound_session(spec: JobSpec, stores: Stores) -> tuple[Session, CampaignConfig]:
-    campaign = stores.campaigns.load_campaign(spec.hop.campaign_id)
-    if campaign is None:
-        raise NotFoundError(f"campaign not found: {spec.hop.campaign_id}")
-    bound, campaign_config = await bind_cycle_session(stores, campaign, spec.hop)
-    return configure_and_apply_pipeline(bound, campaign_config), campaign_config
+async def open_held_cycle(
+    stores: Stores, campaign: Campaign, hop: CycleHop
+) -> tuple[Session, CampaignConfig, SelectedOptimizer]:
+    bound, campaign_config = await bind_cycle_session(stores, campaign, hop)
+    optimizer = resolve_resume(bound, campaign, bound.bank.samples)
+    return configure_and_apply_pipeline(bound, campaign_config), campaign_config, optimizer
 
 
 async def run_job(spec: JobSpec) -> StopOutcome | None:
@@ -261,7 +271,10 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
         # The claim now lives and dies with THIS process: a run killed before it declares itself leaves the cycle free.
         claim_cycle(stores, job_registry, adopted, spec.hop)
     try:
-        session, campaign_config = await _bound_session(spec, stores)
+        campaign = stores.campaigns.load_campaign(spec.hop.campaign_id)
+        if campaign is None:
+            raise NotFoundError(f"campaign not found: {spec.hop.campaign_id}")
+        session, campaign_config, optimizer = await open_held_cycle(stores, campaign, spec.hop)
     except BaseException as exc:
         logger.exception("job %s could not bind its session", spec.job_id)
         release_slot(job_registry, spec.job_id, exc, stores=stores, hop=spec.hop)
@@ -275,6 +288,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
             campaign_config,
             mode=spec.mode,
             budget=spec.budget,
+            optimizer=optimizer,
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         return StopOutcome.PAUSED

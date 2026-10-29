@@ -12,6 +12,7 @@ from promptpotter.application.knobs import (
     declared_couplings,
     resolve_knob_states,
 )
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
@@ -89,7 +90,8 @@ def config_map(config: CampaignConfig) -> ConfigMapResponse:
         )
         for estimand in Estimand
     ]
-    active = {c.name for c in check_couplings(config)}
+    selected = select_optimizer(config.optimization)
+    active = {c.name for c in check_couplings(config, selected)}
     couplings = [
         ConfigCoupling(
             name=c.name,
@@ -99,7 +101,7 @@ def config_map(config: CampaignConfig) -> ConfigMapResponse:
             severity=c.severity,
             active=c.name in active,
         )
-        for c in declared_couplings(config)
+        for c in declared_couplings(selected)
     ]
     return ConfigMapResponse(
         groups=[g for g in groups if g.knobs],

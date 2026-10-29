@@ -13,7 +13,7 @@ from promptpotter.application.initialization.loop_start import (
     scope_memory,
 )
 from promptpotter.application.initialization.session import LaunchClock, Session
-from promptpotter.application.optimizer_manifest import binding_optimizer, bound_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, binding_optimizer
 from promptpotter.application.run_observers import (
     RunObservers,
     build_run_observers,
@@ -311,6 +311,7 @@ async def run_optimization(
     langfuse_session_id: str | None = None,
     mode: RunMode,
     budget: HeldBudget,
+    optimizer: SelectedOptimizer,
 ) -> tuple[Session, CycleResult]:
     """*observers* MUST be pre-built (ledger bound before origin); *dataset* is the whole bank.
 
@@ -321,12 +322,14 @@ async def run_optimization(
     session.state.clock = LaunchClock.now()
     try:
         # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
-        with at_round(0), binding_optimizer(campaign_config.optimization):
-            selected = bound_optimizer()
-            if mode.diag and selected.plan.controller is None:
+        with (
+            at_round(0),
+            binding_optimizer(optimizer, determinism=campaign_config.optimization.determinism),
+        ):
+            if mode.diag and optimizer.plan.controller is None:
                 raise PayloadInvalidError(
                     f"--diag shows what an optimizer's controller does at a round boundary, and "
-                    f"{selected.name} declares no controller node"
+                    f"{optimizer.name} declares no controller node"
                 )
             scope_memory(session)
             partition = cycle_partition(session, dataset, campaign_config)

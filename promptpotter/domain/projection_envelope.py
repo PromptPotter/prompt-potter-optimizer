@@ -20,6 +20,7 @@ ProjectionKind = Literal[
     "cycle_final",
     "cycle_minted",
     "cycle_seed",
+    "cycle_share",
     "cycle_superseded",
     "election",
     "error",

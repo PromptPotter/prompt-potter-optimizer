@@ -11,6 +11,7 @@ from promptpotter.application.datasets.origin_readiness import (
     origin_projection,
     save_checkin_draft,
 )
+from promptpotter.domain.run_records import NoEffect, OriginEditedEffect
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import Dispatched, DispatchedToDraft
@@ -22,9 +23,12 @@ def reread_draft_wire(stores: Stores, draft_id: str) -> DraftCampaignWire:
     return draft_wire(stores, owned_draft(stores, draft_id))
 
 
-def origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict[str, Any]:
+def origin_effect(
+    stores: Stores, draft_id: str, before: dict[str, Any]
+) -> OriginEditedEffect | NoEffect:
     """Recorded on the ack because the command payload states only what was ASKED for."""
-    return origin_delta(before, origin_projection(owned_draft(stores, draft_id)))
+    moved = origin_delta(before, origin_projection(owned_draft(stores, draft_id)))
+    return OriginEditedEffect(moved) if moved else NoEffect()
 
 
 def edit_draft_campaign(

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.account import account_of
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import withdraw_queued
+from promptpotter.domain.run_records import ArmedCeilingEffect
 from promptpotter.domain.spend import CYCLE_AXES, MONEY_AXES, Budget
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal
@@ -34,13 +35,13 @@ def change_run_limits(dispatched: DispatchedToCycle[ChangeRunLimitsPayload]) -> 
     )
 
 
-def _armed_ceiling(stores: Stores, hop: CycleHop) -> dict[str, Any]:
-    """The ack's effect: the ceiling a budget stop fires at once the clamped change stands."""
+def _armed_ceiling(stores: Stores, hop: CycleHop) -> ArmedCeilingEffect:
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     assert campaign is not None, "a cycle command addresses a campaign it loaded"
     cycle = stores.campaigns.read_standing_budget(hop).budget
-    armed = campaign.standing_budget.only(MONEY_AXES).over(cycle.only(CYCLE_AXES))
-    return {"armed": armed.model_dump(mode="json")}
+    return ArmedCeilingEffect(
+        armed=campaign.standing_budget.only(MONEY_AXES).over(cycle.only(CYCLE_AXES))
+    )
 
 
 def _clamp_to_account_ceilings(

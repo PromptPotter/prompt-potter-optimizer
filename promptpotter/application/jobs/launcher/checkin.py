@@ -33,6 +33,7 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.quota import on_free_tier
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.connector import BackendUnreachableError
@@ -99,8 +100,10 @@ class CheckinStart:
 def _refuse_unrunnable_upload(stores: Stores, draft: DraftCampaign, source: dict[str, Any]) -> None:
     """Before the dataset lands, so a refused Start takes no slug and its retry is a Start like the first."""
     params, _rows, schema = draft_pipeline(stores, draft)
+    config = draft_config(stores, draft)
     refuse_unrunnable(
-        draft_config(stores, draft),
+        config,
+        select_optimizer(config.optimization),
         cut_bank(stores, source),
         params,
         schema,
@@ -178,4 +181,4 @@ async def hold_checkin_start(
         request.claim.release()
 
     logger.info("start-checkin: started %s/%s (job %s)", hop.campaign_id, hop.cycle_id, job.job_id)
-    return HeldRun.of(job_registry, job.job_id, minted.session, held)
+    return HeldRun.of(job_registry, job.job_id, minted, held)

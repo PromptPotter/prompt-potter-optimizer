@@ -35,6 +35,7 @@ from promptpotter.domain.run_records import (
     CycleRecord,
     CycleSeed,
     CycleSeedRecord,
+    CycleShareRecord,
     CycleSupersededRecord,
     ForkDirection,
     ForkGradedRecord,
@@ -741,6 +742,14 @@ class CampaignStore:
 
     def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
         return standing_budget(self.cycle_dir(hop))
+
+    def write_cycle_share(self, hop: CycleHop, *, allotment: Budget, reserve: Budget) -> None:
+        CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
+            CycleShareRecord(allotment=allotment, reserve=reserve)
+        )
+
+    def read_cycle_share(self, hop: CycleHop) -> CycleShareRecord | None:
+        return self.last(hop, CycleShareRecord)
 
     def _chain(self, hop: CycleHop) -> list[LedgerSpan]:
         return ledger_chain(CycleDir(self.cycle_dir(hop)), moment=None)

@@ -971,9 +971,11 @@ _DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.Cont
 
 
 @contextlib.contextmanager
-def binding_optimizer(optimization: OptimizationConfig) -> Iterator[None]:
-    token = _BOUND.set(select_optimizer(optimization))
-    clamp = _DETERMINISM.set(optimization.determinism)
+def binding_optimizer(
+    selected: SelectedOptimizer, *, determinism: DeterminismClamp | None
+) -> Iterator[None]:
+    token = _BOUND.set(selected)
+    clamp = _DETERMINISM.set(determinism)
     try:
         yield
     finally:
@@ -985,8 +987,8 @@ def bound_optimizer() -> SelectedOptimizer:
     selected = _BOUND.get()
     if selected is None:
         raise RuntimeError(
-            "no optimizer is bound to this task — the run seam binds "
-            "`select_optimizer(config.optimization)` before anything reads a node"
+            "no optimizer is bound to this task — the run seam binds the launch's "
+            "selection before anything reads a node"
         )
     return selected
 

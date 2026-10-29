@@ -93,6 +93,7 @@ from promptpotter.application.jobs.registry import (
     JobRegistry,
 )
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
 from promptpotter.application.run_callbacks import RunCallbacks
@@ -156,6 +157,7 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
+    ArmedCeilingEffect,
     BankedSubject,
     ConfigOverrides,
     CycleSeed,
@@ -337,7 +339,9 @@ def _change_run_limits(dispatcher: CommandDispatcher, hop: CycleHop, budget: Bud
 
     asyncio.run(apply())
     assert applier.effect_fn is not None, "a limits change acks no ceiling for its trace"
-    return Budget.model_validate(applier.effect_fn()["armed"])
+    effect = applier.effect_fn()
+    assert isinstance(effect, ArmedCeilingEffect), f"a limits change acked {effect!r}"
+    return effect.armed
 
 
 # 1. What a call costs
@@ -903,12 +907,14 @@ async def test_a_run_bills_each_cell_once_whatever_its_process_lookahead_or_resu
     assert Budget(usd=1.0).only(MONEY_AXES).named == {"usd"}, "only() named an axis self did not"
     hop = CycleHop(campaign_id="ds__000001", cycle_id="cycle_root")
     mode = RunMode(from_round=2, diag=True)
+    launched_config = CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05))
     launched = HeldRun(
         job_registry=spawned,
         job_id=held.job_id,
         session=loop_session(stores, pipeline_schema([]), [], hop=hop),
-        campaign_config=CampaignConfig(optimization=OptimizationConfig(degradation_threshold=0.05)),
+        campaign_config=launched_config,
         budget=held,
+        optimizer=select_optimizer(launched_config.optimization),
     )
     spec = launched.job_spec(mode)
     book = _armed(stores, None, spec.budget, spawned)
@@ -2675,7 +2681,7 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         (optimizer_on("high"), "low", ["llm_only"], 1),
     ):
         params = {"steps": steps, "llm_only": {"model": oss, "reasoning_effort": effort}}
-        off = free_tier.outside_free_tier(run, params, schema)
+        off = free_tier.outside_free_tier(run, select_optimizer(run.optimization), params, schema)
         assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
     with pytest.raises(PayloadInvalidError):
         free_tier.refuse_outside_free_tier(off)

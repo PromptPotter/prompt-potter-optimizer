@@ -10,7 +10,7 @@ from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
 from promptpotter.application.jobs.quota import on_free_tier
-from promptpotter.application.optimizer_manifest import resolve_optimizer
+from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
 from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
 from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
 from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
@@ -155,8 +155,9 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
 def _refusals(stores: Stores, draft: DraftCampaign, *, free: bool) -> tuple[list[str], list[str]]:
     params, _rows, schema = draft_pipeline(stores, draft)
     config = draft_config(stores, draft)
-    outside = outside_free_tier(config, params, schema) if free else []
-    return unpriced_routes(config, params, schema), outside
+    selected = select_optimizer(config.optimization)
+    outside = outside_free_tier(config, selected, params, schema) if free else []
+    return unpriced_routes(config, selected, params, schema), outside
 
 
 def _block(value: object) -> dict[str, Any]:

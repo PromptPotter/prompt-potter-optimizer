@@ -39,6 +39,7 @@ from promptpotter.domain.run_records import (
     CycleMintedRecord,
     CycleRecord,
     CycleSeedRecord,
+    CycleShareRecord,
     CycleSupersededRecord,
     ElectionRecord,
     ForkDirection,
@@ -862,6 +863,7 @@ LEDGER_FOLDS = (
         _last,
         (
             CycleSeedRecord,
+            CycleShareRecord,
             PartitionRecord,
             StandingBudgetRecord,
             RunPhaseRecord,

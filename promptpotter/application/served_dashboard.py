@@ -324,11 +324,11 @@ def _binding(
 
 
 def _allotment(stores: Stores, hop: CycleHop, run: RunState) -> Budget | None:
-    # The share lives on the run's job, which a reshare moves mid-run; no run, no share.
+    # The share the book opened over, or the reshare that last moved it; no run, no share.
     if not run.producer.appending:
         return None
-    job = JobRegistry.attach(stores.jobs_dir).running_job_for(stores.campaigns.workspace, hop)
-    return None if job is None else job.allotment
+    held = stores.campaigns.read_cycle_share(hop)
+    return None if held is None else held.allotment
 
 
 def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkRemainder:

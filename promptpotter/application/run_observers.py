@@ -69,6 +69,7 @@ UNREPORTED_KINDS: frozenset[str] = frozenset(
         "bank_partition",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "cycle_final",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "cycle_minted",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
+        "cycle_share",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "cycle_superseded",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "fork_graded",  # a cycle fact scanned off the ledger (`ledger_scan.py`)
         "intervention",  # a cycle fact scanned off the ledger (`ledger_scan.py`)

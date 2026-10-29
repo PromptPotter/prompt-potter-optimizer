@@ -63,8 +63,8 @@ from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     declare,
     mint_framed_cycle,
-    refuse_drifted_resume,
     resolve_cycle_plan,
+    resolve_resume,
 )
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
@@ -535,7 +535,10 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
         async def entered() -> None:
             set_cycle_ledger(CycleEventLog(tmp_path / "asked.jsonl"))
             with (
-                binding_optimizer(OptimizationConfig(degradation_threshold=0.0, determinism=clamp)),
+                binding_optimizer(
+                    select_optimizer(OptimizationConfig(degradation_threshold=0.0)),
+                    determinism=clamp,
+                ),
                 spending_under(unbounded_spend_book()),
             ):
                 await call_mod.llm_call(
@@ -1220,7 +1223,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         ),
     )
     opened = opened.bound(held_campaign.root_hop, purpose=Optimize())
-    refuse_drifted_resume(opened, held_campaign, rows_30)
+    resolve_resume(opened, held_campaign, rows_30)
     wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     root_cut = Cut(
         cycle=CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)),
@@ -1266,10 +1269,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     # A resume over an edited bank never runs on an origin other than its rounds stand on.
     with pytest.raises(ConfigDriftError):
-        refuse_drifted_resume(recut, held_campaign, rows_30[:-1])
+        resolve_resume(recut, held_campaign, rows_30[:-1])
     # The candidates a ranker reads beside the bank's answers are origin content too.
     with pytest.raises(ConfigDriftError):
-        refuse_drifted_resume(
+        resolve_resume(
             replace(opened, candidate_library=("an unlisted label",)), held_campaign, rows_30
         )
     # A steering seed is its fork's declared delta, never a waiver of the root's own drift.
@@ -1282,9 +1285,9 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         steered_hop, CycleSeed(pipeline_overlay={"solve": {"temperature": 0.3}})
     )
     steered_fork = opened.bound(steered_hop, purpose=Optimize())
-    refuse_drifted_resume(steered_fork, held_campaign, rows_30)
+    resolve_resume(steered_fork, held_campaign, rows_30)
     with pytest.raises(ConfigDriftError):
-        refuse_drifted_resume(steered_fork, held_campaign, rows_30[:-1])
+        resolve_resume(steered_fork, held_campaign, rows_30[:-1])
     # The capability menu the origin hashed under is on record: a moved one is the cause named.
     floored = ModelCapability(
         model="m", provider="", reasoning_efforts=["high"], reasoning_note="", source="test"
@@ -1297,7 +1300,7 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         backend_revision=None,
     )
     with pytest.raises(ConfigDriftError) as refused:
-        refuse_drifted_resume(recut, held_campaign, rows_30[:-1])
+        resolve_resume(recut, held_campaign, rows_30[:-1])
     assert refused.value.details["capabilities_moved"] == ["/m"], (
         "a resume past a moved capability snapshot blamed only the dataset"
     )
@@ -1519,7 +1522,10 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         reflecting = NodeContext(reflected_on, optimizers.NODE_MEMBERS.get("gepa_reflect"))
         no_cells = Panel(cells=[], order=[], block_size=0)
         with (
-            binding_optimizer(reflected_on.cycle.config.optimization),
+            binding_optimizer(
+                reflected_on.cycle.optimizer,
+                determinism=reflected_on.cycle.config.optimization.determinism,
+            ),
             spending_under(unbounded_spend_book()),
             verb_ledger(built_stores, reflected_on.cycle.session.hop),
         ):
