@@ -22,12 +22,11 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.run_records import ForkRemainder, RunWiringRecord
+from promptpotter.domain.run_records import ForkRemainder
 from promptpotter.domain.run_standing import closed_after_origin
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import Budget, CeilingMeter, MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     DashboardFacts,
@@ -42,7 +41,6 @@ from promptpotter.infrastructure.runtime_flags import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,
-    scan_last,
     scan_ledger_verify,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
@@ -307,9 +305,7 @@ def binding_run_limits(
     stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring yet."""
-    wiring = scan_last(
-        ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None), RunWiringRecord
-    )
+    wiring = stores.campaigns.read_run_wiring(hop)
     return None if wiring is None else _binding(stores, hop, config, run, wiring.run_limits)
 
 

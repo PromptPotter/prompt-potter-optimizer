@@ -1250,6 +1250,45 @@
         "title": "BackendResponse",
         "type": "object"
       },
+      "BackendRevision": {
+        "additionalProperties": false,
+        "description": "What a launch read of the backend's revision, beside the one its connector was written against.",
+        "properties": {
+          "expected": {
+            "title": "Expected",
+            "type": "string"
+          },
+          "reported": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported"
+          },
+          "unread": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unread"
+          }
+        },
+        "required": [
+          "expected",
+          "reported",
+          "unread"
+        ],
+        "title": "BackendRevision",
+        "type": "object"
+      },
       "BackendWarning": {
         "additionalProperties": false,
         "description": "A backend transport or 5xx retry; a 429 is ``backpressure``, never one of these.",
@@ -14409,6 +14448,17 @@
             "default": 0,
             "title": "Backend Retry Count",
             "type": "integer"
+          },
+          "backend_revision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackendRevision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What this launch read of the backend's revision beside the one its connector expects; `None` where the connector checks none. A drift is served, never refused."
           },
           "backpressure": {
             "anyOf": [

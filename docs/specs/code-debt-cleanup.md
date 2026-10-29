@@ -16,14 +16,22 @@ acting.
     `fork_on_divergence` and `no_divergence_check` are admitted as a `LeftComparisonRecord`: one door
     shape per act is `decisions.md` § 0009's open proposal.
   - **Today's ledgers are read by tolerance until the 2026-10-30 wipe**: the new `ResolvedRunRecord`
-    fields default, and `CommandEffect`'s arms are told apart by their fields, not a tag. Make the
-    fields required and tag the union with the wipe.
+    fields and `RunWiringRecord.backend_revision` default, and `CommandEffect`'s arms are told apart
+    by their fields, not a tag. Make the fields required and tag the union with the wipe.
   - **`campaign.standing_budget`'s money lives in `campaign.json`**, beside the ledger.
   - **A cycle's share has two stores**: the job file arbitrates siblings and feeds the book live, and
     `CycleShareRecord` records each move. Action: the book and the sibling sums read the record.
-  - **A backend revision unlike the connector's expected one is a log warning**
-    (`initialization/wiring.py::_verify_connector_revision`); only a resume whose origin moved names it.
   **Re-test:** each input either hashed into the declaration or written as a record.
+- **A backend revision drift is served, not refused — until a connector's numbers read the revision
+  unchecked** (`initialization/wiring.py::_read_backend_revision` → `RunWiringRecord.backend_revision`,
+  the dashboard and the readout's ⚠ line). Served, because every contract a wrong number rides is
+  checked on its own and raises (the schema, `required_observation_keys`, the package cache): a
+  revision gate would stop each backend upgrade that moved none of them, and an unreachable `/status`
+  would stop a run whose cells answer. A refusal is right only where a measurement reads the
+  backend's layout with no check of its own: harbor's `_digest` reads the task layout of its `0.22`
+  series. Action: harbor checks the layout `_digest` reads and raises, so the revision stays a fact.
+  **Re-test:** `git grep -n "EXPECTED_HARBOR_SERIES" -- promptpotter/connectors/harbor.py` still
+  stands in for a layout check.
 
 - **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
   `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on

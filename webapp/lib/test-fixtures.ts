@@ -499,6 +499,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     round_cells_ceiling: 0,
     run_limits: { budget: {}, optimizer: [] },
     defaults_drift: null,
+    backend_revision: null,
     spend_metered: null,
     fork_remainder: null,
     spend_metered_by_round: null,

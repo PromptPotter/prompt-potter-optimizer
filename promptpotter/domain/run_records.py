@@ -1004,6 +1004,26 @@ class DefaultsDrift(FrozenModel):
         ]
 
 
+class BackendRevision(FrozenModel):
+    """What a launch read of the backend's revision, beside the one its connector was written against."""
+
+    expected: str
+    # `None`: the backend answered with none, or could not be asked (`unread`).
+    reported: str | None
+    # Why it could not be asked: the failure's class alone, since its message names the backend's address.
+    unread: str | None
+
+    def drift(self) -> str | None:
+        """``None`` where the backend runs the revision expected; else what differs, in a sentence."""
+        if self.reported == self.expected:
+            return None
+        if self.unread is not None:
+            said = f"its revision could not be read ({self.unread})"
+        else:
+            said = f"it reports revision {self.reported or 'none'}"
+        return f"the backend's connector expects revision {self.expected}, and {said}"
+
+
 class RunWiringRecord(FrozenModel):
     """LAST wins, over the whole chain: a fork stands on its parent's until its own lands."""
 
@@ -1019,6 +1039,8 @@ class RunWiringRecord(FrozenModel):
     run_limits: RunLimits
     # `None` on a mint's record: nothing has moved since the declaration was made.
     defaults_drift: DefaultsDrift | None
+    # `None` where the connector checks no revision; a drift is served, never refused (`wiring.py`).
+    backend_revision: BackendRevision | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1049,8 +1071,6 @@ class ResolvedRunRecord(FrozenModel):
     experiment: dict[str, Any] | None
     # The menu the run's schema answered with, its reasoning floors included; empty is UNKNOWN.
     model_capabilities: CapabilityMenu = Field(default_factory=dict)
-    # `None` where the connector checks no revision or the backend reported none.
-    backend_revision: str | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

@@ -77,6 +77,10 @@ export interface ServedDashboard {
    * delta over moved since it was declared, under an unchanged origin: this
    * launch runs today's values. */
   defaults_drift: DefaultsDrift | null;
+  /** What this launch read of the backend's revision beside the one its connector
+   * expects; `None` where the connector checks none. A drift is served, never
+   * refused. */
+  backend_revision: BackendRevision | null;
   catch_up_log: CatchUpLogEntry[];
   current_round: CurrentRound;
   error: DashboardError | null;
@@ -732,6 +736,13 @@ export interface Treatment {
   prompt_hashes: Record<string, string>;
   manifest: string;
   source: string;
+}
+
+/** What a launch read of the backend's revision, beside the one its connector was written against. */
+export interface BackendRevision {
+  expected: string;
+  reported: string | null;
+  unread: string | null;
 }
 
 /** One race catch-up: the priors eliminator ``member`` re-measured on one sample. */

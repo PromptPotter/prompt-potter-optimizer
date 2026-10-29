@@ -178,6 +178,7 @@ def declare_run_wiring(
                     session.store.block_packs,
                 ),
             ),
+            backend_revision=session.backend_revision,
         )
     )
 
