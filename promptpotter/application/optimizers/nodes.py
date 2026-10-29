@@ -9,6 +9,7 @@ import pkgutil
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -330,6 +331,19 @@ INITIAL_POPULATION = "initial_population"
 RUN_INIT = "run_init"
 
 
+class RoundRole(Enum):
+    """The ONE order a round's members run in, each role by the node kinds it admits: ``_round_plan`` admits a `default` walk in it, ``runner/round.py::execute_round`` walks it."""
+
+    SAMPLER = frozenset({NodeKind.SAMPLER})
+    PROPOSER = frozenset({NodeKind.LLM, NodeKind.ALGORITHM})
+    # The gateway's walk, raced by the eliminator.
+    MEASUREMENT = frozenset({NodeKind.ELIMINATOR, NodeKind.GATEWAY})
+    SELECTOR = frozenset({NodeKind.SELECTOR})
+    SURVIVOR = frozenset({NodeKind.ALGORITHM})
+    ADAPTER = frozenset({NodeKind.LLM})
+    CONTROLLER = frozenset({NodeKind.CONTROLLER})
+
+
 @dataclass(frozen=True)
 class RoundWalk:
     """``pipeline`` makes the round's arms; ``seeds`` walk ahead of it into the population it reads; ``gate`` says what of it walks."""
@@ -442,7 +456,6 @@ class RoundContext:
     cycle: Cycle
     round_num: int
     callbacks: RunCallbacks
-    is_final_round: bool = False
     # Each arm the round walked, its panel walk and every read of it as a reference, whoever asked.
     walks: dict[ArmKey, ArmWalk] = field(default_factory=dict, init=False)
 

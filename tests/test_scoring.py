@@ -1120,7 +1120,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     )
                 )
             else:
-                _, uncut = asyncio.run(execute_round(cycle, 1, callbacks))
+                uncut = asyncio.run(execute_round(cycle, 1, callbacks)).cut
                 assert uncut is None, f"{case}: round 1 ran inside its budget"
             paid.clear()
             parent = ArmKey(cycle.parent.id)
@@ -1136,7 +1136,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
                     f"{case}: an arm was crowned on a holed panel"
                 )
                 return
-            closed, cut = asyncio.run(cut_walk)
+            closed, cut, _ = asyncio.run(cut_walk)
             assert cut is StopReason.SPEND_BUDGET, f"{case}: the round names its cut"
             rows = {key: closed.rows(key) for key in closed.panel}
             assert sum(len(closed.rows(key)) for key in closed.arms) == (
@@ -1266,7 +1266,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         offline.llm.says = crossover_says
         session = cycle.session
         assert not cycle.population
-        closed, cut = asyncio.run(execute_round(cycle, 1, callbacks))
+        closed, cut, _ = asyncio.run(execute_round(cycle, 1, callbacks))
     assert cut is None
     assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
         "a crossover saw one parent"
@@ -1396,7 +1396,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
     ) as (cycle, callbacks):
         offline.llm.says = bench_says
         session = cycle.session
-        picked = asyncio.run(execute_round(cycle, 1, callbacks))[0]
+        picked = asyncio.run(execute_round(cycle, 1, callbacks)).result
         head, fold = picked.head, picked.fold
         assert head is not None and fold is not None and fold.accuracy is not None
         assert picked.election is not None
@@ -1727,7 +1727,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                     )
                     await submit("arms-at-the-hold")
 
-                (held_round, held_cut), _ = await asyncio.gather(
+                (held_round, held_cut, _), _ = await asyncio.gather(
                     execute_round(cycle, 1, callbacks), answer()
                 )
                 assert held_cut is None

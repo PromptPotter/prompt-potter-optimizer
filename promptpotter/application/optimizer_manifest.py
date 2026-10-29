@@ -7,7 +7,7 @@ import json
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
 
 from pydantic import Field
 
@@ -19,6 +19,7 @@ from promptpotter.application.optimizers.nodes import (
     Initializer,
     PanelSize,
     Reviewer,
+    RoundRole,
     RoundWalk,
     source_digest,
 )
@@ -203,6 +204,28 @@ class RoundPlan:
             return RoundWalk(INITIAL_POPULATION, (), self.initial_population, self.gate)
         return RoundWalk("default", self.initial_population, self.proposers, self.gate)
 
+    def first_walk(self, role: RoundRole) -> tuple[NodeMember, ...]:
+        """*role*'s members as the first rounds walk them: seeds alone walk a round of their own, and the arms' proposers after it close as if it wrote nothing."""
+        match role:
+            case RoundRole.SAMPLER:
+                return (self.sampler,)
+            case RoundRole.PROPOSER:
+                first = self.walk(stands=False)
+                after = self.walk(stands=True).steps if first.pipeline == INITIAL_POPULATION else ()
+                return (*first.steps, *after)
+            case RoundRole.MEASUREMENT:
+                return () if self.eliminator is None else (self.eliminator,)
+            case RoundRole.SELECTOR:
+                return (self.selector,)
+            case RoundRole.SURVIVOR:
+                return () if self.survivor is None else (self.survivor,)
+            case RoundRole.ADAPTER:
+                return self.adapters
+            case RoundRole.CONTROLLER:
+                return () if self.controller is None else (self.controller,)
+            case unreachable:
+                assert_never(unreachable)
+
 
 def _walk_refused(name: str, why: str) -> PayloadInvalidError:
     return PayloadInvalidError(f"optimizer {name!r}: {why}", code="optimizer_roster_open")
@@ -218,54 +241,48 @@ def _round_plan(
     declared = {n.name: n.kind for n in schema.declared_nodes}
     if undeclared := [n for n in walk if n not in declared]:
         raise _walk_refused(name, f"`default` walks {undeclared}, which it does not declare.")
-    kinds = [declared[n] for n in walk]
-    if NodeKind.GATEWAY not in kinds:
-        raise _walk_refused(name, f"`default` walks no {NodeKind.GATEWAY} node — it walks {walk}.")
-    measured_at = kinds.index(NodeKind.GATEWAY)
-    selected_at = next((i for i, kind in enumerate(kinds) if kind is NodeKind.SELECTOR), len(kinds))
-    samplers: list[Sampler] = []
-    proposers: list[Proposer] = []
-    eliminators: list[Eliminator] = []
-    selectors: list[Selector] = []
-    survivors: list[Survivor] = []
-    adapters: list[Adapter] = []
-    controllers: list[Controller] = []
-    for at, (node, kind) in enumerate(zip(walk, kinds, strict=True)):
-        if kind is NodeKind.GATEWAY:
-            continue
-        member = optimizers.NODE_MEMBERS.get(node)
-        if kind is NodeKind.SAMPLER and at < measured_at:
-            samplers.append(cast("Sampler", member))
-        elif kind in (NodeKind.LLM, NodeKind.ALGORITHM) and at < measured_at:
-            proposers.append(cast("Proposer", member))
-        elif kind is NodeKind.ELIMINATOR and at < measured_at:
-            eliminators.append(cast("Eliminator", member))
-        elif kind is NodeKind.SELECTOR and at > measured_at:
-            selectors.append(cast("Selector", member))
-        elif kind is NodeKind.ALGORITHM and at > selected_at:
-            survivors.append(cast("Survivor", member))
-        elif kind is NodeKind.LLM and at > selected_at:
-            adapters.append(cast("Adapter", member))
-        elif kind is NodeKind.CONTROLLER and at > measured_at:
-            controllers.append(cast("Controller", member))
-        else:
+    roles = list(RoundRole)
+    held: dict[RoundRole, list[str]] = {role: [] for role in roles}
+    at = 0
+    for node in walk:
+        kind = declared[node]
+        rank = next((i for i in range(at, len(roles)) if kind in roles[i].value), None)
+        if rank is None:
             raise _walk_refused(
                 name,
-                f"`default` walks {kind} node {node!r} where the bench has no role for it "
-                f"(the {NodeKind.GATEWAY} node is at {measured_at}).",
+                f"`default` walks {kind} node {node!r} after its {roles[at].name.lower()}, where "
+                f"the bench has no role for it: a round runs {[r.name.lower() for r in roles]}, "
+                "in that order.",
             )
+        at = rank
+        held[roles[at]].append(node)
+
+    gateways = [n for n in held[RoundRole.MEASUREMENT] if declared[n] is NodeKind.GATEWAY]
+
+    def members_of(role: RoundRole) -> list[Any]:
+        return [optimizers.NODE_MEMBERS.get(n) for n in held[role] if n not in gateways]
+
+    samplers: list[Sampler] = members_of(RoundRole.SAMPLER)
+    proposers: list[Proposer] = members_of(RoundRole.PROPOSER)
+    eliminators: list[Eliminator] = members_of(RoundRole.MEASUREMENT)
+    selectors: list[Selector] = members_of(RoundRole.SELECTOR)
+    survivors: list[Survivor] = members_of(RoundRole.SURVIVOR)
+    adapters: list[Adapter] = members_of(RoundRole.ADAPTER)
+    controllers: list[Controller] = members_of(RoundRole.CONTROLLER)
     if (
-        len(samplers) != 1
+        len(gateways) != 1
+        or len(samplers) != 1
         or len(selectors) != 1
         or not proposers
         or len(eliminators) > 1
         or len(survivors) > 1
+        or len(controllers) > 1
     ):
         raise _walk_refused(
             name,
-            "`default` must walk one sampler, at least one proposer and at most one eliminator "
-            "before its measurement, and one selector after it, then at most one survival "
-            f"node — it walks {walk}.",
+            f"`default` must walk one sampler, at least one proposer, one {NodeKind.GATEWAY} "
+            "node raced by at most one eliminator, one selector, then at most one survival node "
+            f"and one controller — it walks {walk}.",
         )
     initial = [
         cast("Proposer", optimizers.NODE_MEMBERS.get(n))
@@ -296,7 +313,7 @@ def _round_plan(
         )
     return RoundPlan(
         initializers=tuple(cast("Initializer", m) for m in initializers),
-        measurement=walk[measured_at],
+        measurement=gateways[0],
         sampler=samplers[0],
         initial_population=tuple(initial),
         seeds_alone=seeds_walk == "alone",
@@ -869,23 +886,13 @@ def _roster(schema: PipelineSchema) -> tuple[str, ...]:
 
 
 def _walk(selected: SelectedOptimizer) -> tuple[NodeMember, ...]:
-    """Every member in the order ``runner/round.py::execute_round`` walks the first rounds, then the members only a walked one reaches."""
+    """Every member in the order the first rounds walk it, then the members only a walked one reaches."""
     plan = selected.plan
-    first = plan.walk(stands=False)
-    # Seeds alone walk a round of their own; the arms' proposers after it close as if it wrote nothing.
-    after = plan.walk(stands=True).steps if first.pipeline == INITIAL_POPULATION else ()
     named = {n for walk in _WALKS for n in selected.schema.pipelines.get(walk, ())}
     reached = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes if n not in named]
     return (
         *plan.initializers,
-        plan.sampler,
-        *first.steps,
-        *after,
-        *(() if plan.eliminator is None else (plan.eliminator,)),
-        plan.selector,
-        *(() if plan.survivor is None else (plan.survivor,)),
-        *plan.adapters,
-        *(() if plan.controller is None else (plan.controller,)),
+        *(member for role in RoundRole for member in plan.first_walk(role)),
         *reached,
     )
 

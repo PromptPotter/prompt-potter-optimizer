@@ -89,11 +89,6 @@ acting.
 
 ### The member backbone
 
-- **A round role is ordered three times**: `optimizer_manifest.py::_round_plan` admits each role by
-  its position against the gateway and selector, `::_walk` places every role for the closure check,
-  and `runner/round.py::execute_round` calls them. A static order cannot derive from calls, so one
-  order needs the executor to walk the plan's. **Re-test:** two of the three orders deleted.
-
 - **The cladogram re-derives fork lineage the server resolves.**
   `webapp/components/candidates/forest-layout.ts::extentKeys` walks spawn cuts client-side while each
   `HierarchyCandidate` serves `main_line`; the cut is by proposal round, not line position. Action:
