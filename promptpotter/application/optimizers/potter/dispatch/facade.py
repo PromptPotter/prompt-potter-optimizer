@@ -266,7 +266,7 @@ BUNDLE_SEES: frozenset[type[CycleRead]] = frozenset({Lineage, Frontier, Ruler, B
 def _by_field(entries: tuple[PoolEntry, ...]) -> dict[str, tuple[PoolEntry, ...]]:
     out: dict[str, list[PoolEntry]] = {}
     for entry in entries:
-        out.setdefault(entry.group[0], []).append(entry)
+        out.setdefault(BlockPool.part(entry), []).append(entry)
     return {field: tuple(held) for field, held in out.items()}
 
 

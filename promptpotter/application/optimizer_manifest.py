@@ -7,7 +7,7 @@ import json
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 from pydantic import Field
 
@@ -74,9 +74,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.scoring import CellSheet
 
-shapes_optimizer_prompt(__name__)
 
-
+@shapes_optimizer_prompt
 def _stamp(path: Path) -> int:
     try:
         return path.stat().st_mtime_ns
@@ -155,12 +154,14 @@ def authored_manifest(path: Path) -> PipelineManifest | ManifestSwitch:
     return _read_manifest(path, _stamp(path))
 
 
+@shapes_optimizer_prompt
 @functools.lru_cache(maxsize=8)
 def _read_schemas(path: Path) -> dict[str, Any]:
     schemas: dict[str, Any] = read_json(path)
     return schemas
 
 
+@shapes_optimizer_prompt
 def _parse(manifest: PipelineManifest, schemas: Mapping[str, Any]) -> PipelineSchema:
     authored = manifest.model_dump(mode="json", exclude_unset=True)
     # Every prompt a manifest resolves is an `OptimizerPromptTemplate`, so its loci are that class's.
@@ -171,6 +172,7 @@ def _parse(manifest: PipelineManifest, schemas: Mapping[str, Any]) -> PipelineSc
     )
 
 
+@shapes_optimizer_prompt
 @dataclass(frozen=True)
 class RoundPlan:
     """What the bench walks, by role: built once, at load, so a walk the bench cannot run is refused before a mint."""
@@ -297,16 +299,15 @@ def _round_plan(
             name,
             f"`{RUN_INIT}` walks {strays}, which are no pool initializer: it seeds pools alone.",
         )
-    return RoundPlan(
 
     def one(role: RoundRole) -> Any:
         return next(iter(members[role]), None)
 
+    return RoundPlan(
         initializers=tuple(cast("Initializer", m) for m in initializers),
         initial_population=tuple(initial),
         seeds_alone=seeds_walk == "alone",
         gate=gate,
-    )
         sampler=one(RoundRole.SAMPLER),
         proposers=proposers,
         measurement=gateways[0],
@@ -315,8 +316,10 @@ def _round_plan(
         survivor=one(RoundRole.SURVIVOR),
         adapters=cast("tuple[Adapter, ...]", members[RoundRole.ADAPTER]),
         controller=one(RoundRole.CONTROLLER),
+    )
 
 
+@shapes_optimizer_prompt
 @dataclass(frozen=True)
 class SelectedOptimizer:
     """``manifest`` is as resolved, a switch laid onto what it extends; ``schema`` is it parsed with the overlay applied."""
@@ -626,22 +629,26 @@ def _resolved_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
     return {} if member is None else member.resolved_levers(declared)
 
 
+@shapes_optimizer_prompt
 def _resolved_key(family: object, version: object) -> str | None:
     if not family:
         return None
     return f"{family}/{version}" if version is not None else str(family)
 
 
+@shapes_optimizer_prompt
 def prompt_key(config: Mapping[str, Any]) -> str | None:
     """The `resolved_prompts` key a node's config names; ``None`` where it runs no prompt."""
     return _resolved_key(config.get("prompt_family"), config.get("prompt_version"))
 
 
+@shapes_optimizer_prompt
 def prompt_edits(config: Mapping[str, Any]) -> dict[str, Any]:
     """The prompt fields a config sets over its template, `optimization.nodes.{node}.config.{field}`."""
     return {f: config[f] for f in PROMPT_FIELDS if f in config}
 
 
+@shapes_optimizer_prompt
 def node_prompt(
     node: str, config: Mapping[str, Any], manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
@@ -655,6 +662,7 @@ def node_prompt(
     return manifest.resolved_prompts[key].model_copy(update=prompt_edits(config))
 
 
+@shapes_optimizer_prompt
 def running_prompt(
     node: str, config: Mapping[str, Any], manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
@@ -958,6 +966,7 @@ class CheckinManifest:
     schema: PipelineSchema
 
 
+@shapes_optimizer_prompt
 @functools.lru_cache(maxsize=2)
 def _checkin_at(path: Path, _mtime_ns: int) -> CheckinManifest:
     manifest = PipelineManifest.model_validate(read_yaml(path))
@@ -965,13 +974,14 @@ def _checkin_at(path: Path, _mtime_ns: int) -> CheckinManifest:
     return CheckinManifest(manifest=manifest, schema=_parse(manifest, schemas))
 
 
+@shapes_optimizer_prompt
 def checkin_manifest() -> CheckinManifest:
     path = checkin_manifest_path()
     return _checkin_at(path, _stamp(path))
 
 
-_BOUND: contextvars.ContextVar[SelectedOptimizer | None] = contextvars.ContextVar(
-    "selected_optimizer", default=None
+_BOUND: Annotated[contextvars.ContextVar[SelectedOptimizer | None], shapes_optimizer_prompt] = (
+    contextvars.ContextVar("selected_optimizer", default=None)
 )
 _DETERMINISM: contextvars.ContextVar[DeterminismClamp | None] = contextvars.ContextVar(
     "determinism_clamp", default=None
@@ -991,6 +1001,7 @@ def binding_optimizer(
         _BOUND.reset(token)
 
 
+@shapes_optimizer_prompt
 def bound_optimizer() -> SelectedOptimizer:
     selected = _BOUND.get()
     if selected is None:
@@ -1001,6 +1012,7 @@ def bound_optimizer() -> SelectedOptimizer:
     return selected
 
 
+@shapes_optimizer_prompt
 def llm_node_manifest(node: str) -> tuple[PipelineNode, Mapping[str, Any], PipelineManifest]:
     checkin = checkin_manifest()
     if (held := checkin.schema.get_node(node)) is not None:
@@ -1010,9 +1022,9 @@ def llm_node_manifest(node: str) -> tuple[PipelineNode, Mapping[str, Any], Pipel
 
 
 # The OUTER's per-node mutations, bound inside the inner task so each recursion level carries its own.
-_OPTIMIZER_PROMPT_OVERRIDES: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = (
-    contextvars.ContextVar("optimizer_prompt_overrides", default=None)
-)
+_OPTIMIZER_PROMPT_OVERRIDES: Annotated[
+    contextvars.ContextVar[dict[str, dict[str, Any]] | None], shapes_optimizer_prompt
+] = contextvars.ContextVar("optimizer_prompt_overrides", default=None)
 
 
 @contextlib.contextmanager
@@ -1042,11 +1054,13 @@ class ResolvedNodeOverride:
     provider: str | None
 
 
+@shapes_optimizer_prompt
 def declared_node_override(node: str) -> dict[str, Any]:
     raw = (_OPTIMIZER_PROMPT_OVERRIDES.get() or {}).get(node)
     return raw if isinstance(raw, dict) else {}
 
 
+@shapes_optimizer_prompt
 def _single_model(overrides: dict[str, Any]) -> tuple[str | None, str | None]:
     for nd in overrides.values():
         if isinstance(nd, dict) and isinstance(nd.get("model"), str) and nd["model"]:
@@ -1055,6 +1069,7 @@ def _single_model(overrides: dict[str, Any]) -> tuple[str | None, str | None]:
     return None, None
 
 
+@shapes_optimizer_prompt
 def _resolved_prompt_parts(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
     """An unusable rename is DROPPED, never raised: a bad L4 mutation must score poorly, not break the run."""
     prompt_fields = {k: v for k, v in raw.items() if k in OptimizerPromptTemplate.model_fields}
@@ -1073,6 +1088,7 @@ def _resolved_prompt_parts(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[st
     return prompt_fields, names
 
 
+@shapes_optimizer_prompt
 def resolve_node_override(node: str) -> ResolvedNodeOverride:
     prompt_fields, names = _resolved_prompt_parts(declared_node_override(node))
     model, provider = _single_model(_OPTIMIZER_PROMPT_OVERRIDES.get() or {})

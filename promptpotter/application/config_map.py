@@ -1,4 +1,4 @@
-"""Kept OUT of ``knobs.py``: that source is hashed into the optimizer prompt's identity."""
+"""The served config map: each knob's effective value and source, grouped by estimand, and the couplings."""
 
 from __future__ import annotations
 
@@ -76,7 +76,8 @@ def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
 
 
 def config_map(config: CampaignConfig) -> ConfigMapResponse:
-    states = resolve_knob_states(config)
+    selected = select_optimizer(config.optimization)
+    states = resolve_knob_states(config, selected)
     groups = [
         ConfigEstimandGroup(
             key=estimand.value,
@@ -90,7 +91,6 @@ def config_map(config: CampaignConfig) -> ConfigMapResponse:
         )
         for estimand in Estimand
     ]
-    selected = select_optimizer(config.optimization)
     active = {c.name for c in check_couplings(config, selected)}
     couplings = [
         ConfigCoupling(

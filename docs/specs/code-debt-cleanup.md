@@ -267,11 +267,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   derived by verbatim equality with the donor, not recorded on the lineage, so an LLM edit that lands on
   the donor's value reads as donated. The capo offline bench turns on one seed: lift +0.700 or none
   after a draw-order change, so the fixture cannot tell a mating-law change from a reshuffle.
-- **`optimizer_manifest.py` is hashed whole into every optimizer's `treatment.source`**
-  (`shapes_optimizer_prompt(__name__)`), so a presentation-only edit re-keys every optimizer. The
-  pools commit did: `ManifestNode.makes` and the proposer labels changed no prompt, yet potter's key
-  moved. Action: move what no prompt reads (labels, proposer rows, the setup projection) into a module
-  outside the hash. **Re-test:** edit one proposer label; potter's treatment key stays.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 
@@ -354,13 +349,14 @@ word's `git grep -c` for that sense is 0.
   - `HoverCard` opens on tap only through focus (fragile on iOS); the check-in picklist button's
     accessible name runs slug and meta together; two open check-ins share one slug.
 - **Seen drawing the pools in place**:
-  - `pipeline_resolve.py::_pack_offers` reads the block pool's `packs` by its key off a dumped knob
-    model: the initializer should serve its packs as it serves `active`, but `optimizers/pools/members.py`
-    is hashed whole, so the method rides the next accepted treatment re-key.
-  - `potter/dispatch/facade.py::_by_field` spells a block's field as `entry.group[0]` beside
-    `domain/pool.py::BlockPool.part`; the facade is hashed whole, so it rides the same re-key.
   - A named pack that leaves the shelf makes `BlockPoolInitializer.held` raise `block_pack_not_found`,
     so the draft read itself fails instead of offering the pack to unname.
+- **Seen splitting the manifest hash**: the scan now hashes every top-level definition the marked units
+  reach (`source_scan.py::optimizer_prompt_shapers`), so most marks are redundant roots kept from when
+  each reached name had to be marked by hand; only a unit read through an instance or a registry (as
+  `SelectedOptimizer`) needs one. The `application/` modules that still carry
+  `shapes_optimizer_prompt(__name__)` hash whole where the reached units would do. **Re-test:**
+  `git grep -n "shapes_optimizer_prompt(__name__)" -- promptpotter/application`.
 - **Seen building the prompt workspace**:
   - An override cannot be removed, only overwritten: knob Reset writes the declared value and a cleared
     prompt field writes `""`, so the draft stays "edited". The overlay merge needs a delete.

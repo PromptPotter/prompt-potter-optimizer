@@ -778,6 +778,10 @@ class Initializer(NodeMember, Protocol):
 
     def active(self, selected: SelectedOptimizer) -> list[str]: ...
 
+    def packs(self, selected: SelectedOptimizer) -> list[str] | None:
+        """The block packs its pool draws from, in draw order; ``None`` where it draws from no shelf."""
+        ...
+
     def held(self, selected: SelectedOptimizer, mint: MintFacts | None) -> list[PoolEntry]:
         """The entries an ``active`` path may name: at load with no *mint*, every one any run admits."""
         ...

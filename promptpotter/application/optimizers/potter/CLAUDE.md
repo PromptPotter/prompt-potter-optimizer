@@ -57,7 +57,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 ## Editing a renderer's PROSE is a measurement change
 
 **`nodes.py::source_digest` hashes the prompt-shaping set AST-normalized, so rewording a directive voids banked origins — expect the re-measure.** A pool's starting content is hashed as data, only the entries its `active` keeps of what the campaign admits (`nodes.py::Initializer.starting_content`, `nodes.py::admits`).
-**A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else**, and its module is in the hashed set or carries `shared/hashing.py::shapes_optimizer_prompt`.
+**A prompt-shaping constant lives in `bundle.py` unless it is a fact about something else.** Hashed code's reads are followed (`source_scan.py::optimizer_prompt_shapers`), so only a unit reached through an instance or a registry carries `shared/hashing.py::shapes_optimizer_prompt`; the closure stops at `source_scan.py::PLUMBING_MODULES`.
 
 ## A validator either REJECTS or SCORES — never both
 

@@ -38,7 +38,7 @@ from factories import (
 )
 from offline_world import Router
 
-from promptpotter.application import optimizers
+from promptpotter.application import optimizer_manifest, optimizers
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import (
     admission_failures,
@@ -75,6 +75,7 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
+from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect
 from promptpotter.application.optimizers.gepa.state import ParetoScores
@@ -406,6 +407,25 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
     assert replace(capo, manifest=rewalked).treatment(every, shelf).digest != (
         capo.treatment(every, shelf).digest
     ), "a manifest walking its initial population apart ran under the treatment of one racing it"
+    # A prompt-shaping class's method re-keys the run though it is only ever read through an instance.
+    manifest_file, read_text = Path(optimizer_manifest.__file__), Path.read_text
+    as_shipped = read_text(manifest_file, "utf-8")
+    drawing_on = as_shipped.replace(
+        'self.access(member, pool) != "off"', 'self.access(member, pool) == "on"'
+    )
+    assert drawing_on != as_shipped, "the probe's edit no longer lands in `SelectedOptimizer.draws`"
+    as_run_source = potter.treatment(every, shelf).source
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            Path,
+            "read_text",
+            lambda p, *a, **k: drawing_on if p == manifest_file else read_text(p, *a, **k),
+        )
+        nodes._source_digest.cache_clear()
+        assert potter.treatment(every, shelf).source != as_run_source, (
+            "an edit to which pools a member draws ran under the unedited treatment"
+        )
+    nodes._source_digest.cache_clear()
     # A pool its readers could draw nothing from never runs: the silent outcome is a pool-less search.
     earned_only = ManifestNodeOverlay(config={"active": [f"persona/{EARNED_SOURCE}"]})
     closed = ManifestNodeOverlay(config={"block_access": "closed"})
