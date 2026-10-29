@@ -382,6 +382,19 @@ word's `git grep -c` for that sense is 0.
   sweeps stale `pp-push-*` (unlink, then `git worktree prune`). Also: the green store keeps one key per
   check name, so a tip's offline-run green overwrites the working tree's own, and the two take turns
   rerunning. **Re-test:** kill a push mid-run, then run `--push` again and list `%TEMP%\pp-push-*`.
+- **Seen hardening the endpoints** (P0, 2026-10-29):
+  - `main.py` CORS keeps `allow_methods=["*"]` / `allow_headers=["*"]` beside the pinned origins;
+    pin them to what the routes serve.
+  - Only launches and paid calls meter a write (`quota.py::refuse_verb_rate`, `paid_call`): a free
+    verb (`set-campaign-label`, `bank-snippet`) has no rate (C6).
+  - Every refusal logs one WARNING (`main.py::_error_response`), so a 429 flood is a log flood.
+  - `/docs` and `/openapi.json` sit outside `main.py::API_ROUTERS`, public by a comment, not by the
+    table; the leaks journey matches public routes by path, so a gated method sharing a public path is
+    skipped.
+  - `auth.py::_require_provider_client` and `callback` dispatch on the provider string with two
+    `type: ignore[union-attr]`: string-keyed call dispatch.
+  - `app.openapi()` warns `UnsupportedFieldAttributeWarning` (alias `body` / `payload` on a union-typed
+    body param): a request alias that has no effect.
 - **The offline legs rest on fake-data draws keyed by the whole node config**
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.

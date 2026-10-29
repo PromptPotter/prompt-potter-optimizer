@@ -15,9 +15,8 @@ neither waits on the other. A wave's paid runs need only what an earlier wave la
    invariants ([`code-debt-cleanup.md`](code-debt-cleanup.md) § URGENT — shapes that hide the backbone
    from a reshape). Paid: the CAPO head-to-head
    on `hotpotqa-closedbook`, closing M13 (§ The bench (M13)); L4 validation (~$1).
-2. **Recombination at $0** (C9): the member backbone (code-debt § The member backbone); endpoint
-   hardening P0 (the **M14 (publication)** paragraph below), since tier 3 is open. Paid: the mode head-to-head
-   (§ Variation and pools, item 1).
+2. **Recombination at $0** (C9): the member backbone (code-debt § The member backbone). Paid: the
+   mode head-to-head (§ Variation and pools, item 1).
 3. **The optimizer climbs** (§ Optimizer tuning — the standing board): L1 quality (answer_format is
    never edited, a held leader is never re-scored); early stop when C1.1 clearly beats C0; Δ per time,
    per candidate and per $ served in chat. Paid: the board's path, steps (1)–(4).
@@ -49,16 +48,14 @@ the rest of Lane C.
 - **C3** L4 closure — [`l4-outer-loop.md`](l4-outer-loop.md) § Open.
 - **C4** Cross-user measurement panel, after P3.
 - **C5** MCP server mode (§ Agent-tool parity) · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit).
-- **C6** Public-service hardening: Docker, metrics, app-level rate limit, billing; a bound on the NUMBER of accounts.
+- **C6** Public-service hardening: Docker, metrics, a rate on unpaid writes (reads are metered), billing; a bound on the NUMBER of accounts.
 - **C7** Non-prompt targets · agent harnesses (§ Evolving agent harnesses) · multimodal; all but harnesses after v1.
 - **C8** Mask abstraction — the sample-set half (§ Lineage mask).
 - **C9** Variation and pools (§ Variation and pools).
 - **C10** Operator-authored prompt-field order (§ Prompt-field order).
 
 **M14 (publication)** needs: ablation rows L1 / L1+L2 / full · scan · cross-run archive · critique ·
-zero-signal-filter; competitor and L4 numbers after C3; **endpoint hardening P0** (auth dependency on
-every router, pinned `ALLOWED_ORIGINS`, `extra=forbid` on request models, poll rate limit) before any
-non-localhost open. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
+zero-signal-filter; competitor and L4 numbers after C3. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
 
 ## The bench (M13)
 
