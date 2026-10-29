@@ -16,6 +16,7 @@ import threading
 import time
 import tomllib
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import cache
 from importlib import metadata
@@ -200,9 +201,9 @@ def _layering(_: Selection) -> Outcome:
     imports: dict[str, list[str]] = {}
     for path in _sources(REPO / package, "*.py"):
         rel = path.relative_to(REPO).as_posix()
-        reached = tests_owning._imported(
+        reached = tests_owning.imported(
             ast.parse(path.read_text(encoding="utf-8")),
-            tests_owning._module_name(rel),
+            tests_owning.module_name(rel),
             path.name == "__init__.py",
         )
         imports[rel[len(package) :]] = sorted(target[len(package) :] for target in reached)
@@ -499,6 +500,8 @@ _PROBE = re.compile(r'<!--\s*probe:\s*(git grep -cE "([^"]+)" -- (\S+) (==|<=|>=
 # Git's ERE runs in bounded time except through a back-reference.
 _BACKREFERENCE = re.compile(r"\\[1-9]")
 _TRACKER = "docs/specs/code-debt-cleanup.md"
+# Past four counts at once the probes finish no sooner and the job's peak doubles.
+_PROBE_WIDTH = 4
 # An invariant a doc states as the target while its sentence says what holds today, keyed to the
 # phrase the tracker's URGENT section files it under; once true, the sentence is the invariant.
 _KNOWN_FALSE: dict[str, str] = {
@@ -664,6 +667,12 @@ def _ts_holds(text: str, symbol: str) -> bool:
     return bool(held)
 
 
+@cache
+def _document(path: Path) -> Any:
+    text = path.read_text(encoding="utf-8")
+    return tomllib.loads(text) if path.suffix == ".toml" else yaml.safe_load(text)
+
+
 def _symbol_in(path: Path, symbol: str) -> bool:
     """Python: a name the module binds, a method also bare (`ledger.py::iter`). YAML and TOML: a key
     path from the document root. Markdown: a heading. CSS: a selector or a custom property.
@@ -672,11 +681,9 @@ def _symbol_in(path: Path, symbol: str) -> bool:
         names = _defined(path)
         tails = {name.rpartition(".")[2] for name in names}
         return any(fnmatch.fnmatchcase(n, symbol) for n in names) or symbol in tails
+    if path.suffix in (".yaml", ".yml", ".toml"):
+        return _key_path(_document(path), symbol.split("."))
     text = path.read_text(encoding="utf-8")
-    if path.suffix in (".yaml", ".yml"):
-        return _key_path(yaml.safe_load(text), symbol.split("."))
-    if path.suffix == ".toml":
-        return _key_path(tomllib.loads(text), symbol.split("."))
     if path.suffix in (".ts", ".tsx"):
         return _ts_holds(text, symbol)
     word = _word(symbol)
@@ -719,6 +726,12 @@ _SECTION_CLAIM = re.compile(
 _HEADING = re.compile(r"(?m)^#{1,6}[ \t]+(.+?)[ \t#]*$")
 
 
+@cache
+def _headings(path: Path) -> tuple[str, ...]:
+    text = _FENCE.sub("", path.read_text("utf-8"))
+    return tuple(h.replace("`", "") for h in _HEADING.findall(text))
+
+
 def _section_claims(rel: str, prose: str) -> list[str]:
     """Each `[...](doc.md) § Name` names exactly one heading there: the longest prefix of the
     name ending on a word boundary that matches any heading must match only one."""
@@ -732,9 +745,7 @@ def _section_claims(rel: str, prose: str) -> list[str]:
         if not path.is_file():
             failures.append(f"{claim}: no such file")
             continue
-        headings = [
-            h.replace("`", "") for h in _HEADING.findall(_FENCE.sub("", path.read_text("utf-8")))
-        ]
+        headings = _headings(path)
         words = " ".join(name.replace("`", "").split())
         cuts = [m.start() for m in re.finditer(r"(?<=\w)(?!\w)", words)]
         for cut in reversed(cuts):
@@ -797,7 +808,7 @@ def _doc_claims(_: Selection) -> Outcome:
         for probe, phrase in _KNOWN_FALSE.items()
         if phrase not in urgent
     ]
-    probed: set[str] = set()
+    probes: list[tuple[str, ...]] = []
     for rel in every_doc:
         unfenced = _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8"))
         failures += _section_claims(rel, unfenced)
@@ -808,24 +819,28 @@ def _doc_claims(_: Selection) -> Outcome:
                 line = prose[opened.start() :].partition("\n")[0]
                 failures.append(f"  {rel}: a probe that does not parse: {line}")
                 continue
-            probe, pattern, where, op, bound = parsed.groups()
-            probed.add(probe)
-            count = _probe_count(pattern, where)
-            if isinstance(count, str):
-                failures.append(f"  {rel}: `{probe}` cannot run: {count}")
-                continue
-            limit = int(bound)
-            holds = {"==": count == limit, "<=": count <= limit, ">=": count >= limit}[op]
-            tracked = _KNOWN_FALSE.get(probe)
-            if holds and tracked:
-                failures.append(
-                    f"  {rel}: `{probe}` now holds, so {tracked!r} is done: the sentence states "
-                    "the invariant again and the entry leaves `_KNOWN_FALSE` and the tracker"
-                )
-            elif not holds and not tracked:
-                failures.append(
-                    f"  {rel}: `{probe}` counts {count}, so the sentence beside it is false"
-                )
+            probes.append((rel, *parsed.groups()))
+    probed = {probe for _, probe, *_ in probes}
+    # Each count waits on two git processes, so the counts are asked side by side, in this job.
+    joined = ("job", metered.job)
+    with ThreadPoolExecutor(_PROBE_WIDTH, initializer=metered.__setattr__, initargs=joined) as pool:
+        counts = list(pool.map(lambda p: _probe_count(p[2], p[3]), probes))
+    for (rel, probe, _pattern, _where, op, bound), count in zip(probes, counts, strict=True):
+        if isinstance(count, str):
+            failures.append(f"  {rel}: `{probe}` cannot run: {count}")
+            continue
+        limit = int(bound)
+        holds = {"==": count == limit, "<=": count <= limit, ">=": count >= limit}[op]
+        tracked = _KNOWN_FALSE.get(probe)
+        if holds and tracked:
+            failures.append(
+                f"  {rel}: `{probe}` now holds, so {tracked!r} is done: the sentence states "
+                "the invariant again and the entry leaves `_KNOWN_FALSE` and the tracker"
+            )
+        elif not holds and not tracked:
+            failures.append(
+                f"  {rel}: `{probe}` counts {count}, so the sentence beside it is false"
+            )
     failures += [
         f"  `_KNOWN_FALSE` names a probe no doc carries: `{p}`"
         for p in _KNOWN_FALSE.keys() - probed
