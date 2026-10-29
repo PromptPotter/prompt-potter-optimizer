@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, get_args
@@ -501,7 +502,14 @@ class KnobRow(StrictModel):
     """One knob of one optimizer node, as every surface offers it: its only served row."""
 
     key: str = Field(description="The knob's name under `nodes.{node}.config`")
-    description: str = Field(description="What the knob does — its field description")
+    description: str = Field(
+        description="What the knob does — its field description, as plain text (RST literals "
+        "unmarked)"
+    )
+    summary: str = Field(
+        description="The description's first sentence, cut at its first clause where that runs "
+        "long: the one line a setup surface shows before the whole text"
+    )
     type: KnobType = Field(description="JSON Schema type the value takes")
     options: list[str] | None = Field(
         description="The closed set a string knob takes, in declared order; null when open"
@@ -590,7 +598,10 @@ class OptimizerSetup(StrictModel):
         "no entry"
     )
     arms_per_round: int = Field(description="Arms each round tests")
-    proposers: list[str] = Field(description="The nodes making each round's arms, in walk order")
+    proposers: list[str] = Field(
+        description="The nodes making each round's arms under this config, in walk order: one "
+        "that opens or adds arms and adds none here is off, and absent"
+    )
     pools: list[PoolRow] = Field(description="What the members draw from")
 
 
@@ -999,7 +1010,9 @@ def optimizer_setup(cfg: CampaignConfig, mint: MintFacts | None) -> OptimizerSet
         knobs=_node_knobs(selected),
         prompts=_node_prompts(selected),
         arms_per_round=selected.arms_per_round,
-        proposers=[p.name for p in selected.plan.proposers],
+        proposers=[
+            p.name for p in selected.plan.proposers if p.proposes == "edits" or p.arms(selected) > 0
+        ],
         pools=[
             PoolRow(
                 pool=initializer.pool.kind,
@@ -1325,6 +1338,28 @@ def _knob_type(kind: Mapping[str, Any]) -> KnobType:
     raise ValueError(f"knob type {declared!r} is none of {', '.join(_KNOB_TYPES)}")
 
 
+_RST_LITERAL = re.compile(r"``(.+?)``", re.DOTALL)
+# Read on the marked text: a stop before a capital, a literal or the end ends a sentence; "e.g. x"
+# and "0.15" end none.
+_SENTENCE_END = re.compile(r"(?<=[.!?])(?=\s+[A-Z(`]|\s*$)")
+_CLAUSE_END = re.compile(r"[:;](?=\s)|\s—\s")
+_SUMMARY_CHARS = 120
+# A clause shorter than this is a symbol being named (`T: …`, `b: …`), no summary.
+_CLAUSE_MIN_CHARS = 24
+
+
+def _plain(text: str) -> str:
+    return _RST_LITERAL.sub(r"\1", text)
+
+
+def _summary(marked: str) -> str:
+    first = _plain(_SENTENCE_END.split(marked.strip(), maxsplit=1)[0].strip())
+    if len(first) <= _SUMMARY_CHARS:
+        return first
+    clause = _CLAUSE_END.search(first, _CLAUSE_MIN_CHARS)
+    return first[: clause.start()].rstrip() if clause else first
+
+
 def _knob_row(
     key: str,
     prop: Mapping[str, Any],
@@ -1340,9 +1375,11 @@ def _knob_row(
     nullable = any(o.get("type") == "null" for o in options)
     kind = next(o for o in options if o.get("type") != "null")
     enum = kind.get("enum") or ([kind["const"]] if "const" in kind else None)
+    description = str(prop.get("description") or "")
     return KnobRow(
         key=key,
-        description=str(prop.get("description") or ""),
+        description=_plain(description),
+        summary=_summary(description),
         type=_knob_type(kind),
         options=[str(v) for v in enum] if enum else None,
         nullable=nullable,

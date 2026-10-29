@@ -2040,18 +2040,6 @@ export interface FileContentResponse {
   content: string | null;
 }
 
-/** The caller's open check-ins, most recently edited first. */
-export interface DraftListResponse {
-  drafts: DraftSummary[];
-}
-
-export interface DraftSummary {
-  draft_id: string;
-  slug: string;
-  n_samples: number;
-  updated_at: string;
-}
-
 /** A re-opened check-in: its draft and what the last resolver turn left. */
 export interface DraftReopenResponse {
   draft: DraftCampaignWire;
@@ -2060,6 +2048,15 @@ export interface DraftReopenResponse {
   /** Proposals the last turn left unclicked, so a re-opened check-in keeps the
    * operator's outstanding actions. */
   raised: RaisedCommand[];
+  /** Its task is on file but no resolver turn ever set it up
+   * (`DraftCampaign.resolution_pending`): the one case a reopen sends
+   * `resolve-origin`, so a revisit never re-buys a turn or re-proposes over
+   * authored prompts. */
+  resolution_pending: boolean;
+  /** A Start on it waits on a machine slot: it is minted once one frees, so a
+   * reopen offers no second Start (the same fact as its listing's `queued`
+   * lifecycle). */
+  queued: boolean;
 }
 
 /** A check-in's draft as every check-in route answers it; Start mints its campaign. No */
@@ -2177,7 +2174,8 @@ export interface OptimizerSetup {
   prompts: Record<string, OptimizerNodePrompt>;
   /** Arms each round tests */
   arms_per_round: number;
-  /** The nodes making each round's arms, in walk order */
+  /** The nodes making each round's arms under this config, in walk order: one that
+   * opens or adds arms and adds none here is off, and absent */
   proposers: string[];
   /** What the members draw from */
   pools: PoolRow[];
@@ -2204,8 +2202,12 @@ export interface NodeKnobs {
 export interface KnobRow {
   /** The knob's name under `nodes.{node}.config` */
   key: string;
-  /** What the knob does — its field description */
+  /** What the knob does — its field description, as plain text (RST literals
+   * unmarked) */
   description: string;
+  /** The description's first sentence, cut at its first clause where that runs
+   * long: the one line a setup surface shows before the whole text */
+  summary: string;
   /** JSON Schema type the value takes */
   type: 'boolean' | 'integer' | 'number' | 'string' | 'array' | 'object';
   /** The closed set a string knob takes, in declared order; null when open */
@@ -2719,6 +2721,7 @@ export interface MachineSlot {
 /** A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle. */
 export interface CampaignLaunch {
   dataset_name: string;
+  draft_id: string | null;
   kind: 'campaign_launch';
 }
 
@@ -2808,8 +2811,24 @@ export interface OptimizerEntry {
 export interface LibraryResponse {
   /** The closed set `suits` draws from, in `PROMPT_FIELDS` order */
   parts: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
+  /** Every source a snippet names, once, in first-named order */
+  sources: LibrarySource[];
   /** By pack name, then each pack's own order */
   snippets: LibrarySnippet[];
+}
+
+/** One source a snippet names: a cited work as its pack declares it, or the authored one. */
+export interface LibrarySource {
+  /** A snippet's `source`: the work's arXiv id, or `authored` */
+  id: string;
+  /** The work's title; for `authored`, the word itself */
+  title: string;
+  /** The title up to its first colon, for a chip */
+  short_title: string;
+  /** Absent for `authored` */
+  first_author: string | null;
+  /** Absent for `authored` */
+  year: number | null;
 }
 
 /** One snippet of one installed pack, as a library surface lists it. */
@@ -2823,16 +2842,21 @@ export interface LibrarySnippet {
   suits: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
   /** Free labels for search alone; nothing else reads them */
   tags: string[];
-  /** Its cited work's arXiv id, or `authored` */
+  /** A `sources` id: its cited work's arXiv id, or `authored` */
   source: string;
+  /** The cited technique's family as its pack records it; absent for an authored
+   * snippet */
+  method: string | null;
   /** The installed pack holding it, as a `packs` knob names it */
   pack: string;
 }
 
-/** Every campaign in one store, root-major and newest first. */
+/** Every campaign in one store: the unstarted first, then root-major and newest first. */
 export interface HierarchyResponse {
-  /** Campaigns sharing a root cycle sit together, the group of the newest first. */
-  entries: HierarchyCampaign[];
+  /** Unstarted campaigns lead, most recently edited first; then campaigns sharing a
+   * root cycle sit together, the group of the newest first. A `campaign` or
+   * `attached` filter asks after runs, so it serves no unstarted one. */
+  entries: (HierarchyCampaign | UnstartedCampaign)[];
 }
 
 /** A campaign as the listing serves it: its state and line stats are its line course's. */
@@ -3089,6 +3113,34 @@ export interface LivesReading {
   label: string;
   /** The bank is empty: the run stops after this round. */
   spent: boolean;
+}
+
+/** An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course, */
+export interface UnstartedCampaign {
+  /** Server-minted and stable: the key of every row and every open set. A course's
+   * is its `CyclePath` on the wire (`encodeCyclePath`). */
+  address: string;
+  /** The hierarchy parent's address; a top-level campaign's is null, an inner one's
+   * the outer course it sits under. */
+  parent: string | null;
+  /** The display name. */
+  label: string;
+  /** The one sentence under the title: the selection line. */
+  lede: string | null;
+  /** What could not be read; null where all was. */
+  caveat: string | null;
+  tags: HierarchyTag[];
+  /** Server-ordered; `stats[0]` is the headline. */
+  stats: (HierarchyStat | BenchStat)[];
+  level: 'unstarted';
+  span: HierarchySpan;
+  facts: UnstartedFacts;
+}
+
+/** An open check-in's typed facts: it has no cycle, so no course, line or run. */
+export interface UnstartedFacts {
+  /** What its check-in has cost so far. */
+  spend_lifetime: LifetimeSpend;
 }
 
 /** One window of a family's chronology, oldest-first: a course, its forks and inner runs. */

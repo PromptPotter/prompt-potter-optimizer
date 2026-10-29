@@ -12,7 +12,7 @@
 - **An axis is one `ui/ValueList`**: start value = position 1, ticks = permitted set, so the lock is DERIVED (🔒/🔓 only where there is no set). Each part draws exactly when its channel exists; **gate on the fact (`onApply`), never one callback.** `NodeConfigEditor` is the single editor; `ConfigMode` picks only the transport.
 - **A row answers two questions: who may SEARCH it (`never_axis`/`movable_by`) and which widget EXPRESSES it (`kind`)** — the search fence is server-side, never re-gated here. The SCHEMA is outside the rows (`OutputContract`; a check-in authors via `SchemaTreeEditor`). Exactly one 🔓/🔒 mark per row; a shut axis names its own remedy.
 - **A card header is ONE row** — `Toolbar` + `ToolbarSep` + `ToolbarSpacer`, controls `flex: 0 0 auto`, rare ones in a `⋯` `Menu`; a control driving one region sits beside it.
-- **"Where is this run" is `shell/masthead/RunMasthead`'s alone** — no pane below repeats it. Its chips read `dash` for the viewed leaf, except STATE and BENCH (`useViewedCourse`).
+- **"Where is this run" is `shell/masthead/RunMasthead`'s alone** — no pane below repeats it. Its chips read `dash` for the viewed leaf, except STATE and BENCH (`useViewedCourse`); over a check-in it shows the unstarted campaign's listing (`useRegistry().unstarted`), never a run chip.
 - **A run bound is a CAP on every label** (the account's is the ALLOWANCE); one parse, `lib/run-limits.ts::parseCap`.
 - **Text and numeric controls commit on Enter or blur, never per keystroke** — `ui/CommitInput`.
 - **A lit chip wears the ink of what it drew**, lit from the served value, never a local boolean.

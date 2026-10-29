@@ -46,51 +46,85 @@ export type ThreadItem<R> = StoredItem<R> | BlockItem;
 
 type Draft = Omit<MessageItem, "id"> | Omit<FileItem, "id">;
 
-interface ThreadStore<R> {
-  items: readonly StoredItem<R>[];
-  append: (item: Draft) => string;
-  setFileDetail: (id: string, detail: string) => void;
-  /** Idempotent per `key`: an ending can be observed twice (a re-mount, a switch back). */
-  appendRun: (key: string, run: R) => void;
-  clear: () => void;
+// One conversation per SUBJECT — a run's address or a check-in's — so nothing one files reaches another.
+export type ThreadKey = string;
+
+export function runThreadKey(address: string): ThreadKey {
+  return `run:${address}`;
 }
 
-const ThreadContext = createContext<ThreadStore<unknown> | null>(null);
+// A fresh check-in (no draft yet) is `null`; its thread moves under the draft id once one is minted.
+export function checkinThreadKey(draftId: string | null): ThreadKey {
+  return `checkin:${draftId ?? "new"}`;
+}
+
+interface Threads<R> {
+  of: (key: ThreadKey) => readonly StoredItem<R>[];
+  append: (key: ThreadKey, item: Draft) => string;
+  setFileDetail: (key: ThreadKey, id: string, detail: string) => void;
+  /** Idempotent per `runKey`: an ending can be observed twice (a re-mount, a switch back). */
+  appendRun: (key: ThreadKey, runKey: string, run: R) => void;
+  clear: (key: ThreadKey) => void;
+  /** A fresh check-in's thread becomes its draft's, the moment the draft is minted. */
+  move: (from: ThreadKey, to: ThreadKey) => void;
+}
+
+const ThreadContext = createContext<Threads<unknown> | null>(null);
+
+type Book = Readonly<Record<ThreadKey, readonly StoredItem<unknown>[]>>;
+const NONE: readonly StoredItem<unknown>[] = [];
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<readonly StoredItem<unknown>[]>([]);
-
-  const append = useCallback((item: Draft): string => {
-    const id = crypto.randomUUID();
-    setItems((m) => [...m, { ...item, id }]);
-    return id;
-  }, []);
-  const setFileDetail = useCallback(
-    (id: string, detail: string) =>
-      setItems((m) => m.map((x) => (x.id === id && x.kind === "file" ? { ...x, detail } : x))),
+  const [book, setBook] = useState<Book>({});
+  const edit = useCallback(
+    (key: ThreadKey, f: (m: readonly StoredItem<unknown>[]) => readonly StoredItem<unknown>[]) =>
+      setBook((b) => ({ ...b, [key]: f(b[key] ?? NONE) })),
     [],
+  );
+
+  const of = useCallback((key: ThreadKey) => book[key] ?? NONE, [book]);
+  const append = useCallback(
+    (key: ThreadKey, item: Draft): string => {
+      const id = crypto.randomUUID();
+      edit(key, (m) => [...m, { ...item, id }]);
+      return id;
+    },
+    [edit],
+  );
+  const setFileDetail = useCallback(
+    (key: ThreadKey, id: string, detail: string) =>
+      edit(key, (m) => m.map((x) => (x.id === id && x.kind === "file" ? { ...x, detail } : x))),
+    [edit],
   );
   const appendRun = useCallback(
-    (key: string, run: unknown) =>
-      setItems((m) =>
-        m.some((x) => x.kind === "run" && x.key === key)
+    (key: ThreadKey, runKey: string, run: unknown) =>
+      edit(key, (m) =>
+        m.some((x) => x.kind === "run" && x.key === runKey)
           ? m
-          : [...m, { id: crypto.randomUUID(), kind: "run", key, run }],
+          : [...m, { id: crypto.randomUUID(), kind: "run", key: runKey, run }],
       ),
+    [edit],
+  );
+  const clear = useCallback((key: ThreadKey) => edit(key, () => NONE), [edit]);
+  const move = useCallback(
+    (from: ThreadKey, to: ThreadKey) =>
+      setBook((b) => {
+        const { [from]: moved = NONE, ...rest } = b;
+        return { ...rest, [to]: [...(rest[to] ?? NONE), ...moved] };
+      }),
     [],
   );
-  const clear = useCallback(() => setItems([]), []);
 
   const value = useMemo(
-    () => ({ items, append, setFileDetail, appendRun, clear }),
-    [items, append, setFileDetail, appendRun, clear],
+    () => ({ of, append, setFileDetail, appendRun, clear, move }),
+    [of, append, setFileDetail, appendRun, clear, move],
   );
   return createElement(ThreadContext.Provider, { value }, children);
 }
 
 // `R` is the host's run payload; one app mounts one provider and names one `R`.
-export function useThread<R>(): ThreadStore<R> {
+export function useThreads<R>(): Threads<R> {
   const v = useContext(ThreadContext);
-  if (!v) throw new Error("useThread must be used inside ThreadProvider");
-  return v as ThreadStore<R>;
+  if (!v) throw new Error("useThreads must be used inside ThreadProvider");
+  return v as Threads<R>;
 }

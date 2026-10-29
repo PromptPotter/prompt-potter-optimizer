@@ -104,6 +104,7 @@ from promptpotter.domain.cycle_paths import (
     hierarchy_address,
 )
 from promptpotter.domain.hierarchy import (
+    HierarchyCampaign,
     HierarchyCandidate,
     HierarchyRound,
     SubtreeCampaign,
@@ -1177,6 +1178,7 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         attached_only=False,
         depth=1,
     ).entries
+    assert isinstance(listed, HierarchyCampaign), "guard"
     assert listed.facts.line == hierarchy_address((), fork_hop.campaign_id, fork_hop.cycle_id), (
         "the campaign's line stayed on the cycle a supersede retired"
     )

@@ -2161,6 +2161,17 @@
             "title": "Dataset Name",
             "type": "string"
           },
+          "draft_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Id"
+          },
           "kind": {
             "const": "campaign_launch",
             "default": "campaign_launch",
@@ -5306,30 +5317,17 @@
         "title": "DraftDependency",
         "type": "object"
       },
-      "DraftListResponse": {
-        "additionalProperties": false,
-        "description": "The caller's open check-ins, most recently edited first.",
-        "properties": {
-          "drafts": {
-            "items": {
-              "$ref": "#/components/schemas/DraftSummary"
-            },
-            "title": "Drafts",
-            "type": "array"
-          }
-        },
-        "required": [
-          "drafts"
-        ],
-        "title": "DraftListResponse",
-        "type": "object"
-      },
       "DraftReopenResponse": {
         "additionalProperties": false,
         "description": "A re-opened check-in: its draft and what the last resolver turn left.",
         "properties": {
           "draft": {
             "$ref": "#/components/schemas/DraftCampaignWire"
+          },
+          "queued": {
+            "description": "A Start on it waits on a machine slot: it is minted once one frees, so a reopen offers no second Start (the same fact as its listing's `queued` lifecycle).",
+            "title": "Queued",
+            "type": "boolean"
           },
           "raised": {
             "description": "Proposals the last turn left unclicked, so a re-opened check-in keeps the operator's outstanding actions.",
@@ -5349,43 +5347,21 @@
               }
             ],
             "description": "The last resolver turn's output; null when none ran."
+          },
+          "resolution_pending": {
+            "description": "Its task is on file but no resolver turn ever set it up (`DraftCampaign.resolution_pending`): the one case a reopen sends `resolve-origin`, so a revisit never re-buys a turn or re-proposes over authored prompts.",
+            "title": "Resolution Pending",
+            "type": "boolean"
           }
         },
         "required": [
           "draft",
           "resolution",
-          "raised"
+          "raised",
+          "resolution_pending",
+          "queued"
         ],
         "title": "DraftReopenResponse",
-        "type": "object"
-      },
-      "DraftSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "draft_id": {
-            "title": "Draft Id",
-            "type": "string"
-          },
-          "n_samples": {
-            "title": "N Samples",
-            "type": "integer"
-          },
-          "slug": {
-            "title": "Slug",
-            "type": "string"
-          },
-          "updated_at": {
-            "title": "Updated At",
-            "type": "string"
-          }
-        },
-        "required": [
-          "draft_id",
-          "slug",
-          "n_samples",
-          "updated_at"
-        ],
-        "title": "DraftSummary",
         "type": "object"
       },
       "EditDraftCampaignPayload": {
@@ -7582,12 +7558,26 @@
       },
       "HierarchyResponse": {
         "additionalProperties": false,
-        "description": "Every campaign in one store, root-major and newest first.",
+        "description": "Every campaign in one store: the unstarted first, then root-major and newest first.",
         "properties": {
           "entries": {
-            "description": "Campaigns sharing a root cycle sit together, the group of the newest first.",
+            "description": "Unstarted campaigns lead, most recently edited first; then campaigns sharing a root cycle sit together, the group of the newest first. A `campaign` or `attached` filter asks after runs, so it serves no unstarted one.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyCampaign"
+              "discriminator": {
+                "mapping": {
+                  "campaign": "#/components/schemas/HierarchyCampaign",
+                  "unstarted": "#/components/schemas/UnstartedCampaign"
+                },
+                "propertyName": "level"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/HierarchyCampaign"
+                },
+                {
+                  "$ref": "#/components/schemas/UnstartedCampaign"
+                }
+              ]
             },
             "title": "Entries",
             "type": "array"
@@ -8055,7 +8045,7 @@
             "title": "Declared"
           },
           "description": {
-            "description": "What the knob does — its field description",
+            "description": "What the knob does — its field description, as plain text (RST literals unmarked)",
             "title": "Description",
             "type": "string"
           },
@@ -8140,6 +8130,11 @@
             "description": "The closed set a string knob takes, in declared order; null when open",
             "title": "Options"
           },
+          "summary": {
+            "description": "The description's first sentence, cut at its first clause where that runs long: the one line a setup surface shows before the whole text",
+            "title": "Summary",
+            "type": "string"
+          },
           "type": {
             "description": "JSON Schema type the value takes",
             "enum": [
@@ -8161,6 +8156,7 @@
         "required": [
           "key",
           "description",
+          "summary",
           "type",
           "options",
           "nullable",
@@ -8251,10 +8247,19 @@
             },
             "title": "Snippets",
             "type": "array"
+          },
+          "sources": {
+            "description": "Every source a snippet names, once, in first-named order",
+            "items": {
+              "$ref": "#/components/schemas/LibrarySource"
+            },
+            "title": "Sources",
+            "type": "array"
           }
         },
         "required": [
           "parts",
+          "sources",
           "snippets"
         ],
         "title": "LibraryResponse",
@@ -8269,13 +8274,25 @@
             "title": "Id",
             "type": "string"
           },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cited technique's family as its pack records it; absent for an authored snippet",
+            "title": "Method"
+          },
           "pack": {
             "description": "The installed pack holding it, as a `packs` knob names it",
             "title": "Pack",
             "type": "string"
           },
           "source": {
-            "description": "Its cited work's arXiv id, or `authored`",
+            "description": "A `sources` id: its cited work's arXiv id, or `authored`",
             "title": "Source",
             "type": "string"
           },
@@ -8306,19 +8323,65 @@
           "suits",
           "tags",
           "source",
+          "method",
           "pack"
         ],
         "title": "LibrarySnippet",
         "type": "object"
       },
-      "LifecycleFilter": {
-        "enum": [
-          "active",
-          "archived",
-          "deleted",
-          "all"
+      "LibrarySource": {
+        "additionalProperties": false,
+        "description": "One source a snippet names: a cited work as its pack declares it, or the authored one.",
+        "properties": {
+          "first_author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent for `authored`",
+            "title": "First Author"
+          },
+          "id": {
+            "description": "A snippet's `source`: the work's arXiv id, or `authored`",
+            "title": "Id",
+            "type": "string"
+          },
+          "short_title": {
+            "description": "The title up to its first colon, for a chip",
+            "title": "Short Title",
+            "type": "string"
+          },
+          "title": {
+            "description": "The work's title; for `authored`, the word itself",
+            "title": "Title",
+            "type": "string"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent for `authored`",
+            "title": "Year"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "short_title",
+          "first_author",
+          "year"
         ],
-        "type": "string"
+        "title": "LibrarySource",
+        "type": "object"
       },
       "LifecycleStatus": {
         "enum": [
@@ -8544,6 +8607,16 @@
         ],
         "title": "LineageDivergence",
         "type": "object"
+      },
+      "ListingLifecycle": {
+        "enum": [
+          "unstarted",
+          "active",
+          "archived",
+          "deleted",
+          "all"
+        ],
+        "type": "string"
       },
       "LiveCandidate": {
         "additionalProperties": false,
@@ -11028,7 +11101,7 @@
             "type": "object"
           },
           "proposers": {
-            "description": "The nodes making each round's arms, in walk order",
+            "description": "The nodes making each round's arms under this config, in walk order: one that opens or adds arms and adds none here is off, and absent",
             "items": {
               "type": "string"
             },
@@ -16364,6 +16437,113 @@
         "title": "UnarchiveCampaignPayload",
         "type": "object"
       },
+      "UnstartedCampaign": {
+        "additionalProperties": false,
+        "description": "An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course,\nline or run. Its `address` is the draft id Start mints from and `discard-draft` deletes.",
+        "properties": {
+          "address": {
+            "description": "Server-minted and stable: the key of every row and every open set. A course's is its `CyclePath` on the wire (`encodeCyclePath`).",
+            "title": "Address",
+            "type": "string"
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What could not be read; null where all was.",
+            "title": "Caveat"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/UnstartedFacts"
+          },
+          "label": {
+            "description": "The display name.",
+            "title": "Label",
+            "type": "string"
+          },
+          "lede": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one sentence under the title: the selection line.",
+            "title": "Lede"
+          },
+          "level": {
+            "const": "unstarted",
+            "default": "unstarted",
+            "title": "Level",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hierarchy parent's address; a top-level campaign's is null, an inner one's the outer course it sits under.",
+            "title": "Parent"
+          },
+          "span": {
+            "$ref": "#/components/schemas/HierarchySpan"
+          },
+          "stats": {
+            "description": "Server-ordered; `stats[0]` is the headline.",
+            "items": {
+              "$ref": "#/components/schemas/EntryStat"
+            },
+            "title": "Stats",
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/HierarchyTag"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "address",
+          "parent",
+          "label",
+          "lede",
+          "caveat",
+          "tags",
+          "stats",
+          "span",
+          "facts"
+        ],
+        "title": "UnstartedCampaign",
+        "type": "object"
+      },
+      "UnstartedFacts": {
+        "additionalProperties": false,
+        "description": "An open check-in's typed facts: it has no cycle, so no course, line or run.",
+        "properties": {
+          "spend_lifetime": {
+            "$ref": "#/components/schemas/LifetimeSpend",
+            "description": "What its check-in has cost so far."
+          }
+        },
+        "required": [
+          "spend_lifetime"
+        ],
+        "title": "UnstartedFacts",
+        "type": "object"
+      },
       "UserSettings": {
         "additionalProperties": false,
         "description": "The caller's per-user preferences.",
@@ -20290,38 +20470,6 @@
         ]
       }
     },
-    "/api/v1/drafts": {
-      "get": {
-        "description": "The caller's open check-ins. A draft is no campaign: Start mints one and closes it.",
-        "operationId": "list_drafts_api_v1_drafts_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DraftListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "List Drafts",
-        "tags": [
-          "Campaigns"
-        ]
-      }
-    },
     "/api/v1/drafts/{draft_id}": {
       "get": {
         "description": "Re-open a check-in: its draft and its last resolver turn. 404 once started or discarded.",
@@ -20557,14 +20705,14 @@
             }
           },
           {
-            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'",
+            "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'unstarted' — the open check-ins; or 'all'",
             "in": "query",
             "name": "lifecycle",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/LifecycleFilter",
+              "$ref": "#/components/schemas/ListingLifecycle",
               "default": "active",
-              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; or 'all'"
+              "description": "'active' (default), 'archived' or 'deleted' — the visibility intent; 'unstarted' — the open check-ins; or 'all'"
             }
           },
           {

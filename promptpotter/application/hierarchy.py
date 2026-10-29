@@ -4,6 +4,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_drafts
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import campaign_runs_with, line_config
 from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
@@ -40,7 +42,10 @@ from promptpotter.domain.hierarchy import (
     HierarchyStat,
     HierarchyState,
     HierarchyTag,
+    ListingLifecycle,
     StatKey,
+    UnstartedCampaign,
+    UnstartedFacts,
 )
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
@@ -51,7 +56,7 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.runtime_flags import derive_run_state
-from promptpotter.infrastructure.store.account_spend import campaign_spend
+from promptpotter.infrastructure.store.account_spend import billed_spend, campaign_spend
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
 from promptpotter.infrastructure.store.layout import sibling_kind
@@ -431,6 +436,35 @@ def campaign_entry(
     )
 
 
+def queued_drafts(stores: Stores) -> frozenset[str]:
+    """This account's check-ins a queued Start waits on: the listing and the reopen serve them."""
+    jobs = JobRegistry.attach(stores.jobs_dir)
+    return jobs.queued_drafts(user_id=str(stores.identity.user_id))
+
+
+def unstarted_entry(stores: Stores, draft: DraftCampaign, *, queued: bool) -> UnstartedCampaign:
+    """An open check-in as a campaign: its spend is what the check-in cost, its lifecycle word
+    `queued` while a Start waits on a slot for it."""
+    ledger = stores.drafts.ledger(draft.draft_id)
+    spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []))
+    dataset = draft.dataset_name
+    lifecycle = "queued" if queued else "unstarted"
+    return UnstartedCampaign(
+        address=draft.draft_id,
+        parent=None,
+        label=draft.slug,
+        lede=None,
+        caveat=None,
+        tags=[
+            HierarchyTag(kind="dataset", value=dataset, label=dataset),
+            HierarchyTag(kind="lifecycle", value=lifecycle, label=lifecycle),
+        ],
+        stats=[_lifetime_stat(spend_lifetime)],
+        span=HierarchySpan(opened_at=draft.created_at, last_at=draft.updated_at),
+        facts=UnstartedFacts(spend_lifetime=spend_lifetime),
+    )
+
+
 def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
     """Stats only: every input an entry reads in *held* — run state, the archive rows its bench and
     lens grade, the ruler, each dataset's scorer — so a client holding it is answered unread."""
@@ -448,6 +482,9 @@ def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
     return (
         *{str(s.identity.user_id) for s in stores},
         *(s.campaigns.version() for s in stores),
+        *(s.drafts.version() for s in stores),
+        # A queue entry moves no draft file: its own fact, read only where a draft could wait on it.
+        *(sorted(queued_drafts(s)) for s in stores if s.drafts.draft_ids()),
         *(archive.version() for archive in archives),
         *(file_sig(path) for path in rulers),
         *(definition_version(s, name) for (_, name), s in definitions),
@@ -463,7 +500,7 @@ def list_hierarchy(
     *,
     inside: CyclePath,
     dataset: str | None,
-    lifecycle: LifecycleFilter,
+    lifecycle: ListingLifecycle,
     campaign_id: str | None,
     attached_only: bool,
     depth: int,
@@ -471,6 +508,8 @@ def list_hierarchy(
     if attached_only and depth == 0:
         raise BadRequestError("`attached` keeps the courses a producer holds; depth 0 serves none.")
     leaf = descend_store(stores, inside)
+    # No manifest holds an open check-in, so the store is asked only after a stored lifecycle.
+    stored: LifecycleFilter | None = None if lifecycle == "unstarted" else lifecycle
     built = [
         (
             campaign.root_cycle_id,
@@ -482,8 +521,12 @@ def list_hierarchy(
                 depth=depth,
             ),
         )
-        for campaign in leaf.campaigns.list_campaigns(
-            dataset, lifecycle=lifecycle, owner_user_id=str(leaf.identity.user_id)
+        for campaign in (
+            []
+            if stored is None
+            else leaf.campaigns.list_campaigns(
+                dataset, lifecycle=stored, owner_user_id=str(leaf.identity.user_id)
+            )
         )
         if campaign_id in (None, campaign.campaign_id)
     ]
@@ -495,4 +538,15 @@ def list_hierarchy(
                 continue
             entry = entry.model_copy(update={"children": attached})
         rooted.setdefault(root, []).append(entry)
-    return HierarchyResponse(entries=[entry for group in rooted.values() for entry in group])
+    unstarted: list[UnstartedCampaign] = []
+    if campaign_id is None and not attached_only and lifecycle in ("unstarted", "all"):
+        drafts = sorted(owned_drafts(leaf), key=lambda d: d.updated_at, reverse=True)
+        queued = queued_drafts(leaf) if drafts else frozenset()
+        unstarted = [
+            unstarted_entry(leaf, draft, queued=draft.draft_id in queued)
+            for draft in drafts
+            if dataset in (None, draft.dataset_name)
+        ]
+    return HierarchyResponse(
+        entries=[*unstarted, *(entry for group in rooted.values() for entry in group)]
+    )

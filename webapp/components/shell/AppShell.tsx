@@ -23,14 +23,14 @@ import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { CompareSelectionProvider } from "@/lib/state/compare-selection";
 import { SelectionProvider } from "@/lib/SelectionContext";
 import { LineageProvider } from "@/lib/lineage";
-import { IngestFlowProvider, useIngest } from "@/lib/ingest-flow";
+import { IngestFlowProvider } from "@/lib/ingest-flow";
 import { ThreadProvider } from "@/lib/chat/thread";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteControl } from "@/components/shell/remote/RemoteControl";
 import { RunMasthead } from "@/components/shell/masthead/RunMasthead";
 import { RecordsTabs, ViewTabs } from "@/components/shell/ViewTabs";
 import { WorkspaceHeader } from "@/components/shell/WorkspaceHeader";
-import { ChatPane, FilesPane, IngestPane } from "@/components/shell/lazy-panes";
+import { ChatPane, FilesPane } from "@/components/shell/lazy-panes";
 
 export function AppShell() {
   const { viewedPath } = useWorkspace();
@@ -50,7 +50,6 @@ export function AppShell() {
 
 function AppShellInner() {
   const { viewedPath, campaignId, cycleId, leafCycleId, tab, listScreen } = useWorkspace();
-  const { composerOpen } = useIngest();
   // The chain is the hops ABOVE the leaf, so an L4 inner run resolves its OWN pipeline.
   const leafHop = viewedPath ? pathLeaf(viewedPath) : null;
   const connectorAt = useMemo(
@@ -130,7 +129,6 @@ function AppShellInner() {
         )}
       </main>
       {!isWorkspaceTab(tab) && <RemoteControl />}
-      {composerOpen && <IngestPane />}
       {/* A `.shell` child: the phone hides the sidebar, and `#/account/<pane>` must open anywhere. */}
       <AccountModal />
       <VendorSprite />

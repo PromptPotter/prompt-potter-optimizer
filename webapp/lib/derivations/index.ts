@@ -15,6 +15,7 @@ export * from "./output-contract";
 export * from "./paired-reading";
 export * from "./pipeline-layout";
 export * from "./pipeline-nodes";
+export * from "./prompt-segments";
 export * from "./round-candidates";
 export * from "./round-health";
 export * from "./round-reading";

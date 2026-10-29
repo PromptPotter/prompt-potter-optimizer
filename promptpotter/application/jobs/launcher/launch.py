@@ -102,7 +102,7 @@ def admit(
     job = request_job(
         stores=stores,
         job_registry=job_registry,
-        holder=CampaignLaunch(request.dataset_name),
+        holder=CampaignLaunch(request.dataset_name, draft_id=request.draft_id),
         hop=request.hop,
     )
     if inline is not None and job.queued:

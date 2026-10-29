@@ -53,6 +53,8 @@ class CampaignLaunch:
     __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     dataset_name: str
+    # The check-in a Start mints from; null for every other launch. A queued one serves its draft queued.
+    draft_id: str | None = None
     kind: Literal["campaign_launch"] = "campaign_launch"
 
 
@@ -477,6 +479,14 @@ class JobRegistry:
             for j in self.list_all(user_id=user_id)
             if j.created_at.startswith(today) and isinstance(j.holder, CampaignLaunch)
         ]
+
+    def queued_drafts(self, *, user_id: str) -> frozenset[str]:
+        """The check-ins a queued Start waits on: a reload serves each queued, never Start again."""
+        return frozenset(
+            j.holder.draft_id
+            for j in self.list_queued(user_id=user_id)
+            if isinstance(j.holder, CampaignLaunch) and j.holder.draft_id is not None
+        )
 
     def _persist(self, job: Job) -> None:
         write_json(self._path(job.job_id), _JOB.dump_python(job, mode="json"))

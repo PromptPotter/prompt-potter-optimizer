@@ -479,6 +479,7 @@ describe("parseKnob (an optimizer knob typed in on the check-in)", () => {
   const knob = (over: Partial<KnobRow>): KnobRow => ({
     key: "k",
     description: "",
+    summary: "",
     type: "integer",
     options: null,
     nullable: false,

@@ -107,11 +107,11 @@ export function LineageProvider({
     [lensParam, samples],
   );
 
-  const { entries } = useRegistry();
+  const { started } = useRegistry();
   const resting = useMemo(
     () =>
       new Set(
-        entries
+        started
           .filter(
             (e) =>
               e.children.length > 0 &&
@@ -119,7 +119,7 @@ export function LineageProvider({
           )
           .map((e) => e.address),
       ),
-    [entries],
+    [started],
   );
 
   // The offset is the viewed LEAF's, which the campaign-keyed subtree is not addressed by.

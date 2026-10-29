@@ -33,14 +33,20 @@ acting.
   beside `ui/DataTable` in `components/compare/`, `shell/SpendBuckets`, `ingest/DatasetPreview`; a
   hand-rolled dialog in `shell/sidebar/SidebarFilterPopover`. Action: route each through its owner.
   **Re-test:** `gate.py --only doc-claims`.
-- **The chat thread has no subject.** `webapp/lib/chat/thread.ts::ThreadProvider` is one in-memory list for
-  the whole app and `lib/ingest-flow.tsx::IngestFlowProvider` one check-in beside whatever is viewed;
-  `components/chat/ChatPane.tsx` concatenates both with the viewed cycle's live feed and run card, held
-  apart only by a `composing` flag that the modal door (`ingest/IngestPane.tsx`) never sets. A run ending
-  while a check-in is open files its ending into the check-in (seen 2026-10-29). Action: the viewed
-  address is the conversation — a draft is an address beside a cycle path, `+ New campaign` navigates to
-  one, the pane renders that subject's thread; `composing`, the modal door and the global list go.
-  **Re-test:** open a check-in while another run ends; the check-in shows nothing of that run.
+- **Left by the check-in address (unstarted campaigns)**:
+  - `components/chat/README.md` still describes one global `ThreadProvider` (another session's file).
+  - **A promoted Start is unserved**: `application/hierarchy.py::queued_drafts` serves a draft `queued` only while
+    its job is QUEUED; once promoted to STARTING (probe, `init_services`) and until the mint closes the
+    draft, a reload serves it open and a Start is refused `draft_held`. Action: serve the job's stage
+    (`queued` | `starting`) off the same `CampaignLaunch.draft_id`.
+  - `useIngestFlow::readDraft` is a hand-rolled fetch in an effect (not `useRead`), its failure said
+    into the thread as a string, not a `ReadFailure` on `FailureLine`.
+  - `application/hierarchy.py::entries_version` reads the jobs dir on every listing poll where a draft exists, and
+    `JobRegistry.list_queued` is a reconciling read: a GET can release an orphaned job.
+  - The check-in thread is retold from the draft on a reload (`useIngestFlow::retell`): a warning or
+    failure line said live is not draft state and is not retold.
+  **Re-test:** `git grep -n "ThreadProvider" -- webapp/components/chat/README.md`;
+  `git grep -n "queued_drafts" -- promptpotter` serves a stage.
 
 ## NEXT ARC
 
@@ -216,6 +222,15 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `finish_reason=error` then pass one schema repair; unknown whether the row banks the answer or a
   miss. **Rides with:** the next head-to-head read. **Re-test:** per arm, the hit rate of error rows
   against the arm's other rows.
+- **An arm refused at run init keeps its key, and its config can no longer be changed.**
+  `preflight.py::refuse_arm_below_round` advises "size the round down with the optimizer's own
+  knobs", but a node knob is fixed at mint. `new --arm <h2h>:<key>` on that key is refused ("is
+  campaign … already"), so the operator mints under a second key and the head-to-head keeps a dead
+  arm that never searched. Seen on h2h-7: capo `__bca431` was refused at its $0.03 cap; `capo-b5`
+  `__530ab2` was minted with `max_blocks=5`. Also seen there: `set-limits --max-usd 0.20` on
+  `__bca431` did not arm before init read $0.03. Open: should an arm that never closed a round be
+  re-mintable under its own key, or should the refusal run before the mint so no key is taken?
+  **Re-test:** `promptpotter evidence` on h2h-7 lists `capo` beside `capo-b5`.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 
@@ -284,9 +299,6 @@ word's `git grep -c` for that sense is 0.
     subject.
   - `OptimizerSetupInner` reads the optimizer from the draft and from `useConnector().optimizer`, which
     are one value through two doors.
-  - `NodeDetail` shows an optimizer prompt read-only through `NodeSurface`, whose `PromptFieldsEditor`
-    is labelled `scope="target"` (`NodeSurface.tsx`), while the setup step edits it. Make `NodeDetail`
-    the one editor.
   - An edited optimizer-prompt field cannot be reset: `OptimizerNodePrompt` serves no template text and
     `campaign_config._merge_dicts` keeps a null as a value.
   - `LibrarySnippet` serves no `presumes`, so the library cannot show that a snippet the chain refuses
@@ -294,6 +306,52 @@ word's `git grep -c` for that sense is 0.
   - Smaller: `title=` used as teaching prose in `NodeDetail` and `OptimizerCard`;
     `CheckinLoadingWindow` keeps its own `setInterval` outside `lib/cadence`; `.setup-step` is styled in
     `chat.css`.
+- **Seen in the phone-first setup pass**:
+  - A changed knob value names no source: the resolver keeps none for `optimization.nodes` layers
+    (dataset block, draft override, cycle seed), so the row says only "Changed from default".
+  - `locus_crossover` is listed as a maker with nothing upstream making two-parent children; an
+    arm-editing maker's on/off belongs on `nodes.Proposer` as a member-declared rule.
+  - The "adds no arms ⇒ off" rule sits in `pipeline_resolve.py`, not on `SelectedOptimizer`.
+  - A pool's `active` is served twice (a `KnobRow` and `PoolRow.active`); the client drops the knob by
+    the literal key `"active"`.
+  - `HoverCard` opens on tap only through focus (fragile on iOS); the check-in picklist button's
+    accessible name runs slug and meta together; two open check-ins share one slug.
+  - `packs` is a raw JSON textarea where a picker of installed packs belongs.
+- **Seen building the prompt workspace**:
+  - An override cannot be removed, only overwritten: knob Reset writes the declared value and a cleared
+    prompt field writes `""`, so the draft stays "edited". The overlay merge needs a delete.
+  - `PipelineSetupSection` picks a default node in a `useEffect` with a ref latch: a second door into the
+    shared node selection.
+  - The packs copy each snippet's arXiv id and method into its `tags`, so Tags repeats Source and Method.
+  - `LibrarySource` fakes "authored" as a cited work with no author or year.
+  - `ui/MenuCheck` takes a `title=` prop; filter buttons are ~28px, under the 44px touch target.
+- **A live `set-limits` raise is not served**: `hotpotqa-closedbook__55f765`'s `dashboard.json::run_limits.budget.usd`
+  stayed 0.025 after `set-limits --max-usd 0.20` during the run, while the runner spent past it and kept
+  going — the armed ceiling and the served one are two states. **Re-test:** raise mid-run; the served
+  budget moves with the runner's.
+- **Seen framing snippets in a prompt**:
+  - An edited snippet keeps its frame only for the session: `PromptFieldsEditor`'s `edits` live in
+    component state, since no library write exists. The root is a write that banks the edit as a new
+    `Authored` snippet naming the one it supersedes; it waits on packs becoming per-account
+    (`config/paths.py::block_packs_root` is install-wide, and tier 3 signs anyone up).
+  - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
+  - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module);
+    `examples/optimizer-plugin/README.md` names `nodes.Measured` for `MeasuredRound`.
+  - `vitest.config.ts` loads as CommonJS (Vite warns on every run).
+- **A worktree that ran the offline gate cannot be removed by git**: `.gate_cache/offline-run` nests
+  campaign paths past Windows' 260-char limit (`git worktree remove` fails "Filename too long"), and a
+  worktree's `webapp/node_modules` junction makes any forced recursive delete reach the main tree's.
+  Action: the offline home lives outside the tree (or under a short root). **Re-test:** run the
+  offline gate in a worktree; `git worktree remove` succeeds.
+- **A side worktree cannot pass the full gate**: Turbopack refuses the `node_modules` junction
+  ("points out of the filesystem root"), so `next-build` and `playwright` never run there, and pytest's
+  `compileall` breaks on long Temp paths. A rebuilt commit series is therefore gated without them.
+  **Re-test:** the full gate green in a worktree.
+- **`p_served`'s ceiling is slack** (175 measured under 176 since 3dfce02f0); the gate allows slack, so
+  the ratchet never tightened. **Re-test:** BASELINE equals the measured count.
+- **The installed webapp packages drift from `package.json`**: `npm ls` reports `next@16.3.8` against
+  `16.4.1` and `vitest@4.1.11` against `^4.1.12`, so the gate builds with versions the lock does not
+  name. **Re-test:** `npm ls --depth=0` clean.
 - **The offline legs rest on fake-data draws keyed by the whole node config**
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.

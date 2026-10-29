@@ -102,8 +102,14 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
         changes["pipeline_overlay"] = _narrowing_follows_schema(overlay, before, after)
 
     if patch.optimization_overrides is not None:
+        prior = dict(draft.optimization_overrides)
+        # A node knob is its optimizer's: a switch starts the new one at its own defaults.
+        if patch.optimization_overrides.get("optimizer", prior.get("optimizer")) != prior.get(
+            "optimizer"
+        ):
+            prior.pop("nodes", None)
         merged = merge_config_layers(
-            {"optimization": dict(draft.optimization_overrides)},
+            {"optimization": prior},
             {"optimization": patch.optimization_overrides},
         )
         try:

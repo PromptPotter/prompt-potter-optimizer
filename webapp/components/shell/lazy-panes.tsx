@@ -12,10 +12,6 @@ export const FilesPane = dynamic(
   () => import("@/components/files/FilesPane").then((m) => m.FilesPane),
   { ssr: false, loading: PANE_LOADING },
 );
-export const IngestPane = dynamic(
-  () => import("@/components/ingest/IngestPane").then((m) => m.IngestPane),
-  { ssr: false },
-);
 
 // A miss is swallowed: it resurfaces at the real load, which `ui/ErrorBoundary` owns.
 export function preloadLazyPanes(): void {

@@ -41,7 +41,7 @@ chart theme, vocabulary). A context one surface alone consumes lives in that sur
 
 ## Viewed identity — one address (CyclePath)
 
-**"What am I looking at?" is `viewedPath`, a `CyclePath` (`lib/ids.ts`), and no surface keeps a second.** `lib/workspace.tsx` owns it; `drillInto` / `backToOuter` move it.
+**"What am I looking at?" is `viewedPath`, a `CyclePath` (`lib/ids.ts`), and no surface keeps a second.** `lib/workspace.tsx` owns it; `drillInto` / `backToOuter` move it. **An unstarted campaign is the one address beside it: `checkin` (`#/d/<draft id>`, `#/new` before one is minted), under which `viewedPath` is null** — `openCheckin` moves there, `navigate` back. **The chat is that subject's**: `lib/chat/thread.ts` keys one thread per subject, and the check-in flow (`lib/ingest-flow.tsx`) holds the viewed check-in's draft alone.
 
 **Navigation policy has one entry, `workspace.tsx::navigate(path, opts)`**, and `openView` is the one view switch; a surface reads `useWorkspace()` itself, never a callback handed down.
 

@@ -147,6 +147,12 @@ class CampaignFacts(FrozenModel):
     )
 
 
+class UnstartedFacts(FrozenModel):
+    """An open check-in's typed facts: it has no cycle, so no course, line or run."""
+
+    spend_lifetime: LifetimeSpend = Field(description="What its check-in has cost so far.")
+
+
 class CourseSpawn(FrozenModel):
     """Where a fork was born on its parent's time line: the cut, as an event."""
 
@@ -480,9 +486,26 @@ def entries_under(entry: HierarchyEntry) -> Iterator[HierarchyEntry]:
         yield from entries_under(child)
 
 
-class HierarchyResponse(StrictModel):
-    """Every campaign in one store, root-major and newest first."""
+class UnstartedCampaign(_HierarchyEntry):
+    """An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, course,
+    line or run. Its `address` is the draft id Start mints from and `discard-draft` deletes."""
 
-    entries: list[HierarchyCampaign] = Field(
-        description="Campaigns sharing a root cycle sit together, the group of the newest first."
+    level: Literal["unstarted"] = "unstarted"
+    span: HierarchySpan
+    facts: UnstartedFacts
+
+
+# What a listing filter picks: a stored lifecycle, or the open check-ins no manifest holds.
+type ListingLifecycle = Literal["unstarted", "active", "archived", "deleted", "all"]
+
+ListedCampaign = Annotated[HierarchyCampaign | UnstartedCampaign, Field(discriminator="level")]
+
+
+class HierarchyResponse(StrictModel):
+    """Every campaign in one store: the unstarted first, then root-major and newest first."""
+
+    entries: list[ListedCampaign] = Field(
+        description="Unstarted campaigns lead, most recently edited first; then campaigns sharing "
+        "a root cycle sit together, the group of the newest first. A `campaign` or `attached` "
+        "filter asks after runs, so it serves no unstarted one."
     )

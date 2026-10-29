@@ -11,10 +11,11 @@ import s from "./MobileAppBar.module.css";
 export function MobileAppBar() {
   const { status, openAuthPrompt } = useAuth();
   const { running: live } = useRegistry();
-  const { campaignId, tab, listScreen, showList } = useWorkspace();
-  const { openComposer } = useIngest();
+  const { campaignId, checkin, tab, listScreen, showList } = useWorkspace();
+  const { compose } = useIngest();
   const workspace = isWorkspaceTab(tab);
-  const found = useCampaign(campaignId);
+  // A viewed check-in heads the bar as the unstarted campaign it is: its row's own `⋯`.
+  const found = useCampaign(checkin === null ? campaignId : checkin.draftId);
 
   if (listScreen) return null;
 
@@ -55,7 +56,7 @@ export function MobileAppBar() {
               className={s.icon}
               aria-label="New campaign"
               title="New campaign"
-              onClick={openComposer}
+              onClick={compose}
             >
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h7A1.5 1.5 0 0 1 13 5.5v4A1.5 1.5 0 0 1 11.5 11H6l-3 2.5z" />

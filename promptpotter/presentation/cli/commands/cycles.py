@@ -5,7 +5,7 @@ import argparse
 from promptpotter.application.cycle_addressing import active_pointer, resolve_campaign_id_hint
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.domain.cycle_paths import hierarchy_address
-from promptpotter.domain.hierarchy import HierarchyCourse
+from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
@@ -55,6 +55,7 @@ async def cmd_cycles(args: argparse.Namespace) -> CommandResult:
     lines = [
         _line(course, active=course.address == active)
         for campaign in listing.entries
+        if isinstance(campaign, HierarchyCampaign)
         for course in campaign.children
     ]
     # Each arm campaign's `new --arm` address: the head-to-head ids already taken.

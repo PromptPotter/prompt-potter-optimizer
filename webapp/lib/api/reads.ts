@@ -14,7 +14,6 @@ import type {
   DatasetPipelineResponse,
   OptimizerPipelineResponse,
   DatasetIndexResponse,
-  DraftListResponse,
   Cell,
   CellsResponse,
   DatasetStorageResponse,
@@ -97,10 +96,6 @@ export function datasetIndexRead(): ReadDescriptor<DatasetIndexResponse> {
 
 export function originsRead(): ReadDescriptor<OriginListResponse> {
   return once("origins", `${API}/origins`);
-}
-
-export function draftsRead(): ReadDescriptor<DraftListResponse> {
-  return once("drafts", `${API}/drafts`);
 }
 
 export function optimizerPipelineRead(optimizer: string): ReadDescriptor<OptimizerPipelineResponse> {

@@ -265,6 +265,8 @@ def worked_seconds(launches: Sequence[LaunchClockRecord]) -> float | None:
     return sum(worked) if worked else None
 
 
+# What a minted campaign's manifest stores: a manifest is written at Start, so an open check-in
+# has none (the listing serves it as `domain/hierarchy.py::UnstartedCampaign`).
 type LifecycleStatus = Literal["active", "archived", "deleted"]
 LIFECYCLE_STATUS_LABELS: dict[LifecycleStatus, str] = {
     "active": "Active",

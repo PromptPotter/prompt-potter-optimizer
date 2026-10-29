@@ -98,6 +98,10 @@ class FreshMint:
     def dataset_name(self) -> str:
         return self.dataset.name
 
+    @property
+    def draft_id(self) -> None:
+        return None
+
     def backend_type(self, _stores: Stores) -> str:
         return declared_backend_type(self.dataset.directory)
 
@@ -118,6 +122,10 @@ class ExistingCycle:
     @property
     def dataset_name(self) -> str:
         return self.campaign.dataset_name
+
+    @property
+    def draft_id(self) -> None:
+        return None
 
     def backend_type(self, stores: Stores) -> str:
         return declared_backend_type(resolve_dataset(stores, self.dataset_name).directory)

@@ -10,10 +10,10 @@ One chat-shaped flow, one origin, no hand-written loader — locally (TermNorm `
 
 **Web flow:**
 
-1. Sidebar → "Start a new campaign" opens the IngestPane.
+1. Sidebar → "+ New campaign" opens a fresh check-in in the chat (`#/new`).
 2. Upload CSV / TSV / JSON / JSONL / XLSX, ≤ `MAX_UPLOAD_BYTES`, ≤ `MAX_SAMPLES` rows → a DURABLE
-   check-in draft (on disk, in the open check-ins, survives a restart). Nothing RUNS until Start
-   mints; Discard closes it.
+   check-in draft (on disk, survives a restart), listed in the sidebar as an unstarted campaign at
+   `#/d/<draft id>`. Nothing RUNS until Start mints; Delete (or Discard) closes it.
 3. The user types what the prompt should do → CONFIRMED.
 4. One `checkin` turn proposes the column map (`query` + `ground_truth`), the six Layer-1 prompt fields
    and the 7-field `task_context`; code fills the closed-label answer space. A checklist gate (no LLM)

@@ -114,7 +114,7 @@ test.describe("the check-in's pools and recombination host", () => {
     const before = (await served(request)).optimizer_setup.pools.find((p) => p.pool === "block_pool")!;
     const offer = before.offered.find((o) => o.kind === "entry" && o.path.startsWith("instruction."))!;
     const entry = offer.path;
-    const chip = { name: new RegExp(`^${offer.label.replace(".", "\\.")} `) };
+    const chip = { name: new RegExp(`^${offer.label.replace(".", "\\.")}$`) };
     const all = { name: /^All entries / };
 
     await optimizerStep(page);

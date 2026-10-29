@@ -12,7 +12,6 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_version,
 )
 from promptpotter.application.mask.record import parse_lens, parse_sample_ids
-from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.cycle_paths import decode_cycle_path
 from promptpotter.domain.hierarchy import (
     DEFAULT_STEP_LIMIT,
@@ -20,6 +19,7 @@ from promptpotter.domain.hierarchy import (
     HierarchyEntry,
     HierarchyResponse,
     HierarchySteps,
+    ListingLifecycle,
 )
 from promptpotter.presentation.api.deps import StoresDep
 from promptpotter.presentation.api.routers.campaigns._conditional import conditional_json
@@ -34,10 +34,10 @@ def get_hierarchy(
     descend: str | None = Query(None),
     dataset: str | None = Query(default=None, description="Filter to one dataset"),
     lifecycle: Annotated[
-        LifecycleFilter,
+        ListingLifecycle,
         Query(
             description="'active' (default), 'archived' or 'deleted' — the visibility intent; "
-            "or 'all'",
+            "'unstarted' — the open check-ins; or 'all'",
         ),
     ] = "active",
     campaign: str | None = Query(default=None, description="Filter to one campaign id"),

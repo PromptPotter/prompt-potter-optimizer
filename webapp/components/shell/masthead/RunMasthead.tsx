@@ -14,6 +14,7 @@ import {
   readSpend,
   spendHeadline,
   statusTone,
+  tagLabel,
   tagValue,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
@@ -22,11 +23,46 @@ import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf } from "@/lib/ids";
 import { useViewedCourse } from "@/lib/lineage";
 import { measuringArm, useCycleStream } from "@/lib/poll";
-import { useCampaign } from "@/lib/state/registry";
+import { useCampaign, useRegistry } from "@/lib/state/registry";
 import { TERMS } from "@/lib/terms";
 import { useWorkspace } from "@/lib/workspace";
 
 export function RunMasthead() {
+  const { viewedPath, checkin } = useWorkspace();
+  // No run viewed is a check-in (`lib/ingest-flow.tsx`): it has no run, so no run chip stands over it.
+  return viewedPath === null ? <CheckinMasthead draftId={checkin?.draftId ?? null} /> : <RunHeader />;
+}
+
+// An unstarted campaign: what its listing serves — dataset, name, lifecycle word, check-in spend.
+function CheckinMasthead({ draftId }: { draftId: string | null }) {
+  const campaign = useRegistry().unstarted.find((c) => c.address === draftId);
+  if (!campaign) return null;
+  const spend = campaign.stats[0];
+  return (
+    <header className="run-header">
+      <div className="run-header-inner">
+        <div className="run-title">
+          <Badge>{tagValue(campaign, "dataset")}</Badge>
+          <span className="run-name">{campaign.label}</span>
+        </div>
+        <div className="run-chips">
+          <span className="chip">
+            <span className="chip-lbl">State</span>
+            {tagLabel(campaign, "lifecycle")}
+          </span>
+          {spend && (
+            <span className="chip">
+              <span className="chip-lbl">{spend.label}</span>
+              {spend.value}
+            </span>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function RunHeader() {
   const { campaignId, leafCycleId, viewedPath, following, followActive } = useWorkspace();
 
   const { dash } = useCycleStream();

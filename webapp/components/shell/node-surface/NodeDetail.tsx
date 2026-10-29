@@ -20,6 +20,7 @@ import {
 import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
 import { nodeKind } from "@/lib/types";
 import { CopyButton, Empty, Loading, SegmentedControl } from "@/components/ui";
+import { MemberKnobList } from "@/components/dashboard/pipeline/NodeKnobsPanel";
 import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
@@ -160,6 +161,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
             origin={origin}
             schema={schema}
             modelCapabilities={modelCapabilities}
+            onPromptApply={onPromptApply}
           />
         ) : (
           <TargetProgram
@@ -200,12 +202,15 @@ function OptimizerProgram({
   origin,
   schema,
   modelCapabilities,
+  onPromptApply,
 }: {
   id: string;
   node: Parameters<typeof NodeSurface>[0]["node"];
   origin: OptimizerNodePrompt | null;
   schema: NodeSchemaReading;
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
+  // A check-in's: its optimizer prompt is edited here, as `nodes.<node>.config.<field>`.
+  onPromptApply: ((patch: DraftPatch) => void) | undefined;
 }) {
   return (
     <>
@@ -216,7 +221,12 @@ function OptimizerProgram({
         schema={schema}
         modelCapabilities={modelCapabilities}
         mode="values"
+        promptScope="optimizer"
+        edited={origin?.edited}
+        onApply={onPromptApply}
       />
+      {/* `node_config_schema` holds the call config and prompt rows; a member's knobs are served once, in `optimizer_setup`. */}
+      <MemberKnobList node={id} />
       {origin && origin.versions_declared > 1 && (
         <p className="inspector-note">
           Showing prompt {origin.version} of {origin.versions_declared} this node declares.

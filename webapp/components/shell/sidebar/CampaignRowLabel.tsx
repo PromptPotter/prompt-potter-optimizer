@@ -1,10 +1,10 @@
 "use client";
 import { VendorLogo } from "@/components/ui";
-import type { HierarchyCampaign } from "@/lib/api";
+import type { ListedCampaign } from "@/lib/api";
 import type { RunStatus } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
 import { fmtAgo } from "@/lib/format";
-import { STATUS_MARK } from "@/lib/derivations";
+import { STATUS_MARK, tagLabel } from "@/lib/derivations";
 
 export function PhaseMark({ status }: { status: RunStatus }) {
   const mark = STATUS_MARK[status.mark];
@@ -15,9 +15,14 @@ export function PhaseMark({ status }: { status: RunStatus }) {
   );
 }
 
-export function CampaignRowLabel({ campaign }: { campaign: HierarchyCampaign }) {
+export function CampaignRowLabel({ campaign }: { campaign: ListedCampaign }) {
   const vendors = campaign.tags.filter((t) => t.kind === "vendor");
-  const rounds = campaign.stats.find((s) => s.key === "rounds")?.value;
+  const started = campaign.level === "campaign" ? campaign : null;
+  // An unstarted campaign has no run: its lifecycle word stands where the rounds would.
+  const rounds =
+    started === null
+      ? tagLabel(campaign, "lifecycle")
+      : started.stats.find((s) => s.key === "rounds")?.value;
   const line = [rounds, fmtAgo(campaign.span.last_at)].filter(Boolean).join(" · ");
   return (
     <span className="unit-library-row">
@@ -32,7 +37,7 @@ export function CampaignRowLabel({ campaign }: { campaign: HierarchyCampaign }) 
         <span className="unit-library-name-head">{campaign.label}</span>
       </span>
       <span className="unit-library-meta unit-library-meta-marked">
-        <PhaseMark status={campaign.state.status} />
+        {started && <PhaseMark status={started.state.status} />}
         <span className="unit-library-spend">{campaign.stats[0]?.value}</span>
       </span>
       {line && (

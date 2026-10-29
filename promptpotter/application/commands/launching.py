@@ -255,7 +255,7 @@ def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> Applier
         try:
             draft = start_ready_draft(stores, claim.draft_id)
             return admit(
-                CheckinStart(claim=claim, slug=draft.slug, budget=start.budget),
+                CheckinStart(claim=claim, dataset_name=draft.dataset_name, budget=start.budget),
                 RunMode(diag=start.diag),
                 stores=stores,
                 job_registry=dispatcher.job_registry,

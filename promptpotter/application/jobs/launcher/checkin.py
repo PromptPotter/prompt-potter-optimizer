@@ -73,8 +73,8 @@ class CheckinStart:
     verb: ClassVar[str] = "start-checkin"
 
     claim: DraftClaim
-    # The queue's label alone; every decision reads the draft.
-    slug: str
+    # The queue's label alone (`DraftCampaign.dataset_name`); every decision reads the draft.
+    dataset_name: str
     budget: Budget
 
     @property
@@ -86,8 +86,8 @@ class CheckinStart:
         return None
 
     @property
-    def dataset_name(self) -> str:
-        return self.slug
+    def draft_id(self) -> str:
+        return self.claim.draft_id
 
     def backend_type(self, stores: Stores) -> str:
         return owned_draft(stores, self.claim.draft_id).connector
@@ -110,6 +110,7 @@ def _refuse_unrunnable_upload(stores: Stores, draft: DraftCampaign, source: dict
 
 async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
     draft = start_ready_draft(stores, draft_id)
+    dataset_name = draft.dataset_name
     canonical = draft.source_dataset
     if canonical is None:
         if stores.tenant_datasets.slug_exists(draft.slug):
@@ -122,11 +123,9 @@ async def _commit_checkin(stores: Stores, draft_id: str) -> MintedCycle:
         source = upload_source(draft, upload)
         _refuse_unrunnable_upload(stores, draft, source)
         commit_upload_definition(stores, draft, source=source)
-        dataset_name = draft.slug
         origin_override = None
     else:
         persist_origin_candidate_library(stores, canonical, draft)
-        dataset_name = canonical
         # An origin authored over an existing slug writes no dataset: only the override carries it.
         # `committed_prompts` rather than the raw map, or the label enumeration is lost.
         origin_override = (

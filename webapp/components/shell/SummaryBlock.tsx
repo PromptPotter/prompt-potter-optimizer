@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { cx } from "@/lib/cx";
-import type { HierarchyEntry } from "@/lib/api";
+import type { HierarchyEntry, UnstartedCampaign } from "@/lib/api";
 
 export function SummaryBlock({
   facts,
@@ -10,7 +10,7 @@ export function SummaryBlock({
   lede,
   actions,
 }: {
-  facts: HierarchyEntry;
+  facts: HierarchyEntry | UnstartedCampaign;
   dense?: boolean;
   lede?: ReactNode;
   actions?: ReactNode;

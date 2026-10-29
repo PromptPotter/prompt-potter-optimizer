@@ -31,12 +31,17 @@ interface CycleAddress {
   at: number | null;
   cell: CellAddress | null;
 }
+// An unstarted campaign: its check-in, by draft id; null is a fresh one no file or pick has minted.
+interface CheckinAddress {
+  kind: "checkin";
+  draftId: string | null;
+}
 // Carries no cycle: the pin stays in workspace state while the modal is up.
 interface AccountAddress {
   kind: "account";
   pane: AccountPane;
 }
-export type Address = FollowAddress | CycleAddress | AccountAddress;
+export type Address = FollowAddress | CycleAddress | CheckinAddress | AccountAddress;
 
 const CYCLE_PREFIX = "cycle_";
 const CAND_SEG = "k";
@@ -44,6 +49,8 @@ const AT_SEG = "t";
 const CELL_SEG = "x";
 const CYCLE_SEG = "c";
 const ACCOUNT_SEG = "account";
+const DRAFT_SEG = "d";
+const NEW_SEG = "new";
 
 function shortCycle(cycleId: string): string {
   return cycleId.startsWith(CYCLE_PREFIX) ? cycleId.slice(CYCLE_PREFIX.length) : cycleId;
@@ -58,6 +65,8 @@ export const EMPTY_ADDRESS = "#/";
 
 export function formatAddress(a: Address): string {
   if (a.kind === "account") return `#/${ACCOUNT_SEG}/${a.pane}`;
+  // A check-in is the chat alone: it carries no view, candidate, moment or cell.
+  if (a.kind === "checkin") return a.draftId === null ? `#/${NEW_SEG}` : `#/${DRAFT_SEG}/${a.draftId}`;
   const segs: string[] = [];
   if (a.kind === "cycle") {
     segs.push(CYCLE_SEG);
@@ -81,6 +90,13 @@ export function parseAddress(hash: string): Address | null {
     const pane = segs[1];
     if (pane === undefined) return { kind: "account", pane: DEFAULT_ACCOUNT_PANE };
     return isAccountPane(pane) ? { kind: "account", pane } : null;
+  }
+
+  if (segs[0] === NEW_SEG) return segs.length === 1 ? { kind: "checkin", draftId: null } : null;
+  if (segs[0] === DRAFT_SEG) {
+    const draftId = segs[1];
+    if (segs.length !== 2 || draftId === undefined || !validIdComponent(draftId)) return null;
+    return { kind: "checkin", draftId };
   }
 
   if (segs[0] !== CYCLE_SEG) {

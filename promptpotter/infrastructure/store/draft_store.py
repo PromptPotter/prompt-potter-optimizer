@@ -19,7 +19,9 @@ from promptpotter.infrastructure.store.layout import (
     draft_claim_path,
     draft_dir_for,
     draft_dirs,
+    drafts_root_dir_for,
 )
+from promptpotter.infrastructure.store.read_model import file_sig
 from promptpotter.shared.errors import ConflictError, NotFoundError
 
 
@@ -48,6 +50,16 @@ class DraftStore:
 
     def draft_ids(self) -> list[str]:
         return [p.name for p in draft_dirs(self._base_dir) if (p / "draft.json").is_file()]
+
+    def version(self) -> tuple[object, ...]:
+        """Stats only: moves on an open, an edit, a check-in's spend, a Start and a discard."""
+        return (
+            file_sig(drafts_root_dir_for(self._base_dir)),
+            *(
+                (p.name, file_sig(p / "draft.json"), file_sig(CycleLayout(p).ledger))
+                for p in draft_dirs(self._base_dir)
+            ),
+        )
 
     def _take(self, draft_id: str) -> DraftClaim:
         lock = take_lock(draft_claim_path(self._base_dir, draft_id), wait_s=0)
