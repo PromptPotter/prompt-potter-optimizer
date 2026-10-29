@@ -2243,6 +2243,7 @@ export interface ModelCapability {
   reasoning_note: string;
   unsupported_params: string[] | null;
   indistinct_efforts: string[] | null;
+  refused_efforts: string[];
   source: string;
   display_name: string;
   context_length: number | null;

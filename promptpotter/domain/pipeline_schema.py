@@ -486,6 +486,8 @@ class ModelCapability(FrozenModel):
     unsupported_params: list[str] | None = None
     # `None` UNMEASURED, `[]` all distinct. Never subtracted from `reasoning_efforts`.
     indistinct_efforts: list[str] | None = None
+    # Measured to fail on the wire: struck from whichever ladder answers, the declared one included.
+    refused_efforts: list[str] = Field(default_factory=list)
     source: str
     display_name: str = ""
     context_length: int | None = None
@@ -649,7 +651,8 @@ class PipelineSchema(FrozenModel):
         answered = self._answering(node, param, model)
         offered = answered.reasoning_efforts if answered else None
         if offered is None:
-            return declared
+            struck = set(answered.refused_efforts) if answered else set()
+            return declared if declared is None else [r for r in declared if r not in struck]
         # The model may strike a rung a campaign kept, never hand back one the operator took away.
         if param in node.param_values_narrowed and declared is not None:
             return [rung for rung in offered if rung in set(declared)]

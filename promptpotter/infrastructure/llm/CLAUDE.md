@@ -24,7 +24,8 @@ no layer of it (`llm/pricing.py::lookup_rate`).
 
 **An absent answer is `None` and renders UNKNOWN, never unsupported** (absent is not zero — owned by
 [`docs/developer/conventions.md`](../../../docs/developer/conventions.md) § Code shape); an axis with no legal
-value is `[]`. Where the model answers, its ladder replaces the node's; **a CAMPAIGN narrowing intersects**
+value is `[]`. Where the model answers, its ladder replaces the node's; where it does not, its measured
+refusals (`ModelCapability.refused_efforts`) still strike the node's; **a CAMPAIGN narrowing intersects**
 (`PipelineNode.param_values_narrowed`).
 
 **`PipelineSchema.param_options` applies the model's answer for the ENGINE; the SCREEN must not apply it** <!-- probe: git grep -cE "param_options\(" -- promptpotter/presentation/*.py == 0 --> —

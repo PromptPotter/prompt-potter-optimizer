@@ -275,26 +275,39 @@ def refuse_below_reasoning_floor(
         *((n, selected.node_config(n)) for n in selected.llm_nodes),
         *((n.name, n.current_config) for n in checkin_manifest().schema.declared_nodes),
     ]
-    violations: list[str] = []
+    refused: list[str] = []
+    below_floor: list[str] = []
     for node, cfg in node_configs:
         model = cfg.get("model")
-        max_tokens = cfg.get("max_tokens")
-        if not model or max_tokens is None:
+        if not model:
             continue
         profile = model_profile(str(model))
         if profile is None:
             continue
-        if int(max_tokens) < profile.min_max_tokens:
-            violations.append(
+        if (effort := cfg.get("reasoning_effort")) in profile.refuses_efforts:
+            refused.append(
+                f"node '{node}': model '{model}' is measured to refuse reasoning_effort="
+                f"{effort}, so every call to it fails. Set reasoning_effort to a rung it "
+                f"answers, or another model."
+            )
+        max_tokens = cfg.get("max_tokens")
+        if max_tokens is not None and int(max_tokens) < profile.min_max_tokens:
+            below_floor.append(
                 f"node '{node}': reasoning model '{model}' is pinned to max_tokens="
                 f"{max_tokens}, below its floor {profile.min_max_tokens}. It will spend the "
                 f"budget reasoning and emit zero content (reasoning_budget_exhausted). Raise "
                 f"max_tokens to >= {profile.min_max_tokens} and keep reasoning_effort low."
             )
-    if violations:
+    if refused:
         raise PayloadInvalidError(
-            "a reasoning model is configured below its token floor and would emit zero content:"
-            "\n  - " + "\n  - ".join(violations),
+            "a model is configured with a reasoning_effort it refuses:"
+            "\n  - " + "\n  - ".join(refused),
+            code="reasoning_effort_refused",
+        )
+    if below_floor:
+        raise PayloadInvalidError(
+            "a reasoning model is configured below its floor and would answer nothing:"
+            "\n  - " + "\n  - ".join(below_floor),
             code="model_below_reasoning_floor",
         )
 

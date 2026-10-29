@@ -110,7 +110,11 @@ REBASED = "rebased"
 CROSSED = "crossed"
 CROSSED_HOSTS = ("l1_generate", "l2_context")
 CROSSED_OFFSPRING = 2
-REBASE_HARDNESS = 6
+# L2 fires every round, a leg's premise pinned rather than left to the fake replies.
+EVERY_L2 = {"l1_patience": 0}
+# Spreads δ without saturating k: at 6 most rows clamp to always/never, every arm answers them
+# alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
+REBASE_HARDNESS = 3
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
 TERMINAL_ROUNDS = 1
@@ -424,7 +428,12 @@ def synthetic_rows(n: int) -> list[Sample]:
 
 
 def campaign_config(
-    optimizer: str, rounds: int, *, bench_trigger: BenchTrigger, crossover: str | None = None
+    optimizer: str,
+    rounds: int,
+    *,
+    bench_trigger: BenchTrigger,
+    crossover: str | None = None,
+    knobs: dict[str, dict[str, Any]] | None = None,
 ) -> CampaignConfig:
     raw = dict(dataset_campaign_block(install_datasets_root() / DATASET))
     # The narrowing a check-in of the shipped definition declares, its `optimizer` blocks included.
@@ -445,18 +454,20 @@ def campaign_config(
     if optimizer != templated:
         roster = resolve_optimizer(optimizer, {}, gate="off").manifest.nodes
         opt["nodes"] = {node: block for node, block in SCALED.items() if node in roster}
+    knobs = dict(knobs or {})
     # The draw's host and the LLM host *crossover* names at once, drawing on one measured pool; an
     # L2 host fires every round, so each round past the first can add its children.
     if crossover:
-        nodes = opt.setdefault("nodes", {})
-        for node, knobs in (
-            ("mating", {"offspring": CROSSED_OFFSPRING}),
-            ("l1_generate", {"recombine": CROSSED_OFFSPRING, "recombination_host": crossover}),
-            *((("escalation", {"l1_patience": 0}),) if crossover == "l2_context" else ()),
-        ):
-            held = dict(nodes.get(node) or {})
-            held["config"] = {**(held.get("config") or {}), **knobs}
-            nodes[node] = held
+        knobs |= {
+            "mating": {"offspring": CROSSED_OFFSPRING},
+            "l1_generate": {"recombine": CROSSED_OFFSPRING, "recombination_host": crossover},
+            **({"escalation": EVERY_L2} if crossover == "l2_context" else {}),
+        }
+    nodes = opt.setdefault("nodes", {})
+    for node, config in knobs.items():
+        held = dict(nodes.get(node) or {})
+        held["config"] = {**(held.get("config") or {}), **config}
+        nodes[node] = held
     sampler = select_optimizer(CampaignConfig.model_validate(raw).optimization).sampler
     if sampler.size_knob is not None:
         nodes = opt.setdefault("nodes", {})
@@ -636,7 +647,10 @@ async def run_one(
 
 async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     """Potter resumed with `--from` under an L2 proposing a fork at every fire, until the clock stops it."""
-    config = campaign_config("potter", rounds, bench_trigger="manual")
+    # L2 fires every round, so the fork owes nothing to whether the fake replies happen to stall.
+    config = campaign_config(
+        "potter", rounds, bench_trigger="manual", knobs={"escalation": EVERY_L2}
+    )
     samples = synthetic_rows(rows)
     (workspace / "requests").mkdir()
     llm = ByCallIdentity(workspace / "requests", text_templates(config))

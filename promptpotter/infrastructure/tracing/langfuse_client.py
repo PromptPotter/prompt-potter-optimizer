@@ -77,22 +77,21 @@ class LangfuseLogger:
         if not self.enabled or not self.client:
             return None
 
+        from langfuse import propagate_attributes
+
         trace_id: str = self.client.create_trace_id()
-        root = self.client.start_observation(
-            trace_context={"trace_id": trace_id},
-            as_type="chain",
-            name=name,
-            input=input,
-            metadata=metadata or {},
-        )
-        root.update_trace(
-            name=name,
-            user_id=user_id,
-            session_id=session_id,
-            input=input,
-            metadata=metadata,
-            tags=tags or [],
-        )
+        # A trace's attributes are its spans' since Langfuse 4: the root takes them as it starts.
+        with propagate_attributes(
+            user_id=user_id, session_id=session_id, tags=tags or [], trace_name=name
+        ):
+            root = self.client.start_observation(
+                trace_context={"trace_id": trace_id},
+                as_type="chain",
+                name=name,
+                input=input,
+                metadata=metadata or {},
+            )
+        root.set_trace_io(input=input)
         self._trace_metadata[trace_id] = root
         return trace_id
 
@@ -224,13 +223,10 @@ class LangfuseLogger:
             return
         root = self._trace_metadata.get(trace_id)
         if root:
-            kwargs: dict[str, Any] = {}
             if output is not None:
-                kwargs["output"] = output
+                root.set_trace_io(output=output)
             if metadata is not None:
-                kwargs["metadata"] = metadata
-            if kwargs:
-                root.update_trace(**kwargs)
+                root.update(metadata=metadata)
 
     def end_trace(self, trace_id: str) -> None:
         if not self.enabled or not self.client or not trace_id:

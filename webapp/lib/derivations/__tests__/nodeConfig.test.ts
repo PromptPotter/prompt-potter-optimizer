@@ -429,6 +429,7 @@ describe("effortLadder", () => {
     reasoning_note: "",
     unsupported_params: null,
     indistinct_efforts: null,
+    refused_efforts: [],
     source: "unknown",
     display_name: "",
     context_length: null,

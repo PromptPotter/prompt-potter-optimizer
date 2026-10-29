@@ -241,6 +241,11 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   scope nor estimand.
 - **The check-in lists a demo pool as raw sample-key hashes** (50 chips of `a9123c5c…· 1`): an id with no
   content preview gives the operator nothing to pick by.
+- **No gate check runs `scripts/offline_run.py`**, so a commit that breaks every offline leg passes
+  the gate (3e3b1bb62 did). Its legs also rest on fake-data draws keyed by the whole node config
+  (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
+  leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited. **Re-test:** a gate
+  check that names `offline_run`.
 
 ## Bypasses — held for one holistic pass
 

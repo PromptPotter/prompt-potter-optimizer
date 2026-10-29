@@ -9791,6 +9791,13 @@
             "title": "Reasoning Note",
             "type": "string"
           },
+          "refused_efforts": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Refused Efforts",
+            "type": "array"
+          },
           "source": {
             "title": "Source",
             "type": "string"
