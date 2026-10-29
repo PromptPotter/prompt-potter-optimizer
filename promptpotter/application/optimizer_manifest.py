@@ -62,6 +62,7 @@ if TYPE_CHECKING:
         ReviewReading,
         Sampler,
         Selector,
+        Survivor,
     )
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.campaign_config import ArmGateMode
@@ -178,6 +179,8 @@ class RoundPlan:
     proposers: tuple[Proposer, ...]
     eliminator: Eliminator | None
     selector: Selector
+    # Absent, the selector's `ranked` is the next population whole.
+    survivor: Survivor | None
     adapters: tuple[Adapter, ...]
     controller: Controller | None
 
@@ -215,6 +218,7 @@ def _round_plan(
     proposers: list[Proposer] = []
     eliminators: list[Eliminator] = []
     selectors: list[Selector] = []
+    survivors: list[Survivor] = []
     adapters: list[Adapter] = []
     controllers: list[Controller] = []
     for at, (node, kind) in enumerate(zip(walk, kinds, strict=True)):
@@ -229,6 +233,8 @@ def _round_plan(
             eliminators.append(cast("Eliminator", member))
         elif kind is NodeKind.SELECTOR and at > measured_at:
             selectors.append(cast("Selector", member))
+        elif kind is NodeKind.ALGORITHM and at > selected_at:
+            survivors.append(cast("Survivor", member))
         elif kind is NodeKind.LLM and at > selected_at:
             adapters.append(cast("Adapter", member))
         elif kind is NodeKind.CONTROLLER and at > measured_at:
@@ -239,23 +245,32 @@ def _round_plan(
                 f"`default` walks {kind} node {node!r} where the bench has no role for it "
                 f"(the {NodeKind.GATEWAY} node is at {measured_at}).",
             )
-    if len(samplers) != 1 or len(selectors) != 1 or not proposers or len(eliminators) > 1:
+    if (
+        len(samplers) != 1
+        or len(selectors) != 1
+        or not proposers
+        or len(eliminators) > 1
+        or len(survivors) > 1
+    ):
         raise _walk_refused(
             name,
             "`default` must walk one sampler, at least one proposer and at most one eliminator "
-            f"before its measurement, and one selector after it — it walks {walk}.",
+            "before its measurement, and one selector after it, then at most one survival "
+            f"node — it walks {walk}.",
         )
     initial = [
         cast("Proposer", optimizers.NODE_MEMBERS.get(n))
         for n in schema.pipelines.get(INITIAL_POPULATION, ())
     ]
     for pipeline, walked in (("default", proposers), (INITIAL_POPULATION, initial)):
-        if misplaced := [p.name for at, p in enumerate(walked) if p.opens is not (at == 0)]:
+        if misplaced := [
+            p.name for at, p in enumerate(walked) if p.proposes == ("edits" if at == 0 else "opens")
+        ]:
             raise _walk_refused(
                 name,
-                f"`{pipeline}` must walk a proposer that makes the round's arms first and only "
-                f"ones editing them after — {misplaced} of {[p.name for p in walked]} are out of "
-                "place.",
+                f"`{pipeline}` must walk a proposer that makes or adds arms first, and only ones "
+                f"adding or editing arms after — {misplaced} of {[p.name for p in walked]} are "
+                "out of place.",
             )
     if bool(initial) != (seeds_walk is not None):
         raise _walk_refused(
@@ -279,6 +294,7 @@ def _round_plan(
         proposers=tuple(proposers),
         eliminator=eliminators[0] if eliminators else None,
         selector=selectors[0],
+        survivor=survivors[0] if survivors else None,
         adapters=tuple(adapters),
         controller=controllers[0] if controllers else None,
     )
@@ -855,6 +871,8 @@ def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
     for walk in selected.plan.round_walks:
         if not selected.walk_arms(walk):
             open_.append(f"{[p.name for p in walk]} add no arm: no member answers a round's arms")
+        if editors := [p.name for p in walk if p.proposes == "edits" and p.arms(selected)]:
+            open_.append(f"{editors} edit the arms they are handed and count arms of their own")
     if len(reviewers := sorted(n for n, m in members.items() if isinstance(m, Reviewer))) > 1:
         open_.append(f"{reviewers} each answer review.md's reading, which one member answers")
     return open_

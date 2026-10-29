@@ -460,7 +460,7 @@ class Panel:
 
 @dataclass(frozen=True)
 class Proposals:
-    """The round's ARMS; the population carried between rounds is ``Selection.population``."""
+    """The round's ARMS; the population carried between rounds is ``Selection.ranked``, a ``Survivor`` cutting it."""
 
     proposals: list[Proposal]
 
@@ -554,8 +554,9 @@ class Selection:
     selected: ArmKey | None
     leading: ArmKey | None
     verdict_reason: str
-    # What the next round's walk reads as the population, which the bench seats.
-    population: Sequence[OptSearchPoint]
+    # What the selector keeps, best first: the next population, cut by a survival node where the
+    # walk names one (`Survivor`), else whole.
+    ranked: Sequence[OptSearchPoint]
 
 
 class Sampler(NodeMember, Protocol):
@@ -575,12 +576,17 @@ class Sampler(NodeMember, Protocol):
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel: ...
 
 
+# What a proposer does with the proposals it is handed: `opens` ignores them and makes the round's
+# arms, so it walks first alone; `adds` appends arms to them; `edits` rewrites them and adds none.
+Proposing = Literal["opens", "adds", "edits"]
+
+
 class Proposer(NodeMember, Protocol):
     """Each takes the proposals the one before it returned; the walk's first is handed none."""
 
     @property
-    def opens(self) -> bool:
-        """True of a walk's first proposer and of no other, which a manifest is refused on at load."""
+    def proposes(self) -> Proposing:
+        """A manifest is refused at load on a walk whose first neither opens nor adds, or that opens later."""
         ...
 
     @property
@@ -696,6 +702,14 @@ class Selector(NodeMember, Protocol):
         ...
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection: ...
+
+
+class Survivor(NodeMember, Protocol):
+    """Survival, walked after the selector: what of its ranking the next round carries."""
+
+    def survive(
+        self, ctx: NodeContext, ranked: Sequence[OptSearchPoint]
+    ) -> Sequence[OptSearchPoint]: ...
 
 
 class MintFacts(NamedTuple):

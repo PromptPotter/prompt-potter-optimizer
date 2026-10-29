@@ -36,7 +36,9 @@ and survival are members registered once and named by any manifest, so "does rec
 ## The variation node contract
 
 **A variation node is a `Proposer`** — owned by [`../developer/node-standard.md`](../developer/node-standard.md)
-§ Optimizer node types; a member declares on top:
+§ Optimizer node types. **What it does with the arms it is handed is `nodes.py::Proposing`**: `opens` makes
+the round's arms and walks first alone, `adds` appends arms, `edits` rewrites them — so a crossover's
+offspring ride beside another node's arms in one walk. A member declares on top:
 
 - **Class**, served: `recombination` only if every value in its child is verbatim from a parent or a pool
   entry — the property per-locus credit rests on. An LLM merge of two texts is `novelty`.
@@ -46,27 +48,47 @@ and survival are members registered once and named by any manifest, so "does rec
 - **Lineage**: every node that shaped a child is on it, in walk order, never overwritten.
 - **Treatment**: every roster member's module, and every module shaping its prompts, is in its optimizer's `Treatment` (`optimizers/nodes.py::source_digest`) — owned by [`../architecture.md`](../architecture.md) § Three identities.
 
-**Parent choice is the opening node's, survival the selector's** — never a variation node's; each takes a
-rule knob (uniform · tournament · softmax · Pareto-lead · complementary; top-μ · one-to-one · archive insert).
-Roulette only where fitness is accuracy on a fixed panel — θ has no ratio scale.
+**Parent choice is `variation/members.py::Mating`'s, survival `variation/members.py::Survival`'s** — never a
+variation node's, and the selector only ranks its `standing`; each
+takes a rule knob (uniform · tournament · softmax · Pareto-lead · complementary; top-μ · one-to-one · archive
+insert). Roulette only where fitness is accuracy on a fixed panel — θ has no ratio scale. **A parent is ranked
+on θ alone, every entry read on the round's one judging fit over all the cells it was measured on**
+(`node_context.py::Lineage.theta`): arms of different rounds walked different cells, so their accuracies
+never rank.
 
 ## Recombination is one mechanism, and its host is a knob
 
-- **The spec**: the parents by id and, per locus set, the entry taken. Every host emits that and nothing else.
-- **The materializer**: one deterministic function turns specs into arms through `OptSearchPoint.derive`,
+- **Recombination is asymmetric: a child has a MAIN and a DONOR.** The main, `parent_ids[0]`, is the line
+  it continues and its major contributor; the donor, `parent_ids[1]`, may be any measured individual of any
+  round and gives a minority of loci — at most `variation/members.py::most_donated`. Symmetric, the
+  lineage could not be read over time. CAPO's LLM merge keeps its paper's symmetric draw, both parents
+  from its population, the main only the first it names.
+- **The spec is a `take`**: the parents in order and, per locus, the donor's position. Every host emits that
+  and nothing else; the loci a donor can give are `variation/members.py::crossable`'s.
+- **The materializer** is `domain/opt_search_point.py::taken`, through `Children.child` / `Children.edit`,
   recording every edge and the variation step. No host builds an individual.
-- **The hosts**: `l1_generate` (in the call that writes its variants), `l2_context` (on a fire; the opening
-  node materializes next round), an `algorithm` node (a seeded draw). Moving the host moves the pool panels and
-  the reply slot; two hosts are two arms of one comparison.
+- **The hosts**: an `algorithm` node (`variation/members.py::LocusCrossover`, `donor_take` over `Mating`'s
+  pairs, the main drawn from the population and the donor from `donor_from`), and an LLM host by
+  `l1_generate`'s `recombine` + `recombination_host` knobs, a main from the population and a donor from
+  every measured individual:
+  `l1_generate` in the call that writes its variants, or `l2_context` on a fire, its specs banked on
+  `L2Memory` for the next round's `l1_generate` to add (`l1/generate.py::_recombined`, the child's variation
+  naming the host). Moving the host moves the pool panel and the reply slot; two hosts are two arms of one
+  comparison. The offline run's crossed legs run each.
 - **Closed access picks by id**: the host's response schema carries entry ids as an enum, so an invented
   value is inexpressible rather than rejected.
 
 ## The pool contract
 
 **A pool's shape, sources, access and banking** — owned by
-[`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Other surfaces; still to build:
+[`../../promptpotter/domain/CLAUDE.md`](../../promptpotter/domain/CLAUDE.md) § Other surfaces.
 
-- **The campaign's own measured individuals are the next pool**, each entry its content id.
+- **The campaign's measured individuals are a pool read, never a banked one** (`node_context.py::Lineage.measured`):
+  every individual a closed round concluded, losers included, so a resume holds the pool its banked rounds
+  name by holding them. A writer adding an individual is the arm gate's seat, whose arm a round measures.
+
+Still to build:
+
 - **Static or growing is a setting**: under `open`, a knob bounds how many arms may carry a new value, each
   recorded with its writer; at zero the pool is static.
 - **Writers are declared and plural** (a variation node, a selector, a run-init miner, a command). The arm
@@ -89,10 +111,18 @@ node and the selector.
 derived in the browser ([`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § A wire shape is GENERATED).
 
 - **Check-in**: the mix (counts and total) and the pools, each with its active subset and its drawing nodes
-  grouped by class with their knobs and access; every control writes
+  grouped by class with their knobs and access. **A pool picks in two columns**, the store and the selected:
+  an entry moved across leaves the store and shows as selected, beside the nodes it feeds. **Selecting never
+  sizes a prompt**: each reader's per-call knob bounds how many selected entries one call shows, drawn afresh
+  each round, so a large selection costs no context. Every control writes
   `optimization_overrides.nodes.{node}.config.{knob}` through `edit-draft-campaign`
   ([`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § No ad-hoc mutating routes).
 - **Live**: each arm shows its variation node, parents and entries; each pool its size, draw and additions.
+  **The lineage is one main descent, a declared donor, then gene links**: an arm hangs from its main as last
+  measured before it (`CandidateFacts.descends_from`); its donor links from wherever in time it was
+  measured, with the loci holding its value verbatim (`donor`, `donated_loci`), a fact, never a guess; each
+  other locus it moved off the main links to the earlier candidates closer to its value than the main's —
+  most similar first, then latest measured (`gene_sources`, `application/hierarchy_subtree.py::_descent`).
 - **Steer**: mix, access and active subset are fork-seed knobs; a pool write is the command above. A
   controlled arm refuses both.
 - **Terminal**: `--set nodes.<node>.<knob>=<yaml>`; REST and the embedded launch carry the same overlay, an
@@ -118,7 +148,7 @@ seed is never a lever.
 - **A controlled arm takes no pool write**; elsewhere a write makes the pair read `differs`, naming the pool.
 - **Structure is a confound to control**: a fielded individual against a one-field preset runs both on one
   origin shape.
-- **The headless control** — a fresh individual as second parent at equal budget — separates recombination
+- **The headless control** — a fresh individual as donor at equal budget — separates recombination
   from macro-mutation.
 - A crossover child positive against its better parent is the promotion clock, never a result
   ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § Reading a round).

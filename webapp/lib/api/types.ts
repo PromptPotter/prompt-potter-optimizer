@@ -30,6 +30,7 @@ export type {
   FilesResponse,
   ServedBackpressure,
   LineageDivergence,
+  GeneSource,
   LensShift,
   ArmReading,
   ArmPanel,

@@ -32,16 +32,20 @@ type Rounds = (number | { n: number; held?: boolean })[];
 const A = encodeCyclePath([{ campaignId: "camp", cycleId: "cycle_a" }]);
 const B = encodeCyclePath([{ campaignId: "camp", cycleId: "cycle_a_fork_b" }]);
 
-// Round `first + i` holds `rounds[i]` candidates; the last of each is crowned unless it held.
+// Round `first + i` holds `rounds[i]` candidates; the last of each is crowned unless it held, and
+// each descends from the newest crown before it, as a mutation of the line serves.
 function cands(course: string, rounds: Rounds, first = 1): HierarchyCandidate[] {
+  let crown: string | null = null;
   return rounds.flatMap((spec, ri) => {
     const r = typeof spec === "number" ? { n: spec } : spec;
     const round = first + ri;
-    return Array.from({ length: r.n }, (_, i) => {
+    const from = crown;
+    const made = Array.from({ length: r.n }, (_, i) => {
       const id = `c${round}_${i}`;
       const label = `C${round}.${i + 1}`;
       return hierarchyCandidate(course, {
         id,
+        descends_from: from,
         reading: armReading({
           arm: { round, label, key: id },
           own: ownLevel(0.5),
@@ -49,6 +53,8 @@ function cands(course: string, rounds: Rounds, first = 1): HierarchyCandidate[] 
         }),
       });
     });
+    if (!r.held) crown = made.at(-1)?.address ?? crown;
+    return made;
   });
 }
 
@@ -273,6 +279,50 @@ describe("placeNodes", () => {
       );
       expect(seg).toBeTruthy();
     }
+  });
+
+  it("expanded: a child hangs from its served main; donor and gene links reach their sources", () => {
+    const base = one([1, 2, 1]);
+    const ran = (round: number) =>
+      candidatesOf(base.children[0]!).filter((c) => c.facts.reading.arm.round === round);
+    const [early] = ran(1);
+    const [loser, winner] = ran(2);
+    const lane = base.children[0]!;
+    const tree = campaign("camp", [
+      {
+        ...lane,
+        children: lane.children.map((rnd) =>
+          rnd.level === "round" && rnd.facts.round === 3
+            ? {
+                ...rnd,
+                children: rnd.children.map((c) => ({
+                  ...c,
+                  facts: {
+                    ...c.facts,
+                    descends_from: loser!.address,
+                    donor: early!.address,
+                    donated_loci: ["n.persona"],
+                    gene_sources: [
+                      { locus: "n.instruction", source: winner!.address, similarity: 0.9 },
+                      { locus: "n.instruction", source: loser!.address, similarity: 0.4 },
+                    ],
+                  },
+                })),
+              }
+            : rnd,
+        ),
+      },
+    ]);
+    const { nodes, segs } = placeNodes(layout(tree, new Set([A])).laneByKey, ROOMY);
+    const at = (address: string) => nodes.find((n) => n.candKey === address)!;
+    const child = nodes.find((n) => n.round === 3)!;
+    const into = segs.filter((s) => s.y2 === child.y && s.x2 === child.x - ROOMY.candStub);
+    const from = (variant: string) =>
+      into.filter((s) => s.variant === variant).map((s) => [s.x1, s.y1]);
+
+    expect(from("chain")).toEqual([[at(loser!.address).x, at(loser!.address).y]]);
+    expect(from("donor")).toEqual([[at(early!.address).x, at(early!.address).y]]);
+    expect(from("gene")).toEqual([[at(winner!.address).x, at(winner!.address).y]]);
   });
 
   it("a fork's stem anchors to the exact candidate it was cut from", () => {

@@ -234,6 +234,10 @@ export function hierarchyCandidate(
       course_latest: false,
       answers_for_id: true,
       main_line: [],
+      descends_from: null,
+      donor: null,
+      donated_loci: [],
+      gene_sources: [],
       lens_value: null,
       lens_rank_move: null,
       sample_set_accuracy: null,
@@ -263,7 +267,7 @@ export function roundsOf(
       parent: course,
       children,
       level: "round",
-      facts: { round, elects_on: "ability", reference: null },
+      facts: { round, elects_on: "ability" },
     }));
 }
 

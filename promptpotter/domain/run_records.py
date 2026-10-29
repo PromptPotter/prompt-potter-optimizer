@@ -698,6 +698,9 @@ RoundWarningKind = Literal[
     "critique_cluster_dropped",
     # Nothing failed: the round promoted an arm the origin panel does not back (`runner/round.py`).
     "round_not_advanced",
+    # A declared child no node could make: `mating`'s pool under two, a `locus_crossover` pair on
+    # under two loci, or an `l1_generate` recombination naming no two pool entries.
+    "offspring_dropped",
 ]
 
 

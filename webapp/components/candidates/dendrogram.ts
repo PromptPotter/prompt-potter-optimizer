@@ -1,4 +1,5 @@
 import type { ArmElection } from "@/lib/api/types";
+import { descentOf } from "@/lib/derivations";
 import type { CandidateBar } from "@/lib/types";
 
 export const NODE_ROW_Y = 7;
@@ -14,23 +15,31 @@ interface DendroNode {
   label: string;
   isWinner: boolean;
   crown: ArmElection["crown"];
+  parent: string | null;
+  donor: string | null;
+  genes: string[];
   i: number;
   xf: number;
   y: number;
 }
 
+// `chain`: a main to what descends from it. `donor`: a declared donor to the child it gave loci.
+// `gene`: a source to the child whose locus, which no declared parent explains, resembles it.
+type DendroVariant = "chain" | "donor" | "gene";
+
 interface DendroStub {
   xf: number;
   y1: number;
   y2: number;
+  variant: DendroVariant;
 }
 
 interface DendroBracket {
-  round: number;
+  key: string;
   x1f: number;
   x2f: number;
   y: number;
-  parentKey: string;
+  variant: DendroVariant;
 }
 
 interface Dendrogram {
@@ -48,6 +57,9 @@ export interface DendroRow {
   address: string;
   is_selected: boolean;
   crown: ArmElection["crown"];
+  parent: string | null;
+  donor: string | null;
+  genes: string[];
 }
 
 export function roundOf(bar: CandidateBar): number {
@@ -55,6 +67,7 @@ export function roundOf(bar: CandidateBar): number {
 }
 
 export function dendroRow(bar: CandidateBar): DendroRow {
+  const { parent, donor, genes } = descentOf(bar.node);
   return {
     key: bar.key,
     round: roundOf(bar),
@@ -62,6 +75,9 @@ export function dendroRow(bar: CandidateBar): DendroRow {
     address: bar.node.address,
     is_selected: bar.reading?.election.selected ?? false,
     crown: bar.reading?.election.crown ?? null,
+    parent,
+    donor,
+    genes: genes.map((g) => g.source),
   };
 }
 
@@ -88,18 +104,18 @@ export function dendrogram(
       label: r.label,
       isWinner: r.is_selected,
       crown: r.crown,
+      parent: r.parent,
+      donor: r.donor,
+      genes: r.genes,
       i,
       xf: centers[i]!,
       y: NODE_ROW_Y,
     });
   });
 
-  const bands = new Map<number, { first: number; last: number }>();
-  rows.forEach((r, i) => {
-    const b = bands.get(r.round);
-    if (b) b.last = i;
-    else bands.set(r.round, { first: i, last: i });
-  });
+  // A repair re-measures without re-minting, so an address may repeat: the first bar draws it.
+  const byAddress = new Map<string, DendroNode>();
+  for (const n of nodes) if (!byAddress.has(n.address)) byAddress.set(n.address, n);
 
   // Strict `<`: a bracket touching the row's right edge would render as one merged beam.
   const rowRight: number[] = [];
@@ -114,24 +130,33 @@ export function dendrogram(
     return rowRight.length - 1;
   };
 
-  let parent: DendroNode | null = null;
-
-  for (const round of [...bands.keys()].sort((a, b) => a - b)) {
-    const band = bands.get(round)!;
-    const kids = nodes.slice(band.first, band.last + 1);
-    const lastKid = kids[kids.length - 1];
-    if (!lastKid) continue;
-
-    if (parent) {
-      const d = place(parent.xf, lastKid.xf);
-      const y = FIRST_ROW_Y + d * ROW_H;
-      brackets.push({ round, x1f: parent.xf, x2f: lastKid.xf, y, parentKey: parent.key });
-      stubs.push({ xf: parent.xf, y1: NODE_ROW_Y, y2: y });
-      for (const k of kids) stubs.push({ xf: k.xf, y1: y, y2: NODE_ROW_Y });
+  // One beam per main and round, over the kids served as descending from it; one per donor or gene link.
+  const families = new Map<string, { from: DendroNode; kids: DendroNode[]; variant: DendroVariant }>();
+  const join = (key: string, from: DendroNode, kid: DendroNode, variant: DendroVariant): void => {
+    const family = families.get(key);
+    if (family) family.kids.push(kid);
+    else families.set(key, { from, kids: [kid], variant });
+  };
+  for (const kid of nodes) {
+    const from = kid.parent === null ? undefined : byAddress.get(kid.parent);
+    if (from) join(`c|${kid.round}|${from.key}`, from, kid, "chain");
+    const donor = kid.donor === null ? undefined : byAddress.get(kid.donor);
+    if (donor && donor !== from) join(`d|${kid.key}|${donor.key}`, donor, kid, "donor");
+    for (const address of kid.genes) {
+      const source = byAddress.get(address);
+      if (source && source !== from && source !== donor) {
+        join(`g|${kid.key}|${source.key}`, source, kid, "gene");
+      }
     }
-
-    const winner = kids.find((n) => n.isWinner);
-    if (winner) parent = winner;
+  }
+  for (const [key, { from, kids, variant }] of families) {
+    const xs = [from.xf, ...kids.map((k) => k.xf)];
+    const x1f = Math.min(...xs);
+    const x2f = Math.max(...xs);
+    const y = FIRST_ROW_Y + place(x1f, x2f) * ROW_H;
+    brackets.push({ key, x1f, x2f, y, variant });
+    stubs.push({ xf: from.xf, y1: NODE_ROW_Y, y2: y, variant });
+    for (const k of kids) stubs.push({ xf: k.xf, y1: y, y2: NODE_ROW_Y, variant });
   }
 
   const depth = rowRight.length;

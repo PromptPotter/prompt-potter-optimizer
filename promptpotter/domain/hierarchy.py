@@ -244,18 +244,23 @@ class MainLineStep(FrozenModel):
 
 
 class RoundFacts(FrozenModel):
-    """A round's typed facts: what its election declared and what it measured against."""
+    """A round's typed facts: what its election declared."""
 
     round: int
     elects_on: DisplayMetric | None = Field(
         description="The column the round's election elected on (`Election.elects_on`); null on "
         "a round never elected. `ability`: the round is won on θ, not on accuracy."
     )
-    reference: str | None = Field(
-        description="The address of the candidate the round measured its arms against — the "
-        "individual its `parent`-role arm re-read, as the pick this course's line stood on going "
-        "into the round. Never a child of the round: a reference is not re-listed. Null at round "
-        "0, where none was read, and where the re-read individual is not the line's pick."
+
+
+class GeneSource(FrozenModel):
+    """A candidate one locus of a child may have come from, other than the parent it descends from."""
+
+    locus: str = Field(description="The locus the child moved off its parent, as `node.key`.")
+    source: str = Field(description="The address of the candidate whose value it resembles.")
+    similarity: float = Field(
+        description="How alike the child's value and the source's are, 0 to 1: a verbatim copy "
+        "is 1. Always above the child's similarity to its parent on that locus."
     )
 
 
@@ -294,6 +299,24 @@ class CandidateFacts(FrozenModel):
         "course hangs from (a fork's from-candidate, an inner course's host) up to the cut, each elected round of its course before it with the "
         "candidates crowned, then this candidate, then any later round that crowned nobody up to "
         "the next crown. Read off crowns, never `parent_ids`."
+    )
+    descends_from: str | None = Field(
+        description="The address of the candidate its first parent, its main, was last measured as "
+        "before it: the ONE edge a lineage view draws it from. Null at an origin, and where no "
+        "candidate of its campaign measured that parent."
+    )
+    donor: str | None = Field(
+        description="The address of the candidate its second parent, the donor of a crossover, was "
+        "last measured as before it, of any round. Null without a second parent or a main, and "
+        "where no candidate of its campaign measured it."
+    )
+    donated_loci: list[str] = Field(
+        description="The loci, as `node.key`, it moved off its main to the donor's value verbatim: "
+        "what the donor gave. Empty without a donor."
+    )
+    gene_sources: list[GeneSource] = Field(
+        description="Per other locus it moved off its main, the earlier candidates whose value there "
+        "is closer to its own than the main's: most similar first, then most recently measured."
     )
     lens_value: float | None = Field(
         description="This candidate's composite fitness under the request's `score:` lens. Null "

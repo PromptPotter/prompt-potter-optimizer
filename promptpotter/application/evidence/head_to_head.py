@@ -253,6 +253,10 @@ class HeadToHeadRow(StrictModel):
     subject: str
     campaign_id: str
     optimizer: str
+    swapped_in: list[str] = Field(
+        description="The members this arm's optimizer walks and some other arm's does not: what "
+        "it was swapped in for. Empty where every arm walks the members it does."
+    )
     optimizer_models: list[str]
     purpose: Purpose
     guard: PairGuard
@@ -287,7 +291,10 @@ class HeadToHead(StrictModel):
 
     rows: list[HeadToHeadRow]
     covers_selection: bool
-    optimizers_differ: bool
+    swapped: list[str] = Field(
+        description="The members some arm's optimizer walks and another's does not: what the "
+        "arms' optimizers differ by. Empty where every arm walks one roster, whatever its knobs."
+    )
     guard: PairGuard
     headline: BenchColumn
     verdict: bool | None
@@ -317,6 +324,7 @@ class Grader(NamedTuple):
 class _Graded(NamedTuple):
     row: HeadToHeadRow
     member: GuardMember
+    walks: frozenset[str]
     origin: MemberRows | None
     selected: MemberRows | None
     sample_keys: list[str]
@@ -395,6 +403,7 @@ def head_to_head(
         else None
     )
     verdict = None if verdict_absent is not None else guard.state is not GuardState.DIFFERS
+    everywhere = frozenset.intersection(*(g.walks for g in read))
     return HeadToHead(
         rows=[
             g.row.model_copy(
@@ -402,13 +411,14 @@ def head_to_head(
                     "guard": g.row.guard
                     if reference is None or g.row.bench.graded is None
                     else _guard([g, reference], None),
+                    "swapped_in": sorted(g.walks - everywhere),
                     **_ratios(g.row, base),
                 }
             )
             for g in read
         ],
         covers_selection=set(asked) <= {g.row.subject for g in read},
-        optimizers_differ=len({g.row.optimizer for g in read}) > 1,
+        swapped=sorted(frozenset().union(*(g.walks for g in read)) - everywhere),
         guard=guard,
         headline=BENCH_HEADLINE,
         verdict=verdict,
@@ -556,6 +566,8 @@ def _read(
             subject=reading.key,
             campaign_id=reading.campaign_id,
             optimizer=config.optimization.optimizer,
+            # Set once every arm is read: what an arm was swapped in for is a fact of the set.
+            swapped_in=[],
             optimizer_models=optimizer_models,
             purpose=campaign.declaration.purpose,
             guard=pair_guard([member], record, origin_read_apart=False),
@@ -580,6 +592,7 @@ def _read(
             worked_ratio=None,
         ),
         member=member,
+        walks=frozenset(selected.member_nodes),
         origin=origin_pass,
         selected=selected_pass,
         sample_keys=[] if passes is None else passes.origin.sample_keys,

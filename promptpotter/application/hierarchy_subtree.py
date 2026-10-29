@@ -16,6 +16,8 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
+from functools import cached_property
 from typing import Any, Literal
 
 from promptpotter.application.hierarchy import (
@@ -51,6 +53,7 @@ from promptpotter.domain.cycle_paths import (
 from promptpotter.domain.hierarchy import (
     CandidateFacts,
     EntryStat,
+    GeneSource,
     HierarchyCandidate,
     HierarchyCourse,
     HierarchyEntry,
@@ -65,6 +68,7 @@ from promptpotter.domain.hierarchy import (
     SubtreeCourseFacts,
     entries_under,
 )
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.results import Election
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
@@ -153,10 +157,95 @@ class _Candidate:
     read_in: _Read
     status: _Status = "live"
     inner: list[SubtreeCampaign] = field(default_factory=list)
+    descends_from: _Candidate | None = None
+    donor: _Candidate | None = None
+    donated_loci: list[str] = field(default_factory=list)
+    gene_sources: list[GeneSource] = field(default_factory=list)
 
     @property
     def round(self) -> int:
         return self.arm.round
+
+    @property
+    def individual(self) -> OptSearchPoint:
+        return self.arm.state.individual
+
+    @cached_property
+    def loci(self) -> dict[Locus, Any]:
+        return self.individual.loci()
+
+
+# How many earlier candidates a moved locus names as its possible sources.
+GENE_SOURCES_PER_LOCUS = 3
+
+
+def _similarity(a: object, b: object) -> float:
+    """Text by its matching blocks, shots by the keys they share, anything else equal or not."""
+    if isinstance(a, str) and isinstance(b, str):
+        return SequenceMatcher(None, a, b).ratio()
+    if isinstance(a, tuple) and isinstance(b, tuple):
+        union = set(a) | set(b)
+        return len(set(a) & set(b)) / len(union) if union else 1.0
+    return 1.0 if a == b else 0.0
+
+
+def _earlier(c: _Candidate, everyone: list[_Candidate]) -> dict[str, _Candidate]:
+    """Each individual measured in a round before *c*'s, as its newest measurement — one the line
+    *c* was read on holds before any other."""
+    latest: dict[str, _Candidate] = {}
+    for x in sorted(
+        (x for x in everyone if x.round < c.round),
+        key=lambda x: (c.read_in.holds(x), x.round, x.read_in.course is c.read_in.course),
+    ):
+        latest[x.individual.id] = x
+    return latest
+
+
+def _descent(c: _Candidate, everyone: list[_Candidate]) -> None:
+    """The candidate *c* descends from — its main, the first parent, as last measured before it —
+    its donor, the second, likewise, with each locus moved off the main to the donor's value
+    verbatim, and per other moved locus the earlier candidates its value there is closer to."""
+    parent_ids = c.individual.lineage.parent_ids
+    earlier = _earlier(c, everyone)
+    parent = earlier.get(parent_ids[0]) if parent_ids else None
+    c.descends_from = parent
+    if parent is None:
+        return
+    mine, theirs = c.loci, parent.loci
+    by_name = {locus.name: locus for locus in (*mine, *theirs)}
+    moved = c.individual.loci_moved_from(parent.individual)
+    c.donor = earlier.get(parent_ids[1]) if len(parent_ids) > 1 else None
+    if c.donor is not None:
+        given = c.donor.loci
+        c.donated_loci = [
+            name
+            for name, locus in ((name, by_name[name]) for name in moved)
+            if (locus in mine, mine.get(locus)) == (locus in given, given.get(locus))
+        ]
+    for name in moved:
+        locus = by_name[name]
+        if name in c.donated_loci or (value := mine.get(locus)) is None:
+            continue
+        floor = 0.0 if locus not in theirs else _similarity(value, theirs[locus])
+        found = []
+        for x in earlier.values():
+            if x is parent or x.individual.id == c.individual.id:
+                continue
+            if (other := x.loci.get(locus)) is None:
+                continue
+            if (
+                isinstance(value, str)
+                and isinstance(other, str)
+                and SequenceMatcher(None, value, other).real_quick_ratio() <= floor
+            ):
+                continue
+            if (alike := _similarity(value, other)) > floor:
+                found.append((alike, x.round, x))
+        found.sort(key=lambda f: (f[0], f[1]), reverse=True)
+        c.gene_sources += [
+            GeneSource(locus=name, source=x.address, similarity=round(alike, 3))
+            for alike, _, x in found[:GENE_SOURCES_PER_LOCUS]
+        ]
 
 
 @dataclass
@@ -380,6 +469,9 @@ class _Build:
             superseding = _superseding(course, courses)
             for c in course.candidates:
                 c.status = _status(c, superseding)
+        everyone = list(found.values())
+        for c in everyone:
+            _descent(c, everyone)
 
     def _read(self, stores: Stores, course: _Course, offset: int | None) -> _Read:
         """*course* at its head, or as its ledger stood at a fork's cut — the mint record's offset,
@@ -473,13 +565,7 @@ class _Build:
                     address=round_address(course.address, round_),
                     parent=course.address,
                     children=members,
-                    facts=RoundFacts(
-                        round=round_,
-                        elects_on=elects_on,
-                        reference=None
-                        if election is None or election.reference is None
-                        else head.address(election.reference),
-                    ),
+                    facts=RoundFacts(round=round_, elects_on=elects_on),
                 )
             )
         spec, then = course.index.fork, head.below
@@ -534,6 +620,10 @@ class _Build:
             course_latest=c.address == latest,
             answers_for_id=False,
             main_line=_main_line(c),
+            descends_from=None if c.descends_from is None else c.descends_from.address,
+            donor=None if c.donor is None else c.donor.address,
+            donated_loci=c.donated_loci,
+            gene_sources=c.gene_sources,
             lens_value=None,
             lens_rank_move=None,
             sample_set_accuracy=None,

@@ -41,8 +41,27 @@ class L1Layout(StrictModel):
         return cast("list[str]", getattr(self, name))
 
 
+class Recombination(FrozenModel):
+    """One recombination spec as a host wrote it: the main's and the donor's pool id heads, and the
+    loci the donor gives."""
+
+    main: str
+    donor: str
+    from_donor: list[str]
+    changes_description: str = ""
+
+
 class L2Memory(StateSlice, kind="l2_memory"):
     """What `l2_context` alone writes; a fire landing after its round's close restates it there."""
+
+    recombinations: list[Recombination] = Field(
+        default_factory=list,
+        description="The children L2's last fire named for ``l1_generate`` to add in ``for_round``.",
+    )
+    for_round: int | None = Field(
+        default=None,
+        description="The round those children join; any other round's L1 adds none of them.",
+    )
 
     steer: dict[str, ManifestNodeOverlay] = Field(
         default_factory=dict,

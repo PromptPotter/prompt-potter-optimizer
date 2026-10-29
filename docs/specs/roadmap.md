@@ -8,12 +8,8 @@ Any new endpoint is multi-tenant by default.
 
 **Arc order, auto-dev runs it top to bottom** (each arc closes on the operator's word):
 
-1. **Reset and shrink.** Docs and rules cut to what governs: shallow modules, knowledge at the
-   caller, the deletion test, name what varies, test through the interface. Pytest consolidated;
-   the URGENT items of [`code-debt-cleanup.md`](code-debt-cleanup.md) closed. Every `CLAUDE.md` rule is in scope.
-2. **Recombination at $0** (C9, § Variation and pools): pools; recombination on a host; parent
-   choice and survival as members; `pair_guard` naming the swapped member; the three surfaces.
-3. **The optimizer climbs** (§ Optimizer tuning — the standing board):
+1. **Recombination at $0** (C9, § Variation and pools): the three surfaces.
+2. **The optimizer climbs** (§ Optimizer tuning — the standing board):
    - L1 quality: answer_format is never edited; a held leader is never re-scored; whole-reply counting.
    - L4 validation (~$1).
    - Early stop when C1.1 clearly beats C0.
@@ -156,11 +152,6 @@ The contract is [`variation-and-pools.md`](variation-and-pools.md); why is
 `optimization.nodes`, a pool written by a file edit, or a credit model steering before a reading
 shows it informative.
 
-2. **Pools** — owed: the campaign's measured individuals as a pool. *Closes when* a manifest declares
-   it and a resumed run hands its reader the pool its banked round names.
-3. **Recombination on a host** (`l1_generate`, `l2_context`, an `algorithm` node). *Closes when* the
-   offline leg produces arms under each host from the same pools and a two-parent child carries both edges.
-4. **Parent choice and survival as members.** *Closes when* `capo` is re-expressed on them, offline leg unchanged.
 5. **The three surfaces**, the terminal's `--set` writing the same draft. *Closes when* the cold
    browser walk switches a host, narrows a pool and reads both back, equal to the terminal's draft.
 6. **The mode head-to-head** (PAID), the host the only difference, matched on USD and cells.
@@ -169,7 +160,7 @@ shows it informative.
    boundary, replayed on resume.
 9. **Paper compositions** — EvoPrompt GA/DE, PhaseEvo, GEPA's merge, each stating its departures.
 
-Stages 5, 7, 8 and 9 share no seam once 3 lands.
+Stages 5, 7, 8 and 9 share no seam.
 
 ## Probe rounds
 

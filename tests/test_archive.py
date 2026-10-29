@@ -1505,39 +1505,32 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
     } == lines, "a candidate's line reads a round off a course that does not own it"
     courses = {e.address: e for e in entries_under(tree) if isinstance(e, SubtreeCourse)}
     hangs = {
-        family: (None, o, {0: None, 1: o, 2: None}),
-        kid: (first_pick, o, {2: first_pick}),
-        grand: (first_pick, o, {3: first_pick}),
-        great: (x, o, {4: x}),
-        # Round 2 lists only t3, re-run away: it re-read nothing its head still holds.
-        steered: (o, at(steered, 0, "s"), {0: None, 1: at(steered, 0, "s"), 2: None}),
-        rewound: (o, o, {1: o}),
-        redone: (first_pick, o, {3: first_pick}),
-        branched: (b, at(branched, 0, "p"), {0: None}),
+        family: (None, o),
+        kid: (first_pick, o),
+        grand: (first_pick, o),
+        great: (x, o),
+        steered: (o, at(steered, 0, "s")),
+        rewound: (o, o),
+        redone: (first_pick, o),
+        branched: (b, at(branched, 0, "p")),
         # A steer naming a round's re-read hangs from the candidate that round re-read, lifted or not.
-        rerun: (first_pick, at(rerun, 0, "r"), {0: None}),
-        relift: (o, at(relift, 0, "l"), {0: None}),
-        # It hangs from the parent line's arm; each re-read is its own round's, off its own crowns.
-        mended: (first_pick, o, {1: o, 3: at(mended, 1, "a")}),
-        carried: (at(rewound, 1, "w"), o, {2: at(rewound, 1, "w")}),
-        rival: (o, at(rival, 0, "c"), {0: None, 1: at(rival, 0, "c"), 2: at(rival, 1, "e")}),
-        first: (at(rival, 0, "c"), at(rival, 0, "c"), {1: at(rival, 0, "c"), 2: at(first, 1, "i")}),
+        rerun: (first_pick, at(rerun, 0, "r")),
+        relift: (o, at(relift, 0, "l")),
+        # It hangs from the parent line's arm.
+        mended: (first_pick, o),
+        carried: (at(rewound, 1, "w"), o),
+        rival: (o, at(rival, 0, "c")),
+        first: (at(rival, 0, "c"), at(rival, 0, "c")),
         # Cut on g, which its parent has since re-run away: the cut still names g.
-        second: (at(rival, 2, "g"), at(rival, 0, "c"), {3: at(rival, 2, "g")}),
-        glance: (at(steered, 0, "s"), at(glance, 0, "u"), {0: None}),
-        # The live round names its re-read only once it elects.
-        peek: (at(steered, 2, "t3"), at(peek, 0, "u2"), {0: None, live: None}),
+        second: (at(rival, 2, "g"), at(rival, 0, "c")),
+        glance: (at(steered, 0, "s"), at(glance, 0, "u")),
+        peek: (at(steered, 2, "t3"), at(peek, 0, "u2")),
     }
-    for hop, (cut_from, starts, references) in hangs.items():
+    for hop, hangs_from in hangs.items():
         course = courses[course_of(hop)]
-        assert (course.facts.from_candidate, course.facts.origin) == (cut_from, starts), (
+        assert (course.facts.from_candidate, course.facts.origin) == hangs_from, (
             f"{hop.cycle_id} hangs from, or starts at, a candidate its mint record does not name"
         )
-        assert {
-            rnd.facts.round: rnd.facts.reference
-            for rnd in course.children
-            if isinstance(rnd, HierarchyRound)
-        } == references, f"{hop.cycle_id} names a re-read its line did not stand on"
     by_addr = {e.address: e for e in entries_under(tree) if isinstance(e, HierarchyCandidate)}
     assert {
         address: tag.value

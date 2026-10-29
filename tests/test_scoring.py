@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import random
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -112,6 +113,7 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     LayerCounters,
 )
+from promptpotter.application.optimizers.variation.members import donor_take, most_donated
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_observers import declare_gate
 from promptpotter.application.run_phase_control import RunControl
@@ -187,7 +189,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
-from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
 from promptpotter.domain.origin_panel import (
     OverlapReading,
@@ -1056,7 +1058,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         "capo_init": {"config": {"size": 3, "k_max": 0}},
         "mating": {"config": {"offspring": 2}},
         "few_shot": {"config": {"k_max": 0}},
-        "population": {"config": {"size": 3}},
+        "survival": {"config": {"size": 3}},
     }
 
     def cut_by_budget(
@@ -1195,7 +1197,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         manifest_dir.mkdir(parents=True)
         # The demo pool's initializer is the shared pools package's, a third registrant beside the two.
         init = ["demo_pool"]
-        nodes = {n: (capo["nodes"] | potter["nodes"])[n] for n in (*init, *seed, *walk)}
+        nodes = {n: (potter["nodes"] | capo["nodes"])[n] for n in (*init, *seed, *walk)}
         (manifest_dir / "pipeline.yaml").write_text(
             yaml.safe_dump(
                 {
@@ -1285,6 +1287,22 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         "the individual the next round mutates from does not lead the population the run carries"
     )
 
+    # A crossover child continues its main: its donor gives a minority of the loci the two differ on.
+    solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)])
+    for differing in range(1, len(PROMPT_FIELDS) + 1):
+        pair = [prompted(**dict.fromkeys(PROMPT_FIELDS[:differing], side)) for side in "md"]
+        sizes = Counter(
+            None if (take := donor_take(pair, solve, random.Random(seed))) is None else len(take)
+            for seed in range(40)
+        )
+        most = most_donated(differing)
+        assert set(sizes) == ({None} if differing < 2 else set(range(1, most + 1))), (
+            f"over {differing} differing loci the donor gave {dict(sizes)}"
+        )
+        assert differing < 2 or 2 * most < differing or (differing, most) == (2, 1), (
+            f"over {differing} differing loci the donor may give {most}: the main is no longer major"
+        )
+
     # A cut θ round reads its cold parent on the cells the archive holds GRADED, guard and election alike.
     replies = iter(["Merged.", "Other."])
     theta_book = spend_book(None, usd_reserve=None)
@@ -1359,7 +1377,7 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         "capo_init": {"config": {"size": 2, "k_max": 0}},
         "mating": {"config": {"offspring": 1}},
         "few_shot": {"config": {"k_max": 0}},
-        "population": {"config": {"size": 2}},
+        "survival": {"config": {"size": 2}},
     }
     root = tmp_path / "bench"
     with _peer_cycle(

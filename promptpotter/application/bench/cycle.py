@@ -149,6 +149,9 @@ class Cycle:
     bench_passes: BenchPasses | None = None
     # The last close's, set by the close and by a resume's replay; ``None`` until a close states one.
     standing: RunStanding | None = None
+    # `measured_pool`'s fold, held while the closed rounds it read are the cycle's, and its θ by scale.
+    _pool: tuple[tuple[int, ...], dict[str, tuple[OptSearchPoint, list[GradedCell]]]] | None = None
+    _pool_theta: dict[tuple[int, str], float | None] = field(default_factory=dict)
 
     @classmethod
     def start(
@@ -217,6 +220,36 @@ class Cycle:
     def measured(self, individual_id: str) -> Concluded:
         """The individual's latest arm a round of this cycle concluded."""
         return measured_arm(self.rounds, individual_id)
+
+    def measured_pool(self) -> dict[str, tuple[OptSearchPoint, list[GradedCell]]]:
+        """Every individual a CLOSED round concluded, by id in the order first measured, with its
+        cells across those rounds merged — folded once per close, never banked."""
+        closed = self.closed_rounds
+        # Keyed on the closed rounds' objects: `seat` swaps in a new copy, never edits one.
+        read_from = tuple(id(rr) for rr in closed)
+        if self._pool is not None and self._pool[0] == read_from:
+            return self._pool[1]
+        held: dict[str, tuple[OptSearchPoint, list[GradedCell]]] = {}
+        for rr in closed:
+            for key, arm in rr.arms.items():
+                if isinstance(arm, Concluded):
+                    # By individual, never arm key: a key names a slot, and readers ask by id.
+                    individual = arm.individual
+                    _, rows = held.get(individual.id, (individual, []))
+                    held[individual.id] = (individual, merge_known_outcomes(rows, rr.rows(key)))
+        self._pool = (read_from, held)
+        self._pool_theta.clear()
+        return held
+
+    def pooled_theta(self, individual_id: str) -> float | None:
+        """θ on the round's one judging fit over every cell the pool holds of it, read once per scale;
+        ``None`` where it is unread or a caveat says it is not ability."""
+        held = self.measured_pool().get(individual_id)
+        memo = (id(self.difficulty.judging), individual_id)
+        if memo not in self._pool_theta:
+            read = None if held is None else self.difficulty.scale.frontier(held[1])
+            self._pool_theta[memo] = None if read is None or read.caveat else read.theta
+        return self._pool_theta[memo]
 
     def _seat_origin(self, parent: ReadArm, optimizer_state: OptimizerState | None) -> None:
         """The origin's θ is carried, not re-fit: round 0 closes on the scale it opened on."""

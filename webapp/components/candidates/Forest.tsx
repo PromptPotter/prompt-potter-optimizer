@@ -272,8 +272,10 @@ export function Forest({
               y1={s.y1}
               x2={s.x2}
               y2={s.y2}
-              className={cx("family-cladogram-branch", s.variant === "fork" && "fork")}
-            />
+              className={cx("family-cladogram-branch", s.variant !== "chain" && s.variant)}
+            >
+              {s.note && <title>{s.note}</title>}
+            </line>
           ))}
 
           {laneList.map((l) => {

@@ -1129,8 +1129,8 @@ export interface OptSearchPoint {
 /** The provenance of one mint: its edges, variations and words; it names no individual. */
 export interface IndividualLineage {
   /** Every individual this one derives from — one for a mutation, several for a
-   * crossover; empty at the origin. A tree view hangs it under
-   * `parent_ids[0]`. */
+   * crossover, its main first and its donor second; empty at the origin. A
+   * tree view hangs it under `parent_ids[0]`. */
   parent_ids: string[];
   changes_description: string;
   /** Every variation node that wrote it, in the order they ran; empty for an
@@ -1536,7 +1536,10 @@ export interface Comparability {
 export interface HeadToHead {
   rows: HeadToHeadRow[];
   covers_selection: boolean;
-  optimizers_differ: boolean;
+  /** The members some arm's optimizer walks and another's does not: what the arms'
+   * optimizers differ by. Empty where every arm walks one roster, whatever
+   * its knobs. */
+  swapped: string[];
   guard: PairGuard;
   headline: 'accuracy' | 'composite';
   verdict: boolean | null;
@@ -1552,6 +1555,9 @@ export interface HeadToHeadRow {
   subject: string;
   campaign_id: string;
   optimizer: string;
+  /** The members this arm's optimizer walks and some other arm's does not: what it
+   * was swapped in for. Empty where every arm walks the members it does. */
+  swapped_in: string[];
   optimizer_models: string[];
   purpose: Optimize | Compare;
   guard: PairGuard;
@@ -3176,18 +3182,12 @@ export interface HierarchyRound {
   children: HierarchyCandidate[];
 }
 
-/** A round's typed facts: what its election declared and what it measured against. */
+/** A round's typed facts: what its election declared. */
 export interface RoundFacts {
   round: number;
   /** The column the round's election elected on (`Election.elects_on`); null on a
    * round never elected. `ability`: the round is won on θ, not on accuracy. */
   elects_on: 'accuracy' | 'composite' | 'ability' | null;
-  /** The address of the candidate the round measured its arms against — the
-   * individual its `parent`-role arm re-read, as the pick this course's line
-   * stood on going into the round. Never a child of the round: a reference is
-   * not re-listed. Null at round 0, where none was read, and where the re-
-   * read individual is not the line's pick. */
-  reference: string | null;
 }
 
 /** One candidate a round proposed; its children are the inner campaigns it spawned. */
@@ -3242,6 +3242,21 @@ export interface CandidateFacts {
    * crowned, then this candidate, then any later round that crowned nobody up
    * to the next crown. Read off crowns, never `parent_ids`. */
   main_line: MainLineStep[];
+  /** The address of the candidate its first parent, its main, was last measured as
+   * before it: the ONE edge a lineage view draws it from. Null at an origin,
+   * and where no candidate of its campaign measured that parent. */
+  descends_from: string | null;
+  /** The address of the candidate its second parent, the donor of a crossover, was
+   * last measured as before it, of any round. Null without a second parent or
+   * a main, and where no candidate of its campaign measured it. */
+  donor: string | null;
+  /** The loci, as `node.key`, it moved off its main to the donor's value verbatim:
+   * what the donor gave. Empty without a donor. */
+  donated_loci: string[];
+  /** Per other locus it moved off its main, the earlier candidates whose value
+   * there is closer to its own than the main's: most similar first, then most
+   * recently measured. */
+  gene_sources: GeneSource[];
   /** This candidate's composite fitness under the request's `score:` lens. Null
    * without a lens, or where no row carries a verdict under it. */
   lens_value: number | null;
@@ -3269,6 +3284,17 @@ export interface MainLineStep {
   /** The addresses of the candidates the round's election crowned; at the
    * candidate's own round, the candidate. Empty: the election crowned nobody. */
   candidates: string[];
+}
+
+/** A candidate one locus of a child may have come from, other than the parent it descends from. */
+export interface GeneSource {
+  /** The locus the child moved off its parent, as `node.key`. */
+  locus: string;
+  /** The address of the candidate whose value it resembles. */
+  source: string;
+  /** How alike the child's value and the source's are, 0 to 1: a verbatim copy is
+   * 1. Always above the child's similarity to its parent on that locus. */
+  similarity: number;
 }
 
 /** Where an alternative criterion would have elected someone else, on the candidate it names. */

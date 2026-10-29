@@ -43,7 +43,7 @@ export function ChannelCards({
         headline && (headline.guard.state !== "controlled" || headline.bench_set === null),
     );
     return COLUMN_ROWS.filter(
-      (r) => (r !== "optimizer" || h2h.optimizers_differ) && (r !== "standing" || flagged),
+      (r) => (r !== "optimizer" || h2h.swapped.length > 0) && (r !== "standing" || flagged),
     );
   }, [h2h, items]);
   const [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null);

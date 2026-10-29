@@ -147,7 +147,8 @@ class IndividualLineage(StrictModel):
         default_factory=list,
         description=(
             "Every individual this one derives from — one for a mutation, several for a "
-            "crossover; empty at the origin. A tree view hangs it under `parent_ids[0]`."
+            "crossover, its main first and its donor second; empty at the origin. A tree view "
+            "hangs it under `parent_ids[0]`."
         ),
     )
     changes_description: str = ""
@@ -386,13 +387,9 @@ class OptSearchPoint(FrozenModel):
         changes_description: str = "",
         evidence_grounding: EvidenceGrounding | None = None,
     ) -> OptSearchPoint:
-        """*take* maps a locus to its donor's position in *parents*; a donor that sets none empties it."""
+        """*take* maps a locus to its donor's position in *parents* (`taken`)."""
         base = parents[0]
-        writes: dict[Locus, Any] = {}
-        for locus, donor in (take or {}).items():
-            held = parents[donor].loci()
-            writes[locus] = held[locus] if locus in held else _unset(locus, schema)
-        writes.update(changes or {})
+        writes = {**taken(parents, take or {}, schema), **(changes or {})}
         child = base._written(writes, schema)
         lineage = IndividualLineage(
             parent_ids=[p.id for p in parents],
@@ -419,6 +416,18 @@ class OptSearchPoint(FrozenModel):
         if changes_description is not None:
             update["changes_description"] = changes_description
         return after.model_copy(update={"lineage": self.lineage.model_copy(update=update)})
+
+
+def taken(
+    parents: Sequence[OptSearchPoint], take: Mapping[Locus, int], schema: PipelineSchema
+) -> dict[Locus, Any]:
+    """The one materializer of a recombination spec: each locus *take* names, its donor's value by
+    position in *parents*; a donor that sets none empties it. Every host emits a *take*."""
+    writes: dict[Locus, Any] = {}
+    for locus, donor in take.items():
+        held = parents[donor].loci()
+        writes[locus] = held[locus] if locus in held else _unset(locus, schema)
+    return writes
 
 
 def _unset(locus: Locus, schema: PipelineSchema) -> Any:

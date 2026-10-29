@@ -2447,6 +2447,18 @@
             "title": "Course Latest",
             "type": "boolean"
           },
+          "descends_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address of the candidate its first parent, its main, was last measured as before it: the ONE edge a lineage view draws it from. Null at an origin, and where no candidate of its campaign measured that parent.",
+            "title": "Descends From"
+          },
           "divergence": {
             "anyOf": [
               {
@@ -2462,6 +2474,34 @@
             "description": "Inside the counterfactual below a divergence — the client dims it.",
             "title": "Divergent",
             "type": "boolean"
+          },
+          "donated_loci": {
+            "description": "The loci, as `node.key`, it moved off its main to the donor's value verbatim: what the donor gave. Empty without a donor.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Donated Loci",
+            "type": "array"
+          },
+          "donor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address of the candidate its second parent, the donor of a crossover, was last measured as before it, of any round. Null without a second parent or a main, and where no candidate of its campaign measured it.",
+            "title": "Donor"
+          },
+          "gene_sources": {
+            "description": "Per other locus it moved off its main, the earlier candidates whose value there is closer to its own than the main's: most similar first, then most recently measured.",
+            "items": {
+              "$ref": "#/components/schemas/GeneSource"
+            },
+            "title": "Gene Sources",
+            "type": "array"
           },
           "individual": {
             "description": "`OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one individual again.",
@@ -2558,6 +2598,10 @@
           "course_latest",
           "answers_for_id",
           "main_line",
+          "descends_from",
+          "donor",
+          "donated_loci",
+          "gene_sources",
           "lens_value",
           "lens_rank_move",
           "sample_set_accuracy",
@@ -6828,6 +6872,34 @@
         "title": "ForkTrigger",
         "type": "string"
       },
+      "GeneSource": {
+        "additionalProperties": false,
+        "description": "A candidate one locus of a child may have come from, other than the parent it descends from.",
+        "properties": {
+          "locus": {
+            "description": "The locus the child moved off its parent, as `node.key`.",
+            "title": "Locus",
+            "type": "string"
+          },
+          "similarity": {
+            "description": "How alike the child's value and the source's are, 0 to 1: a verbatim copy is 1. Always above the child's similarity to its parent on that locus.",
+            "title": "Similarity",
+            "type": "number"
+          },
+          "source": {
+            "description": "The address of the candidate whose value it resembles.",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locus",
+          "source",
+          "similarity"
+        ],
+        "title": "GeneSource",
+        "type": "object"
+      },
       "GradeBenchPayload": {
         "additionalProperties": false,
         "description": "Grade the campaign's origin and its selection on the held-out bench rows.",
@@ -6901,10 +6973,6 @@
             "title": "Notes",
             "type": "array"
           },
-          "optimizers_differ": {
-            "title": "Optimizers Differ",
-            "type": "boolean"
-          },
           "pairs": {
             "items": {
               "$ref": "#/components/schemas/SelectionPair"
@@ -6928,6 +6996,14 @@
               "$ref": "#/components/schemas/HeadToHeadRow"
             },
             "title": "Rows",
+            "type": "array"
+          },
+          "swapped": {
+            "description": "The members some arm's optimizer walks and another's does not: what the arms' optimizers differ by. Empty where every arm walks one roster, whatever its knobs.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Swapped",
             "type": "array"
           },
           "verdict": {
@@ -6959,7 +7035,7 @@
         "required": [
           "rows",
           "covers_selection",
-          "optimizers_differ",
+          "swapped",
           "guard",
           "headline",
           "verdict",
@@ -7113,6 +7189,14 @@
             "title": "Subject",
             "type": "string"
           },
+          "swapped_in": {
+            "description": "The members this arm's optimizer walks and some other arm's does not: what it was swapped in for. Empty where every arm walks the members it does.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Swapped In",
+            "type": "array"
+          },
           "treatment_digest": {
             "title": "Treatment Digest",
             "type": "string"
@@ -7144,6 +7228,7 @@
           "subject",
           "campaign_id",
           "optimizer",
+          "swapped_in",
           "optimizer_models",
           "purpose",
           "guard",
@@ -7792,7 +7877,7 @@
             ]
           },
           "parent_ids": {
-            "description": "Every individual this one derives from — one for a mutation, several for a crossover; empty at the origin. A tree view hangs it under `parent_ids[0]`.",
+            "description": "Every individual this one derives from — one for a mutation, several for a crossover, its main first and its donor second; empty at the origin. A tree view hangs it under `parent_ids[0]`.",
             "items": {
               "type": "string"
             },
@@ -12660,7 +12745,7 @@
       },
       "RoundFacts": {
         "additionalProperties": false,
-        "description": "A round's typed facts: what its election declared and what it measured against.",
+        "description": "A round's typed facts: what its election declared.",
         "properties": {
           "elects_on": {
             "anyOf": [
@@ -12679,18 +12764,6 @@
             "description": "The column the round's election elected on (`Election.elects_on`); null on a round never elected. `ability`: the round is won on θ, not on accuracy.",
             "title": "Elects On"
           },
-          "reference": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The address of the candidate the round measured its arms against — the individual its `parent`-role arm re-read, as the pick this course's line stood on going into the round. Never a child of the round: a reference is not re-listed. Null at round 0, where none was read, and where the re-read individual is not the line's pick.",
-            "title": "Reference"
-          },
           "round": {
             "title": "Round",
             "type": "integer"
@@ -12698,8 +12771,7 @@
         },
         "required": [
           "round",
-          "elects_on",
-          "reference"
+          "elects_on"
         ],
         "title": "RoundFacts",
         "type": "object"

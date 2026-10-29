@@ -3651,7 +3651,7 @@
             "default": null
           },
           "parent_ids": {
-            "description": "Every individual this one derives from — one for a mutation, several for a crossover; empty at the origin. A tree view hangs it under `parent_ids[0]`.",
+            "description": "Every individual this one derives from — one for a mutation, several for a crossover, its main first and its donor second; empty at the origin. A tree view hangs it under `parent_ids[0]`.",
             "items": {
               "type": "string"
             },
@@ -6907,7 +6907,8 @@
               "layer_rebase_dropped",
               "adapter_output_unavailable",
               "critique_cluster_dropped",
-              "round_not_advanced"
+              "round_not_advanced",
+              "offspring_dropped"
             ],
             "title": "Kind",
             "type": "string"

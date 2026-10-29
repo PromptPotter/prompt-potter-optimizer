@@ -34,7 +34,7 @@ A panel renders only what adds signal for this task and state; duplication, para
 **L2 fires on L1 stall, yield drought or evidence starvation; the rule set in `escalation/rules.py` is the policy.** A fact about one node lives on its member (`optimizers/nodes.py::LlmNode`), never in a table keyed by node name.
 
 - **Deterministic rules route; they never diagnose or stop.** L2 judges recoverability, and `terminate_proposal` is its exit for a backend fault.
-- **L2 writes exactly `l1_layout` and `l1_overrides`, as one node overlay on `l1_generate`** (`L2Memory.steer`) — never `pipeline_params`. Each steer cites an axis, sample or yield number (`l2_targets_l1_surface`).
+- **L2 writes exactly `l1_layout` and `l1_overrides`, as one node overlay on `l1_generate`** (`L2Memory.steer`) — never `pipeline_params` — **and, as the recombination host, `recombinations`** (`L2Memory.recombinations`, ids and loci only, which the next round's `l1_generate` adds). Each steer cites an axis, sample or yield number (`l2_targets_l1_surface`).
 - **No layer writes `task_context`** — no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`. <!-- probe: git grep -cE "task_context:" -- promptpotter/application/optimizers/potter/dispatch/schemas.py == 0 -->
 
 ## L3 — what `l3_plan` may write

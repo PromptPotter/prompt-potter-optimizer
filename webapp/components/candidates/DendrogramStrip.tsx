@@ -46,12 +46,12 @@ export const DendrogramStrip = memo(function DendrogramStrip({
         height={geo.height}
         className="cand-dendro-svg"
         role="group"
-        aria-label="Candidate genealogy — each candidate descends from the last winning round's winner"
+        aria-label="Candidate genealogy — each candidate hangs from the main it continues; a dashed link reaches the donor that gave it parts, a dotted one where another part may have come from"
       >
         {geo.brackets.map((b) => (
           <line
-            key={`b${b.round}`}
-            className="cand-dendro-beam"
+            key={b.key}
+            className={cx("cand-dendro-beam", b.variant !== "chain" && b.variant)}
             x1={pct(b.x1f)}
             y1={b.y}
             x2={pct(b.x2f)}
@@ -61,7 +61,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
         {geo.stubs.map((s, i) => (
           <line
             key={`s${i}`}
-            className="cand-dendro-stub"
+            className={cx("cand-dendro-stub", s.variant !== "chain" && s.variant)}
             x1={pct(s.xf)}
             y1={s.y1}
             x2={pct(s.xf)}

@@ -96,7 +96,7 @@ acting.
 
 ## Open — optimizer tuning
 
-**Rides with:** arc 3 of [`roadmap.md`](roadmap.md) § Sequence.
+**Rides with:** "The optimizer climbs" in [`roadmap.md`](roadmap.md) § Sequence.
 
 - **A held leader's evidence is discarded**: an arm that leads but misses the bar is never re-scored
   (`optimizers/potter/members.py::AdaptiveQueue.draw`). Action: carry it into the next round's draw.

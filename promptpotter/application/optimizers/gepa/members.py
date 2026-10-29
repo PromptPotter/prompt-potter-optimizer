@@ -126,7 +126,7 @@ class GepaReflect(nodes.Proposer):
     name: ClassVar[str] = "gepa_reflect"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "each"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores, ReflectionModules})
@@ -444,7 +444,7 @@ class Pareto(nodes.Selector):
                 leading=None,
                 verdict_reason="no candidate carries a verdict on every Pareto-set cell; none "
                 "is admitted",
-                population=kept,
+                ranked=kept,
             )
         aggregates = {cid: _aggregate(scores) for cid, scores in candidates.items()}
         top = max(aggregates.values())
@@ -466,7 +466,7 @@ class Pareto(nodes.Selector):
             selected=ArmKey(selected_id) if selected_id else None,
             leading=ArmKey(leading) if leading else None,
             verdict_reason=verdict,
-            population=kept,
+            ranked=kept,
         )
 
 

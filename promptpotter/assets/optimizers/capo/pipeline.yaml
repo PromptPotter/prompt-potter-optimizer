@@ -30,11 +30,15 @@ nodes:
     config:
       block_size: 30
       max_blocks: 10
-  # c = 4 crossovers per round (App. C.4), each one's two parents drawn at random (§4).
+  # c = 4 crossovers per round (App. C.4), each one's two parents drawn at random (§4) from the
+  # population: a tournament of 1 draws by no score. The paper's merge is symmetric, so which one
+  # is main is only the order `capo_crossover` names them in.
   mating:
     type: algorithm
     config:
       offspring: 4
+      donor_from: population
+      tournament: 1
   # The paper runs one model as optimizer and target (§5); set `config.model` to the target's to
   # match it. The paper states no decoding temperature; 1.0 is the vLLM sampling default it ran
   # under (App. C.1).
@@ -84,9 +88,13 @@ nodes:
   score:
     type: measurement
     config: {}
-  # μ = 10 (App. C.4): the population kept, and the arms the `paired_t` race keeps.
+  # The race's survivors ranked on CAPO's objective (§4), best first.
   population:
     type: selector
+    config: {}
+  # μ = 10 (App. C.4): the population kept, and the arms the `paired_t` race keeps.
+  survival:
+    type: algorithm
     config:
       size: 10
   # The initial instructions (App. D.2, Table 7), generated once from the task description: μ of
@@ -121,6 +129,7 @@ pipelines:
     - paired_t
     - score
     - population
+    - survival
   initial_population:
     - capo_init
 # Alg. 1 races the initial population together with the first offspring (lines 3-12): round 1

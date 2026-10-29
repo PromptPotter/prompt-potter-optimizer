@@ -378,7 +378,7 @@ class MapElites(nodes.Selector):
             selected=selected,
             leading=selected or max(placed_scores, key=placed_scores.__getitem__, default=None),
             verdict_reason=verdict,
-            population=[held[cid] for cid in dict.fromkeys(e.individual_id for e in archive)],
+            ranked=[held[cid] for cid in dict.fromkeys(e.individual_id for e in archive)],
         )
 
 
@@ -408,7 +408,7 @@ class LeviSeed(nodes.Proposer):
     name: ClassVar[str] = "levi_seed"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
@@ -440,7 +440,7 @@ class LeviParadigmShift(nodes.Proposer):
     name: ClassVar[str] = "levi_paradigm_shift"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = False
+    proposes: ClassVar[nodes.Proposing] = "adds"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviParadigmShiftKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
@@ -539,7 +539,7 @@ class LeviRefine(nodes.Proposer):
     name: ClassVar[str] = "levi_refine"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviRefineKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})

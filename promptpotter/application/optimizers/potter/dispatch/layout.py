@@ -26,6 +26,8 @@ L1_MANDATORY: frozenset[str] = frozenset(
         "confounds",
         # The one carrier of the parent's shots, which the rendered prompt leaves out.
         "demo_pool",
+        # The one carrier of the ids `recombinations` names.
+        "recombination_pool",
     }
 )
 
@@ -84,6 +86,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "confounds",
                 "block_pool",
                 "demo_pool",
+                "recombination_pool",
                 "plan",
                 "answer_distribution",
                 "critique",
@@ -129,6 +132,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "diagnostics",
                 "rebase_capability",
                 "terminate_capability",
+                # The one carrier of the ids its `recombinations` names.
+                "l2_recombination_pool",
             }
         ),
         floor=L1Layout(
@@ -147,6 +152,7 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "l1_overrides",
                 "l1_layout",
                 "l1_signal_catalogue",
+                "l2_recombination_pool",
                 "skill_tiers",
                 "rebase_capability",
                 "terminate_capability",

@@ -106,6 +106,10 @@ CONTROLLED = ("controlled", "controlled-bare")
 RESUMED = "resumed"
 DIVERGED = "diverged"
 REBASED = "rebased"
+# Potter with its crossover on: offspring added beside L1's by a draw and by an LLM host.
+CROSSED = "crossed"
+CROSSED_HOSTS = ("l1_generate", "l2_context")
+CROSSED_OFFSPRING = 2
 REBASE_HARDNESS = 6
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # The Ctrl+C contract is the pause and the resume, not the search: one round ends the cycle soonest.
@@ -122,7 +126,7 @@ ROUND_CELLS = 20
 SCALED: dict[str, dict[str, Any]] = {
     "blocks": {"config": {"block_size": 5, "max_blocks": 4}},
     "paired_t": {"config": {"alpha": 0.2}},
-    "population": {"config": {"size": 4}},
+    "survival": {"config": {"size": 4}},
     "capo_init": {"config": {"size": 4, "k_max": 2}},
     "mating": {"config": {"offspring": 2}},
     "few_shot": {"config": {"k_max": 2}},
@@ -210,14 +214,48 @@ class SchemaFiller:
         return None
 
 
+def _recombine(obj: dict[str, Any], props: dict[str, Any], filler: SchemaFiller, call: str) -> None:
+    """Where the slot is offered, as many children as it takes, each the next main given one locus
+    by the next donor apart from it."""
+    if "recombinations" not in props:
+        return
+    slot = filler.resolve(props["recombinations"])
+    spec = filler.resolve(slot["items"])["properties"]
+    mains = filler.resolve(spec["main"])["enum"]
+    ids = filler.resolve(spec["donor"])["enum"]
+    loci = filler.resolve(spec["from_donor"]["items"])["enum"]
+    children = []
+    for i in range(slot["maxItems"]):
+        main = mains[i % len(mains)]
+        donors = [d for d in ids if d != main]
+        children.append(
+            {
+                "main": main,
+                "donor": donors[i % len(donors)],
+                "from_donor": [loci[i % len(loci)]],
+                "changes_description": f"Recombine (call {call}, child {i}).",
+            }
+        )
+    obj["recombinations"] = children
+
+
 class ByCallIdentity:
     """The offline run's `FakeLLM` policy: an answer follows the CALL's identity, never the
-    prompt's wording nor the arrival order. *rebasing*, every L2 fire proposes a fork."""
+    prompt's wording nor the arrival order. *rebasing*, every L2 fire proposes a fork. *crossing*,
+    an odd variant rewrites a second field, so two arms can differ on two loci a crossover swaps."""
 
-    def __init__(self, capture: Path, templates: dict[str, str], *, rebasing: bool = False) -> None:
+    def __init__(
+        self,
+        capture: Path,
+        templates: dict[str, str],
+        *,
+        rebasing: bool = False,
+        crossing: bool = False,
+    ) -> None:
         self.capture = capture
         self.templates = templates
         self.rebasing = rebasing
+        self.crossing = crossing
         self.prefixes = {node: template.split("{{")[0] for node, template in templates.items()}
         self.calls: dict[str, int] = {}
         self.turns: dict[tuple[str, int | None], int] = {}
@@ -282,11 +320,13 @@ class ByCallIdentity:
         prompt: str,
     ) -> dict[str, Any]:
         if node.startswith("L1Generate"):
-            item = filler.resolve(filler.resolve(schema)["properties"]["variants"])
+            props = filler.resolve(schema)["properties"]
+            item = filler.resolve(props["variants"])
             obj["variants"] = [
                 self._variant_edit(turn, i, filler, filler.resolve(item["items"]), prompt)
                 for i in range(item.get("minItems") or item["maxItems"])
             ]
+            _recombine(obj, props, filler, call)
         elif node.startswith("L1Critique"):
             # Read off the prompt as a model would: the rows a cluster may span are the `[#id]` marks.
             ids = _marks(prompt)
@@ -303,6 +343,7 @@ class ByCallIdentity:
         elif node.startswith("L2Context"):
             obj["axis_targeted"] = "instruction"
             obj["rationale"] = f"L2 fire {call}: L1 stalled on the instruction axis."
+            _recombine(obj, filler.resolve(schema)["properties"], filler, call)
             obj.pop("fork_proposal", None)
             if self.rebasing:
                 obj["fork_proposal"] = {"reason": f"L2 fire {call}: rewind past the stall."}
@@ -332,11 +373,15 @@ class ByCallIdentity:
         }
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
         offered = item["properties"]["prompt_fields_updates"]["properties"]
+        second = ("thinking_style",) if self.crossing and i % 2 else ()
         v["prompt_fields_updates"] = {
             node: {
-                "instruction": _variant(
-                    f"g{generation}v{i}{node}", random.Random(f"l1:{generation}:{i}:{node}")
+                field: _variant(
+                    f"g{generation}v{i}{node}{tag}",
+                    random.Random(f"l1:{generation}:{i}:{node}{tag and f':{tag}'}"),
                 )
+                for field, tag in (("instruction", ""), *((f, f) for f in second))
+                if field in fields["properties"]
             }
             for node, fields in offered.items()
             if "instruction" in fields["properties"]
@@ -378,7 +423,9 @@ def synthetic_rows(n: int) -> list[Sample]:
     return rows
 
 
-def campaign_config(optimizer: str, rounds: int, *, bench_trigger: BenchTrigger) -> CampaignConfig:
+def campaign_config(
+    optimizer: str, rounds: int, *, bench_trigger: BenchTrigger, crossover: str | None = None
+) -> CampaignConfig:
     raw = dict(dataset_campaign_block(install_datasets_root() / DATASET))
     # The narrowing a check-in of the shipped definition declares, its `optimizer` blocks included.
     pipeline = read_dataset_pipeline(install_datasets_root() / DATASET)
@@ -398,6 +445,18 @@ def campaign_config(optimizer: str, rounds: int, *, bench_trigger: BenchTrigger)
     if optimizer != templated:
         roster = resolve_optimizer(optimizer, {}, gate="off").manifest.nodes
         opt["nodes"] = {node: block for node, block in SCALED.items() if node in roster}
+    # The draw's host and the LLM host *crossover* names at once, drawing on one measured pool; an
+    # L2 host fires every round, so each round past the first can add its children.
+    if crossover:
+        nodes = opt.setdefault("nodes", {})
+        for node, knobs in (
+            ("mating", {"offspring": CROSSED_OFFSPRING}),
+            ("l1_generate", {"recombine": CROSSED_OFFSPRING, "recombination_host": crossover}),
+            *((("escalation", {"l1_patience": 0}),) if crossover == "l2_context" else ()),
+        ):
+            held = dict(nodes.get(node) or {})
+            held["config"] = {**(held.get("config") or {}), **knobs}
+            nodes[node] = held
     sampler = select_optimizer(CampaignConfig.model_validate(raw).optimization).sampler
     if sampler.size_knob is not None:
         nodes = opt.setdefault("nodes", {})
@@ -490,16 +549,17 @@ async def run_one(
     pause_after: int | None = None,
     bench_trigger: BenchTrigger = "at_end",
     diverge: bool = False,
+    crossover: str | None = None,
 ) -> tuple[Path, str]:
     """The archive is the workspace's, never *out*'s: campaigns in one process share it."""
     out = workspace if out is None else out
     (out / "requests").mkdir(parents=True)
     arm = purpose.arm if isinstance(purpose, Compare) else None
-    config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger)
+    config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger, crossover=crossover)
     if not framing:
         config = config.model_copy(update={"task_framing": "off"})
     samples = synthetic_rows(rows)
-    llm = ByCallIdentity(out / "requests", text_templates(config))
+    llm = ByCallIdentity(out / "requests", text_templates(config), crossing=crossover is not None)
     backend = FakeBackend(samples)
     router = Router(FakeLLM(llm), backend)
     install_network(router)
@@ -1037,6 +1097,55 @@ def decided(workspace: Path, *, after: int) -> dict[str, Any]:
     return {**doc, "ledger": kept, "rounds": [r for r in doc["rounds"] if r["round"] > after]}
 
 
+def recombined(workspace: Path, host: str) -> int:
+    """Distinct lineages naming two parents whose *host* step moved a locus."""
+    found: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            steps = node.get("variations")
+            if (
+                len(node.get("parent_ids") or ()) == 2
+                and isinstance(steps, list)
+                and any(s["node"].endswith(f":{host}") and s["loci"] for s in steps)
+            ):
+                found.add(json.dumps(node, sort_keys=True))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    for path in Path(long_path(workspace)).glob("projects/*/campaigns/*/cycles/*/rounds/*.json"):
+        walk(json.loads(path.read_text(encoding="utf-8")))
+    return len(found)
+
+
+def crossed_legs(
+    potter: Path, legs: tuple[Future[int], Future[int], Future[int]] | None, pause_after: int
+) -> bool:
+    """Prints the crossover legs' reading; True where they ran green or were not run."""
+    if legs is None:
+        return True
+    straight, paused, by_l2 = (
+        potter / leg for leg in (CROSSED, f"{CROSSED}-{RESUMED}", f"{CROSSED}-l2")
+    )
+    if any(exits := [leg.result() for leg in legs]):
+        print(f"potter: crossover on FAILED (exit {exits}) -- {straight / 'run.log'}")
+        return False
+    hosted = {
+        "locus_crossover": recombined(straight, "locus_crossover"),
+        "l1_generate": recombined(straight, "l1_generate"),
+        "l2_context": recombined(by_l2, "l2_context"),
+    }
+    same = decided(straight, after=pause_after) == decided(paused, after=pause_after)
+    print(
+        f"potter: crossover on, two-parent arms recombined by host {hosted}; paused after round "
+        f"{pause_after} and resumed, decisions {'UNMOVED' if same else 'MOVED'}"
+    )
+    return all(hosted.values()) and same
+
+
 def moved_against(workspace: Path, earlier: Path) -> str:
     if not (earlier / "decisions.json").is_file():
         return f"no run in {earlier}"
@@ -1085,6 +1194,7 @@ def main() -> int:
     ap.add_argument("--pause-after", type=int, help=argparse.SUPPRESS)
     ap.add_argument("--diverge", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--rebase", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--crossover", choices=CROSSED_HOSTS, help=argparse.SUPPRESS)
     ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
     ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
@@ -1127,6 +1237,7 @@ def main() -> int:
             pause_after=args.pause_after,
             bench_trigger=args.bench_trigger,
             diverge=args.diverge,
+            crossover=args.crossover,
         )
         print(asyncio.run(one)[0])
         return 0
@@ -1158,7 +1269,7 @@ def main() -> int:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    tasks = len(names) if args.controlled else 2 * len(names) + len(INTERRUPTED) + 2
+    tasks = len(names) if args.controlled else 2 * len(names) + len(INTERRUPTED) + 5
     pool = ThreadPoolExecutor(RamBudget.read().offline_run_children(tasks))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
@@ -1198,11 +1309,25 @@ def main() -> int:
             names[0], home / names[0] / DIVERGED, f"--pause-after={pause_after}", "--diverge"
         )
     )
-    # Only potter's L2 proposes a fork; its prior campaign needs rounds past the one it pauses at.
-    rebasing = (
-        spawn("potter", home / "potter" / REBASED, "--rebase")
-        if not args.controlled and "potter" in names and pause_after
-        else None
+    # Potter's own legs need rounds past the one they pause at.
+    potter_legs = not args.controlled and "potter" in names and pause_after
+    # Only potter's L2 proposes a fork.
+    rebasing = spawn("potter", home / "potter" / REBASED, "--rebase") if potter_legs else None
+    # Its pool is read off the closed rounds, so a resume must hand it the pool a straight run had.
+    l1_host, l2_host = (f"--crossover={host}" for host in CROSSED_HOSTS)
+    crossing = (
+        None
+        if not potter_legs
+        else (
+            spawn("potter", home / "potter" / CROSSED, l1_host),
+            spawn(
+                "potter",
+                home / "potter" / f"{CROSSED}-{RESUMED}",
+                l1_host,
+                f"--pause-after={pause_after}",
+            ),
+            spawn("potter", home / "potter" / f"{CROSSED}-l2", l2_host),
+        )
     )
     resumed = (
         {}
@@ -1270,6 +1395,7 @@ def main() -> int:
         ended = f"FAILED (exit {rc}) -- {log}" if rc else ""
         ended = ended or next(ln for ln in reversed(lines) if ln.startswith("rebased "))
         print(f"potter: a line proposing a fork at every L2 fire {ended}")
+    failed += not crossed_legs(home / "potter", crossing, pause_after)
     if args.controlled and not failed:
         beside, bare = (home / name for name in CONTROLLED)
         for arm in (f"arm-{name}" for name in arm_names):

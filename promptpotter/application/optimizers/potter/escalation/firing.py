@@ -35,6 +35,7 @@ from promptpotter.application.optimizers.potter.records import (
     L1Layout,
     Ladder,
     PotterCheckpointKind,
+    Recombination,
 )
 from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.phase_views import OptimizerStepExitView
@@ -75,6 +76,9 @@ class TransitionResult:
     l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     fork_proposal: ForkProposal | None = None
     terminate_proposal: TerminateProposal | None = None
+    # L2's as a recombination host: the children the next round's L1 adds, and that round.
+    recombinations: list[Recombination] = field(default_factory=list)
+    for_round: int | None = None
 
 
 def _high_water(ctx: NodeContext) -> HighWater:

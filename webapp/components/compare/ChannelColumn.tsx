@@ -120,7 +120,12 @@ export function ChannelColumn({
           </div>
         );
       case "optimizer":
-        return <span className="cmp-col-optimizer">{headline.optimizer}</span>;
+        return (
+          <span className="cmp-col-optimizer">
+            {headline.optimizer}
+            {headline.swapped_in.length > 0 && ` · ${headline.swapped_in.join(", ")}`}
+          </span>
+        );
       case "bench":
         return <Metric {...lead.score} />;
       case "lift":

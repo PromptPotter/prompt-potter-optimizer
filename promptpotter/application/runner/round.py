@@ -440,7 +440,12 @@ async def execute_round(
     callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=round_num)
     callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
     selection = plan.selector.select(NodeContext(ctx, plan.selector), measured)
-    cycle.population = list(selection.population)
+    survivor = plan.survivor
+    cycle.population = list(
+        selection.ranked
+        if survivor is None
+        else survivor.survive(NodeContext(ctx, survivor), selection.ranked)
+    )
     round_result = _round_result(ctx, measured, selection, elects_on=plan.selector.elects_on)
     callbacks.on_phase(
         CampaignPhase.SELECT,

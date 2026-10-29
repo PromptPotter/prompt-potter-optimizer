@@ -51,7 +51,9 @@ def _check_targets_l1_surface(
     out: L2Output, _audit: RoundAudit, _ctx: ValidatorContext
 ) -> tuple[bool, str]:
     """``axis_targeted`` is not a surface: it is prose, and L1 reads its axes from measurement."""
-    if touched := [name for name in ("l1_layout", "l1_overrides") if out.get(name)]:
+    if touched := [
+        name for name in ("l1_layout", "l1_overrides", "recombinations") if out.get(name)
+    ]:
         return True, f"L2 touched: {touched}"
     return False, "L2 fired but changed nothing L1 reads"
 

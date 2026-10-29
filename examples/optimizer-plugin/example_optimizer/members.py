@@ -70,7 +70,7 @@ class Propose(nodes.Proposer):
     name: ClassVar[str] = "propose"
     kind: ClassVar[NodeKind] = NodeKind.LLM
     prompt_arity: ClassVar[PromptArity] = "one"
-    opens: ClassVar[bool] = True
+    proposes: ClassVar[nodes.Proposing] = "opens"
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = ProposeKnobs
     sees = frozenset({Calls, Children, Lineage, Target})
@@ -117,7 +117,7 @@ class Keep(nodes.Selector):
             selected=selected,
             leading=ranked[0] if ranked else None,
             verdict_reason=f"kept {selected[:8] if selected else 'the parent'}",
-            population=list(ctx.read(Lineage).population),
+            ranked=list(ctx.read(Lineage).population),
         )
 
 
