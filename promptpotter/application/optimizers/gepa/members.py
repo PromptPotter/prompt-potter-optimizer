@@ -94,10 +94,11 @@ class Minibatch(nodes.Sampler):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Replay})
     size_knob: ClassVar[str | None] = None
 
-    def round_cells(self, knobs: MinibatchKnobs, search: int) -> int:
-        if search - knobs.pareto_size < knobs.size:
-            return 0
-        return knobs.size + knobs.pareto_size
+    def drawn(self, knobs: MinibatchKnobs, search: int, _pipeline: str) -> nodes.PanelSize:
+        fits = search - knobs.pareto_size >= knobs.size
+        return nodes.PanelSize(
+            cells=knobs.size + knobs.pareto_size if fits else 0, block_size=knobs.size
+        )
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         knobs = ctx.knobs(MinibatchKnobs)
@@ -138,6 +139,9 @@ class GepaReflect(nodes.Proposer):
 
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
+
+    def parent_read(self, panel: nodes.PanelSize) -> int:
+        return panel.block_size
 
     def round_packages(self, _cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
         # The parent a round reflects on is drawn off every earlier round's Pareto-set scores.
@@ -409,6 +413,9 @@ class Pareto(nodes.Selector):
         _rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
         return panel.cells[panel.block_size :]
+
+    def parent_read(self, panel: nodes.PanelSize) -> int:
+        return panel.cells - panel.block_size
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         pareto_set = ctx.slice(ParetoSet).keys

@@ -17,6 +17,7 @@ from promptpotter.application.optimizers.nodes import (
     RUN_INIT,
     CountKnob,
     Initializer,
+    PanelSize,
     Reviewer,
     RoundWalk,
     source_digest,
@@ -190,9 +191,10 @@ class RoundPlan:
     gate: ArmGateMode
 
     @property
-    def round_walks(self) -> tuple[tuple[Proposer, ...], ...]:
-        """The proposers of each walk that is a round of its own: seeds heading round 1 are its."""
-        return (self.proposers, *((self.initial_population,) if self.seeds_alone else ()))
+    def round_walks(self) -> dict[str, tuple[Proposer, ...]]:
+        """The proposers of each walk that is a round of its own, by pipeline: seeds heading round 1 are its."""
+        alone = {INITIAL_POPULATION: self.initial_population} if self.seeds_alone else {}
+        return {"default": self.proposers, **alone}
 
     def walk(self, *, stands: bool) -> RoundWalk:
         """A round seeds only where no population stands: a resumed one restores its own."""
@@ -366,10 +368,20 @@ class SelectedOptimizer:
         return self.plan.sampler
 
     def round_cells(self, search: int) -> int:
-        return self.sampler.round_cells(self.knobs(self.sampler.name), search)
+        """Cells a round after the first asks for; 0 where the search split holds no panel."""
+        return self.sampler.drawn(self.knobs(self.sampler.name), search, "default").cells
 
     def round_cells_ceiling(self, search: int) -> int:
-        return self.sampler.round_cells_ceiling(self, search)
+        """The most cells one round buys: its arms on the walk's panel, then the parent's reads past theirs."""
+        return max(self._walk_ceiling(search, *walk) for walk in self.plan.round_walks.items())
+
+    def _walk_ceiling(self, search: int, pipeline: str, walk: tuple[Proposer, ...]) -> int:
+        asked = self.sampler.drawn(self.knobs(self.sampler.name), search, pipeline)
+        # An L4 size above the split still walks no more cells than the split holds.
+        panel = PanelSize(min(asked.cells, search), asked.block_size)
+        read = self.plan.selector.parent_read(panel) + sum(p.parent_read(panel) for p in walk)
+        # The selector's and proposers' parent reads are a union inside one panel, not a sum.
+        return self.walk_arms(walk) * panel.cells + min(read, panel.cells)
 
     def node_config(self, name: str) -> dict[str, Any]:
         return dict(self.node(name).current_config)
@@ -471,7 +483,7 @@ class SelectedOptimizer:
 
     @property
     def arms_per_round(self) -> int:
-        return max(map(self.walk_arms, self.plan.round_walks))
+        return max(map(self.walk_arms, self.plan.round_walks.values()))
 
     @property
     def limits(self) -> tuple[OptimizerLimit, ...]:
@@ -905,7 +917,7 @@ def _open_edges(selected: SelectedOptimizer) -> list[str]:
                 + (f" under `arm_gate: {gate}`" if gate == "author" else "")
             )
         written |= member.writes
-    for walk in selected.plan.round_walks:
+    for walk in selected.plan.round_walks.values():
         if not selected.walk_arms(walk):
             open_.append(f"{[p.name for p in walk]} add no arm: no member answers a round's arms")
         if editors := [p.name for p in walk if p.proposes == "edits" and p.arms(selected)]:

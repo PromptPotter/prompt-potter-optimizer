@@ -181,14 +181,9 @@ class AdaptiveQueue(nodes.Sampler):
     size_knob: ClassVar[str | None] = "sp_budget_round"
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ADAPTIVE_QUEUE
 
-    def round_cells(self, knobs: AdaptiveQueueKnobs, _search: int) -> int:
+    def drawn(self, knobs: AdaptiveQueueKnobs, _search: int, _pipeline: str) -> nodes.PanelSize:
         # Unclamped: a budget above the search split is the finding preflight reports.
-        return knobs.sp_budget_round
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        # The draw is unclamped where the budget exceeds the search split; a round's is not.
-        budget = selected.knobs_of(self.name, AdaptiveQueueKnobs).sp_budget_round
-        return (selected.arms_per_round + 1) * min(budget, search)
+        return nodes.PanelSize(cells=knobs.sp_budget_round, block_size=1)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         view = ctx.read(Ruler).difficulty
@@ -333,6 +328,9 @@ class ThetaElection(nodes.Selector):
         panel: Panel,
         _rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
+        return panel.cells
+
+    def parent_read(self, panel: nodes.PanelSize) -> int:
         return panel.cells
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:

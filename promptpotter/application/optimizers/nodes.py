@@ -483,6 +483,14 @@ class Panel:
 
 
 @dataclass(frozen=True)
+class PanelSize:
+    """A walk's ``Panel`` as counted BEFORE any round runs: no ``cells`` where the search split holds none."""
+
+    cells: int
+    block_size: int
+
+
+@dataclass(frozen=True)
 class Proposals:
     """The round's ARMS; the population carried between rounds is ``Selection.ranked``, a ``Survivor`` cutting it."""
 
@@ -589,13 +597,9 @@ class Sampler(NodeMember, Protocol):
         """What a caller sizing the panel from outside (an L4 per-round count) writes; ``None`` where no one knob does."""
         ...
 
-    def round_cells(self, knobs: Any, search: int) -> int:
-        """Cells a round after the first asks for under its own *knobs*, read BEFORE any round runs; 0 where the search split holds no panel."""
+    def drawn(self, knobs: Any, search: int, pipeline: str) -> PanelSize:
+        """The panel a walk of *pipeline* asks for under *knobs*; ``SelectedOptimizer.round_cells_ceiling`` prices each walk off it."""
         ...
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        """The most cells one round's walks read, the parent's among them; 0 where ``round_cells`` is."""
-        return (selected.arms_per_round + 1) * selected.round_cells(search)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel: ...
 
@@ -620,6 +624,10 @@ class Proposer(NodeMember, Protocol):
 
     def arms(self, _selected: SelectedOptimizer) -> int:
         """The arms it adds to its walk, whose arms are the sum and a round's the most of any walk it runs alone; an editor of arms another made adds none."""
+        return 0
+
+    def parent_read(self, _panel: PanelSize) -> int:
+        """The cells of *panel* it reads the parent on (``Frontier.measure_parent``)."""
         return 0
 
     def opening(self, _ctx: NodeContext, bench: RoundOpening) -> RoundOpening:
@@ -715,6 +723,10 @@ class Selector(NodeMember, Protocol):
         self, ctx: NodeContext, panel: Panel, rows: Mapping[ArmKey, CellSheet]
     ) -> list[Sample]:
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
+        ...
+
+    def parent_read(self, panel: PanelSize) -> int:
+        """The most of *panel*'s cells ``parent_cells`` names that no arm's walk buys."""
         ...
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection: ...

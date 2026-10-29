@@ -52,8 +52,9 @@ class RandomDraw(nodes.Sampler):
     sees = frozenset({Replay})
     size_knob: ClassVar[str | None] = "size"
 
-    def round_cells(self, knobs: DrawKnobs, search: int) -> int:
-        return min(knobs.size, search)
+    def drawn(self, knobs: DrawKnobs, search: int, _pipeline: str) -> nodes.PanelSize:
+        cells = min(knobs.size, search)
+        return nodes.PanelSize(cells=cells, block_size=cells)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         cells = ctx.read(Replay).rng().sample(pool, min(ctx.knobs(DrawKnobs).size, len(pool)))
@@ -102,6 +103,9 @@ class Keep(nodes.Selector):
         panel: Panel,
         _rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
+        return panel.cells
+
+    def parent_read(self, panel: nodes.PanelSize) -> int:
         return panel.cells
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:

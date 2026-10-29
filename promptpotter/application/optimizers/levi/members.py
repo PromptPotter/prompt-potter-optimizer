@@ -129,19 +129,12 @@ class ProxyCss(nodes.Sampler):
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration})
     size_knob: ClassVar[str | None] = None
 
-    def round_cells(self, knobs: ProxyCssKnobs, search: int) -> int:
+    def drawn(self, knobs: ProxyCssKnobs, search: int, pipeline: str) -> nodes.PanelSize:
         # The proxy is chosen among the discovery set, which the search split must hold whole.
-        return knobs.size if knobs.discovery <= search else 0
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        # The calibration round reads its seeds and the origin on the discovery set.
-        if not (proxy := selected.round_cells(search)):
-            return 0
-        discovery = selected.knobs_of(self.name, ProxyCssKnobs).discovery
-        seeds = selected.walk_arms(selected.plan.initial_population)
-        return max(
-            (seeds + 1) * discovery, (selected.walk_arms(selected.plan.proposers) + 1) * proxy
-        )
+        if knobs.discovery > search:
+            return nodes.PanelSize(cells=0, block_size=0)
+        cells = knobs.discovery if pipeline == nodes.INITIAL_POPULATION else knobs.size
+        return nodes.PanelSize(cells=cells, block_size=cells)
 
     def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel:
         calibration = ctx.slice(DescriptorCalibration).calibration
@@ -319,6 +312,9 @@ class MapElites(nodes.Selector):
         panel: Panel,
         _rows: Mapping[ArmKey, CellSheet],
     ) -> list[Sample]:
+        return panel.cells
+
+    def parent_read(self, panel: nodes.PanelSize) -> int:
         return panel.cells
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:

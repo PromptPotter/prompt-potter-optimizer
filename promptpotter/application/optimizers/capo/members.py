@@ -165,14 +165,9 @@ class Blocks(nodes.Sampler):
     knobs: ClassVar[type[StrictModel]] = BlocksKnobs
     size_knob: ClassVar[str | None] = None
 
-    def round_cells(self, knobs: BlocksKnobs, search: int) -> int:
-        return min(knobs.max_blocks, search // knobs.block_size) * knobs.block_size
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        # Round 1's origin is no member: its reading is one block beside the arms'.
-        block = selected.knobs_of(self.name, BlocksKnobs).block_size
-        panel = selected.round_cells(search)
-        return selected.arms_per_round * panel + block if panel else 0
+    def drawn(self, knobs: BlocksKnobs, search: int, _pipeline: str) -> nodes.PanelSize:
+        n_blocks = min(knobs.max_blocks, search // knobs.block_size)
+        return nodes.PanelSize(cells=n_blocks * knobs.block_size, block_size=knobs.block_size)
 
     def round_facts(
         self, selected: SelectedOptimizer, round_result: RoundResult
@@ -682,6 +677,10 @@ class PopulationSelector(nodes.Selector):
         # The incumbent's reading is the cells it walked as a member; round 1's origin reads block one.
         walked = {cell.key for cell in rows.get(ArmKey(ctx.read(Lineage).parent.id), NO_CELLS)}
         return [s for s in panel.cells if s.key in walked] or panel.cells[: panel.block_size]
+
+    def parent_read(self, panel: nodes.PanelSize) -> int:
+        # Round 1's origin is no arm and reads block one; later the incumbent races as an arm.
+        return panel.block_size
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         survivors = measured.electable
