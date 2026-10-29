@@ -167,6 +167,8 @@ stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_ru
   alone, outside every tenant.
 - **Blocklist edits never have an inbound door** — the on-box, outbound-only bot
   ([decisions.md § 0004](../decisions.md#0004-operator-admin-channels)).
+- **CORS answers `Settings.ALLOWED_ORIGINS` alone**, exact origins; a `*`, path or pattern refuses
+  to load (`settings.py::Settings._exact_origins`), since the app serves credentialed requests.
 - **Response headers** — one middleware, `presentation/api/middleware/headers.py::ResponseHeadersMiddleware`.
 - **PP↔TermNorm** — a shared bearer token plus TermNorm's IP allowlist
   ([`backend-integration.md`](backend-integration.md) § Connection security).

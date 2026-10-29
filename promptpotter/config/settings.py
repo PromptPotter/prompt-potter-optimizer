@@ -1,10 +1,11 @@
 import codecs
 import locale
+import re
 import tomllib
 from importlib.metadata import version
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
 from promptpotter.config.paths import env_file_path, source_checkout_root
@@ -27,6 +28,8 @@ TERMS_VERSION: str = "2026-10-11"
 # Seconds a writer waits on a held file lock before raising; an OS lock dies with its holder.
 LOCK_TIMEOUT: float = 5.0
 
+_ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(:\d{1,5})?")
+
 
 class Settings(BaseSettings):
     # `off` runs every request as the CLI's on-disk identity: a local harness, never a served box.
@@ -37,8 +40,18 @@ class Settings(BaseSettings):
     BRAND_SERVICE_NAME: str = "PromptPotter Optimizer"
     BRAND_DOCS_URL: str = "https://github.com/PromptPotter/prompt-potter-optimizer"
 
-    # Comma-separated; never `*`, since the app serves credentialed requests.
+    # Comma-separated exact origins: a credentialed app answers no `*`, path or pattern.
     ALLOWED_ORIGINS: str = ""
+
+    @field_validator("ALLOWED_ORIGINS")
+    @classmethod
+    def _exact_origins(cls, value: str) -> str:
+        loose = [o for o in map(str.strip, value.split(",")) if o and not _ORIGIN.fullmatch(o)]
+        if loose:
+            raise ValueError(
+                f"ALLOWED_ORIGINS takes scheme://host[:port] origins only, not {loose}"
+            )
+        return value
 
     @property
     def allowed_origins_list(self) -> list[str]:
