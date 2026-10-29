@@ -235,6 +235,8 @@ class ReadoutProjection(Projection):
                 f"  {YELLOW}⚠ what this campaign's declaration is a delta over moved since it was "
                 f"declared ({', '.join(drift.moved())}): this launch runs today's values{RESET}"
             )
+        if record.backend_revision is not None and (said := record.backend_revision.drift()):
+            self._write(f"  {YELLOW}⚠ {said}: this launch measures on it as it is{RESET}")
 
     def _handle_round_proposed(self, record: RoundProposedRecord) -> None:
         if record.submitted:

@@ -135,6 +135,11 @@ export interface ServedDashboard {
    * replay. */
   walk: SampleWalk | null;
   round_axis: RoundAxis;
+  /** Where this launch's backend reports a revision other than the one its
+   * connector expects, or none could be read, that in a sentence; null where
+   * it runs the expected one or the connector checks none. A drift is served,
+   * never refused. */
+  backend_drift: string | null;
 }
 
 /** One arm of the run: its key, and where it was walked (a re-read: its latest walk). */

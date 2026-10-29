@@ -779,6 +779,45 @@
         "title": "Authored",
         "type": "object"
       },
+      "BackendRevision": {
+        "additionalProperties": false,
+        "description": "What a launch read of the backend's revision, beside the one its connector was written against.",
+        "properties": {
+          "expected": {
+            "title": "Expected",
+            "type": "string"
+          },
+          "reported": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported"
+          },
+          "unread": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unread"
+          }
+        },
+        "required": [
+          "expected",
+          "reported",
+          "unread"
+        ],
+        "title": "BackendRevision",
+        "type": "object"
+      },
       "BackendWarningRecord": {
         "additionalProperties": false,
         "description": "An attempt that failed and will be retried: a transport fault or a 5xx, never a 429.",
@@ -6149,18 +6188,6 @@
         "additionalProperties": false,
         "description": "What a run init resolved, read over the chain: the declaration LAST wins, the roster FIRST.",
         "properties": {
-          "backend_revision": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Backend Revision"
-          },
           "declaration": {
             "additionalProperties": true,
             "title": "Declaration",
@@ -7421,6 +7448,16 @@
         "additionalProperties": false,
         "description": "LAST wins, over the whole chain: a fork stands on its parent's until its own lands.",
         "properties": {
+          "backend_revision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BackendRevision"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "defaults_drift": {
             "anyOf": [
               {
@@ -7498,7 +7535,8 @@
           "measured_unit",
           "langfuse_trace_url",
           "run_limits",
-          "defaults_drift"
+          "defaults_drift",
+          "backend_revision"
         ],
         "title": "RunWiringRecord",
         "type": "object"

@@ -60,7 +60,12 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.run_records import CycleSeed, DefaultsDrift, OriginSource
+from promptpotter.domain.run_records import (
+    BackendRevision,
+    CycleSeed,
+    DefaultsDrift,
+    OriginSource,
+)
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
@@ -315,11 +320,15 @@ def _capabilities_moved(recorded: CapabilityMenu, running: CapabilityMenu) -> li
     )
 
 
-def _revision_moved(recorded: str | None, running: str | None) -> str | None:
+def _revision_moved(
+    recorded: BackendRevision | None, running: BackendRevision | None
+) -> str | None:
     """``None`` where nothing recorded one: an unknown revision names no move."""
-    if recorded is None or recorded == running:
+    ran = None if recorded is None else recorded.reported
+    now = None if running is None else running.reported
+    if ran is None or ran == now:
         return None
-    return f"the backend reports revision {running or 'none'}, not the {recorded} it ran under"
+    return f"the backend reports revision {now or 'none'}, not the {ran} it ran under"
 
 
 def resolve_resume(
@@ -334,7 +343,9 @@ def resolve_resume(
         checked = resolve_cycle_plan(root, campaign.declaration, dataset)
     if campaign.root_content_hash == checked.origin_hash:
         return plan.optimizer
-    recorded = session.store.campaigns.read_resolved_run(campaign.root_hop)
+    campaigns = session.store.campaigns
+    recorded = campaigns.read_resolved_run(campaign.root_hop)
+    wired = campaigns.read_run_wiring(campaign.root_hop)
     raise ConfigDriftError(
         campaign,
         current_hash=checked.origin_hash,
@@ -342,7 +353,9 @@ def resolve_resume(
         capabilities_moved=_capabilities_moved(
             recorded.model_capabilities, checked.session.pipeline_schema.model_capabilities
         ),
-        revision_moved=_revision_moved(recorded.backend_revision, checked.session.backend_revision),
+        revision_moved=_revision_moved(
+            None if wired is None else wired.backend_revision, checked.session.backend_revision
+        ),
     )
 
 

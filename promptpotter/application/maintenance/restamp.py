@@ -334,20 +334,37 @@ _LEDGER_ARMS: dict[str, type[BaseModel]] = {
 }
 
 
+def _admits_none(ann: object) -> bool:
+    if get_origin(ann) is Annotated:
+        return _admits_none(get_args(ann)[0])
+    return get_origin(ann) in (Union, types.UnionType) and type(None) in get_args(ann)
+
+
 def _prune_record(rec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    # A line carrying a key its arm no longer declares refuses its whole cycle (`ledger_record`).
+    """Each key moved, labelled: a line carrying a key its arm no longer declares, or lacking one
+    it now requires, refuses its whole cycle (`ledger_record`)."""
     arm = _LEDGER_ARMS.get(str(rec.get("record_type")))
     if arm is None:
         return rec, []
     pruned, dropped = _prune_to_schema(rec, arm)
-    if not dropped:
+    # A required key a line predates is filled only where its reader reads null as "not read".
+    filled = [
+        key
+        for key, field in arm.model_fields.items()
+        if field.is_required() and key not in pruned and _admits_none(field.annotation)
+    ]
+    if not dropped and not filled:
         return rec, []
+    restamped = pruned | dict.fromkeys(filled)
     try:
-        arm.model_validate(pruned)
+        arm.model_validate(restamped)
     except ValidationError:
-        # A prune that leaves the line unreadable deleted a key the reader needs: keep the line.
+        # A restamp that leaves the line unreadable deleted a key the reader needs: keep the line.
         return rec, []
-    return pruned, [dotted for dotted, _ in dropped]
+    kind = rec["record_type"]
+    return restamped, [f"dropped {kind}.{dotted}" for dotted, _ in dropped] + [
+        f"filled {kind}.{key} = null" for key in filled
+    ]
 
 
 def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
@@ -377,11 +394,11 @@ def _compacted(
             lines.append(line)
             after += len(line)
             continue
-        # Prune BEFORE projecting: a stale key on the record refuses the line to its reader.
-        rec, dropped = _prune_record(rec)
-        gone.update(dropped)
+        # Restamp BEFORE projecting: a stale key on the record refuses the line to its reader.
+        rec, moved = _prune_record(rec)
+        gone.update(moved)
         out = _compact_record(rec)
-        if out is None and not dropped:
+        if out is None and not moved:
             lines.append(line)
             after += len(line)
             continue
@@ -433,8 +450,8 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
     for saved, name in sorted(rows, reverse=True)[:10]:
         print(f"  {saved / mb:8.2f} MB  {name}")
     if gone:
-        print("\nDropped — record keys the engine no longer declares, each of which refused")
-        print("its cycle to every reader:")
+        print("\nMoved — record keys the engine no longer declares or now requires, each of which")
+        print("refused its cycle to every reader:")
         for key, n in gone.most_common():
             print(f"  {n:4d}x  {key}")
     if not apply and touched:
@@ -443,7 +460,7 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         "cycles": touched,
         "skipped_producing": sum(skipped.values()),
         "bytes_saved": total_before - total_after,
-        "record_keys_dropped": sum(gone.values()),
+        "record_keys_moved": sum(gone.values()),
     }
 
 

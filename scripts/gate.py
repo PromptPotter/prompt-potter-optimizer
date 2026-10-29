@@ -1168,18 +1168,21 @@ def _stored_shape(text: str) -> dict[str, bool]:
 def _stored_shapes(sel: Selection) -> Outcome:
     """A commit that drops a stored key, or requires one an older document lacks, leaves every
     ledger line or pack written before it unreadable until `restamp` runs: its body says so."""
-    # A spec HEAD lacks has no document written under it.
+    missing = f"{_STORED_SPEC} is missing: `python scripts/build_specs.py` writes it"
+    if sel.commit_msg is None:
+        if not (REPO / _STORED_SPEC).is_file():
+            return 1, missing
+        after = (REPO / _STORED_SPEC).read_text(encoding="utf-8")
+    elif (shown := git("show", f":{_STORED_SPEC}"))[0]:
+        return 1, missing
+    else:
+        after = shown[1]
+    # Only the change adding the spec meets a HEAD without it: no document was written under it.
     if git("cat-file", "-e", f"HEAD:{_STORED_SPEC}")[0]:
         return 0, ""
     code, before = git("show", f"HEAD:{_STORED_SPEC}")
     if code:
         return code, before
-    if sel.commit_msg is None:
-        after = (REPO / _STORED_SPEC).read_text(encoding="utf-8")
-    elif (shown := git("show", f":{_STORED_SPEC}"))[0]:
-        return shown
-    else:
-        after = shown[1]
     was, now = _stored_shape(before), _stored_shape(after)
     moved = [f"  dropped {key}" for key in sorted(was.keys() - now.keys())] + [
         f"  newly required {key}"
@@ -1194,9 +1197,10 @@ def _stored_shapes(sel: Selection) -> Outcome:
         return 0, ""
     return 1, (
         "a stored document's shape moved, so a ledger line or a pack on disk written before it is "
-        "unreadable until `python -m promptpotter restamp --apply` prunes a dropped key (a newly "
-        "required one it cannot: its report names the campaign to delete or the pack to fix; an "
-        "install's pack is fixed by hand). Name `restamp` in the commit body:\n" + "\n".join(moved)
+        "unreadable until `python -m promptpotter restamp --apply` prunes a dropped key or fills a "
+        "newly required ledger key that admits null (any other it cannot: its report names the "
+        "campaign to delete or the pack to fix; an install's pack is fixed by hand). Name "
+        "`restamp` in the commit body:\n" + "\n".join(moved)
     )
 
 

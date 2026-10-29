@@ -109,6 +109,7 @@ export function LiveStateCard() {
           </div>
         </>
       )}
+      <BackendRevisionDrift dash={dash} />
       <BackendWarnings dash={dash} />
       <RaceCatchUpLog dash={dash} />
       <div className="lsc-charts">
@@ -139,6 +140,20 @@ function RaceCatchUpLog({ dash }: { dash: ServedDashboard | null }) {
             </div>
           );
         })}
+      </div>
+    </>
+  );
+}
+
+// Served, never refused: this launch measures on the backend as it is.
+function BackendRevisionDrift({ dash }: { dash: ServedDashboard | null }) {
+  const drift = dash?.backend_drift;
+  if (!drift) return null;
+  return (
+    <>
+      <div className="var-label">Backend revision</div>
+      <div className="payload-block">
+        <span className="log-warn">{drift}</span>
       </div>
     </>
   );

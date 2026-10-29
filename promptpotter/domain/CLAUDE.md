@@ -52,7 +52,8 @@ migration**, fatal one way or the other; which way is correct depends on the pay
 - **Ledger** (`CycleRecord` arms) — never tolerant (`infrastructure/store/read_model.py::ledger_record`);
   a retired key is pruned by `application/maintenance/restamp.py::_prune_record`.
 
-A renamed or newly required field cannot be pruned: `application/maintenance/restamp.py::check_readable`
-names each refused cycle's campaign `delete`. **A commit moving a ledger or block-pack key names
+A newly required ledger key whose type admits null is filled null by `_prune_record`, so null there
+must read as "not read"; a renamed field or any other newly required one cannot be restamped:
+`application/maintenance/restamp.py::check_readable` names each refused cycle's campaign `delete`. **A commit moving a ledger or block-pack key names
 `restamp` in its body** — the commit-msg hook's `scripts/gate.py::_stored_shapes` refuses it otherwise;
 `scripts/build_specs.py::_STORED_ROOTS` names what it watches.

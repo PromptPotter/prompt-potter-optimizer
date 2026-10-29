@@ -22,12 +22,11 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.run_records import ForkRemainder, RunWiringRecord
+from promptpotter.domain.run_records import ForkRemainder
 from promptpotter.domain.run_standing import closed_after_origin
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import Budget, CeilingMeter, MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
 from promptpotter.infrastructure.projections.live_dashboard.state import (
     DashboardFacts,
@@ -42,7 +41,6 @@ from promptpotter.infrastructure.runtime_flags import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,
-    scan_last,
     scan_ledger_verify,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
@@ -285,6 +283,11 @@ class ServedDashboard(DashboardFacts):
         "replay."
     )
     round_axis: RoundAxis
+    backend_drift: str | None = Field(
+        description="Where this launch's backend reports a revision other than the one its "
+        "connector expects, or none could be read, that in a sentence; null where it runs the "
+        "expected one or the connector checks none. A drift is served, never refused."
+    )
 
 
 class _Standing(NamedTuple):
@@ -307,9 +310,7 @@ def binding_run_limits(
     stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring yet."""
-    wiring = scan_last(
-        ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None), RunWiringRecord
-    )
+    wiring = stores.campaigns.read_run_wiring(hop)
     return None if wiring is None else _binding(stores, hop, config, run, wiring.run_limits)
 
 
@@ -493,6 +494,7 @@ def _serve(
         observed=_observed(state, live=live),
         walk=_walk(state, hop, live=live),
         round_axis=_round_axis(state, live=live),
+        backend_drift=None if state.backend_revision is None else state.backend_revision.drift(),
     )
 
 

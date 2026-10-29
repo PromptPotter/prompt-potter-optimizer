@@ -17,7 +17,7 @@ from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
 from promptpotter.domain.ruler import LevelSeries
-from promptpotter.domain.run_records import DefaultsDrift, RunWiringRecord
+from promptpotter.domain.run_records import BackendRevision, DefaultsDrift, RunWiringRecord
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
@@ -169,6 +169,8 @@ class LiveDashboardState(DashboardFacts):
     level_series: LevelSeries | None = None
     # A PLAN: an eliminator can stop a candidate before the tail is reached.
     declared_sample_order: list[int] = Field(default_factory=list)
+    # What this launch read beside what its connector expects; served only as `backend_drift`.
+    backend_revision: BackendRevision | None = None
 
     waiting_since: float | None = None
 
@@ -205,6 +207,7 @@ class LiveDashboardState(DashboardFacts):
             "langfuse_trace_url": wiring.langfuse_trace_url,
             "run_limits": wiring.run_limits,
             "defaults_drift": wiring.defaults_drift,
+            "backend_revision": wiring.backend_revision,
             "state": DashboardState.INIT,
             "optimizer_step": None,
             "measuring_arm": None,

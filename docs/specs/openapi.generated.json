@@ -14405,6 +14405,18 @@
             "title": "At Time",
             "type": "string"
           },
+          "backend_drift": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where this launch's backend reports a revision other than the one its connector expects, or none could be read, that in a sentence; null where it runs the expected one or the connector checks none. A drift is served, never refused.",
+            "title": "Backend Drift"
+          },
           "backend_retry_count": {
             "default": 0,
             "title": "Backend Retry Count",
@@ -14829,7 +14841,8 @@
           "fork_remainder",
           "observed",
           "walk",
-          "round_axis"
+          "round_axis",
+          "backend_drift"
         ],
         "title": "ServedDashboard",
         "type": "object"
@@ -20975,6 +20988,60 @@
           }
         },
         "summary": "Get Draft",
+        "tags": [
+          "Campaigns"
+        ]
+      }
+    },
+    "/api/v1/drafts/{draft_id}/optimizer-setup": {
+      "get": {
+        "description": "The knobs, pools and prompts *optimizer* runs as an arm of this check-in's head-to-head.",
+        "operationId": "get_draft_arm_setup_api_v1_drafts__draft_id__optimizer_setup_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "draft_id",
+            "required": true,
+            "schema": {
+              "title": "Draft Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The optimizer one head-to-head arm runs",
+            "in": "query",
+            "name": "optimizer",
+            "required": true,
+            "schema": {
+              "description": "The optimizer one head-to-head arm runs",
+              "title": "Optimizer",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizerSetup"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Get Draft Arm Setup",
         "tags": [
           "Campaigns"
         ]

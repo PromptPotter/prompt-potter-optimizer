@@ -1061,7 +1061,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
             declaration=declaring(rungs),
             experiment=None,
             model_capabilities={},
-            backend_revision=None,
         )
     fork_seed = parse_cycle_seed(
         ForkSeed.model_validate({"node_narrowing": {"a": rows}}),
@@ -1326,7 +1325,6 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
         declaration={},
         experiment=None,
         model_capabilities={"": {"m": floored}},
-        backend_revision=None,
     )
     with pytest.raises(ConfigDriftError) as refused:
         resolve_resume(recut, held_campaign, rows_30[:-1])

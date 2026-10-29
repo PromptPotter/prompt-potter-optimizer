@@ -17,13 +17,21 @@ acting.
     shape per act is `decisions.md` § 0009's open proposal.
   - **Today's ledgers are read by tolerance until the 2026-10-30 wipe**: the new `ResolvedRunRecord`
     fields default, and `CommandEffect`'s arms are told apart by their fields, not a tag. Make the
-    fields required and tag the union with the wipe.
+    fields required (restamp fills a nullable one null) and tag the union with the wipe.
   - **`campaign.standing_budget`'s money lives in `campaign.json`**, beside the ledger.
   - **A cycle's share has two stores**: the job file arbitrates siblings and feeds the book live, and
     `CycleShareRecord` records each move. Action: the book and the sibling sums read the record.
-  - **A backend revision unlike the connector's expected one is a log warning**
-    (`initialization/wiring.py::_verify_connector_revision`); only a resume whose origin moved names it.
   **Re-test:** each input either hashed into the declaration or written as a record.
+- **A backend revision drift is served, not refused — until a connector's numbers read the revision
+  unchecked** (`initialization/wiring.py::_read_backend_revision` → `RunWiringRecord.backend_revision`,
+  the dashboard and the readout's ⚠ line). Served, because every contract a wrong number rides is
+  checked on its own and raises (the schema, `required_observation_keys`, the package cache): a
+  revision gate would stop each backend upgrade that moved none of them, and an unreachable `/status`
+  would stop a run whose cells answer. A refusal is right only where a measurement reads the
+  backend's layout with no check of its own: harbor's `_digest` reads the task layout of its `0.22`
+  series. Action: harbor checks the layout `_digest` reads and raises, so the revision stays a fact.
+  **Re-test:** `git grep -n "EXPECTED_HARBOR_SERIES" -- promptpotter/connectors/harbor.py` still
+  stands in for a layout check.
 
 - **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
   `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
@@ -272,23 +280,24 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   naming both reaches the operator as an error, not a sentence. Action: `BlockPoolInitializer.refusal`
   names the repeated entry. **Re-test:** two account packs with one text, both named; the draft serves.
 - **A detached arm's job is the spawner's until its process adopts it**
-  (`jobs/launcher/run_job.py::spawn_job`, `jobs/registry.py::_reap_if_orphaned`): a `head-to-head`
+  (`jobs/launcher/run_job.py::spawn_jobs`, `jobs/registry.py::_reap_if_orphaned`): a `head-to-head`
   terminal killed between the spawn and the adoption leaves jobs a reconciling read releases, so the
   child's `adopt` refuses and the arm's minted cycle never runs. Action: the child holds the producer
   lock before the spawner returns. **Re-test:** kill the terminal right after its `arm …` lines; each
   arm's cycle runs or reads released with its reason.
-- **Two acts on one fresh head-to-head id race its record**: `jobs/mint.py::arm_plans` reads the
-  standing record outside any lock, so two concurrent acts each declare their own `SharedPart`.
-  Action: declare the record under the workspace lock and plan the second off it. **Re-test:** two
-  `mint-head-to-head` on one fresh id at once — one is refused off the record.
-- **A refused launch still spends its rate tokens** (`jobs/quota.py::check_launch_quotas`): the
-  bucket is debited before the slot checks that can still refuse, so a head-to-head refused
-  `machine_busy` costs all its arms' tokens. Action: debit on admission. **Re-test:** refuse N
-  launches on a full box; the next is not `rate_limited`.
-- **Two launch doors**: `jobs/launcher/launch.py::launch` (one run, may queue) and
-  `jobs/launcher/head_to_head.py::admit_head_to_head` (N arms, never queued) each request slots and
-  admit. Action: one door admitting N, queueing only when N is 1. **Re-test:** `git grep -c
-  "check_launch_quotas(" -- promptpotter/application/jobs/launcher/*.py` is 1.
+- **A single mint moves the billed ledger in before its campaign exists**
+  (`jobs/mint.py::_mint_campaign`: `adopt_ledger`, then `create_campaign`): a raise between the two
+  leaves the draft's paid ledger under a cycle no campaign owns, and `unmint` never sees it, since it
+  takes back campaign ids. Action: create the campaign first, adopt last, as `_mint_all` orders arms.
+  **Re-test:** fail `create_campaign` on a check-in Start; the draft's ledger is still the draft's.
+- **A head-to-head record holds its budget twice** (`domain/campaign.py::HeadToHeadRecord`):
+  `shared.budget` is the declared delta `_refuse_off_record` compares, `armed` the effective ceiling
+  `evidence/head_to_head.py::pair_guard` compares; two spellings of one bound read by two guards. Action: keep `armed` and
+  refuse a request off it. **Re-test:** a second act on one id with another budget is refused once.
+- **`run_preflight_checks` refuses nothing** (`application/preflight.py`): a cap
+  below one round moved to `jobs/mint.py::arm_plans`, leaving `_check_cap_funds_round` a warning
+  beside the refusal that already decides it. Action: delete the check, or make preflight the one
+  refusal. **Re-test:** `git grep -c "_check_cap_funds_round" -- promptpotter/*.py` is 0.
 - **The origin's `changes_description` embeds the checkout's absolute path** (`Origin from
   /…/origin.yaml`): a served individual names the host's filesystem, and two checkouts of one commit
   read `decisions MOVED` in `scripts/offline_run.py --against`. Action: name the dataset-relative
@@ -426,7 +435,7 @@ word's `git grep -c` for that sense is 0.
 - **Seen hardening the endpoints** (P0, 2026-10-29):
   - `main.py` CORS keeps `allow_methods=["*"]` / `allow_headers=["*"]` beside the pinned origins;
     pin them to what the routes serve.
-  - Only launches and paid calls meter a write (`quota.py::refuse_verb_rate`, `paid_call`): a free
+  - Only launches and paid calls meter a write (`quota.py::verb_rate`, `paid_call`): a free
     verb (`set-campaign-label`, `bank-snippet`) has no rate (C6).
   - Every refusal logs one WARNING (`main.py::_error_response`), so a 429 flood is a log flood.
   - `/docs` and `/openapi.json` sit outside `main.py::API_ROUTERS`, public by a comment, not by the

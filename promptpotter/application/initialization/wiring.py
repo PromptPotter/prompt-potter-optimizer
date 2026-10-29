@@ -33,6 +33,7 @@ from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InPro
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
+from promptpotter.domain.run_records import BackendRevision
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient
@@ -57,39 +58,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def _verify_connector_revision(
-    client: BackendClient,
-    connector: Connector,
-) -> str | None:
-    """The revision the backend reported, which each launch records (`ResolvedRunRecord`)."""
+async def _read_backend_revision(
+    client: BackendClient, connector: Connector
+) -> BackendRevision | None:
+    """Each launch's wiring records it, and a drift is served (the dashboard, the readout), never
+    refused: every contract a wrong number rides is checked on its own and raises — the schema,
+    the observation keys, the package cache — so a revision gate would only stop a backend
+    upgrade that moved none of them."""
     expected = connector.expected_revision
     check = connector.version_check
     if not expected or check is None:
         return None
     try:
-        actual = await check(client.http, client.base_url)
+        reported = await check(client.http, client.base_url)
     except (httpx.HTTPError, ValueError) as exc:
-        logger.warning(
-            "connector[%s]: could not verify backend revision (%s) — expected %s",
-            connector.name,
-            exc,
-            expected,
-        )
-        return None
-    if actual is None:
-        logger.warning(
-            "connector[%s]: backend did not report a revision — expected %s",
-            connector.name,
-            expected,
-        )
-    elif actual != expected:
-        logger.warning(
-            "connector[%s]: backend revision drift — expected %s, got %s",
-            connector.name,
-            expected,
-            actual,
-        )
-    return actual
+        return BackendRevision(expected=expected, reported=None, unread=type(exc).__name__)
+    return BackendRevision(expected=expected, reported=reported, unread=None)
 
 
 def _warn_if_labels_have_no_ranker(
@@ -117,7 +101,7 @@ def _verify_required_observation_keys(
     connector: Connector,
     dataset_name: str | None,
 ) -> None:
-    """RAISES, unlike its advisory revision sibling: a dropped term is a wrong number, not drift."""
+    """RAISES, unlike the served revision drift: a dropped term is a wrong number, not drift."""
     required = connector.required_observation_keys
     if not required:
         return
@@ -273,7 +257,7 @@ async def init_services(
         experiment=experiment,
     )
     _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
-    backend_revision = await _verify_connector_revision(client, connector)
+    backend_revision = await _read_backend_revision(client, connector)
     bank, candidate_library = _session_bank(
         stores, dataset, connector=connector, experiment=experiment
     )
