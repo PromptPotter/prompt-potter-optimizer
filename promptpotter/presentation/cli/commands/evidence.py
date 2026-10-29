@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import logging
 from typing import get_args
 
 from pydantic import BaseModel
@@ -28,8 +27,6 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.spend import RATE_PRICED_LABEL, SPEND_KIND_LABELS
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
-
-logger = logging.getLogger("promptpotter.presentation.cli")
 
 # Only a `delta` earns a leading `+`: on a level or a ratio it dresses the value as a lift.
 _UNIT_SPEC: dict[MetricUnit, str] = {

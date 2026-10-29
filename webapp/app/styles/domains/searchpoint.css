@@ -22,7 +22,7 @@
 .subject-headline-was{color:var(--color-text-secondary)}
 .subject-headline-cut{font-size:var(--text-xs);color:var(--color-text-secondary)}
 .subject-headline-acc,.subject-flip-line{text-decoration:underline dotted var(--color-border);text-underline-offset:3px}
-.subject-headline-acc:focus-visible,.subject-flip-line:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:3px}
+.subject-flip-line:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:3px}
 .subject-lift-card{max-width:280px}
 .subject-lift-bench{margin:0 0 3px;font-family:var(--font-mono);font-size:var(--text-sm);color:var(--color-text-primary)}
 .subject-lift-note{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}

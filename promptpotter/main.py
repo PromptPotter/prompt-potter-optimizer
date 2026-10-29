@@ -17,6 +17,7 @@ from scalar_fastapi import get_scalar_api_reference
 from starlette.exceptions import HTTPException
 from starlette.middleware.gzip import GZipMiddleware
 
+from promptpotter.application import health
 from promptpotter.application.account import record_refusal
 from promptpotter.application.datasets.startability import offer_faults
 from promptpotter.application.initialization.wiring import complete_registries
@@ -24,7 +25,8 @@ from promptpotter.application.jobs.reaper import periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
 from promptpotter.config.paths import (
-    DEFAULT_PROJECTS_ROOT,
+    default_projects_root,
+    jobs_dir,
     user_data_root,
     webapp_static_root,
 )
@@ -33,7 +35,7 @@ from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
-from promptpotter.presentation.admin_bot import notify_operator
+from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
 from promptpotter.presentation.api.deps import (
     auth_is_open,
     build_stores_from_identity,
@@ -82,6 +84,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     complete_registries()
     bundle = build_identity_bundle(default_identity_paths())
     app.state.identity_bundle = bundle
+    # Before any user can find out: what is broken is told now, not at its first use.
+    checked = await asyncio.to_thread(check_health_and_tell)
     print(
         render_server_banner(
             brand_name=settings.BRAND_SERVICE_NAME,
@@ -89,6 +93,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             data_root=user_data_root(),
             auth_open=auth_is_open(),
             providers=bundle.config.configured,
+            broken=[health.row(c) for c in checked if c.reading.state == "broken"],
             non_utf8=non_utf8_encoding(),
             offer=settings.dataset_offer,
             offer_faults=offer_faults(),
@@ -97,9 +102,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     # The registry ends cycles whose JOB is proven dead; the sweep clears dead cycles it never saw.
-    registry = JobRegistry.attach()
+    projects_root = default_projects_root()
+    registry = JobRegistry.attach(jobs_dir(projects_root))
     app.state.job_registry = registry
-    sweep_task = asyncio.create_task(periodic_sweep(DEFAULT_PROJECTS_ROOT))
+    sweep_task = asyncio.create_task(periodic_sweep(projects_root))
     yield
     sweep_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
@@ -232,7 +238,7 @@ async def routing_error_handler(request: Request, exc: HTTPException) -> JSONRes
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, _exc: Exception) -> JSONResponse:
     # `exc_info` logs the traceback beside the `error_id`, the only way back to it.
     return _error_response(
         request,
@@ -251,7 +257,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Tokens never appear past this boundary (ADR-0002): downstream code sees only IdentityContext.
+# Tokens never appear past this boundary (decisions.md § 0002): downstream code sees only IdentityContext.
 install_oidc_middleware(app)
 
 

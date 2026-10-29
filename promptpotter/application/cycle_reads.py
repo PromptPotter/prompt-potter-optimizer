@@ -13,18 +13,15 @@ from promptpotter.application.scoring.closed_rounds import campaign_scorer, clos
 from promptpotter.application.served_dashboard import WarmingDashboard, served_dashboard
 from promptpotter.application.views.render.export import ExportFiles, Provenance, export_files
 from promptpotter.config.settings import APP_VERSION
+from promptpotter.domain.arm_reading import ArmReading, ScoreboardRow
+from promptpotter.domain.arms import ArmState
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.export import ExportTier, ExportVersionError, PromptExport
 from promptpotter.domain.hierarchy import HierarchySteps
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.results import (
-    ArmReading,
-    ArmState,
-    Election,
-    ScoreboardRow,
-)
+from promptpotter.domain.results import Election
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
@@ -134,7 +131,7 @@ def served_round(
 def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFiles:
     """Every surface's export: the served tree, the served dashboard and ``export.json``, read once."""
     # A banked round names its optimizer's state kinds, which register as their packages import.
-    optimizers.registered()
+    optimizers.NODE_MEMBERS.complete()
     cycle = view_cycle(stores, path)
     hop = cycle.hop
     campaign = cycle.stores.campaigns.load_campaign(hop.campaign_id)

@@ -1,21 +1,20 @@
 # paper/ — the M14 manuscript
 
 Why this is not under `docs/`: that tree describes the system to someone working on it, and a page
-that argues about a *field* has no owner there. `docs/research/related-work.md` proves the point —
-it was folded into `methods/candidate-elimination.md`, which kept the bandit-family half and
-dropped the peer roster. This directory exists so that does not repeat.
+that argues about a *field* has no owner there. The one exception is
+[`docs/research/related-work.md`](../docs/research/related-work.md), the argument against the peers,
+which the public `README.md` links; the manuscript cites it and keeps no second copy.
 
 **What M14 is, and its rules — owned by the root [`CLAUDE.md`](../CLAUDE.md) § The closing
 directive.** Read it there. **The subject changed when M13 became the bench:** the contribution is
 that the stopping rule and the comparability guard are *executable* here and that every peer ran
 under them. Pricing a lift in wall clock and dollars is the evidence for that, no longer the claim.
 
-The three files under `related/` are recovered git blobs, and their provenance is the only fact
+The two files under `related/` are recovered git blobs, and their provenance is the only fact
 this page owns:
 
 | File | Recovered from | Why it is not in `docs/` any more |
 |---|---|---|
-| `related/related-work.md` | `git show d5f5f7e0^` | folded away; only its bandit half survived |
 | `related/algorithm-configuration-lineage.md` | `git show 69d170d1^` | deleted in a consolidation pass |
 | `related/pevol-bench.md` | `git show c0ac0c88^` | superseded by `docs/research/benchmarks.md` § PEvol-Bench, which is shorter and current |
 
@@ -24,6 +23,9 @@ from the four-optimizer head-to-head of 2026-09-28, and the EP 04 wall-clock bre
 head-to-head logs are a placeholder — the first run after the bugs they surfaced are fixed
 replaces them. `notes/ep04-findings.md` is the record of what EP 04 surfaced on its day, not
 current state.
+
+`bbeh-comparison/` is the uncontrolled reference arm — each peer run its own way on BBEH, and the
+shared export its notebooks and `notebooks/bbeh_potter.ipynb` write ([`bbeh-comparison/README.md`](bbeh-comparison/README.md)).
 
 Method sections stay where the code is: `docs/methods/` and `docs/research/benchmarks.md`. Cite
 them; copying one here is what makes two of them.
@@ -50,7 +52,7 @@ them; copying one here is what makes two of them.
 Stages close on a verification. **If something has to give, the benchmark count gives, never the
 rigor** — two benchmarks with a held-out split are citable, five with selection-biased numbers are
 the gap this paper writes about. M13's comparability run and budget dimension
-([`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) § The optimizer plug point, stages 5–6) are
+([`../docs/specs/roadmap.md`](../docs/specs/roadmap.md) § The bench (M13), stages 5–6) are
 the matrix; what follows is what the paper needs beside them.
 
 1. **The unlock — nothing runs unattended before it.** The per-cell wall-clock and spend envelope and
@@ -82,6 +84,45 @@ the matrix; what follows is what the paper needs beside them.
    break-even per arm; transfer of an evolved prompt across models.
 8. **Write** — the citation filter below, run at the outline. The full spec review M13 owes comes
    after stage 4, never beside a measurement programme.
+
+## The first runs to publish
+
+The site's `/benchmarks` page shows a protocol and a roster and publishes no optimized result. The
+rules these runs rest on are [`../docs/research/benchmarks.md`](../docs/research/benchmarks.md).
+
+| # | Run | Who it convinces, and why |
+|---|---|---|
+| 1 | `justlogic/d234-held`, potter alone: `noise-floor --k 3` on the origin, one full campaign, then `bench`. | **The sceptic.** Synthetic, so no contamination; balanced labels, so no shortcut; scored on rows the search never saw, the noise floor beside the gain; the cheapest model, so anyone can repeat it. |
+| 2 | The same dataset as a head-to-head: `new --arm` for potter and capo, then gepa and levi. | **The researcher comparing optimizers.** The first table where only the optimizer differs. |
+| 3 | `gsm8k`: one measured origin pass at the pinned model, then a campaign scored on 200 or more test rows. | **The researcher and the buyer.** CAPO's published 78.1 → 93.7 is the number ours is held against. The solver is `benchmarks.md` § Order of use's GSM8K row. |
+| 4 | `sealqa/longseal-12`, all 254 tasks, skill opened, judge-graded. | **The agent builder.** The paper gives a no-skill figure and a ceiling, so the result lands between two numbers we did not choose. |
+| 5 | `lca-termnorm`, one campaign on the multi-step pipeline. | **The practitioner with a real pipeline.** The only run where settings move beside wording. Publish only if the rows may be shown. |
+
+Two cheap additions: re-measure the BBEH origin on the model `dataset.yaml::pipeline` pins, and the
+"L1 only" arm against the full ladder on run 1.
+
+**Each run leaves one folder under `paper/evidence/<date>-<dataset>/`**: `export.json` (the `bench`
+block plus `dataset_hash`, `treatment`, `stop_reason`, `tool_version`), `index.json`,
+`dashboard.json`, `rounds/` and `hard_samples.json`, the `launch_clock` records, the `dataset.yaml`
+used, the exact commands and the `noise-floor` output. The site adds one `src/data/results.ts` entry
+linking that `export.json`, and prints nothing a file does not state.
+
+**The minimum report per run:** dataset, cut and `dataset_hash`; model, provider, settings; rows
+searched and held out, with the split seed; origin and optimized score on the held-out rows, with
+the interval; the noise floor; rounds run and `rounds_to_separable`; dollars (with the price date),
+tokens, calls, wall clock; `reads_before`; seeds and repeats. A run done once says "one run".
+
+**A head-to-head needs** one model for every arm, stamped from the wire; the same held-out rows and
+one grader; the budget matched in spent tokens and reported as an axis; every arm's defaults
+stated, each peer run its own way once as the uncontrolled reference; paired per-row differences
+with an interval; rows where we lose kept in the table.
+
+**Never published:** a figure from fewer than 200 rows, or any tuning reading
+(`benchmarks.md` § Protocol); in-campaign fitness, the round banner or the dashboard headline
+(`benchmarks.md` § The winner's own number); a BBEH comparison before model and grader match; two
+cuts or two models in one row; a gain under the noise floor as anything but "no measurable
+change"; anything from `promptpotter-self/e2e`, a fixture; the figures the site removed on
+2026-10-11 (REMOVED in its `results.ts`).
 
 ## The citation filter — run it at the outline, not at the end
 

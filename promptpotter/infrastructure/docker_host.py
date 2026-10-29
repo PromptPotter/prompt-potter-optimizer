@@ -14,7 +14,7 @@ from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.shared.errors import CellInfrastructureError
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterable, Iterator, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +135,10 @@ def forget_package_cache() -> None:
     _package_cache_running = False
 
 
-def _producer_is_dead(home: Path, token: str) -> bool:
+def _dead_producers(home: Path, labelled: Iterable[str]) -> set[str]:
+    tokens = {*labelled, *(d.name for d in home.iterdir() if d.is_dir())} - {CONTAINER_PRODUCER}
     # The lock, never an mtime: a cell runs for minutes writing nothing.
-    return not producer_lock.held(home / token / _PRODUCER_LOCK)
+    return {token for token in tokens if not producer_lock.held(home / token / _PRODUCER_LOCK)}
 
 
 async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> None:
@@ -158,11 +159,7 @@ async def reap_dead_producers(home: Path, *, compose_overlay: Path | None) -> No
         # Unlabelled yet naming our overlay is nobody's: nothing this code starts is unlabelled.
         elif ours is not None and ours in compose_files.lower():
             gone.append(cid)
-    for token in by_token.keys() | {d.name for d in home.iterdir() if d.is_dir()}:
-        if token == CONTAINER_PRODUCER or not await asyncio.to_thread(
-            _producer_is_dead, home, token
-        ):
-            continue
+    for token in await asyncio.to_thread(_dead_producers, home, by_token):
         gone += by_token.get(token, [])
         with contextlib.suppress(OSError):
             await asyncio.to_thread(rmtree_robust, home / token)

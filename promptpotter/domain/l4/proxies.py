@@ -5,10 +5,11 @@ from collections.abc import Callable, Iterable, Sequence
 
 from pydantic import Field
 
+from promptpotter.domain.arms import Cut
 from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_TOOLING
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
-from promptpotter.domain.results import Cut, CycleResult, RoundResult
+from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import PIPELINE_KEYS, GradedCell, PipelineData
 from promptpotter.domain.strict_model import FrozenModel

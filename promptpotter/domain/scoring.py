@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import math
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -52,7 +53,14 @@ ANSWER_SPACE_CAP: Annotated[int, shapes_optimizer_prompt] = 10
 
 
 class TurnRecord(TypedDict, total=False):
-    """ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``."""
+    """ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``.
+
+    A connector projects a published turn format, never authors one, and parses it as plain JSON so
+    an upstream field degrades the record instead of raising in a paid cell. A turn carries the STEP
+    it served and never becomes one: per-step rewards ride as terms beside the cell's aggregate, and
+    a turn ordinal is not an item. No ``turns`` key is no turn concept; ``[]`` is none happened.
+    ``reasoning_trace`` holds what the agent DECIDED: ``user`` turns and environment output stay out.
+    """
 
     index: int
     # ``system`` | ``user`` | ``agent`` — ATIF's ``source``.
@@ -334,6 +342,47 @@ _CELL = WireRecord.of(
     "A :class:`MeasuredCell` on the wire, as :meth:`MeasuredCell.wire` writes it.",
 )
 
+_SAYS_EVERYTHING = MeasuredCell(
+    sample_key="k",
+    query="q",
+    ground_truth="g",
+    predicted="p",
+    error="e",
+    error_category=ErrorCategory.SERVER,
+    cached=True,
+    answer="f.a",
+    retry_of_degraded=True,
+    rerun_comparison={"hit_change": "MISS->HIT", "rank_change": None, "improved": True},
+    degraded_obs_count=2,
+    pipeline=PipelineData(
+        total_time=0.0,
+        terminal_node="n",
+        step_timings={"n": 1.5},
+        step_tokens={
+            "n": StepUsage(input=3, output=4, estimated=True, cost_usd=0.5, model="m", reasoning=0),
+            "silent": StepUsage(),
+        },
+        diagnostics=Diagnostics(
+            step_statuses={"n": "degraded"},
+            warnings=(
+                NodeWarning("n", "c", "m", "transient", (1, {"a": 2}), {"x": 1}),
+                NodeWarning(),
+            ),
+        ),
+        result_ranking=(),
+        turns=({"index": 0},),
+        step_phases={},
+        judge_readings={"t": JudgeReading(), "u": JudgeReading("label", "why")},
+        target_prompt_chars=0,
+        observations={"final_ranking": [1], "env_reward": 0.0, "opened": False},
+    ),
+)
+assert all(
+    MeasuredCell.from_wire(wired := json.loads(json.dumps(cell.wire()))) == cell
+    and MeasuredCell.from_wire(wired).wire() == wired
+    for cell in (_SAYS_EVERYTHING, MeasuredCell(sample_key="k"))
+), "a field of a measured cell does not survive its own wire"
+
 
 # What `archive_maintenance.py` may move to the cold store.
 # No ranking may join: a row cannot tell a MOVED ranking from an empty one, so it grades a miss.
@@ -584,7 +633,7 @@ CellGrade = Literal["fitness", "objective"]
 DEFAULT_SCORER_ID = "default_hit"
 
 # Every pass size — a definition's, a derived default's, a request's — is bounded here:
-# docs/adr/0010-every-paid-pass-lean-stoppable-visible.md.
+# docs/decisions.md § 0010.
 MAX_PASS_ROWS: Annotated[int, shapes_optimizer_prompt] = 150
 
 HIT_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 1.0

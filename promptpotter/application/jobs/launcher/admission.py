@@ -71,8 +71,8 @@ from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
+    from promptpotter.domain.campaign_config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingE
     # A campaign that outlived its dataset dir: ``connectors.get`` is strict and would raise.
     if not backend_type:
         return None
-    connector = connectors.get(backend_type)
+    connector = connectors.CONNECTORS.get(backend_type)
     if connector.extra is not None and (absent := missing(connector.extra)):
         return MissingExtraError(connector.extra, absent)
     if connector.preflight is None:
@@ -370,7 +370,7 @@ async def embedded_share(
     step_rounds: int | None,
 ) -> AsyncIterator[tuple[str, HeldBudget]]:
     """A launch's admission with no slot, entered BEFORE anything paid: the job, then its hold."""
-    job_registry = JobRegistry.attach()
+    job_registry = JobRegistry.attach(stores.jobs_dir)
     job = job_registry.create(
         user_id=str(stores.identity.user_id),
         principal_id=acting_principal(stores.identity).id,
@@ -408,7 +408,7 @@ def inner_share(
     enclosing = bound_spend_book()
     if enclosing is None:
         raise RuntimeError("an inner run spawns only under its enclosing run's book")
-    job_registry = JobRegistry.attach()
+    job_registry = JobRegistry.attach(stores.jobs_dir)
     job = job_registry.create(
         user_id=str(stores.identity.user_id),
         principal_id=acting_principal(stores.identity).id,
@@ -449,7 +449,7 @@ async def paid_pass(
     *, stores: Stores, verb: ScoringVerb, hop: CycleHop | None, declared: Budget
 ) -> AsyncIterator[SpendBook]:
     """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops it."""
-    job_registry = JobRegistry.attach()
+    job_registry = JobRegistry.attach(stores.jobs_dir)
     job = await asyncio.to_thread(
         request_job,
         stores=stores,

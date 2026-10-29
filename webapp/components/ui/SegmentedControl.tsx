@@ -9,7 +9,7 @@ export interface Segment<T extends string> {
   ariaLabel?: string;
   title?: string;
   disabled?: boolean;
-  fill?: "full" | "part";
+  fill?: "full" | "part" | undefined;
 }
 
 export function SegmentedControl<T extends string>({

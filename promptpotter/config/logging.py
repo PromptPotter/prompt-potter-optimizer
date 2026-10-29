@@ -81,8 +81,16 @@ def setup_logging(
         # Deep layers stay quiet: the presentation layer prints the summary.
         logging.getLogger("promptpotter.application").setLevel(logging.WARNING)
         logging.getLogger("promptpotter.infrastructure").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn.access").addFilter(_QuietPolls())
-    logging.getLogger("uvicorn.access").addFilter(_CallbackPathOnly())
+    access = logging.getLogger("uvicorn.access")
+    access.addFilter(_QuietPolls())
+    access.addFilter(_CallbackPathOnly())
+    callback = ("127.0.0.1:1", "GET", "/api/v1/auth/callback/google?code=c", "1.1", 303)
+    line = logging.LogRecord(
+        "uvicorn.access", logging.INFO, "", 0, "%s %s %s %s %d", callback, None
+    )
+    assert access.filter(line) and "code=" not in line.getMessage(), (
+        "the access log keeps a sign-in's one-time code"
+    )
 
 
 def silence_proactor_disconnect_noise() -> None:

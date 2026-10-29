@@ -12,8 +12,8 @@ from promptpotter.application.initialization.loop_start import (
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.diagnostic_run import DiagnosticRunRecord, RescoreCount
 from promptpotter.domain.measurement_provenance import RunSource
-from promptpotter.domain.results import DiagnosticRunRecord, RescoreCount
 from promptpotter.domain.spend import Budget
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import DiagnosticError

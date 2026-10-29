@@ -9,7 +9,7 @@ import { pathOfAddress } from "@/lib/ids";
 import { useViewedLineage } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
 
-export interface CompareWithOrigin {
+interface CompareWithOrigin {
   run: (() => void) | null;
   originLabel: string | null;
   /** ORIGIN first; one entry while the point IS the origin. Stable per pair, so it can key a read. */

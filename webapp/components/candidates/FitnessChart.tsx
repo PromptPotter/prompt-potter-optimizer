@@ -58,9 +58,9 @@ const barCapsPlugin: Plugin<
 > = {
   id: "barCaps",
   afterDatasetsDraw(chart, _args, opts) {
-    const counts = opts?.counts;
+    const counts = opts.counts;
     const xScale = chart.scales.x;
-    if (!counts || !xScale) return;
+    if (!xScale) return;
     const { ctx, chartArea } = chart;
     // Bar channels only: letting the cache line into the minimum drags the caption onto the dash.
     const topOf = (i: number): number => {
@@ -84,7 +84,7 @@ const barCapsPlugin: Plugin<
       ctx.fillStyle = getCss("--color-text-secondary");
       ctx.fillText(String(n), xScale.getPixelForValue(i), Math.max(topY - 4, chartArea.top + 10));
     });
-    const w = opts?.parent;
+    const w = opts.parent;
     if (w != null && w >= 0) {
       const topY = topOf(w);
       if (Number.isFinite(topY)) {
@@ -92,7 +92,7 @@ const barCapsPlugin: Plugin<
         ctx.fillStyle = getCss("--color-accent");
         const capY = counts[w] != null ? topY - 15 : topY - 4;
         ctx.fillText(
-          `${CROWN}${opts?.crown ?? ""}`,
+          `${CROWN}${opts.crown}`,
           xScale.getPixelForValue(w),
           Math.max(capY, chartArea.top + 10),
         );
@@ -139,7 +139,7 @@ function drawRibbons(chart: ChartJS, bands: WhiskerBand[]): void {
     for (let i = 0; i < band.lo.length; i++) {
       const lo = band.lo[i];
       const hi = band.hi[i];
-      const x = points[i]?.getProps?.(["x"], true)?.x;
+      const x = points[i]?.getProps?.(["x"], true).x;
       if (lo == null || hi == null || typeof x !== "number") {
         close();
         continue;
@@ -157,12 +157,12 @@ const isMark = (label: unknown): boolean => seriesByKey(String(label ?? ""))?.ki
 const ciWhiskerPlugin: Plugin<"bar", BandOpts> = {
   id: "ciWhisker",
   beforeDatasetsDraw(chart, _args, opts) {
-    const ribbons = opts?.bands?.filter((b) => !isMark(b.anchor));
-    if (opts?.shaded && ribbons?.length) drawRibbons(chart, ribbons);
+    const ribbons = opts.bands.filter((b) => !isMark(b.anchor));
+    if (opts.shaded && ribbons.length) drawRibbons(chart, ribbons);
   },
   afterDatasetsDraw(chart, _args, opts) {
-    const bands = opts?.shaded ? opts.bands?.filter((b) => isMark(b.anchor)) : opts?.bands;
-    if (!bands?.length) return;
+    const bands = opts.shaded ? opts.bands.filter((b) => isMark(b.anchor)) : opts.bands;
+    if (!bands.length) return;
     const { ctx } = chart;
     ctx.save();
     ctx.strokeStyle = getCss("--color-ci");
@@ -180,7 +180,7 @@ const ciWhiskerPlugin: Plugin<"bar", BandOpts> = {
         const el = bars.data[i] as
           | { getProps?: (p: string[], final: boolean) => Record<string, number> }
           | undefined;
-        const x = el?.getProps?.(["x"], true)?.x;
+        const x = el?.getProps?.(["x"], true).x;
         if (typeof x !== "number") continue;
         // No clamp: the server clips `mean_fitness_ci` to [0,1] and θ's axis is fitted to its data.
         const yLo = yScale.getPixelForValue(lo);
@@ -202,7 +202,7 @@ const ciWhiskerPlugin: Plugin<"bar", BandOpts> = {
 const divergenceLinePlugin: Plugin<"bar", { index: number | null }> = {
   id: "divergenceLine",
   afterDatasetsDraw(chart, _args, opts) {
-    const idx = opts?.index;
+    const idx = opts.index;
     if (idx == null || idx < 0) return;
     const xScale = chart.scales.x;
     if (!xScale) return;
@@ -239,7 +239,7 @@ function nextPulseFrame(chart: ChartJS): void {
     chart,
     requestAnimationFrame(() => {
       pulseRaf.delete(chart);
-      if (chart.ctx) chart.draw();
+      chart.draw();
     }),
   );
 }
@@ -247,10 +247,9 @@ function nextPulseFrame(chart: ChartJS): void {
 const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
   id: "inFlightPulse",
   afterDatasetsDraw(chart, _args, opts) {
-    const idx = opts?.index;
+    const idx = opts.index;
     if (idx == null || idx < 0) return;
     const { ctx } = chart;
-    if (!ctx) return;
     let left = Infinity;
     let right = -Infinity;
     let top = Infinity;
@@ -307,9 +306,9 @@ type MarkEl = { x: number; y: number; skip?: boolean };
 const verificationMarksPlugin: Plugin<"bar", MarkOpts> = {
   id: "verificationMarks",
   afterDatasetsUpdate(chart, _args, opts) {
-    const rows = opts?.marks;
+    const rows = opts.marks;
     const xScale = chart.scales.x;
-    if (!rows?.length || !xScale) return;
+    if (!rows.length || !xScale) return;
     const bars = chart.data.datasets.flatMap((ds, di) =>
       seriesByKey(String(ds.label ?? ""))?.kind === "bar" ? [chart.getDatasetMeta(di)] : [],
     );
@@ -330,8 +329,8 @@ const verificationMarksPlugin: Plugin<"bar", MarkOpts> = {
     });
   },
   afterDatasetsDraw(chart, _args, opts) {
-    const rows = opts?.marks;
-    if (!rows?.length) return;
+    const rows = opts.marks;
+    if (!rows.length) return;
     const { ctx } = chart;
     const t = 0.5 + 0.5 * Math.cos((Date.now() / MARK_PULSE_MS) * Math.PI * 2);
     let pulsing = false;
@@ -343,9 +342,9 @@ const verificationMarksPlugin: Plugin<"bar", MarkOpts> = {
       if (di < 0 || typeof ink !== "string") continue;
       ctx.strokeStyle = ink;
       ctx.fillStyle = ink;
-      chart.getDatasetMeta(di).data.forEach((el, i) => {
+      for (const [i, el] of chart.getDatasetMeta(di).data.entries()) {
         const { x, y, skip } = el as unknown as MarkEl;
-        if (skip || !Number.isFinite(x) || !Number.isFinite(y)) return;
+        if (skip || !Number.isFinite(x) || !Number.isFinite(y)) continue;
         const running = row.running[i] === true;
         pulsing ||= running && !opts.still;
         ctx.globalAlpha = !running ? 1 : opts.still ? 0.6 : 0.35 + 0.65 * t;
@@ -357,7 +356,7 @@ const verificationMarksPlugin: Plugin<"bar", MarkOpts> = {
         ctx.closePath();
         if (row.filled) ctx.fill();
         ctx.stroke();
-      });
+      }
     }
     ctx.restore();
     if (pulsing) nextPulseFrame(chart);
@@ -369,8 +368,8 @@ const HEX_R = 4;
 const partialPanelsPlugin: Plugin<"bar", { short: boolean[]; picked: number | null }> = {
   id: "partialPanels",
   afterDatasetsDraw(chart, _args, opts) {
-    const short = opts?.short;
-    if (!short?.some(Boolean)) return;
+    const short = opts.short;
+    if (!short.some(Boolean)) return;
     const { ctx } = chart;
     ctx.save();
     ctx.lineWidth = 1.4;
@@ -401,9 +400,9 @@ const partialPanelsPlugin: Plugin<"bar", { short: boolean[]; picked: number | nu
 const xBridgePlugin: Plugin<"bar", { onGeometry: (g: PlotGeometry) => void }> = {
   id: "xBridge",
   afterLayout(chart, _args, opts) {
-    const emit = opts?.onGeometry;
+    const emit = opts.onGeometry;
     const x = chart.scales.x;
-    if (!emit || !x) return;
+    if (!x) return;
     const { left, right, width } = chart.chartArea;
     // A zero-width (hidden) card keeps the last good geometry; re-showing fires a resize.
     if (!(width > 0)) return;
@@ -597,7 +596,7 @@ export const FitnessChart = memo(function FitnessChart({
     maintainAspectRatio: false,
     animation: asLines ? lineMotion(reducedMotion) : false,
     onClick: (_evt, elements) => {
-      const hit = elements?.[0];
+      const hit = elements[0];
       if (!hit) return;
       const view = views[hit.index];
       if (!view) return;
@@ -607,7 +606,7 @@ export const FitnessChart = memo(function FitnessChart({
     onHover: (evt, elements) => {
       const target = (evt.native?.target ?? null) as HTMLElement | null;
       if (!target) return;
-      target.style.cursor = elements?.[0] ? "pointer" : "default";
+      target.style.cursor = elements[0] ? "pointer" : "default";
     },
     scales: {
       x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === parentIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : 11, family: getCss("--font-mono"), weight: t.index === parentIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
@@ -670,7 +669,7 @@ export const FitnessChart = memo(function FitnessChart({
               lines.push(`accuracy 95% CI [${ciLo.toFixed(3)}, ${ciHi.toFixed(3)}]`);
             }
             const lift = liftOf(reading?.vs_reference ?? null);
-            if (lift != null && lift.ci_lo != null && lift.ci_hi != null) {
+            if (lift != null) {
               const flat = lift.side === "spans" ? ` — ${NOT_SEPARABLE}` : "";
               lines.push(
                 `accuracy lift vs parent ${fmtSigned(lift.value)} [${fmtSigned(lift.ci_lo)}, ${fmtSigned(lift.ci_hi)}]${flat}`,

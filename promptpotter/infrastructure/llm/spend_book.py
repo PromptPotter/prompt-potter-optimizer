@@ -848,7 +848,7 @@ class _HoldTrail:
         self._labels: dict[str, CallLabel] = {}
         self._bills: dict[str, tuple[float, int]] = {}
 
-    def feed(self, offset: int, record: HoldTrailRecord) -> None:
+    def feed(self, record: HoldTrailRecord) -> None:
         self._held.track(record)
         if isinstance(record, SpendHoldRecord):
             self._labels[record.hold_id] = CallLabel(record.node, record.kind)

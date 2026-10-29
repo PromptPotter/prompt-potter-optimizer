@@ -12,16 +12,10 @@ from promptpotter.application.views.render.primitives import (
     fmt_ci,
     fmt_pct,
 )
+from promptpotter.domain.arms import Broken, Concluded, Cut, arm_elimination, arm_end
 from promptpotter.domain.candidate_diff import flatten_sp_summary
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit, unit_count
-from promptpotter.domain.results import (
-    Broken,
-    Concluded,
-    Cut,
-    ScoreSummary,
-    arm_elimination,
-    arm_end,
-)
 from promptpotter.shared.answer_text import truncate
 from promptpotter.shared.composite import render_composite_fitness_oneliner
 

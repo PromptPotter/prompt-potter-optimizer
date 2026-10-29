@@ -121,7 +121,7 @@ class Compare(FrozenModel):
     arm: Arm
 
 
-# What a run is FOR (ADR-0009), declared once: every scope, stamp and meter derives from it.
+# What a run is FOR (decisions.md § 0009), declared once: every scope, stamp and meter derives from it.
 Purpose = Annotated[Optimize | Compare, Field(discriminator="kind")]
 
 
@@ -251,16 +251,6 @@ def ceiling_meter(purpose: Purpose) -> CeilingMeter:
             return "bill"
         case Compare():
             return "search_incurred"
-        case _:
-            assert_never(purpose)
-
-
-def comparison_line(purpose: Purpose) -> str:
-    match purpose:
-        case Optimize():
-            return "not controlled — optimizes with every measurement and steer"
-        case Compare(arm=arm):
-            return f"controlled — arm {arm.arm_key} of head-to-head {arm.head_to_head_id}"
         case _:
             assert_never(purpose)
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import Field, field_validator
 
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.bench import BenchTrigger, DatasetSplit
 from promptpotter.domain.campaign import (
     DeterminismClamp,
@@ -15,13 +16,13 @@ from promptpotter.domain.campaign import (
     RunDeclaration,
     StoppingRule,
 )
+from promptpotter.domain.cells import HardSampleOrder
+from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
-from promptpotter.domain.results import DisplayMetric, HardSampleOrder
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.judges.protocol import JudgeSpec
 
 if TYPE_CHECKING:
     from promptpotter.domain.run_records import ConfigOverrides, CycleSeed
@@ -111,7 +112,7 @@ class LivesConfig(StrictModel):
 
     @property
     def bank(self) -> tuple[int, int]:
-        """``(start, cap)``, as ``domain/results.py::stalls_left`` folds it."""
+        """``(start, cap)``, as ``domain/run_standing.py::stalls_left`` folds it."""
         return (self.start, self.cap)
 
 
@@ -354,9 +355,10 @@ class CampaignConfig(StrictModel):
         default_factory=dict,
         description="Per-node declaration over the dataset's optimizer search space — the "
         "per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). "
-        "`provider`/`route_order` are always locked. **`param_keys` SUBSETS and "
-        "`param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline "
-        "setup): a campaign may only close axes the dataset opened, but the value space is "
+        "`provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, "
+        "`prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` "
+        "REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only "
+        "close axes the dataset opened, but the value space is "
         "its own statement — which is what lets an operator ADD a model or a reasoning rung "
         "no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE "
         "permitted model set: what the optimizer may pick, and what a human fork may steer to "
@@ -446,14 +448,14 @@ class CampaignConfig(StrictModel):
 
     optimization: OptimizationConfig
 
-    def identity(self) -> dict[str, Any]:
+    def identity(self) -> dict[str, object]:
         """What this config adds to a cell's identity beside its optimizer's ``Treatment``, which
         resolves ``optimizer`` and ``nodes`` against the manifest: less those, and less every
         default, so which file states a value — or whether one restates a default — moves no cell."""
         return self.model_dump(mode="json", exclude_defaults=True, exclude=_TREATMENT_OWNED)
 
 
-def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
+def merge_config_layers(base: dict[str, object], over: Mapping[str, object]) -> dict[str, object]:
     """Depth-first; a layer naming another ``optimizer`` drops the base's ``nodes``, which addressed the old one."""
     base_opt = base.get("optimization")
     over_opt = over.get("optimization")
@@ -464,7 +466,7 @@ def merge_config_layers(base: dict[str, Any], over: Mapping[str, Any]) -> dict[s
     return _merge_dicts(base, over)
 
 
-def _merge_dicts(base: dict[str, Any], over: Mapping[str, Any]) -> dict[str, Any]:
+def _merge_dicts(base: dict[str, object], over: Mapping[str, object]) -> dict[str, object]:
     out = dict(base)
     for key, value in over.items():
         current = out.get(key)

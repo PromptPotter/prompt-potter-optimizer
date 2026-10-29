@@ -100,7 +100,7 @@ def has_capability(identity: IdentityContext, capability: str) -> bool:
 
 
 def require_capability(identity: IdentityContext, capability: str, *, subject: str) -> None:
-    """Raises 404, never 403: ADR-0005's existence-hiding posture."""
+    """Raises 404, never 403: the existence-hiding posture (decisions.md § 0005)."""
     if has_capability(identity, capability):
         return
     logger.warning(

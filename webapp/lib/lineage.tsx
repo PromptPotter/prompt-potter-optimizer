@@ -28,7 +28,7 @@ export interface CampaignTree {
 
 const EMPTY: CampaignTree = { root: null, loaded: false, failed: false };
 
-export interface ViewedLineage {
+interface ViewedLineage {
   tree: SubtreeCampaign | null;
   index: LineageIndex;
   // "" (off), "score:<formula>", or "abort:<variant>"; the open scoring-mask panel overrides it.

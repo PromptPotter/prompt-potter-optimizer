@@ -5,26 +5,26 @@ from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import Field
 
+from promptpotter.domain.arm_reading import ArmReading
+from promptpotter.domain.arms import arm_name
 from promptpotter.domain.bench import BandedValue, BenchReading
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import NodePrompt
-from promptpotter.domain.paired_reading import ArmKey, ArmName
-from promptpotter.domain.results import (
-    ArmReading,
-    HealthGrade,
+from promptpotter.domain.origin_panel import (
     LineRate,
-    OptimizerFact,
     OverlapReading,
-    VerifyReading,
-    arm_name,
     line_by_individual,
     overlap_line,
 )
+from promptpotter.domain.paired_reading import ArmKey, ArmName
+from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import critical_health_title
+from promptpotter.domain.round_health import HealthGrade
 from promptpotter.domain.ruler import AbilityReading, LevelSeries, SeriesReading
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.domain.verify_pass import VerifyReading
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -243,8 +243,8 @@ class RoundSummary(FrozenModel):
     candidates: list[DashboardCandidate] = Field(default_factory=list)
     # Measurement order, off the longest candidate sequence: PoBB truncates losers.
     selection: list[int] = Field(default_factory=list)
-    # ``None`` only when the round measured zero samples. Rendered, never recomputed.
-    health: RoundHealth | None = None
+    # Rendered, never recomputed.
+    health: RoundHealth
     health_alert: str | None = Field(
         default=None,
         description="The alert a `critical` `health` raises, worded "
@@ -288,9 +288,7 @@ class RoundSummary(FrozenModel):
                 if reading.role != MeasurementRole.PARENT
             ],
             selection=list(dict.fromkeys(closed.positions[key] for key, _, _ in longest)),
-            health=None
-            if health is None
-            else RoundHealth(grade=health.grade, suggested_action=health.suggested_action),
+            health=RoundHealth(grade=health.grade, suggested_action=health.suggested_action),
             health_alert=critical_health_title(closed.round, health),
             overlap=closed.overlap,
             panel_precision=closed.panel_precision,

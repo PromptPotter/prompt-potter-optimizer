@@ -11,14 +11,14 @@ from typing import TYPE_CHECKING
 from promptpotter.application.bench.resume_and_fork.decisions import (
     record_decision,
 )
-from promptpotter.application.campaign_config import effective_config
 from promptpotter.application.served_dashboard import fork_remainder
+from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import (
-    FORK_TRAITS,
+    FORK_DIRECTION,
     BenchCheckpointKind,
     ForkDirection,
     ForkSpec,
@@ -174,8 +174,9 @@ def mint_fork(
     seed: CycleSeed | None = None,
 ) -> str:
     """``fork_from_round`` is how many parent rounds the cut lifts, recorded as its ``cut_round``."""
-    # A cut continuing no scale branches from the origin and lifts no parent round.
-    if not FORK_TRAITS[trigger].continues_scale and fork_from_round != 0:
+    direction = FORK_DIRECTION[trigger]
+    # Only a superseding cut continues the parent's line, so only it lifts the parent's rounds.
+    if direction is not ForkDirection.SUPERSEDE and fork_from_round != 0:
         raise ValueError(
             f"mint_fork({trigger.value}) branches from the origin and lifts no parent "
             f"round, so fork_from_round must be 0; got {fork_from_round}"
@@ -198,7 +199,7 @@ def mint_fork(
         payload=payload,
     )
     # An offshoot's parent keeps running, hence the DIRECTION.
-    if payload.traits.direction is ForkDirection.SUPERSEDE:
+    if direction is ForkDirection.SUPERSEDE:
         campaign_store.mark_superseded(parent, child.cycle_id)
     return child.cycle_id
 
@@ -219,8 +220,8 @@ def declare_steered_values(
             steered = str(value)
             values[param] = [steered, *(v for v in listed.get(param) or () if v != steered)]
         if values:
-            declared[node] = NodeSearchNarrowing(
-                param_keys=own.param_keys if own else None, param_allowed_values=values
+            declared[node] = (own or NodeSearchNarrowing()).model_copy(
+                update={"param_allowed_values": values}
             )
     return seed.model_copy(update={"optimizer_narrowing": declared})
 

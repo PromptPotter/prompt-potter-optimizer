@@ -97,12 +97,12 @@ export function useHardSamples(): HardSamples {
 export interface CellsPreset {
   path?: CyclePath;
   datasetName?: string;
-  candidateId?: string;
+  candidateId?: string | undefined;
   round?: number;
   scope?: HardSamplesScope;
 }
 
-export type PresetCells = Pick<
+type PresetCells = Pick<
   HardSamples,
   | "datasetName"
   | "items"

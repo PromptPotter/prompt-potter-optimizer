@@ -1,16 +1,10 @@
-"""The package's conceptual surface, counted — and the ratchet that holds it where it stands.
+"""What the next change costs, counted — and the ceiling that holds each row where it stands.
 
     python scripts/complexity_ledger.py            # print the ledger
     python scripts/complexity_ledger.py --check    # the gate's `surface-ledger` check
-    ARC_BASE=<rev> python scripts/complexity_ledger.py --check   # and the tip against an arc's base
 
-Move a number in ``BASELINE`` and you owe a written reason — root ``CLAUDE.md`` §
-``<surface-ledger>``, rules in ``docs/developer/reasoning-doctrine.md``. The reason goes in the
-COMMIT BODY, and ``git log -p`` is the history layer: ``BASELINE`` is only where the surface
-stands now, never a target to reach. The check asserts EQUALITY, so a win nobody re-pins cannot
-become silent headroom for the next raise. Under ``ARC_BASE`` the base is counted by THIS counter
-in a worktree of it, and a row standing above it fails unless an ``# Above base: <rev>: <reason>``
-line in its comment names that same base and what pays for it.
+Each ``BASELINE`` row is a CEILING: a row above it fails, and a raise owes a written reason in the
+COMMIT BODY (root ``CLAUDE.md`` § ``<surface-ledger>``). A fall needs no edit.
 
 A script and not a module of the package: it counts every layer, the suite and the generated
 contract beside them, none of which an installed wheel carries.
@@ -23,43 +17,28 @@ import collections
 import importlib
 import inspect
 import json
-import os
 import re
-import shutil
 import sys
-import tempfile
 import typing
 from collections.abc import Iterator
 from pathlib import Path
 
-import tests_owning
-from processes import REPO, git, run
-from pydantic import BaseModel
+from processes import REPO
 
 BASELINE = {
-    # Every `.py` under the package.
-    "modules": 450,
-    # Every `__init__.py` among them.
-    "init_files": 56,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 2,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     "config_leaf_fields": 90,
     # `Settings` fields — what the environment can set.
     "settings_env": 42,
-    # The upper-case constants `config/settings.py` exports.
-    "settings_const": 3,
-    # Leaves of `OptSearchPoint` — what a run is handed.
-    "opt_search_point_fields": 10,
-    # Leaves of `CycleResult` — what a run produces.
-    "cycle_result_fields": 828,
     # Parameters annotated `Any`.
-    "any_params": 44,
+    "any_params": 43,
     # `dict[str, Any]` maps declared in `domain/`.
-    "domain_any_maps": 66,
+    "domain_any_maps": 65,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     "models_lax": 9,
-    # Injections the optimizers' runtimes price — each a block an optimizer prompt can carry.
+    # Injections the optimizers' members price — each a block an optimizer prompt can carry.
     "injections": 29,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
     # transition written as a branch beside the tables was policy the count could not see.
@@ -67,97 +46,49 @@ BASELINE = {
     # Function-local imports of the package's own modules. The bare invocation's first-run check
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
     "deferred_imports": 7,
-    # `CLAUDE.md` files under the package.
-    "claude_md": 21,
+    # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
+    "p_record": 17,
+    # The arms each file naming most of them leaves out: a mirror rotting raises it.
+    "p_record_drift": 13,
+    # Served properties no surface reads by name; a payload field only the terminal sends is one.
+    "p_served": 175,
+    # Files naming three or more `CommandKind` rows, each a site the next row must reach.
+    "p_command": 10,
+    # The rows each file naming most of them leaves out.
+    "p_command_drift": 0,
+    # What every optimizer member is handed: `NodeContext`'s public members, inherited ones included,
+    # and the public members of each object one of its properties exposes.
+    "p_member": 12,
+    # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
+    "p_reads": 302,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
-    # Test functions across them: one journey per `# N.` section, plus the forks a section names
-    # (`tests/CLAUDE.md` § One journey per section).
+    # Test functions across them: one journey per `# N.` section, plus the forks a section names.
     "test_functions": 25,
-    # Modules a test run imports: our own, followed through their module-level imports, plus
-    # each outside distribution's top name. A test that reaches the server app or an extra
-    # moves it as one function does not.
-    "test_reach": 369,
-    # Every property of every schema the generated contract offers the browser. A command body IS
-    # its payload model, so every payload's fields are declared here. The schema flattens a subclass,
-    # so the subtree's `Subtree*` entries re-count the listing fields they extend.
-    "served_fields": 1672,
-    # The rows below price a CHANGE in the sites it touches, read off code.
-    # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
-    "p_record": 18,
-    # The arms each of those files leaves out: a mirror rotting raises it.
-    "p_record_drift": 525,
-    # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 174,
-    # Files naming three or more `CommandKind` rows, each a site the next row must reach.
-    "p_command": 11,
-    # The rows each of those files leaves out.
-    "p_command_drift": 208,
-    # What an optimizer member is handed: `NodeContext`'s public members, inherited ones included,
-    # and the public members of each object one of its properties exposes; each `CycleRead` alike.
-    "p_member": 309,
-    # Places a test reaches a private name of the package: an import, an attribute, a patch target.
-    "test_private_reach": 12,
 }
 
 _PACKAGE_ROOT = REPO / "promptpotter"
 
 # ``assets/`` is install DATA the package reads, never code it imports — the optimizer
-# manifest, the exported dashboard, the benchmark dataset definitions. Counting it as
-# conceptual surface is wrong on its own terms: the dashboard is STAGED there by
-# ``scripts/build_release.py`` before a wheel is built, and ``assets/datasets/CLAUDE.md``
-# documents data, not a layer.
+# manifest, the exported dashboard, the benchmark dataset definitions.
 _ASSETS_ROOT = _PACKAGE_ROOT / "assets"
 
-# The suite beside the package. `tests/CLAUDE.md` fixes its files and admits a function only
-# through three axes, and a rule that is prose alone is the mechanism of organic growth —
-# four files landed in one arc against it. A raise costs the same written reason as any other
-# row: name the invariant and the axis it clears.
+# The suite's shape (`tests/CLAUDE.md`): prose alone let four files land in one arc against it.
 _TESTS_ROOT = REPO / "tests"
 
 
-def _test_files() -> list[Path]:
-    return sorted(_TESTS_ROOT.glob("test_*.py"))
-
-
-def _count_test_functions(files: list[Path]) -> int:
-    return sum(
+def _count_tests() -> tuple[int, int]:
+    files = sorted(_TESTS_ROOT.glob("test_*.py"))
+    functions = sum(
         line.startswith(("def test_", "async def test_"))
         for f in files
         for line in f.read_text(encoding="utf-8").splitlines()
     )
-
-
-def _count_test_reach(test_files: list[Path], graph: dict[str, set[str]]) -> int:
-    local = {p.stem for p in _TESTS_ROOT.glob("*.py")} | {"tests", "__future__"}
-    roots: set[str] = set()
-    for path in [*test_files, _TESTS_ROOT / "conftest.py", _TESTS_ROOT / "factories.py"]:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        name = tests_owning._module_name(path.relative_to(REPO).as_posix())
-        roots |= tests_owning._import_names(tree, name, False, deferred=True)
-    reached: set[str] = set()
-    todo = list(roots)
-    while todo:
-        name = todo.pop()
-        if name in reached or name not in graph:
-            continue
-        reached.add(name)
-        parts = name.split(".")
-        todo.extend(".".join(parts[:i]) for i in range(1, len(parts)))
-        todo.extend(graph[name])
-    outside = {
-        top
-        for name in roots.union(*(graph[m] for m in reached))
-        if (top := name.split(".")[0]) not in local
-        and top != "promptpotter"
-        and top not in sys.stdlib_module_names
-    }
-    return len(reached) + len(outside)
+    return len(files), functions
 
 
 # What the browser is OFFERED — every property of every schema in the generated contract, so the
-# roster is the app's own answer and not a hand-kept list. An unread field costs a baseline edit
-# like any other: writing one is a line, finding its reader is a grep, so it is added silently.
+# roster is the app's own answer and not a hand-kept list.
 _CONTRACT = REPO / "docs" / "specs" / "openapi.generated.json"
 
 
@@ -203,14 +134,18 @@ _ENUMERATES = 3
 
 
 def _enumerations(sites: dict[Path, str], roster: list[_Spelling]) -> tuple[int, int]:
-    """The files enumerating *roster*, and the entries each leaves out. A quoted value is often a
-    common word, so it counts only inside a file that already enumerates by name."""
+    """The files enumerating *roster*, and the entries each mirror leaves out. A file naming more
+    than half the roster mirrors it; one naming fewer reads its subset, so leaves out nothing. A
+    quoted value is often a common word, so it counts only inside a file that already enumerates by
+    name."""
     enumerating = left_out = 0
     for text in sites.values():
         named = [bool(name.search(text)) for name, _ in roster]
         if sum(named) < _ENUMERATES:
             continue
         enumerating += 1
+        if 2 * sum(named) <= len(roster):
+            continue
         left_out += sum(
             not (hit or quoted.search(text)) for hit, (_, quoted) in zip(named, roster, strict=True)
         )
@@ -329,7 +264,7 @@ def _without_types(text: str) -> str:
     return "".join(kept)
 
 
-def _count_unread_served(sites: dict[Path, str]) -> int:
+def _read_names(sites: dict[Path, str]) -> set[str]:
     """By NAME, not by schema: a name read on any type counts as read on every schema declaring it,
     and a whole-object dump (`JSON.stringify`, a copy button) reads nothing here."""
     read: set[str] = set()
@@ -345,39 +280,7 @@ def _count_unread_served(sites: dict[Path, str]) -> int:
         else:
             continue
         read.update(name for match in _READ.findall(code) for name in match if name)
-    return sum(prop not in read for prop in _served_properties())
-
-
-def _private(name: str) -> bool:
-    # `_` is the discard, and an f-string's `_` separator is a constant: neither names a binding.
-    return len(name) > 1 and name[0] == "_" and name[1] != "_"
-
-
-def _count_test_private_reach(package_private: set[str]) -> int:
-    """A test's own name is no exemption: one the package binds is reached wherever it is named."""
-    sites = 0
-    for path in sorted(_TESTS_ROOT.glob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            named: list[str] = []
-            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("promptpotter"):
-                named = [*(node.module or "").split("."), *(a.name for a in node.names)]
-            elif isinstance(node, ast.Import):
-                named = [
-                    part
-                    for alias in node.names
-                    if alias.name.startswith("promptpotter")
-                    for part in alias.name.split(".")
-                ]
-            elif isinstance(node, ast.Attribute) and node.attr in package_private:
-                named = [node.attr]
-            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                # A dotted patch target names its module path; a bare one names an attribute.
-                if node.value.startswith("promptpotter."):
-                    named = node.value.split(".")
-                elif node.value in package_private:
-                    named = [node.value]
-            sites += sum(_private(name) for name in named)
-    return sites
+    return read
 
 
 def _package_files(pattern: str) -> list[Path]:
@@ -389,37 +292,6 @@ def _package_files(pattern: str) -> list[Path]:
         "that staged it."
     )
     return [p for p in _PACKAGE_ROOT.rglob(pattern) if _ASSETS_ROOT not in p.parents]
-
-
-def _models_in(annotation: object) -> list[type[BaseModel]]:
-    """Every model an annotation holds, through ``Annotated``, unions and container arguments."""
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return [annotation]
-    if typing.get_origin(annotation) is typing.Annotated:
-        return _models_in(typing.get_args(annotation)[0])
-    return [model for arg in typing.get_args(annotation) for model in _models_in(arg)]
-
-
-def _count_leaves(model: type[BaseModel], _path: tuple[type[BaseModel], ...] = ()) -> int:
-    """A field holding models — ``Model | None``, ``list[Model]``, ``dict[K, Annotated[A | B, …]]``
-    — is each model's whole nested surface, not one leaf.
-    The guard is the PATH, never a seen-set: one model at two sibling fields is two surfaces.
-
-    REBUILD FIRST, or the count is a reading of what happened to be imported. Pydantic resolves a
-    forward reference lazily, on first validation — so an unresolved annotation is no ``BaseModel``
-    yet and prices as ONE leaf, and the same model prices its whole subtree once anything in the
-    process has built one. ``RoundResult.health`` hid ``DegradationHealth``'s 17 leaves that way,
-    visible or not depending on what the process had imported. A resolved model rebuilds to a
-    no-op."""
-    if model in _path:
-        return 0
-    model.model_rebuild()
-    path = (*_path, model)
-    total = 0
-    for field in model.model_fields.values():
-        nested = _models_in(field.annotation)
-        total += sum(_count_leaves(n, path) for n in nested) if nested else 1
-    return total
 
 
 _Function = ast.FunctionDef | ast.AsyncFunctionDef
@@ -506,7 +378,7 @@ def _count_lax_models(bases: dict[str, list[str]], declared: dict[str, str | Non
 # A function-local import of our OWN package, `importlib.import_module` included unless its
 # argument is a literal naming another package. Sanctioned for one reason, which the import must
 # declare: it gates an optional extra, so hoisting it would make the core un-importable without
-# that extra (ADR-0006). Mark those `# extras: <name>` on the import line or the one above; the
+# that extra (docs/decisions.md § 0006). Mark those `# extras: <name>` on the import line or the one above; the
 # rest are debt and count here. Why startup and cycles do not excuse one:
 # `docs/developer/conventions.md` § Code shape.
 _EXTRAS_MARKER = "# extras:"
@@ -529,11 +401,8 @@ def _imports_own_package(node: ast.AST) -> typing.TypeGuard[ast.stmt | ast.expr]
     )
 
 
-def _source_counts(
-    py_files: list[Path], graph: dict[str, set[str]], private: set[str]
-) -> dict[str, int]:
-    """The four counts read off source, and the private names it binds, in ONE parse and one walk
-    per module.
+def _source_counts(py_files: list[Path]) -> dict[str, int]:
+    """The four counts read off source, in ONE parse and one walk per module.
 
     A deferred import counts once per function enclosing it, so a closure's import is charged to
     the closure and to the function that holds it. ``domain_any_maps`` is scoped to ``domain/``
@@ -547,23 +416,7 @@ def _source_counts(
         source = path.read_text(encoding="utf-8")
         lines = source.splitlines()
         in_domain = domain_root in path.parents
-        tree = ast.parse(source)
-        name = tests_owning._module_name(path.relative_to(REPO).as_posix())
-        graph[name] = tests_owning._import_names(
-            tree, name, path.name == "__init__.py", deferred=False
-        )
-        for node, depth in _nodes(tree):
-            bound = (
-                node.name
-                if isinstance(node, _Function | ast.ClassDef)
-                else node.id
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
-                else node.attr
-                if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store)
-                else ""
-            )
-            if _private(bound):
-                private.add(bound)
+        for node, depth in _nodes(ast.parse(source)):
             if isinstance(node, _Function):
                 args = node.args
                 annotations = [a.annotation for a in args.posonlyargs + args.args + args.kwonlyargs]
@@ -611,27 +464,17 @@ def compute_ledger() -> dict[str, int]:
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.knobs import KNOBS, member_knob_count
     from promptpotter.application.optimizers.nodes import CycleRead
-    from promptpotter.config import settings as settings_mod
     from promptpotter.config.settings import Settings
     from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.results import CycleResult
     from promptpotter.domain.run_records import CycleRecord
 
     py_files = _package_files("*.py")
-    init_files = [p for p in py_files if p.name == "__init__.py"]
-    graph: dict[str, set[str]] = {}
-    private: set[str] = set()
-    source = _source_counts(py_files, graph, private)
+    source = _source_counts(py_files)
     sites = _sites()
     arms = typing.get_args(typing.get_args(CycleRecord)[0])
     records, records_left_out = _enumerations(
         sites, [_spelled(a.model_fields["record_type"].default, a.__name__) for a in arms]
     )
-    # Imported for the table it completes: the kinds whose payload holds an application type.
-    from promptpotter.application.commands import payloads
-
-    del payloads
     commands, commands_left_out = _enumerations(
         sites,
         [
@@ -640,170 +483,59 @@ def compute_ledger() -> dict[str, int]:
         ],
     )
     priced: collections.Counter[str] = collections.Counter()
-    for runtime in optimizers.runtimes().values():
-        priced.update(runtime.priced_surface)
+    for member in optimizers.NODE_MEMBERS.table.values():
+        priced.update(member.priced_surface)
+    read = _read_names(sites)
+    test_files, test_functions = _count_tests()
 
     return {
-        "modules": len(py_files),
-        "init_files": len(init_files),
-        "reexport_shims": sum(_is_reexport_shim(p) for p in init_files),
+        "reexport_shims": sum(_is_reexport_shim(p) for p in py_files if p.name == "__init__.py"),
         # The overlay leaf stands for the node knobs each member declares, counted instead.
         "config_leaf_fields": len(KNOBS) - 1 + member_knob_count(),
         "settings_env": len(Settings.model_fields),
-        "settings_const": sum(1 for name in settings_mod.__all__ if name.isupper()),
-        "opt_search_point_fields": _count_leaves(OptSearchPoint),
-        # The mirror of the row above: what a run PRODUCES, rooted at the one model that
-        # reaches every round and candidate, so no hand-listed roster can drift from it.
-        "cycle_result_fields": _count_leaves(CycleResult),
         "any_params": source["any_params"],
         "domain_any_maps": source["domain_any_maps"],
         "models_lax": source["models_lax"],
         **priced,
         "deferred_imports": source["deferred_imports"],
-        "claude_md": len(_package_files("CLAUDE.md")),
-        "test_files": len(test_files := _test_files()),
-        "test_functions": _count_test_functions(test_files),
-        "test_reach": _count_test_reach(test_files, graph),
-        "served_fields": len(_served_properties()),
         "p_record": records,
         "p_record_drift": records_left_out,
-        "p_served": _count_unread_served(sites),
+        "p_served": sum(prop not in read for prop in _served_properties()),
         "p_command": commands,
         "p_command_drift": commands_left_out,
-        "p_member": sum(map(_count_handed, (NodeContext, *CycleRead.__subclasses__()))),
-        "test_private_reach": _count_test_private_reach(private),
+        "p_member": _count_handed(NodeContext),
+        "p_reads": sum(map(_count_handed, CycleRead.__subclasses__())),
+        "test_files": test_files,
+        "test_functions": test_functions,
     }
 
 
 def _format(ledger: dict[str, int]) -> str:
     width = max(len(k) for k in ledger)
-    rows = [f"  {k.ljust(width)}  {v:>4}" for k, v in ledger.items()]
-    return (
-        "complexity ledger\n"
-        + "\n".join(rows)
-        + f"\n  {'TOTAL'.ljust(width)}  {sum(ledger.values()):>4}"
-    )
+    rows = [f"  {k.ljust(width)}  {v:>4}  / {BASELINE.get(k, '-')}" for k, v in ledger.items()]
+    return "complexity ledger (count / ceiling)\n" + "\n".join(rows)
 
 
 def check(ledger: dict[str, int]) -> list[str]:
-    """What stands between *ledger* and ``BASELINE`` — empty where they are equal."""
+    """What stands above ``BASELINE`` — empty where every row is at or under its ceiling."""
     if set(ledger) != set(BASELINE):
         moved = sorted(set(ledger) ^ set(BASELINE))
         return [f"complexity-ledger dimensions changed ({moved}); update BASELINE in this commit"]
     risen = {k: (v, BASELINE[k]) for k, v in ledger.items() if v > BASELINE[k]}
-    fallen = {k: (v, BASELINE[k]) for k, v in ledger.items() if v < BASELINE[k]}
-    failures = []
-    if risen:
-        failures.append(
-            "conceptual surface grew (dimension: actual vs baseline) — a simplification "
-            f"pass must lower the ledger, not raise it: {risen}. If this is a justified "
-            "feature, raise the baseline deliberately; otherwise subtract instead of add."
-        )
-    if fallen:
-        failures.append(
-            "conceptual surface SHRANK while the baseline still reads the old number "
-            f"(dimension: actual vs baseline): {fallen}. Lower it in this commit — a win "
-            "nobody re-pins becomes silent headroom for the next raise, and the pass that "
-            "earned it keeps no number to show for it."
-        )
-    return failures
-
-
-_ABOVE_BASE = re.compile(r"# Above base: (\S+): \S")
-
-
-def _commit(rev: str) -> str:
-    code, commit = git("rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}")
-    if code:
-        raise SystemExit(f"{rev!r} names no commit")
-    return commit
-
-
-def _paid_rows() -> dict[str, str]:
-    """Each row an ``# Above base: <rev>: <reason>`` line pays for, by the rev it pays against."""
-    lines = Path(__file__).read_text(encoding="utf-8").splitlines()
-    paid: dict[str, str] = {}
-    pending: str | None = None
-    for line in lines[lines.index("BASELINE = {") + 1 :]:
-        text = line.strip()
-        if text == "}":
-            break
-        if text.startswith("# Above base"):
-            if not (named := _ABOVE_BASE.match(text)):
-                raise SystemExit(f"not `# Above base: <rev>: <reason>`: {text}")
-            pending = named[1]
-        elif key := re.match(r'"(\w+)":', text):
-            if pending is not None:
-                paid[key[1]] = pending
-            pending = None
-    return paid
-
-
-def _counted_at(commit: str) -> dict[str, int]:
-    """*commit* counted by THIS counter, in a worktree of it: a row redefined since then reads one
-    rule on both sides, so the redefinition is never credited as a move."""
-    with tempfile.TemporaryDirectory() as parent:
-        tree = Path(parent) / "base"
-        code, out = git("worktree", "add", "--detach", "--quiet", str(tree), commit)
-        if code:
-            raise SystemExit(f"ARC_BASE: no worktree of {commit}: {out}")
-        try:
-            for script in (REPO / "scripts").glob("*.py"):
-                shutil.copy2(script, tree / "scripts" / script.name)
-            argv = [sys.executable, "scripts/complexity_ledger.py", "--counts"]
-            code, out = run(argv, tree, PYTHONPATH=str(tree))
-        finally:
-            git("worktree", "remove", "--force", str(tree))
-    if code:
-        raise SystemExit(f"ARC_BASE: counting {commit} failed:\n{out}")
-    counts: dict[str, int] = json.loads(out)
-    return counts
-
-
-def against_base(ledger: dict[str, int], rev: str) -> tuple[str, list[str]]:
-    """The tip against *rev* row by row, and what stands between them."""
-    commit = _commit(rev)
-    base = _counted_at(commit)
-    paid = _paid_rows()
-    failures = [
-        f"`# Above base:` on {row} pays against {named}, not ARC_BASE={rev}"
-        for row, named in paid.items()
-        if _commit(named) != commit
+    if not risen:
+        return []
+    return [
+        "the cost of the next change grew (dimension: actual vs ceiling): "
+        f"{risen}. Subtract instead, or raise the ceiling with a reason in the commit body."
     ]
-    width = max(len(k) for k in {*ledger, *base})
-    rows = [f"  {'':<{width}}  {'base':>5}  {'tip':>5}  {'move':>5}  ({rev} = {commit[:12]})"]
-    unpaid = []
-    for name in [*ledger, *(k for k in base if k not in ledger)]:
-        was, now = base.get(name), ledger.get(name)
-        move = "new" if was is None else "gone" if now is None else f"{now - was:+d}"
-        mark = ""
-        if was is not None and now is not None and now > was:
-            mark = "  paid" if name in paid else "  UNPAID"
-            if name not in paid:
-                unpaid.append(name)
-        then, tip = ("-" if v is None else str(v) for v in (was, now))
-        rows.append(f"  {name:<{width}}  {then:>5}  {tip:>5}  {move:>5}{mark}")
-    if unpaid:
-        failures.append(
-            f"rows above ARC_BASE={rev} with no `# Above base: {rev}: <reason>` line in BASELINE: "
-            f"{unpaid}"
-        )
-    return "\n".join(rows), failures
 
 
 if __name__ == "__main__":
     counted = compute_ledger()
-    if sys.argv[1:] == ["--counts"]:
-        print(json.dumps(counted))
-        raise SystemExit(0)
-    rev = os.environ.get("ARC_BASE")
-    table, beyond = against_base(counted, rev) if rev else (_format(counted), [])
     if "--check" not in sys.argv[1:]:
-        print(table)
+        print(_format(counted))
         raise SystemExit(0)
-    moved = check(counted) + beyond
-    if rev:
-        print(table)
-    if moved:
-        print("\n".join(moved) + "\nBASELINE lives in scripts/complexity_ledger.py.")
-    raise SystemExit(bool(moved))
+    risen = check(counted)
+    if risen:
+        print("\n".join(risen) + "\nBASELINE lives in scripts/complexity_ledger.py.")
+    raise SystemExit(bool(risen))

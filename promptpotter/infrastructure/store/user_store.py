@@ -92,7 +92,7 @@ def read_accounts(projects_root: Path) -> list[AccountDir]:
     for tenant_dir in account_dirs(projects_root):
         try:
             user = UserStore(tenant_dir).load()
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             accounts.append(AccountDir(tenant_dir, Torn(f"{type(exc).__name__}: {exc}")))
             continue
         # Gone between the listing and the read: an account that is being deleted is not one.

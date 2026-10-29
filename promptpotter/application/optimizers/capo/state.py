@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.optimizer_state import StateSlice
 from promptpotter.domain.scoring import ROW_GRADES
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import GradedCell
-
-
-CapoManifest = Literal["capo"]
-CAPO_MANIFEST: CapoManifest = "capo"
 
 
 class CapoObjective(StateSlice, kind="capo_objective"):

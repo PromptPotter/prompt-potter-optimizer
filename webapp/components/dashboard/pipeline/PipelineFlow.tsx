@@ -407,7 +407,7 @@ function PipelineBox({ view, layer, compact, models }: BoxProps) {
   );
 }
 
-export interface PipelineFlowProps {
+interface PipelineFlowProps {
   layer: PipelineLayer;
   inspector?: ReactNode;
   // Owned by the STACK, never a `useState` here: a zoom re-parents this flow and React drops its state.

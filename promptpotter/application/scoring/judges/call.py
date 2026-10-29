@@ -5,9 +5,12 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 
+import httpx
+
+from promptpotter.domain.judges import JudgeStage, JudgeVerdict
 from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, waiting_on
 from promptpotter.infrastructure.llm.registry import get_llm_client
@@ -22,8 +25,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     emit_token_usage,
 )
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
-from promptpotter.judges.protocol import JudgeStage, JudgeVerdict
-from promptpotter.shared.errors import CellSendRefusedError, SendRefusedError
+from promptpotter.shared.errors import CellSendRefusedError, RequestTooLargeError, SendRefusedError
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,12 @@ def bind_cache(cache: LLMReuseCache | None) -> Iterator[None]:
 
 
 async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
-    """``(reply, error)``, exactly one non-empty; raises nothing but ``CellSendRefusedError``."""
+    """``(reply, error)``, exactly one non-empty: a provider's failure is the error half, any other raises.
+
+    The REPLY is cached, never the verdict — keyed by ``hash_call`` over the rendered prompt and
+    model / provider / temperature / max_tokens, so a changed ``_parse`` or ``to_score`` re-derives.
+    A hit is metered (``cached``); an empty reply is never stored.
+    """
     started = time.monotonic()
     cache = _CACHE.get()
     key: str | None = None
@@ -65,7 +72,7 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         except SendRefusedError as exc:
             # `spent` is empty: `measure_sample` bills the backend spend before any judge runs.
             raise CellSendRefusedError(str(exc), category=exc.category, spent={}) from exc
-        except Exception as exc:
+        except (httpx.HTTPError, RequestTooLargeError, ValueError) as exc:
             logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
             return "", f"{type(exc).__name__}: {exc}"
 
@@ -131,7 +138,7 @@ def _replay(cache: LLMReuseCache, key: str, *, judge: str, role: str) -> LLMResp
         if payload is None:
             return None
         response = LLMResponse.model_validate(payload)
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         logger.warning("judge_reuse entry for %s:%s unusable, re-sampling — %s", judge, role, exc)
         return None
     logger.debug("judge_reuse hit for %s:%s (%s)", judge, role, key)
@@ -166,9 +173,5 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
     finally:
         # An in-flight task survives the function exit and appends progress against a closed call.
         beat.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await beat
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.warning("heartbeat task for judge %s raised on teardown", label, exc_info=True)

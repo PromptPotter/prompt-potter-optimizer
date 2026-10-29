@@ -17,7 +17,7 @@ from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.reaper import sweep_dead_cycles
 from promptpotter.application.views.render.phase import render_completion
 from promptpotter.config.first_run import ensure_api_key
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.command_kinds import (
     CyclePayload,
     OriginGateDecisionPayload,
@@ -43,13 +43,13 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 def prepare_launch() -> None:
     """Runs BEFORE the loop exists: a prompt or refusal here never meets a run's Ctrl+C handler."""
     # A CLI-only install has no periodic sweep: a launch is where a dead producer's cycle is recorded.
-    sweep_dead_cycles(DEFAULT_PROJECTS_ROOT)
+    sweep_dead_cycles(default_projects_root())
     ensure_api_key()
 
 
 def pipeline_summary(session: Session, pipeline_params: dict[str, Any] | None) -> str:
     ps = session.pipeline_schema
-    pipe = f"{ps.name} v{ps.version}" if ps else "pipeline unavailable"
+    pipe = f"{ps.name} v{ps.version}"
     active = list((pipeline_params or {}).get("steps") or [])
     nodes = f"{len(active)} node{'s' if len(active) != 1 else ''}"
     if active:
@@ -72,7 +72,7 @@ def log_startup_summary(
 
 def backend_reach_line(backend_type: str, backend_url: str) -> str:
     """An ``in_process`` connector was never contacted: claim no reachable URL for it."""
-    if connectors.get(backend_type).execution == "in_process":
+    if connectors.CONNECTORS.get(backend_type).execution == "in_process":
         return f"in-process ({backend_type}) — no wire"
     return f"reachable at {backend_url}"
 
@@ -130,7 +130,7 @@ def ctrl_c_pauses(
 
     interrupted = False
 
-    def on_sigint(signum: int, frame: object) -> None:
+    def on_sigint(_signum: int, _frame: object) -> None:
         nonlocal interrupted
         if interrupted:
             raise KeyboardInterrupt

@@ -308,7 +308,7 @@ def _emit_reading_state_tables() -> str:
 
 
 def _emit_round_advance_tables() -> str:
-    from promptpotter.domain.results import ROUND_ADVANCE_INFO, RoundAdvance
+    from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance
 
     def table(column: str) -> str:
         return "\n".join(
@@ -319,11 +319,11 @@ def _emit_round_advance_tables() -> str:
     return (
         _emit_enum_union(
             RoundAdvance,
-            "What a closed round did to the best-so-far line (domain/results.py::RoundAdvance).",
+            "What a closed round did to the best-so-far line (domain/origin_panel.py::RoundAdvance).",
         )
         + "\n\n"
         "// The served label and sentence per advance. Mirror of\n"
-        "// domain/results.py::ROUND_ADVANCE_INFO — the single wording source.\n"
+        "// domain/origin_panel.py::ROUND_ADVANCE_INFO — the single wording source.\n"
         "export const ROUND_ADVANCE_LABELS: Record<RoundAdvance, string> = {\n"
         f"{table('label')}\n"
         "};\n\n"
@@ -394,8 +394,8 @@ def _emit_theta_caveat_table() -> str:
 def _emit_label_tables() -> str:
     from promptpotter.application.evidence.head_to_head import GUARD_STATE_LABELS
     from promptpotter.application.evidence.subjects import SUBJECT_KIND_LABELS
+    from promptpotter.domain.arm_reading import ARM_VERDICT_LABELS
     from promptpotter.domain.dashboard_rows import SAMPLE_MOVEMENT_LABELS
-    from promptpotter.domain.results import ARM_VERDICT_LABELS
 
     def table(name: str, owner: str, labels: Mapping[typing.Any, str]) -> str:
         members = " | ".join(repr(str(member)) for member in labels)
@@ -410,7 +410,7 @@ def _emit_label_tables() -> str:
 
     return "\n\n".join(
         [
-            table("ARM_VERDICT_LABELS", "domain/results.py", ARM_VERDICT_LABELS),
+            table("ARM_VERDICT_LABELS", "domain/arm_reading.py", ARM_VERDICT_LABELS),
             table("GUARD_STATE_LABELS", "application/evidence/head_to_head.py", GUARD_STATE_LABELS),
             table("SAMPLE_MOVEMENT_LABELS", "domain/dashboard_rows.py", SAMPLE_MOVEMENT_LABELS),
             table("SUBJECT_KIND_LABELS", "application/evidence/subjects.py", SUBJECT_KIND_LABELS),
@@ -419,7 +419,7 @@ def _emit_label_tables() -> str:
 
 
 def _emit_display_metrics() -> str:
-    from promptpotter.domain.results import DISPLAY_METRIC_INFO, LevelUnit
+    from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO, LevelUnit
 
     members = " | ".join(repr(m) for m in DISPLAY_METRIC_INFO)
     level_units = " | ".join(repr(u) for u in typing.get_args(LevelUnit))
@@ -435,9 +435,10 @@ def _emit_display_metrics() -> str:
         f"  {metric!r}: {info.unit!r}," for metric, info in DISPLAY_METRIC_INFO.items()
     )
     return (
-        "// A column every arm carries (domain/results.py::DisplayMetric).\n"
+        "// A column every arm carries (domain/arm_reading.py::DisplayMetric).\n"
         f"export type DisplayMetric = {members};\n\n"
-        "// Each column's words, in pick order. Mirror of domain/results.py::DISPLAY_METRIC_INFO.\n"
+        "// Each column's words, in pick order. Mirror of "
+        "domain/arm_reading.py::DISPLAY_METRIC_INFO.\n"
         "export const DISPLAY_METRICS: readonly {\n"
         "  id: DisplayMetric;\n  label: string;\n  glyph: string;\n  title: string;\n}[] = [\n"
         f"{rows}\n"
@@ -445,7 +446,7 @@ def _emit_display_metrics() -> str:
         "export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {\n"
         f"{labels}\n"
         "};\n\n"
-        "// A displayed level's unit (domain/results.py::LevelUnit).\n"
+        "// A displayed level's unit (domain/arm_reading.py::LevelUnit).\n"
         f"export type LevelUnit = {level_units};\n\n"
         "export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {\n"
         f"{units}\n"
@@ -473,12 +474,12 @@ def _emit_export_tiers() -> str:
 
 
 def _emit_verify_strategy_labels() -> str:
-    from promptpotter.domain.results import VERIFY_STRATEGY_LABELS
+    from promptpotter.domain.verify_pass import VERIFY_STRATEGY_LABELS
 
     rows = "\n".join(f"  {name!r}: {label!r}," for name, label in VERIFY_STRATEGY_LABELS.items())
     return (
         "// How a verify pass's pick of fresh cells reads, by strategy. Mirror of\n"
-        "// domain/results.py::VERIFY_STRATEGY_LABELS.\n"
+        "// domain/verify_pass.py::VERIFY_STRATEGY_LABELS.\n"
         'export const VERIFY_STRATEGY_LABELS: Record<VerifyReading["strategy"], string> = {\n'
         f"{rows}\n"
         "};"

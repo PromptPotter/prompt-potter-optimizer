@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from functools import cache
 from pathlib import Path
-from typing import Any, ClassVar, NamedTuple, get_args
+from typing import Any, ClassVar, NamedTuple, cast, get_args
 
+from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchPasses, BenchReading, PartitionRecord
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     LoopPayload,
@@ -22,18 +25,7 @@ from promptpotter.domain.phase_views import (
     VerifyGradedView,
 )
 from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase
-from promptpotter.domain.results import (
-    ArmState,
-    Cut,
-    IndividualWalk,
-    Measured,
-    RoundCells,
-    RunStanding,
-    ScoreSummary,
-    Skipped,
-    VerifyPass,
-    VerifyReading,
-)
+from promptpotter.domain.results import RoundCells
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import (
     AnnouncedArms,
@@ -43,7 +35,6 @@ from promptpotter.domain.run_records import (
     CycleFinalRecord,
     CycleMintedRecord,
     CycleRecord,
-    CycleSeed,
     CycleSeedRecord,
     CycleSupersededRecord,
     ElectionRecord,
@@ -74,6 +65,7 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
     WallClock,
 )
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import WalkedCell
 from promptpotter.domain.spend import (
     Budget,
@@ -81,6 +73,8 @@ from promptpotter.domain.spend import (
     SpendRollup,
     metered,
 )
+from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.verify_pass import VerifyPass, VerifyReading
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
@@ -91,33 +85,25 @@ from promptpotter.infrastructure.store.read_model import (
 )
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.identity import Principal
-from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.measurement_context import IndividualWalk, MeasurementRole
 
 
-class _CycleSeed:
-    records: ClassVar[RecordClasses] = (CycleSeedRecord,)
-
-    def __init__(self) -> None:
-        self._found: CycleSeed | None = None
-
-    def feed(self, offset: int, record: CycleSeedRecord) -> None:
-        self._found = record.seed
-
-    def value(self) -> CycleSeed | None:
-        return self._found
-
-
-class _Partition:
-    records: ClassVar[RecordClasses] = (PartitionRecord,)
+class _Last:
+    records: ClassVar[RecordClasses]
 
     def __init__(self) -> None:
-        self._found: PartitionRecord | None = None
+        self._found: StrictModel | None = None
 
-    def feed(self, offset: int, record: PartitionRecord) -> None:
+    def feed(self, record: StrictModel) -> None:
         self._found = record
 
-    def value(self) -> PartitionRecord | None:
+    def value(self) -> StrictModel | None:
         return self._found
+
+
+@cache
+def _last(record: type[StrictModel]) -> type[_Last]:
+    return type(f"_Last{record.__name__}", (_Last,), {"records": (record,)})
 
 
 class ResolvedRun(NamedTuple):
@@ -141,7 +127,7 @@ class _ResolvedRun:
     def __init__(self) -> None:
         self._found = ResolvedRun()
 
-    def feed(self, offset: int, record: ResolvedRunRecord) -> None:
+    def feed(self, record: ResolvedRunRecord) -> None:
         self._found = self._found.then(ResolvedRun(record.declaration, record.experiment))
 
     def value(self) -> ResolvedRun:
@@ -154,24 +140,11 @@ class _LaunchClocks:
     def __init__(self) -> None:
         self._found: list[LaunchClockRecord] = []
 
-    def feed(self, offset: int, record: LaunchClockRecord) -> None:
+    def feed(self, record: LaunchClockRecord) -> None:
         self._found.append(record)
 
     def value(self) -> list[LaunchClockRecord]:
         return list(self._found)
-
-
-class _StandingBudget:
-    records: ClassVar[RecordClasses] = (StandingBudgetRecord,)
-
-    def __init__(self) -> None:
-        self._found = StandingBudgetRecord()
-
-    def feed(self, offset: int, record: StandingBudgetRecord) -> None:
-        self._found = record
-
-    def value(self) -> StandingBudgetRecord:
-        return self._found.model_copy()
 
 
 class CycleFacts(NamedTuple):
@@ -226,7 +199,7 @@ class _CycleFacts:
     def __init__(self) -> None:
         self._held = CycleFacts()
 
-    def feed(self, offset: int, record: _CycleFact) -> None:
+    def feed(self, record: _CycleFact) -> None:
         held = self._held
         match record:
             case CycleMintedRecord():
@@ -300,7 +273,7 @@ class _Controls:
         self._kinds: dict[str, type[LoopPayload]] = {}
         self._declared: RunPhase | None = None
 
-    def feed(self, offset: int, record: CommandRecord | CommandAckRecord | RunPhaseRecord) -> None:
+    def feed(self, record: CommandRecord | CommandAckRecord | RunPhaseRecord) -> None:
         match record:
             case CommandRecord():
                 if record.kind in _LOOP_TAKEN:
@@ -388,9 +361,7 @@ class _LaunchClaim:
     def __init__(self) -> None:
         self._found: LaunchClaimRecord | None = None
 
-    def feed(
-        self, offset: int, record: LaunchClaimRecord | LaunchReleasedRecord | RunPhaseRecord
-    ) -> None:
+    def feed(self, record: LaunchClaimRecord | LaunchReleasedRecord | RunPhaseRecord) -> None:
         match record:
             case RunPhaseRecord():
                 self._found = None
@@ -413,7 +384,7 @@ class _Progress:
     def __init__(self) -> None:
         self._held = Progress()
 
-    def feed(self, offset: int, line: dict[str, Any]) -> None:
+    def feed(self, line: dict[str, Any]) -> None:
         kind = line.get("record_type")
         # A heartbeat proves the process alive, not that it progressed.
         if kind == "llm_call_progress":
@@ -570,16 +541,17 @@ class _Standing:
     records: ClassVar[RecordClasses] = get_args(_RoundStep)
 
     def __init__(self) -> None:
+        self.at_offset = -1
         self._held = StandingRounds.none()
         self._entered_at: dict[int, int] = {}
         self._arms = AnnouncedArms()
         self._cells: dict[tuple[int, ArmKey], dict[str, WalkedCell]] = {}
 
-    def feed(self, offset: int, record: _RoundStep) -> None:
+    def feed(self, record: _RoundStep) -> None:
         rnd = record.round
         if rnd is None:
             return
-        held = self._held
+        held, offset = self._held, self.at_offset
         match record:
             case RoundEnteredRecord():
                 self._entered_at[rnd] = offset
@@ -678,7 +650,7 @@ class _Answers:
         self._found: set[str] = set()
         self._frozen: frozenset[str] | None = frozenset()
 
-    def feed(self, offset: int, record: _Naming) -> None:
+    def feed(self, record: _Naming) -> None:
         match record:
             case SampleScoredRecord():
                 walked = [] if (cell := _walked_cell(record)) is None else [cell]
@@ -703,19 +675,6 @@ class _Answers:
         return self._frozen
 
 
-class _DeclaredPhase:
-    records: ClassVar[RecordClasses] = (RunPhaseRecord,)
-
-    def __init__(self) -> None:
-        self._declared: RunPhaseRecord | None = None
-
-    def feed(self, offset: int, record: RunPhaseRecord) -> None:
-        self._declared = record
-
-    def value(self) -> RunPhaseRecord | None:
-        return self._declared
-
-
 class VerifyLedger(NamedTuple):
     graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]]
     # EVERY graded pass, oldest first: a later one buys other cells and retires none.
@@ -729,7 +688,7 @@ class _Verify:
         self._graded: dict[ArmKey, tuple[VerifyPass, VerifyReading]] = {}
         self._passes: list[VerifyPass] = []
 
-    def feed(self, offset: int, record: PhaseRecord) -> None:
+    def feed(self, record: PhaseRecord) -> None:
         if isinstance(banked := record.view, VerifyGradedView):
             self._graded[banked.verify_pass.arm.key] = banked.verify_pass, banked.reading
             self._passes.append(banked.verify_pass)
@@ -758,7 +717,7 @@ class _Spend:
         self._calls = 0
         self._worked_s = 0.0
 
-    def feed(self, offset: int, usage: TokenUsageRecord) -> None:
+    def feed(self, usage: TokenUsageRecord) -> None:
         self._by_round.setdefault(usage.spend_round, SpendRollup()).bank(usage)
         if not usage.cached:
             self._calls += 1
@@ -781,7 +740,7 @@ class _Metered:
         self._usd: dict[CeilingMeter, float] = dict.fromkeys(get_args(CeilingMeter), 0.0)
         self._tokens: dict[CeilingMeter, int] = dict.fromkeys(get_args(CeilingMeter), 0)
 
-    def feed(self, offset: int, usage: TokenUsageRecord) -> None:
+    def feed(self, usage: TokenUsageRecord) -> None:
         for meter in self._usd:
             usd, tokens = metered(usage, meter)
             if usd is not None:
@@ -792,26 +751,13 @@ class _Metered:
         return {meter: Budget.amount(self._usd[meter], self._tokens[meter]) for meter in self._usd}
 
 
-class _RunWiring:
-    records: ClassVar[RecordClasses] = (RunWiringRecord,)
-
-    def __init__(self) -> None:
-        self._found: RunWiringRecord | None = None
-
-    def feed(self, offset: int, record: RunWiringRecord) -> None:
-        self._found = record
-
-    def value(self) -> RunWiringRecord | None:
-        return self._found
-
-
 class _Bench:
     records: ClassVar[RecordClasses] = (PhaseRecord,)
 
     def __init__(self) -> None:
         self._graded: list[BenchGradedView] = []
 
-    def feed(self, offset: int, record: PhaseRecord) -> None:
+    def feed(self, record: PhaseRecord) -> None:
         if record.phase != CampaignPhase.BENCH or record.event != "graded":
             return
         if isinstance(record.view, BenchGradedView):
@@ -821,26 +767,13 @@ class _Bench:
         return list(self._graded)
 
 
-class _ScoringLock:
-    records: ClassVar[RecordClasses] = (ScoringLockedRecord,)
-
-    def __init__(self) -> None:
-        self._found: ScoringLockedRecord | None = None
-
-    def feed(self, offset: int, record: ScoringLockedRecord) -> None:
-        self._found = record
-
-    def value(self) -> ScoringLockedRecord | None:
-        return self._found
-
-
 class _PricedKeys:
     records: ClassVar[RecordClasses] = (PricedKeyRecord,)
 
     def __init__(self) -> None:
         self._keys: set[str] = set()
 
-    def feed(self, offset: int, record: PricedKeyRecord) -> None:
+    def feed(self, record: PricedKeyRecord) -> None:
         self._keys.add(record.priced_key)
 
     def value(self) -> frozenset[str]:
@@ -866,7 +799,7 @@ class _Timeline:
     def __init__(self) -> None:
         self._held = Timeline([], [], [], [], [])
 
-    def feed(self, offset: int, record: _Clocked) -> None:
+    def feed(self, record: _Clocked) -> None:
         if (at := epoch_seconds(record.timestamp)) is None:
             return
         held = self._held
@@ -896,23 +829,28 @@ class _Timeline:
 
 
 LEDGER_FOLDS = (
-    _CycleSeed,
-    _Partition,
+    *map(
+        _last,
+        (
+            CycleSeedRecord,
+            PartitionRecord,
+            StandingBudgetRecord,
+            RunPhaseRecord,
+            RunWiringRecord,
+            ScoringLockedRecord,
+        ),
+    ),
     _ResolvedRun,
     _LaunchClocks,
-    _StandingBudget,
     _CycleFacts,
     _Controls,
     _LaunchClaim,
     _Standing,
     _Answers,
-    _DeclaredPhase,
     _Verify,
     _Spend,
     _Metered,
-    _RunWiring,
     _Bench,
-    _ScoringLock,
     _PricedKeys,
     _Timeline,
 )
@@ -922,14 +860,12 @@ def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[Any, V]]) -> V:
     return LedgerIndex.of(ledger_path, LEDGER_FOLDS).view(fold)
 
 
-def scan_ledger_cycle_seed(ledger_path: Path) -> CycleSeed | None:
-    return _view(ledger_path, _CycleSeed)
-
-
-def scan_bank_partition(spans: Iterable[LedgerSpan]) -> PartitionRecord | None:
-    found: PartitionRecord | None = None
+def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R | None:
+    """The last *record* the spans hold, a later span's over an earlier one's."""
+    found: R | None = None
     for span in spans:
-        found = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Partition, span.until) or found
+        own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_last(record), span.until)
+        found = found if own is None else cast("R", own)
     return found
 
 
@@ -951,20 +887,12 @@ def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
     ]
 
 
-def scan_ledger_standing_budget(ledger_path: Path) -> StandingBudgetRecord:
-    return _view(ledger_path, _StandingBudget)
-
-
 def scan_ledger_controls(ledger_path: Path) -> Controls:
     return _view(ledger_path, _Controls)
 
 
 def scan_launch_claim(ledger_path: Path) -> LaunchClaimRecord | None:
     return _view(ledger_path, _LaunchClaim)
-
-
-def scan_ledger_scoring_lock(ledger_path: Path) -> ScoringLockedRecord | None:
-    return _view(ledger_path, _ScoringLock)
 
 
 def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
@@ -1047,10 +975,6 @@ def scan_ledger_walks(spans: Iterable[LedgerSpan]) -> list[IndividualWalk[Walked
         banked = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_Verify, span.until)
         walks += [verify_pass.walk() for verify_pass in banked.passes]
     return walks
-
-
-def scan_ledger_declared_phase(ledger_path: Path) -> RunPhaseRecord | None:
-    return _view(ledger_path, _DeclaredPhase)
 
 
 _Span = tuple[float, float]
@@ -1205,14 +1129,6 @@ def scan_ledger_spend_by_round(spans: Iterable[LedgerSpan]) -> dict[int, SpendRo
         for n, held in own.by_round.items():
             by_round.setdefault(n, SpendRollup()).absorb(held)
     return dict(sorted(by_round.items()))
-
-
-def scan_ledger_run_wiring(spans: Iterable[LedgerSpan]) -> RunWiringRecord | None:
-    found: RunWiringRecord | None = None
-    for span in spans:
-        own = LedgerIndex.of(span.path, LEDGER_FOLDS).view(_RunWiring, span.until)
-        found = found if own is None else own
-    return found
 
 
 def scan_ledger_wall_clock(

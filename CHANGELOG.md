@@ -28,6 +28,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ArmSpend`, `ArmCost`, `CloseSpend` and `RunStanding.spent` are gone, each a fold of the spend facts read at its scope.
 - **Every optimizer runs on one model by default, `qwen/qwen3.7-flash` with reasoning off** (was `openai/gpt-6-luna`; GEPA and LEVI on `qwen/qwen3-8b`, retired on OpenRouter).
 - **The `openai` and `anthropic` SDKs are gone**: both clients post over httpx; the `anthropic` extra is deleted.
+- **No core install carries LiteLLM**: it arrives only with the `dspy` or `harbor` extra, and its send meter lives in the `harbor` connector.
 - The gate runs two serial lanes, py and web, each tool owning its own parallelism; the learned admission scheduler and its weights cache are gone. pytest's rss ceiling is read by `tests_owning.py --record` off its own peak. (2e0cd33a7)
 - `offer-extras`, and the server's boot, refuse a `DATASET_OFFER` naming no dataset; `update.sh` stops before any extra is dropped. (2e0cd33a7)
 - One `columns` recipe replaces `aime`, `bbh`, `mgsm`, `gsm_hard` and `bbeh_mini`.

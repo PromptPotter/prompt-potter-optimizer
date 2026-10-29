@@ -23,7 +23,7 @@ export function metricLevel(
     : (reading.own?.[metric]?.value ?? null);
 }
 
-export interface FitnessTrend {
+interface FitnessTrend {
   // `null` draws a GAP: a point at 0 would claim the prompt scored nothing.
   points: {
     round: number;
@@ -31,6 +31,8 @@ export interface FitnessTrend {
     composite: number | null;
     theta: number | null;
     bench: number | null;
+    // The rows the round's bench reading carries a verdict on; null with `bench`.
+    benchN: number | null;
     n: number;
   }[];
 }
@@ -44,6 +46,7 @@ export function fitnessTrend(rounds: readonly ServedRound[] | undefined): Fitnes
     composite: r.composite_fitness,
     theta: r.level?.theta ?? null,
     bench: r.bench?.level?.value ?? null,
+    benchN: r.bench?.level ? r.bench.n : null,
     n: r.total,
   }));
   return { points };

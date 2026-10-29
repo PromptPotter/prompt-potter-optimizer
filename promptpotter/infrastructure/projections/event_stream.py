@@ -82,7 +82,7 @@ class CycleLedgerTail:
         return self._line_index
 
     def _read(self, raw: bytes) -> tuple[ProjectionKind, dict[str, Any]] | None:
-        offset = self._line_index
+        offset = self._feed.at_offset = self._line_index
         rec = ledger_record(line_dict, raw, ledger=self._ledger_path, offset=offset)
         if rec is None:
             return None
@@ -90,7 +90,7 @@ class CycleLedgerTail:
         if not isinstance(kind, str) or kind not in RECORD_KINDS:
             return None
         if (record := bearing_record(kind, rec)) is not None:
-            feed_fold(self._feed, offset, record, ledger=self._ledger_path)
+            feed_fold(self._feed, record, ledger=self._ledger_path, offset=offset)
         return cast(ProjectionKind, kind), rec
 
     def _to_envelope(self, raw: bytes) -> ProjectionEnvelope | None:

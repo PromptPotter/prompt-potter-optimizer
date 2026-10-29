@@ -12,11 +12,12 @@ from promptpotter.infrastructure.store.read_model import LineIndex, append_row
 
 class _Folds:
     def __init__(self) -> None:
+        self.at_offset = -1
         self._folds: list[RulerFold | None] = []
 
-    def feed(self, offset: int, line: dict[str, Any]) -> None:
+    def feed(self, line: dict[str, Any]) -> None:
         # An unreadable line still holds its version, or every later version would shift.
-        self._folds.extend([None] * (offset - len(self._folds)))
+        self._folds.extend([None] * (self.at_offset - len(self._folds)))
         self._folds.append(RulerFold.model_validate(line))
 
     def value(self) -> tuple[RulerFold | None, ...]:

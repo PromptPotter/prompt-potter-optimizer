@@ -25,10 +25,10 @@ interface LineageCleanup {
   stubCount: number | null;
   request: () => void;
   cancel: () => void;
-  confirm: () => Promise<void>;
+  confirm: () => void;
 }
 
-export interface Lineage {
+interface Lineage {
   tree: SubtreeCampaign | null;
   valueByKey: ReadonlyMap<string, number | null>;
   thetaByKey: ReadonlyMap<string, number | null>;
@@ -143,10 +143,10 @@ export function useLineage({
       setCleanupOpen(false);
       cmd.clear();
     },
-    confirm: async () => {
+    confirm: () => {
       const rootId = tree ? pathOfAddress(tree.facts.root).at(-1)?.cycleId : undefined;
       if (!campaignId || !rootId) return;
-      await cmd.run("cleanup-empty-cycles", () => postCommand("cleanup-empty-cycles", { campaign_id: campaignId, cycle_id: rootId }), () => {
+      void cmd.run("cleanup-empty-cycles", () => postCommand("cleanup-empty-cycles", { campaign_id: campaignId, cycle_id: rootId }), () => {
         setCleanupAcked(true);
         setCleanupOpen(false);
       });

@@ -8,7 +8,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal, NamedTuple
 
+from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
+from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.infrastructure.store.io import (
     newest_mtime_ns,
     read_json_optional,
@@ -21,23 +23,11 @@ logger = logging.getLogger(__name__)
 
 _SIBLING_SEP_RE = re.compile(r"_(fork|diag)_")
 _SIBLING_LAST_SEP_RE = re.compile(r"_(fork|diag)_(?!.*_(fork|diag)_)")
-_DATASET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*$")
-
-
-def validate_dataset_name(name: str) -> str:
-    """The name IS the dataset's path under its tier, ``/``-separated; lowercase-only, since both
-    shipped filesystems fold case."""
-    if not name or not _DATASET_NAME_RE.match(name):
-        raise ValueError(
-            f"Invalid dataset name: {name!r}. `/`-separated segments of lowercase alphanumerics, "
-            "hyphens and underscores, each starting with a letter or digit."
-        )
-    return name
 
 
 def dataset_id_prefix(name: str) -> str:
-    """The name where ONE path segment must hold it — a campaign id, which is a directory and a URL
-    segment. Joined on ``.``, which no name may hold, so two names never share a prefix."""
+    """The name wherever ONE path segment holds it — a campaign id, a tenant file or folder named for a
+    dataset. Joined on ``.``, which no name may hold, so two names never share a prefix."""
     return validate_dataset_name(name).replace("/", ".")
 
 
@@ -78,6 +68,18 @@ def archive_home(
         return ArchiveHome(tenant, tenant_workspace(shared_root, tenant), "tenant")
     named = validate_path_component(shared_archive)
     return ArchiveHome(named, shared_root.parent / _ARCHIVE_HOMES_DIR / named, "install")
+
+
+def archive_homes(projects_root: Path) -> list[Path]:
+    """Every root `archive_home` can name that holds an archive: a tenant's, or a named home."""
+    parents = (projects_root, projects_root.parent / _ARCHIVE_HOMES_DIR)
+    return sorted(
+        home
+        for parent in parents
+        if parent.is_dir()
+        for home in parent.iterdir()
+        if (home / MEASUREMENTS_DIR).is_dir()
+    )
 
 
 def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:

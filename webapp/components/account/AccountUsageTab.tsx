@@ -51,9 +51,9 @@ export function AccountUsageTab() {
   );
 }
 
-function Meter({ share, tone }: { share: number; tone?: "warn" }) {
+function Meter({ share, warn = false }: { share: number; warn?: boolean }) {
   return (
-    <div className={cx("account-meter", tone === "warn" && "warn")} aria-hidden="true">
+    <div className={cx("account-meter", warn && "warn")} aria-hidden="true">
       <div className="account-meter-fill" style={{ width: `${share * 100}%` }} />
     </div>
   );
@@ -86,7 +86,7 @@ function SpendSection({ quota }: { quota: QuotaStatus }) {
               {usdCap === null ? " no ceiling" : ` of ${fmtUsd(usdCap)}`}
             </span>
           </span>
-          {usdShare !== null ? <Meter share={usdShare} tone={blind ? "warn" : undefined} /> : null}
+          {usdShare !== null ? <Meter share={usdShare} warn={blind} /> : null}
           {blind ? (
             <span className="account-warn">
               ⚠ USD cap inactive — {fmtTokens(lifetime.unpriced_tokens)} billed with no

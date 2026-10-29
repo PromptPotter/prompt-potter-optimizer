@@ -52,15 +52,17 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.phase_views import BenchEnterView, BenchGradedView, BenchScoredView
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome
-from promptpotter.domain.results import (
-    IndividualWalk,
-    declared_selection,
-    individual_cells,
-)
+from promptpotter.domain.run_standing import declared_selection
 from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.store.archive_queries import bench_reads
-from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole, RoleScope
+from promptpotter.shared.measurement_context import (
+    IndividualWalk,
+    MeasuredPass,
+    MeasurementRole,
+    RoleScope,
+    individual_cells,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -68,7 +70,8 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_callbacks import RunCallbacks
-    from promptpotter.domain.results import PointContext, RoundOutcome, RoundResult
+    from promptpotter.domain.arms import PointContext
+    from promptpotter.domain.results import RoundOutcome, RoundResult
     from promptpotter.domain.scoring import CellSheet, Scorer
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.stores import Stores

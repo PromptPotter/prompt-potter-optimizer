@@ -22,15 +22,15 @@ export function ValueList({
   // ALREADY ordered current-first by the caller; this component never sorts.
   values: readonly string[];
   // `undefined` = no tick column, never a column of empty boxes reading "nothing permitted".
-  checked?: readonly string[];
+  checked?: readonly string[] | undefined;
   inert?: readonly string[];
   userAdded?: readonly string[];
   note?: string;
   readOnly?: boolean;
   addPlaceholder?: string;
-  onPick?: (value: string) => void;
-  onToggle?: (value: string) => void;
-  onAdd?: (value: string) => void;
+  onPick?: ((value: string) => void) | undefined;
+  onToggle?: ((value: string) => void) | undefined;
+  onAdd?: ((value: string) => void) | undefined;
 }) {
   // The free-text input clears by REMOUNT: `CommitInput` latches what it sent, so a constant "" never re-clears it.
   const [added, setAdded] = useState(0);
@@ -159,7 +159,7 @@ export function ValueList({
   );
 }
 
-function ValueLabel({ value, userAdded }: { value: string; userAdded?: readonly string[] }) {
+function ValueLabel({ value, userAdded }: { value: string; userAdded: readonly string[] | undefined }) {
   return (
     <>
       {value}

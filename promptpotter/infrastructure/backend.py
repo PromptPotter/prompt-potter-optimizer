@@ -11,9 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
-from filelock import BaseFileLock, FileLock, Timeout
 
-from promptpotter.config.paths import default_jobs_dir
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.pricing import inline_route
@@ -39,6 +37,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     reserved,
 )
 from promptpotter.infrastructure.llm.telemetry import emit_backend_warning
+from promptpotter.infrastructure.store.io import HeldLock, take_lock
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellThrottledError,
@@ -108,21 +107,16 @@ class MachineSlots:
         self._capacity = capacity
         self._compose_overlay = compose_overlay
 
-    def _lock(self, name: str) -> BaseFileLock | None:
-        held = FileLock(str(self._root / f"{name}.lock"), timeout=0)
-        try:
-            held.acquire()
-        except Timeout:
-            return None
-        return held
+    def _lock(self, name: str) -> HeldLock | None:
+        return take_lock(self._root / f"{name}.lock", wait_s=0)
 
-    def _take(self) -> BaseFileLock | None:
+    def _take(self) -> HeldLock | None:
         for i in range(self._capacity):
             if (slot := self._lock(str(i))) is not None:
                 return slot
         return None
 
-    async def _wait(self, take: Callable[[], BaseFileLock | None]) -> BaseFileLock:
+    async def _wait(self, take: Callable[[], HeldLock | None]) -> HeldLock:
         abort = get_abort_check()
         while (held := take()) is None:
             if abort is not None and abort():
@@ -134,7 +128,6 @@ class MachineSlots:
 
     @asynccontextmanager
     async def hold(self) -> AsyncIterator[None]:
-        self._root.mkdir(parents=True, exist_ok=True)
         with machine_step():
             await claim_machine(compose_overlay=self._compose_overlay)
         # One turn at a time: without it a run armed to the pool's depth holds every slot all round.
@@ -150,7 +143,9 @@ class MachineSlots:
 
 
 class BackendClient:
-    def __init__(self, connector: Connector, *, workload: InProcessWorkload) -> None:
+    def __init__(
+        self, connector: Connector, *, workload: InProcessWorkload, jobs_dir: Path
+    ) -> None:
         self._connector = connector
         self.base_url = connector.base_url()
         self.workload = workload
@@ -159,7 +154,7 @@ class BackendClient:
         self._http: httpx.AsyncClient | None = None
         self._machine_slots = (
             MachineSlots(
-                default_jobs_dir() / "machine" / connector.name,
+                jobs_dir / "machine" / connector.name,
                 connector.max_cells_in_flight,
                 compose_overlay=connector.compose_overlay,
             )
@@ -260,9 +255,7 @@ class BackendClient:
         except httpx.ConnectError as exc:
             logger.warning("Backend unreachable: %s", exc)
             return {"status": "unreachable", "error": str(exc)}
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             logger.warning("Backend status check failed: %s", exc)
             return {"status": "error", "error": str(exc)}
 

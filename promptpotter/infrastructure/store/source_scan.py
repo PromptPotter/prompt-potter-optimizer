@@ -191,4 +191,5 @@ def optimizer_prompt_shapers(
             "hashed code reads package names nothing hashes — mark each one whose value reaches "
             f"prompt text `shapes_optimizer_prompt`: {breaches}"
         )
-    return tuple(NormalizedSource(unit["source"]) for _, unit in units)
+    # Sorted by content, never path: relocating a marked unit moves no digest.
+    return tuple(sorted(NormalizedSource(unit["source"]) for _, unit in units))

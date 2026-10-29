@@ -5,10 +5,12 @@ from typing import Any, Literal
 
 from pydantic import Field, JsonValue
 
-from promptpotter.domain.results import HardSampleOrder
 from promptpotter.domain.ruler import DELTA_STATE_LABEL, DeltaState, RulerStanding
 from promptpotter.domain.scoring import SampleStatus, is_hit
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
+
+# Ranks what the operator READS only: the engine's scoring order is `build_round_order`.
+HardSampleOrder = Literal["info_gain", "difficulty"]
 
 # How much evidence a cell buys, never what it is: out of every key, so a deepened cell CONTINUES
 # its campaign. Named as `runner/inner/tasks.py::InnerTaskSpec` names them, which subtracts the same set.

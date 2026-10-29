@@ -19,8 +19,8 @@ from promptpotter.application.views.render.primitives import (
     render_pipeline_overlay,
 )
 from promptpotter.domain.connector import MeasuredUnit, unit_count
+from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
 from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
-from promptpotter.domain.results import ROUND_ADVANCE_INFO, RoundAdvance, StallEffect
 from promptpotter.domain.ruler import PLATEAU_ROUNDS, LevelSeries
 from promptpotter.infrastructure.tracing.langfuse_client import langfuse_trace_url
 
@@ -125,7 +125,6 @@ def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
 
 def render_round_stats(
     round_result: RoundClosedRecord,
-    pipeline_schema: PipelineSchema | None,
     unit: MeasuredUnit = "sample",
 ) -> str:
     lines: list[str] = []
@@ -155,9 +154,9 @@ def render_round_stats(
     )
 
     h = round_result.health
-    if h is not None and h.grade == "critical":
+    if h.grade == "critical":
         lines.append(_node_line(f"{BOLD}{RED}⛔ CRITICAL — {h.suggested_action}{RESET}"))
-    elif h is not None and h.grade == "degraded":
+    elif h.grade == "degraded":
         lines.append(_node_line(f"{YELLOW}⚠ DEGRADED — {h.suggested_action}{RESET}"))
 
     # No per-node tally: `terminal_node` is the deepest node each sample REACHED, constant on a healthy round.

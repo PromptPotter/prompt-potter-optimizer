@@ -18,7 +18,7 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.run_records import StandingBudgetRecord
+from promptpotter.domain.run_records import RunPhaseRecord, StandingBudgetRecord
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
@@ -26,11 +26,10 @@ from promptpotter.infrastructure.producer_lock import cycle_held, held, pass_hel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     Controls,
     Progress,
+    scan_last,
     scan_launch_claim,
     scan_ledger_controls,
-    scan_ledger_declared_phase,
     scan_ledger_progress,
-    scan_ledger_standing_budget,
 )
 from promptpotter.infrastructure.store.io import read_json_optional
 from promptpotter.infrastructure.store.layout import (
@@ -39,6 +38,7 @@ from promptpotter.infrastructure.store.layout import (
     campaign_cycles_dir,
     in_inner_sandbox,
 )
+from promptpotter.infrastructure.store.read_model import LedgerSpan
 
 
 def standing_controls(cycle_dir: Path) -> Controls:
@@ -58,7 +58,9 @@ def requested_lookahead(controls: Controls) -> int:
 
 
 def standing_budget(cycle_dir: Path) -> StandingBudgetRecord:
-    return scan_ledger_standing_budget(CycleLayout(cycle_dir).ledger)
+    # No record stands no axis, which the empty record says.
+    held = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], StandingBudgetRecord)
+    return held or StandingBudgetRecord()
 
 
 def armed_run_limits(cycle_dir: Path, declared: RunLimits) -> RunLimits:
@@ -143,7 +145,7 @@ def read_run_state(
 
 def derive_run_state(cycle_dir: Path) -> RunState:
     ledger = CycleLayout(cycle_dir).ledger
-    last = scan_ledger_declared_phase(ledger)
+    last = scan_last([LedgerSpan(ledger)], RunPhaseRecord)
     declared = "" if last is None else last.run_phase.value
     terminal = declared == RunPhase.TERMINAL
     producer_held = cycle_held(cycle_dir)

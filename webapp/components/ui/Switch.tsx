@@ -11,10 +11,10 @@ export function Switch({
   lockedNote = "coming soon",
 }: {
   checked: boolean;
-  onChange?: () => void;
+  onChange?: (() => void) | undefined;
   label: string;
-  locked?: boolean;
-  lockedNote?: string;
+  locked?: boolean | undefined;
+  lockedNote?: string | undefined;
 }) {
   return (
     <button

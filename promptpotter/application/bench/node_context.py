@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from promptpotter.application import optimizers
@@ -27,6 +26,8 @@ from promptpotter.application.runner.inner.spawn_context import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.arms import ArmRole, Proposal, Proposed
+from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.opt_search_point import (
     OPERATOR_SOURCE,
     Locus,
@@ -36,21 +37,14 @@ from promptpotter.domain.opt_search_point import (
     node_source,
 )
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.pipeline_schema import PipelineNode
+from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool, PoolEntry
-from promptpotter.domain.results import (
-    ArmRole,
-    Proposal,
-    Proposed,
-    merge_known_outcomes,
-    round_document_digest,
-    walked_slot,
-)
+from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_records import LLMCallRecord, RoundProposedRecord
+from promptpotter.domain.run_standing import walked_slot
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import SendRefusedError
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -60,7 +54,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.difficulty import DifficultyView
     from promptpotter.application.intelligence.indexes.axis import AxisIndex
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
         Controller,
         NodeMember,
@@ -154,6 +147,24 @@ async def measure_as_parent(
     return read
 
 
+def _rng(round_: RoundContext, node: str, tag: str) -> random.Random:
+    """A function of the run's seed, the round, the node and *tag* alone, so a resume redraws the same."""
+    cycle = round_.cycle
+    clamp = cycle.config.optimization.determinism
+    pinned = None if clamp is None else clamp.seed
+    seed = cycle.session.campaign_id if pinned is None else pinned
+    return random.Random(f"{seed}:{round_.round_num}:{node}{tag}")
+
+
+def _drawn(round_: RoundContext, member: NodeMember, kind: type[Pool]) -> tuple[Any, ...]:
+    """The one reading of a pool, by its reader's draw: its entries in draw order, none where it draws none."""
+    cycle = round_.cycle
+    if kind not in cycle.optimizer.draws(member):
+        return ()
+    demo = cycle.session.state.scoring.require_partition().demo
+    return cycle.slices.get(kind).drawn({s.key: s for s in demo})
+
+
 class Lineage(CycleRead):
     @property
     def parent(self) -> OptSearchPoint:
@@ -171,6 +182,10 @@ class Lineage(CycleRead):
     def rounds(self) -> Sequence[RoundResult]:
         """Sealed: a round's optimizer state opens only through ``recall`` / ``slice``, which check what the node declares."""
         return [rr.model_copy(update={"optimizer_state": None}) for rr in self._cycle.rounds]
+
+    @property
+    def rebases(self) -> int:
+        return self._cycle.session.state.rebases
 
     def rewind_round(self) -> int | None:
         """Where a rewind of this cycle lands (UCB over the campaign's lineage); ``None`` where no ancestor stands."""
@@ -204,6 +219,17 @@ class Frontier(CycleRead):
         """On the panel it was LAST scored on; ``None`` is unmeasured."""
         fold = self._cycle.parent_fold
         return None if fold is None else fold.accuracy
+
+    async def measure_parent(self, individual_id: str, cells: list[Sample]) -> CellSheet:
+        arm = self._cycle.measured(individual_id)
+        read = await measure_as_parent(
+            self._round,
+            arm.individual,
+            self._cycle.points.measured(arm),
+            cells,
+            role=MeasurementRole.PARENT,
+        )
+        return read.rows
 
 
 class Ruler(CycleRead):
@@ -256,6 +282,16 @@ class Target(CycleRead):
     """The pipeline the run measures, as the bench resolved it."""
 
     @property
+    def schema(self) -> PipelineSchema:
+        return self._cycle.session.pipeline_schema
+
+    @property
+    def prompt_node(self) -> PipelineNode:
+        """The ONE prompt node a ``prompt_arity: one`` member rewrites; ``preflight.py::refuse_unfit_pipeline`` refused any other roster before the mint."""
+        (node,) = self.schema.prompt_nodes()
+        return node
+
+    @property
     def framing(self) -> Any:
         return self._cycle.framing
 
@@ -303,109 +339,87 @@ class Target(CycleRead):
         return earned_blocks_for(session.store, signature)
 
 
-class NodeContext[K: StrictModel]:
-    """Nothing here hands out the cycle, its session, a store, the manifest or the config: only what this node declares, and its own."""
+class Calls(CycleRead):
+    """Its own node's model, called under the run's ledger and reuse cache."""
 
-    def __init__(self, round_: RoundContext, member: NodeMember) -> None:
-        self._round = round_
-        self._member = member
-        self.node = member.name
-
-    def read[R: CycleRead](self, kind: type[R]) -> R:
-        if kind not in self._member.sees:
-            raise KeyError(f"{self.node!r} reads the cycle's {kind.__name__} and does not see it")
-        return kind(self._round)
+    @classmethod
+    def refusal(cls, member: NodeMember) -> str | None:
+        return None if member.kind is NodeKind.LLM else "only an llm node calls a model"
 
     @property
-    def round_num(self) -> int:
-        return self._round.round_num
+    def model(self) -> str:
+        return self._cycle.optimizer.model(self._member.name)
 
     @property
-    def is_final_round(self) -> bool:
-        return self._round.is_final_round
+    def node_config(self) -> dict[str, Any]:
+        """Its own node's config as the manifest and overlay resolve it."""
+        return self._cycle.optimizer.node_config(self._member.name)
 
-    def banked_proposals(self) -> list[Proposal] | None:
-        return self._round.cycle.banked_proposals(self.round_num)
+    def fill(self, **values: str) -> str:
+        node, selected = self._member.name, self._cycle.optimizer
+        template = running_prompt(node, selected.node_config(node), selected.manifest)
+        return template.compile_prompt(**values)
 
-    @property
-    def _selected(self) -> SelectedOptimizer:
-        return self._round.cycle.optimizer
+    def call_context(self, injections: InjectionBreakdown) -> LLMCallContext:
+        session = self._cycle.session
+        return LLMCallContext(
+            ledger=session.state.ledger,
+            round_num=self._round.round_num,
+            cache=session.store.optimizer_reuse,
+            injections=injections,
+        )
 
-    def _declares(self, kind: type[StatePart], *, writes: bool) -> None:
-        member = self._member
-        if kind not in (member.writes if writes else member.reads | member.writes):
-            verb = "writes" if writes else "reads"
-            raise KeyError(f"{self.node!r} {verb} the {kind.kind!r} state and does not declare it")
+    def note_synthesized_call(self, payload: dict[str, Any]) -> None:
+        """Where a round makes no call, so the audit trail and dashboard still see the node."""
+        if (ledger := self._cycle.session.state.ledger) is not None:
+            ledger.append(
+                LLMCallRecord(
+                    node=self._member.name,
+                    round=self._round.round_num,
+                    payload_kind="synthesized",
+                    payload=payload,
+                )
+            )
 
-    def knobs_of[T: StrictModel](self, kind: type[T]) -> T:
-        return self._selected.reached_knobs(self._member, kind)
+    async def ask(self, prompt: str, idx: int | None = None) -> str:
+        session = self._cycle.session
+        node = self._member.name
+        # The seed keys the reuse cache: a resume replays its reply, a repeat anywhere else samples.
+        seed = _rng(self._round, node, f":{idx}:request").getrandbits(31)
+        response = await llm_call(
+            [{"role": "user", "content": prompt}],
+            node=node,
+            context=LLMCallContext(
+                ledger=session.state.ledger,
+                round_num=self._round.round_num,
+                candidate_idx=idx,
+                cache=session.store.optimizer_reuse,
+            ),
+            seed=seed,
+        )
+        return response.content
 
-    def fire(self, member: type) -> NodeContext[Any]:
-        """The context a fired member runs under, its own, declared by this controller's ``fires``."""
-        if member not in cast("Controller", self._member).fires:
-            raise KeyError(f"{self.node!r} fires {member.__name__} and does not declare it")
-        return NodeContext(self._round, optimizers.member(self._selected.roster_one(member)))
+    async def ask_each(self, prompts: Mapping[int, str]) -> list[str]:
+        """Every send lands before one's refusal is raised; a refused send is re-asked alone, into the room really left."""
+        landed = await asyncio.gather(
+            *(self.ask(prompt, idx) for idx, prompt in prompts.items()), return_exceptions=True
+        )
+        replies: list[str] = []
+        for (idx, prompt), reply in zip(prompts.items(), landed, strict=True):
+            if isinstance(reply, SendRefusedError):
+                reply = await self.ask(prompt, idx)
+            if isinstance(reply, BaseException):
+                raise reply
+            replies.append(reply)
+        return replies
 
-    def slice[S: StateSlice](self, kind: type[S]) -> S:
-        self._declares(kind, writes=False)
-        return self._round.cycle.slices.get(kind)
 
-    def put(self, value: StateSlice) -> None:
-        self._declares(type(value), writes=True)
-        self._round.cycle.slices.put(value)
+class Children(CycleRead):
+    """The ONE way a child is written, so the bench admits it as it is made."""
 
-    def recall[O: RoundOutput](self, kind: type[O], round_num: int) -> O:
-        self._declares(kind, writes=False)
-        return self._round.cycle.output(kind, round_num)
-
-    def emit(self, output: RoundOutput) -> None:
-        """Onto this context's round: banked at its close, or restated there where it already closed."""
-        self._declares(type(output), writes=True)
-        if (restated := self._round.cycle.emit(output, self.round_num)) is not None:
-            self._bank(restated)
-
-    def restate(self, *kinds: type[StateSlice]) -> None:
-        """Bank what this node now holds of *kinds* onto the closed round: a write landing after its close."""
-        for kind in kinds:
-            self._declares(kind, writes=True)
-        cycle = self._round.cycle
-        closed = cycle.rounds[-1]
-        state = closed.closed_state.holding(*(cycle.slices.get(kind) for kind in kinds))
-        self._bank(closed.model_copy(update={"optimizer_state": state}))
-
-    def access(self, kind: type[Pool]) -> Access:
-        return self._selected.access(self._member, kind)
-
-    @overload
-    def drawn(self, kind: type[DemoPool]) -> tuple[Sample, ...]: ...
-    @overload
-    def drawn(self, kind: type[BlockPool]) -> tuple[PoolEntry, ...]: ...
-    def drawn(self, kind: type[Pool]) -> tuple[Any, ...]:
-        """The one reading of a pool, by its reader's declared draw: its entries in draw order, none under ``off``."""
-        if self.access(kind) == "off":
-            return ()
-        demo = self._round.cycle.session.state.scoring.require_partition().demo
-        return self._round.cycle.slices.get(kind).drawn({s.key: s for s in demo})
-
-    def _bank(self, restated: RoundResult) -> None:
-        """On the run's own ledger before the cycle seats it: a restatement that failed to land is held nowhere."""
-        cycle = self._round.cycle
-        session = cycle.session
-        if restated.at_offset is not None:
-            ledger = session.state.ledger
-            assert ledger is not None, "a closed round is restated under the run's observers"
-            ledger.append(session.store.campaigns.restated_state(session.hop, restated))
-        cycle.seat(restated)
-
-    @property
-    def schema(self) -> PipelineSchema:
-        return self._round.cycle.session.pipeline_schema
-
-    @property
-    def prompt_node(self) -> PipelineNode:
-        """The ONE prompt node a ``prompt_arity: one`` member rewrites; ``preflight.py::refuse_unfit_pipeline`` refused any other roster before the mint."""
-        (node,) = self.schema.prompt_nodes()
-        return node
+    @classmethod
+    def refusal(cls, member: NodeMember) -> str | None:
+        return None if hasattr(member, "variation_mode") else "only a proposer writes a child"
 
     def child(
         self,
@@ -418,8 +432,8 @@ class NodeContext[K: StrictModel]:
         changes_description: str = "",
         evidence_grounding: EvidenceGrounding | None = None,
     ) -> Proposal:
-        """The ONE way a child is written, so the bench admits it as it is made; *overlay* lays config over the FIRST parent's."""
-        schema = self.schema
+        """*overlay* lays config over the FIRST parent's."""
+        schema = self._cycle.session.pipeline_schema
         asked = overlay or {}
         prompts, config, carried = carried_writes(
             schema,
@@ -450,7 +464,7 @@ class NodeContext[K: StrictModel]:
         prompt_loci: Mapping[Locus, Any],
         changes_description: str | None = None,
     ) -> Proposal:
-        schema = self.schema
+        schema = self._cycle.session.pipeline_schema
         prompts, _, carried = carried_writes(
             schema, prompt_loci=prompt_loci, overlay={}, demo=self._demo_keys(prompt_loci)
         )
@@ -469,140 +483,139 @@ class NodeContext[K: StrictModel]:
 
     def _demo_keys(self, loci: Mapping[Locus, Any]) -> frozenset[str] | None:
         """The shots this member may write: what it draws of the demo pool, asked only where *loci* write one; ``None`` where it draws none."""
-        if DemoPool not in self._member.draws:
-            return None
+        member = self._member
         if not any(locus.key == SHOTS_KEY for locus in loci):
             return frozenset()
-        return frozenset(s.key for s in self.drawn(DemoPool))
-
-    @property
-    def optimizer_name(self) -> str:
-        return self._selected.name
-
-    @property
-    def knobs(self) -> K:
-        return cast("K", self._selected.knobs(self.node))
-
-    @property
-    def node_config(self) -> dict[str, Any]:
-        """Its own node's config as the manifest and overlay resolve it."""
-        return self._selected.node_config(self.node)
-
-    @property
-    def model(self) -> str:
-        return self._selected.model(self.node)
-
-    def call_context(
-        self, *, round_num: int | None = None, injections: InjectionBreakdown | None = None
-    ) -> LLMCallContext:
-        session = self._round.cycle.session
-        return LLMCallContext(
-            ledger=session.state.ledger,
-            round_num=self.round_num if round_num is None else round_num,
-            cache=session.store.optimizer_reuse,
-            injections=InjectionBreakdown() if injections is None else injections,
-        )
-
-    def note_synthesized_call(self, payload: dict[str, Any]) -> None:
-        """Where a round makes no call, so the audit trail and dashboard still see the node."""
-        if (ledger := self._round.cycle.session.state.ledger) is not None:
-            ledger.append(
-                LLMCallRecord(
-                    node=self.node,
-                    round=self.round_num,
-                    payload_kind="synthesized",
-                    payload=payload,
-                )
-            )
-
-    def race_standing(self, snapshot: RaceSnapshot) -> None:
-        self._round.callbacks.on_race_standing(self.node, self.round_num, snapshot)
-
-    def phase(self, phase: str, step: Literal["enter", "exit"], view: PhaseView) -> None:
-        self._round.callbacks.on_phase(phase, step, round=self.round_num, view=view)
-
-    def keep(self, individuals: Sequence[OptSearchPoint]) -> None:
-        self._round.cycle.population = list(individuals)
+        if DemoPool not in self._cycle.optimizer.draws(member):
+            return None
+        return frozenset(s.key for s in _drawn(self._round, member, DemoPool))
 
     @property
     def _variation(self) -> Variation:
         mode = cast("Proposer", self._member).variation_mode
         node = (
-            OPERATOR_SOURCE if mode == "operator" else node_source(self._selected.name, self.node)
+            OPERATOR_SOURCE
+            if mode == "operator"
+            else node_source(self._cycle.optimizer.name, self._member.name)
         )
         return Variation(node=node, mode=mode)
 
+
+class Replay(CycleRead):
+    """What a resume re-derives as the run first did: its seeded draws, its decisions, its banked proposals."""
+
     def rng(self, tag: str = "") -> random.Random:
-        """A function of the run's seed, the round, this node and *tag* alone, so a resume redraws the same."""
-        cycle = self._round.cycle
-        clamp = cycle.config.optimization.determinism
-        pinned = None if clamp is None else clamp.seed
-        seed = cycle.session.campaign_id if pinned is None else pinned
-        return random.Random(f"{seed}:{self.round_num}:{self.node}{tag}")
-
-    def fill(self, **values: str) -> str:
-        selected = self._selected
-        template = running_prompt(self.node, selected.node_config(self.node), selected.manifest)
-        return template.compile_prompt(**values)
-
-    async def ask(self, prompt: str, idx: int | None = None) -> str:
-        session = self._round.cycle.session
-        # The seed keys the reuse cache: a resume replays its reply, a repeat anywhere else samples.
-        seed = self.rng(f":{idx}:request").getrandbits(31)
-        response = await llm_call(
-            [{"role": "user", "content": prompt}],
-            node=self.node,
-            context=LLMCallContext(
-                ledger=session.state.ledger,
-                round_num=self.round_num,
-                candidate_idx=idx,
-                cache=session.store.optimizer_reuse,
-            ),
-            seed=seed,
-        )
-        return response.content
-
-    async def ask_each(self, prompts: Mapping[int, str]) -> list[str]:
-        """Every send lands before one's refusal is raised; a refused send is re-asked alone, into the room really left."""
-        landed = await asyncio.gather(
-            *(self.ask(prompt, idx) for idx, prompt in prompts.items()), return_exceptions=True
-        )
-        replies: list[str] = []
-        for (idx, prompt), reply in zip(prompts.items(), landed, strict=True):
-            if isinstance(reply, SendRefusedError):
-                reply = await self.ask(prompt, idx)
-            if isinstance(reply, BaseException):
-                raise reply
-            replies.append(reply)
-        return replies
-
-    async def measure_parent(self, individual_id: str, cells: list[Sample]) -> CellSheet:
-        cycle = self._round.cycle
-        arm = cycle.measured(individual_id)
-        read = await measure_as_parent(
-            self._round,
-            arm.individual,
-            cycle.points.measured(arm),
-            cells,
-            role=MeasurementRole.PARENT,
-        )
-        return read.rows
-
-    async def show_next_round(self) -> None:
-        shown = self.round_num + 1
-        with at_round(shown):
-            await self._selected.runtime.show_round(replace(self._round, round_num=shown))
+        return _rng(self._round, self._member.name, tag)
 
     def decide(
         self, kind: str, inputs: dict[str, Any], outcome: Any, *, data: dict[str, Any] | None = None
     ) -> Any:
-        """A resume re-derives it only where the runtime registers a replayer for *kind*; else it is archived."""
+        """A resume re-derives it only where a member registers a replayer for *kind*; else it is archived."""
         return record_decision(
-            self._round.cycle.pending_decisions,
+            self._cycle.pending_decisions,
             kind,
             inputs,
             outcome,
-            node=self.node,
+            node=self._member.name,
             data=data,
-            round=self.round_num,
+            round=self._round.round_num,
         )
+
+    def banked_proposals(self) -> list[Proposal] | None:
+        return self._cycle.banked_proposals(self._round.round_num)
+
+
+class Progress(CycleRead):
+    """What the operator watches it do: its phases and its race's standing."""
+
+    def phase(self, phase: str, step: Literal["enter", "exit"], view: PhaseView) -> None:
+        self._round.callbacks.on_phase(phase, step, round=self._round.round_num, view=view)
+
+    def race_standing(self, snapshot: RaceSnapshot) -> None:
+        self._round.callbacks.on_race_standing(self._member.name, self._round.round_num, snapshot)
+
+
+class NodeContext:
+    """Its own identity and one accessor per declaration; any other need is a ``CycleRead`` it names in ``sees``. Nothing here hands out the cycle, its session, a store, the manifest or the config."""
+
+    def __init__(self, round_: RoundContext, member: NodeMember) -> None:
+        self._round = round_
+        self._member = member
+        self.node = member.name
+
+    def read[R: CycleRead](self, kind: type[R]) -> R:
+        if kind not in self._member.sees:
+            raise KeyError(f"{self.node!r} reads the cycle's {kind.__name__} and does not see it")
+        return kind(self._round, self._member)
+
+    @property
+    def round_num(self) -> int:
+        return self._round.round_num
+
+    def knobs[T: StrictModel](self, kind: type[T]) -> T:
+        """Its own where they are a *kind*, else the ONE consulted member's."""
+        return self._round.cycle.optimizer.reached_knobs(self._member, kind)
+
+    def fire(self, member: type) -> NodeContext:
+        """The context a fired member runs under, its own, declared by this controller's ``fires``."""
+        if member not in cast("Controller", self._member).fires:
+            raise KeyError(f"{self.node!r} fires {member.__name__} and does not declare it")
+        selected = self._round.cycle.optimizer
+        return NodeContext(self._round, optimizers.NODE_MEMBERS.get(selected.roster_one(member)))
+
+    def _declares(self, kind: type[StatePart], *, writes: bool) -> None:
+        member = self._member
+        if kind not in (member.writes if writes else member.reads | member.writes):
+            verb = "writes" if writes else "reads"
+            raise KeyError(f"{self.node!r} {verb} the {kind.kind!r} state and does not declare it")
+
+    def slice[S: StateSlice](self, kind: type[S]) -> S:
+        self._declares(kind, writes=False)
+        return self._round.cycle.slices.get(kind)
+
+    def put(self, value: StateSlice) -> None:
+        self._declares(type(value), writes=True)
+        self._round.cycle.slices.put(value)
+
+    def recall[O: RoundOutput](self, kind: type[O], round_num: int) -> O:
+        self._declares(kind, writes=False)
+        return self._round.cycle.output(kind, round_num)
+
+    def emit(self, output: RoundOutput) -> None:
+        """Onto this context's round: banked at its close, or restated there where it already closed."""
+        self._declares(type(output), writes=True)
+        if (restated := self._round.cycle.emit(output, self.round_num)) is not None:
+            self._bank(restated)
+
+    def restate(self, *kinds: type[StateSlice]) -> None:
+        """Bank what this node now holds of *kinds* onto the closed round: a write landing after its close."""
+        for kind in kinds:
+            self._declares(kind, writes=True)
+        cycle = self._round.cycle
+        closed = cycle.rounds[-1]
+        state = closed.closed_state.holding(*(cycle.slices.get(kind) for kind in kinds))
+        self._bank(closed.model_copy(update={"optimizer_state": state}))
+
+    def access(self, kind: type[Pool]) -> Access:
+        return self._round.cycle.optimizer.access(self._member, kind)
+
+    @overload
+    def drawn(self, kind: type[DemoPool]) -> tuple[Sample, ...]: ...
+    @overload
+    def drawn(self, kind: type[BlockPool]) -> tuple[PoolEntry, ...]: ...
+    def drawn(self, kind: type[Pool]) -> tuple[Any, ...]:
+        if kind not in self._member.draws:
+            raise KeyError(
+                f"{self.node!r} draws from the {kind.kind!r} pool and does not declare it"
+            )
+        return _drawn(self._round, self._member, kind)
+
+    def _bank(self, restated: RoundResult) -> None:
+        """On the run's own ledger before the cycle seats it: a restatement that failed to land is held nowhere."""
+        cycle = self._round.cycle
+        session = cycle.session
+        if restated.at_offset is not None:
+            ledger = session.state.ledger
+            assert ledger is not None, "a closed round is restated under the run's observers"
+            ledger.append(session.store.campaigns.restated_state(session.hop, restated))
+        cycle.seat(restated)

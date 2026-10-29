@@ -10,7 +10,7 @@ from promptpotter.application.maintenance.reset import (
     plan_reset,
     size_tag,
 )
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT, SHARED_CACHE_DIRS
+from promptpotter.config.paths import SHARED_CACHE_DIRS, default_projects_root
 from promptpotter.presentation.cli.commands.result import CommandResult
 
 
@@ -58,7 +58,7 @@ def _render_summary(plan: ResetPlan) -> str:
 
 async def cmd_reset(args: argparse.Namespace) -> CommandResult:
     plan = plan_reset(
-        DEFAULT_PROJECTS_ROOT,
+        default_projects_root(),
         tenant_id=None
         if args.all_tenants
         else registered_or_default_identity(args.tenant).tenant_id,

@@ -4,7 +4,7 @@ import { evidenceRead } from "@/lib/api/reads";
 import type { Evidence } from "@/lib/api/types";
 import { useRead } from "@/lib/hooks/useRead";
 
-export interface EvidenceRead {
+interface EvidenceRead {
   evidence: Evidence | null;
   loading: boolean;
   error: string | null;

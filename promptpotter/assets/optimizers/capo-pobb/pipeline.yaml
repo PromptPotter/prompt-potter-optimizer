@@ -1,0 +1,12 @@
+# capo-pobb — CAPO with potter's `pobb` race in place of its paired t-test: a switch over two
+# optimizers' members, selected with `optimization.optimizer: capo-pobb`. Every other node is
+# capo's at its paper configuration, and `pobb` is potter's at potter's, read from those files.
+name: capo-pobb
+version: v1.0
+# A switch answers to no paper: the picker serves it as the bench's own.
+paper: null
+extends: capo
+swap:
+  paired_t:
+    node: pobb
+    of: potter

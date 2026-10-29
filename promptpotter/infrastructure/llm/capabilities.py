@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
@@ -25,6 +24,7 @@ from promptpotter.shared.tls import tls_context
 logger = logging.getLogger(__name__)
 
 MODELS_URL = "https://openrouter.ai/api/v1/models"
+_FETCH_TIMEOUT_S = 15.0
 
 CAPABILITY_FILE = "model_capabilities.yaml"
 
@@ -179,9 +179,7 @@ def resolve_schema_menu(schema: PipelineSchema, *, workspace: Path | None) -> Ca
     return resolve_menu(schema.selectable_routes(), workspace=workspace)
 
 
-async def ensure_model_capabilities(
-    workspace: Path, *, max_age_days: float = 7.0, timeout: float = 15.0
-) -> int:
+async def ensure_model_capabilities(workspace: Path, *, max_age_days: float = 7.0) -> int:
     """0 is "nothing written" — an already-fresh snapshot as much as a failed fetch."""
     cached = read_json_tolerant(_cache_path(workspace), default={}) or {}
     fetched = cached.get("fetched_at") if isinstance(cached, dict) else None
@@ -192,20 +190,18 @@ async def ensure_model_capabilities(
             age = None
         if age is not None and age < timedelta(days=max_age_days):
             return 0
-    return await refresh_model_capabilities(workspace, timeout=timeout)
+    return await refresh_model_capabilities(workspace)
 
 
-async def refresh_model_capabilities(workspace: Path, *, timeout: float = 15.0) -> int:
+async def refresh_model_capabilities(workspace: Path) -> int:
     import httpx
 
     try:
-        async with httpx.AsyncClient(timeout=timeout, verify=tls_context()) as client:
+        async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT_S, verify=tls_context()) as client:
             resp = await client.get(MODELS_URL)
             resp.raise_for_status()
             payload: dict[str, Any] = resp.json()
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         logger.info("model capability refresh failed, keeping any cached snapshot: %s", exc)
         return 0
 

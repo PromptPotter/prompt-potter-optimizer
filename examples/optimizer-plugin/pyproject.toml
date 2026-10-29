@@ -15,9 +15,9 @@ example_draw = "example_optimizer.members:DRAW"
 propose = "example_optimizer.members:PROPOSE"
 example_keep = "example_optimizer.members:KEEP"
 
-# The runtime's `name` is what `optimization.optimizer` selects.
-[project.entry-points."promptpotter.optimizer_runtimes"]
-example = "example_optimizer.members:RUNTIME"
+# The manifest's `name` is what `optimization.optimizer` selects.
+[project.entry-points."promptpotter.optimizer_manifests"]
+example = "example_optimizer.members:MANIFEST"
 
 [tool.setuptools]
 packages = ["example_optimizer"]

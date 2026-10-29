@@ -24,7 +24,7 @@ import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
 
-export interface NodeAuthoring {
+interface NodeAuthoring {
   overlay: Record<string, unknown>;
   prompts: Record<string, NodePrompt>;
 }
@@ -239,13 +239,13 @@ function TargetProgram({
   onPromptApply,
 }: {
   node: Parameters<typeof NodeSurface>[0]["node"];
-  authoring?: NodeAuthoring;
+  authoring: NodeAuthoring | undefined;
   subject: ObserveSubject;
   observed: SearchpointRead;
   schema: NodeSchemaReading;
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
   isLive: boolean;
-  onPromptApply?: (patch: DraftPatch) => void;
+  onPromptApply: ((patch: DraftPatch) => void) | undefined;
 }) {
   const { setObserve } = useSelection();
   if (authoring) {

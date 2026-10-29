@@ -7,7 +7,7 @@ import {
 import type { LiftEstimate, MeasuredLift, PairedReading } from "@/lib/api/types";
 import { fmtLevel, fmtSigned } from "@/lib/format";
 
-export type PairRead =
+type PairRead =
   | { read: true; lift: MeasuredLift; cells: number }
   | { read: false; kind: ReadingStateKind; label: string; sentence: string };
 

@@ -62,10 +62,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
 
   const datasets = series.map((s, i) => ({
     label: seriesLabel(s),
-    data: cells.map((cell) => {
-      const value = s.values[cell];
-      return value === undefined ? null : value;
-    }),
+    data: cells.map((cell) => s.values[cell] ?? null),
     borderColor: seriesColor(i),
     backgroundColor: seriesColor(i),
     borderWidth: view === "lines" ? 1.5 : 0,

@@ -44,8 +44,8 @@ from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import Stores
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.jobs.registry import Job, JobRegistry
+    from promptpotter.domain.campaign_config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 

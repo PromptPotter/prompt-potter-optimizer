@@ -44,6 +44,7 @@ export function QuestionAnswer({
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="Your answer"
+            aria-label="Your answer"
           />{" "}
           <button type="button" disabled={!text.trim()} onClick={() => submit(text)}>
             Answer

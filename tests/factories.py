@@ -5,6 +5,7 @@ import functools
 import selectors
 import time
 from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
+from dataclasses import replace
 from itertools import count
 from pathlib import Path
 from types import EllipsisType
@@ -14,11 +15,6 @@ from offline_world import FakeBackend
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.difficulty import DifficultyView
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
-    declare_run,
-)
 from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import resolve_optimizer, select_optimizer
@@ -33,18 +29,37 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.runner.bench import BenchLine
 from promptpotter.application.runner.inner.tasks import (
     InnerCell,
     InnerCells,
     InnerTaskSpec,
 )
 from promptpotter.application.scoring.formula.compiler import compile_scorer
+from promptpotter.application.scoring.paired import MemberRows
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
 from promptpotter.connectors.termnorm import termnorm_wire_adapter
+from promptpotter.domain.arms import (
+    ArmRole,
+    ArmSlot,
+    ArmState,
+    Broken,
+    Cut,
+    CutKind,
+    Eliminated,
+    Elimination,
+    Invalid,
+    Measured,
+    Proposed,
+    Skipped,
+    arm_end,
+)
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     BandedValue,
     BankPartition,
+    BenchPass,
+    BenchPasses,
     BenchScore,
     LiftCost,
     LineRun,
@@ -53,47 +68,45 @@ from promptpotter.domain.bench import (
     partition_bank,
 )
 from promptpotter.domain.campaign import Campaign, Optimize, Purpose
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    declare_run,
+)
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS, NodePrompt, OptSearchPoint
-from promptpotter.domain.optimizer_state import Critique, OptimizerState
-from promptpotter.domain.paired_reading import ArmKey, PairedReading, ReadingState
+from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
+from promptpotter.domain.origin_panel import OverlapReading
+from promptpotter.domain.paired_reading import (
+    ArmKey,
+    ArmName,
+    MemberAddress,
+    PairedReading,
+    ReadingState,
+)
 from promptpotter.domain.phases import RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import NodePromptInfo, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import BlockPool, DemoPool
-from promptpotter.domain.results import (
-    ArmRole,
-    ArmSlot,
-    ArmState,
-    Broken,
-    Cut,
-    CutKind,
-    CycleResult,
-    DegradationHealth,
-    Election,
-    Eliminated,
-    Elimination,
-    Invalid,
-    Measured,
-    OverlapReading,
-    Proposed,
-    RoundResult,
-    ScoreSummary,
-    Skipped,
-    arm_end,
-)
+from promptpotter.domain.results import CycleResult, Election, RoundResult
+from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.ruler import (
     AbilityReading,
+    DeltaRuler,
     LevelSeries,
     RulerScope,
     RulerStamp,
     ThetaCaveat,
+    anchor_id_of,
     flat_ruler_id,
 )
-from promptpotter.domain.run_records import RunPhaseRecord, SampleScoredRecord
-from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer, WalkedCell
+from promptpotter.domain.run_records import RunPhaseRecord, SampleScoredRecord, TokenUsageRecord
+from promptpotter.domain.run_standing import RunStanding
+from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
+from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget, CeilingMeter, SpendBucket, SpendRollup
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
@@ -105,9 +118,10 @@ from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
+from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive, config_key
 from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.shared.identity import default_identity
-from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.shared.identity import IdentityContext, default_identity
+from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 
 class _SpentWaits(selectors.DefaultSelector):
@@ -295,17 +309,85 @@ def spend_book(
     )
 
 
-def backend_client(**declared: Any) -> BackendClient:
+def backend_client(jobs_dir: Path, **declared: Any) -> BackendClient:
     declared.setdefault("endpoint", lambda: f"http://{FakeBackend.AT}")
     declared.setdefault("cell_envelope_s", cell_envelope_of(600.0))
     connector = Connector("fake", termnorm_wire_adapter, **declared)
-    return BackendClient(connector, workload=PROBE_WORKLOAD)
+    return BackendClient(connector, workload=PROBE_WORKLOAD, jobs_dir=jobs_dir)
 
 
-def workspace(root: Path) -> Stores:
+def workspace(root: Path, identity: IdentityContext | None = None) -> Stores:
     return build_stores(
-        default_identity(), projects_root=root / "projects", install_datasets_root=root / "datasets"
+        default_identity() if identity is None else identity,
+        projects_root=root / "projects",
+        install_datasets_root=root / "datasets",
     )
+
+
+def scorer_of(
+    per_sample: str = "label_match(predicted, ground_truth)",
+    per_cell: str | None = None,
+    *,
+    verifier_graded: bool = False,
+) -> Scorer:
+    return compile_scorer(per_sample, per_cell, verifier_graded=verifier_graded)
+
+
+type Configs = list[tuple[str, dict[str, Any]]]
+LLM_ONLY: Configs = [("llm_only", {"model": "X"})]
+
+
+def filed_under(
+    configs: Configs = LLM_ONLY, dataset_hash: str = "ds", *, prompt_fields_id: str = "pf"
+) -> ArchiveEntry:
+    return ArchiveEntry(
+        config_key=config_key(configs),
+        prompt_fields_id=prompt_fields_id,
+        node_configs=configs,
+        pipeline_params={},
+        dataset_hash=dataset_hash,
+    )
+
+
+def archive_row(query: str, *, truth: str = "g", **wire: Any) -> MeasuredCell:
+    """An answer to *query*, keyed on its content as a bank keys it; *wire* bends any fact."""
+    key = sample_key(query=query, ground_truth=truth, question=None, source_pin=None)
+    return MeasuredCell.from_wire(
+        {"sample_key": key, "query": query, "ground_truth": truth, **wire}
+    )
+
+
+def filed(
+    archive: MeasurementArchive,
+    cells: Iterable[MeasuredCell],
+    under: ArchiveEntry | None = None,
+    *,
+    grade: str = "A",
+    role: str = "panel",
+    created_at: str = "",
+) -> list[WalkedCell]:
+    """Each cell filed as a fresh answer under *under*, as a walk files what it bought."""
+    held = list(cells)
+    refs = archive.file_answers(
+        filed_under() if under is None else under,
+        [(cell, grade) for cell in held],
+        role=role,
+        source=RunSource.OPTIMIZATION_LOOP.value,
+        created_at=created_at,
+    )
+    return [(cell.sample_key, ref, False) for cell, ref in zip(held, refs, strict=True)]
+
+
+def billed_call(cost_usd: float | None = None, **fields: Any) -> TokenUsageRecord:
+    """One optimizer call billed *cost_usd*; *fields* bend any other field of the record."""
+    record: dict[str, Any] = {
+        "kind": "optimizer",
+        "node": "l1_generate",
+        "input_tokens": 1,
+        "output_tokens": 0,
+        "cost_usd": cost_usd,
+    } | fields
+    return TokenUsageRecord(**record)
 
 
 def loop_session(
@@ -327,7 +409,7 @@ def loop_session(
         store=stores,
         backend_id=backend_id,
         backend_client=backend_client(
-            max_cells_in_flight=1, cancel_stops_billing=True, holds_own_sends=True
+            stores.jobs_dir, max_cells_in_flight=1, cancel_stops_billing=True, holds_own_sends=True
         )
         if client is None
         else client,
@@ -349,7 +431,13 @@ def loop_session(
 
 PROMPT_INFO = NodePromptInfo(fields=PROMPT_FIELDS)
 
-_SEAT_BANK = (Sample(id=0, query="q0", ground_truth="a"),)
+
+def samples(n: int, truth: str | None = "a", *, query: str = "q") -> list[Sample]:
+    """Ids ``0..n-1``, each asking *query* spelled with its id."""
+    return [Sample(id=i, query=f"{query}{i}", ground_truth=truth) for i in range(n)]
+
+
+_SEAT_BANK = tuple(samples(1))
 _SEATS = count()
 
 
@@ -367,12 +455,13 @@ def seat(
     backend_id: str = "",
     control: RunControl | None = None,
     hop: CycleHop | None = None,
-    origin: Callable[[Session], ReadArm] | None = None,
-    **cycle: Any,
+    origin: tuple[OptSearchPoint, Callable[[Session], CellSheet]] | None = None,
+    framing: TaskDecomposition | None = None,
 ) -> RoundContext:
-    """Round *round_num* of a cycle started from *origin*'s reading of its session, else of one
-    whose origin was never measured; *cycle* bends its fields. It is bound to *hop*, else to a
-    cycle of its own."""
+    """Round *round_num* of a cycle started from *origin*, an individual and its reading of the
+    session, else of one whose origin was never measured. It is bound to *hop*, else to a cycle of
+    its own."""
+    framing = framing or TaskDecomposition()
     schema = schema or pipeline_schema(
         [PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)]
     )
@@ -389,8 +478,7 @@ def seat(
         schema,
         bank,
         backend_id=backend_id,
-        scorer=scorer
-        or compile_scorer("label_match(predicted, ground_truth)", verifier_graded=False),
+        scorer=scorer or scorer_of(),
         partition=partition_bank(list(bank), config.dataset_split, seed=config.run_seed),
         control=control,
         hop=hop,
@@ -403,15 +491,43 @@ def seat(
             config=config,
             slices=SliceMap(select_optimizer(config.optimization).slices),
             difficulty=DifficultyView.open(session, config, origin="origin"),
-            **cycle,
+            framing=framing,
         )
     else:
-        seated = Cycle.start(origin(session), session=session, config=config, **cycle)
+        individual, read = origin
+        sp = session.points(framing).job(individual)
+        c0 = arm_state(
+            "C0",
+            slot=ArmSlot(round=0, idx=0, total=1),
+            individual=individual,
+            resolved_params=sp.config_params or {},
+            sp_hash=sp.sp_hash(session.pipeline_schema),
+        )
+        seated = Cycle.start(
+            ReadArm(ArmKey(individual.id), c0, read(session)),
+            framing=framing,
+            session=session,
+            config=config,
+        )
     return RoundContext(seated, round_num, callbacks=RunCallbacks(ledger))
 
 
-def set_line(cycle: Cycle, line: Sequence[RoundResult]) -> None:
-    cycle.rounds = list(line)
+def set_cycle(
+    cycle: Cycle,
+    *,
+    line: Sequence[RoundResult] | None = None,
+    population: Sequence[OptSearchPoint] | None = None,
+    slices: Iterable[StateSlice] = (),
+    standing: RunStanding | None = None,
+) -> None:
+    if line is not None:
+        cycle.rounds = list(line)
+    if standing is not None:
+        cycle.standing = standing
+    if population is not None:
+        cycle.population = list(population)
+    for held in slices:
+        cycle.slices.put(held)
 
 
 def minted_campaign(
@@ -693,6 +809,130 @@ def round_result(
         "optimizer_state": optimizer_state(parse_failure=parse_failure),
     }
     return RoundResult(**(base | overrides))
+
+
+def member_rows(
+    individual: str,
+    rows: Sequence[GradedCell],
+    bank: Sequence[Sample],
+    *,
+    scorer_id: str = "s",
+    address: MemberAddress | None = None,
+    scope: RoleScope = RoleScope.DECISION,
+    instrument_id: str = "i",
+    dataset_hash: str | None = "d",
+    cell_set_id: str | None = None,
+) -> MemberRows:
+    """*rows* keyed by slot, each re-keyed onto its *bank* sample."""
+    key_of = {s.id: s.key for s in bank}
+    return MemberRows(
+        address=MemberAddress(
+            path=(CycleHop(campaign_id="camp", cycle_id="cyc"),),
+            individual_id=individual,
+            arm=None,
+            pass_role=None,
+        )
+        if address is None
+        else address,
+        sheet=sheet(
+            (row.filed(replace(row.facts, sample_key=key_of[int(row.key)])) for row in rows),
+            scorer_id,
+        ),
+        bought=0,
+        cut=False,
+        scope=scope,
+        instrument_id=instrument_id,
+        dataset_hash=dataset_hash,
+        cell_set_id=cell_set_id,
+    )
+
+
+def delta_ruler(
+    delta: Mapping[int, float],
+    *,
+    mu: float = 0.0,
+    sigma: float = 2.0,
+    se: float | Mapping[int, float] = 0.5,
+    sigma_theta: float = 1.5,
+) -> DeltaRuler:
+    """Keyed by slot here, by the slot's `measurement` key on the ruler."""
+    keyed = {str(sid): d for sid, d in delta.items()}
+    return DeltaRuler(
+        delta=keyed,
+        delta_se=(
+            {str(sid): s for sid, s in se.items()}
+            if isinstance(se, Mapping)
+            else dict.fromkeys(keyed, se)
+        ),
+        mu_delta=mu,
+        sigma_delta=sigma,
+        sigma_theta=sigma_theta,
+        calibration_model="1PL",
+        anchor_id=anchor_id_of(keyed, mu, sigma, "1PL"),
+    )
+
+
+def bench_pass(
+    stores: Stores,
+    individual: str,
+    rows: Sequence[GradedCell],
+    sample_keys: Sequence[str],
+    *,
+    filed_as: str | None = None,
+    **bend: Any,
+) -> BenchPass:
+    """*individual*'s held-out pass, *rows* filed as its bench cells; *filed_as* parts two
+    campaigns that send one individual."""
+    fields: dict[str, Any] = {
+        "round": int(individual != "origin"),
+        "candidate_id": individual,
+        "sp_hash": individual,
+        "stop": None,
+        "scorer_id": "",
+        "reads_before": 0,
+    } | bend
+    under = filed_under(
+        [("", {"individual": filed_as or f"bench_{individual}"})], prompt_fields_id=individual
+    )
+    return BenchPass(
+        cells=filed(stores.archive, [row.facts for row in rows], under, role="bench"),
+        sample_keys=list(sample_keys),
+        **fields,
+    )
+
+
+def bench_passes(origin: BenchPass, *held: BenchPass, tolerance: int = 0) -> BenchPasses:
+    return BenchPasses(
+        tolerance=tolerance,
+        origin=origin,
+        reserve_usd=0.0,
+        reserve_tokens=0,
+        selections={taken.candidate_id: taken for taken in held},
+    )
+
+
+def bench_line(
+    selection: ArmName,
+    *,
+    selecting: bool = False,
+    ending: StopReason | None = StopReason.ROUNDS_BUDGET,
+    **line: Any,
+) -> BenchLine:
+    """A line that closed one round on *selection*; *line* bends any other field."""
+    fields: dict[str, Any] = {
+        "hop": CycleHop(campaign_id="camp", cycle_id="cyc"),
+        "on_line": True,
+        "inner": False,
+        "held_by": None,
+        "trigger": "at_end",
+        "held_out": 4,
+        "instrument_id": "i",
+        "spend": None,
+    } | line
+    return BenchLine(
+        run=LineRun(selecting=selecting, ending=ending, selection=selection, rounds_closed=1),
+        **fields,
+    )
 
 
 def level_series(

@@ -18,7 +18,6 @@ from promptpotter.domain.hierarchy import MAX_STEP_LIMIT, HierarchyStep, Hierarc
 from promptpotter.domain.projection_envelope import RECORD_KINDS, bearing_record
 from promptpotter.domain.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.store.layout import (
-    CycleLayout,
     course_validator_ns,
     cycle_dir_for,
 )
@@ -60,6 +59,7 @@ class _RayTail:
     def __init__(
         self, limit: int = MAX_STEP_LIMIT, path_and_bound: tuple[str, RayCursor] | None = None
     ) -> None:
+        self.at_offset = -1
         self._below = path_and_bound
         # Fed every bearing record, kept or not: one record declares the round of those after it.
         self._feed = ActivityFeed()
@@ -71,10 +71,11 @@ class _RayTail:
         self._last_ts = ""
         self._heard: float | None = None
 
-    def feed(self, offset: int, line: dict[str, Any]) -> None:
+    def feed(self, line: dict[str, Any]) -> None:
         kind = line.get("record_type")
         if not isinstance(kind, str) or kind not in RECORD_KINDS:
             return
+        offset = self.at_offset
         record = bearing_record(kind, line)
         item = None if record is None else self._feed.read(offset, record)
         own = epoch_seconds(line.get("timestamp"))
@@ -176,7 +177,7 @@ def build_family_ray(
     truncated = False
 
     for course in courses:
-        ledger = CycleLayout(cycle_dir_for(course.store.base_dir, course.path[-1])).ledger
+        ledger = course.store.campaigns.ledger(course.path[-1])
         key = encode_cycle_path(course.path)
         rows, dropped = _read_curated(
             ledger, encoded_path=key, depth=course.depth, keep=limit, bound=before

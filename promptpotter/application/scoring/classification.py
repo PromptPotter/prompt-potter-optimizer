@@ -4,13 +4,13 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.results import degradation_reading
+from promptpotter.domain.arms import degradation_reading
 from promptpotter.domain.results_health import classify_result, is_deprecated
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell, MeasuredCell

@@ -5,14 +5,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from pydantic import ValidationError
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import merge_config_layers
-from promptpotter.application.datasets.draft_campaign import (
-    EditDraftPatch,
-    NodeOutputEdit,
-    OptimizationOverrides,
-    owned_draft,
-    rendered_pipeline_json,
-)
+from promptpotter.application.datasets.draft_campaign import owned_draft, rendered_pipeline_json
 from promptpotter.application.datasets.startability import checkin_rows
 from promptpotter.application.datasets.tabular_ingest import candidate_library_from_rows
 from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
@@ -22,6 +15,8 @@ from promptpotter.application.pipeline_resolve import draft_config, draft_pipeli
 from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
 from promptpotter.application.scoring.formula.compiler import parse_dials, spell_dials
 from promptpotter.application.scoring.formula.matchers import MATCHERS
+from promptpotter.domain.campaign_config import merge_config_layers
+from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -65,11 +60,11 @@ def plan_draft_patch(stores: Stores, draft: DraftCampaign, patch: EditDraftPatch
             f"{sorted(MATCHERS)}."
         )
     if patch.connector is not None and not (
-        (chosen := connectors.registered().get(patch.connector)) and chosen.serves_uploads
+        (chosen := connectors.CONNECTORS.table.get(patch.connector)) and chosen.serves_uploads
     ):
         raise PayloadInvalidError(
             f"patch.connector {patch.connector!r} does not serve an uploaded table; one of "
-            f"{sorted(n for n, c in connectors.registered().items() if c.serves_uploads)}."
+            f"{sorted(n for n, c in connectors.CONNECTORS.table.items() if c.serves_uploads)}."
         )
     if patch.scoring_dials is not None:
         # Canonical spelling, so two drafts declaring the same criterion mint the same block.

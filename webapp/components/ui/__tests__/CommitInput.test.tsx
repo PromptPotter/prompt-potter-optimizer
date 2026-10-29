@@ -60,6 +60,6 @@ describe("CommitInput", () => {
     const { rerender } = render(<CommitInput value="a" onCommit={() => {}} aria-label="cell" />);
     fireEvent.change(screen.getByLabelText("cell"), { target: { value: "typed" } });
     rerender(<CommitInput value="b" onCommit={() => {}} aria-label="cell" />);
-    expect((screen.getByLabelText("cell") as HTMLInputElement).value).toBe("b");
+    expect(screen.getByLabelText("cell")).toHaveProperty("value", "b");
   });
 });

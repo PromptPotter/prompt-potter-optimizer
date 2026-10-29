@@ -7,126 +7,58 @@ PromptPotter optimizes any backend that speaks three endpoints. It reads the pip
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/matches` | POST | Run one query under given `pipeline_params`; returns prediction, ranked candidates, and `diagnostics.warnings[]` (`{step, code, message}` — the self-healing signal). |
-| `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. Read once at init to discover optimization axes. |
+| `/pipeline` | GET | Full schema: nodes, types, parameters, allowed value sets, LLM-node prompt templates, named sequences. Read once at init. |
 | `/status` | GET | Liveness; 200 when up. |
 
-Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md).
+Wire shapes: [`../developer/node-standard.md`](../developer/node-standard.md). Tested with [TermNorm](https://github.com/runfish5/TermNorm-excel); PromptPotter's own API roster is `/docs` (`openapi.generated.json`).
 
-**A gateway (OmniRoute, OpenRouter) is a backend like any other, and a campaign points at a pinned model — never at a router that chooses one per request.** A gateway picks per request on live heuristics where PromptPotter picks once on measured evidence; both choosing on the eval path means the rows were not measured on one model, and no fork or `verify` recovers that campaign.
+**A gateway (OmniRoute, OpenRouter) is a backend like any other, and a campaign points at a pinned model — never at a router that chooses one per request.** Both choosing on the eval path means the rows were not measured on one model, and no fork or `verify` recovers that campaign.
 
-**Pinning the model does not pin the HOST, and that is what `served_by` is for.** A `:nitro`-style suffix routes to whichever provider is fastest, and hosts of one model disagree *systematically* rather than randomly — measured 2026-08-29, five hosts of `gpt-oss-20b` splitting on a claim four of them got wrong. So a backend may report, per LLM node on `step_tokens`, WHICH upstream host answered; PromptPotter banks it on `TokenUsageRecord.served_by` and a later comparison can ask whether two disagreeing readings even ran on the same silicon.
+**Pinning the model does not pin the HOST, and that is what `served_by` is for.** Hosts of one model disagree systematically, so a backend may report per LLM node which upstream host answered; it is banked on `TokenUsageRecord.served_by`.
 
 ### Optional `step_tokens` fields — read, never required
 
-Every key is ABSENT when the backend reported nothing, and PromptPotter reads absence as "not reported" rather than as a value. **The coupling is soft by construction: an older backend that sends none of them degrades what can be asked afterwards and breaks nothing**, so these need no version gate between the two repos and no release may claim one.
-
-**The roster is `domain/spend.py::StepUsage`**, the one declaration its reader, its writer and the served `StepTokenUsage` record are all derived from (`domain/wire_record.py`) — read it there; the table below is only what a backend author cannot derive from the type: what it COSTS to omit one. An **in-tree** connector builds a `StepUsage` and hands over its `wire()`, so the checker enforces the roster; the type sits in `domain/` so it can. **Absent is the only soft case:** a key that is PRESENT holds its declared type or the read raises — a count sent as `"1200"` is refused, never coerced and never read as absent, which would bill the node nothing.
+Every key is ABSENT when the backend reported nothing, and absence reads as "not reported". **An older backend that sends none degrades what can be asked afterwards and breaks nothing**, so no version gate exists between the repos. **The roster is `domain/spend.py::StepUsage`**; an in-tree connector hands over its `wire()`. **Absent is the only soft case:** a present key holds its declared type or the read raises — `"1200"` is refused, never coerced.
 
 | Key | Missing ⇒ |
 |---|---|
-| `cost_usd` | the node bills nothing: its tokens are priced at our rate table for the node's `(provider, model)` pair, filed as `rate_priced_usd` — counted by every ceiling, shown beside the bill, never called spent |
+| `cost_usd` | the node bills nothing: its tokens are priced at our rate table, filed as `rate_priced_usd` — counted by every ceiling, never called spent |
 | `model` | spend buckets by the provider slug instead |
-| `served_by` | host attribution unavailable; nothing else changes. **This is the one key no in-repo connector writes** — the read side is pinned by a test, but whether a `backend` row names its upstream host is entirely the remote backend's to answer |
-| `finish_reason` | a truncation cannot be told from an empty response, and every empty terminal grades as the fatal `empty_response` |
-| `reasoning` | the share of output spent thinking is unreadable, so a slow node reads as a slow provider |
-| `cache_read` | the prefix-cache reading is `unreported` — every surface renders `c?`, distinct from a reported `c0%` (`domain/spend.py::prefix_reading`) |
-| `unreported_attempts` | every request the node sent is read off its sums, so a resend that left and reported no usage (a 5xx, a connection broken after the request went) bills nothing. Each one counted is held at one attempt's bound as a send nobody priced (`scoring/sample_measurement.py::_unreported_attempts`); an answered repair turn is in the sums and is never counted here |
+| `served_by` | host attribution unavailable. **No in-repo connector writes it** — it is the remote backend's to answer |
+| `finish_reason` | a truncation cannot be told from an empty response; every empty terminal grades as fatal `empty_response` |
+| `reasoning` | the thinking share is unreadable, so a slow node reads as a slow provider |
+| `cache_read` | the prefix-cache reading is `unreported` — rendered `c?`, distinct from `c0%` (`domain/spend.py::prefix_reading`) |
+| `unreported_attempts` | a resend that left and reported no usage bills nothing; each counted one is held at one attempt's bound (`scoring/sample_measurement.py::_unreported_attempts`) |
 
 ### What a backend owes a campaign under a spend ceiling — required, not optional
 
-A ceiling is enforced before a cell is SENT, at the most the cell may cost, so the backend has to
-say what that is and hold to it. Without these, a campaign with no ceiling runs as before, and one
-under a ceiling has every cell refused before it leaves. A backend whose limits are all ones we
-send it serves nothing — its connector derives the bound from what it sends
-(`Connector.sent_spend_bound`; harbor's is `_sent_spend_bound`).
+A ceiling is enforced before a cell is SENT, at the most the cell may cost. Without these, a campaign under a ceiling has every cell refused. A backend whose limits are all ones we send derives the bound in its connector (`Connector.sent_spend_bound`).
 
-- **`/pipeline` serves `spend_bound` on every node that can bill** — for an LLM node
-  `{kind: "llm", attempts, input_bytes, max_tokens}` — plus `hosts` where the node may be served
-  by no other (`allow_fallbacks: false`), which prices it at the dearest of those — for a web search
-  `{kind: "web", queries, usd_per_query}` (`domain/pipeline_schema.py::NodeSpendBound`). They are
-  COUNTS the backend enforces, never prices: PromptPotter prices them at the dearest host the
-  node's model routes to (`infrastructure/llm/pricing.py::rate_ceiling`). `input_bytes` is the
-  wire's unit, because a byte length is what a backend can enforce; the hold is in tokens, and
-  `domain/pipeline_schema.py::token_bound_of_bytes` is the one conversion between them.
-- **The backend enforces them.** No request reads more than `input_bytes`, no retry lifts
-  `max_tokens`, no run of a node sends more than `attempts` requests.
-- **Every billed attempt is reported**, in `step_tokens`, on a failed request too — an error
-  envelope carries `data.step_tokens`. A reply reporting none leaves the cell unreported at its
-  whole bound: it binds the ceiling, and no surface shows it as spent. **A backend that retries on
-  its own owes one more fact: how many of a node's requests left and reported no usage**
-  (`unreported_attempts`); each is held as unreported, and nothing else is.
-- **A 4xx says the request was refused before any model generated, and its bound is released** —
-  except a 408 (`infrastructure/llm/spend_book.py::replied`), and the 422 a relay answers a model
-  whose reply failed validation with: that model generated, so an unreported one stays held
-  (`infrastructure/backend.py::_ANSWERED_STATUSES`).
+- **`/pipeline` serves `spend_bound` on every node that can bill** (`domain/pipeline_schema.py::NodeSpendBound`) — `{kind: "llm", attempts, input_bytes, max_tokens}` plus `hosts` where `allow_fallbacks: false`; `{kind: "web", queries, usd_per_query}`. They are COUNTS the backend enforces, never prices: PromptPotter prices them at the dearest host (`infrastructure/llm/pricing.py::rate_ceiling`); `token_bound_of_bytes` is the one bytes→tokens conversion.
+- **The backend enforces them**: no request past `input_bytes`, no retry lifting `max_tokens`, no more than `attempts` requests.
+- **Every billed attempt is reported** in `step_tokens`, a failed one too (`data.step_tokens` on the error envelope). None reported leaves the cell held at its whole bound. A backend that retries on its own also owes `unreported_attempts`.
+- **A 4xx releases its bound** — except a 408 (`infrastructure/llm/spend_book.py::replied`) and a relay's 422 for a reply that failed validation (`infrastructure/backend.py::_ANSWERED_STATUSES`): that model generated.
 - **Search spend is reported in dollars**, as `data.web_cost.usd`.
-
-**Deploying the pair.** The Linux box co-hosts both — `deploy.config::BACKEND_DIR` / `BACKEND_SERVICE` — and `deploy-linux/update.sh` already syncs the backend checkout, reinstalls its requirements and restarts its unit alongside the optimizer. A backend-side change therefore reaches production through the ordinary update, provided it is pushed first; there is no separate download step to add.
 
 ## Connection security
 
-The client talks to each backend over HTTP(S) with optional bearer-token auth. Four layers, all operator config — the endpoint and the token reach the wire only through the connector (`Connector.endpoint` / `Connector.auth_token`; TermNorm's read `TERMNORM_URL` / `TERMNORM_TOKEN`):
+The endpoint and token reach the wire only through the connector (`Connector.endpoint` / `Connector.auth_token`; TermNorm's read `TERMNORM_URL` / `TERMNORM_TOKEN`):
 
-- **Transport** — `https://` verifies the server cert; `http://` is cleartext. Pick the scheme in `TERMNORM_URL`.
-- **Auth** — set `TERMNORM_TOKEN` and every request carries `Authorization: Bearer …`; empty token → no header.
-- **Backend gate** — the backend decides whether to *require* a token (`TERMNORM_REQUIRE_AUTH=1`). Mismatch → 401.
-- **Resilience** — the session handshake auto-recovers; a 429 is the run's backpressure's (`infrastructure/llm/send_pacing.py::Backpressure` — one cooldown every cell shares, fewer sent at once, a stop only once no wait clears it); a 5xx, or a connection broken before any reply, backs off 1→2→4→8 s unless its body declares a resend pointless (`detail.retryable: false`, TermNorm's deadline on a provider request), which halts the cell; a connection never made waits for `GET /status` to answer, up to a fixed outage wait (`infrastructure/backend.py::_OUTAGE_WAIT_S`), so a backend restart costs a campaign nothing; a cell still open past the smaller of its connector's `cell_envelope_s` and the launch's wall clock left is cut `HALTED`; a read timeout is never sent again, because the backend is still working — and billing — the first request.
-
-**Remote:** set `TERMNORM_REQUIRE_AUTH=1` + matching `TERMNORM_TOKEN` on both hosts, set `TERMNORM_URL` to the `https://` URL, verify `curl https://…/status` returns 200. **Local:** same machine → `http://127.0.0.1:8000`; token optional for bare dev. The Linux deploy (`deploy-linux/bootstrap.sh`) auto-provisions a shared `TERMNORM_TOKEN` and sets `TERMNORM_REQUIRE_AUTH=true` on both sides **even on loopback** — defense-in-depth against a co-located compromised process. Nothing leaves loopback either way.
-
-**Not yet secured** (M12 control-plane, [ADR-0001](../adr/0001-m12-control-plane.md)): mutual-TLS, hot token rotation, per-tenant token isolation — one `TERMNORM_TOKEN` per install today.
+- **Transport** — `https://` verifies the server cert; `http://` is cleartext.
+- **Auth** — a set `TERMNORM_TOKEN` sends `Authorization: Bearer …`; empty sends no header. The backend decides whether to require it (`TERMNORM_REQUIRE_AUTH=1`; mismatch → 401). The Linux deploy provisions a shared token and requires it **even on loopback** — defense-in-depth against a co-located compromised process. One token per install.
+- **Resilience** — a 429 is the run's backpressure (`infrastructure/llm/send_pacing.py::Backpressure`, one shared cooldown); a 5xx or a connection broken before any reply backs off 1→2→4→8 s unless the body says `detail.retryable: false`, which halts the cell; a connection never made waits for `GET /status` up to `infrastructure/backend.py::_OUTAGE_WAIT_S`, so a backend restart costs nothing; a cell open past the smaller of `cell_envelope_s` and the launch's wall clock left is cut `HALTED`; **a read timeout is never resent**, because the backend is still working — and billing — the first request.
 
 ## Self-healing a node
 
-A node emits `diagnostics.warnings[]`; PromptPotter counts them and synthesizes a `RuntimeFailure` on the offending candidate (`application/scoring/arm_states.py::read_breakage`), which the next round's generation is shown. To wire a new node: emit the warning; the trip rate is `optimization.degradation_threshold` (0 disables). Who heals which wound: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
+A node emits `diagnostics.warnings[]`; PromptPotter synthesizes a `RuntimeFailure` on the candidate (`application/scoring/arm_states.py::read_breakage`), which the next round's generation is shown. The trip rate is `optimization.degradation_threshold` (0 disables). Who heals which wound: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
 ## Web-search strategy — a swept axis with a cost signal
 
-TermNorm's `web_search` node gathers the evidence `entity_profiling` turns into a profile.
-It exposes a `strategy` parameter (`snippets` / `scrape` / `hybrid`) as an optimization axis
-(`/pipeline` → `web_search.optimizer.param_keys` + `param_allowed_values`). All three issue
-exactly **one** metered Brave query per match, so sweeping `strategy` holds search cost
-fixed and varies only evidence depth, latency, and LLM token cost. Sweep it on the
-LCA ground-truth set and read the winner off accuracy vs the per-match cost block.
-
-Each `/matches` response (and a langfuse `web_search` observation) carries `web_cost`:
-`{strategy, brave_queries, usd, scrape_attempts, scrape_ok, scrape_failed, evidence_chars}`.
-`brave_queries` is the metered count (==1 on a live search, 0 when skipped/precomputed) and
-`usd` its price, which PromptPotter bills; `evidence_chars` + `scrape_failed` are the efficiency/reliability
-signal to weigh against accuracy. The status/sources/warning-`kind` contract is unchanged —
-existing display and self-healing keep working. Backend rationale:
-`TermNorm-excel/backend-api/docs/WEB_SEARCH_STRATEGY.md`.
-
-## PromptPotter's own REST API
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/v1/backends` | List registered backends |
-| `GET …/backends/{id}/health` | Backend health |
-| `GET …/hierarchy` | Every campaign and its courses, as served entries |
-| `GET …/health` | Service health |
-| `POST …/commands/{kind}` | Mutations — pause / step / fork a run, and the rest of the closed set `domain/command_kinds.py::CommandKind` (ADR-0001 command highway) |
-
-```bash
-python -X utf8 -m uvicorn promptpotter.main:app --port 8001   # API reference: /docs
-```
-
-## Currently tested with
-
-[TermNorm](https://github.com/runfish5/TermNorm-excel) — terminology normalization; its node roster is what its `GET /pipeline` serves.
+TermNorm's `web_search` exposes `strategy` (`snippets` / `scrape` / `hybrid`) as an axis. All three issue exactly **one** metered query per match, so sweeping it holds search cost fixed and varies evidence depth, latency and LLM tokens; read the winner off accuracy against `web_cost` (`usd` is what PromptPotter bills). Contract: `TermNorm-excel/backend-api/docs/WEB_SEARCH_STRATEGY.md`.
 
 ## Debugging the highway
 
-- **Diagnose from the code path, not by restarting.** When the backend "goes down" — `/status` itself times out, scoring stalls — the cause is almost always a **blocking call in an `async def` request path**, not a crash / SQLite lock / double-start. Grep the handler for sync I/O (`requests`, `ThreadPoolExecutor.map`, `time.sleep`, blocking DB) FIRST; a restart cannot distinguish the two. One sync call freezes the single uvicorn worker for its whole step, so every concurrent request stalls with it, `/status` included. Offload via `asyncio.to_thread` / `run_in_executor`. **Backend async hygiene is a standing check: no sync I/O on the event loop.**
-- **The highway IS a cross-repo contract — change one side, fix both.** PP consumes TermNorm response *shapes*, so a shape change on either side silently breaks the other. Coupling points: the error envelope is TermNorm's `{status, message, code}` (a global handler in `main.py`), **not** FastAPI's `{detail}` — PP must read `message`. Session-loss self-heal keys on a stable machine-readable `code: "no_session"` and nothing else (codes, never substring or shape guessing), and the resend policy on the typed `detail.retryable` — both read by `connectors/termnorm.py::TermNormSession`, never by the agnostic `BackendClient`. The web_search warning `stats` dict keys are read by PP's display. When you touch a response field, grep the *other* repo for its consumer.
-- **`--reload` wipes the in-memory session on every backend code edit.** TermNorm holds sessions in `user_sessions = {}` (process memory), so any backend edit reloads uvicorn and in-flight PP runs hit `400 no_session`. PP self-heals (re-`POST /sessions` + retry); keep it that way — a developer editing the backend mid-run must not abort the campaign.
-- **Provider latency is the recurring root, and the guards are bounds rather than a faster host.** Bound optimizer reasoning (`medium`) and keep request timeouts under the envelope PP gives a cell (`Connector.cell_envelope_s`); an unbounded optimizer node blows `OPTIMIZER_CALL_DEADLINE_S` and raises `OPTIMIZER_TIMEOUT` before round 1. Which provider a campaign runs on is the operator's daily-volume knob — don't flip it unprompted.
-- **Evidence depth is a strategy axis, not a timeout.** `scrape` runs under a hard `scrape_budget` deadline, `snippets` cannot hang, `hybrid` (default) falls back per source — so a slow scrape costs depth rather than the run. Contract, `web_cost` fields, and how to sweep it → § Web-search strategy above.
-
-## Troubleshooting
-
-| Symptom | Action |
-|---------|--------|
-| Connection refused | backend down/unreachable — check `curl http://127.0.0.1:8000/status` |
-
-User-level: [`../manual/05-troubleshooting.md`](../manual/05-troubleshooting.md).
+- **Diagnose from the code path, not by restarting.** A backend whose `/status` times out almost always has a **blocking call in an `async def` request path** — one sync call freezes the single uvicorn worker. Grep the handler for sync I/O first; offload via `asyncio.to_thread`. **No sync I/O on the event loop** is a standing check.
+- **The highway IS a cross-repo contract — change one side, fix both.** TermNorm's error envelope is `{status, message, code}`, not FastAPI's `{detail}`; session self-heal keys on `code: "no_session"` and resend policy on `detail.retryable` — codes, never substring guessing — both read by `connectors/termnorm.py::TermNormSession`, never by the agnostic `BackendClient`. When you touch a response field, grep the other repo for its consumer.
+- **`--reload` wipes TermNorm's in-memory sessions on every backend edit**; PP self-heals (re-`POST /sessions` + retry), and must keep doing so.
+- **Provider latency is the recurring root, and the guards are bounds.** Bound optimizer reasoning and keep request timeouts under `Connector.cell_envelope_s`; an unbounded optimizer node blows `OPTIMIZER_CALL_DEADLINE_S` before round 1. Which provider a campaign runs on is the operator's knob — don't flip it unprompted.

@@ -125,7 +125,7 @@ def permitted_models_from_narrowing(
 def overlay_sets_model_outside_allowed(
     overlay: dict[str, Any] | None, permitted: Mapping[str, Sequence[str]] | None
 ) -> bool:
-    """The ADR-0005 babysit trigger. A node absent from *permitted* sanctions nothing; a cost lever always counts."""
+    """The babysit trigger (decisions.md § 0005). A node absent from *permitted* sanctions nothing; a cost lever always counts."""
     for node, cfg in node_config_items(overlay):
         if cfg.keys() & PARAM_FORBIDDEN_KEYS:
             return True

@@ -11,13 +11,13 @@ from typing import NamedTuple
 from pydantic import Field
 
 from promptpotter.application.account import account_of
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
     Job,
     JobRegistry,
 )
 from promptpotter.config.settings import settings
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,
@@ -502,7 +502,9 @@ def launch_usd_bound(stores: Stores) -> float | None:
     user = account_of(stores)
     if lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores)).usd is None:
         return None
-    wallet = read_account_wallet(user=user, stores=stores, job_registry=JobRegistry.attach())
+    wallet = read_account_wallet(
+        user=user, stores=stores, job_registry=JobRegistry.attach(stores.jobs_dir)
+    )
     return None if wallet.contended else wallet.headroom.usd
 
 
@@ -525,7 +527,7 @@ def _admit_call(*, stores: Stores, bucket: str) -> SpendBook:
     wallet = read_account_wallet(
         user=user,
         stores=stores,
-        job_registry=JobRegistry.attach(),
+        job_registry=JobRegistry.attach(stores.jobs_dir),
     )
     if wallet.contended:
         raise _contended("what this account has left")

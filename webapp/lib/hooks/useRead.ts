@@ -24,14 +24,14 @@ export type ReadResult<T> =
   | { status: "ready"; data: T }
   | { status: "failed"; failure: ReadFailure; kept: T | null };
 
-export interface ReadOptions {
+interface ReadOptions {
   // Idle until the session is confirmed; a 401 re-probes it.
   auth?: boolean;
   // `kept` then carries the PRIOR id's read under an `invalid`.
   survive?: "invalid";
   // A 404 is this read's ordinary empty answer: no incident, and the poll goes on.
   expects?: "gone";
-  intervalMs?: number;
+  intervalMs?: number | undefined;
   onGone?: () => void;
 }
 

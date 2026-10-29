@@ -9,8 +9,8 @@ from promptpotter.application.bench.llm_call import (
     OptimizerResponseModel,
     run_optimizer_node,
 )
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.optimizer_manifest import llm_node_manifest, running_prompt
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.opt_search_point import (
     PROMPT_FIELDS,
@@ -207,7 +207,6 @@ async def commit_task_framing(
     dataset_name: str,
     description: str,
     *,
-    campaign_id: str,
     ledger: CycleEventLog,
 ) -> None:
     context = checkin_call_context(stores, ledger)

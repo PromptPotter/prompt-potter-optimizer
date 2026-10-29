@@ -5,50 +5,53 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.node_context import NodeContext, bank_proposals
-from promptpotter.application.optimizers.nodes import OperatorSeat
+from promptpotter.application.bench.node_context import Children, bank_proposals
+from promptpotter.application.optimizers.nodes import OPERATOR_SEAT
 from promptpotter.application.run_observers import declare_gate, declare_running
 from promptpotter.application.runner.operator_hold import hold_for_operator
 from promptpotter.domain.opt_search_point import Locus, loci_of
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.search_point import SHOTS_KEY
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.wounds import ValidationFailure
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import ArmGateMode
     from promptpotter.application.optimizers.nodes import RoundContext
+    from promptpotter.domain.arms import Proposal
+    from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.command_kinds import SubmittedArm
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.results import Proposal
 
 logger = logging.getLogger(__name__)
-
-
-_NODE = OperatorSeat.name
-
-
-def authored_arm(
-    seat: NodeContext[StrictModel], parent: OptSearchPoint, arm: SubmittedArm
-) -> Proposal:
-    # An undeclared node or field, or a shot the seat does not draw, fails at `NodeContext.child`.
-    shots = {Locus(node, SHOTS_KEY): keys for node, keys in arm.shots.items()}
-    return seat.child(
-        [parent],
-        overlay=arm.pipeline_overlay,
-        prompt_loci={**loci_of(arm.prompt_fields), **shots},
-        changes_description=arm.changes_description,
-    )
 
 
 def arm_gate_mode(ctx: RoundContext) -> ArmGateMode:
     return ctx.cycle.config.optimization.arm_gate
 
 
+def author_arm(ctx: RoundContext, parent: OptSearchPoint, arm: SubmittedArm) -> Proposal:
+    """An undeclared node or field, or a shot no proposer of the round could draw, fails at ``Children.child``."""
+    cap = ctx.cycle.optimizer.shot_cap
+    shots = {Locus(node, SHOTS_KEY): keys for node, keys in arm.shots.items()}
+    over = [
+        ValidationFailure(
+            axis=locus.name, value=str(len(keys)), allowed=[str(cap)], reason="shots_over_cap"
+        )
+        for locus, keys in shots.items()
+        if len(keys) > cap
+    ]
+    return Children(ctx, OPERATOR_SEAT).child(
+        [parent],
+        overlay=arm.pipeline_overlay,
+        failures=over,
+        prompt_loci={**loci_of(arm.prompt_fields), **shots},
+        changes_description=arm.changes_description,
+    )
+
+
 async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Proposal]:
     """Holds once per round: an answer already banked against this parent IS the round's arms."""
     session = ctx.cycle.session
-    seat: NodeContext[StrictModel] = NodeContext(ctx, ctx.cycle.optimizer.plan.seat)
     rounds = ctx.cycle.rounds
     answered = session.store.campaigns.round_submission(session.hop, ctx.round_num)
     if answered is not None and rounds and answered.consumed == round_document_digest(rounds[-1]):
@@ -68,7 +71,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         command_id, asked = standing
         arms = [
             *(drafts[idx] for idx in asked.keep),
-            *(authored_arm(seat, ctx.cycle.parent, arm) for arm in asked.arms),
+            *(author_arm(ctx, ctx.cycle.parent, arm) for arm in asked.arms),
         ]
         # Recorded and banked BEFORE the ack: a producer lost between them re-reads the answer.
         session.record_intervention("submit-arms")
@@ -76,7 +79,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         session.state.control.take_submission(command_id, arms=len(arms))
         return arms
 
-    arms = await hold_for_operator(session, _take, node=_NODE, round_num=ctx.round_num)
+    arms = await hold_for_operator(session, _take, node=OPERATOR_SEAT.name, round_num=ctx.round_num)
     if arms is None:
         raise StopLoop(StopReason.PAUSED)
     declare_running(session)

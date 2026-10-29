@@ -8,7 +8,7 @@ import { Button } from "./Button";
 import { Menu, MenuItem } from "./Menu";
 import s from "./CopyButton.module.css";
 
-export interface CopyChoice {
+interface CopyChoice {
   key: string;
   label: string;
   data: unknown;

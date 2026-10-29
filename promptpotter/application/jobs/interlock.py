@@ -8,13 +8,13 @@ import logging
 import os
 import secrets
 import threading
+from collections.abc import Iterator
 from pathlib import Path
-
-from filelock import BaseFileLock, FileLock
 
 from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.store.io import validate_path_component
+from promptpotter.infrastructure.store.io import take_lock, validate_path_component
+from promptpotter.shared.errors import ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +26,31 @@ _token_lock = threading.Lock()
 _tokens: dict[Path, str] = {}
 
 
-def admission_lock(jobs_dir: Path) -> BaseFileLock:
-    """ONE instance per registry: ``filelock`` counts acquisitions per object and per thread."""
-    jobs_dir.mkdir(parents=True, exist_ok=True)
-    return FileLock(str(jobs_dir / _ADMISSION_LOCK), timeout=LOCK_TIMEOUT)
+class AdmissionGate:
+    """ONE per registry, reentrant in its holding thread: an admission nests through `request_slot`."""
+
+    def __init__(self, jobs_dir: Path) -> None:
+        self._path = jobs_dir / _ADMISSION_LOCK
+        self._nest = threading.RLock()
+        self._depth = 0
+
+    @contextlib.contextmanager
+    def held(self) -> Iterator[None]:
+        with self._nest:
+            lock = None
+            if self._depth == 0 and (lock := take_lock(self._path, wait_s=LOCK_TIMEOUT)) is None:
+                raise ServiceUnavailableError(
+                    "The machine's admission gate is held by another process that has not "
+                    "released it. Nothing was started; retry shortly.",
+                    code="admission_gate_stuck",
+                )
+            self._depth += 1
+            try:
+                yield
+            finally:
+                self._depth -= 1
+                if lock is not None:
+                    lock.release()
 
 
 def this_producer(jobs_dir: Path) -> str:

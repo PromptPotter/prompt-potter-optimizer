@@ -9,10 +9,11 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from promptpotter.application.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
+from promptpotter.application.scoring.judges.registry import judge_instrument
+from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.scoring import Scorer
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
@@ -22,7 +23,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_framing,
 )
 from promptpotter.infrastructure.store.io import read_yaml_optional
-from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import PayloadInvalidError, StoredConfigInvalidError
 
 

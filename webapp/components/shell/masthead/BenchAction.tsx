@@ -2,13 +2,15 @@
 
 import { useDashboardAt } from "@/lib/poll";
 import { postCommand } from "@/lib/api/commands";
+import { benchStat } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { encodeCyclePath, pathRoot, type CyclePath } from "@/lib/ids";
+import { useViewedCourse } from "@/lib/lineage";
 
 export function BenchAction({ path }: { path: CyclePath }) {
   const dash = useDashboardAt(path);
   const cmd = useCommand<"grade-bench">("grade-bench", { scope: encodeCyclePath(path) });
-  const status = dash?.bench_score?.status;
+  const status = benchStat(useViewedCourse())?.status;
   if (!status?.offered) {
     return null;
   }

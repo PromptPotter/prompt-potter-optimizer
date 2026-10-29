@@ -39,7 +39,7 @@ export function variantsOf(response: unknown): Variant[] | null {
 function Overrides({ title, map }: { title: string; map: Record<string, unknown> | null | undefined }) {
   const entries = Object.entries(map ?? {}).filter(([, v]) => {
     if (v == null || v === "") return false;
-    if (typeof v === "object") return Object.keys(v as object).length > 0;
+    if (typeof v === "object") return Object.keys(v).length > 0;
     return true;
   });
   if (entries.length === 0) return null;

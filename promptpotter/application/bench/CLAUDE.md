@@ -1,15 +1,8 @@
 # application/bench/ — the harness every optimizer runs inside
 
-**An optimizer's own state rides `Cycle` as typed `slices` (across rounds) and `outputs` (one round's) a member reaches only through what it declares (`NodeContext.slice` / `put` / `emit` / `recall` / `restate`); what the bench derives for every optimizer — the axis index, the runtime failures — is `Cycle`'s, never a member's copy; its replay is its runtime's, never `resume_and_fork/`'s.** A member is handed `node_context` in the cycle's place, never the `Cycle`; every optimizer's child is admitted through `children` before a cell is bought; `difficulty` is the δ ruler any selector reads, a view over archive facts under an explicit scope.
-
-**The bench never imports an optimizer** — owned by [`../CLAUDE.md`](../CLAUDE.md) § Layer rule; nothing here reaches past `optimizers/__init__.py` and `optimizers/nodes.py`.
-
-## Load-bearing
-
-- Don't add a second decomposition node → § checkin
+**An optimizer's state rides `Cycle` as typed `slices` (across rounds) and `outputs` (one round), reached through what a member declares on `NodeContext`.** A member's step gets `node_context`, never the `Cycle`; what the bench derives for every optimizer is `Cycle`'s, never a member's copy.
 
 ## checkin — the bench's one llm node
 
-`checkin` belongs to no optimizer and is **not a loop layer**: it runs *around* the loop, skips the injection path, and its template may name `{{consultation_instruction}}` alone (`task_context.py::_checkin_template`). It is **not** thereby a "non-ledger" call — both modes bill a cycle ledger through `task_context.py::checkin_call_context`, so tokens, cost and audit record land like any other: resolution on the draft's (`draft_call_context`, moved into the root cycle at Start), decomposition on the run it frames.
-
-**One node, two modes, one output schema (`CheckinOutput`) — don't add a second decomposition/resolution node.** Task decomposition (the first mint on an unframed dataset, or `new --task-file`) turns a raw `task_description` into the six Layer-1 prompt strings plus `task_context`; origin resolution (web ingest) turns a draft origin into `assessment` + `findings` + `next_action` + `recap`. Both produce the six decomposition fields and both drivers capture them, so an origin turn returns the resolved origin *and* a seeded starting prompt the operator edits before mint.
+**One node, two modes, one output schema (`CheckinOutput`).** <!-- probe: git grep -cE "class \w*Checkin\w*Output\(" -- promptpotter/*.py <= 1 --> Decomposition turns a raw `task_description` into the six Layer-1 prompt strings plus `task_context`; origin resolution adds `assessment`, `findings`, `next_action` and `recap`.
+**Both modes bill a cycle ledger** (`task_context.py::checkin_call_context`): resolution the draft's, decomposition the run's.

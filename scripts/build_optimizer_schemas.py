@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.task_context import CheckinOutput
+from promptpotter.application.optimizer_manifest import ManifestSwitch, authored_manifest
 from promptpotter.config.paths import checkin_assets_root
 from promptpotter.infrastructure.store.io import read_yaml
 
@@ -18,10 +19,14 @@ def _manifests() -> dict[Path, Mapping[str, type[BaseModel]]]:
     out: dict[Path, Mapping[str, type[BaseModel]]] = {
         checkin_assets_root(): {"checkin": CheckinOutput}
     }
-    for runtime in optimizers.runtimes().values():
-        declared = read_yaml(runtime.manifest_dir / "pipeline.yaml").get("nodes") or {}
+    for manifest in optimizers.MANIFESTS.table.values():
+        authored = authored_manifest(manifest.directory / "pipeline.yaml")
+        # A switch writes none: its schemas are those of the manifests it reads its nodes from.
+        if isinstance(authored, ManifestSwitch):
+            continue
+        declared = authored.nodes
         # Manifest order: the file's key order is the committed artifact's.
-        out[runtime.manifest_dir] = {
+        out[manifest.directory] = {
             node: model
             for node in declared
             if node in stated and (model := stated[node].response_model) is not None

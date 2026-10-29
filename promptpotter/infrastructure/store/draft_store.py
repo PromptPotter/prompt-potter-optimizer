@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import contextlib
 from pathlib import Path
 from typing import Any, get_args
-
-from filelock import BaseFileLock, FileLock, Timeout
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.run_records import BankedSubject
 from promptpotter.domain.spend import NOTHING_METERED, CeilingMeter
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.io import (
+    HeldLock,
     read_json_optional,
     rmtree_robust,
+    take_lock,
     write_json,
 )
 from promptpotter.infrastructure.store.layout import (
@@ -27,19 +26,12 @@ from promptpotter.shared.errors import ConflictError, NotFoundError
 class DraftClaim:
     """An OS lock, so a dead process holds none; ``release`` is idempotent for a refusal before the hold."""
 
-    def __init__(self, draft_id: str, lock: BaseFileLock, draft_dir: Path) -> None:
+    def __init__(self, draft_id: str, lock: HeldLock) -> None:
         self.draft_id = draft_id
         self._lock = lock
-        self._draft_dir = draft_dir
 
     def release(self) -> None:
-        if not self._lock.is_locked:
-            return
-        self._lock.release()
-        # Only once the draft is gone: before that, a second taker may already hold this file.
-        if not self._draft_dir.exists():
-            with contextlib.suppress(OSError):
-                Path(self._lock.lock_file).unlink(missing_ok=True)
+        self._lock.retire()
 
 
 class DraftStore:
@@ -58,18 +50,13 @@ class DraftStore:
         return [p.name for p in draft_dirs(self._base_dir) if (p / "draft.json").is_file()]
 
     def _take(self, draft_id: str) -> DraftClaim:
-        path = draft_claim_path(self._base_dir, draft_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # A fresh instance, never reentrant: a second take in this process must refuse too.
-        lock = FileLock(str(path), timeout=0, thread_local=False)
-        try:
-            lock.acquire()
-        except Timeout:
+        lock = take_lock(draft_claim_path(self._base_dir, draft_id), wait_s=0)
+        if lock is None:
             raise ConflictError(
                 f"draft {draft_id!r} is held by a Start or a command on it; retry once that ends.",
                 code="draft_held",
-            ) from None
-        return DraftClaim(draft_id, lock, self.draft_dir(draft_id))
+            )
+        return DraftClaim(draft_id, lock)
 
     def claim(self, draft_id: str) -> DraftClaim:
         """Taken first, then the draft asked for: a discard that won the race leaves nothing to mint."""

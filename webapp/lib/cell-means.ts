@@ -2,7 +2,7 @@
 
 import { fmtMetricValue } from "@/lib/format";
 
-export interface CellMeanRow {
+interface CellMeanRow {
   key: string;
   label: string;
   fmt: (v: number) => string;

@@ -6,7 +6,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench import difficulty
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.intelligence import rasch
 from promptpotter.application.runner.inner.spawn import (
     inner_cell_envelope_s,
@@ -21,6 +20,7 @@ from promptpotter.application.runner.inner.tasks import (
 )
 from promptpotter.application.scoring import metrics, selection
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY

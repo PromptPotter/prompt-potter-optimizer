@@ -11,8 +11,8 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
-from promptpotter.domain.run_records import AccountEvent, AccountEventRecord
+from promptpotter.config.paths import default_projects_root
+from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.infrastructure.identity import blocklist, migration
 from promptpotter.infrastructure.identity.grants import (
     grant_principal,
@@ -36,15 +36,24 @@ from promptpotter.infrastructure.store.user_store import (
     read_accounts,
 )
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
+from promptpotter.shared.errors import LedgerUnreadableError
 from promptpotter.shared.identity import IdentityContext, acting_principal, default_identity
 
 
-def _record(stores: Stores, event: AccountEvent, *, at: str, subject: str = "") -> None:
+def _record(
+    stores: Stores,
+    event: AccountEvent,
+    *,
+    at: str,
+    subject: str = "",
+    device: Device | None = None,
+) -> None:
     CycleEventLog.open_workspace(stores.base_dir).append(
         AccountEventRecord(
             event=event,
             user_id=acting_principal(stores.identity).id,
             subject=subject,
+            device=device,
             timestamp=at,
         )
     )
@@ -56,7 +65,7 @@ class Arrival(NamedTuple):
     opened: bool
 
 
-def arrive(stores: Stores) -> Arrival:
+def arrive(stores: Stores, *, device: Device | None) -> Arrival:
     """The ONE place an account comes into being, whichever request reaches it first."""
     existing = stores.users.load()
     if existing is not None:
@@ -68,18 +77,24 @@ def arrive(stores: Stores) -> Arrival:
         email=identity.email,
         created_at=utcnow_iso(),
     )
-    _record(stores, "account_created", at=user.created_at)
+    _record(stores, "account_created", at=user.created_at, device=device)
     stores.users.save(user)
     return Arrival(user, opened=True)
 
 
 def account_of(stores: Stores) -> User:
-    return arrive(stores).user
+    return arrive(stores, device=None).user
 
 
-def sign_in(stores: Stores) -> Arrival:
-    arrival = arrive(stores)
-    _record(stores, "signed_in", at=utcnow_iso(), subject=stores.identity.provider or "")
+def sign_in(stores: Stores, *, device: Device | None) -> Arrival:
+    arrival = arrive(stores, device=device)
+    _record(
+        stores,
+        "signed_in",
+        at=utcnow_iso(),
+        subject=stores.identity.provider or "",
+        device=device,
+    )
     return arrival
 
 
@@ -125,7 +140,7 @@ def _scanned(
     for account in accounts:
         try:
             found = list(workspace_lines(CampaignStore(account.workspace)))
-        except Exception:
+        except (OSError, ValueError, LedgerUnreadableError):
             if (who := _who(account)) not in unreadable:
                 unreadable.append(who)
             continue
@@ -142,7 +157,7 @@ def _who(account: AccountDir) -> str:
 
 
 def trail_by_email(projects_root: Path, email: str) -> Trail:
-    """The operator-admin read (ADR-0004) of what one PERSON did, across every workspace on the box.
+    """The operator-admin read (decisions.md § 0004) of what one PERSON did, across every workspace on the box.
 
     Everything in a workspace they own, whoever did it, and their own lines in anyone else's: a
     delegate acts in its delegator's workspace. Several ids where one address signed in through more
@@ -178,7 +193,7 @@ class AccountTrail(NamedTuple):
 
 
 def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail], list[str]]:
-    """The operator-admin read (ADR-0004) of what EVERY account did from ``since`` (epoch) on.
+    """The operator-admin read (decisions.md § 0004) of what EVERY account did from ``since`` (epoch) on.
 
     One trail per workspace that has a line, whoever acted in it, then the workspaces that could
     not be read.
@@ -216,7 +231,9 @@ def registered_or_default_identity(explicit_tenant: str | None = None) -> Identi
 
 
 def local_stores(*, tenant: str | None) -> Stores:
-    return build_stores(registered_or_default_identity(tenant), projects_root=DEFAULT_PROJECTS_ROOT)
+    return build_stores(
+        registered_or_default_identity(tenant), projects_root=default_projects_root()
+    )
 
 
 def blocked_emails() -> list[str]:

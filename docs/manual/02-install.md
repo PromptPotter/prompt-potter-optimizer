@@ -6,7 +6,7 @@ Five steps. Takes a couple of minutes.
 
 Sign up at [openrouter.ai/keys](https://openrouter.ai/keys) and create an API key.
 
-OpenRouter is the default optimizer LLM provider — the optimizer prompt is too large for Groq's free tier. If you prefer Groq, OpenAI, or Anthropic, see [§ Environment variables](#environment-variables) below for the alternative variables.
+OpenRouter is the default LLM provider. If you prefer Groq, OpenAI or Anthropic, see [Environment variables](#environment-variables) below.
 
 ## 2. Clone the repo
 
@@ -19,19 +19,13 @@ Requires **Python 3.13+**.
 
 ## 3. Create `.env`
 
-Create a file called `.env` in the repo root, containing exactly:
+Create a file called `.env` in the repo root, containing:
 
 ```
 OPENROUTER_API_KEY=your_key_here
 ```
 
-Installed from a wheel there is no repo root, so it goes in the user-data root's `.env` instead — `$PROMPTPOTTER_HOME`, else the OS app-data dir. `promptpotter new` offers to write it for you on first run if no key is set.
-
-The optimizer's model and provider are declared per optimizer node in `promptpotter/assets/optimizers/potter/pipeline.yaml` (`config.model` / `config.provider`; `available_models` is the menu a human picks from); edit that file to change it for every campaign, or set one campaign's `optimization.nodes.{node}.config.model`. Set the corresponding `*_API_KEY` for Groq/Anthropic/OpenAI. There is no env-var override.
-
-Installed from a wheel rather than a clone, that file sits under `site-packages` and an edit there dies at the next upgrade. Put your copy at `optimizers/potter/pipeline.yaml` under the user-data root instead: present, it replaces the shipped manifest whole. Full resolution rules — **owned by** [`../developer/stable-api.md § 4b`](../developer/stable-api.md).
-
-Connecting to a remote / auth-gated backend? See [`operations/backend-integration.md § Connection security`](../operations/backend-integration.md#connection-security).
+If no key is set, `python -m promptpotter new` offers to write it for you on first run.
 
 ## 4. Install
 
@@ -39,11 +33,11 @@ Connecting to a remote / auth-gated backend? See [`operations/backend-integratio
 pip install -e ".[all]"
 ```
 
-Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2. `[all]` bundles the operator extras but not every one — which stay out, and why, is [ADR-0006 § Decision](../adr/0006-embeddable-core-and-extras.md#decision). Add `,benchmarks` when you fetch a public bank. For a minimal install or a specific extra, see [§ Optional dependency bundles](#optional-dependency-bundles) below.
+Not developing on it? `pip install "promptpotter[all]"` instead, and skip step 2.
 
 ## 5. Reload Claude Code
 
-If Claude Code (CLI, desktop app, or IDE extension) was already open, **reload your session or restart VS Code now** — otherwise it won't see the `/potter-run` skill that ships with the repo.
+If Claude Code was already open, **reload your session or restart VS Code now** — otherwise it won't see the `/potter-run` skill that ships with the repo.
 
 ## Done
 
@@ -53,40 +47,13 @@ Next: [Your first campaign](03-first-campaign.md).
 
 ## Environment variables
 
-The `.env` file carries keys and deployment postures, never a model: where the optimizer's provider + model are declared is [step 3](#3-create-env) above. (Target/scoring model is per-dataset in the pipeline overlay.) Every key it may hold, with what it does, is `.env.example`; the ones a first install meets:
+`.env` holds keys, never a model. Every key it may hold is listed in `.env.example`; the ones a first install meets:
 
-| Variable | When required | Purpose |
-|----------|---------------|---------|
-| `OPENROUTER_API_KEY` | using OpenRouter (default) | OpenRouter (`sk-or-…`) |
-| `GROQ_API_KEY` | using Groq | Groq API key |
-| `OPENAI_API_KEY` | using OpenAI | OpenAI API key |
-| `ANTHROPIC_API_KEY` | using Anthropic | Anthropic API key |
-| `TERMNORM_URL` | TermNorm backend elsewhere than `http://127.0.0.1:8000` | Where the `termnorm` connector sends |
-| `TERMNORM_TOKEN` | TermNorm backend requires auth | Bearer the `termnorm` connector sends |
-| `LANGFUSE_PUBLIC_KEY` | optional | Langfuse cloud tracing |
-| `LANGFUSE_SECRET_KEY` | optional | Langfuse cloud tracing |
-| `LANGFUSE_HOST` | optional | Langfuse host URL |
-| `MLFLOW_TRACKING_URI` | optional | The operator's MLflow server: each round lands as a run and each finished cycle's winner as a prompt version — [`../operations/observability.md`](../operations/observability.md) § MLflow |
-
-Groq daily-volume model swap (when `120b` exhausts): [`05-troubleshooting.md § Groq daily token limit exhausted on 120b`](05-troubleshooting.md).
-
-## Optional dependency bundles
-
-A bare install is the **engine**: the CLI, the loop, the stores. Serving the API and the
-dashboard is `[api]`, because PromptPotter is also a library another program imports, and one
-that drags a web server along is one nobody adds.
-
-```bash
-pip install -e ".[api]"            # the API + the dashboard mount + OIDC identity
-pip install -e ".[excel]"          # ingest .xlsx and .xls; .ods and text formats need nothing
-pip install -e ".[jupyter]"        # JupyterLab + IPython display
-pip install -e ".[benchmarks]"     # GSM8K, AIME 2025, BBEH (HuggingFace datasets)
-pip install -e ".[observability]"  # Langfuse cloud tracing
-pip install -e ".[dspy]"           # PromptPotter as a DSPy optimizer + the dspy connector
-pip install -e ".[harbor]"         # the harbor connector — needs a running container runtime
-pip install -e ".[dev]"            # pytest, ruff, mypy, deptry
-pip install -e ".[all]"            # The operator extras (what it leaves out: ADR-0006)
-pip install -e ".[all,benchmarks]"  # …plus the opt-in public-bank loader
-```
-
-Contributing? `python scripts/gate.py` once builds the developer `.venv` from `uv.lock` — [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
+| Variable | When required |
+|----------|---------------|
+| `OPENROUTER_API_KEY` | using OpenRouter (default) |
+| `GROQ_API_KEY` | using Groq |
+| `OPENAI_API_KEY` | using OpenAI |
+| `ANTHROPIC_API_KEY` | using Anthropic |
+| `TERMNORM_URL` | a TermNorm backend elsewhere than `http://127.0.0.1:8000` |
+| `TERMNORM_TOKEN` | a TermNorm backend that requires auth |

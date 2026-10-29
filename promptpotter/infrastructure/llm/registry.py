@@ -72,12 +72,23 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
         "OPENROUTER_API_KEY",
         base_url="https://openrouter.ai/api/v1",
         gateway=True,
+        # Its `/models` answers without a key.
+        key_check="/key",
     ),
 }
 
 
 def openai_compat_spec(provider: str) -> ProviderSpec | None:
     return _OPENAI_COMPAT_SPECS.get(provider)
+
+
+def keyed_specs() -> dict[str, tuple[ProviderSpec, str]]:
+    """Each OpenAI-compatible provider this process holds a key for, with that key."""
+    keyed = {
+        name: (spec, getattr(settings, spec.api_key_attr).get_secret_value().strip())
+        for name, spec in _OPENAI_COMPAT_SPECS.items()
+    }
+    return {name: held for name, held in keyed.items() if held[1]}
 
 
 def default_routes() -> dict[str, dict[str, list[str]]]:

@@ -11,7 +11,6 @@ from promptpotter.application.datasets.draft_build import overlay_from_campaign_
 from promptpotter.application.datasets.draft_campaign import (
     PREVIEW_ROWS,
     DraftCampaign,
-    OptimizationOverrides,
     default_slug_from_filename,
     new_draft,
     scoring_choice,
@@ -36,13 +35,14 @@ from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.connector import BackendUnreachableError
+from promptpotter.domain.dataset_name import validate_dataset_name
+from promptpotter.domain.draft_edit import OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import refresh_model_capabilities
 from promptpotter.infrastructure.store.dataset_access import backend_type_of_dataset
-from promptpotter.infrastructure.store.layout import validate_dataset_name
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import ConflictError, NotFoundError
 from promptpotter.shared.identity import CAMPAIGN_CREATE_CAP, require_capability
@@ -53,11 +53,11 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
-async def fetch_backend_nodes(connector_name: str) -> dict[str, Any]:
-    connector = connectors.get(connector_name)
+async def fetch_backend_nodes(stores: Stores, connector_name: str) -> dict[str, Any]:
+    connector = connectors.CONNECTORS.get(connector_name)
     if connector.execution == "in_process":
         return {}
-    client = BackendClient(connector, workload=PROBE_WORKLOAD)
+    client = BackendClient(connector, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir)
     try:
         declared = await client.fetch_pipeline()
     except BackendUnreachableError as exc:
@@ -120,7 +120,7 @@ async def ingest_draft(
     # Raised before the draft is kept, so a collision leaves no orphan.
     if stores.tenant_datasets.slug_exists(base_slug):
         raise SlugTakenError(base_slug, stores.tenant_datasets.suggest_free_slug(base_slug))
-    backend_nodes = await fetch_backend_nodes(DEFAULT_CONNECTOR)
+    backend_nodes = await fetch_backend_nodes(stores, DEFAULT_CONNECTOR)
 
     preview = [dict(row) for row in table.rows[:PREVIEW_ROWS]]
     draft = new_draft(
@@ -152,7 +152,7 @@ async def draft_from_dataset(
     declared = backend_type_of_dataset(stores, dataset_name)
     # An origin reuse reads the node declaration off ITS connector, not the shared file's.
     backend_nodes = await fetch_backend_nodes(
-        origin_campaign.connector if origin_campaign is not None else declared
+        stores, origin_campaign.connector if origin_campaign is not None else declared
     )
 
     authored = read_authored_dataset(dataset_dir)

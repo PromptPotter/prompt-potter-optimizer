@@ -119,7 +119,7 @@ The optimizer drives a separate backend over `/matches` — clone it as a **git 
 git clone <backend>.git ~/potter/<backend>; cd ~/potter/<backend>/backend-api
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cp .env.example .env && $EDITOR .env
 ```
-Wrap it in a systemd unit like `install-service.sh` (`ExecStart … uvicorn main:app --port 8000`). PromptPotter reaches it at `.env`'s `TERMNORM_URL` (default `http://127.0.0.1:8000`). Set `BACKEND_DIR` / `BACKEND_SERVICE` in `deploy.config` **before** `./bootstrap.sh`, so bootstrap writes the shared `TERMNORM_TOKEN` into both `.env` files and `update.sh` keeps the backend in lockstep; otherwise copy the token into the backend's `.env` by hand, with `TERMNORM_REQUIRE_AUTH=true`.
+Wrap it in a systemd unit like `install-service.sh` (`ExecStart … uvicorn main:app --port 8000`). PromptPotter reaches it at `.env`'s `TERMNORM_URL` (default `http://127.0.0.1:8000`). Set `BACKEND_DIR` / `BACKEND_SERVICE` in `deploy.config` **before** `./bootstrap.sh`, so bootstrap writes the shared `TERMNORM_TOKEN` into both `.env` files and `update.sh` keeps the backend in lockstep; otherwise copy the token into the backend's `.env` by hand, with `TERMNORM_REQUIRE_AUTH=true`. `update.sh` syncs the backend checkout, reinstalls its requirements and restarts its unit beside the optimizer, so a pushed backend change ships with the ordinary update.
 
 ## Defaults you can override
 
@@ -203,23 +203,110 @@ knowing:
 
 ## Security posture
 
-**The whole model, the post-install hardening checklist and the admin-bot setup** are owned by
-[`docs/operations/access-model.md`](../docs/operations/access-model.md). This is the perimeter in
-four lines:
+**The trust boundaries and where each is enforced** are
+[`docs/operations/access-model.md`](../docs/operations/access-model.md)'s. On the box:
 
-- **Signing up IS the grant.** Stage-1 OIDC, provider config at `.promptpotter/identity/oidc.json`;
-  what bounds a stranger is `FREE_TIER_SPEND_CAP_USD`, not an approval queue.
+- **Signing up IS the grant.** OIDC provider config at `.promptpotter/identity/oidc.json`; what
+  bounds a stranger is `FREE_TIER_SPEND_CAP_USD`, not an approval queue.
 - **`blocklist.json` is the revoke**, re-read on every request — edits are instant, no restart.
-- **Set `HOST_ADMIN_EMAIL` and `HOST_ADMIN_ISSUER`** or nothing ever claims this box. The issuer
-  pins the claim to one provider rather than to an address any wired provider could assert.
-- **Don't stack Cloudflare Access in front of the OIDC gate** — that is a double-gate; pick one.
+- **Set `HOST_ADMIN_EMAIL` and `HOST_ADMIN_ISSUER`** or nothing ever claims this box; the issuer
+  pins the claim to one provider. Unset, the terminal stays on the `default` tenant and the app logs
+  a warning.
+- **Don't stack Cloudflare Access in front of the OIDC gate** — a double-gate; pick one.
 
-**The one rule: a control-plane change never has an inbound door open to the internet.** The
-blocklist is the front-door lock, so editing it is not a public endpoint. An on-box admin bot reaches
-*out* to Telegram — long-poll, no open port — and edits the local file, which is the zero-trust
-posture of a protected zone never reachable from the lowest-trust one. Rationale:
-[`docs/adr/0004-operator-admin-channels.md`](../docs/adr/0004-operator-admin-channels.md); the bot's
-keys, commands and secret hygiene are access-model.md's. Install it with `./install-admin-bot.sh`.
+**The one rule: a control-plane change never has an inbound door open to the internet** — owned by
+[`docs/decisions.md` § 0004](../docs/decisions.md#0004--operator-admin-channels). The blocklist edit
+happens on the box, which reaches *out* to your phone. An external tool that must drive an admin
+action goes behind an edge broker (Cloudflare Access service token) **plus** an app token, never a
+bare public route.
+
+### Hardening checklist
+
+Each step is idempotent.
+
+1. **Apply the hardened unit** — `./install-service.sh`, then `systemctl status $APP_NAME` and the
+   health curl. A unit that fails to start: first suspects are `ProtectSystem=strict` (add the write
+   path to `ReadWritePaths`) and `SystemCallFilter`. `MemoryDenyWriteExecute` is omitted on purpose;
+   add it only after a clean smoke test.
+2. **(Optional) cgroup bound** — `MEMORY_MAX="2G"` in `deploy.config`, re-run `install-service.sh`;
+   a memory-starved run then dies as a clean cgroup OOM.
+3. **Provision the PP↔TermNorm token.** A first install's `bootstrap.sh` generates `TERMNORM_TOKEN`;
+   on an installed box it will not re-run (its `REPO_URL` guard exits first), so set the same token
+   by hand in both `.env` files, with `TERMNORM_REQUIRE_AUTH=true` on TermNorm's side.
+4. **Restart BOTH services** — PromptPotter reads `TERMNORM_TOKEN` once at boot. Verify
+   `127.0.0.1:8000/status`: no `Authorization` → **401**, bearer → **200**. PP's reachability probe
+   (`connectors/termnorm.py::_termnorm_preflight`) is unauthenticated and fails only on a refused
+   connect.
+5. **Confirm TermNorm's IP allowlist** (`backend-api/config/users.json`) lists PP's source IP; a
+   remote PP needs its IP added, or `/matches` dropped from `protected_paths`.
+6. **Never run TermNorm's dev launcher in prod** — `start-server-py-LLMs.sh` binds `0.0.0.0:8000`.
+7. **Verify no surprise listener** — `ss -tlnp` shows only loopback `:8000` / `:8001` and
+   cloudflared's outbound; the admin bot adds no port.
+8. **The firewall is yours, deliberately not scripted** — ingress is tunnel-only, so a host firewall
+   is defense-in-depth with real SSH-lockout risk. Add default-deny-inbound that **preserves SSH** by
+   hand.
+
+### Admin bot — blocking, delegating, auditing from Telegram
+
+The only recurring admin action is taking access away. The bot long-polls Telegram (outbound only)
+and is a courtesy control, not a boundary: a blocked person can sign up again from another address,
+and the spend ceiling is what bounds a stranger.
+
+**Setup.** Create a bot via [@BotFather](https://t.me/BotFather) (its OWN token — two units polling
+one token fight over the offset), read your `message.chat.id` off `getUpdates`, put the keys in the
+env file, then `./install-admin-bot.sh`. Every key is a `Settings` field read from the environment
+or the install's `.env` (`config/paths.py::env_file_path`).
+
+```bash
+ADMIN_BOT_TELEGRAM_TOKEN=123456:AA...           # from BotFather
+ADMIN_BOT_CHAT_ID=987654321                      # your numeric chat id
+ADMIN_BOT_PASSPHRASE=optional-extra-word         # optional 2nd factor
+HOST_ADMIN_EMAIL=you@example.com                 # who may claim this box
+HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
+```
+
+- **`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file** once `BOT_ENV_FILE` is split: a copy in the
+  API's environment turns a read of that process into command authority.
+- **Token and chat id stay in BOTH files** — the API sends on the same bot (new sign-ins, health
+  changes), and without them `notify_operator` fails silently. `install-admin-bot.sh` warns.
+
+| You send | Effect |
+|---|---|
+| `/block <email>` · `/unblock <email>` · `/blocked` | Withdraw access (every command refused from the next request), give it back, list. |
+| `/grant <sub_user_id> step,create` · `/revoke <sub_user_id>` · `/grants` | Delegate an attenuated sub-principal into your workspace, remove it, list. The id is the delegate's own account modal's (`/auth/me`). |
+| `/trail <email>` | What that account did, oldest first, across every workspace it owns or acts in; the terminal's `trail <email>` reads the same. |
+| `/spend` | Every account's spend and output. |
+
+With a passphrase set, prefix **every** message with it (`my-word /block alice@example.com`). A
+refused message and a lost one look identical in Telegram; `journalctl -u $APP_NAME-admin-bot`
+tells them apart. Changes are audited to `blocklist_audit.jsonl` / `grants_audit.jsonl` in
+`.promptpotter/identity/`.
+
+### Optional outbound feeds
+
+- **New accounts into your CRM** — `N8N_SIGNUP_WEBHOOK_URL`; the app POSTs the new account's
+  contact fields on its first `/auth/me`, best-effort (`admin_bot.py::forward_new_account_to_crm`).
+  Copy the path from the workflow's webhook node, not its file name; a `POST`-only webhook answers
+  *"not registered"* to a browser GET, so confirm with the receiver's own API.
+- **What accounts did, into your morning briefing** — `N8N_TRAIL_WEBHOOK_URL` +
+  `N8N_TRAIL_WEBHOOK_SECRET` in the **bot's** file; every half hour the bot POSTs the last 24 h of
+  `/trail` lines plus the box's health, secret in `X-Trail-Secret`
+  (`admin_bot.py::forward_trail_to_briefing`). Each send is the whole window, so an offline box
+  shows as an old `as_of`. The briefing cannot ask — that would be an inbound cross-tenant read.
+- **The box's health** — `promptpotter health` runs every probe (`application/health.py::probes`:
+  remote backends, each sign-in provider's view of `oidc.json`, each LLM key); a state change is
+  recorded on the box's workspace ledger and told to the bot's chat. It runs at app start, before
+  each briefing, and in `update.sh`, where a broken probe fails the deploy.
+- **Your website's records** — `SITE_RECORDS_TOKEN` in the **app's** file, then restart. A caller
+  sending `Authorization: Bearer <token>` can `POST /api/v1/site-records/{table}` (`{row, key}`),
+  `GET …?since=`, `DELETE …?before=` (keyed rows survive). The rows are files under `site_records/`;
+  the box's backup is their only copy.
+
+### Secret hygiene
+
+- `.env` is `chmod 600` and never committed.
+- A leaked `ADMIN_BOT_TELEGRAM_TOKEN`: re-issue via @BotFather, paste it into every env file
+  carrying it, restart both units.
 
 ## Uninstall
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.node_context import Calls
 from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.scoring.row_diagnostics import cell_feedback
 
@@ -33,11 +34,9 @@ def _example(n: int, cell: GradedCell) -> str:
     )
 
 
-def reflection_prompt(
-    ctx: NodeContext[Any], *, instruction: str, rows: Iterable[GradedCell]
-) -> str:
+def reflection_prompt(ctx: NodeContext, *, instruction: str, rows: Iterable[GradedCell]) -> str:
     examples = "\n\n".join(_example(n, row) for n, row in enumerate(rows, start=1))
-    return ctx.fill(current_instruction=instruction, examples=fence_untrusted(examples))
+    return ctx.read(Calls).fill(current_instruction=instruction, examples=fence_untrusted(examples))
 
 
 def fenced(text: str) -> str | None:

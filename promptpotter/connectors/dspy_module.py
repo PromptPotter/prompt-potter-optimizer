@@ -1,3 +1,5 @@
+"""``import dspy`` stays function-local: the table imports every built-in, and dspy is an extra."""
+
 from __future__ import annotations
 
 import asyncio

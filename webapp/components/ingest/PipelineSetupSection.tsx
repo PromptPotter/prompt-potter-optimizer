@@ -164,7 +164,7 @@ function PipelineSetupInner({
             }}
             tone="neutral"
           />
-          {showDetail && selected ? (
+          {showDetail ? (
             <NodeDetail
               node={selected}
               authoring={authoring}

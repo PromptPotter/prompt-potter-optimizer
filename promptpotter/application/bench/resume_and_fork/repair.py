@@ -8,9 +8,9 @@ from promptpotter.application.bench.resume_and_fork.replayers import ReplayMisma
 from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.run_callbacks import stated_line
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.results import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.run_records import (
     ForkDirection,
     ForkTrigger,
@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.bench.difficulty import DifficultyView
-    from promptpotter.application.campaign_config import LivesConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.campaign_config import LivesConfig
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import GradedCell
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -272,7 +272,7 @@ async def apply_correction(
     corrected = [*mended, *prior[cut.resume_at :]]
     mismatches, drifted = _package_drift(
         packages_before,
-        cycle.optimizer.runtime.round_packages(cycle, corrected),
+        cycle.optimizer.round_packages(cycle, corrected),
         {t.round for t in corrected},
         campaign_store,
         hop,
@@ -296,7 +296,7 @@ async def apply_correction(
         repair_target,
     )
     if drifted:
-        corrected = await cycle.optimizer.runtime.rederive(
+        corrected = await cycle.optimizer.rederive(
             campaign_store, branch, cycle, corrected, drifted
         )
 

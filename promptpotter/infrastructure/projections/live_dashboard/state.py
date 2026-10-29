@@ -4,8 +4,8 @@ from typing import Any
 
 from pydantic import ConfigDict, Field
 
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.dashboard_rows import (
     LiveCandidate,
@@ -15,10 +15,10 @@ from promptpotter.domain.dashboard_rows import (
 )
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
-from promptpotter.domain.results import DisplayMetric, RunStanding
 from promptpotter.domain.round_audit import LoopWarning, NodeBlock
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_records import DefaultsDrift, RunWiringRecord
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import fitness_bands
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
@@ -109,8 +109,6 @@ class DashboardFacts(StrictModel):
 
     rounds: list[RoundSummary] = Field(default_factory=list)
 
-    # As the run last DECLARED it; the served body reads it anew (`served_dashboard`).
-    bench_score: BenchScore | None = None
     verification: list[VerificationMark] = Field(
         default_factory=list,
         description="Each arm's latest verify and held-out bench pass on this cycle's ledger, "
@@ -213,8 +211,6 @@ class LiveDashboardState(DashboardFacts):
             "state_since": wiring.timestamp,
             "stop_reason": None,
             "error": None,
-            # A resumed run grades its selection again; the prior pass graded a stale one.
-            "bench_score": None,
             "current_query_payload": None,
             "current_position": None,
             "open_positions": [],

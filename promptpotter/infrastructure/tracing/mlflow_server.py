@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.run_records import RoundClosedRecord
 
 
+_CAMPAIGN = "promptpotter.campaign_id"
 _CYCLE = "promptpotter.cycle_id"
 _ROUND = "promptpotter.round"
 # MLflow's own rule for a prompt name: alphanumerics, hyphens, underscores and dots.
@@ -42,8 +43,8 @@ def _client() -> MlflowClient:
     return MlflowClient(tracking_uri=uri, registry_uri=uri)
 
 
-def _experiment(tenant_id: str, cycle_id: str) -> str:
-    return f"{tenant_id}/{cycle_id}"
+def _experiment(tenant_id: str, campaign_id: str, cycle_id: str) -> str:
+    return f"{tenant_id}/{campaign_id}/{cycle_id}"
 
 
 class MLflowSink(TraceSink):
@@ -55,11 +56,11 @@ class MLflowSink(TraceSink):
 
     def on_campaign_start(self, event: CampaignStart) -> None:
         client = _client()
-        name = _experiment(self._tenant_id, event.cycle_id)
+        name = _experiment(self._tenant_id, event.campaign_id, event.cycle_id)
         found = client.get_experiment_by_name(name)
         self._experiment_id = found.experiment_id if found else client.create_experiment(name)
 
-    def on_round_closed(self, campaign_id: str, record: RoundClosedRecord) -> None:
+    def on_round_closed(self, record: RoundClosedRecord) -> None:
         if self._experiment_id is None:
             return
         client = _client()
@@ -82,7 +83,7 @@ class MLflowSink(TraceSink):
 
 
 def register_export(export: PromptExport, *, tenant_id: str) -> None:
-    """One version per (cycle, prompt text), whose tags a restated export moves; no alias is ever set."""
+    """One version per (campaign, cycle, prompt text), whose tags a restated export moves; no alias is ever set."""
     if not settings.MLFLOW_TRACKING_URI:
         return
     client = _client()
@@ -96,7 +97,7 @@ def _register_node_prompt(
 ) -> None:
     tags = {
         _CYCLE: export.cycle_id,
-        "promptpotter.campaign_id": export.campaign_id,
+        _CAMPAIGN: export.campaign_id,
         "promptpotter.tool_version": export.tool_version,
         "promptpotter.dataset_hash": export.dataset_hash,
         "promptpotter.stop_reason": export.stop_reason.value,
@@ -109,7 +110,9 @@ def _register_node_prompt(
         (
             v
             for v in _versions(client, name)
-            if v.tags.get(_CYCLE) == export.cycle_id and v.template == template
+            if v.tags.get(_CAMPAIGN) == export.campaign_id
+            and v.tags.get(_CYCLE) == export.cycle_id
+            and v.template == template
         ),
         None,
     )
@@ -132,7 +135,9 @@ def _link_winning_round(
     client: MlflowClient, version: PromptVersion, *, tenant_id: str, export: PromptExport
 ) -> None:
     """Found on the server, never handed over in memory: a bench graded later runs in another process."""
-    experiment = client.get_experiment_by_name(_experiment(tenant_id, export.cycle_id))
+    experiment = client.get_experiment_by_name(
+        _experiment(tenant_id, export.campaign_id, export.cycle_id)
+    )
     if experiment is None:
         return
     runs = client.search_runs(

@@ -2,7 +2,6 @@ export {
   ApiError,
   buildIsStale,
   failureKind,
-  type Conditional,
   type FailureKind,
 } from "./client";
 export * from "./types";

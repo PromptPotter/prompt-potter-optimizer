@@ -55,17 +55,15 @@ class LangfuseLogger:
             )
             self.enabled = False
         if self.enabled:
-            try:
-                from langfuse import Langfuse
+            from langfuse import Langfuse
 
+            with graceful("Failed to initialize Langfuse"):
                 self.client = Langfuse(
                     public_key=settings.LANGFUSE_PUBLIC_KEY.get_secret_value(),
                     secret_key=settings.LANGFUSE_SECRET_KEY.get_secret_value(),
                     host=settings.LANGFUSE_HOST,
                 )
-            except Exception:
-                logger.warning("Failed to initialize Langfuse", exc_info=True)
-                self.enabled = False
+            self.enabled = self.client is not None
 
     def create_trace(
         self,
@@ -79,28 +77,24 @@ class LangfuseLogger:
         if not self.enabled or not self.client:
             return None
 
-        try:
-            trace_id: str = self.client.create_trace_id()
-            root = self.client.start_observation(
-                trace_context={"trace_id": trace_id},
-                as_type="chain",
-                name=name,
-                input=input,
-                metadata=metadata or {},
-            )
-            root.update_trace(
-                name=name,
-                user_id=user_id,
-                session_id=session_id,
-                input=input,
-                metadata=metadata,
-                tags=tags or [],
-            )
-            self._trace_metadata[trace_id] = root
-            return trace_id
-        except Exception:
-            logger.debug("Failed to create Langfuse trace", exc_info=True)
-            return None
+        trace_id: str = self.client.create_trace_id()
+        root = self.client.start_observation(
+            trace_context={"trace_id": trace_id},
+            as_type="chain",
+            name=name,
+            input=input,
+            metadata=metadata or {},
+        )
+        root.update_trace(
+            name=name,
+            user_id=user_id,
+            session_id=session_id,
+            input=input,
+            metadata=metadata,
+            tags=tags or [],
+        )
+        self._trace_metadata[trace_id] = root
+        return trace_id
 
     def _evict_orphans(self) -> None:
         # An error mid-node skips `end_observation`; its span would hold its payload for the process's life.
@@ -131,23 +125,19 @@ class LangfuseLogger:
         if not self.enabled or not self.client or not trace_id:
             return None
 
-        try:
-            parent = self._resolve_parent(trace_id, parent_observation_id)
-            if parent is None:
-                return None
-            child = parent.start_observation(
-                as_type=as_type,
-                name=name,
-                input=input,
-                metadata=metadata or {},
-            )
-            observation_id = getattr(child, "id", uuid.uuid4().hex[:12])
-            self._evict_orphans()
-            self._open_observations[observation_id] = child
-            return observation_id
-        except Exception:
-            logger.debug("Failed to start Langfuse span", exc_info=True)
+        parent = self._resolve_parent(trace_id, parent_observation_id)
+        if parent is None:
             return None
+        child = parent.start_observation(
+            as_type=as_type,
+            name=name,
+            input=input,
+            metadata=metadata or {},
+        )
+        observation_id = getattr(child, "id", uuid.uuid4().hex[:12])
+        self._evict_orphans()
+        self._open_observations[observation_id] = child
+        return observation_id
 
     def end_observation(
         self,
@@ -187,28 +177,24 @@ class LangfuseLogger:
         if not self.enabled or not self.client or not trace_id:
             return None
 
-        try:
-            parent = self._resolve_parent(trace_id, parent_observation_id)
-            if parent is None:
-                return None
-            kwargs: dict[str, Any] = {
-                "as_type": as_type,
-                "name": name,
-                "input": input,
-                "output": output,
-                "metadata": metadata or {},
-            }
-            if model:
-                kwargs["model"] = model
-            if usage_details:
-                kwargs["usage_details"] = usage_details
-
-            child = parent.start_observation(**kwargs)
-            child.end()
-            return getattr(child, "id", uuid.uuid4().hex[:12])
-        except Exception:
-            logger.debug("Failed to log Langfuse span", exc_info=True)
+        parent = self._resolve_parent(trace_id, parent_observation_id)
+        if parent is None:
             return None
+        kwargs: dict[str, Any] = {
+            "as_type": as_type,
+            "name": name,
+            "input": input,
+            "output": output,
+            "metadata": metadata or {},
+        }
+        if model:
+            kwargs["model"] = model
+        if usage_details:
+            kwargs["usage_details"] = usage_details
+
+        child = parent.start_observation(**kwargs)
+        child.end()
+        return getattr(child, "id", uuid.uuid4().hex[:12])
 
     def create_score(
         self,
@@ -217,46 +203,34 @@ class LangfuseLogger:
         value: float,
         data_type: str = "NUMERIC",
         comment: str | None = None,
-    ) -> bool:
+    ) -> None:
         if not self.enabled or not self.client or not trace_id:
-            return False
-
-        try:
-            self.client.create_score(
-                trace_id=trace_id,
-                name=name,
-                value=value,
-                data_type=data_type,
-                comment=comment,
-            )
-            return True
-        except Exception:
-            logger.debug("Failed to log Langfuse score", exc_info=True)
-            return False
+            return
+        self.client.create_score(
+            trace_id=trace_id,
+            name=name,
+            value=value,
+            data_type=data_type,
+            comment=comment,
+        )
 
     def update_trace(
         self,
         trace_id: str,
         output: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> bool:
+    ) -> None:
         if not self.enabled or not self.client or not trace_id:
-            return False
-
-        try:
-            root = self._trace_metadata.get(trace_id)
-            if root:
-                kwargs: dict[str, Any] = {}
-                if output is not None:
-                    kwargs["output"] = output
-                if metadata is not None:
-                    kwargs["metadata"] = metadata
-                if kwargs:
-                    root.update_trace(**kwargs)
-            return True
-        except Exception:
-            logger.debug("Failed to update Langfuse trace", exc_info=True)
-            return False
+            return
+        root = self._trace_metadata.get(trace_id)
+        if root:
+            kwargs: dict[str, Any] = {}
+            if output is not None:
+                kwargs["output"] = output
+            if metadata is not None:
+                kwargs["metadata"] = metadata
+            if kwargs:
+                root.update_trace(**kwargs)
 
     def end_trace(self, trace_id: str) -> None:
         if not self.enabled or not self.client or not trace_id:
@@ -278,19 +252,14 @@ class LangfuseLogger:
         name: str,
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> bool:
+    ) -> None:
         if not self.enabled or not self.client:
-            return False
-        try:
-            self.client.create_dataset(
-                name=name,
-                description=description or "",
-                metadata=metadata or {},
-            )
-            return True
-        except Exception:
-            logger.debug("Failed to create Langfuse dataset", exc_info=True)
-            return False
+            return
+        self.client.create_dataset(
+            name=name,
+            description=description or "",
+            metadata=metadata or {},
+        )
 
     def create_dataset_item(
         self,
@@ -303,7 +272,6 @@ class LangfuseLogger:
         if not self.enabled or client is None:
             return None
         item = self._resent(
-            "create dataset item",
             lambda: client.create_dataset_item(
                 dataset_name=dataset_name,
                 input=input,
@@ -313,7 +281,7 @@ class LangfuseLogger:
         )
         return getattr(item, "id", None)
 
-    def _resent(self, what: str, send: Callable[[], _T]) -> _T | None:
+    def _resent(self, send: Callable[[], _T]) -> _T | None:
         if self.rate_limited:
             return None
         budget = SendBudget(None, attempts=_WRITE_ATTEMPTS)
@@ -335,39 +303,8 @@ class LangfuseLogger:
                     return None
                 wait = budget.resend_wait() if throttled or outcome.resendable else None
                 if wait is None:
-                    logger.warning("Langfuse %s failed: %s", what, outcome.detail[:300])
-                    return None
+                    raise
                 time.sleep(asked or wait)
-
-    def get_dataset(self, name: str) -> object | None:
-        if not self.enabled or not self.client:
-            return None
-        try:
-            dataset: object = self.client.get_dataset(name=name)
-            return dataset
-        except Exception:
-            logger.debug("Failed to get Langfuse dataset", exc_info=True)
-            return None
-
-    def update_dataset_item(
-        self,
-        item_id: str,
-        expected_output: Any = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> bool:
-        if not self.enabled or not self.client:
-            return False
-        try:
-            kwargs: dict[str, Any] = {"id": item_id}
-            if expected_output is not None:
-                kwargs["expected_output"] = expected_output
-            if metadata is not None:
-                kwargs["metadata"] = metadata
-            self.client.create_dataset_item(**kwargs)
-            return True
-        except Exception:
-            logger.debug("Failed to update Langfuse dataset item", exc_info=True)
-            return False
 
     @property
     def rate_limited(self) -> bool:
@@ -380,9 +317,9 @@ class LangfuseLogger:
         observation_id: str | None = None,
         run_name: str = "",
         run_metadata: dict[str, Any] | None = None,
-    ) -> bool:
+    ) -> None:
         if not self.enabled or not self.client:
-            return False
+            return
         body: dict[str, Any] = {
             "datasetItemId": dataset_item_id,
             "traceId": trace_id,
@@ -397,12 +334,11 @@ class LangfuseLogger:
             settings.LANGFUSE_SECRET_KEY.get_secret_value(),
         )
 
-        def post() -> bool:
+        def post() -> None:
             resp = httpx.post(url, auth=auth, json=body, timeout=30, verify=tls_context())
             resp.raise_for_status()
-            return True
 
-        return self._resent("link item to run", post) or False
+        self._resent(post)
 
     def flush(self) -> None:
         if not (self.enabled and self.client):

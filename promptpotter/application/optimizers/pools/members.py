@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING, Annotated, ClassVar
 from pydantic import Field
 
 from promptpotter.application.bench.node_context import Target
-from promptpotter.application.campaign_config import Estimand, Knob, Scope
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.config.paths import block_packs_root
 from promptpotter.config.prompt_blocks import missing_packs, pack_entries, pack_identity
+from promptpotter.domain.campaign_config import Estimand, Knob, Scope
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
 from promptpotter.domain.pool import (
     EARNED_SOURCE,
@@ -55,7 +55,7 @@ class BlockPoolKnobs(PoolKnobs):
     )
 
 
-class _PoolInitializer(nodes.Member):
+class _PoolInitializer(nodes.Initializer):
     kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
     knobs: ClassVar[type[StrictModel]] = PoolKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Target})
@@ -80,7 +80,7 @@ class BlockPoolInitializer(_PoolInitializer):
         return pack_identity(selected.knobs_of(self.name, BlockPoolKnobs).packs)
 
     def refusal(
-        self, selected: SelectedOptimizer, *, closed: bool, mint: MintFacts | None
+        self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None
     ) -> str | None:
         packs = selected.knobs_of(self.name, BlockPoolKnobs).packs
         if absent := missing_packs(packs):
@@ -101,8 +101,8 @@ class BlockPoolInitializer(_PoolInitializer):
             )
         return None
 
-    def initialize(self, ctx: NodeContext[BlockPoolKnobs]) -> None:
-        target = ctx.read(Target)
+    def initialize(self, ctx: NodeContext) -> None:
+        target, knobs = ctx.read(Target), ctx.knobs(BlockPoolKnobs)
         earned = (
             PoolEntry(id=entry_id(field, text), group=(field, EARNED_SOURCE), text=text)
             for field, texts in target.earned_blocks().items()
@@ -110,9 +110,9 @@ class BlockPoolInitializer(_PoolInitializer):
         )
         entries: Mapping[str, PoolEntry] = {
             **{e.id: e for e in earned},
-            **pack_entries(ctx.knobs.packs, admits=_admits(ctx.schema, target.matcher)),
+            **pack_entries(knobs.packs, admits=_admits(target.schema, target.matcher)),
         }
-        active = kept(ctx.knobs.active, ((i, e.group) for i, e in entries.items()))
+        active = kept(knobs.active, ((i, e.group) for i, e in entries.items()))
         ctx.put(BlockPool(entries=tuple(entries[i] for i in active)))
 
 
@@ -121,11 +121,11 @@ class DemoPoolInitializer(_PoolInitializer):
     pool: ClassVar[type[Pool]] = DemoPool
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({DemoPool})
 
-    def starting_content(self, selected: SelectedOptimizer) -> object:
+    def starting_content(self, _selected: SelectedOptimizer) -> object:
         return None
 
     def refusal(
-        self, selected: SelectedOptimizer, *, closed: bool, mint: MintFacts | None
+        self, selected: SelectedOptimizer, _closed: bool, mint: MintFacts | None
     ) -> str | None:
         # A partition's size is its split's declaration, so only its names are refused.
         paths = self.active(selected)
@@ -133,9 +133,9 @@ class DemoPoolInitializer(_PoolInitializer):
             return f"{self.name}.active names {bad}, which the demo partition lacks"
         return None
 
-    def initialize(self, ctx: NodeContext[PoolKnobs]) -> None:
+    def initialize(self, ctx: NodeContext) -> None:
         demo = ctx.read(Target).demo_split
-        ctx.put(DemoPool(keys=kept(ctx.knobs.active, ((s.key, ()) for s in demo))))
+        ctx.put(DemoPool(keys=kept(ctx.knobs(PoolKnobs).active, ((s.key, ()) for s in demo))))
 
 
 MEMBERS = (BlockPoolInitializer(), DemoPoolInitializer())

@@ -10,9 +10,10 @@ from promptpotter.application.views.view_models import (
     LogMdView,
     RoundDigestView,
 )
+from promptpotter.domain.arm_reading import DISPLAY_METRIC_INFO
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import DISPLAY_METRIC_INFO, RunStanding
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import RATE_PRICED_LABEL, calls_rate_priced
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import LedgerSpend
 from promptpotter.shared.composite import render_composite_fitness_block

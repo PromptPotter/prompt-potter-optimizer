@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,8 +11,7 @@ from promptpotter.application.bench.task_context import (
     draft_call_context,
     run_checkin,
 )
-from promptpotter.application.commands.payloads import EditDraftCampaignPayload
-from promptpotter.application.datasets.draft_campaign import DraftCampaign, EditDraftPatch
+from promptpotter.application.datasets.draft_campaign import DraftCampaign
 from promptpotter.application.datasets.origin_readiness import (
     OriginLastResolution,
     OriginResolution,
@@ -25,12 +23,12 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 from promptpotter.application.jobs.quota import paid_call
 from promptpotter.application.scoring.formula.matchers import MATCHERS
+from promptpotter.domain.command_kinds import EditDraftCampaignPayload
+from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store.stores import Stores
-
-logger = logging.getLogger(__name__)
 
 # Each value is both the ``EditDraftPatch`` key and the ``DraftCampaign`` attribute name.
 FINDING_PATCH_KEYS: dict[str, str] = {

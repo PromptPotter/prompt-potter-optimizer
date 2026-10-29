@@ -12,8 +12,8 @@ from pydantic.fields import FieldInfo
 from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
-from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob
 from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
@@ -94,7 +94,7 @@ def _node_decls(selected: SelectedOptimizer) -> dict[tuple[str, ...], KnobDecl]:
     out: dict[tuple[str, ...], KnobDecl] = {}
     for node in selected.member_nodes:
         declared = selected.declared_knobs(node).model_dump(mode="json")
-        for decl in _walk(optimizers.member(node).knobs, _node_prefix(node)):
+        for decl in _walk(optimizers.NODE_MEMBERS.get(node).knobs, _node_prefix(node)):
             value: Any = declared
             for part in decl.path[len(_node_prefix(node)) :]:
                 value = value.get(part) if isinstance(value, dict) else None
@@ -104,7 +104,9 @@ def _node_decls(selected: SelectedOptimizer) -> dict[tuple[str, ...], KnobDecl]:
 
 def member_knob_count() -> int:
     """Every registered member's knob leaves — what the ledger's config-leaf row adds to ``KNOBS``."""
-    return sum(len(_walk(m.knobs, _node_prefix(n))) for n, m in optimizers.registered().items())
+    return sum(
+        len(_walk(m.knobs, _node_prefix(n))) for n, m in optimizers.NODE_MEMBERS.table.items()
+    )
 
 
 def _table(config: CampaignConfig) -> dict[tuple[str, ...], KnobDecl]:
@@ -221,7 +223,7 @@ COUPLINGS: tuple[Coupling, ...] = (
             "once the bank is rich. Turn OFF to pin 1PL everywhere."
         ),
         severity="info",
-        predicate=lambda c: False,
+        predicate=lambda _c: False,
     ),
     Coupling(
         name="lives_no_headroom",
@@ -248,9 +250,10 @@ COUPLINGS: tuple[Coupling, ...] = (
 
 def _member_couplings(config: CampaignConfig) -> Iterator[Coupling]:
     selected = select_optimizer(config.optimization)
-    for node in selected.member_nodes:
+    for member in selected.members:
+        node = member.name
         knobs, declared = selected.knobs(node), selected.declared_knobs(node)
-        for mc in selected.runtime.couplings.get(node, ()):
+        for mc in member.couplings:
             if ghosts := sorted(set(mc.knobs) - set(type(knobs).model_fields)):
                 raise RuntimeError(f"{node}: coupling {mc.name!r} names unknown knobs {ghosts}.")
             yield Coupling(

@@ -13,18 +13,18 @@ from pathlib import Path
 from typing import Any
 
 from last_green import file_digest
-from processes import REPO, git, peak_mb, queue_behind_siblings
+from processes import REPO, git, peak_mb, queue_behind_siblings, run
 
 PACKAGE = "promptpotter"
 TESTS = "tests"
 EVERY_TEST = f"{TESTS}/"
 RECORD = REPO / ".pytest_cache" / "tests_owning.json"
 # Over the suite's peak in each platform's own `peak_mb` metric: win32 a fifth above a measured
-# 172 MB peak commit; linux 197 over a measured 193 MB peak RSS, never loosened past it.
-CEILING_MB = {"win32": 206, "linux": 197}
+# 168 MB peak commit; linux 197 over a measured 193 MB peak RSS, never loosened past it.
+CEILING_MB = {"win32": 202, "linux": 197}
 # Package modules the widest journey RAN: one that wires the whole engine to reach one decision
 # is the churn every reshape pays. Equality, like the ledger: a move is re-pinned with its reason.
-WIDEST_JOURNEY_MODULES = 137
+WIDEST_JOURNEY_MODULES = 140
 
 
 def _rel(path: str | Path) -> str | None:
@@ -298,6 +298,15 @@ def _record(pytest_args: list[str]) -> int:
             self.whole_suite = False
 
     plugin = Ran()
+    # The peak is the suite's, never the compiler's: whatever `__pycache__` a checkout starts with,
+    # every module the suite imports is bytecode, pytest's rewritten ones too, before it is measured.
+    for warm in (
+        ["compileall", "-q", PACKAGE, "scripts"],
+        ["pytest", "--collect-only", *pytest_args],
+    ):
+        code, said = run([sys.executable, "-m", *warm], REPO)
+        if code:
+            raise RuntimeError(said)
     before = _hashed()
     sys.addaudithook(audited)
     monitoring.use_tool_id(tool, "tests_owning")
@@ -337,8 +346,16 @@ def _record(pytest_args: list[str]) -> int:
     failed = []
     if (ceiling := CEILING_MB.get(sys.platform)) is None:
         failed.append(f"no suite peak is measured on {sys.platform}: pin one in CEILING_MB")
-    elif (peak := peak_mb()) > ceiling:
-        failed.append(f"the suite peaked at {peak} MB, over its {ceiling} MB ceiling")
+    else:
+        peak = peak_mb()
+        # The gate hides a green check's output: CI's job summary is where a re-pin reads the peak.
+        if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(summary, "a", encoding="utf-8") as out:
+                out.write(
+                    f"pytest suite peak: {peak} MB on {sys.platform} (ceiling {ceiling} MB)\n"
+                )
+        if peak > ceiling:
+            failed.append(f"the suite peaked at {peak} MB, over its {ceiling} MB ceiling")
     widest = max(sum(rel.startswith(f"{PACKAGE}/") for rel in rels) for rels in reached.values())
     if widest != WIDEST_JOURNEY_MODULES:
         failed.append(

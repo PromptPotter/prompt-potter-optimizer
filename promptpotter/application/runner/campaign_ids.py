@@ -11,9 +11,9 @@ from promptpotter.infrastructure.store.layout import dataset_id_prefix
 from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
+    from promptpotter.domain.arms import PointContext
     from promptpotter.domain.campaign import RunDeclaration
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.results import PointContext
     from promptpotter.domain.sample import Sample
 
 

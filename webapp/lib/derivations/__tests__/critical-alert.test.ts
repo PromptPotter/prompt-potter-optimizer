@@ -7,7 +7,7 @@ import { dash as dashboard, health, producerReading, summaryRound } from "@/lib/
 const base = {
   bannerStatus: "connected" as const,
   bannerText: "",
-  bannerHint: undefined,
+  bannerHint: "",
   dash: null as ServedDashboard | null,
 };
 

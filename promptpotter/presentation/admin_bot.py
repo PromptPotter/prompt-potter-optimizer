@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from promptpotter import connectors
+from promptpotter.application import health
 from promptpotter.application.account import (
     block_email,
     blocked_emails,
@@ -22,13 +22,12 @@ from promptpotter.application.account import (
 )
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.install_spend import read_install_spend
-from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.application.jobs.quota import overrun
 from promptpotter.application.views.trail import trail_fields, trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.connector import BackendUnreachableError
+from promptpotter.domain.run_records import Device
 from promptpotter.domain.spend import RATE_PRICED_LABEL
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
@@ -92,7 +91,7 @@ def _render_trail(argument: str) -> str:
     email = argument.strip()
     if not email:
         return "Usage: /trail <email>"
-    trail = trail_by_email(DEFAULT_PROJECTS_ROOT, email)
+    trail = trail_by_email(default_projects_root(), email)
     notes = trail_notes(trail)
     if not trail.own:
         return "\n".join([f"No account with email {email}.", *notes])
@@ -115,7 +114,7 @@ def _render_trail(argument: str) -> str:
 
 
 def _render_install_spend() -> str:
-    rows = read_install_spend(DEFAULT_PROJECTS_ROOT)
+    rows = read_install_spend(default_projects_root())
     if not rows:
         return "No accounts on this install."
     torn = sum(1 for r in rows if r.unreadable)
@@ -131,14 +130,14 @@ def _render_install_spend() -> str:
         if r.unreadable:
             lines.append(f"{who}: unreadable — {r.unreadable}")
             continue
-        over_usd, over_tokens = overrun(r.ceilings, r.spent)
+        over = overrun(r.ceilings, r.spent)
         flags = []
         if r.ceilings.usd is None:
             flags.append("host, unmetered")
         if r.spent.unpriced_tokens:
             flags.append(f"{r.spent.unpriced_tokens:,} unpriced")
-        if over_usd or over_tokens:
-            flags.append(f"⚠ ${over_usd:.4f}/{over_tokens:,} past ceiling")
+        if over.usd_amount or over.token_amount:
+            flags.append(f"⚠ ${over.usd_amount:.4f}/{over.token_amount:,} past ceiling")
         lines.append(
             f"{who}: ${r.spent.used_usd:.4f} billed + ${r.spent.rate_priced_usd:.4f} "
             f"{RATE_PRICED_LABEL} / {r.spent.used_tokens:,} tok · "
@@ -219,8 +218,17 @@ def notify_operator(text: str) -> bool:
     return True
 
 
+def check_health_and_tell() -> list[health.Checked]:
+    """Every entry point's health check, each change of state already told. Blocking."""
+    checked = asyncio.run(health.check(default_projects_root()))
+    for one in checked:
+        if (said := health.notice(one)) is not None:
+            notify_operator(said)
+    return checked
+
+
 def forward_new_account_to_crm(
-    email: str | None, name: str | None, user_id: str, account_count: int
+    email: str | None, name: str | None, user_id: str, account_count: int, device: Device | None
 ) -> bool:
     url = settings.N8N_SIGNUP_WEBHOOK_URL.get_secret_value().strip()
     if not url:
@@ -236,6 +244,7 @@ def forward_new_account_to_crm(
                     "use_case": "",
                     "signup_source": "promptpotter-app",
                     "account_count": account_count,
+                    "device": device or "",
                 },
             )
     except httpx.HTTPError:
@@ -244,20 +253,8 @@ def forward_new_account_to_crm(
     return True
 
 
-async def _backends_down() -> dict[str, str]:
-    """Every backend SERVICE the launch gate found unreachable, mapped to why. An in-process one
-    starts per cell, so a container runtime this box lacks is its choice, not an outage."""
-    down = {}
-    for name, connector in connectors.registered().items():
-        if connector.execution != "remote_http":
-            continue
-        if isinstance(refused := await probe_backend(name), BackendUnreachableError):
-            down[name] = str(refused)
-    return down
-
-
 def forward_trail_to_briefing() -> bool:
-    """What every account did in the last day, and which backends are down, sent OUT to n8n.
+    """What every account did in the last day, and the box's health, sent OUT to n8n.
 
     Sent whole each time: the receiver keeps the newest, so a missed send costs freshness only,
     and a send that stops arriving is itself the box going quiet.
@@ -265,8 +262,7 @@ def forward_trail_to_briefing() -> bool:
     url = settings.N8N_TRAIL_WEBHOOK_URL.get_secret_value().strip()
     if not url:
         return False
-    trails, unreadable = trails_since(DEFAULT_PROJECTS_ROOT, time.time() - _TRAIL_WINDOW_H * 3600)
-    down = asyncio.run(_backends_down())
+    trails, unreadable = trails_since(default_projects_root(), time.time() - _TRAIL_WINDOW_H * 3600)
     try:
         with httpx.Client(timeout=10, verify=tls_context()) as client:
             resp = client.post(
@@ -281,7 +277,7 @@ def forward_trail_to_briefing() -> bool:
                         {"who": account.who, "lines": trail_fields(account)} for account in trails
                     ],
                     "unreadable": unreadable,
-                    "backends_down": down,
+                    "health": health.briefing(default_projects_root()),
                 },
             )
     except httpx.HTTPError:
@@ -331,9 +327,11 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
             if time.monotonic() >= forward_due:
                 forward_due = time.monotonic() + _TRAIL_FORWARD_EVERY_S
                 try:
+                    # Checked first, so the briefing carries what this check just found.
+                    check_health_and_tell()
                     forward_trail_to_briefing()
                 except Exception:
-                    logger.exception("trail forward failed; channel stays up")
+                    logger.exception("health check or trail forward failed; channel stays up")
             try:
                 params: dict[str, Any] = {"timeout": _POLL_TIMEOUT_S}
                 if offset is not None:
@@ -362,7 +360,7 @@ def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:
                 try:
                     _process_update(update, client, chat_id, passphrase)
                 except Exception:
-                    # One handler's raise must not end the operator's only admin channel (ADR-0004).
+                    # One handler's raise must not end the operator's only admin channel (decisions.md § 0004).
                     logger.exception("admin command failed; channel stays up")
 
 
@@ -375,7 +373,7 @@ def main() -> int:
     if not token or not chat_id:
         logger.error(
             "ADMIN_BOT_TELEGRAM_TOKEN and ADMIN_BOT_CHAT_ID must be set "
-            "(see docs/operations/access-model.md)."
+            "(see deploy-linux/README.md § Admin bot)."
         )
         return 1
     try:

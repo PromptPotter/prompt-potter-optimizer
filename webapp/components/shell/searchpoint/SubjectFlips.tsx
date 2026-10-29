@@ -69,8 +69,12 @@ function FlipKeys({
   return (
     <>
       <FlipSep />
-      <HoverCard className="subject-flip-card" content={<FlipList keys={keys} arms={arms} />}>
-        <span className={cx("subject-flip-line", `is-${kind}`)} tabIndex={0}>
+      <HoverCard
+        className="subject-flip-card"
+        content={<FlipList keys={keys} arms={arms} />}
+        focusable
+      >
+        <span className={cx("subject-flip-line", `is-${kind}`)}>
           <strong>{keys.length}</strong> {label}
         </span>
       </HoverCard>

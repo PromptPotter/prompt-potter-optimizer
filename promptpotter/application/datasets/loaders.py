@@ -4,6 +4,7 @@ import json
 import logging
 import random
 import re
+import sys
 import urllib.request
 from collections import defaultdict
 from collections.abc import Callable, Mapping
@@ -11,6 +12,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
+from types import CodeType, FunctionType, ModuleType
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.datasets.sealqa_panel import write_longseal_panel
@@ -28,7 +30,7 @@ from promptpotter.infrastructure.store.io import write_bytes
 from promptpotter.infrastructure.store.measurement_archive import config_key
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.extras import Extra, require_extra
-from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
+from promptpotter.shared.hashing import ADDRESS_HEX, module_source_digest, stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -36,6 +38,8 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
+
+_PACKAGE = __name__.rpartition(".")[0]
 
 Row = dict[str, Any]
 Drawn = tuple[str, str]
@@ -100,9 +104,16 @@ class Source:
 
     @property
     def identity(self) -> str:
-        """A new ``rev`` is a new recipe, so it cuts a bank of its own."""
+        """A new ``rev``, cut parameter or edit to its recipe's code cuts a bank of its own."""
         return stable_hash(
-            [self.recipe, self.kind.value, self.repo, self.rev, dict(self.params)],
+            [
+                recipe_code(self.recipe),
+                self.recipe,
+                self.kind.value,
+                self.repo,
+                self.rev,
+                dict(self.params),
+            ],
             length=ADDRESS_HEX,
         )
 
@@ -450,7 +461,7 @@ BANK_RECIPES: dict[str, Callable[[Source], BankLoader]] = {
     "screen_taste": lambda src: _bank(src, lambda: _screen_taste_rows(src)),
 }
 """A recipe is the code half of a cut; the ``source:`` section beside the definition is the data half
-— repo, commit and every cut parameter, so a new cut is a new definition and no edit here."""
+— repo, commit and every cut parameter. ``Source.identity`` keys a held cut on both halves."""
 
 
 def _sealqa_longseal(src: Source, out_dir: Path) -> int:
@@ -479,6 +490,38 @@ PANEL_RECIPES: dict[str, Callable[[Source, Path], int]] = {
 """A recipe that BUILDS a connector-owned panel and the task directories it names, into the tenant tier."""
 
 
+def _reached(value: object, seen: set[object]) -> set[ModuleType]:
+    """The modules of this package, beside this one, whose code *value* runs: through every
+    function, lambda, closure and class of this module it names."""
+    if not isinstance(value, FunctionType | type) or value in seen:
+        return set()
+    seen.add(value)
+    if value.__module__ != __name__:
+        named = value.__module__.startswith(f"{_PACKAGE}.")
+        return {sys.modules[value.__module__]} if named else set()
+    if isinstance(value, type):
+        return set().union(*(_reached(v, seen) for v in vars(value).values()))
+    cells = [cell.cell_contents for cell in value.__closure__ or ()]
+    codes = [value.__code__]
+    names: set[object] = set()
+    while codes:
+        code = codes.pop()
+        names.update(value.__globals__[n] for n in code.co_names if n in value.__globals__)
+        codes.extend(c for c in code.co_consts if isinstance(c, CodeType))
+    return set().union(*(_reached(v, seen) for v in (*names, *cells)))
+
+
+def recipe_modules(recipe: str) -> tuple[ModuleType, ...]:
+    """What a recipe's code IS: this module and every module of this package it runs."""
+    run = (BANK_RECIPES | PANEL_RECIPES)[recipe]
+    imported = sorted(_reached(run, set()), key=lambda m: m.__name__)
+    return (sys.modules[__name__], *imported)
+
+
+def recipe_code(recipe: str) -> str:
+    return module_source_digest(*recipe_modules(recipe))
+
+
 def definition_source(dataset_dir: Path) -> Source | None:
     definition = read_dataset_definition(dataset_dir)
     return None if definition is None else Source.of(definition.source)
@@ -489,13 +532,6 @@ def _loader(stores: Stores, src: Source) -> BankLoader:
         # The definition names the kept file; where this tenant keeps it is the store's.
         src = replace(src, repo=str(stores.tenant_datasets.upload_path(src.repo)))
     return BANK_RECIPES[src.recipe](src)
-
-
-def dataset_loader(stores: Stores, dataset_dir: Path) -> BankLoader | None:
-    src = definition_source(dataset_dir)
-    if src is None or src.recipe not in BANK_RECIPES:
-        return None
-    return _loader(stores, src)
 
 
 def cut_bank(stores: Stores, section: Mapping[str, Any]) -> list[Sample]:
@@ -524,14 +560,6 @@ def no_dataset_hint(stores: Stores) -> str:
     ]
     body = "\n".join(lines) if lines else "  (no datasets readable here)"
     return "Available datasets:\n\n" + body
-
-
-def loadable_dataset_names(stores: Stores) -> list[str]:
-    return sorted(
-        ref.dataset.name
-        for ref in list_readable_datasets(stores)
-        if has_source(ref.dataset.directory)
-    )
 
 
 def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:

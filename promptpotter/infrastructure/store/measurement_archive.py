@@ -4,28 +4,30 @@ import contextlib
 import gzip
 import json
 import os
+import re
 import threading
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import replace
+from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple
-
-from filelock import BaseFileLock, FileLock, Timeout
 
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, meets_grade
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.sample import ArchiveEntry, FiledAnswer
+from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, FiledAnswer
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, MeasuredCell, PipelineData
 from promptpotter.infrastructure.store.io import (
+    HeldLock,
     PairWrite,
     read_bytes_optional,
     read_json_optional,
     read_lines,
     replace_lines,
     rewrite_pair,
+    take_lock,
     unlink_robust,
     write_json,
 )
@@ -38,11 +40,63 @@ from promptpotter.shared.hashing import ADDRESS_HEX, CANONICAL_PIN, stable_hash
 
 ANSWER_KEY = "answer"
 _INDEX_FOLD_KEY = "k"
-# What an entry says of its dataset and first answer, never of its configuration.
-_INDEXED_ONLY = frozenset({"dataset_hash", "name", "created_at"})
-_CELLS_SUFFIX = ".jsonl"
-_COLD_SUFFIX = ".jsonl.gz"
 _FILES_MAX_BYTES = 32 << 20
+
+
+_ADDRESS = re.compile(f"[0-9a-f]{{{ADDRESS_HEX}}}")
+
+
+def is_address(key: str) -> bool:
+    return _ADDRESS.fullmatch(key) is not None
+
+
+class ArchiveFile(Enum):
+    """Every file the archive writes, at ``{folder}/{key}{suffix}`` under ``measurements/``.
+    A key is a content address; the unkeyed INDEX is one file, its key ``""``."""
+
+    folder: str
+    suffix: str
+    keyed: bool
+
+    INDEX = ("", "index.jsonl", False)
+    CONFIG = ("configs", ".json", True)
+    CELLS = ("cells", ".jsonl", True)
+    COLD = ("cold", ".jsonl.gz", True)
+    # One walk's claim on a cell: the lock, and the row its holder publishes under it.
+    CLAIM_LOCK = ("claims", ".lock", True)
+    CLAIM_ROW = ("claims", ".json", True)
+    SAMPLE_FOLD = ("sample_folds", ".jsonl", True)
+
+    def __init__(self, folder: str, suffix: str, keyed: bool) -> None:
+        self.folder = folder
+        self.suffix = suffix
+        self.keyed = keyed
+
+    def _admits(self, key: str) -> bool:
+        return is_address(key) if self.keyed else key == ""
+
+    def file_name(self, key: str) -> str:
+        if not self._admits(key):
+            raise ValueError(f"{self.name} files no key {key!r}: a key is a content address")
+        return f"{key}{self.suffix}"
+
+    def key_of(self, name: str) -> str | None:
+        key = name[: len(name) - len(self.suffix)]
+        return key if name.endswith(self.suffix) and self._admits(key) else None
+
+
+assert all(
+    (other.key_of(kind.file_name("0" * ADDRESS_HEX if kind.keyed else "")) is None)
+    == (other is not kind)
+    for kind in ArchiveFile
+    for other in ArchiveFile
+    if other.folder == kind.folder
+), "two archive kinds name one file, so one kind's walker rewrites the other's"
+assert all(
+    kind.key_of(kind.file_name(key)) == key and not kind._admits(f"{key}/")
+    for kind in ArchiveFile
+    for key in ["f" * ADDRESS_HEX if kind.keyed else ""]
+), "an archive kind names a file it does not enumerate, or a key holding a separator names one"
 
 
 def config_key(node_configs: list[tuple[str, dict[str, Any]]]) -> str:
@@ -91,6 +145,10 @@ def _matches_subset(
         if subdict and not (subdict.items() <= cfg.items()):
             return False
     return True
+
+
+def indexed_entry(row: Mapping[str, Any]) -> ArchiveEntry:
+    return ArchiveEntry.model_validate({k: v for k, v in row.items() if k != _INDEX_FOLD_KEY})
 
 
 def _tail_from(st: os.stat_result, cursor: tuple[int, int] | None) -> int:
@@ -261,23 +319,45 @@ class MeasurementArchive:
     def _store_dir(self) -> Path:
         return self._base_dir / MEASUREMENTS_DIR
 
+    def folder(self, kind: ArchiveFile) -> Path:
+        return self._store_dir() / kind.folder
+
+    def path(self, kind: ArchiveFile, key: str = "") -> Path:
+        return self.folder(kind) / kind.file_name(key)
+
+    def _named(self, kind: ArchiveFile) -> Iterator[tuple[str, os.DirEntry[str]]]:
+        """The one enumeration: each file `path` builds for *kind*, beside its key."""
+        try:
+            with os.scandir(self.folder(kind)) as it:
+                for entry in it:
+                    key = kind.key_of(entry.name)
+                    if key is not None and entry.is_file():
+                        yield key, entry
+        except OSError:
+            return
+
+    def keys(self, kind: ArchiveFile) -> list[str]:
+        return sorted(key for key, _ in self._named(kind))
+
+    def unwalked(self) -> list[Path]:
+        """Every file here no `keys` names, at any depth; `store/io.py`'s dot-named locks and temp files aside."""
+        named = {self.path(kind, key) for kind in ArchiveFile for key in self.keys(kind)}
+        return sorted(
+            path
+            for top, _, names in os.walk(self._store_dir())
+            for name in names
+            if name[0] != "." and (path := Path(top) / name) not in named
+        )
+
     def _index_path(self) -> Path:
-        return self._store_dir() / "index.jsonl"
-
-    def _cells_dir(self) -> Path:
-        return self._store_dir() / "cells"
-
-    def _configs_dir(self) -> Path:
-        return self._store_dir() / "configs"
-
-    def derived_dir(self) -> Path:
-        return self._store_dir() / "derived"
+        return self.path(ArchiveFile.INDEX)
 
     def cell_path(self, file_key: str) -> Path:
-        return self._cells_dir() / f"{file_key}{_CELLS_SUFFIX}"
+        return self.path(ArchiveFile.CELLS, file_key)
 
-    def _claim_path(self, node_configs: list[tuple[str, dict[str, Any]]], sample_key: str) -> Path:
-        return self._store_dir() / "claims" / _cell_key(node_configs, sample_key)
+    def config(self, key: str) -> ArchiveConfig | None:
+        raw = read_json_optional(self.path(ArchiveFile.CONFIG, key))
+        return None if raw is None else ArchiveConfig.model_validate(raw)
 
     def _invalidate(self) -> None:
         self._rows = None
@@ -298,12 +378,7 @@ class MeasurementArchive:
                 return self._rows
             start = 0 if self._rows is None else _tail_from(st, self._cursor)
             folded, offset = fold_jsonl_from(path, _INDEX_FOLD_KEY, start)
-            fresh = {
-                fold_key: ArchiveEntry.model_validate(
-                    {k: v for k, v in row.items() if k != _INDEX_FOLD_KEY}
-                )
-                for fold_key, row in folded.items()
-            }
+            fresh = {fold_key: indexed_entry(row) for fold_key, row in folded.items()}
             # A NEW dict per change: a reader still iterating the shared one must not see it grow.
             self._rows = {**self._rows, **fresh} if start and self._rows is not None else fresh
             self._cursor = (st.st_ino, offset)
@@ -324,6 +399,10 @@ class MeasurementArchive:
                 while weight > _FILES_MAX_BYTES and len(self._files) > 1:
                     weight -= self._files.popitem(last=False)[1].size
             return held
+
+    def answers(self, file_key: str) -> list[FiledAnswer]:
+        with self._lock:
+            return list(self._file(file_key).rows)
 
     def file_answers(
         self,
@@ -362,9 +441,11 @@ class MeasurementArchive:
         return refs
 
     def _register(self, entry: ArchiveEntry) -> None:
-        config_path = self._configs_dir() / f"{entry.config_key}.json"
+        config_path = self.path(ArchiveFile.CONFIG, entry.config_key)
         if not config_path.exists():
-            write_json(config_path, entry.model_dump(mode="json", exclude=set(_INDEXED_ONLY)))
+            write_json(
+                config_path, entry.model_dump(mode="json", include=set(ArchiveConfig.model_fields))
+            )
         fold_key = _fold_key(entry.config_key, entry.dataset_hash)
         if fold_key in self._live_rows():
             return
@@ -372,7 +453,7 @@ class MeasurementArchive:
 
     def answer(self, ref: str) -> FiledAnswer | None:
         file_key, _, _ = ref.partition(".")
-        if not file_key or any(ch in ref for ch in "/\\") or ".." in ref:
+        if not is_address(file_key):
             return None
         return self._file(file_key).by_id.get(ref)
 
@@ -416,15 +497,10 @@ class MeasurementArchive:
 
     def cell_signatures(self) -> dict[str, tuple[int, int]]:
         out: dict[str, tuple[int, int]] = {}
-        try:
-            with os.scandir(self._cells_dir()) as it:
-                for e in it:
-                    if not e.name.endswith(_CELLS_SUFFIX):
-                        continue
-                    st = e.stat()
-                    out[e.name[: -len(_CELLS_SUFFIX)]] = (st.st_mtime_ns, st.st_size)
-        except OSError:
-            return out
+        with contextlib.suppress(OSError):
+            for key, entry in self._named(ArchiveFile.CELLS):
+                st = entry.stat()
+                out[key] = (st.st_mtime_ns, st.st_size)
         return out
 
     def signature(
@@ -443,27 +519,14 @@ class MeasurementArchive:
             str(self._base_dir),
             file_sig(self._index_path()),
             self.signature(),
-            file_sig(self._cold_dir()),
+            file_sig(self.folder(ArchiveFile.COLD)),
         )
 
     def files_signature(self, file_keys: Iterable[str]) -> tuple[Any, ...]:
         return tuple(file_sig(self.cell_path(key)) for key in sorted(set(file_keys)))
 
-    def _cold_dir(self) -> Path:
-        return self._store_dir() / "cold"
-
     def cold_path(self, file_key: str) -> Path:
-        return self._cold_dir() / f"{file_key}{_COLD_SUFFIX}"
-
-    def file_keys(self) -> list[str]:
-        return sorted(self.cell_signatures())
-
-    def cold_file_keys(self) -> list[str]:
-        try:
-            names = os.listdir(self._cold_dir())
-        except OSError:
-            return []
-        return sorted(n[: -len(_COLD_SUFFIX)] for n in names if n.endswith(_COLD_SUFFIX))
+        return self.path(ArchiveFile.COLD, file_key)
 
     def detail_lines(self, file_key: str) -> list[str]:
         return read_lines(self.cell_path(file_key))
@@ -507,23 +570,21 @@ class MeasurementArchive:
     def _built_index(self) -> tuple[list[str], dict[str, int]]:
         first: dict[str, ArchiveEntry] = {}
         undescribed = 0
-        for file_key in self.file_keys():
+        for file_key in self.keys(ArchiveFile.CELLS):
             for answer in self._file(file_key).rows:
                 fold_key = _fold_key(answer.config_key, answer.dataset_hash)
                 held = first.get(fold_key)
                 if held is not None and held.created_at <= answer.created_at:
                     continue
-                described = read_json_optional(self._configs_dir() / f"{answer.config_key}.json")
-                if not isinstance(described, dict):
+                described = self.config(answer.config_key)
+                if described is None:
                     undescribed += 1
                     continue
-                first[fold_key] = ArchiveEntry.model_validate(
-                    {
-                        **described,
-                        "dataset_hash": answer.dataset_hash,
-                        "name": answer.role,
-                        "created_at": answer.created_at,
-                    }
+                first[fold_key] = ArchiveEntry(
+                    **described.model_dump(),
+                    dataset_hash=answer.dataset_hash,
+                    name=answer.role,
+                    created_at=answer.created_at,
                 )
         indexed = sorted(first.items(), key=lambda held: (held[1].created_at, held[0]))
         lines = [
@@ -555,7 +616,7 @@ class MeasurementArchive:
 class CellClaim:
     """An OS lock the kernel drops with its holder: no expiry, so none can time a live holder out."""
 
-    def __init__(self, lock: BaseFileLock, row_path: Path) -> None:
+    def __init__(self, lock: HeldLock, row_path: Path) -> None:
         self._lock = lock
         self.row_path = row_path
 
@@ -572,8 +633,7 @@ class CellClaim:
         try:
             _drop_row(self.row_path)
         finally:
-            if self._lock.is_locked:
-                self._lock.release()
+            self._lock.retire()
 
 
 def _drop_row(path: Path) -> None:
@@ -618,13 +678,11 @@ class ReplayFeed:
         return fresh
 
     def claim(self, sample_key: str) -> CellClaim | None:
-        path = self._archive._claim_path(self._node_configs, sample_key)
-        lock = FileLock(f"{path}.lock", timeout=0, thread_local=False)
-        try:
-            lock.acquire()
-        except Timeout:
+        key = self.cell_key(sample_key)
+        lock = take_lock(self._archive.path(ArchiveFile.CLAIM_LOCK, key), wait_s=0)
+        if lock is None:
             return None
-        claim = CellClaim(lock, path.with_suffix(".json"))
+        claim = CellClaim(lock, self._archive.path(ArchiveFile.CLAIM_ROW, key))
         # A holder unlinks its row before it unlocks, so a row found here outlived its holder.
         _drop_row(claim.row_path)
         return claim
@@ -633,9 +691,9 @@ class ReplayFeed:
         return _cell_key(self._node_configs, sample_key)
 
     def claimed_cell(self, sample_key: str) -> MeasuredCell | None:
-        path = self._archive._claim_path(self._node_configs, sample_key)
+        path = self._archive.path(ArchiveFile.CLAIM_ROW, self.cell_key(sample_key))
         try:
-            row = read_json_optional(path.with_suffix(".json"))
+            row = read_json_optional(path)
         except PermissionError:
             # Windows: a holder is unlinking or replacing it this instant — the next poll reads again.
             return None

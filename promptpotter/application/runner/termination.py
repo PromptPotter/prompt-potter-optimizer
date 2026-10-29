@@ -7,6 +7,7 @@ import logging
 import traceback
 from typing import TYPE_CHECKING
 
+from promptpotter.domain.origin_panel import RoundAdvance
 from promptpotter.domain.phases import (
     REFUSAL_STOPS,
     STOP_REASON_INFO,
@@ -15,7 +16,6 @@ from promptpotter.domain.phases import (
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.results import RoundAdvance
 from promptpotter.infrastructure.llm.telemetry import emit_error_record, emit_round_warning
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -30,9 +30,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.application.campaign_config import OriginGateMode, PanelGateMode
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.results import DegradationHealth, RunStanding
+    from promptpotter.domain.campaign_config import OriginGateMode, PanelGateMode
+    from promptpotter.domain.round_health import DegradationHealth
     from promptpotter.domain.scoring import GradedCell
 
 logger = logging.getLogger(__name__)
@@ -94,10 +94,8 @@ def end_run_on(
     )
 
 
-def origin_gate_tripped(
-    health: DegradationHealth | None, mode: OriginGateMode
-) -> StopReason | None:
-    if mode == "off" or health is None:
+def origin_gate_tripped(health: DegradationHealth, mode: OriginGateMode) -> StopReason | None:
+    if mode == "off":
         return None
     if health.grade == "critical":
         return StopReason.ORIGIN_GATE
@@ -130,7 +128,9 @@ def target_tripped(cycle: Cycle, target: float | None) -> StopReason | None:
     return StopReason.TARGET_HIT if accuracy is not None and accuracy >= target else None
 
 
-def standing_tripped(cycle: Cycle, standing: RunStanding) -> StopReason | None:
+def standing_tripped(cycle: Cycle) -> StopReason | None:
+    standing = cycle.standing
+    assert standing is not None, "a boundary stop reads the close it follows"
     # The OBJECTIVE, not accuracy: where it prices tokens, 100% correct at 3x the tokens is no ceiling.
     fold = cycle.parent_fold
     if (

@@ -10,13 +10,8 @@ function getMatch(query: string): boolean {
 
 function subscribeMatch(query: string, cb: () => void): () => void {
   const mql = window.matchMedia(query);
-  // `addListener` is Safari < 14's only form.
-  if ("addEventListener" in mql) {
-    mql.addEventListener("change", cb);
-    return () => mql.removeEventListener("change", cb);
-  }
-  (mql as MediaQueryList).addListener(cb);
-  return () => (mql as MediaQueryList).removeListener(cb);
+  mql.addEventListener("change", cb);
+  return () => mql.removeEventListener("change", cb);
 }
 
 export function useMediaQuery(query: string): boolean {

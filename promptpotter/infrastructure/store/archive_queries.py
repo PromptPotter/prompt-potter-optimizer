@@ -9,11 +9,11 @@ from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
 
 from pydantic import Field
 
-from promptpotter.domain.results import CellFold
+from promptpotter.domain.cell_fold import CellFold
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
-from promptpotter.infrastructure.store.measurement_archive import standing
+from promptpotter.infrastructure.store.measurement_archive import ArchiveFile, standing
 from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -147,10 +147,6 @@ def population_signatures(stores: Stores, bank: Bank) -> dict[str, list[list[Any
     return out
 
 
-def _sample_fold_path(stores: Stores, dataset_hash: str) -> Path:
-    return stores.archive.derived_dir() / f"sample_fold__{dataset_hash}.jsonl"
-
-
 class SampleFoldRow(FrozenModel):
     config_key: str
     sp: str
@@ -166,19 +162,21 @@ class SampleFoldRow(FrozenModel):
     reading: CellFold | None = None
 
 
+def read_sample_fold(path: Path) -> list[SampleFoldRow]:
+    return [SampleFoldRow.model_validate(row) for row in iter_jsonl(path)]
+
+
 def sample_fold_rows(stores: Stores, *, dataset_hash: str) -> list[SampleFoldRow]:
     """Every campaign's, as it stands: a task remembering less reads none."""
     if not every_campaign_now():
         return []
-    return [
-        SampleFoldRow.model_validate(row)
-        for row in iter_jsonl(_sample_fold_path(stores, dataset_hash))
-    ]
+    return read_sample_fold(stores.archive.path(ArchiveFile.SAMPLE_FOLD, dataset_hash))
 
 
 def write_sample_fold(stores: Stores, *, dataset_hash: str, rows: Iterable[SampleFoldRow]) -> None:
     if not every_campaign_now():
         return
     write_jsonl(
-        _sample_fold_path(stores, dataset_hash), (row.model_dump(mode="json") for row in rows)
+        stores.archive.path(ArchiveFile.SAMPLE_FOLD, dataset_hash),
+        (row.model_dump(mode="json") for row in rows),
     )

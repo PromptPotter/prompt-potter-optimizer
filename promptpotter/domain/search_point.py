@@ -68,13 +68,6 @@ class JobSearchPoint(FrozenModel):
             )
         return v
 
-    def rendered_prompts(self) -> dict[str, str]:
-        return {
-            node: str(cfg["prompt"])
-            for node, cfg in self.pipeline_params.items()
-            if isinstance(cfg, dict) and "prompt" in cfg
-        }
-
     @property
     def config_params(self) -> dict[str, Any]:
         return strip_rendered_prompt(self.pipeline_params)

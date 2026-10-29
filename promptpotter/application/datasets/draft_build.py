@@ -6,12 +6,8 @@ from typing import Any, Literal
 from pydantic import Field
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.datasets.draft_campaign import (
-    MAX_EDITED_ROUNDS,
     DraftCampaign,
-    EditDraftPatch,
-    OptimizationOverrides,
     default_campaign_config,
     owned_drafts,
 )
@@ -22,6 +18,8 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_draft,
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
+from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.draft_edit import MAX_EDITED_ROUNDS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import (
     CANDIDATE_LIBRARY,
@@ -50,7 +48,7 @@ class DraftDependency(PipelineDependency):
 
 class DraftCampaignWire(StrictModel):
     """A check-in's draft as every check-in route answers it; Start mints its campaign. No
-    ``tenant_id`` rides it (ADR-0002 no-drift gate #3)."""
+    ``tenant_id`` rides it (decisions.md § 0002)."""
 
     draft_id: str
     slug: str
@@ -157,6 +155,8 @@ def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
         # `[]` is a real answer (every axis closed), so `is not None`, never truthiness.
         if narrowing.param_keys is not None:
             optimizer["param_keys"] = list(narrowing.param_keys)
+        if narrowing.prompt_fields_held:
+            optimizer["prompt_fields_held"] = list(narrowing.prompt_fields_held)
         if narrowing.param_allowed_values:
             optimizer["param_allowed_values"] = {
                 k: list(v) for k, v in narrowing.param_allowed_values.items()
@@ -169,7 +169,11 @@ def overlay_from_campaign_config(config: CampaignConfig) -> dict[str, Any]:
 def draft_pipeline_dependencies(draft: DraftCampaign) -> tuple[PipelineDependency, ...]:
     active = set(draft.active_steps())
     return dependencies_from_node_roles(
-        {n: r for n, r in connectors.get(draft.connector).node_roles.items() if n in active}
+        {
+            n: r
+            for n, r in connectors.CONNECTORS.get(draft.connector).node_roles.items()
+            if n in active
+        }
     )
 
 
@@ -182,7 +186,11 @@ def _dependency_fulfilled(dep: PipelineDependency, draft: DraftCampaign) -> bool
 def _draft_schema_source(draft: DraftCampaign) -> SchemaSource:
     if draft.backend_nodes:
         return "backend"
-    return "local" if connectors.get(draft.connector).execution == "in_process" else "unreachable"
+    return (
+        "local"
+        if connectors.CONNECTORS.get(draft.connector).execution == "in_process"
+        else "unreachable"
+    )
 
 
 def _wire_overrides(draft: DraftCampaign) -> OptimizationOverrides:

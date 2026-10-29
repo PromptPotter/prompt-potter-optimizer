@@ -13,8 +13,10 @@ from promptpotter.application.intelligence.rasch import (
     graded_response,
     graduate_ruler_model,
 )
+from promptpotter.domain.arms import Concluded
+from promptpotter.domain.cell_fold import is_floor_pinned
 from promptpotter.domain.measurement_provenance import meets_grade
-from promptpotter.domain.results import Concluded, InRunCells, is_floor_pinned
+from promptpotter.domain.results import InRunCells
 from promptpotter.domain.ruler import (
     AbilityReading,
     CellScopes,
@@ -34,7 +36,7 @@ from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.shared.measurement_context import RoleScope
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import CellSheet, GradedCell
     from promptpotter.infrastructure.store.ruler_store import RulerStore

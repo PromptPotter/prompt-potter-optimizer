@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the admin bot as a systemd service (ADR-0004 operator-admin channel).
+# Installs the admin bot as a systemd service (the operator-admin channel, docs/decisions.md § 0004).
 # The bot long-polls Telegram OUTBOUND-ONLY and edits the local sign-in blocklist
 # — it opens no inbound port. Idempotent: re-running refreshes + restarts.
 set -euo pipefail
@@ -40,7 +40,7 @@ ENV_FILE="${ENV_FILE:-$INSTALL_DIR/.env}"
 # cannot reach by talking to the app. Today the API worker holds that token for no reason —
 # it never sends a Telegram message — so any read-primitive in the API hands over the very
 # channel that exists to survive the API being compromised. Splitting is a file move, not an
-# architecture change (ADR-0004; docs/operations/access-model.md § The perimeter).
+# architecture change (docs/decisions.md § 0004).
 BOT_ENV_FILE="${BOT_ENV_FILE:-$ENV_FILE}"
 # ------------------------------------------------------------------------
 
@@ -56,9 +56,9 @@ die()  { printf '\033[1;31mxx \033[0m %s\n' "$*" >&2; exit 1; }
 # `=.` and not `=`: a key present but empty reads exactly like a key that was never set, and the
 # bot's own check cannot tell the operator which of the two they did.
 sudo grep -q '^ADMIN_BOT_TELEGRAM_TOKEN=.' "$BOT_ENV_FILE" \
-    || die "ADMIN_BOT_TELEGRAM_TOKEN not set in $BOT_ENV_FILE — see docs/operations/access-model.md"
+    || die "ADMIN_BOT_TELEGRAM_TOKEN not set in $BOT_ENV_FILE — see deploy-linux/README.md § Admin bot"
 sudo grep -q '^ADMIN_BOT_CHAT_ID=.' "$BOT_ENV_FILE" \
-    || die "ADMIN_BOT_CHAT_ID not set in $BOT_ENV_FILE — see docs/operations/access-model.md"
+    || die "ADMIN_BOT_CHAT_ID not set in $BOT_ENV_FILE — see deploy-linux/README.md § Admin bot"
 
 # Only the PASSPHRASE is the bot's alone. The token and chat id must stay in BOTH files: the API
 # imports `notify_operator` to announce a new sign-in, so it sends on the same bot. Naming the

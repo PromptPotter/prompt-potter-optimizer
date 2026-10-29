@@ -55,7 +55,7 @@ export function raySteps(served: readonly HierarchyStep[], rootPathKey: string):
   return steps;
 }
 
-export interface RayHead {
+interface RayHead {
   tone: RunPhaseTone;
   wedged: boolean;
   label: string;

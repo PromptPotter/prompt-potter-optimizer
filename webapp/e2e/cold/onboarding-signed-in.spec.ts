@@ -10,7 +10,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await fake?.stop();
+  await fake.stop();
 });
 
 test("a blocked account sees AccessGate, not the app", async ({ page, context }) => {

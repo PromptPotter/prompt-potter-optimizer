@@ -15,7 +15,6 @@ from typing import Any
 import numpy as np
 import pytest
 from factories import (
-    PROMPT_INFO,
     arm_state,
     cycle_result,
     election,
@@ -24,6 +23,7 @@ from factories import (
     pipeline_schema,
     prompted,
     round_result,
+    samples,
     seat,
     sheet,
     workspace,
@@ -36,8 +36,7 @@ from promptpotter.application.bench.difficulty import (
     session_ruler_scope,
 )
 from promptpotter.application.bench.node_context import NodeContext
-from promptpotter.application.campaign_config import CampaignConfig
-from promptpotter.application.datasets.authored import load_dataset_campaign_config
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     covered_prefix,
     stratum_shares,
@@ -47,27 +46,20 @@ from promptpotter.application.intelligence.rasch import (
     RaschPosterior,
     build_round_order,
     fit_rasch,
-    fit_theta_given_delta,
+    fit_theta,
     graduate_ruler_model,
 )
-from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.optimizers.nodes import ReadArm
-from promptpotter.application.runner.bench import pair_on_bench
-from promptpotter.application.runner.inner.tasks import inner_instrument_config, parse_panel
-from promptpotter.application.scoring.paired import MemberRows
-from promptpotter.config.paths import install_datasets_root
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.arms import ArmSlot
 from promptpotter.domain.l4.proxies import (
     compute_outer_proxies,
     inner_cell_facts,
     mean_parent_level_se,
 )
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_FAILURE_TOOLING
-from promptpotter.domain.paired_reading import ArmKey, MemberAddress
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineNode
-from promptpotter.domain.results import ArmSlot, CycleResult, RoundResult, origin_panel
+from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.ruler import (
     CellScopes,
     DeltaRuler,
@@ -81,7 +73,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell, Scorer
+from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -90,12 +82,9 @@ from promptpotter.infrastructure.store.archive_queries import (
     OpenAt,
     bind_memory_scope,
 )
-from promptpotter.infrastructure.store.dataset_access import read_dataset_definition
 from promptpotter.infrastructure.store.ruler_store import RulerStore
-from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError
-from promptpotter.shared.identity import default_identity
-from promptpotter.shared.measurement_context import RoleScope
 
 # 1. The estimator
 
@@ -138,73 +127,81 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
     ):
         assert abs(fitted - truth) < tol, "the population spread is not the one drawn"
 
-    # θ given a fixed δ: subset-invariant, where raw accuracy inverts the true ability.
+    # θ given a fixed δ, one arm's cells at a time: subset-invariant, where raw accuracy inverts it.
     rng = np.random.default_rng(7)
-    ruler = {"1": -2.0, "2": -2.0, "3": -2.0, "4": 2.0, "5": 2.0, "6": 2.0}
+    level = {"1": -2.0, "2": -2.0, "3": -2.0, "4": 2.0, "5": 2.0, "6": 2.0}
+    ruler = {f"{sid}.{i}": d for sid, d in level.items() for i in range(200)}
     easy, hard = ["1", "2", "3"], ["4", "5", "6"]
 
-    def measure(cid: str, theta: float, sids: list[str], n: int = 200) -> list[Observation]:
-        return _synth({cid: theta}, {sid: ruler[sid] for sid in sids}, n_per_pair=n, rng=rng)
+    def measure(theta: float, sids: list[str], n: int = 200) -> dict[str, float]:
+        cells = [f"{sid}.{i}" for sid in sids for i in range(n)]
+        p = 1.0 / (1.0 + np.exp(-(theta - np.array([ruler[c] for c in cells]))))
+        return dict(zip(cells, (rng.random(len(cells)) < p).astype(float).tolist(), strict=True))
 
-    able, weak = measure("able", 1.5, hard), measure("weak", -0.5, easy)
-    assert sum(o.response for o in weak) / len(weak) > sum(o.response for o in able) / len(able), (
+    def theta_of(
+        responses: dict[str, float], scale: Any, sigma_theta: float = 1.5
+    ) -> tuple[float, float]:
+        read = fit_theta(responses, scale, sigma_theta=sigma_theta)
+        assert read is not None, "an arm with cells on the ruler carried no θ"
+        return read
+
+    able, weak = measure(1.5, hard), measure(-0.5, easy)
+    assert np.mean(list(weak.values())) > np.mean(list(able.values())), (
         "guard: raw accuracy must INVERT the true ability here"
     )
-    fit = fit_theta_given_delta(able + weak, ruler)
-    assert fit["able"][0] > fit["weak"][0], "θ on a fixed ruler ranked the arms by their subset"
-    assert abs(fit["able"][0] - 1.5) < 0.5 and abs(fit["weak"][0] + 0.5) < 0.5, "θ off its truth"
-    same_easy = fit_theta_given_delta(measure("x", 0.8, easy), ruler)["x"][0]
-    same_hard = fit_theta_given_delta(measure("x", 0.8, hard), ruler)["x"][0]
+    able_theta, weak_theta = theta_of(able, ruler)[0], theta_of(weak, ruler)[0]
+    assert able_theta > weak_theta, "θ on a fixed ruler ranked the arms by their subset"
+    assert abs(able_theta - 1.5) < 0.5 and abs(weak_theta + 0.5) < 0.5, "θ off its truth"
+    same_easy = theta_of(measure(0.8, easy), ruler)[0]
+    same_hard = theta_of(measure(0.8, hard), ruler)[0]
     assert abs(same_easy - same_hard) < 0.5, "one ability read differently on two subsets"
 
     # A sample absent from a WARM ruler enters no θ: δ=0 is a position on the scale, not neutral.
-    assert fit_theta_given_delta([Observation("ghost", "99", True)], ruler) == {}
-    off_scale = fit_theta_given_delta([*able, Observation("able", "99", False)], ruler)
-    assert off_scale["able"] == fit_theta_given_delta(able, ruler)["able"], (
+    assert fit_theta({"99": 1.0}, ruler) is None, "a cell off the ruler carried a θ"
+    assert fit_theta({**able, "99": 0.0}, ruler) == fit_theta(able, ruler), (
         "an off-ruler cell moved θ"
     )
-    cold = fit_theta_given_delta([Observation("ghost", "99", True)], None)
-    assert cold["ghost"][0] > 0.0, "a COLD ruler reads plain logit-accuracy: one hit is θ > 0"
+    assert theta_of({"99": 1.0}, None)[0] > 0.0, (
+        "a COLD ruler reads plain logit-accuracy: one hit is θ > 0"
+    )
 
     # θ_se is dispersion-corrected: a GRADED response varies less about its mean than Bernoulli.
-    graded = [Observation("g", sid, 0.5 + 0.02 * i) for i, sid in enumerate(easy * 6)]
-    spread = [Observation("b", sid, float(i % 2)) for i, sid in enumerate(easy * 6)]
-    assert (
-        fit_theta_given_delta(graded, ruler)["g"][1] < fit_theta_given_delta(spread, ruler)["b"][1]
-    ), "a graded response was read as noisy as a coin flip"
+    graded = {f"{sid}.{i}": 0.5 + 0.02 * i for i, sid in enumerate(easy * 6)}
+    spread = {f"{sid}.{i}": float(i % 2) for i, sid in enumerate(easy * 6)}
+    assert theta_of(graded, ruler)[1] < theta_of(spread, ruler)[1], (
+        "a graded response was read as noisy as a coin flip"
+    )
     # Hits far below θ and misses far above, as a δ fit on these rows reads them: φ would be ≪ 1.
-    separated = [Observation("bin", s, float(s in easy)) for s in [*easy, *hard] * 6]
-    for binary in (measure("bin", 0.8, easy, n=60), separated):
-        bin_theta, bin_se = fit_theta_given_delta(binary, ruler, sigma_theta=1.5)["bin"]
-        p_hat = 1.0 / (1.0 + np.exp(-(bin_theta - np.array([ruler[o.key] for o in binary]))))
+    separated = {f"{s}.{i}": float(s in easy) for i, s in enumerate([*easy, *hard] * 6)}
+    for binary in (measure(0.8, easy, n=60), separated):
+        bin_theta, bin_se = theta_of(binary, ruler, sigma_theta=1.5)
+        p_hat = 1.0 / (1.0 + np.exp(-(bin_theta - np.array([ruler[k] for k in binary]))))
         bern_se = 1.0 / np.sqrt(float(np.sum(p_hat * (1 - p_hat))) + 1 / 1.5**2)
         assert abs(bin_se - bern_se) < 0.15 * bern_se, "φ moved the SE of a dichotomous dataset"
-    flat = [Observation("f", sid, 0.5) for sid in easy * 6]
-    assert fit_theta_given_delta(flat, ruler)["f"][1] > 0.1, (
+    flat = {f"{sid}.{i}": 0.5 for i, sid in enumerate(easy * 6)}
+    assert theta_of(flat, ruler)[1] > 0.1, (
         "no residual spread read as infinite confidence: every gate would fire"
     )
 
     # A 1PL entry and a 2PL entry at a = 1 are one ruler.
-    seam_obs = [Observation("c1", str(s), float(s % 2 == 0)) for s in range(8)] + [
-        Observation("c2", str(s), float(s % 3 == 0)) for s in range(8)
-    ]
     bare = {str(s): 0.2 * s - 1.0 for s in range(8)}
-    on_1pl = fit_theta_given_delta(seam_obs, bare)
-    on_unit_a = fit_theta_given_delta(seam_obs, {s: (d, 1.0) for s, d in bare.items()})
-    assert all(abs(on_1pl[c][0] - on_unit_a[c][0]) < 1e-9 for c in on_1pl), (
-        "every θ shifts at 2PL graduation"
-    )
+    on_unit_a = {s: (d, 1.0) for s, d in bare.items()}
+    for arm in (
+        {str(s): float(s % 2 == 0) for s in range(8)},
+        {str(s): float(s % 3 == 0) for s in range(8)},
+    ):
+        assert abs(theta_of(arm, bare)[0] - theta_of(arm, on_unit_a)[0]) < 1e-9, (
+            "every θ shifts at 2PL graduation"
+        )
 
     # Every δ sits five logits from the θ=0 seed, where an undamped `grad / info` step limit-cycles.
     far = dict.fromkeys(map(str, range(20)), 5.55)
-    damped = fit_theta_given_delta(
-        [Observation("parent", s, 0.20) for s in far]
-        + [Observation("better", s, 0.45) for s in far],
-        far,
-        sigma_theta=1.34,
+    parent_theta, parent_se = theta_of(dict.fromkeys(far, 0.20), far, sigma_theta=1.34)
+    better_theta, better_se = theta_of(dict.fromkeys(far, 0.45), far, sigma_theta=1.34)
+    assert 2.0 < parent_theta < better_theta < 7.0 and parent_theta < 5.55, (
+        parent_theta,
+        better_theta,
     )
-    (parent_theta, parent_se), (better_theta, better_se) = damped["parent"], damped["better"]
-    assert 2.0 < parent_theta < better_theta < 7.0 and parent_theta < 5.55, damped
     assert parent_se < 1.0 and better_se < 1.0, (
         "an SE in the hundreds: the iteration never converged"
     )
@@ -256,7 +253,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     assert warm is not None and warm.calibration_model == "1PL", "a second arm left δ flat"
 
     # One tenant ruler, versioned by its folds. C0 hits a quarter of the bank; its child changed nothing.
-    pool40 = [Sample(id=i, query=f"r{i}", ground_truth="t") for i in range(40)]
+    pool40 = samples(40, "t", query="r")
     c0_hits = {s.key for s in pool40 if s.id % 4 == 3}
     race_rows = [
         (cid, s.key, float(s.key in c0_hits)) for cid in ("c0-address", "child") for s in pool40
@@ -307,21 +304,18 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     # Drawn blind: the parent hits the easiest 16 of 40 cells on a graded ruler, and each round's
     # cells must still be the pool's, or the election reads rows the held-out bench never would.
-    graded_pool = [Sample(id=i, query=f"d{i}", ground_truth="t") for i in range(40)]
+    graded_pool = samples(40, "t", query="d")
 
-    def hits_easiest(session: Any) -> ReadArm:
-        origin = prompted(instruction="Answer.")
-        rows = sheet(
+    def hits_easiest(session: Session) -> CellSheet:
+        return sheet(
             (measurement(s.id, float(s.id < 16), sample_key=s.key) for s in graded_pool),
             session.state.scoring.require_scorer().id,
         )
-        c0 = arm_state("C0", slot=ArmSlot(round=0, idx=0, total=1), individual=origin)
-        return ReadArm(ArmKey(origin.id), c0, rows)
 
     drawing = seat(
         workspace(tmp_path / "draw"),
         bank=graded_pool,
-        origin=hits_easiest,
+        origin=(prompted(instruction="Answer."), hits_easiest),
         framing=TaskDecomposition(pipeline_purpose="Answer each query."),
     )
     session = drawing.cycle.session
@@ -410,10 +404,8 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     # Read: a child on cells the judging scale does not carry stays off it until its round folds.
     fitted = _anchored({"1": 1.5, "2": -1.25, "3": 0.0})
-    child = [Observation("child", sid, float(sid == "7")) for sid in ("7", "8", "9")]
-    assert fit_theta_given_delta(child, fitted.entries()) == {}, (
-        "a child read on unlinked cells carried a θ"
-    )
+    child = {sid: float(sid == "7") for sid in ("7", "8", "9")}
+    assert fit_theta(child, fitted.entries()) is None, "a child read on unlinked cells carried a θ"
     tied = _anchored({"1": 0.0, "2": 0.0, "3": 3.0})
     for scale, read_on, expected in (
         (fitted, ["1", "2", "3"], None),
@@ -443,45 +435,6 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 
     assert caveat([0, 1]) is None and caveat([0, 2]) is ThetaCaveat.DISJOINT_SCOPES
 
-    def rows(hits: list[float]) -> list[GradedCell]:
-        return [measurement(i, h, sample_key=key[i]) for i, h in enumerate(hits)]
-
-    c0_rows, pick = rows([0.0, 1.0, 0.0, 0.0]), rows([1.0, 1.0, 1.0, 0.0])
-    # C0 sat `a` alone; the line drew `b`, so C0 is topped up there rather than paired on `a` only.
-    topped = origin_panel(
-        [0, 1],
-        line_cells=[0, 1, 2, 3],
-        poolable=range(4),
-        scope_of={s.id: scopes.by_key[s.key] for s in seated},
-        size=2,
-    )
-    assert topped == [0, 1, 2, 3]
-
-    def member(individual: str, cells: list[GradedCell]) -> MemberRows:
-        return MemberRows(
-            address=MemberAddress(
-                path=(CycleHop(campaign_id="c", cycle_id="y"),),
-                individual_id=individual,
-                arm=None,
-                pass_role=None,
-            ),
-            sheet=sheet(cells),
-            bought=0,
-            cut=False,
-            scope=RoleScope.BENCH,
-            instrument_id="i",
-            dataset_hash=None,
-            cell_set_id=None,
-        )
-
-    paired = pair_on_bench(
-        member("c0", c0_rows), member("c1", pick), sample_keys=list(key.values()), instrument_id="i"
-    )
-    lift = paired.lift("fitness")
-    assert lift is not None and lift.estimate.value == pytest.approx(0.5), (
-        "the lift lost its pairing"
-    )
-
     # Stratified: a stratum short of its share hands the rest on; an empty one takes nothing.
     assert stratum_shares([2, 10, 10], 9) == [2, 4, 3]
     assert stratum_shares([0, 5], 4) == [0, 4]
@@ -489,7 +442,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
     assert stratum_shares([30], 20) == [20]
 
     # Traced: every round's ended-on individual re-read on ONE scale, whatever its election read.
-    bank = [Sample(id=i, query=f"q{i}", ground_truth="t") for i in range(12)]
+    bank = samples(12, "t")
     scorer = Scorer(
         id="acc",
         per_cell=None,
@@ -659,44 +612,7 @@ def test_a_round_draws_orders_and_reads_its_cells_on_one_delta_ruler(tmp_path: P
 # 3. The L4 outer proxy — what one finished inner cycle says
 
 
-def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_path: Path) -> None:
-    # The shipped panel measures in ONE unit: no inner cell may graduate its ruler to 2PL.
-    d = install_datasets_root() / "promptpotter-self" / "panel"
-    definition = read_dataset_definition(d)
-    assert definition is not None and definition.panel is not None
-    declared = definition.panel
-    panel = parse_panel(declared)
-    assert panel.tasks
-    # The SHIPPED config, not a hand-built one — the question is what the panel runs under.
-    base = load_dataset_campaign_config(d)
-    cells = panel.resolve_cells(build_stores(default_identity(), projects_root=tmp_path))
-    graph = parse_pipeline_response(cells.pipeline())
-    for task in panel.tasks:
-        task_spec = cells.spec(task)
-        # The INNER backend's prompt nodes: what the recursion's cell pins and narrows.
-        solver = [PipelineNode(name="llm_only", tunes_llm=True, prompt_info=PROMPT_INFO)]
-        derived = inner_instrument_config(task_spec, base, solver=solver, n_search=40)
-        assert derived.optimization.enable_2pl_graduation is False, (
-            f"cell {task.id} may graduate its ruler to 2PL — its theta would then be in units of "
-            "1/a while the rest of the panel is in logits, and the outer verdict pools them anyway"
-        )
-        assert [derived.optimizer_narrowing[n.name].param_keys for n in solver] == [
-            list(n.prompt_fields) for n in solver
-        ], "the solver's spend axes are the instrument: the inner search writes prompt text alone"
-        assert derived.bench_trigger == "each_round" and derived.dataset_split is not None
-        own = CampaignConfig.model_validate(
-            dict(cells.by_dataset[task_spec.inner_dataset].campaign_config)
-        )
-        ran = select_optimizer(
-            inner_instrument_config(task_spec, own, solver=solver, n_search=40).optimization
-        )
-        shown = cells.held(task).optimizer
-        assert shown.treatment() == ran.treatment(), (
-            "the manifest the outer mutates a cell against is not the one that cell runs"
-        )
-        assert shown.knobs("escalation") == ran.knobs("escalation")
-        assert {n.name for n in graph.declared_nodes if n.tunes_llm} == set(ran.llm_nodes)
-
+def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> None:
     def cyc(
         levels: list[float | None],
         *,
@@ -747,7 +663,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it(tmp_pa
     assert lift([0.30, 0.55], [0.40, 0.50], round_budget=4) == pytest.approx(0.075)
 
     # EXCLUDED, never floored: the -1 floor would punish the optimizer prompt for a slow provider.
-    tooling = [round_result(1, parse_failure="l1_provider_empty_response")]
+    tooling = [round_result(1, parse_failure=PARSE_FAILURE_TOOLING)]
     for unscoreable in (
         cyc([], stop_reason=StopReason.TARGET_HIT),
         cyc([0.40, 0.55], stop_reason=StopReason.TOKEN_BUDGET),

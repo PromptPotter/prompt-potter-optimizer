@@ -5,13 +5,13 @@ from typing import Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.application.mask.record import Lens, parse_lens, parse_sample_ids
+from promptpotter.domain.arms import ArmStateKind
 from promptpotter.domain.cycle_paths import (
     CycleHop,
     CyclePath,
     decode_cycle_path,
     encode_cycle_path,
 )
-from promptpotter.domain.results import ArmStateKind
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_records import OPERATOR_ORIGIN_SOURCES
 from promptpotter.domain.strict_model import StrictModel

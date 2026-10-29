@@ -1,4 +1,11 @@
-import type { HierarchyCampaign, HierarchyCourse, HierarchyEntry, HierarchyTag } from "@/lib/api";
+import type {
+  BenchStat,
+  HierarchyCampaign,
+  HierarchyCourse,
+  HierarchyEntry,
+  HierarchyStat,
+  HierarchyTag,
+} from "@/lib/api";
 import { decodeCyclePath } from "@/lib/ids";
 import { dockPriority } from "@/lib/run-phase";
 
@@ -53,6 +60,15 @@ export function hasTag(entry: Tagged | null, kind: HierarchyTag["kind"]): boolea
 
 export function tagValue(entry: Tagged | null, kind: HierarchyTag["kind"]): string | null {
   return entry?.tags.find((t) => t.kind === kind)?.value ?? null;
+}
+
+interface Stated {
+  stats: readonly (HierarchyStat | BenchStat)[];
+}
+
+// Null where the entry serves no bench: a moment, or a pipeline that did not resolve.
+export function benchStat(entry: Stated | null): BenchStat | null {
+  return entry?.stats.find((s): s is BenchStat => s.key === "bench") ?? null;
 }
 
 export function tagLabel(entry: Tagged | null, kind: HierarchyTag["kind"]): string | null {

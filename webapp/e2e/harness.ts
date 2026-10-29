@@ -27,7 +27,7 @@ const EXPECTED_4XX: [RegExp, number][] = [
   [/\/rounds\/\d+(\?|$)/, 404],
 ];
 
-export type Problem = { kind: string; text: string };
+type Problem = { kind: string; text: string };
 
 function faultLog(baseURL: string | undefined): string | null {
   if (!baseURL) return null;
@@ -61,7 +61,7 @@ export const test = base.extend<{ problems: Problem[]; rich: Campaign }>({
       page.on("console", (m) => {
         if (m.type() !== "error") return;
         // Chrome's failed-subresource error carries no status; it is read off the response channel below.
-        const url = m.location()?.url ?? "";
+        const url = m.location().url;
         if (/Failed to load resource/.test(m.text()) && expected(url, seen4xx.get(url) ?? 0)) return;
         note("console.error", m.text() + (url ? ` (${url})` : ""));
       });
@@ -185,7 +185,7 @@ export async function richestCampaign(request: APIRequestContext): Promise<Campa
   return best;
 }
 
-export const E2E_DATASETS = ["email-tagging", "promptpotter-self/e2e"];
+const E2E_DATASETS = ["email-tagging", "promptpotter-self/e2e"];
 
 /** Not "the world is empty": the spend specs share one workspace, so the second finds the first's campaign. */
 export async function assertThrowawayWorld(request: APIRequestContext) {
@@ -263,7 +263,7 @@ export function assertRoundMeasured(label: string, round: ServedRound | undefine
 }
 
 /** Checked before any spend: `backend_unreachable` is a bounded `halted`, which `assertBoundedStop` would pass. */
-export const BACKEND_URL = process.env.PP_E2E_BACKEND_URL || "http://127.0.0.1:8000";
+const BACKEND_URL = process.env.PP_E2E_BACKEND_URL || "http://127.0.0.1:8000";
 
 export async function assertBackendUp(request: APIRequestContext) {
   const res = await request.get(`${BACKEND_URL}/health`).catch(() => null);
@@ -290,7 +290,7 @@ export function assertBoundedStop(label: string, stopped: string) {
 }
 
 /** `replayed` is `null` where there is no share, never 0: read as zero, a cache that went missing reports a perfect hit. */
-export type Tape = { used: number; incurred: number; replayed: number | null };
+type Tape = { used: number; incurred: number; replayed: number | null };
 
 export function tapeOf(dash: Record<string, unknown> | null): Tape | null {
   const spend = dash?.spend;

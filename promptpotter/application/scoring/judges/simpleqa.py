@@ -5,8 +5,13 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from promptpotter.judges.call import absent, graded, judge_answer, judge_question
-from promptpotter.judges.protocol import GradeFn, Judge, JudgeSpec, JudgeVerdict
+from promptpotter.application.scoring.judges.call import (
+    absent,
+    graded,
+    judge_answer,
+    judge_question,
+)
+from promptpotter.domain.judges import GradeFn, Judge, JudgeSpec, JudgeVerdict
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import MeasuredCell

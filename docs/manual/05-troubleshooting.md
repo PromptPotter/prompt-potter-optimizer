@@ -6,70 +6,51 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ## A provider returns 429 "rate limit"
 
-**What you see:** Campaign crawls — the readout prints `⚠ RATE-LIMITED · <provider> …` and the time the run gives up, and the run controls' *Samples in flight* panel shows a `Provider` row. Or it stops as **Provider rate-limited**.
+**What you see:** The campaign crawls and the readout prints `⚠ RATE-LIMITED · <provider> …`, or it stops as **Provider rate-limited**.
 
-**Why:** The model provider is refusing sends — your key's tier (Groq's free tier), or an upstream host's shared pool on OpenRouter (`… is temporarily rate-limited upstream`). PromptPotter holds every send for one shared cooldown, sends fewer at once, and probes with one; it stops only on a per-hour or per-day quota, or once the provider has refused everything for half an hour.
+**Why:** The model provider is refusing sends — your key's tier, or a shared upstream host on OpenRouter. PromptPotter waits, sends fewer at once, and stops only on an hourly or daily quota.
 
 **What to try:**
-- Use your own key for that provider (OpenRouter BYOK), which gets its own rate limit, or route to another host (`route_order` in the node's config), then `python -m promptpotter resume`. No re-mint needed.
-- On a shared upstream pool, waiting is the only other cure: resume later.
-- Switch the optimizer to a smaller model off the manifest's `available_models` menu in `promptpotter/assets/optimizers/potter/pipeline.yaml` (each optimizer node's `config.model`) — every campaign that does not override it; one campaign's `optimization.nodes.{node}.config.model` moves only that one.
+- Wait, then `python -m promptpotter resume`. Nothing is lost.
+- Use your own key with that provider, or route the node to another host (`route_order` in its config).
 - Upgrade to a paid tier.
-
----
-
-## Groq daily token limit exhausted on 120b
-
-**What you see:** Daily volume on `openai/gpt-oss-120b` hits Groq's per-model ceiling and queries start failing.
-
-**Why:** Groq's free tier has a tight per-model daily limit and 120b exhausts it fast. The default optimizer provider is OpenRouter — this only bites if you switched the optimizer (or a target node) to Groq.
-
-**What to try:**
-- Swap the `model` field in your definition's `{dataset}/dataset.yaml::pipeline` (`.promptpotter/projects/{tenant}/datasets/<name>/`) to `openai/gpt-oss-20b` and keep iterating. Flip back to `120b` for benchmarks.
-- **Which `reasoning_effort` keeps a model clear of Groq's output ceiling** — owned by [`dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md) § The Groq output ceiling; check the dataset's pin before swapping its model.
-- Where `max_tokens` is and is not pinned by a dataset — owned by the matrix below. Raise it per-cycle via `{dataset}/dataset.yaml::campaign.pipeline_overlay`.
-- Target-layer model lives in `{dataset}/dataset.yaml::pipeline.nodes.llm_only.config` (set `provider` explicitly — e.g. `openrouter`); the optimizer-layer model is declared apart from it ([Install § 3](02-install.md#3-create-env)). They're independent.
-- Full per-dataset matrix: [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md).
 
 ---
 
 ## Backend connection refused
 
-**What you see:** The launch is refused with `Backend '<name>' at <url> is not reachable` (or `is not ready: connection refused at <url>`), or a running campaign stops as **Backend unreachable**.
+**What you see:** The launch is refused with `Backend '<name>' at <url> is not reachable`, or a running campaign stops as **Backend unreachable**.
 
 **Why:** The backend service isn't running, or isn't reachable at the URL you configured.
 
 **What to try:**
 - Check the backend is up: `curl http://127.0.0.1:8000/status` (substitute your URL).
 - If running a local TermNorm backend, start it in its own terminal first.
-- Check `.env`'s `TERMNORM_URL` points at it — the connector's endpoint is operator config, never a campaign field.
-- Then `python -m promptpotter resume`: an unreached cell is a hole, not a score, and the resume measures it.
+- Check `.env`'s `TERMNORM_URL` points at it.
+- Then `python -m promptpotter resume`: the samples it missed are measured on resume.
 
 ---
 
 ## Validation failures on many candidates every round
 
-**What you see:** Many candidates receive synthetic score zero, each under a `⚠ <node>.<param> = <value>  ∉ [<allowed>]` line ([Reading the output](04-reading-the-output.md) § Annotation lines).
+**What you see:** Many candidates score zero, each under a `⚠ <node>.<param> = <value>  ∉ [<allowed>]` line.
 
-**Why:** L1 proposed a parameter value outside the allowed set for a pipeline node. PromptPotter catches this before any backend call (the *schema-compliance check*; Wound 1 in [self-healing](../developer/self-healing-internals.md)).
+**Why:** The optimizer proposed a value outside the allowed set for a pipeline node. It is caught before any call runs.
 
-**What to try:** Self-healing usually clears this within 1–2 rounds — the failure reaches L1's own next call as a wound that names the forbidden value. If it persists, check `param_allowed_values` in your pipeline schema — the allowed set may be misconfigured backend-side. Which wound reaches which layer: [self-healing-internals.md](../developer/self-healing-internals.md).
+**What to try:** It usually clears within 1–2 rounds — the next proposal is told which value was forbidden. If it persists, the allowed set may be misconfigured on the backend side.
 
 ---
 
 ## Degradation warnings on many candidates
 
-**What you see:** `✂ broken (degradation)` lines appear frequently. Candidates are being eliminated. The campaign is advancing slowly.
+**What you see:** `✂ broken (degradation)` lines appear often. Candidates are being eliminated and the campaign advances slowly.
 
-**Why:** The backend pipeline is returning low-quality results for a consistent configuration region — not an optimizer issue.
+**Why:** The pipeline itself is returning broken results for a region of configurations — not an optimizer issue.
 
-**What to try:**
-- Look at which `{step}:{code}` is firing — the last field of each `✂ broken` line.
-- If the step is `llm_only` with `reasoning_budget_exhausted`: the reasoning model spent its entire output budget on the hidden reasoning trace before emitting visible content. Raise `pipeline_params.llm_only.max_tokens` (look at `step_tokens.llm_only.output` and `reasoning` to size it). L1's wound channel should already name `max_tokens` directly.
-- If the code is `output_truncated`: the provider cut the response short. Same `max_tokens` lever; it is provider-fault, so it deprecates the sample without eliminating the candidate.
-- If the code is `reasoning_only_response`: the model spent its output on the hidden reasoning trace and then stopped on its own, without hitting the cap — so raising `max_tokens` will not help. That is the route, not the prompt: pick a different model or provider for the node. Also provider-fault, so the candidate survives.
-- If the code is `empty_response`: the LLM returned nothing parseable *and no retry recovered it*. Often a sign the prompt is causing a refusal or the model is overloaded. This one is candidate-fault and eliminates on a single sighting, so L3 will eventually replan to avoid the failing region.
-- If the step is a specific pipeline node: check that node's configuration in your campaign config — the degradation threshold may be set too tight, or the node may have a bug.
+**What to try:** Read the `{node}:{code}` at the end of each `✂ broken` line.
+- `reasoning_budget_exhausted` or `output_truncated` — the model ran out of output tokens. Raise the node's `max_tokens`.
+- `reasoning_only_response` — the model stopped after reasoning without answering. Pick a different model or provider for the node.
+- `empty_response` — nothing parseable came back, often a refusal or an overloaded model. The optimizer replans away from it.
 
 ---
 
@@ -77,23 +58,22 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What you see:** Every round produces candidates that look nearly identical. Accuracy has plateaued.
 
-**Why:** L1 is over-exploiting a small region of the search space. This can happen when the candidate budget is too small to explore. (There is no improvement-threshold knob: a round is elected on θ against its parent.)
+**Why:** The optimizer is over-exploiting a small region of the search space, often because the per-round budget is too small to explore.
 
 **What to try:**
-- Increase `l1_generate`'s `n_variants` to widen the search per round.
-- Let L2 fire — it can raise `n_variants` and `temperature` via `l1_overrides`.
-- If prompt fields are the only axis: confirm the pipeline's LLM node has a prompt template exposed. If it doesn't, the optimizer has no prompt space to explore.
+- Increase `n_variants` on the `l1_generate` node to widen the search per round.
+- If prompt fields are the only axis: confirm the pipeline's LLM node exposes a prompt. If it doesn't, the optimizer has no prompt space to explore.
 
 ---
 
 ## Missing dependency on import
 
-**What you see:** `ImportError` or "install the `[excel]` extra" messages.
+**What you see:** `ImportError`, or a message naming an extra such as `[excel]`.
 
-**Why:** Core install is intentionally minimal. Optional features (Jupyter, Excel loaders, Langfuse, Anthropic) live under extras.
+**Why:** The core install is intentionally minimal. Optional features live under extras.
 
 **What to try:**
 - Install `[all]` if you haven't: `pip install -e ".[all]"`.
-- If you started with the minimal install, the error message names the extra — install just that one.
+- Or install just the extra the message names.
 
 Next: [Going deeper](06-going-deeper.md).

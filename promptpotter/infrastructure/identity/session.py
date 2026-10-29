@@ -1,4 +1,4 @@
-"""The cookie carries the session id only — no JWT, no signed envelope (ADR-0002 gate #2)."""
+"""The cookie carries the session id only — no JWT, no signed envelope (decisions.md § 0002)."""
 
 from __future__ import annotations
 

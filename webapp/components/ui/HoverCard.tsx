@@ -22,11 +22,14 @@ export function HoverCard({
   content,
   className,
   block = false,
+  focusable = false,
   children,
 }: {
   content: ReactNode;
   className?: string;
   block?: boolean;
+  // The trigger takes focus itself, for children that hold no control of their own.
+  focusable?: boolean;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLElement | null>(null);
@@ -39,7 +42,7 @@ export function HoverCard({
   const open = at !== null;
 
   const within = useCallback(
-    (n: Node | null) => !!n && !!(ref.current?.contains(n) || cardRef.current?.contains(n)),
+    (n: Node | null) => !!n && (!!ref.current?.contains(n) || !!cardRef.current?.contains(n)),
     [],
   );
 
@@ -85,11 +88,12 @@ export function HoverCard({
     <Wrap
       ref={setRef}
       className={block ? s.block : s.wrap}
+      tabIndex={focusable ? 0 : undefined}
       onMouseEnter={show}
       onMouseLeave={leave}
       onFocus={show}
       onBlur={(e) => {
-        if (!within(e.relatedTarget as Node | null)) hide();
+        if (!within(e.relatedTarget)) hide();
       }}
     >
       {children}

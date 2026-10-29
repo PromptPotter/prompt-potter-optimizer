@@ -50,7 +50,7 @@ export function editsFor(edits: ScenarioEdits, subjectKey: string): ReadonlyMap<
   return edits.get(subjectKey) ?? new Map();
 }
 
-export function withEdit(
+function withEdit(
   edits: ScenarioEdits,
   subjectKey: string,
   configKey: string,
@@ -66,7 +66,7 @@ export function withEdit(
   return next;
 }
 
-export function restored(
+function restored(
   edits: ScenarioEdits,
   subjectKey: string,
   configKey?: string,

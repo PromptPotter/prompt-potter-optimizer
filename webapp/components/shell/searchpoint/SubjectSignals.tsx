@@ -11,9 +11,9 @@ export function SubjectSignals({
   compare,
 }: Pick<OriginEvidence, "origin" | "shown" | "compare">) {
   const rows = CELL_MEAN_ROWS.flatMap((r) => {
-    const was = origin?.cell_means?.[r.key];
+    const was = origin?.cell_means[r.key];
     if (was === undefined) return [];
-    return [{ ...r, was, now: shown?.cell_means?.[r.key] }];
+    return [{ ...r, was, now: shown?.cell_means[r.key] }];
   });
   if (rows.length === 0) return null;
 

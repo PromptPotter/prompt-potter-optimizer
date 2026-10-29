@@ -20,7 +20,7 @@ export interface MessageItem {
   text: string;
 }
 
-export interface FileItem {
+interface FileItem {
   id: string;
   kind: "file";
   name: string;
@@ -28,7 +28,7 @@ export interface FileItem {
 }
 
 // Captured VALUES of a task that ended, never a pointer to state the task's resume rewrites.
-export interface RunItem<R> {
+interface RunItem<R> {
   id: string;
   kind: "run";
   key: string;
@@ -46,7 +46,7 @@ export type ThreadItem<R> = StoredItem<R> | BlockItem;
 
 type Draft = Omit<MessageItem, "id"> | Omit<FileItem, "id">;
 
-export interface ThreadStore<R> {
+interface ThreadStore<R> {
   items: readonly StoredItem<R>[];
   append: (item: Draft) => string;
   setFileDetail: (id: string, detail: string) => void;

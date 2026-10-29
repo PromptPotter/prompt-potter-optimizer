@@ -39,13 +39,13 @@ export function NodeSurface({
   schema: NodeSchemaReading;
   label?: string;
   mode: ConfigMode;
-  babysitEditable?: boolean;
-  compact?: boolean;
-  modelCapabilities?: CapabilityMenu;
-  permittedModels?: Record<string, readonly string[]>;
-  onApply?: (patch: DraftPatch) => void;
-  onConfigChange?: (overlay: Record<string, Record<string, unknown>>) => void;
-  onNarrowing?: (node: string, rows: ParamIntent[]) => void;
+  babysitEditable?: boolean | undefined;
+  compact?: boolean | undefined;
+  modelCapabilities?: CapabilityMenu | undefined;
+  permittedModels?: Record<string, readonly string[]> | undefined;
+  onApply?: ((patch: DraftPatch) => void) | undefined;
+  onConfigChange?: ((overlay: Record<string, Record<string, unknown>>) => void) | undefined;
+  onNarrowing?: ((node: string, rows: ParamIntent[]) => void) | undefined;
 }) {
   const kind = node?.kind;
   // A node shows its own prompt; the whole pipeline shows each prompt node's, by its served `prompt` rows.
@@ -93,7 +93,7 @@ export function NodeSurface({
       ofKind(kind).map((p) => [p.key.slice(prefix.length), p.movable_by.length === 0]),
     );
   const described = ofKind("description").map((p) => p.key);
-  const tree = {
+  const tree: ContractTree = {
     authored,
     answer: nodeId ? authoredAnswerField(overlay, nodeId) : undefined,
     locks: lockKeys ? locksOf("description", SCHEMA_DESCRIPTION_PREFIX) : undefined,
@@ -150,18 +150,23 @@ export function NodeSurface({
   );
 }
 
+type AuthorSchema = (schema: Record<string, unknown>, answer?: string) => void;
+
+interface ContractTree {
+  authored: Record<string, unknown> | undefined;
+  answer: string | undefined;
+  locks: Record<string, boolean> | undefined;
+  onLock: ((path: string, locked: boolean) => void) | undefined;
+  onAuthor: AuthorSchema | undefined;
+}
+
 function OutputContract({
   schema,
   onAuthor,
   ...tree
 }: {
   schema: Record<string, NodeOutputSchema | null> | null;
-  authored?: Record<string, unknown>;
-  answer?: string;
-  locks?: Record<string, boolean>;
-  onLock?: (path: string, locked: boolean) => void;
-  onAuthor?: (schema: Record<string, unknown>, answer?: string) => void;
-}) {
+} & ContractTree) {
   const entries = Object.entries(schema ?? {});
   const nodes = entries
     .map(([node, out]) => [node, outputContract(out)] as const)
@@ -227,13 +232,7 @@ function SchemaAuthor({
   locks,
   onLock,
   onAuthor,
-}: {
-  authored?: Record<string, unknown>;
-  answer?: string;
-  locks?: Record<string, boolean>;
-  onLock?: (path: string, locked: boolean) => void;
-  onAuthor: (schema: Record<string, unknown>, answer?: string) => void;
-}) {
+}: Omit<ContractTree, "onAuthor"> & { onAuthor: AuthorSchema }) {
   const fields = Object.values(locks ?? {});
   const open = fields.filter((locked) => !locked).length;
   return (

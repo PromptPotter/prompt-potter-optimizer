@@ -7,9 +7,12 @@ import contextlib
 import logging
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
+
+from pydantic import TypeAdapter, model_validator
 
 from promptpotter.application.initialization.wiring import bind_cycle_session, complete_registries
 from promptpotter.application.jobs.capacity import resolve_run_capacity
@@ -39,9 +42,9 @@ from promptpotter.shared.identity import IdentityContext
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.run_observers import RunObservers
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import CycleResult
 
 logger = logging.getLogger(__name__)
@@ -52,7 +55,6 @@ if sys.platform == "win32":
     _DETACHED = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
 else:
     _DETACHED = {"start_new_session": True}
-_WATCH_POLL_S = 1.0
 # The PATH, never a copy: parallel runs each own their cycle's readout, and one copy interleaves.
 _LATEST_READOUT_POINTER = Path("logs/latest-readout-path.txt")
 
@@ -70,6 +72,16 @@ class JobSpec(StrictModel):
     projects_root: Path
     shared_root: Path
     install_datasets_root: Path
+
+    @model_validator(mode="after")
+    def _reads_back_as_written(self) -> Self:
+        # The run's process rebuilds every field off this JSON: one reading back otherwise is another launch.
+        wire = self.model_dump(mode="json")
+        for name, field in type(self).model_fields.items():
+            held = getattr(self, name)
+            if TypeAdapter(field.annotation).validate_python(wire[name]) != held:
+                raise ValueError(f"JobSpec.{name} does not read back as written: {held!r}")
+        return self
 
 
 def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> None:
@@ -92,10 +104,19 @@ def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> No
         release_slot(job_registry, spec.job_id, exc, stores=stores, hop=spec.hop)
         raise
 
+    loop, exited = asyncio.get_running_loop(), asyncio.Event()
+
+    def _await_exit() -> None:
+        child.wait()
+        # A loop closed first is a server gone: its shutdown cancelled `watch`, which has nothing to release.
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(exited.set)
+
+    # A daemon thread, never `to_thread(child.wait)`: an executor thread holds the server's exit until the run ends.
+    threading.Thread(target=_await_exit, name=f"job-{spec.job_id}-exit", daemon=True).start()
+
     async def watch() -> None:
-        # Polled, never `to_thread(child.wait)`: a parked thread would hold the server's exit until the run ended.
-        while child.poll() is None:
-            await asyncio.sleep(_WATCH_POLL_S)
+        await exited.wait()
         # Releases only the claim of a child that died before taking the job over; one that ran has consumed it.
         stores.campaigns.release_claim(
             spec.hop, job_id=spec.job_id, detail="its process exited before the run began"

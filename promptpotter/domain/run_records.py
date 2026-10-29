@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import enum
 import os
+import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Any, Literal, NamedTuple, Self
 
 from pydantic import ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+from promptpotter.domain.arm_reading import DisplayMetric
+from promptpotter.domain.arms import ArmState, Proposal, Proposed
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import PartitionRecord
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
@@ -29,19 +33,9 @@ from promptpotter.domain.phases import (
     StopReason,
 )
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, NodeSearchNarrowing
-from promptpotter.domain.results import (
-    ArmState,
-    DisplayMetric,
-    Election,
-    Proposal,
-    Proposed,
-    RoundCells,
-    RoundOutcome,
-    RoundResult,
-    RunStanding,
-    ScoreSummary,
-)
+from promptpotter.domain.results import Election, RoundCells, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import LevelSeries
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import LedgerCell, WalkedCell
 from promptpotter.domain.spend import (
     Budget,
@@ -528,6 +522,8 @@ class SpendTombstoneRecord(FrozenModel):
 
 
 class BankedCommand(FrozenModel):
+    """A cycle's trail line — a command, or the run's abnormal stop — banked before the cycle went."""
+
     at: str
     kind: str
     # The campaign and cycle it addressed, as the trail read it before they went.
@@ -571,7 +567,6 @@ class LLMCallStartRecord(FrozenModel):
     injection_chars: dict[str, int] = Field(default_factory=dict)
     # What the node's ceiling REFUSED, per panel; `injection_chars` reports only what SURVIVED.
     injection_dropped: dict[str, int] = Field(default_factory=dict)
-    injection_silent: list[str] = Field(default_factory=list)
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
@@ -612,6 +607,39 @@ AccountEvent = Literal[
     "account_created", "signed_in", "terms_accepted", "uploaded", "request_refused"
 ]
 
+HealthState = Literal["held", "broken", "unverified"]
+
+
+class HealthRecord(FrozenModel):
+    """On the box's own WORKSPACE ledger: a probe's state CHANGED. ``unverified`` never is one."""
+
+    record_type: Literal["health"] = "health"
+    probe: str
+    state: Literal["held", "broken"]
+    said: str
+    timestamp: str = Field(default_factory=utcnow_iso)
+
+
+class Device(enum.StrEnum):
+    PHONE = "phone"
+    TABLET = "tablet"
+    COMPUTER = "computer"
+
+
+_TABLET_UA = re.compile(r"iPad|Tablet")
+_PHONE_UA = re.compile(r"Mobi|Android|iPhone")
+
+
+def device_of(mobile_hint: str | None, user_agent: str | None) -> Device | None:
+    """The site's visit-log classes; ``None`` where the request sent no user-agent to read."""
+    if mobile_hint == "?1":
+        return Device.PHONE
+    if not user_agent:
+        return None
+    if _TABLET_UA.search(user_agent):
+        return Device.TABLET
+    return Device.PHONE if _PHONE_UA.search(user_agent) else Device.COMPUTER
+
 
 class AccountEventRecord(FrozenModel):
     """On the WORKSPACE ledger; ``user_id`` is the acting principal, a delegate's own id in its delegator's tenant."""
@@ -622,6 +650,8 @@ class AccountEventRecord(FrozenModel):
     # The provider of a sign-in, the version of a terms acceptance, the file an upload was kept as,
     # what a refused request asked and was told.
     subject: str = ""
+    # What a sign-in or an opening came from; unset where no request carried one.
+    device: Device | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -659,7 +689,8 @@ RoundWarningKind = Literal[
     "send_refused",
     # A `terminate_proposal` carrying no reason: ignored, never silently.
     "layer_terminate_blank",
-    # A `fork_proposal` with no ancestor holding a level: dropped, naming what withholds θ.
+    # A `fork_proposal` dropped: no ancestor holds a level (naming what withholds θ), or the
+    # launch's rebase clock is spent.
     "layer_rebase_dropped",
     # An adapter landed no round output, and the re-runs before the next walk failed: the run halts.
     "adapter_output_unavailable",
@@ -704,31 +735,22 @@ class ForkDirection(enum.StrEnum):
     EQUIVALENT = "equivalent"
 
 
-class ForkTraits(NamedTuple):
-    """What a cut implies, each half independent of the others."""
-
-    direction: ForkDirection
-    # The δ scale read through the cut is the child's OWN, extended in place: the child derives
-    # and grows it as its parent would have, where any other fork reads none of its parent's.
-    continues_scale: bool
-
-
 # Derived from the trigger, never stored. Exhaustiveness is checked at import below.
-FORK_TRAITS: dict[ForkTrigger, ForkTraits] = {
-    ForkTrigger.OPERATOR_DIAG: ForkTraits(ForkDirection.OFFSHOOT, False),
-    ForkTrigger.OPERATOR_STEERED: ForkTraits(ForkDirection.OFFSHOOT, False),
-    ForkTrigger.OPERATOR_REWIND: ForkTraits(ForkDirection.SUPERSEDE, True),
-    ForkTrigger.OPTIMIZER_REBASE: ForkTraits(ForkDirection.SUPERSEDE, True),
-    ForkTrigger.SCORING_DIVERGENCE: ForkTraits(ForkDirection.SUPERSEDE, True),
+FORK_DIRECTION: dict[ForkTrigger, ForkDirection] = {
+    ForkTrigger.OPERATOR_DIAG: ForkDirection.OFFSHOOT,
+    ForkTrigger.OPERATOR_STEERED: ForkDirection.OFFSHOOT,
+    ForkTrigger.OPERATOR_REWIND: ForkDirection.SUPERSEDE,
+    ForkTrigger.OPTIMIZER_REBASE: ForkDirection.SUPERSEDE,
+    ForkTrigger.SCORING_DIVERGENCE: ForkDirection.SUPERSEDE,
 }
 
-_untraited = [t for t in ForkTrigger if t not in FORK_TRAITS]
-if _untraited:
+_undirected = [t for t in ForkTrigger if t not in FORK_DIRECTION]
+if _undirected:
     raise RuntimeError(
-        f"ForkTrigger members missing from FORK_TRAITS: {_untraited}. A cut whose "
+        f"ForkTrigger members missing from FORK_DIRECTION: {_undirected}. A cut whose "
         "direction nobody declared renders as an offshoot, which is a lie half the time."
     )
-del _untraited
+del _undirected
 
 
 class ConfigOverrides(FrozenModel):
@@ -954,16 +976,12 @@ class ForkSpec(FrozenModel):
     # the one its caller named, else the pick the parent's line stood on going into the cut round.
     from_candidate: RoundArm
     seed: CycleSeed | None = None
-    # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_TRAITS`).
+    # The MEASURED direction; `None` ⇒ the trigger implies it (`FORK_DIRECTION`).
     direction: ForkDirection | None = None
 
     @property
-    def traits(self) -> ForkTraits:
-        return FORK_TRAITS[self.trigger]
-
-    @property
     def resolved_direction(self) -> ForkDirection:
-        return self.direction or self.traits.direction
+        return self.direction or FORK_DIRECTION[self.trigger]
 
 
 class SpawnedBy(StrictModel):
@@ -1130,6 +1148,7 @@ CycleRecord = Annotated[
     | ElectionRecord
     | ErrorRecord
     | ForkGradedRecord
+    | HealthRecord
     | InterventionRecord
     | LaunchClaimRecord
     | LaunchClockRecord

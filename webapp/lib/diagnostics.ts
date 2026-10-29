@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { ApiError, failureKind, type FailureKind } from "@/lib/api";
 
-export const DIAGNOSTICS_KEY = "promptpotter.diagnostics.incidents";
+const DIAGNOSTICS_KEY = "promptpotter.diagnostics.incidents";
 
 // Bumping DROPS the stored ring; never migrate it.
 const RECORD_VERSION = 1;
@@ -12,7 +12,7 @@ const TTL_MS = 24 * 60 * 60 * 1000;
 
 const MAX_INCIDENTS = 50;
 
-export interface Incident {
+interface Incident {
   v: number;
   at: number;
   count: number;
@@ -34,9 +34,9 @@ const EMPTY: Ring = [];
 let cache: Ring | null = null;
 const listeners = new Set<() => void>();
 
-function prune(ring: Ring, now: number): Ring {
+function prune(ring: readonly (Incident | null)[], now: number): Ring {
   return ring
-    .filter((i) => i && i.v === RECORD_VERSION && now - i.at < TTL_MS)
+    .filter((i): i is Incident => i !== null && i.v === RECORD_VERSION && now - i.at < TTL_MS)
     .slice(0, MAX_INCIDENTS);
 }
 
@@ -46,7 +46,7 @@ function read(): Ring {
   try {
     const raw = window.localStorage.getItem(DIAGNOSTICS_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
-    cache = Array.isArray(parsed) ? prune(parsed as Ring, Date.now()) : EMPTY;
+    cache = Array.isArray(parsed) ? prune(parsed as (Incident | null)[], Date.now()) : EMPTY;
   } catch {
     cache = EMPTY; // private mode, quota, corrupt blob — diagnostics never throw
   }
@@ -79,7 +79,7 @@ function signature(i: Incident): string {
   return `${i.surface}|${i.kind}|${i.code ?? i.status}|${i.address ?? i.path}`;
 }
 
-export interface IncidentContext {
+interface IncidentContext {
   surface: string;
   address?: string | null;
 }
@@ -145,7 +145,7 @@ export function useIncidents(): Ring {
   return useSyncExternalStore(subscribeIncidents, getIncidents, emptyIncidents);
 }
 
-// Never ship it anywhere from here: ADR-0004 keeps privileged outbound work out of the app.
+// Never ship it anywhere from here: decisions.md § 0004 keeps privileged outbound work out of the app.
 export function formatDiagnostics(opts: { version: string | null }): string {
   const ring = getIncidents();
   const lines = [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 import uuid
@@ -64,7 +65,6 @@ class OptimizerResponseModel(StrictModel):
 class InjectionBreakdown:
     chars: dict[str, int] = field(default_factory=dict)
     dropped: dict[str, int] = field(default_factory=dict)
-    silent: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -118,8 +118,7 @@ def _replay(cache: LLMReuseCache, key: str, *, label: str) -> LLMResponse | None
         if payload is None:
             return None
         return LLMResponse.model_validate(payload)
-    except Exception as exc:
-        # Deliberately broad: nothing in a cache may ever cost a run.
+    except (OSError, ValueError) as exc:
         logger.warning("optimizer_reuse entry for %s unusable, re-sampling — %s", label, exc)
         return None
 
@@ -161,7 +160,7 @@ def _merged_config(
     # The determinism clamp goes LAST: it must beat every per-call override, steered temperature included.
     if config_overrides := get_optimizer_config_overrides():
         merged = {**merged, **config_overrides}
-        # Except the seed a call brings: `NodeContext.ask` draws it FROM the clamp's, one per call.
+        # Except the seed a call brings: `Calls.ask` draws it FROM the clamp's, one per call.
         if "seed" in overrides:
             merged["seed"] = overrides["seed"]
     # Keyed and sent as the host it gets, as a target node is (`pin_default_routes`).
@@ -205,7 +204,6 @@ def _announce(call: _Call) -> None:
         prompt_chars=prompt_chars,
         injection_chars=dict(injections.chars),
         injection_dropped=dict(injections.dropped),
-        injection_silent=list(injections.silent),
     )
     if context.ledger is not None:
         context.ledger.append(start_record)
@@ -279,16 +277,8 @@ async def _provider_reply(call: _Call) -> LLMResponse:
         raise
     finally:
         heartbeat_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.warning(
-                "heartbeat task for %s raised on teardown",
-                label,
-                exc_info=True,
-            )
 
 
 def _call_record(

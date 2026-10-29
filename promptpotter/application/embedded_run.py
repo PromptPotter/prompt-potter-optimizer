@@ -7,9 +7,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
-from promptpotter.application.campaign_config import effective_config
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.payloads import CompactArchivePayload
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
 from promptpotter.application.jobs.launcher.admission import embedded_share, probe_backend
@@ -30,7 +28,9 @@ from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Compare, Optimize, Purpose
+from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.command_kinds import (
+    CompactArchivePayload,
     GradeBenchPayload,
     OriginGateDecisionPayload,
     SubmitArmsPayload,
@@ -44,9 +44,9 @@ from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
     from promptpotter.domain.bench import BenchScore
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.phases import GateDecision
     from promptpotter.domain.run_mode import RunMode
@@ -197,7 +197,7 @@ async def run_campaign(
                 task_text=None,
             )
             session = minted.session
-            JobRegistry.attach().update_target(job_id, hop=session.hop)
+            JobRegistry.attach(session.store.jobs_dir).update_target(job_id, hop=session.hop)
         return await run_optimization(
             list(session.bank.samples),
             campaign_config,

@@ -183,9 +183,9 @@ export function filesRead(campaignId: string, cycleId: string): ReadDescriptor<F
 }
 
 export interface CellsFilter {
-  candidateId?: string;
-  round?: number;
-  status?: CellStatus;
+  candidateId?: string | undefined;
+  round?: number | undefined;
+  status?: CellStatus | undefined;
 }
 
 // The server walks `descend` from the ROOT hop, so both root ids ride along whatever the scope.
@@ -220,7 +220,7 @@ export function cellRead(name: string, answer: string): ReadDescriptor<Cell> {
   return once("cell", `${API}/datasets/${enc(name)}/cells/${enc(answer)}`);
 }
 
-export type DashboardBody = ServedDashboard | WarmingDashboard;
+type DashboardBody = ServedDashboard | WarmingDashboard;
 
 export function isWarming(body: DashboardBody): body is WarmingDashboard {
   return "warming_up" in body;

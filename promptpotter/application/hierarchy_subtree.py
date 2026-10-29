@@ -1,4 +1,14 @@
-"""The deep read: a campaign's courses, their rounds and candidates, and the inner campaigns under them."""
+"""The deep read: a campaign's courses, their rounds and candidates, and the inner campaigns under them.
+
+Every course is drawn where it spawned, at any depth. A fork IS a course, hung off the candidate it
+was cut from; ``C{round}.{n}`` is a course's private counter, so nothing is renumbered. A course's
+line is ONE resolution, pure over recorded facts (``_Read.owner``): every name resolves to an
+address on that line, never a search. A cut retires only as far as the branch actually GOT — status
+(``live`` · ``rewound`` · ``retired(by)``) is derived after every line resolves, so no fork writes
+it, and a retired candidate stays, tagged ``superseded``. Identity outranks position: two candidates
+may share an ``individual``, and ``answers_for_id`` marks the one a remembered id resolves to. An
+inner run hangs under the candidate that SPAWNED it (``SpawnedBy``, recorded at launch).
+"""
 
 from __future__ import annotations
 
@@ -9,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from promptpotter.application.hierarchy import (
+    CourseReads,
     campaign_courses,
     campaign_entry,
     entries_version,
@@ -18,6 +29,13 @@ from promptpotter.application.hierarchy import (
 )
 from promptpotter.application.mask.record import Lens
 from promptpotter.application.mask.tree_lens import lensed, read_samples
+from promptpotter.domain.arm_reading import (
+    ARM_VERDICT_LABELS,
+    ArmReading,
+    DisplayMetric,
+    arm_verdict,
+    panel_cuts,
+)
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import (
@@ -32,6 +50,7 @@ from promptpotter.domain.cycle_paths import (
 )
 from promptpotter.domain.hierarchy import (
     CandidateFacts,
+    EntryStat,
     HierarchyCandidate,
     HierarchyCourse,
     HierarchyEntry,
@@ -47,19 +66,10 @@ from promptpotter.domain.hierarchy import (
     entries_under,
 )
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.results import (
-    ARM_VERDICT_LABELS,
-    ArmReading,
-    DisplayMetric,
-    Election,
-    arm_verdict,
-    panel_cuts,
-)
+from promptpotter.domain.results import Election
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO
 from promptpotter.domain.run_records import ForkDirection, SpawnedBy
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_queries import (
     MAX_COURSE_DEPTH,
     CourseArm,
@@ -257,7 +267,7 @@ def _accuracy(reading: ArmReading) -> HierarchyStat:
     )
 
 
-def _candidate_stats(reading: ArmReading, elects_on: DisplayMetric | None) -> list[HierarchyStat]:
+def _candidate_stats(reading: ArmReading, elects_on: DisplayMetric | None) -> list[EntryStat]:
     on_theta = elects_on == "ability"
     theta = _theta(reading, elected=on_theta)
     level = [_accuracy(reading), *([] if theta is None else [theta])]
@@ -313,11 +323,16 @@ class _Build:
         self.moment = moment
 
     def campaign(
-        self, stores: Stores, inside: CyclePath, campaign: Campaign, *, depth: int
+        self,
+        stores: Stores,
+        inside: CyclePath,
+        campaign: Campaign,
+        held: CourseReads,
+        *,
+        depth: int,
     ) -> SubtreeCampaign:
-        held = campaign_courses(stores, campaign, moment=self.moment)
-        entry = campaign_entry(stores, inside, campaign, held, depth=1, moment=self.moment)
-        index_of = {hop.cycle_id: index for hop, index, _ in held}
+        entry = campaign_entry(stores, inside, campaign, held, depth=1)
+        index_of = {hop.cycle_id: index for hop, index, _ in held.courses}
         courses = [
             _Course(listed, hop, index_of[hop.cycle_id])
             for listed in entry.children
@@ -373,9 +388,7 @@ class _Build:
             moment = (
                 self.moment
                 if offset is None
-                else Moment(
-                    CycleLayout(cycle_dir_for(stores.base_dir, course.hop)).ledger, offset - 1
-                )
+                else Moment(stores.campaigns.ledger(course.hop), offset - 1)
             )
             got = read_course(stores, course.hop, course.index, moment=moment)
             cut, parent = course.index.forked_at_offset, course.parent
@@ -399,16 +412,15 @@ class _Build:
         cut from."""
         by_cycle = {s.hop.cycle_id: s for s in siblings}
         for listed in sandbox.campaigns.list_campaigns(None, lifecycle="all"):
-            index = read_cycle_index(
-                sandbox.campaigns.cycle_dir(listed.root_hop), moment=self.moment
-            )
+            held = campaign_courses(sandbox, listed, moment=self.moment)
+            index = next((i for hop, i, _ in held.courses if hop == listed.root_hop), None)
             if index is None:
                 continue
             spawned = index.spawned_by
             asker = None if spawned is None else by_cycle.get(spawned.cycle_id or "")
             arm = None if spawned is None else spawned.arm
             host = None if asker is None or arm is None else asker.ran.get((arm.round, arm.arm))
-            nested = self.campaign(sandbox, inside, listed, depth=depth)
+            nested = self.campaign(sandbox, inside, listed, held, depth=depth)
             if host is not None:
                 host.inner.append(nested.model_copy(update={"parent": host.address}))
                 continue
@@ -632,7 +644,8 @@ def hierarchy_subtree(
     spawned it on every read, never re-derived for a direct one.
     """
     campaign = owned_campaign(stores, _top_campaign(address))
-    root = _answering(_Build(moment).campaign(stores, (), campaign, depth=MAX_COURSE_DEPTH))
+    held = campaign_courses(stores, campaign, moment=moment)
+    root = _answering(_Build(moment).campaign(stores, (), campaign, held, depth=MAX_COURSE_DEPTH))
     if lens is not None or samples:
         root = lensed(stores, root, lens, samples)
     root = _read_under(root, lens, samples, moment)
@@ -655,10 +668,10 @@ def subtree_moment(
         return None
     path = at_cycle or _root_path(stores, address)
     leaf_store, leaf = resolve_cycle_path(stores, path)
-    cycle_dir = cycle_dir_for(leaf_store.base_dir, leaf)
-    if not cycle_dir.is_dir():
+    layout = leaf_store.campaigns.layout(leaf)
+    if not layout.cycle_dir.is_dir():
         raise NotFoundError(f"Cycle '{leaf.campaign_id}/{leaf.cycle_id}' not found")
-    return Moment(CycleLayout(cycle_dir).ledger, at)
+    return Moment(layout.ledger, at)
 
 
 def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
@@ -668,7 +681,17 @@ def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
 
 
 def subtree_course(stores: Stores, path: CyclePath) -> SubtreeCourse:
-    """One course as the subtree serves it, unlensed and at the head."""
-    course = hierarchy_subtree(stores, encode_cycle_path(path), None, None, moment=None)
-    assert isinstance(course, SubtreeCourse)
-    return course
+    """One course and its rounds, unlensed and at the head: only its own campaign is built, so no
+    inner run hangs under its candidates and none of them answers for an id."""
+    owned_campaign(stores, path[0].campaign_id)
+    inside, hop = path[:-1], path[-1]
+    leaf = descend_store(stores, inside)
+    campaign = leaf.campaigns.load_campaign(hop.campaign_id)
+    address = encode_cycle_path(path)
+    if campaign is not None:
+        held = campaign_courses(leaf, campaign, moment=None)
+        built = _Build(None).campaign(leaf, inside, campaign, held, depth=0)
+        for course in built.children:
+            if course.address == address:
+                return course
+    raise NotFoundError(f"No hierarchy entry at {address!r}")

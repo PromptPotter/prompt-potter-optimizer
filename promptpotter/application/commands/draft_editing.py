@@ -13,9 +13,8 @@ from promptpotter.application.datasets.origin_readiness import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.payloads import EditDraftCampaignPayload
-    from promptpotter.domain.command_kinds import DiscardDraftPayload
-    from promptpotter.infrastructure.store.draft_store import DraftClaim
+    from promptpotter.application.commands.dispatcher import Dispatched, DispatchedToDraft
+    from promptpotter.domain.command_kinds import DiscardDraftPayload, EditDraftCampaignPayload
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -29,12 +28,12 @@ def origin_effect(stores: Stores, draft_id: str, before: dict[str, Any]) -> dict
 
 
 def edit_draft_campaign(
-    dispatcher: CommandDispatcher, payload: EditDraftCampaignPayload, claim: DraftClaim
+    dispatched: DispatchedToDraft[EditDraftCampaignPayload],
 ) -> Applier[DraftCampaignWire]:
-    stores = dispatcher.stores
-    draft_id = payload.draft_id
+    stores = dispatched.dispatcher.stores
+    draft_id = dispatched.payload.draft_id
     draft = owned_draft(stores, draft_id)
-    plan = plan_draft_patch(stores, draft, payload.patch)
+    plan = plan_draft_patch(stores, draft, dispatched.payload.patch)
 
     def _apply() -> DraftCampaignWire:
         updated = apply_draft_patch(draft, plan)
@@ -46,13 +45,13 @@ def edit_draft_campaign(
         _apply,
         replay=lambda: reread_draft_wire(stores, draft_id),
         effect_fn=lambda: origin_effect(stores, draft_id, before),
-        claim=claim,
+        claim=dispatched.claim,
     )
 
 
-def discard_draft(dispatcher: CommandDispatcher, payload: DiscardDraftPayload) -> Applier[object]:
-    stores = dispatcher.stores
-    draft_id = owned_draft(stores, payload.draft_id).draft_id
+def discard_draft(dispatched: Dispatched[DiscardDraftPayload]) -> Applier[object]:
+    stores = dispatched.dispatcher.stores
+    draft_id = owned_draft(stores, dispatched.payload.draft_id).draft_id
     return Applier.silent(lambda: stores.drafts.discard(draft_id))
 
 

@@ -15,8 +15,9 @@ from promptpotter.application.optimizers.potter.validators.l1_behavior import (
 )
 from promptpotter.application.optimizers.potter.validators.l2_behavior import run_all_l2_checks
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_CHARGED, CritiqueReadout
-from promptpotter.domain.results import OptimizerFact, RoundResult, rounds_without_advance
+from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
+from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.wounds import COLLAPSE_WORDS
 
 RoundOneVerdict = Literal["healthy", "degraded", "broken", "unknown"]
@@ -88,26 +89,27 @@ def review_reading(
     )
 
 
-def round_facts(round_result: RoundResult) -> list[OptimizerFact]:
+def yield_facts(round_result: RoundResult) -> list[OptimizerFact]:
     state = round_result.closed_state.output(L1Readout)
-    facts: list[OptimizerFact] = []
-    if state.l1_rejected:
-        live = state.l1_proposed - sum(state.l1_rejected.values())
-        bits = ", ".join(
-            f"{n} {COLLAPSE_WORDS.get(reason, reason.replace('_', ' '))}"
-            for reason, n in state.l1_rejected.items()
+    if not state.l1_rejected:
+        return []
+    live = state.l1_proposed - sum(state.l1_rejected.values())
+    bits = ", ".join(
+        f"{n} {COLLAPSE_WORDS.get(reason, reason.replace('_', ' '))}"
+        for reason, n in state.l1_rejected.items()
+    )
+    text = f"{live}/{state.l1_proposed} ({bits})"
+    return [
+        OptimizerFact(
+            key="l1_yield", label="L1 yield", text=text, value=state.l1_yield, kind="stat"
         )
-        text = f"{live}/{state.l1_proposed} ({bits})"
-        facts.append(
-            OptimizerFact(
-                key="l1_yield", label="L1 yield", text=text, value=state.l1_yield, kind="stat"
-            )
-        )
-    if critique := format_l1_critique_for_prompt(round_result.closed_state.feedback()):
-        facts.append(
-            OptimizerFact(key="critique", label="Critique", text=critique, value=None, kind="note")
-        )
-    return facts
+    ]
+
+
+def critique_facts(round_result: RoundResult) -> list[OptimizerFact]:
+    if not (critique := format_l1_critique_for_prompt(round_result.closed_state.feedback())):
+        return []
+    return [OptimizerFact(key="critique", label="Critique", text=critique, value=None, kind="note")]
 
 
 def _behavior_per_round(

@@ -6,7 +6,7 @@ import sys
 from collections.abc import Iterator
 from dataclasses import replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.llm_call import InjectionBreakdown
 from promptpotter.application.bench.node_context import Bounds, Frontier, Lineage, Ruler, Target
@@ -50,7 +50,7 @@ from promptpotter.domain import ruler
 from promptpotter.domain.opt_search_point import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.pool import BlockPool, DemoPool
-from promptpotter.domain.results import rounds_without_advance
+from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.infrastructure.llm.telemetry import (
     emit_round_warning,
     reset_cycle_ledger,
@@ -129,7 +129,6 @@ class FilledPrompt(NamedTuple):
         return InjectionBreakdown(
             chars={name: len(text) for name, text in shown.items() if text},
             dropped={name: c.dropped for name, c in self.coverage.items() if c.dropped > 0},
-            silent=tuple(sorted(name for name, c in self.coverage.items() if c.produced == 0)),
         )
 
 
@@ -268,7 +267,7 @@ def _by_field(entries: tuple[PoolEntry, ...]) -> dict[str, tuple[PoolEntry, ...]
     return {field: tuple(held) for field, held in out.items()}
 
 
-def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
+def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
     """The round under render is the cycle's last on every node: the bench folds a round in before any node reads it."""
     lineage, frontier, ruler_read, bounds, target = (
         ctx.read(Lineage),
@@ -284,8 +283,8 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
     readout = ctx.recall(L1Readout, latest_round.round)
     health, latest_fold = latest_round.health, latest_round.fold
 
-    escalation = ctx.knobs_of(EscalationKnobs)
-    generate = ctx.knobs_of(L1GenerateKnobs)
+    escalation = ctx.knobs(EscalationKnobs)
+    generate = ctx.knobs(L1GenerateKnobs)
     stall_depth = rounds_without_advance(rounds)
     cs = CycleSlice(
         round_num=latest_round.round + 1,
@@ -309,14 +308,14 @@ def build_bundle(ctx: NodeContext[Any], ladder: Ladder) -> InjectionBundle:
         l2=ctx.slice(L2Memory),
         l3=ctx.slice(L3Memory),
         framing=target.framing,
-        pipeline_schema=ctx.schema,
+        pipeline_schema=target.schema,
         cycle_slice=cs,
         digest=RoundDigest(
             diagnostics=latest_round.diagnostics,
             critique=ctx.recall(Critique, latest_round.round).readout,
             l1_yield=readout.l1_yield,
             l1_parse_failure=readout.l1_parse_failure,
-            node_failure_rates=health.node_failure_rates if health else {},
+            node_failure_rates=health.node_failure_rates,
             latest_sample_keys=_sample_keys(latest_round),
             prev_sample_keys=_sample_keys(prior[-1]) if prior else frozenset(),
             composite_fitness=None if latest_fold is None else latest_fold.composite_fitness,

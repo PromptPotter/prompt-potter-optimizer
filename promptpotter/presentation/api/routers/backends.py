@@ -44,7 +44,7 @@ def list_backends(_identity: IdentityDep) -> list[BackendResponse]:
     """Every registered connector, at the endpoint the operator configured for it."""
     return [
         BackendResponse(id=name, base_url=connector.base_url())
-        for name, connector in sorted(connectors.registered().items())
+        for name, connector in sorted(connectors.CONNECTORS.table.items())
     ]
 
 
@@ -54,7 +54,7 @@ async def get_backend_health(backend_id: str, _identity: IdentityDep) -> Backend
 
     A down backend is an answer, never an error; only an unregistered ``backend_id`` answers 404.
     """
-    connector = connectors.registered().get(backend_id)
+    connector = connectors.CONNECTORS.table.get(backend_id)
     if connector is None:
         raise NotFoundError(f"Backend '{backend_id}' not found")
     down = await probe_backend(connector.name)

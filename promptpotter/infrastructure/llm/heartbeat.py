@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.run_records import LLMCallProgressRecord
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
+from promptpotter.shared.errors import LedgerUnreadableError, ManifestUnreadableError
 
 if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
@@ -39,24 +40,25 @@ async def heartbeat(
     inner_fn: Callable[[], CycleHop | None] | None = None,
     on_suspend: Callable[[float], None] | None = None,
 ) -> None:
-    """``ledger=None`` still ticks, so a missing ledger cannot disarm ``on_suspend``."""
+    """A beat's I/O fault is logged, never raised, so it never replaces the awaited call's reply or raise; ``ledger=None`` still ticks, so a missing ledger cannot disarm ``on_suspend``."""
     while True:
         overshoot = await sleep_measuring_suspend(HEARTBEAT_INTERVAL_S)
-        if on_suspend is not None and overshoot > SUSPEND_GRACE_S:
-            on_suspend(overshoot)
-        if ledger is None:
-            continue
-        elapsed = time.monotonic() - start_monotonic
-        ledger.append(
-            LLMCallProgressRecord(
-                call_id=call_id,
-                node=node,
-                round=round_num,
-                elapsed_s=elapsed,
-                detail=_safe_read(detail_fn),
-                inner=_safe_read(inner_fn),
-            )
-        )
+        try:
+            if on_suspend is not None and overshoot > SUSPEND_GRACE_S:
+                on_suspend(overshoot)
+            if ledger is not None:
+                ledger.append(
+                    LLMCallProgressRecord(
+                        call_id=call_id,
+                        node=node,
+                        round=round_num,
+                        elapsed_s=time.monotonic() - start_monotonic,
+                        detail=_safe_read(detail_fn),
+                        inner=_safe_read(inner_fn),
+                    )
+                )
+        except (OSError, LedgerUnreadableError):
+            logger.exception("heartbeat of %s (call %s) failed a beat", node, call_id)
 
 
 def _safe_read[T](read: Callable[[], T | None] | None) -> T | None:
@@ -65,6 +67,6 @@ def _safe_read[T](read: Callable[[], T | None] | None) -> T | None:
         return None
     try:
         return read()
-    except Exception as exc:
+    except (OSError, ValueError, LedgerUnreadableError, ManifestUnreadableError) as exc:
         logger.warning("heartbeat read unavailable — %s: %s", exc.__class__.__name__, exc)
         return None

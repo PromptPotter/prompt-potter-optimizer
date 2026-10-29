@@ -45,9 +45,10 @@ export function emptyView(): CampaignView {
   };
 }
 
-export function pruneStore(store: Store, now: number): Store {
+export function pruneStore(store: Readonly<Record<string, CampaignView | null>>, now: number): Store {
   const fresh = Object.entries(store).filter(
-    ([, v]) => v && v.v === RECORD_VERSION && now - v.at < TTL_MS,
+    (e): e is [string, CampaignView] =>
+      e[1] !== null && e[1].v === RECORD_VERSION && now - e[1].at < TTL_MS,
   );
   fresh.sort((a, b) => b[1].at - a[1].at);
   return Object.fromEntries(fresh.slice(0, MAX_CAMPAIGNS));
@@ -58,7 +59,7 @@ export const viewMemoryCodec = {
   deserialize: (raw: string): Store => {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return EMPTY_STORE;
-    return pruneStore(parsed as Store, Date.now());
+    return pruneStore(parsed as Record<string, CampaignView | null>, Date.now());
   },
 };
 
@@ -125,7 +126,7 @@ export function useViewMemory(): ViewMemory {
 }
 
 // An ORIGIN spans campaigns, so it owns a record under its own `cycle_<hash>` id (`ownerOfAddress`).
-export interface NodeToggle {
+interface NodeToggle {
   isOpen: (key: string, openByDefault: boolean) => boolean;
   toggle: (key: string) => void;
   autoExpandedFor: (campaignId: string | null) => string | null;

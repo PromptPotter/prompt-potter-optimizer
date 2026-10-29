@@ -5,6 +5,7 @@ import ast
 import dataclasses
 import fnmatch
 import json
+import logging
 import os
 import re
 import shutil
@@ -37,6 +38,8 @@ from processes import (
     run,
 )
 
+logger = logging.getLogger(__name__)
+
 _WEBAPP = REPO / "webapp"
 _PINNED = REPO / ".venv"
 _REEXEC = "PROMPTPOTTER_GATE_REEXEC"
@@ -45,9 +48,9 @@ _REEXEC = "PROMPTPOTTER_GATE_REEXEC"
 # What one unit of each fan-out commits: the slope of its check's job peak across widths.
 _OFFLINE_RUN_CHILD_MB = 108
 _NEXT_WORKER_MB = 80
-# Each lane's heaviest check at full width (offline-run; a cold next-build): below their sum, in turn.
+# Each lane's heaviest check at full width (offline-run; a cold eslint): below their sum, in turn.
 _PY_LANE_MB = 1200
-_WEB_LANE_MB = 3700
+_WEB_LANE_MB = 1000
 # Past these, free memory is no reason to widen: the OS kills concurrent processes on low memory.
 OFFLINE_RUN_CHILDREN_MAX = 8
 NEXT_WORKERS_MAX = 4
@@ -158,7 +161,17 @@ def _sources(root: Path, *patterns: str) -> list[Path]:
     return sorted(p for pattern in patterns for p in root.rglob(pattern))
 
 
-_IMPORTS_POTTER = ("", ("application/optimizers/potter/",), "application/optimizers/")
+_OPTIMIZERS = REPO / "promptpotter/application/optimizers"
+# Every package under `optimizers/`: one reached from outside binds the bench to an optimizer.
+_IMPORTS_OPTIMIZER = (
+    "",
+    tuple(
+        f"application/optimizers/{p.name}/"
+        for p in sorted(_OPTIMIZERS.iterdir())
+        if (p / "__init__.py").is_file()
+    ),
+    "application/optimizers/",
+)
 # `auth.py` is exempt: the Identity adapter, whose subject is the infrastructure it wraps.
 _ROUTER_IMPORTS_INFRASTRUCTURE = (
     "presentation/api/routers/",
@@ -176,7 +189,7 @@ _LAYERING: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("connectors/", ("application/", "presentation/"), ""),
     _ROUTER_IMPORTS_INFRASTRUCTURE,
     _PRESENTATION_IMPORTS_INFRASTRUCTURE,
-    _IMPORTS_POTTER,
+    _IMPORTS_OPTIMIZER,
 )
 
 
@@ -402,14 +415,14 @@ def _path_claims(text: str) -> set[str]:
 
 
 def _instruction_files(_: Selection) -> Outcome:
-    code, listed = git("ls-files", "-z", *_INSTRUCTION_FILES)
+    code, listed = _on_disk(*_INSTRUCTION_FILES)
     if code:
-        return code, listed
-    code, tracked = git("ls-files", "-z")
+        return code, listed[0]
+    code, tracked = _on_disk()
     if code:
-        return code, tracked
+        return code, tracked[0]
     tails: set[str] = set()
-    for path in tracked.split("\0"):
+    for path in tracked:
         parts = path.split("/")
         for end in range(1, len(parts) + 1):
             tails.update("/".join(parts[start:end]) for start in range(end))
@@ -418,7 +431,7 @@ def _instruction_files(_: Selection) -> Outcome:
     pages: dict[Path, int] = {}
     # Both spellings git may know a claim by: from the root, and from the file's own directory.
     unresolved: dict[tuple[str, str], set[str]] = {}
-    for rel in filter(None, listed.split("\0")):
+    for rel in listed:
         text = (REPO / rel).read_text(encoding="utf-8")
         if (words := len(text.split())) > _INSTRUCTION_MAX_WORDS:
             over.append(f"{rel}: {words} words")
@@ -486,7 +499,11 @@ _BACKREFERENCE = re.compile(r"\\[1-9]")
 _TRACKER = "docs/specs/code-debt-cleanup.md"
 # An invariant a doc states as the target while its sentence says what holds today, keyed to the
 # phrase the tracker's URGENT section files it under; once true, the sentence is the invariant.
-_KNOWN_FALSE: dict[str, str] = {}
+_KNOWN_FALSE: dict[str, str] = {
+    'git grep -cE "\\.theta - " -- promptpotter/*.py == 0': "θ differenced without `comparable_to`",
+    'git grep -cE "<table" -- webapp/components/*.tsx == 0': "hand-rolled `<table>`",
+    'git grep -cE "role=.dialog." -- webapp/components/*.tsx <= 1': "a hand-rolled dialog",
+}
 
 
 @cache
@@ -684,23 +701,31 @@ def _probe_count(pattern: str, where: str) -> int | str:
     return sum(int(line.rpartition(":")[2]) for line in out.splitlines())
 
 
+def _on_disk(*pathspec: str) -> tuple[int, list[str]]:
+    """The working tree's files: tracked ones still present, and new ones git does not ignore."""
+    code, out = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", *pathspec)
+    if code:
+        return code, [out]
+    return 0, sorted({p for p in out.split("\0") if p and (REPO / p).is_file()})
+
+
 def _doc_claims(_: Selection) -> Outcome:
-    code, claim_docs = git("ls-files", "-z", "--", *_CLAIM_DOCS)
+    code, claim_docs = _on_disk(*_CLAIM_DOCS)
     if code:
-        return code, claim_docs
-    code, every_doc = git("ls-files", "-z", "--", "*.md")
+        return code, claim_docs[0]
+    code, every_doc = _on_disk("*.md")
     if code:
-        return code, every_doc
-    code, listed = git("ls-files", "-z")
+        return code, every_doc[0]
+    code, listed = _on_disk()
     if code:
-        return code, listed
+        return code, listed[0]
     tails: dict[str, list[Path]] = {}
-    for path in filter(None, listed.split("\0")):
+    for path in listed:
         parts = path.split("/")
         for i in range(len(parts)):
             tails.setdefault("/".join(parts[i:]), []).append(REPO / path)
     failures: list[str] = []
-    for rel in filter(None, claim_docs.split("\0")):
+    for rel in claim_docs:
         # A cited path is relative to the doc, or the tail of ONE tracked path: `runner/round.py`.
         here = (REPO / rel).parent
         prose = _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8"))
@@ -734,7 +759,7 @@ def _doc_claims(_: Selection) -> Outcome:
         if phrase not in urgent
     ]
     probed: set[str] = set()
-    for rel in filter(None, every_doc.split("\0")):
+    for rel in every_doc:
         # A probe quoted in code is an example, never one to run.
         prose = _BACKTICKED.sub("", _FENCE.sub("", (REPO / rel).read_text(encoding="utf-8")))
         for opened in _PROBE_OPENS.finditer(prose):
@@ -770,7 +795,7 @@ def _doc_claims(_: Selection) -> Outcome:
 
 
 # `--staged` lints staged paths verbatim, so a directory missing here is linted by the hook only.
-_BBEH_DIR = "docs/research/bbeh-comparison"
+_BBEH_DIR = "paper/bbeh-comparison"
 _RUFF_TARGETS = ("promptpotter/", "scripts/", "tests/", "examples/", "notebooks/", _BBEH_DIR)
 
 
@@ -933,7 +958,8 @@ class Check:
     run: Callable[[Selection], Outcome]
     staged: bool = False  # in the pre-commit fast set
     landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
-    # Its tool hard-codes a worker timeout that a busy machine trips, so it runs after both lanes.
+    # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
+    # or its peak (next-build's) is more than any lane beside it leaves free.
     alone: bool = False
     # The check that builds what it reads: earlier in its lane, and brought along by `--only`.
     after: str = ""
@@ -946,8 +972,6 @@ class Check:
     product: tuple[str, ...] = ()
     # Returns `None` where ownership cannot be told, and then the whole check runs.
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
-    # Environment variables naming a git revision its verdict reads: each one's COMMIT is in its key.
-    revs: tuple[str, ...] = ()
 
     def inputs(self) -> tuple[str, ...] | None:
         if self.kind == "release":  # the answer lives on the network
@@ -959,14 +983,7 @@ class Check:
         prefixes = self.inputs()
         if prefixes is None:
             return None
-        commits = []
-        for name in self.revs:
-            if asked := os.environ.get(name):
-                code, commit = git("rev-parse", "--verify", "--quiet", f"{asked}^{{commit}}")
-                if code:  # nothing to key on: the check runs and names the bad revision itself
-                    return None
-                commits.append(f"{name}={commit}".encode())
-        return digest(store.key(prefixes, self.product).encode(), *commits).hex()
+        return digest(store.key(prefixes, self.product).encode()).hex()
 
     def kept(self, store: LastGreen, key: str | None) -> bool:
         standing = not self.builds or (REPO / self.builds).exists()
@@ -1098,13 +1115,11 @@ CHECKS: tuple[Check, ...] = (
         reads=(
             "promptpotter/",
             "tests/",
-            "examples/",
             "scripts/",
             "docs/specs/",
             *(f"webapp/{root}/" for root in ("app", "components", "lib")),
             "pyproject.toml",
         ),
-        revs=("ARC_BASE",),
     ),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent.
     Check("undiffable", "py", _undiffable, staged=True, reads=_TREE),
@@ -1189,6 +1204,7 @@ CHECKS: tuple[Check, ...] = (
             _WEBAPP,
             NEXT_BUILD_CPUS=str(RamBudget.read().next_workers()),
         ),
+        alone=True,
         builds="webapp/out/index.html",
     ),
     # `npm run typecheck` runs `next typegen` first, rewriting `.next/types` and the gitignored
@@ -1250,6 +1266,7 @@ def _verdict(check: Check, sel: Selection, store: LastGreen | None) -> Result:
                 None  # narrowed, or edited while it ran: the verdict is for no tree anyone can name
             )
     except Exception as exc:  # a broken check is a red check, never a silent skip
+        logger.exception("check %s raised", check.name)
         rc, out, key = 1, f"{type(exc).__name__}: {exc}", None
     return Result(check, rc, out, time.monotonic() - began, key)
 

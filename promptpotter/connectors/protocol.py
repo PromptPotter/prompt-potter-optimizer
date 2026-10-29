@@ -42,14 +42,16 @@ class NoopSession:
     __slots__ = ()
 
     async def set_terms(
-        self, http: httpx.AsyncClient, base_url: str, terms: list[str]
+        self, _http: httpx.AsyncClient, _base_url: str, terms: list[str]
     ) -> dict[str, Any]:
         return {"status": "noop", "terms_count": len(terms)}
 
-    async def recover(self, http: httpx.AsyncClient, base_url: str, reply: httpx.Response) -> bool:
+    async def recover(
+        self, _http: httpx.AsyncClient, _base_url: str, _reply: httpx.Response
+    ) -> bool:
         return False
 
-    def resend_refused(self, reply: httpx.Response) -> str | None:
+    def resend_refused(self, _reply: httpx.Response) -> str | None:
         return None
 
 
@@ -76,14 +78,14 @@ SentSpendBound = Callable[[str, Mapping[str, Any]], NodeSpendBound | None]
 PromptDelivery = Callable[[dict[str, Any] | None], Delivery]
 
 
-def _in_the_request(pipeline_params: dict[str, Any] | None) -> Delivery:
+def _in_the_request(_pipeline_params: dict[str, Any] | None) -> Delivery:
     return "request"
 
 
 def cell_envelope_of(seconds: float) -> CellEnvelopeSeconds:
     """One envelope for every cell of a backend whose cells do not vary in length."""
 
-    def envelope(sample: Sample, pipeline_params: dict[str, Any] | None) -> float:
+    def envelope(_sample: Sample, _pipeline_params: dict[str, Any] | None) -> float:
         return seconds
 
     return envelope

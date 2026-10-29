@@ -14,7 +14,7 @@ export function Chip({
 }: {
   on: boolean;
   onClick: () => void;
-  title?: string;
+  title?: string | undefined;
   disabled?: boolean;
   // REQUIRED when `icon` is set — the only accessible name an icon-only chip gets.
   ariaLabel?: string;

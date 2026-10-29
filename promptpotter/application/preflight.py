@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application import optimizers
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.domain.campaign import Compare
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.pricing import route_priced

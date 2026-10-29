@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { CSSProperties } from "react";
 import { pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/SelectionContext";
@@ -154,7 +153,7 @@ function SeriesHoverPopup({
   const top = Math.min(hover.y + 14, vh - 280);
   const isLoaded = sameSampleSet(loadedSet, seedSet);
   return (
-    <div role="tooltip" className="st-hover" style={{ left, top } as CSSProperties}>
+    <div role="tooltip" className="st-hover" style={{ left, top }}>
       <div className="st-hover-head">
         R{hover.round} · order at sample #{hover.sampleId} (step {hover.position}/{hover.total})
       </div>

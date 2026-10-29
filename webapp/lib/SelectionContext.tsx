@@ -3,8 +3,6 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import type { ObserveState } from "@/lib/derivations";
 import type { SelectedCandidate } from "@/lib/types";
 
-export type { SelectedCandidate };
-
 // A node id alone is ambiguous: `promptpotter-self`'s TARGET pipeline reuses the OPTIMIZER's node ids.
 export type NodeScope = "optimizer" | "target";
 

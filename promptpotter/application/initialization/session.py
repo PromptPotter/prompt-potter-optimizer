@@ -5,12 +5,13 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
+from promptpotter.domain.arm_reading import DisplayMetric
+from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, restored_partition
 from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.paired_reading import instrument_of
-from promptpotter.domain.results import DisplayMetric, PointContext
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import HeldBudget
@@ -79,6 +80,8 @@ class LaunchState:
     # Seeded off the cycle's index at init; afterwards written only by `record_intervention`.
     human_intervened: bool = False
     control: RunControl = field(default_factory=RunControl)
+    # The forks this launch's line rebased onto: past `MAX_AUTO_REBASES` a proposal is dropped.
+    rebases: int = 0
     flight: FlightGauge | None = None
     # What admission held for this launch, set at the runner seam BEFORE the book is armed.
     held: HeldBudget | None = None
@@ -125,7 +128,7 @@ class Session:
         return str(self.store.base_dir)
 
     def record_intervention(self, kind: str) -> None:
-        """ADR-0005: the act is banked on the cycle, and every run it scores after grades C."""
+        """decisions.md § 0005: the act is banked on the cycle, and every run it scores after grades C."""
         self.store.campaigns.record_intervention(self.hop, kind=kind)
         self.state.human_intervened = True
 

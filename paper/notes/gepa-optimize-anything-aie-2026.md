@@ -41,7 +41,7 @@ evolves a whole agent file (code, sub-agents, control flow, prompts) and accepts
 parameters. The 🟡 on *Tunes the whole pipeline* must be re-read against it before the capability
 table is quoted in the manuscript. What still separates us is the statistical layer (PoBB, the
 subset-invariant ruler, priced measurements), not the reach of the search. Same conclusion the
-harness-evolution grouping reached ([`../related/related-work.md`](../related/related-work.md) § Agent-harness evolution).
+harness-evolution grouping reached ([`../../docs/research/related-work.md`](../../docs/research/related-work.md) § Agent-harness evolution).
 
 ## 2. The ARC-AGI headline: 32.5% → 89.5%
 
@@ -89,8 +89,7 @@ before quoting it.
 
 ## 3. Experiments this asks for
 
-Ordered by cost. Each follows [`../../docs/research/evidence-to-publish.md`](../../docs/research/evidence-to-publish.md)
-§ What a head-to-head needs: one model stamped from the wire, the same held-out rows, budget matched
+Ordered by cost. Each follows [`../README.md`](../README.md) § The first runs to publish: one model stamped from the wire, the same held-out rows, budget matched
 in spent tokens.
 
 1. **Price the lift against the dial (cheap, decisive).** 2 × 2 on a 50-task slice of ARC-AGI-1

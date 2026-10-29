@@ -9,12 +9,6 @@ from pydantic import Field, ValidationError
 
 from promptpotter import connectors
 from promptpotter.application import optimizers
-from promptpotter.application.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
-    apply_cycle_seed,
-    effective_config,
-)
 from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
     scorer_of,
@@ -46,8 +40,17 @@ from promptpotter.application.optimizer_manifest import (
     resolve_optimizer,
     select_optimizer,
 )
+from promptpotter.application.optimizers.nodes import KnobDraw
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
+from promptpotter.application.scoring.judges.registry import judge_instrument
+from promptpotter.domain.arms import Concluded
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
+from promptpotter.domain.campaign_config import (
+    CampaignConfig,
+    OptimizationConfig,
+    apply_cycle_seed,
+    effective_config,
+)
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey
@@ -80,14 +83,12 @@ from promptpotter.domain.pipeline_schema import (
     reach_map,
 )
 from promptpotter.domain.pool import Access, PoolSource
-from promptpotter.domain.results import Concluded
-from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin
+from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin, ScoringLockedRecord
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.pricing import route_priced
 from promptpotter.infrastructure.llm.registry import default_routes
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_scoring_lock
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     dataset_connector,
@@ -100,7 +101,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import descend_store, owned_campaign
-from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import (
     BadRequestError,
     DatasetAccessError,
@@ -116,10 +116,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.judges import JudgeSpec
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.judges.protocol import JudgeSpec
 
 logger = logging.getLogger(__name__)
 
@@ -334,7 +334,7 @@ def dataset_pipeline_declaration(
     definition = read_dataset_definition(dataset.directory)
     if definition is None:
         return None
-    connector = connectors.registered().get(definition.backend_type)
+    connector = connectors.CONNECTORS.table.get(definition.backend_type)
     if connector is None or connector.pipeline_declaration is None:
         return definition.pipeline
     return overlay_dataset_pipeline(
@@ -644,7 +644,7 @@ def _dataset_of(stores: Stores, campaign: Campaign) -> ResolvedDataset | None:
 
 
 def _criterion_locked[S](stores: Stores, hop: CycleHop, scoring: S) -> S | dict[str, str]:
-    lock = scan_ledger_scoring_lock(stores.campaigns.ledger(hop))
+    lock = stores.campaigns.last(hop, ScoringLockedRecord)
     return lock.locked if lock is not None and lock.declared == scoring else scoring
 
 
@@ -839,7 +839,7 @@ def _served_menu(m: _Merge, params: dict[str, Any], workspace: Path | None) -> C
 
 def optimizer_setup(cfg: CampaignConfig) -> OptimizerSetup:
     selected = select_optimizer(cfg.optimization)
-    members = [optimizers.member(n) for n in selected.member_nodes]
+    members = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes]
     return OptimizerSetup(
         knobs={n: selected.knobs(n).model_dump(mode="json") for n in selected.member_nodes},
         arms_per_round=selected.arms_per_round,
@@ -857,7 +857,7 @@ def optimizer_setup(cfg: CampaignConfig) -> OptimizerSetup:
                         switch=KnobSwitch(node=selected.knob_owner(m, draw.knobs), knob=draw.knob),
                     )
                     for m in members
-                    if (draw := m.draws.get(initializer.pool)) is not None
+                    if isinstance(draw := m.draws.get(initializer.pool), KnobDraw)
                 ],
             )
             for initializer in selected.plan.initializers
@@ -1044,7 +1044,7 @@ class ForkPreviewResponse(StrictModel):
         description=(
             "The overlay picks a responder the campaign's declared `optimizer_narrowing` never "
             "sanctioned, or touches a cost lever, which no permitted set can sanction. True means "
-            "the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) "
+            "the fork is the babysit act (decisions.md § 0005): it needs `campaign.babysit` (404 without it) "
             "and stamps the branch grade C."
         )
     )
@@ -1258,7 +1258,7 @@ def optimizer_knobs(name: str) -> OptimizerKnobsResponse:
     selected = resolve_optimizer(name, {}, gate="off")
     nodes: list[NodeKnobs] = []
     for node in selected.member_nodes:
-        schema = optimizers.member(node).knobs.model_json_schema()
+        schema = optimizers.NODE_MEMBERS.get(node).knobs.model_json_schema()
         declared = selected.declared_knobs(node).model_dump(mode="json")
         rows = [
             _knob_row(key, prop, schema.get("$defs") or {}, declared[key])
@@ -1285,7 +1285,7 @@ class OptimizerEntry(StrictModel):
 
 
 class OptimizerRoster(StrictModel):
-    """The optimizers this install can run, the default first: one per runtime the registry holds."""
+    """The optimizers this install can run, the default first: one per manifest the registry holds."""
 
     default: str = Field(description="What a campaign naming no `optimization.optimizer` runs")
     optimizers: list[OptimizerEntry] = Field(description="The roster, the default first")
@@ -1293,8 +1293,8 @@ class OptimizerRoster(StrictModel):
 
 def optimizer_roster() -> OptimizerRoster:
     default = OptimizationConfig.model_fields["optimizer"].default
-    names = sorted(optimizers.runtimes(), key=lambda n: (n != default, n))
-    origins = optimizers.runtime_origins()
+    names = sorted(optimizers.MANIFESTS.table, key=lambda n: (n != default, n))
+    origins = optimizers.MANIFESTS.origins
     entries = []
     for name in names:
         selected = resolve_optimizer(name, {}, gate="off")
@@ -1355,7 +1355,7 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     # VALUES, never the ledger's stat: a running root appends there on every sample.
     seed = stores.campaigns.read_cycle_seed(campaign.root_hop)
     declaration = stores.campaigns.read_resolved_run(campaign.root_hop).declaration
-    lock = scan_ledger_scoring_lock(stores.campaigns.ledger(campaign.root_hop))
+    lock = stores.campaigns.last(campaign.root_hop, ScoringLockedRecord)
     return (
         campaign.declaration.digest,
         None if lock is None else stable_hash(lock.locked),

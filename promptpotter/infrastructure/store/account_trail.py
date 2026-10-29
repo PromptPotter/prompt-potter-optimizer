@@ -7,11 +7,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    StopOutcome,
+    StopReason,
+    stop_reason_outcome,
+)
 from promptpotter.domain.run_records import (
     AccountEventRecord,
     BankedCommand,
     BankedSubject,
     CommandRecord,
+    Device,
+    RunPhaseRecord,
     TrailTombstoneRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -31,31 +39,62 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 
+RUN_STOPPED = "run_stopped"
+
+
 class TrailLine(NamedTuple):
     at: str
     what: str
-    # Where a command was addressed (campaign/cycle, blank on the workspace); what an account event carried.
+    # Where a command was addressed (campaign/cycle, blank on the workspace); what an account event
+    # carried; a run's stop is its address, then why.
     subject: str
-    # The acting principal: a delegate's own id on a line in its delegator's workspace.
+    # The acting principal: a delegate's own id on a line in its delegator's workspace; blank on a stop.
     actor: str
     # The campaign a command acted on, blank on the workspace, a draft and an account event.
     campaign_id: str
+    # What a sign-in or an opening came from; unset on every other line.
+    device: Device | None = None
 
 
 class _Trail:
-    records: ClassVar[RecordClasses] = (AccountEventRecord, CommandRecord, TrailTombstoneRecord)
+    records: ClassVar[RecordClasses] = (
+        AccountEventRecord,
+        CommandRecord,
+        RunPhaseRecord,
+        TrailTombstoneRecord,
+    )
 
     def __init__(self) -> None:
         self._found: list[TrailLine] = []
         self._banked: set[BankedSubject] = set()
 
     def feed(
-        self, offset: int, record: AccountEventRecord | CommandRecord | TrailTombstoneRecord
+        self, record: AccountEventRecord | CommandRecord | RunPhaseRecord | TrailTombstoneRecord
     ) -> None:
         match record:
+            case RunPhaseRecord(stop_reason=StopReason() as reason) if (
+                stop_reason_outcome(reason) is not StopOutcome.SUCCESS
+            ):
+                said = STOP_REASON_INFO[reason].label
+                self._found.append(
+                    TrailLine(
+                        record.timestamp,
+                        RUN_STOPPED,
+                        f"{said} ({record.detail})" if record.detail else said,
+                        "",
+                        "",
+                    )
+                )
             case AccountEventRecord():
                 self._found.append(
-                    TrailLine(record.timestamp, record.event, record.subject, record.user_id, "")
+                    TrailLine(
+                        record.timestamp,
+                        record.event,
+                        record.subject,
+                        record.user_id,
+                        "",
+                        record.device,
+                    )
                 )
             case CommandRecord():
                 self._found.append(
@@ -82,10 +121,12 @@ def _cycle_lines(cycle_dir: Path, *, inside: str = "") -> list[TrailLine]:
     parent = cycle_dir.parent
     campaign_id = "" if parent.name == DRAFTS_DIR else parent.parent.name
     address = f"{campaign_id or parent.name}/{cycle_dir.name}"
+    where = f"{inside}>{address}" if inside else address
     lines, _ = LedgerIndex.of(CycleLayout(cycle_dir).ledger, _TRAIL_FOLDS).view(_Trail)
     return [
         line._replace(
-            subject=f"{inside}>{address}" if inside else address, campaign_id=inside or campaign_id
+            subject=f"{where}: {line.subject}" if line.subject else where,
+            campaign_id=inside or campaign_id,
         )
         for line in lines
     ]

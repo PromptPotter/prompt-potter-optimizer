@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, fields
 from pathlib import Path
 
@@ -36,6 +37,27 @@ SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(f.name for f in fields(ProviderConf
 
 class OIDCConfigError(ValueError):
     pass
+
+
+_ERROR_CODE = re.compile(r"[a-z_]{1,64}")
+
+
+class CodeExchangeError(RuntimeError):
+    """A refused code exchange: the provider's error CODE travels, never its body."""
+
+    def __init__(self, provider: str, error: str) -> None:
+        super().__init__(f"{provider} code exchange refused: {error}")
+        self.provider = provider
+        self.error = error
+
+    @classmethod
+    def refused(cls, provider: str, status: int, body: bytes) -> CodeExchangeError:
+        try:
+            said = json.loads(body).get("error")
+        except (ValueError, AttributeError):
+            said = None
+        code = said if isinstance(said, str) and _ERROR_CODE.fullmatch(said) else f"http_{status}"
+        return cls(provider, code)
 
 
 def load_provider_config(path: Path) -> ProviderConfigBundle:

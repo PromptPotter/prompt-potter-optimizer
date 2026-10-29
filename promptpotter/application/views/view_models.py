@@ -3,19 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from promptpotter.domain.cells import HardSamples
+from promptpotter.domain.arm_reading import DisplayMetric
+from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.cells import HardSampleOrder, HardSamples
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.phase_views import ViewAnchors
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.results import (
-    DisplayMetric,
-    HardSampleOrder,
-    OptimizerFact,
-    OverlapReading,
-    RunStanding,
-    ScoreSummary,
-)
+from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.ruler import SeriesReading
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import LedgerSpend
 

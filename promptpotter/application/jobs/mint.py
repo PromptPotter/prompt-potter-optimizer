@@ -12,11 +12,6 @@ from promptpotter.application.bench.task_context import (
     commit_task_framing,
     committed_task_context,
 )
-from promptpotter.application.campaign_config import (
-    apply_cycle_seed,
-    declare_run,
-    effective_config,
-)
 from promptpotter.application.datasets.draft_campaign import mint_draft_id
 from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
 from promptpotter.application.jobs.quota import on_free_tier, paid_call
@@ -40,6 +35,7 @@ from promptpotter.application.runner.campaign_ids import (
 )
 from promptpotter.application.scoring.formula.compiler import split_scoring_block
 from promptpotter.application.scoring.formula.matchers import matcher_of
+from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, PartitionRecord, partition_bank
 from promptpotter.domain.campaign import (
     Arm,
@@ -50,10 +46,14 @@ from promptpotter.domain.campaign import (
     RunDeclaration,
     SharedPart,
 )
+from promptpotter.domain.campaign_config import (
+    apply_cycle_seed,
+    declare_run,
+    effective_config,
+)
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.results import PointContext
 from promptpotter.domain.run_records import CycleSeed, DefaultsDrift, OriginSource
 from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -70,8 +70,8 @@ from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
@@ -198,7 +198,7 @@ def resolve_cycle_plan(
         apply_cycle_seed(campaign_config, runs_under),
         dataset,
         pipeline_params,
-        schema,
+        configured.pipeline_schema,
         free=on_free_tier(session.store),
     )
     seed = (
@@ -316,14 +316,12 @@ def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
 def _prompt_axes_only(
     session: Session, campaign_config: CampaignConfig
 ) -> dict[str, NodeSearchNarrowing]:
-    narrowing: dict[str, NodeSearchNarrowing] = {}
-    for node in session.pipeline_schema.declared_nodes:
-        held = campaign_config.optimizer_narrowing.get(node.name, NodeSearchNarrowing())
-        still_open = node.prompt_fields if held.param_keys is None else held.param_keys
-        narrowing[node.name] = held.model_copy(
-            update={"param_keys": [key for key in node.prompt_fields if key in still_open]}
-        )
-    return narrowing
+    return {
+        node.name: campaign_config.optimizer_narrowing.get(
+            node.name, NodeSearchNarrowing()
+        ).model_copy(update={"param_keys": []})
+        for node in session.pipeline_schema.declared_nodes
+    }
 
 
 def fresh_campaign_id(session: Session) -> str:
@@ -455,7 +453,6 @@ async def _mint_after_framing(
                 session.store,
                 session.dataset_name,
                 description,
-                campaign_id=campaign_id,
                 ledger=checkin_ledger,
             )
         logger.info("Committed task framing for %s from its check-in", session.dataset_name)

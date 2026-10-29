@@ -32,7 +32,7 @@ export function CriticalAlertBanner() {
   } else if (noUnit && netDown) {
     bannerStatus = "offline";
     bannerText = "Server unreachable — retrying";
-    bannerHint = netFailure?.message ?? "";
+    bannerHint = netFailure.message;
   }
 
   const { health, connector } = useConnector();

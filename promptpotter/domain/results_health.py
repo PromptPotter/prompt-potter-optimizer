@@ -3,13 +3,10 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Annotated
 
-from promptpotter.domain.results import (
-    DegradationHealth,
-    HealthCause,
-    HealthGrade,
-    RoundResult,
-)
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.round_health import DegradationHealth, HealthCause, HealthGrade
 from promptpotter.domain.scoring import (
     NO_RESULT,
     GradedCell,
@@ -20,13 +17,11 @@ from promptpotter.domain.scoring import (
 from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
-shapes_optimizer_prompt(__name__)
-
 STRUCTURAL_FLAG_RATE: float = 0.30
 DEGRADED_RATE_FLAG: float = 0.20
 CONSECUTIVE_DEGRADED_CRITICAL: int = 3
 UNSCOREABLE_RATE: float = 0.50
-EVIDENCE_STARVED_RATE: float = 0.40
+EVIDENCE_STARVED_RATE: Annotated[float, shapes_optimizer_prompt] = 0.40
 # The share of its panel a round must have SENT before any rate below may grade the pipeline.
 MEASURED_COVERAGE_FLOOR: float = 0.50
 
@@ -69,7 +64,7 @@ def _is_refusal(facts: MeasuredCell) -> bool:
     return bool(_REFUSAL_PATTERN.match(head))
 
 
-UNKNOWN_STEP = "unknown"
+UNKNOWN_STEP: Annotated[str, shapes_optimizer_prompt] = "unknown"
 
 
 def _collect_advisories(facts: MeasuredCell) -> set[str]:
@@ -93,10 +88,12 @@ def _advisory_key(warning: NodeWarning) -> str:
     return f"{warning.step or UNKNOWN_STEP}:{warning.code or 'unknown'}"
 
 
+@shapes_optimizer_prompt
 def terminal_node(facts: MeasuredCell) -> str | None:
     return facts.pipeline.terminal_node
 
 
+@shapes_optimizer_prompt
 def _terminal_llm_shape(facts: MeasuredCell, node: str) -> tuple[str | None, int]:
     usage = facts.pipeline.step_tokens.get(node)
     if usage is None:
@@ -104,11 +101,13 @@ def _terminal_llm_shape(facts: MeasuredCell, node: str) -> tuple[str | None, int
     return (usage.finish_reason, usage.reasoning or 0)
 
 
+@shapes_optimizer_prompt
 def _answered(facts: MeasuredCell) -> bool:
     predicted = facts.predicted.strip()
     return bool(predicted) and predicted != NO_RESULT
 
 
+@shapes_optimizer_prompt
 def ran_to_output_ceiling(facts: MeasuredCell) -> bool:
     """An answer cut at its token ceiling: a miss the prompt's length owns, never infra."""
     node = terminal_node(facts)
@@ -167,6 +166,7 @@ def is_deprecated(facts: MeasuredCell) -> bool:
     return classify_result(facts).deprecates
 
 
+@shapes_optimizer_prompt
 def _failure_kind(step_statuses: Mapping[str, str], warning: NodeWarning) -> str | None:
     """A node that finished ``success`` produced its evidence: a recovered retry is a cost, never a failure."""
     if warning.kind not in ("structural", "transient"):
@@ -220,6 +220,7 @@ def is_degraded(facts: MeasuredCell) -> bool:
     return not facts.errored and row_failure(facts)[0] is not None
 
 
+@shapes_optimizer_prompt
 def evidence_starved_node(rates: dict[str, float]) -> str | None:
     return max(
         (n for n in rates if rates[n] >= EVIDENCE_STARVED_RATE),
@@ -246,7 +247,7 @@ def compute_degradation_health(
     node_failure_rates: dict[str, float] | None = None,
     node_warnings: dict[str, list[str]] | None = None,
     is_origin: bool = False,
-) -> DegradationHealth | None:
+) -> DegradationHealth:
     """Never add a PRECISION clause: a Wilson width is not a failure RATE, and grades every small-n round degraded."""
     counts = _RoundCounts(
         attempted=attempted,
@@ -264,11 +265,9 @@ def compute_degradation_health(
     )
     # A PRECONDITION for the ORIGIN alone: a later short round is re-measured, the origin never is.
     if attempted <= 0 or (is_origin and attempted < counts.panel * MEASURED_COVERAGE_FLOOR):
-        if not is_origin:
-            return None
         return DegradationHealth(
-            grade="critical",
-            cause="origin_unmeasured",
+            grade="critical" if is_origin else "unmeasured",
+            cause="origin_unmeasured" if is_origin else None,
             samples=attempted,
             structural_count=structural_count,
             transient_count=transient_count,
@@ -280,7 +279,9 @@ def compute_degradation_health(
             degraded_rate=0.0,
             consecutive_degraded_rounds=0,
             prior_clean_rounds=prior_clean_rounds,
-            suggested_action=_suggested_action(counts, "origin_unmeasured", None),
+            suggested_action=(
+                _suggested_action(counts, "origin_unmeasured", None) if is_origin else None
+            ),
         )
 
     grade, cause = _grade(counts)
@@ -489,8 +490,8 @@ def _suggested_action(
             )
 
 
-def critical_health_title(round_num: int, health: DegradationHealth | None) -> str | None:
-    if health is None or health.grade != "critical":
+def critical_health_title(round_num: int, health: DegradationHealth) -> str | None:
+    if health.grade != "critical":
         return None
     who = "Degraded origin" if round_num == 0 else f"Round {round_num} degraded"
     return f"{who} — pipeline may be structurally broken"
@@ -499,11 +500,12 @@ def critical_health_title(round_num: int, health: DegradationHealth | None) -> s
 def assemble_prior_healths(
     rounds: Sequence[RoundResult],
     round_num: int,
-) -> list[DegradationHealth | None]:
+) -> list[DegradationHealth]:
     """Oldest→newest: ``_trailing_degraded`` walks it reversed."""
     return [r.health for r in rounds if r.round != round_num]
 
 
+@shapes_optimizer_prompt
 def compute_node_failure_rates(results: Sequence[GradedCell]) -> dict[str, float]:
     total = len(results)
     if total <= 0:
@@ -535,10 +537,10 @@ def _collect_node_warnings(results: Sequence[GradedCell]) -> dict[str, list[str]
     return {step: list(by_code.values()) for step, by_code in seen.items()}
 
 
-def _trailing_degraded(prior_healths: Sequence[DegradationHealth | None]) -> int:
+def _trailing_degraded(prior_healths: Sequence[DegradationHealth]) -> int:
     count = 0
     for h in reversed(prior_healths):
-        if h is None:
+        if h.grade == "unmeasured":
             continue
         if h.grade not in ("degraded", "critical"):
             break
@@ -549,13 +551,13 @@ def _trailing_degraded(prior_healths: Sequence[DegradationHealth | None]) -> int
 def compute_round_health(
     *,
     results: Sequence[GradedCell],
-    prior_healths: Sequence[DegradationHealth | None],
+    prior_healths: Sequence[DegradationHealth],
     is_origin: bool = False,
     # Cells the walk never sent: they have no row in ``results``.
     not_attempted: int = 0,
     # Passed in, never recounted off ``results``: ``runner/round.py`` owns the number the round file carries.
     unscored: int = 0,
-) -> DegradationHealth | None:
+) -> DegradationHealth:
     structural = transient = no_result = holes = 0
     ceiling = sum(1 for r in results if ran_to_output_ceiling(r.facts))
     structural_nodes: dict[str, int] = {}
@@ -585,8 +587,8 @@ def compute_round_health(
     node_failure_rates = compute_node_failure_rates(results)
     node_warnings = _collect_node_warnings(results)
 
-    # A ``None`` prior (a probe round, zero samples) is TRANSPARENT: neither clean nor a chain break.
-    prior_clean = sum(1 for h in prior_healths if h is not None and h.grade == "healthy")
+    # An ``unmeasured`` prior (a probe round, zero samples) is TRANSPARENT: neither clean nor a chain break.
+    prior_clean = sum(1 for h in prior_healths if h.grade == "healthy")
     consecutive = 1 + _trailing_degraded(prior_healths) if structural + transient + holes > 0 else 0
 
     return compute_degradation_health(

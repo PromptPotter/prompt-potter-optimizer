@@ -1,4 +1,4 @@
-"""Why the set is fixed at C0 rather than re-chosen: ``domain/results.py::origin_panel``."""
+"""Why the set is fixed at C0 rather than re-chosen: ``domain/origin_panel.py::origin_panel``."""
 
 from __future__ import annotations
 
@@ -13,6 +13,14 @@ from promptpotter.application.scoring.paired import (
     read_pair,
 )
 from promptpotter.application.scoring.search_point_scorer import reread_cells, score_search_point
+from promptpotter.domain.arms import Cut, Measured, arm_name
+from promptpotter.domain.cell_fold import measured_cells
+from promptpotter.domain.origin_panel import (
+    OverlapReading,
+    PanelTrigger,
+    TriggeredReading,
+    origin_panel,
+)
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     CellSet,
@@ -23,19 +31,8 @@ from promptpotter.domain.paired_reading import (
     PairMember,
     ReadingState,
 )
-from promptpotter.domain.results import (
-    Cut,
-    InRunCells,
-    LineStep,
-    Measured,
-    OverlapReading,
-    PanelTrigger,
-    TriggeredReading,
-    arm_name,
-    best_line,
-    measured_cells,
-    origin_panel,
-)
+from promptpotter.domain.results import InRunCells
+from promptpotter.domain.run_standing import LineStep, best_line
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole, RoleScope
 
 if TYPE_CHECKING:

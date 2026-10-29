@@ -112,7 +112,7 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule[EscalationInputs]] = [
     ),
     EscalationRule(
         name="l1_to_l2",
-        when=lambda s: True,
+        when=lambda _s: True,
         fire=NextAction.FIRE_L2,
         priority=10,
     ),
@@ -139,7 +139,7 @@ CLIMB_RULES: list[EscalationRule[LadderInputs]] = [
     ),
     EscalationRule(
         name="l3_patience_spent",
-        when=lambda s: True,
+        when=lambda _s: True,
         fire=NextAction.STOP_L3_PATIENCE,
         priority=10,
     ),
@@ -154,7 +154,7 @@ HEAL_RULES: list[EscalationRule[LadderInputs]] = [
     ),
     EscalationRule(
         name="l2_landed",
-        when=lambda s: True,
+        when=lambda _s: True,
         fire=NextAction.CONTINUE,
         priority=10,
     ),

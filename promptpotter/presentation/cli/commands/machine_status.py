@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 
+from promptpotter.application import health
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import quota_status
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.domain.phases import StopOutcome
+from promptpotter.presentation.admin_bot import check_health_and_tell
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores
 
 
 async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
     stores = open_stores(args)
-    jobs = JobRegistry.attach()
+    jobs = JobRegistry.attach(stores.jobs_dir)
     status = machine_status(jobs, identity=stores.identity)
     account = quota_status(stores=stores, job_registry=jobs)
     lines = [
@@ -40,4 +44,18 @@ async def cmd_machine_status(args: argparse.Namespace) -> CommandResult:
     return CommandResult(
         data={**status.model_dump(mode="json"), "machine_binds": account.machine_binds},
         human="\n".join(lines),
+    )
+
+
+async def cmd_health(_args: argparse.Namespace) -> CommandResult:
+    checked = await asyncio.to_thread(check_health_and_tell)
+    return CommandResult(
+        data={one.probe.name: one.reading._asdict() for one in checked},
+        # The state leads each line: `deploy-linux/update.sh` reads it.
+        human="\n".join(f"{one.reading.state} {health.row(one)}" for one in checked),
+        outcome=(
+            StopOutcome.FAILED
+            if any(one.reading.state == "broken" for one in checked)
+            else StopOutcome.SUCCESS
+        ),
     )

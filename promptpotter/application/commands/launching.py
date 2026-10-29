@@ -7,11 +7,13 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     mint_diag_sibling,
     mint_operator_fork,
 )
-from promptpotter.application.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.application.commands.dispatcher import (
     Applier,
     CommandCall,
     CommandDispatcher,
+    Dispatched,
+    DispatchedToCycle,
+    DispatchedToDraft,
     refused_on_an_arm,
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
@@ -36,6 +38,7 @@ from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
     resolve_pipeline_for_campaign,
 )
+from promptpotter.domain.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, narrowing_of
@@ -51,19 +54,16 @@ from promptpotter.shared.identity import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.commands.payloads import (
-        MintCampaignPayload,
-        StartCheckinPayload,
-    )
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.command_kinds import (
         ForkCyclePayload,
         ForkSeed,
+        MintCampaignPayload,
+        StartCheckinPayload,
         StartRunPayload,
         StepCyclePayload,
     )
-    from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -115,16 +115,15 @@ def _diag_target(stores: Stores, hop: CycleHop, mode: RunMode) -> CycleHop:
     )
 
 
-def start_run(
-    dispatcher: CommandDispatcher, payload: StartRunPayload, campaign: Campaign, hop: CycleHop
-) -> Applier[object]:
+def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[object]:
+    dispatcher, payload, hop = dispatched.dispatcher, dispatched.payload, dispatched.hop
     if declined := _declined(dispatcher, hop):
         return declined
     return Applier.silent(
         lambda: launch(
             ExistingCycle(
                 _diag_target(dispatcher.stores, hop, payload.mode),
-                campaign,
+                dispatched.campaign,
                 payload.budget,
                 step_rounds=payload.step_rounds,
             ),
@@ -136,12 +135,13 @@ def start_run(
     )
 
 
-def step_cycle(
-    dispatcher: CommandDispatcher, payload: StepCyclePayload, campaign: Campaign, hop: CycleHop
-) -> Applier[object]:
+def step_cycle(dispatched: DispatchedToCycle[StepCyclePayload]) -> Applier[object]:
+    dispatcher, hop = dispatched.dispatcher, dispatched.hop
     if declined := _declined(dispatcher, hop):
         return declined
-    request = ExistingCycle(hop, campaign, Budget(), step_rounds=payload.step_rounds)
+    request = ExistingCycle(
+        hop, dispatched.campaign, Budget(), step_rounds=dispatched.payload.step_rounds
+    )
     return Applier.silent(
         lambda: launch(
             request,
@@ -153,15 +153,19 @@ def step_cycle(
     )
 
 
-def fork_cycle(
-    dispatcher: CommandDispatcher, payload: ForkCyclePayload, campaign: Campaign, hop: CycleHop
-) -> Applier[object]:
+def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier[object]:
+    dispatcher, payload, campaign, hop = (
+        dispatched.dispatcher,
+        dispatched.payload,
+        dispatched.campaign,
+        dispatched.hop,
+    )
     if refused := refused_on_an_arm(campaign):
         return refused
     stores = dispatcher.stores
     campaign_config = resolve_campaign_config(stores, campaign, None)
     seed = parse_cycle_seed(payload.seed, campaign_config, stores, campaign, hop)
-    # ADR-0005 §4 babysit: a steer outside what the node permits; `fork-preview` asks the same call.
+    # The babysit act (decisions.md § 0005): a steer outside what the node permits; `fork-preview` asks the same call.
     disallowed = steers_disallowed_model(campaign_config.optimizer_narrowing, seed.pipeline_overlay)
     if disallowed and not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP):
         logger.warning(
@@ -217,7 +221,9 @@ def _cleanup_failed_fork(stores: Stores, parent_hop: CycleHop, new_cycle_id: str
         logger.warning("fork %s: launch failed and its stub was kept (%s)", new_cycle_id, reason)
 
 
-def mint_campaign(dispatcher: CommandDispatcher, payload: MintCampaignPayload) -> Applier[object]:
+def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[object]:
+    dispatcher, payload = dispatched.dispatcher, dispatched.payload
+
     async def _apply_mint() -> Launched:
         request = FreshMint(
             dataset=offered_dataset(dispatcher.stores, payload.dataset_name),
@@ -240,9 +246,8 @@ def mint_campaign(dispatcher: CommandDispatcher, payload: MintCampaignPayload) -
     return Applier.silent(_apply_mint)
 
 
-def start_checkin(
-    dispatcher: CommandDispatcher, start: StartCheckinPayload, claim: DraftClaim
-) -> Applier[Admitted]:
+def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> Applier[Admitted]:
+    dispatcher, start, claim = dispatched.dispatcher, dispatched.payload, dispatched.claim
     stores = dispatcher.stores
 
     def _admit() -> Admitted:

@@ -143,27 +143,15 @@ def _new_pages(keep: set[str]) -> list[str]:
 
 
 _STALE = (
-    "Doc-ratio check: this working tree changed ~{code} code lines but only "
-    "~{docs} documentation lines. Before stopping, look at whether the docs "
-    "describing what you changed (CLAUDE.md, the per-layer CLAUDE.md, docs/, "
-    "README) are now stale or wrong. Prefer TIGHTENING over adding: delete the "
-    "lines the change made untrue and replace them with something shorter and "
-    "truer — fewer, more accurate lines is the win, not more prose. If the docs "
-    "are genuinely already accurate, say so in one line and stop."
+    "Doc-ratio check: this session changed ~{code} code lines but only ~{docs} doc lines. "
+    "Delete what the change made untrue, per docs/CLAUDE.md § Editing a doc; if the docs "
+    "are already accurate, say so in one line and stop."
 )
 
 _GROWTH = (
-    "Doc-growth check: this working tree ADDED ~{net} net documentation lines{pages}. "
-    "The unit that costs maintenance is the FILE, not the line — every page is "
-    "one more place a single fact can drift out of sync with its siblings. "
-    "Before stopping, check three things. (1) ONE OWNER: does each new fact "
-    "have exactly one, or is it a second copy of something a sibling already "
-    "states? An obligation line pointing at the owner beats a restatement — "
-    "docs/CLAUDE.md § Editing a doc. (2) COULD IT RIDE AN EXISTING PAGE: a new "
-    "file needs a reader whose task it owns end to end, not just a distinct "
-    "topic. (3) DID ANYTHING GET DELETED: a docs pass that only adds is how "
-    "this tree got too big to maintain. If the growth is genuinely warranted, "
-    "say so in one line and stop."
+    "Doc-growth check: this session ADDED ~{net} net doc lines{pages}. One fact, one owner, "
+    "ride an existing page, delete something — docs/CLAUDE.md § Editing a doc. If the growth "
+    "is warranted, say so in one line and stop."
 )
 
 

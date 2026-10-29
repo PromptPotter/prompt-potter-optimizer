@@ -40,7 +40,10 @@ from promptpotter.application.views.render.primitives import (
     display_tags,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
+from promptpotter.domain.arm_reading import ScoreboardRankKey, scoreboard_rank_key
+from promptpotter.domain.arms import Concluded, Cut, Measured, Measuring, Proposed, arm_elimination
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.paired_reading import ArmKey
@@ -51,17 +54,6 @@ from promptpotter.domain.phase_views import (
     ViewAnchors,
 )
 from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
-from promptpotter.domain.results import (
-    Concluded,
-    Cut,
-    Measured,
-    Measuring,
-    Proposed,
-    ScoreboardRankKey,
-    ScoreSummary,
-    arm_elimination,
-    scoreboard_rank_key,
-)
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
@@ -97,7 +89,7 @@ from promptpotter.shared.measurement_context import MeasurementRole
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from promptpotter.application.campaign_config import CampaignConfig
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import Grade, MeasuredCell
 
@@ -126,7 +118,6 @@ class ReadoutProjection(Projection):
         self._round_num = 0
         self._sink = sink
         self.patience = patience
-        self.pipeline_schema = pipeline_schema
         self._display_tags = display_tags(pipeline_schema)
         self.measured_unit = measured_unit
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
@@ -209,18 +200,12 @@ class ReadoutProjection(Projection):
             self._round_best_acc = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
-        # `> 1`, not `> 0`: `resumed_from_round` counts the NEXT round, so a fresh mint is 1.
-        if (
-            isinstance(view, InitExitView)
-            and view.resumed_from_round > 1
-            and self._cycle_dir is not None
-        ):
+        # A `--from` retracted its rounds before INIT exits, so what stands is exactly the prior line.
+        if isinstance(view, InitExitView) and self._cycle_dir is not None:
             standing = scan_standing_rounds(
                 ledger_chain(CycleDir(self._cycle_dir), moment=None)
             ).rounds
-            self._closed = {
-                n: held.close for n, held in standing.items() if n < view.resumed_from_round
-            }
+            self._closed = {n: held.close for n, held in standing.items()}
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
         if record.spend is not None:
@@ -610,7 +595,7 @@ class ReadoutProjection(Projection):
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))
-        if stats := render_round_stats(round_result, self.pipeline_schema, self.measured_unit):
+        if stats := render_round_stats(round_result, self.measured_unit):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)

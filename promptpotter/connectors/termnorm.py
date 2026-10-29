@@ -114,12 +114,9 @@ async def _termnorm_version_check(
     http: httpx.AsyncClient,
     base_url: str,
 ) -> str | None:
-    try:
-        resp = await http.get(f"{base_url}/status")
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
-    except Exception:
-        return None
+    resp = await http.get(f"{base_url}/status")
+    resp.raise_for_status()
+    data: dict[str, Any] = resp.json()
     for key in ("version", "revision", "git_sha"):
         val = data.get(key)
         if val:

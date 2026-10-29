@@ -55,7 +55,7 @@ def main() -> int:
     assert paths.checkin_manifest_path().is_file(), "check-in manifest absent from the wheel"
 
     for name, value in (
-        ("DEFAULT_PROJECTS_ROOT", paths.DEFAULT_PROJECTS_ROOT),
+        ("default_projects_root()", paths.default_projects_root()),
         ("env_file_path()", paths.env_file_path()),
     ):
         assert value.is_relative_to(home_path), f"{name} = {value}, expected under {home_path}"
@@ -76,7 +76,7 @@ def main() -> int:
     from promptpotter.infrastructure.store.stores import build_stores
     from promptpotter.shared.identity import default_identity
 
-    store = build_stores(default_identity(), projects_root=paths.DEFAULT_PROJECTS_ROOT)
+    store = build_stores(default_identity(), projects_root=paths.default_projects_root())
     assert store.base_dir.is_relative_to(home_path), f"store rooted at {store.base_dir}"
     assert store.install_datasets_root == bench
 

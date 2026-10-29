@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from pydantic import Field
 
 from promptpotter.application.mask.record import MaskCycle, MaskReading, MaskRecord, MaskRound
-from promptpotter.domain.results import ScoreboardRankKey, scoreboard_rank_key
+from promptpotter.domain.arm_reading import ScoreboardRankKey, scoreboard_rank_key
 from promptpotter.domain.strict_model import FrozenModel
 
 if TYPE_CHECKING:

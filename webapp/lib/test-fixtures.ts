@@ -15,6 +15,7 @@ import type {
   HierarchyState,
   HierarchyStep,
   HierarchyStat,
+  BenchStat,
   HierarchyTag,
   LiveCandidate,
   Measured,
@@ -35,7 +36,7 @@ function envelope(): {
   lede: null;
   caveat: null;
   tags: HierarchyTag[];
-  stats: HierarchyStat[];
+  stats: (HierarchyStat | BenchStat)[];
   children: never[];
 } {
   return { lede: null, caveat: null, tags: [], stats: [], children: [] };
@@ -449,7 +450,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     rounds: [],
     overlap_line_round: null,
     overlap_line_n: null,
-    bench_score: null,
     verification: [],
     composite_fitness_formula: null,
     composite_fitness_weights: null,
@@ -508,7 +508,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
   };
 }
 
-// Mirrors `domain/results.py::candidate_label`; fixtures only — production reads the served label.
+// Mirrors `domain/arms.py::candidate_label`; fixtures only — production reads the served label.
 export const servedLabel = (round: number, idx: number) =>
   round === 0 ? "C0" : `C${round}.${idx + 1}`;
 
@@ -538,7 +538,7 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
     verdict_reason: null,
     candidates: [],
     selection: [],
-    health: null,
+    health: health("healthy"),
     health_alert: null,
     overlap: unreadOverlap(),
     overlap_line: [],

@@ -1,164 +1,109 @@
 # CLAUDE.md
 
-> Read [`docs/architecture.md`](docs/architecture.md) first — §0 + §0.5 are what every PR measures against. Don't restate here.
+> Read [`docs/architecture.md`](docs/architecture.md) §0 + §0.5 first — what every PR measures against.
 
 ## What this is
 
-PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. **Orchestration is the product — backends are pluggable and read-only.** Node tunables ride a per-call overlay (`dataset.yaml::pipeline.nodes.{name}.config`).
+PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. **Orchestration is the product; backends are pluggable and read-only** — node tunables ride the per-call overlay ([`promptpotter/assets/datasets/CLAUDE.md`](promptpotter/assets/datasets/CLAUDE.md) § Sole route).
 
-**Our setting is the cloud team-online deployment (tier 3), NOT the local-secure one (tier 2)** — treat cloud/team as the default operating context in everything we build ([`deploy-linux/`](deploy-linux/): Cloudflare tunnel + open OIDC signup + a per-account spend ceiling). What shipped and what is in flight: [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+**The default operating context is the cloud team-online deployment (tier 3)**, not local-secure (tier 2): [`deploy-linux/`](deploy-linux/) — Cloudflare tunnel, open OIDC signup, a per-account spend ceiling.
 
-**Every run either OPTIMIZES (anything on disk that helps is admissible) or COMPARES (a controlled `--arm`: it reads only what a fresh run of itself would) — ask which before touching any mechanism that reads past the run.** Opposite rules, one predicate: [ADR-0009](docs/adr/0009-optimize-or-compare.md).
+**Every run OPTIMIZES (anything on disk that helps is admissible) or COMPARES (a controlled `--arm` reads only what a fresh run of itself would) — ask which before touching any mechanism that reads past the run** ([`docs/decisions.md`](docs/decisions.md) § 0009).
 
-**Origin = the campaign root = C0**, and for a fork the point it branches *from*. An *individual/candidate* is a configuration (both are `OptSearchPoint`). **The general relation is *parent*** — the individual a candidate was mutated from, and each arm's `reference_id`: the origin at round 0, the prior winner after it.
+**Origin = campaign root = C0** (for a fork, the point it branches from). An *individual/candidate* is a configuration (`OptSearchPoint`); its **parent** is what it was mutated from — each arm's `reference_id`.
 
-**Fitness is never one fixed number — always ask "under which formula?"** It is formula-relative (**active** / **mask**, picked by a **lens** / **replay**) and mode-relative (`measured` subset vs `all`). Every score — the active fitness, any alternative formula or mode, the hard-sample sort — is computed and **served by the backend; the webapp never recomputes.** Depth: [`docs/architecture.md`](docs/architecture.md) §0.5 (Composite-fitness resolution chain) + [`docs/concepts/scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
+**Fitness is formula-relative and mode-relative; the backend serves every score** — owned by architecture.md §0.5.
 
-⚠️ **Where the selector elects on ability (`Selector.elects_on == "ability"` — potter's), a round is won on θ, not accuracy — when the operator reads the accuracy column, say so.** The bench stamps θ on every optimizer's arms, but a peer's selector elects on its own objective, so none of this paragraph applies there. Subsets move between rounds and PoBB truncates arms at different depths, so a lower-accuracy winner is normally *correct*: push back rather than accept the premise. **That pushback is wrong wherever the level series or the arm carries a `ThetaCaveat`** (`domain/ruler.py` — the enum is the roster), SERVED so no surface re-decides one; several are SILENT, every number still rendering. **Read the round's `overlap` line before arguing either way** — C0 and each new best since, on one shared set of cells, needing no ruler. Each caveat's meaning, derivation and what stays readable under it: [`docs/methods/verdict-resolution.md`](docs/methods/verdict-resolution.md) § Reading a round.
+⚠️ **Name the column before you quote or defend a number** — owned by [`docs/methods/verdict-resolution.md`](docs/methods/verdict-resolution.md) § Reading a round: an `ability` election is won on θ, not accuracy, unless a `ThetaCaveat` is served; `improved` is a bare point estimate, `rounds_to_separable` is what a result quotes.
 
 ## First — decide what KIND of ask this is, then load for it
 
-**This repo is not only code.** Launching a campaign, diagnosing a live run, editing a prompt, changing the engine, changing the webapp and cutting a dataset load almost **disjoint** context — reading everything is not the answer. Each row is *what to load*, then the **symptom** that kind produces when it goes wrong — the cure lives in the file the row points at, never in this table.
+| The ask | Load |
+|---|---|
+| Run / watch a campaign | `/potter-run` · the cycle's `readout.log` · [`persistence-and-state.md`](docs/operations/persistence-and-state.md) · [`observability.md`](docs/operations/observability.md) |
+| Diagnose a live or stuck run | [`persistence-and-state.md`](docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run — ledger first, mtimes last |
+| L4 / `promptpotter-self` | [`l4-outer-loop.md`](docs/specs/l4-outer-loop.md) · `/potter-self` · [`optimizers/potter/CLAUDE.md`](promptpotter/application/optimizers/potter/CLAUDE.md) · [`dispatch-hub.md`](docs/developer/dispatch-hub.md) |
+| Dataset / benchmark | [`promptpotter/assets/datasets/CLAUDE.md`](promptpotter/assets/datasets/CLAUDE.md) · [`datasets.md`](docs/operations/datasets.md) (adding one; § The model a dataset runs) |
+| Engine code (Python) | architecture.md §0 + §0.5 · the one layer's `CLAUDE.md` · [`conventions.md`](docs/developer/conventions.md) · [`adding-a-surface.md`](docs/developer/adding-a-surface.md) · [`tests/CLAUDE.md`](tests/CLAUDE.md) before any test |
+| Does my change move what the loop decides? | [`offline-run.md`](docs/developer/offline-run.md) |
+| Changed the formula / PoBB / the engine: carry over or fork? | [`mask-projection.md`](docs/operations/mask-projection.md) |
+| How a layer heals a failure | [`self-healing-internals.md`](docs/developer/self-healing-internals.md) |
+| Access / security | [`access-model.md`](docs/operations/access-model.md) |
+| Variation, pools, recombining optimizers | [`docs/decisions.md`](docs/decisions.md) § 0007 · [`variation-and-pools.md`](docs/specs/variation-and-pools.md) · [`roadmap.md`](docs/specs/roadmap.md) § Variation and pools |
+| An outside source | [`docs/research/CLAUDE.md`](docs/research/CLAUDE.md) · [`landscape.md`](docs/research/landscape.md) |
+| Webapp code | [`webapp/CLAUDE.md`](webapp/CLAUDE.md) · [`frontend-surface-contract.md`](docs/specs/frontend-surface-contract.md) § Invariants · `/design` |
 
-| The ask sounds like | Load | How this kind goes wrong |
-|---|---|---|
-| **Run / watch a campaign** — "run bbeh", "start it", "how's it going" | `/potter-run` · the cycle's `readout.log` · [`persistence-and-state.md`](docs/operations/persistence-and-state.md) (the verbs, resume/rewind/fork) · [`observability.md`](docs/operations/observability.md) (what is traced, the P(best) stream) | Fired and left; config edited mid-flight. |
-| **Diagnose a live or stuck run** — "it's hung", "why did it stop" | [`persistence-and-state.md`](docs/operations/persistence-and-state.md) § Diagnosing a live or stuck run — the triage order, the phase vocabulary, liveness; then § Recovery for the verb | Mtimes read first, so a deliberate pause looks like a crash. |
-| **L4 / `promptpotter-self`** self-improvement, the optimizer's own business logic, prompts and configurations alike. | [`l4-outer-loop.md`](docs/specs/l4-outer-loop.md) (what is true) · `/potter-self` (what to do) · [`optimizers/potter/CLAUDE.md`](promptpotter/application/optimizers/potter/CLAUDE.md) · [`dispatch-hub.md`](docs/developer/dispatch-hub.md) | A leader believed from a panel that cannot resolve arms. |
-| **Dataset / benchmark work** | [`promptpotter/assets/datasets/CLAUDE.md`](promptpotter/assets/datasets/CLAUDE.md) | A row's slot read as the sample it holds. |
-| **Engine code (Python)** | [`architecture.md`](docs/architecture.md) §0 + §0.5 · the ONE layer you touch, indexed by [`promptpotter/CLAUDE.md`](promptpotter/CLAUDE.md) · [`conventions.md`](docs/developer/conventions.md) · [`adding-a-surface.md`](docs/developer/adding-a-surface.md) § for the kind of thing you are adding · [`tests/CLAUDE.md`](tests/CLAUDE.md) BEFORE a test: three axes admit one, it rides one of six files, the ledger counts both | Green locally, red in CI — gated in the wrong env. A test file per feature. |
-| **Variation, pools, recombining optimizers** — "crossover", "genetic", "use CAPO's X in potter" | [`ADR-0007`](docs/adr/0007-one-loop-shared-members.md) · [`variation-and-pools.md`](docs/specs/variation-and-pools.md) · [`roadmap.md`](docs/specs/roadmap.md) § Variation and pools (its Decided list, then the stage in hand) | A feature built inside one optimizer's package. A decided choice re-asked. |
-| **Reading an outside source** — a paper, a peer, a benchmark, "what does X report" | [`docs/research/CLAUDE.md`](docs/research/CLAUDE.md) · [`landscape.md`](docs/research/landscape.md) (where a peer is recorded first) | A fact recalled, not read, written down as if read. |
-| **Webapp code** | [`webapp/CLAUDE.md`](webapp/CLAUDE.md) · [`frontend-surface-contract.md`](docs/specs/frontend-surface-contract.md) § Invariants · `/design` | A number computed in the browser. |
-
-Ask fits no row, or you need one fact rather than a task's whole surface? The question→file table is [`docs/CLAUDE.md`](docs/CLAUDE.md) § Anchor docs for hot questions.
-
-**Two pointer kinds below, deliberately not merged.** A `§` names a PLACE to go read. A `` `<tag>` `` names a delimited block you recall whole — cross-linked from inside other blocks, and cited by name from source (`complexity_ledger.py`, `seed_screen.py`), so it is an identifier, not a location. Don't convert one into the other.
-
-## Load-bearing
-
-What this file owns, and where each rule is stated. Names only — the section is the text.
-
-- Ask optimize-or-compare before touching a mechanism → § What this is
-- Classify the ask before loading → § First — decide what KIND of ask this is, then load for it
-- Delete shims, fallbacks and redundant paths → § STOP — no backward compatibility, ever
-- Never commit or push unprompted → § Conventions
-- Reach for a doctrine by its trigger → § Working principles
-- A campaign does not own its measurements → § The archive is not scoped by campaign
-- Answer every question before adding a concept → § Pre-flight gate
-- Say which column a measured number is in → § The closing directive
-- Print every operations command you invoke → § Commands
-- Per-layer contracts — load only yours → § Pointers
-
-## The archive is not scoped by campaign
-
-**A row is filed under the dataset it MEASURED, never the campaign that paid for it** — owned by [`infrastructure/store/CLAUDE.md`](promptpotter/infrastructure/store/CLAUDE.md) § The archive is not scoped by campaign; count with its command before any per-campaign disk claim.
+**The archive is filed by the dataset a row MEASURED, never the campaign that paid for it** — [`infrastructure/store/CLAUDE.md`](promptpotter/infrastructure/store/CLAUDE.md) § The archive is not scoped by campaign.
 
 ## STOP — no backward compatibility, ever
 
-Zero released versions, zero stale on-disk data — nothing to be compatible with. **This is the rule that gets ignored most often.**
+Zero released versions, zero data worth keeping. **The most-ignored rule here.** Delete on sight, no ask, no TODO: shims, fallback chains, breadcrumb comments, a second mechanism beside the canonical one. Consolidate small duplications on sight; a change that could ride an existing channel does. **This covers on-disk shape**: design the right shape, then wipe or migrate the data — count it first (`ls .promptpotter/projects/*/campaigns`), never recall it.
 
-Delete on sight — don't ask, don't TODO, don't "remove later":
-- **Shim code**, **Fallback chains**, **Breadcrumb comments**, **Redundant mechanisms** — fold it into the canonical mechanism, never add beside it.
-- **Names: distinct + self-describing.** Grep for collisions; a name that could mean three things gets renamed now — naming is cheap. Two failures beyond collision, both found by asking *can a reader pinpoint the concept from this name alone?* — (1) **a second word for something the repo already names** is a deletion, not a synonym: check what the operator already sees on screen and on disk before coining one; (2) **a name that stopped describing its contents** as the module grew under it. Renaming a module means renaming its doc, its `CLAUDE.md` row and its prose in the same commit — a code/doc name split is the drift, not the fix.
-
-**Lean to suspicion** — correct small consolidations on sight, however small, whether or not they fit the arc's main subject. When a change *could* ride an existing channel, assume it *should*, and collapse redundant paths you pass mid-task instead of noting them for later.
-
-**This covers ON-DISK SHAPE, not just code.** Do not leave a bad shape alone because data exists in it; **rearchitect the right shape, then delete or migrate the data to fit** — wipe the store, restamp it, or partially both. Shaping persistence now is far cheaper than after release, **so a design decision must never be bent around what happens to be on disk today**. Measure whether the data is worth keeping (is the cache ever hit? is the field derivable from what sits beside it?), then act on the answer.
-
-**Before invoking migration caution, COUNT the data — do not recall it:** `ls .promptpotter/projects/*/campaigns` answers in one command whether anything would actually have to migrate.
+**Names are distinct and self-describing.** Grep for collisions; a second word for something the repo already names is a deletion, not a synonym; a name that stopped describing its contents is renamed with its doc and `CLAUDE.md` row in the same commit.
 
 <root-fix>
-When a fix would compensate for something an upstream layer should already have made true, the fix belongs upstream — not at the site where the symptom shows up. **Ship the root, never the patch, and do not offer the patch as an option.** One solo developer, ample resources, no backward compatibility: "it is multi-arc", "it is an identity change", "it touches N modules" are never reasons to keep a bridge — do the whole refactor in the same pass, on-disk shape included. A bridge is a join or fallback over an upstream wrongness, a relabel over a mixed concept, a field no one reads, a helper beside the mechanism instead of replacing it, a callable or flag passed in so a caller can steer what the callee should own. The target is backbones and modules with clean seams and **zero indirection**. A sub-agent that reports "kept the bridge, filed the root" is sent back to do the root.
-A fix at N sites is the model serving the wrong shape — realign it and let the sites fall out. Net prose growth in a bug-fix diff is a SIGNAL to re-read the diff, never a proof: a root fix earns a test and states the corrected mechanism, and both are lines a patch never spends.
+**A fix that compensates for something an upstream layer should make true belongs upstream — ship the root, never the patch, and never offer the patch as an option.** "Multi-arc", "identity change" and "touches N modules" are not reasons to keep a bridge: a join or fallback over an upstream wrongness, a relabel over a mixed concept, a field no one reads, a helper beside the mechanism, a callable or flag passed so a caller steers what the callee should own. A fix at N sites means the model has the wrong shape — realign it. A sub-agent that "kept the bridge, filed the root" is sent back.
 </root-fix>
 
 ## Working principles
 
-*Situational* guardrails against recurring AI blind spots. The trigger and the rule are here; the evidence behind each is [`docs/developer/reasoning-doctrine.md`](docs/developer/reasoning-doctrine.md) — open the one block whose trigger fired.
+**Autonomy has two modes; `CLAUDE.local.md` (gitignored) picks one.**
+- **careful** (default): verification up to ~$0.30 (a probe, an A/B, a `seed-screen`, a re-measure) runs without asking; above that, and anything minting a cycle (`new` / `resume` / `promptpotter-self`), asks.
+- **operator** (`autonomy: operator` + `daily_spend_cap_usd`): launch, resume, pause and relaunch campaigns (backgrounded, stdout to `.scratch/`, supervised), start needed services, spend up to the day's cap; report each command and its cost.
+- **Both ask** for a commit, a push, `compact-archive purge-cold --apply`, and any change to the live box (reading it is free: `/potter-box`).
 
-**Autonomy has two modes, and `CLAUDE.local.md` (gitignored, one per machine) picks one.**
-- **careful — the default, and what a fresh clone gets.** VERIFICATION up to ~$0.30 needs no approval (a probe, an A/B, a `seed-screen`, a re-measure): run it and report the number. Above that, and for anything minting a cycle (`new` / `resume` / any `promptpotter-self` run), ask. The same bound decides whether cheap undone work is reported or simply done. **Tell a new user once that operator mode exists** and that it is switched on by writing it into `CLAUDE.local.md`.
-- **operator — `autonomy: operator` + `daily_spend_cap_usd` in `CLAUDE.local.md`.** Launch, resume, pause, fix-and-relaunch campaigns (backgrounded, stdout to a log under `.scratch/`, supervised), start the services a task needs (Docker, a backend), and spend up to the day's cap across everything without asking. Decide, act, report what was done with its command and cost.
-- **Both modes still ask** for a commit, a push, `compact-archive purge-cold --apply`, and anything that changes the live box — reading it is free (`/potter-box`).
-
-- **the operator bounded ANY budget axis** → `<one-budget>`: a limit on one axis binds **all** of them, both directions — "don't spend more" bounds the clock, "we don't have five hours" bounds the dollars. Price a proposal in the axis they named *and* the ones they didn't; trading one for another is an increase, asked for explicitly. When the budget binds, get more from measurements already paid for.
-- **a number tempts "cannot be improved"** → `<reachable-by-default>`: every task is improvable by a good enough optimizer — the base assumption. Write what the tried prompts did, never "capability limit" or "no prompt can".
-- **slow / costly / token-heavy LLM call, OR adding anything to a prompt** → `<simplify-the-problem>`: tighten the prompt so the model doesn't *need* the tokens — the timeout, cap and provider are safety rails, not the fix. **Length is a quality tax, not only a bill**, so this fires before anything is slow. Attribute a real payload per block before diagnosing, and count the response JSON Schema: it is prompt text.
-- **labelling a change "refactor" / LOC work** → `<surface-ledger>`: run `python scripts/complexity_ledger.py` (the ratchet is `gate.py --only surface-ledger`). It prices DECLARED surface, so it refuses a pass that adds a module, a knob, a served field or an injection while calling itself a simplification — and a FLAT total falsifies nothing, since folding helpers moves no name it can see. The ratchet asserts EQUALITY, so every move costs a baseline edit and a written reason.
-- **planning, scoping, reviewing or ranking ANY change — an arc, a stage, a fix, a brief** → `<next-change>`: the target is the cost of the next change, and the next, and the one after those — state that direction in the plan before its findings. Score by sites a probe change touches before → after (rename a served field, add a prompt node field, add an optimizer member) and by test churn; lines and the ledger are reported, never the goal. Extra lines that remove a place a fact lives are in; a compaction the next refactor undoes is out.
-- **changed what the engine DECIDES, added a capability at one entry point, or CAUGHT one rule implemented twice** → `<entry-point-parity>`: five ways in — CLI, the `/potter-run` skill, the embedded launch (`application/embedded_run.py`), REST API, webapp — and a capability reaching only the one you were editing is half-built. Teach a new value, never dump it. **Periphery instead of parity is urgent the moment it is seen**, and its root is a layer boundary, so the fix moves the shared piece down into `application/` rather than patching the copy.
-- **reaching for the shell, a sub-agent, or a wait** → `<wall-clock>`: a shell call carries a fixed toll the file tools do not, so batch shell work and never spend it on something `Read`/`Grep`/`Edit` does. A sub-agent costs minutes and its token bill grows with the square of its length, so a brief covers ONE seam and N searches go out in ONE message or not at all. Never `sleep`-poll — background it and let the notification arrive. Iterate on the one check that owns what you touched; the gate is what you run once. With several writers in one tree: cap them, an overseer beside every pass; gates queue themselves, so only `tests_owning.py --run` and a by-hand `offline_run.py` close centrally.
-- **about to open a file you'll WORK in, a diff, or search across >3 files** → `<read-once>`: a narrow read *feels* frugal and isn't — every line in the window is re-read on each later call, so N pokes cost N times. Send independent tool calls in ONE message; **never re-read an unchanged file**; read whole at four-plus touches, except past ~300 lines (`.claude/hooks/digest_large_read.py` returns the map): read by `offset`/`limit`; never read file content through `sed`/`cat`/`head`; size a diff with `--stat`, then open one path at a time; **never `print` a parsed JSON document** — `dashboard.json` is indented on disk, so `Grep` its key or `Read` a slice, and select named keys from a `.jsonl` record; delegate a >3-file search and ask for the verdict, not the excerpts.
+- **the operator bounded ANY budget axis** → `<one-budget>`: a limit on one axis binds all of them, both directions. Price a proposal in every axis; trading one for another is an increase, asked for. When the budget binds, get more from measurements already paid for.
+- **a number tempts "cannot be improved"** → `<reachable-by-default>`: every task is improvable by a good enough optimizer. Write what the tried prompts did, never "capability limit"; a flat result is first a fact about the proposer, its evidence, the instrument or the election.
+- **slow / costly LLM call, OR adding anything to a prompt** → `<simplify-the-problem>`: tighten the prompt so the model needs fewer tokens; timeout, cap and provider are rails, not the fix. Length is a quality tax. Attribute one real payload by block first — the response JSON Schema is prompt text.
+- **labelling a change "refactor"** → `<surface-ledger>`: `python scripts/complexity_ledger.py`; each row of the gate's `surface-ledger` check is a ceiling, so a raise edits the baseline with its reason in the commit body, and a "refactor" may not raise it.
+- **planning, scoping, reviewing or ranking any change** → `<next-change>`: the target is the cost of the next changes; state that direction first. Score by sites a probe change touches before → after (rename a served field, add a prompt node field, add an optimizer member) and by test churn; lines are reported, never the goal.
+- **changed what the engine DECIDES, added a capability at one entry point, or caught one rule implemented twice** → `<entry-point-parity>`: five entry points — CLI, `/potter-run`, the embedded launch (`application/embedded_run.py`), REST API, webapp — share one orchestration layer. Parity is part of done; a new value reaches the operator taught on an existing channel, never dumped. A rule spelled twice across adapters is urgent: move the shared piece down into `application/`, leave thin shells. Sample look-ahead is browser-only by design ([`presentation/CLAUDE.md`](promptpotter/presentation/CLAUDE.md) § Sample look-ahead).
+- **reaching for the shell, a sub-agent, or a wait** → `<wall-clock>`: one batched call, N sub-agents in ONE message, never a sleep-poll; iterate on `gate.py --changed` / `--only NAME`.
+- **opening a file you'll WORK in, or searching >3 files** → `<read-once>`: read it whole once, independent calls in ONE message; a lookup that missed fixes the pointer that should have answered it.
 
 ## Commands
 
 ```bash
-# Every `python` below is the repo venv (`.venv/Scripts/python.exe` | `.venv/bin/python`). Bare `python` refuses at
-# `import promptpotter`, naming the core dependencies it lacks; `gate.py` re-execs into its own venv instead,
-# and refuses to sync a `.venv` junctioned from another tree — that venv is its owner's.
-python scripts/gate.py                                       # once first — it builds `.venv` from `uv.lock`. EVERY check CI runs, in the locked env. --py / --web to halve it, --only NAME for the one check that owns what you touched
-python scripts/gate.py --release                             # BEFORE cutting a release: the dashboard lock against npm's advisory DB + every open Dependabot alert. Network-bound, so never in the default run
-git config core.hooksPath .githooks                           # one-time per clone: `gate.py --staged`, the same list scoped to what you staged
-python -m promptpotter new <name>                            # fresh: mint campaign+root cycle from promptpotter/assets/datasets/<name>/, run from round 0
-python -m promptpotter new <file.csv> --set task_description=…  # fresh from RAW file: ingest → resolve origin check-in → run
-python -m promptpotter resume                                # resume active cycle; Ctrl+C: 1st pauses (resumable, exit 130), 2nd force-quits
-python -m promptpotter resume --from N                       # rewind in place
-python -m promptpotter resume --fork-on-divergence           # sibling cycle at divergence point
-python -X utf8 -m uvicorn promptpotter.main:app --port 8001  # API + webapp control plane at the root (http://localhost:8001/)
+# `python` = the repo venv (.venv/Scripts/python.exe | .venv/bin/python); bare python refuses at import.
+python scripts/gate.py                       # every CI check in the locked env (builds .venv first); --py / --web / --only NAME / --changed
+python scripts/gate.py --release             # before a release: npm advisories + open Dependabot alerts
+git config core.hooksPath .githooks          # once per clone
+python -m promptpotter new <name>            # fresh campaign from promptpotter/assets/datasets/<name>/
+python -m promptpotter new <file.csv> --set task_description=…
+python -m promptpotter resume                # Ctrl+C once pauses (exit 130), twice force-quits; --from N rewinds; --fork-on-divergence
+python -X utf8 -m uvicorn promptpotter.main:app --port 8001   # API + webapp at http://localhost:8001/
 ```
 
-**`-X utf8` on the server is load-bearing**, and `PYTHONUTF8=1` is the same switch. A cp1252 process serves every read but refuses every container-backed launch, so the box looks healthy until the operator presses Play. The boot banner says so when the posture is wrong.
+**`-X utf8` is load-bearing**: a cp1252 server serves every read and refuses every container-backed launch.
 
-**Print every operations command you invoke, verbatim, in the reply that reports it.** The operator reads the verb, the dataset and the flags — a number with no command behind it cannot be checked, re-run or corrected mid-flight. This covers `python -m promptpotter …` and the maintenance verbs; container and shell plumbing (`docker`, `curl`, `ls`) stays out. **Showing the command is not handing it over** — a verb that is yours to run stays yours, printed beside its result; quoting one for the operator to type is for the cases that genuinely need their hands (an interactive login, spend past the autonomy mode's bound).
+**Print every operations command you invoke, verbatim, beside its result** (`python -m promptpotter …` and maintenance verbs; not `docker`/`curl`/`ls`). Showing it is not handing it over.
 
-`new` and `resume` are the loop-mint verbs. Beside them sit lifecycle, run-control (`pause`, `set-limits`, `cancel-queued`, `skip-searchpoint`, `step-cycle`, `origin-gate`, `submit-arms`, `bench`), manifest-edit, diagnostic (`verify`/`ab`/`noise-floor`/`seed-screen`) and maintenance (`reindex`/`restamp`/`compact-archive`) verbs. **Two facts about the set matter here; everything else is [`persistence-and-state.md`](docs/operations/persistence-and-state.md)'s:** the read VERBS are the four whose reading is in no file — `evidence` (a comparison ACROSS subjects), `cycles` (run state, derived at each read), `machine-status` (occupancy and the queue) and `trail` (what an account did, merged across its ledgers) — and every other read is opening the tree. And `compact-archive purge-cold --apply` is the only verb that destroys paid measurement.
-
-**The project file tree IS the dashboard**, alongside a webapp control plane at the root (Next.js at `webapp/`) polling the active cycle's `dashboard.json` and issuing control verbs through `POST /commands/{kind}`. Every run's readout, whatever launched it, is written ANSI-stripped to **`cycles/{cycle_id}/readout.log`**, one per cycle so parallel runs never share one, and the gitignored `logs/latest-readout-path.txt` names the newest terminal launch's — read the readout instead of asking the operator to paste console output. Onboarding: install → restart VS Code → `/potter-run`.
-
-The **front door is a browser chat** — a human-in-the-loop copilot: the operator converses, the Potter posts its work into the thread (tool calls, web search, each round as it lands), and decisions surface as buttons that fire existing control-plane verbs. The chat is a **canonical agent-chat template** built on a generic activity taxonomy — keep the core (thread model + activity stream + transport), delete the optimizer panes. Contract: [`docs/specs/chat-foundation.md`](docs/specs/chat-foundation.md).
+The verbs are [`persistence-and-state.md`](docs/operations/persistence-and-state.md)'s. **The read verbs are the four whose answer is in no file**: `evidence`, `cycles`, `machine-status`, `trail`; every other read is opening the tree. **The file tree is the dashboard**: each run writes `cycles/{cycle_id}/readout.log` — read it instead of asking for console output.
 
 ## Conventions
 
-- Full style + code-shape + git rules, and the four banned words → [`docs/developer/conventions.md`](docs/developer/conventions.md).
-- **Git — don't commit by default:** **never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask). **Sole standing exception:** where a project instruction already grants autonomous commits.- **Vocabulary:** say "node" never service/building-block; **"optimizer prompt" never "meta-prompt"** — a prompt the optimizer *runs on*, whose opposite is the **target prompt** it *produces* during optimization (`OptSearchPoint` vs `JobSearchPoint`); for L4 say **outer/inner** (position) and **self-optimization** (the arrangement), never "meta"; **"run init" / the INIT phase, never "bootstrap"** — the chain from `new`/`resume` to round 1 (`application/initialization/`), which the operator already sees as `INIT` / `✓ Initialized`; the word survives ONLY for machine provisioning (`deploy-linux/bootstrap.sh`) and external proper nouns (DSPy `BootstrapFewShot`); domain framing = evolution (generation/population/fitness/mutation/selection/individual).
-- **Sample look-ahead is browser-only, and the ABSENCE is the boundary** — the one deliberate `<entry-point-parity>` inversion, so a missing CLI verb / config key / dataset knob is the gate, never an oversight to fix. Why it is declared rather than merely unimplemented: [`presentation/CLAUDE.md`](promptpotter/presentation/CLAUDE.md) § Sample look-ahead.
-- **Fewest dependencies possible** in both repos — reach for the stdlib or a small hand-rolled helper before adding a package; every new dependency must earn its place. **Core is the engine; a surface is an extra** — owned by [`ADR-0006`](docs/adr/0006-embeddable-core-and-extras.md), which settles the boundary on MEASURED reachability rather than on argument.
+- Style, code shape and git: [`docs/developer/conventions.md`](docs/developer/conventions.md).
+- **Never `git commit` or `git push` unless the operator says so** (a commit ask is not a push ask).
+- **Vocabulary:** "node", never service/building-block; **"optimizer prompt"** (runs the optimizer, `OptSearchPoint`) vs **"target prompt"** (what it produces, `JobSearchPoint`), never "meta-prompt"; L4 is **outer/inner** and **self-optimization**, never "meta"; **"run init" / INIT**, never "bootstrap" (except machine provisioning and DSPy `BootstrapFewShot`); framing is evolutionary (generation, population, fitness, mutation, selection, individual).
+- **Fewest dependencies** — stdlib or a small helper first. Core is the engine, a surface is an extra ([`docs/decisions.md`](docs/decisions.md) § 0006).
 
 ## Pre-flight gate
 
-Before adding any new concept (class, projection, injection, prompt, field, dict, file), answer these. "I don't know" or "kind of" is a hard block:
-
-- **Reuse before adding.** Does an existing channel/infrastructure already do this? Default **yes** — search/grep first. Ride the ledger / `injection_table()` / `optimizer_state` / dispatch hub; **no sidecar**.
-- **Map to a §0 bucket.** If it fits none, stop — either §0 is incomplete (update it, separate PR landing first) or this is the wrong PR.
-- **New I/O kind → amend §0 first.** The five are fixed (Persistence, Display, Control-local, Control-remote, Identity). New Control-remote command/event → declare its model *before* the handler lands; `scripts/build_specs.py` generates the spec.
-- **Material facts land on disk, human-readable** — never surfaced only via stdout, in-memory state, or `--verbose`. Same for debug-state: if a bug needs an operator-only env to reproduce, the unblocker (mock/fixture/pin) is a separate PR landing first.
+Before adding a concept (class, projection, injection, prompt, field, dict, file) — "I don't know" blocks:
+- **Reuse first**: ride the ledger / `injection_table()` / `optimizer_state` / dispatch hub; no sidecar.
+- **It maps to a §0 bucket** ([`architecture.md`](docs/architecture.md) §0), a new route or command declares its model before the handler, and its facts land on disk (architecture § Everything material). A bug needing an operator-only env gets its mock/fixture/pin first.
+- **When adding a state, ask what DERIVES it.** A state the system can enter but not report is the costliest bug shape here; a writer with no reader is not a state.
 
 ## The closing directive
 
-**M13 — the bench.** Every peer ships an **algorithm with no interface** — DSPy/GEPA/MIPROv2, CAPO, PromptWizard, Promptolution, SkillOpt, WikiSkill; Opik's `BaseOptimizer` interface lacks a guard. We ship an algorithm **and** an interface, and ours **wraps theirs**: every optimizer, ours included, is a manifest the bench runs, and it inherits measurement, the content-addressed archive, one spend ledger, persistence, five entry points and the control plane. Every optimizer's result is scored on a held-out bench set by one evaluator, and that bench score is the headline. That makes this an open-source **R&D bench for recursive self-improvement and optimizers**, not one more optimizer. **It closes when ONE peer runs end-to-end in a real campaign** — CAPO first, in a head-to-head whose only difference is the optimizer. Features M13 needs get opened. The presets, the selection field, the registry and the identity rule are [`docs/specs/roadmap.md`](docs/specs/roadmap.md) § The optimizer plug point, whose Order is the record.
-
-**M14 — ship the preprint, and the bench IS the contribution.** Prior work fragmented the components of prompt and agent-harness search — proposer, evaluator, selector, memory, budget, **stopping rule**, **comparability guard** — and the last two are where nobody stands. Pricing a lift in wall clock and dollars is the EVIDENCE, not the claim; the claim is that both are **executable** here and that every peer ran under them. Record and manuscript: [`paper/`](paper/README.md) § The sequence. **Neither milestone has dates and neither gets any**: each is a dependency sequence whose stages close on a verification, not on a calendar.
-
-**NEXT, before anything else — recombinable optimizers, inside M13.** Whatever one optimizer built, every other can use: a member reads a typed slice instead of its runtime's whole payload, so any manifest names any registered member, and variation draws from declared pools the operator controls at check-in, live and by steer. The contract is [`docs/specs/variation-and-pools.md`](docs/specs/variation-and-pools.md); the order is [`docs/specs/roadmap.md`](docs/specs/roadmap.md) § Variation and pools.
-
-**M13 is structural; everything beside it is empirical.** The loop, seams, recursion and scoring gateway exist; what remains *there* is making the optimizer *behave well* — run L3 campaigns as well as `promptpotter-self`, read what the loop produced, fix, re-run. **Every fix still goes to its ROOT (`<root-fix>` above)** — in that half the root is usually a prompt or dispatch-hub. **Supervise every run actively — never fire-and-wait. (3 min intervals first, then adjust case dependent)** How to run + supervise + when to reach past prompts to code: `/potter-self`.
-
-**A measured number is not a result until you know which column it is in.** `improved` reads as a verdict and is not one — a bare point estimate (`lift > 0.0`, no interval, no correction; with three arms, P(some arm positive | every arm identical to the parent) is 0.875 per round). It is the PROMOTION clock, and `rounds_to_separable` beside it is the one a result quotes. Say which column a claim rests on, or do not make it.
-
-**When adding a state, ask what DERIVES it — not just what writes it.** The costliest bug shape here is a *state the system could enter but not report*, downstream of a predicate that conflated two facts, invisible because the failure mode is silence rather than an error. A writer with no reader is not a state; it is a note nobody reads.
+**What closes next is [`roadmap.md`](docs/specs/roadmap.md) § Sequence's.** **Supervise every run actively — never fire-and-wait** (3-minute checks first): `/potter-self`.
 
 ## Compact instructions
 
-Keep: the task and the check that closes it, every decision the operator made, paths touched, each measured number with the command that produced it, and what is still owed. Drop file contents and tool output — they are re-read from disk.
+Keep: the task and the check that closes it, every operator decision, paths touched, each measured number with its command, what is still owed. Drop file contents and tool output.
 
 ## Pointers
 
-- **Architecture:** [`docs/architecture.md`](docs/architecture.md) §0/§0.5 — backbone primitives, five I/O kinds, the central loop + L1/L2/L3 escalation + L4-is-recursion, searchpoints, scoring, identity, token/cost ledger. **Extend primitives in place** — the wrong shape is meant to be hard to express, not policed by a test.
-- **What to pick up next:** [`docs/specs/code-debt-cleanup.md`](docs/specs/code-debt-cleanup.md) — **multi-arc** work and **blocked** work, one line each. It answers "what should I do" when nothing is already in hand, and an item ships by being DELETED from it. What may and may not be filed there is stated in the file.
-- **Persistence:** [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md) — four-entity tree (Workspace → Dataset → Campaign → Cycle), `.promptpotter/` layout, `measurements/`, fork lineage, recovery.
-- **Per-layer contracts** — load only the layer you touch, and **never open a second layer's file to check one fact: grep it.** Each subpackage's `CLAUDE.md` auto-loads by directory proximity, so that chain is spent before you type — what that means for anything you add to a layer is [`promptpotter/CLAUDE.md`](promptpotter/CLAUDE.md) § What the chain costs. The index is that file; the roster is its directory listing.
-- **Contracts:** the ADRs in [`docs/adr/`](docs/adr/) are the permanent constitutions, and **the roster is that directory listing** — never an enumeration. Index map: [`docs/CLAUDE.md`](docs/CLAUDE.md).
-- **Design surface:** `BRAND.md` in the sibling site repo (`runfish5/promptpotter-web`) — visual identity (theme-is-audience, dark=operator, light=buyer) and copy register (the Potter is force-multiplier, not friendly-wizard). `webapp/app/styles/foundation/tokens.css` is a mirror of it, never a second spec.
-- **Skills:** [`.claude/skills/`](.claude/skills/) — the roster is that directory listing, and each skill's frontmatter says when it fires.
-- **Product story, feature framing, docs index:** [`README.md`](README.md) — the buyer-facing front page, **deliberately NOT inlined** (written for a reader who has not cloned the repo). Open it when the ask is about positioning, the peer table or how we describe a feature. Don't restate it here either.
+- **Pick-up work:** [`docs/specs/code-debt-cleanup.md`](docs/specs/code-debt-cleanup.md) — multi-arc and blocked work only.
+- **Per-layer contracts:** each subpackage's `CLAUDE.md` auto-loads by directory; load only yours, grep another layer's.
+- **Design surface:** `BRAND.md` in the site repo (`runfish5/promptpotter-web`); `webapp/app/styles/foundation/tokens.css` mirrors it.

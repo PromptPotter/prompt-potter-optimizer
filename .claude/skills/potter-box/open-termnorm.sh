@@ -34,7 +34,8 @@ if ! tmux has-session -t termnorm 2>/dev/null; then
     echo "TermNorm is down at $(git -C "$T" log --oneline -1) — start pulls and starts it, which changes the box"
     exit 1
   fi
-  git -C "$T" pull --ff-only </dev/null
+  # Force-match origin, as update.sh does for the app: a rewritten history never stalls the start.
+  git -C "$T" fetch --quiet origin </dev/null && git -C "$T" reset --hard --quiet '@{u}' || exit 1
   tmux new -d -s termnorm "$T/start-server-py-LLMs.sh"
 fi
 if [ -z "$(tmux list-clients -t termnorm 2>/dev/null)" ]; then

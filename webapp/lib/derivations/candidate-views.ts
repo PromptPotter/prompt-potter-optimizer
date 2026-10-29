@@ -37,7 +37,7 @@ export function barsAreCourses(viewedNode: LineageNode | undefined): boolean {
   return viewedNode?.level === "candidate" && childNodes(viewedNode).length > 0;
 }
 
-export interface CandidateBarsInput {
+interface CandidateBarsInput {
   viewedNode: LineageNode | undefined;
   inflightByKey: ReadonlyMap<string, ArmReading>;
   sampleSet: number[] | null;

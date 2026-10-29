@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import os
-import sys
 import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 
-from filelock import BaseFileLock, FileLock, Timeout
-
+from promptpotter.infrastructure.store.io import HeldLock, probe_lock, take_lock
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.errors import ConflictError
 
@@ -18,7 +13,7 @@ from promptpotter.shared.errors import ConflictError
 _PROBE_GRACE_S = 1.0
 
 _guard = threading.Lock()
-_mine: dict[Path, BaseFileLock] = {}
+_mine: dict[Path, HeldLock] = {}
 
 
 def take(path: Path) -> bool:
@@ -26,12 +21,8 @@ def take(path: Path) -> bool:
     with _guard:
         if key in _mine:
             return False
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Released by whichever thread ends the run, so the lock is the process's and no one thread's.
-    lock = FileLock(str(path), thread_local=False)
-    try:
-        lock.acquire(timeout=_PROBE_GRACE_S)
-    except Timeout:
+    lock = take_lock(path, wait_s=_PROBE_GRACE_S)
+    if lock is None:
         return False
     with _guard:
         if key in _mine:
@@ -52,44 +43,8 @@ def held(path: Path) -> bool:
     with _guard:
         if path.resolve() in _mine:
             return True
-    with probe(path) as producer:
+    with probe_lock(path) as producer:
         return producer
-
-
-@contextmanager
-def probe(path: Path) -> Iterator[bool]:
-    """Whether a producer holds *path*, asked without an exclusive hold another probe would read as one."""
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except FileNotFoundError:
-        yield False
-        return
-    try:
-        yield _excluded(fd)
-    finally:
-        os.close(fd)
-
-
-if sys.platform == "win32":
-
-    def _excluded(fd: int) -> bool:
-        # The holder's byte-0 lock refuses a read of it, and a read takes no lock.
-        try:
-            os.read(fd, 1)
-        except PermissionError:
-            return True
-        return False
-
-else:
-    import fcntl
-
-    def _excluded(fd: int) -> bool:
-        # Shared, so probes never exclude each other; it lasts until the probe closes the file.
-        try:
-            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return True
-        return False
 
 
 def hold_cycle(cycle_dir: Path) -> None:

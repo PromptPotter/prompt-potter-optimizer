@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,8 +27,6 @@ from promptpotter.infrastructure.store.user_store import UserStore
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.identity import IdentityContext, TenantId
 
-logger = logging.getLogger(__name__)
-
 
 @dataclass(frozen=True)
 class Stores:
@@ -52,6 +49,10 @@ class Stores:
     @property
     def tenant_id(self) -> TenantId:
         return self.identity.tenant_id
+
+    @property
+    def jobs_dir(self) -> Path:
+        return paths.jobs_dir(self.shared_root)
 
     @property
     def inner(self) -> bool:

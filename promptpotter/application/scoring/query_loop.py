@@ -59,7 +59,7 @@ from promptpotter.shared.errors import (
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.domain.results import ScoreSummary
+    from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.domain.validators import CatchUps, CaughtUp
@@ -276,11 +276,7 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
         deprecated_display = ctx.scorer.grade(cached_deprecated.replayed())
 
     try:
-        result = await measure_sample(
-            sample,
-            ctx.session,
-            pipeline_params=ctx.search_point.pipeline_params,
-        )
+        result = await measure_sample(sample, ctx.session, ctx.search_point.pipeline_params)
         result = await _maybe_recover_degraded(result, sample, ctx)
         if sample.id in ctx.deprecated_samples:
             result = replace(result, retry_of_deprecated_cache=True)
@@ -852,7 +848,7 @@ class _ScoringPhase[K: Hashable]:
 
     async def depth_raised(self, armed: int) -> None:
         """Polled: the press is a command another process records on the ledger, which no signal carries."""
-        while _armed_cells(self.session) <= armed:
+        while _armed_cells(self.session) <= armed:  # noqa: ASYNC110 — a cross-process ledger wait
             await asyncio.sleep(HELD_POLL_S)
 
     async def wait(self, walk: Walk, armed: int) -> None:

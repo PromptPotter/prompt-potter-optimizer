@@ -12,42 +12,31 @@ from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.optimizers.nodes import ReadArm, SliceMap
 from promptpotter.application.scoring.metrics import arm_folds
+from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
+from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext, Proposal
+from promptpotter.domain.cell_fold import ScoreSummary, merge_known_outcomes
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput
+from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_overlay import node_config_items
-from promptpotter.domain.results import (
-    ArmFit,
-    Broken,
-    Concluded,
-    Cut,
-    DisplayMetric,
-    Election,
-    OverlapReading,
-    PointContext,
-    Proposal,
-    RoundOutcome,
-    RoundResult,
-    ScoreSummary,
-    declared_selection,
-    measured_arm,
-    merge_known_outcomes,
-)
+from promptpotter.domain.results import Election, RoundOutcome, RoundResult
 from promptpotter.domain.results_health import compute_round_health
 from promptpotter.domain.ruler import RulerStamp
 from promptpotter.domain.run_records import ResumeCheckpointRecord
+from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
 from promptpotter.infrastructure.store.read_model import Moment
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.domain.bench import BenchPasses
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import GradedCell
 
@@ -158,6 +147,8 @@ class Cycle:
     sample_index: SampleIndex | None = None
     pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     bench_passes: BenchPasses | None = None
+    # The last close's, set by the close and by a resume's replay; ``None`` until a close states one.
+    standing: RunStanding | None = None
 
     @classmethod
     def start(
@@ -171,7 +162,7 @@ class Cycle:
         schema = session.pipeline_schema
         origin_sheet = origin.rows
         selected = select_optimizer(config.optimization)
-        selected.runtime.refuse_origin(origin_sheet)
+        selected.refuse_origin(origin_sheet)
         slices = SliceMap(selected.slices)
         sp = session.points(framing).job(origin.individual)
         _assert_overlay_preserved(sp, session.pipeline_params)

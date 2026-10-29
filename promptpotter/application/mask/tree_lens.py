@@ -36,7 +36,7 @@ def _abort_suppress(variant: str) -> frozenset[str]:
     """Read per call: the member table completes at a declared step, never at import."""
     variants = {
         name: gates
-        for member in optimizers.registered().values()
+        for member in optimizers.NODE_MEMBERS.table.values()
         if member.kind is NodeKind.ELIMINATOR
         for name, gates in cast("Eliminator", member).abort_lenses.items()
     }

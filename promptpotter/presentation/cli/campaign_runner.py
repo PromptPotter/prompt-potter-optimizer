@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 _COMMANDS_PACKAGE = "promptpotter.presentation.cli.commands"
 
 COMMANDS: dict[str, str] = {verb.name: verb.handler for verb in VERBS}
+_COMPLETING = frozenset(verb.name for verb in VERBS if verb.needs_registries)
 _PARSER = build_parser(VERBS)
 
 
@@ -71,8 +72,9 @@ def main() -> None:
         args = parser.parse_args([*sys.argv[1:], "resume"])
 
     # Named as a string like the handlers: `--help` loads no use case.
-    wiring = importlib.import_module("promptpotter.application.initialization.wiring")
-    wiring.complete_registries(every_treatment=False)
+    if args.command in _COMPLETING:
+        wiring = importlib.import_module("promptpotter.application.initialization.wiring")
+        wiring.complete_registries(every_treatment=False)
     # A launch verb's handler runs its preamble and THEN answers the coroutine: all of it happens here, outside the runner.
     run = _handler(args.command)(args)
 
@@ -92,8 +94,6 @@ def main() -> None:
         print("  python -m promptpotter resume", file=sys.stderr)
         sys.exit(StopOutcome.PAUSED.exit_code)
     runner.close()
-    if result is None:
-        return
     if args.json_output or result.human is None:
         print(json.dumps(result.data, indent=2, default=str))
     else:

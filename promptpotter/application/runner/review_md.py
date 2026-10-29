@@ -13,13 +13,9 @@ from promptpotter.application.views.render.primitives import (
 from promptpotter.domain.bench import BandedValue, BenchColumn, BenchReading, BenchScore
 from promptpotter.domain.paired_reading import ArmKey, LiftEstimate
 from promptpotter.domain.phases import StopReason, stop_next_step
-from promptpotter.domain.results import (
-    CEILING_FRACTION,
-    DegradationHealth,
-    RoundClocks,
-    RoundResult,
-    round_clocks,
-)
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.round_health import DegradationHealth
+from promptpotter.domain.run_standing import CEILING_FRACTION, RoundClocks, round_clocks
 from promptpotter.domain.spend import (
     RATE_PRICED_LABEL,
     SpendBucket,
@@ -45,15 +41,10 @@ def render_review_md(
     bench: BenchScore | None,
     spend: SpendRollup,
 ) -> str:
-    ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
+    ctx_items = [c for c in (context_object or []) if c.strip()]
 
     final = index.final
-    review = optimizer.runtime.review(
-        optimizer,
-        list(rounds),
-        round_audits,
-        context_object=ctx_items,
-    )
+    review = optimizer.review(list(rounds), round_audits, context_object=ctx_items)
     clock = final.wall_clock if final else None
     stats = review.stats if review is not None else None
 
@@ -113,7 +104,7 @@ def _halt_info(index: CycleIndex, rounds: list[RoundResult]) -> dict[str, str] |
     last_health: DegradationHealth | None = None
     last_critical: DegradationHealth | None = None
     for r in rounds:
-        if r.health is not None:
+        if r.health.grade != "unmeasured":
             last_health = r.health
             if r.health.grade == "critical":
                 last_critical = r.health

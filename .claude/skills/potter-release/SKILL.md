@@ -16,6 +16,7 @@ version exists.
 ## 1. Prepare
 
 - [ ] The notes are staged ahead of the cut as `CHANGELOG.md` `## [Unreleased]` lines. At the cut, write the release body from them into a file outside the repo (the session scratchpad), shaped like the last release's (`gh release view`), for `gh release create --notes-file`.
+- [ ] Check every capability phrase in the notes against what shipped (0.8.11 shipped "read-only API/webapp" after the control plane landed).
 - [ ] Bump the version in `pyproject.toml`, `uv.lock` (the version hunk only), `CITATION.cff`, the `README.md` badge and the `CHANGELOG.md` entry.
 - [ ] Count the commits since the last tag by type, and quote the same count everywhere it appears.
 

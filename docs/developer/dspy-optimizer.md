@@ -10,24 +10,16 @@ the DSPy dependency and this module are the only things the extra adds.
 
 ## What you trade away
 
-Less than you would expect. `compile()` mints a real campaign on disk, so the engine and
-everything keyed to it come along — PoBB pruning, Rasch scoring, the block library, the
-measurement cache, the spend ceiling, and the campaign tree the CLI verbs operate on. It is
-the same distribution, so those verbs are already on your PATH:
+Only the **operator surfaces**, not the search. `compile()` mints a real campaign on disk, so the
+engine and everything keyed to it come along — PoBB pruning, Rasch scoring, the block library,
+the measurement cache, the spend ceiling — and the CLI verbs of the same distribution work on it:
+the terminal readout, `dashboard.json`, an MLflow child run per trial; `pause` · `resume --from N`
+· `--fork-on-divergence`; mask · lens · replay off the stored measurements; `noise-floor` ·
+`seed-screen` · `ab` · `verify`.
 
-| | With `promptpotter[dspy]` | Full install |
-|---|---|---|
-| **Live view of a run** — phase, round, candidate, in-flight query | the terminal readout · `dashboard.json` on disk · an MLflow child run per trial | the same, plus the operator webapp |
-| **Pause and resume** · **rewind and fork** | `promptpotter pause` · `resume --from N` · `--fork-on-divergence`, against the campaign `compile()` minted | the same |
-| **Rescore without re-measuring** — change the formula, replay the decisions | mask · lens · replay, off the measurements your run stored | the same |
-| **Diagnostics before you spend** | `noise-floor` · `seed-screen` · `ab` · `verify` | the same |
-| **The operator webapp** — live tree, candidate diffs, run control from a browser | ✗ | ✓ |
-| **An agent driving the campaign** — launch, supervise, diagnose, act on a stall | ✗ | `/potter-run` in Claude Code |
-| **Self-optimization** — the optimizer improving its own prompts | ✗ | L4 |
-
-So the trade is the **operator surfaces**, not the search. Reach for this page when you want
-the optimizer inside an existing DSPy program; reach for the
-[full install](../manual/README.md) when the campaign is the thing you are working on.
+What the extra does not give you: the operator webapp, an agent driving the campaign
+(`/potter-run`), and self-optimization (L4). Reach for the [full install](../manual/README.md)
+when the campaign is the thing you are working on.
 
 ## The swap
 
@@ -51,12 +43,32 @@ compiled = optimizer.compile(my_program, trainset=trainset)
 
 The contract, as DSPy's source states it (`dspy/teleprompt/teleprompt.py`), is
 `Teleprompter.compile(self, student: Module, *, trainset, teacher=None, valset=None, **kwargs) -> Module`.
-`dspy.GEPA` ([paper](https://arxiv.org/abs/2507.19457)) sets its budget with `auto` (light / medium /
-heavy), `max_full_evals` or `max_metric_calls`; the last is the knob a budget-matched comparison
-against this optimizer holds equal.
+Every field has a default, so that is a complete run; shape the search with a `loop`:
 
-Every field below has a default, so that is a complete run. The rest of this page is what
-you override once you want the search shaped to your task.
+```python
+from promptpotter.presentation.teleprompter import compile_loop
+
+loop = compile_loop(
+    optimizer="potter",       # which optimizer proposes — any name optimizer_roster() lists
+    nodes={                   # that optimizer's node knobs; omitted keeps its manifest's
+        "adaptive_queue": {"config": {"sp_budget_round": 20}},  # rows each candidate is scored on — the cost knob
+        "l1_generate": {"config": {"n_variants": 6}},       # candidates generated per round
+        "escalation": {"config": {"l1_patience": 0,         # L1 mutates the winner
+                                  "l2_patience": 2,         # L2 observes the history, re-aims L1
+                                  "l3_patience": 1}},       # L3 replans the strategy L1 works within
+        "pobb": {"config": {"epsilon": 0.2}},               # how aggressively trailing candidates are killed
+    },
+    budget={"rounds": 5, "usd": None},  # what the run stops at, per axis; a named null lifts it
+    elimination_n_min=4,      # samples a candidate gets before it may be pruned
+)
+```
+
+`optimizer="capo"` (or `gepa`, `levi`) swaps the proposer and keeps everything around it; its
+`nodes` are that manifest's knobs (`GET /optimizers/{name}/knobs`), and one the manifest does not
+take is refused when the loop is built. `compile_loop` returns the campaign's own
+`OptimizationConfig`, so any field of it is a keyword. The values above are an illustration:
+omitting `nodes` runs the manifest as declared, and a compile starts from
+`teleprompter.py::_COMPILE_DEFAULTS`. The layers themselves: [`../concepts/the-loop.md`](../concepts/the-loop.md).
 
 `compile()` returns a **copy** of your program with the winning prompt applied — your
 original is never mutated, and neither is it during scoring. The winner's provenance is on
@@ -86,42 +98,6 @@ configuration and attribute the measurement to a model you never chose.
 instead.** `compile()` still works there — it moves the run onto its own thread — but a thread
 never receives SIGINT, so Ctrl+C stops pausing the campaign; `promptpotter pause` and the webapp
 control are unaffected. `acompile()` keeps the interrupt.
-
-## The loop is three layers
-
-L1 proposes candidates each round from the last winner. When L1 stops improving, **L2
-observes** — it reads the whole round history rather than the last result, and re-aims what
-L1 looks at. When L2's steer stops paying, **L3 replans**, rewriting the strategic framework
-L1 works within. Either upper layer may also propose a rewind to a better ancestor, but
-*where* is chosen by the search rather than by the layer. Patience is how many flat rounds
-each layer tolerates before handing up (full mechanism:
-[`../concepts/the-loop.md`](../concepts/the-loop.md)):
-
-```python
-from promptpotter.presentation.teleprompter import compile_loop
-
-loop = compile_loop(
-    optimizer="potter",       # which optimizer proposes — any name optimizer_roster() lists
-    nodes={                   # that optimizer's node knobs; omitted keeps its manifest's
-        "adaptive_queue": {"config": {"sp_budget_round": 20}},  # rows each candidate is scored on — the cost knob
-        "l1_generate": {"config": {"n_variants": 6}},       # candidates generated per round
-        "escalation": {"config": {"l1_patience": 0,         # L1 mutates the winner
-                                  "l2_patience": 2,         # L2 observes the history, re-aims L1
-                                  "l3_patience": 1}},       # L3 replans the strategy L1 works within
-        "pobb": {"config": {"epsilon": 0.2}},               # how aggressively trailing candidates are killed
-    },
-    budget={"rounds": 5, "usd": None},  # what the run stops at, per axis; a named null lifts it
-    elimination_n_min=4,      # samples a candidate gets before it may be pruned
-)
-```
-
-The three layers are potter's. `optimizer="capo"` (or `gepa`, `levi`) swaps the proposer and
-keeps everything around it; its `nodes` are that manifest's knobs, which
-`GET /optimizers/{name}/knobs` lists, and a knob the manifest does not take is refused when the
-loop is built. `compile_loop` returns the campaign's own `OptimizationConfig`, so `nodes` takes the
-shape every other entry point writes and any field of that schema is a keyword here. The values
-above are an illustration, not the defaults: omitting `nodes` runs the named manifest as declared,
-and the three values a compile starts from are `teleprompter.py::_COMPILE_DEFAULTS`.
 
 ## The node is your program
 

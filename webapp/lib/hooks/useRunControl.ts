@@ -7,7 +7,7 @@ import { phasePauseLabel, phaseWalks } from "@/lib/run-phase";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 
-export interface RunControl {
+interface RunControl {
   action: RunAdmission["offers"];
   running: boolean;
   pending: boolean;

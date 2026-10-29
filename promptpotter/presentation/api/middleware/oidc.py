@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from fastapi import FastAPI, Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -21,8 +19,6 @@ from promptpotter.shared.identity import (
     TenantId,
     UserId,
 )
-
-logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = "promptpotter_session"
 

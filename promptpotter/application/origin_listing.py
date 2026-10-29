@@ -17,11 +17,11 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_config_params,
 )
 from promptpotter.application.runner.campaign_ids import origin_content_hash
+from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import partition_bank
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.dataset_start import DatasetStartBlock
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.results import PointContext
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetTier,

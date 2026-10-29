@@ -87,7 +87,7 @@ export function applyChartDefaults(): void {
 
 const THEME_STORAGE_KEY = "promptpotter.theme";
 
-export type Theme = "light" | "dark";
+type Theme = "light" | "dark";
 
 export function readStoredTheme(): Theme {
   if (typeof window === "undefined") return "light";

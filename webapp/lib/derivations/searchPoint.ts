@@ -50,7 +50,7 @@ export function searchpointCopyChoices({
   cells = [],
 }: {
   cfg: ObserveConfig | null;
-  reading?: ArmReading | null;
+  reading: ArmReading | null;
   cells?: readonly CellRow[];
 }): { key: string; label: string; data: unknown }[] {
   const label = reading?.arm.label;

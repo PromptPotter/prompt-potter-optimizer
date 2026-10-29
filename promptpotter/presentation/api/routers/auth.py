@@ -10,7 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from promptpotter.application import account
+from promptpotter.application import account, health
 from promptpotter.application.jobs.account_activity import (
     ActivityGroupBy,
     ActivityResponse,
@@ -18,19 +18,17 @@ from promptpotter.application.jobs.account_activity import (
     account_activity,
 )
 from promptpotter.application.jobs.quota import QuotaStatus, quota_status
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import TERMS_VERSION, settings
+from promptpotter.domain.run_records import Device, device_of
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
-from promptpotter.infrastructure.identity.github import (
-    GitHubTokenExchangeError,
-)
-from promptpotter.infrastructure.identity.google import (
-    GoogleTokenExchangeError,
-    ProviderIdentity,
-)
+from promptpotter.infrastructure.identity.google import ProviderIdentity
 from promptpotter.infrastructure.identity.migration import maybe_claim_default, registered_user_id
-from promptpotter.infrastructure.identity.provider_config import SUPPORTED_PROVIDERS
+from promptpotter.infrastructure.identity.provider_config import (
+    SUPPORTED_PROVIDERS,
+    CodeExchangeError,
+)
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.store.user_store import count_accounts
@@ -226,9 +224,14 @@ async def callback(
             )
         else:
             identity = await bundle.github.exchange_code(code=code)  # type: ignore[union-attr]
-    except (GoogleTokenExchangeError, GitHubTokenExchangeError, IDTokenInvalidError) as exc:
-        logger.warning("OIDC code exchange failed for %s: %s", provider, exc)
-        return _redirect_with_error("code_exchange_failed")
+    except (CodeExchangeError, IDTokenInvalidError) as exc:
+        logger.warning("OIDC sign-in through %s refused: %s", provider, exc)
+        # Nobody signed in yet, so the refusal is the box's own to keep.
+        box = build_stores_from_identity(account.registered_or_default_identity())
+        account.record_refusal(box, subject=f"sign-in through {provider}: {exc}")
+        # No retry of the user's mends a provider the health check found refusing this server.
+        broken = health.is_broken(default_projects_root(), health.signin_probe(provider))
+        return _redirect_with_error("signin_unavailable" if broken else "code_exchange_failed")
 
     # A blocked account still gets a session: the session seam empties its capabilities per request.
     user_id = derive_user_id(identity.issuer, identity.subject)
@@ -238,7 +241,7 @@ async def callback(
     elif _is_declared_host_admin(identity.email, identity.issuer):
         # The marker names the box's own tenant, so who writes it is declared, never inferred from arrival order.
         maybe_claim_default(
-            projects_root=DEFAULT_PROJECTS_ROOT,
+            projects_root=default_projects_root(),
             user_id=str(user_id),
             marker_path=bundle.paths.default_claim_marker,
         )
@@ -260,13 +263,14 @@ async def callback(
     try:
         # Resolved as every later request resolves it, so a delegate's sign-in lands where its commands do.
         signed_in = identity_of_session(session, bundle)
-        arrival = account.sign_in(build_stores_from_identity(signed_in))
+        device = _device(request)
+        arrival = account.sign_in(build_stores_from_identity(signed_in), device=device)
     except Exception:
         # Refused rather than let through unrecorded: the trail's promise is that no sign-in is missing.
         logger.exception("A %s sign-in could not be recorded", provider)
         bundle.session_store.delete(session_id)
         return _redirect_with_error("signin_unavailable")
-    _announce_if_opened(background, arrival, signed_in)
+    _announce_if_opened(background, arrival, signed_in, device)
 
     response = RedirectResponse(url="/", status_code=303)
     _set_auth_cookie(
@@ -287,23 +291,38 @@ async def logout(request: Request) -> JSONResponse:
     return response
 
 
+def _device(request: Request) -> Device | None:
+    return device_of(request.headers.get("sec-ch-ua-mobile"), request.headers.get("user-agent"))
+
+
 def _announce_new_account(
-    *, email: str | None, name: str | None, user_id: str, access_state: AccessState
+    *,
+    email: str | None,
+    name: str | None,
+    user_id: str,
+    access_state: AccessState,
+    device: Device | None,
 ) -> None:
     who = email or f"(no email) {user_id}"
     # Read once the account is on disk, so the arriving account is inside the total.
-    total = count_accounts(DEFAULT_PROJECTS_ROOT)
+    total = count_accounts(default_projects_root())
     notify_operator(
         f"New PromptPotter account: {who}\n"
         f"Accounts now: {total}\n"
-        f"Access: {access_state}" + (f"\nRevoke it with:  /block {email}" if email else "")
+        f"Access: {access_state}\n"
+        f"Device: {device or 'unknown'}" + (f"\nRevoke it with:  /block {email}" if email else "")
     )
     # Fires regardless of `access_state`: a blocked account is still a contact worth keeping.
-    forward_new_account_to_crm(email=email, name=name, user_id=user_id, account_count=total)
+    forward_new_account_to_crm(
+        email=email, name=name, user_id=user_id, account_count=total, device=device
+    )
 
 
 def _announce_if_opened(
-    background: BackgroundTasks, arrival: account.Arrival, identity: IdentityContext
+    background: BackgroundTasks,
+    arrival: account.Arrival,
+    identity: IdentityContext,
+    device: Device | None,
 ) -> None:
     """After the response, never on it."""
     if arrival.opened:
@@ -313,6 +332,7 @@ def _announce_if_opened(
             name=display_name(identity.email),
             user_id=str(identity.user_id),
             access_state=identity.access_state,
+            device=device,
         )
 
 
@@ -328,8 +348,9 @@ def me(
     configured = set(bundle.config.configured)
     available = sorted(configured - {provider}) if provider else sorted(configured)
     # Opened at sign-in as a rule; here for an open box, which has none, and for a session that outlived its files.
-    arrival = account.arrive(stores)
-    _announce_if_opened(background, arrival, identity)
+    device = _device(request)
+    arrival = account.arrive(stores, device=device)
+    _announce_if_opened(background, arrival, identity, device)
     user = arrival.user
     return MeResponse(
         user_id=str(identity.user_id),

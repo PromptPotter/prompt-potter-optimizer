@@ -110,7 +110,7 @@ export function readSpend(dash: ServedDashboard | null): SpendView {
   };
 }
 
-export interface RoundCost {
+interface RoundCost {
   round: number;
   metered: MeteredSpend;
 }

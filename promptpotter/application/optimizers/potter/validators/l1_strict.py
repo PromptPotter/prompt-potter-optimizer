@@ -84,7 +84,7 @@ def l1_shots_in_demo_pool(
                     axis=axis,
                     value=str(len(shots)),
                     allowed=[str(k_max)],
-                    reason="shots_over_k_max",
+                    reason="shots_over_cap",
                 )
             )
     return failures

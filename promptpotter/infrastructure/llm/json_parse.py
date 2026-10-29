@@ -121,7 +121,7 @@ def try_parse_json(content: str, provider: str) -> Any | None:
         text = text.strip()
     try:
         return repair_json(text, return_objects=True)
-    except Exception:
+    except ValueError:
         logger.debug("%s response not valid JSON: %s", provider, content[:200])
         return None
 

@@ -8,7 +8,7 @@ export type {
 } from "@/lib/api";
 
 // served: `pipeline_schema.py::ViewKind`
-export type ViewKind = PipelineViewNode["kind"];
+type ViewKind = PipelineViewNode["kind"];
 
 const NODE_KINDS: Record<ViewKind, { label: string; role: string }> = {
   llm: { label: "LLM", role: "LLM call — runs the prompt below against each query." },

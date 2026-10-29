@@ -13,8 +13,8 @@ export function Term({
   className?: string;
 }) {
   return (
-    <HoverCard content={content}>
-      <span className={className ? `${s.hint} ${className}` : s.hint} tabIndex={0}>
+    <HoverCard content={content} focusable>
+      <span className={className ? `${s.hint} ${className}` : s.hint}>
         {children}
       </span>
     </HoverCard>

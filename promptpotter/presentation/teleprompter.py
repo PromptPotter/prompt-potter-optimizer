@@ -7,7 +7,7 @@ import concurrent.futures
 import contextlib
 import sys
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from promptpotter.shared.extras import Extra, require_extra
 
@@ -24,7 +24,6 @@ else:
                 getattr(_parked, "__file__", None)
 
 from promptpotter.application.account import local_stores
-from promptpotter.application.campaign_config import OptimizationConfig
 from promptpotter.application.datasets.authored import load_dataset_campaign_config
 from promptpotter.application.datasets.loaders import samples_from_dicts
 from promptpotter.application.embedded_run import open_session, run_campaign
@@ -35,6 +34,7 @@ from promptpotter.connectors.dspy_module import (
     DspyProgram,
     dataset_pipeline,
 )
+from promptpotter.domain.campaign_config import OptimizationConfig
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.search_point import TaskDecomposition
@@ -94,6 +94,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         # ``None`` until a compile finishes, and after one that did not.
         self.export: PromptExport | None = None
 
+    @override
     def compile(
         self,
         student: Any,
@@ -101,7 +102,8 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         trainset: list[Any],
         valset: list[Any] | None = None,
     ) -> Any:
-        coro = self.acompile(student, trainset=trainset, valset=valset)
+        """``valset`` is contract parity only: with no ``dataset_split``, the trainset is the pool."""
+        coro = self.acompile(student, trainset=trainset)
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -110,14 +112,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result()
 
-    async def acompile(
-        self,
-        student: Any,
-        *,
-        trainset: list[Any],
-        valset: list[Any] | None = None,
-    ) -> Any:
-        """``valset`` is contract parity only: with no ``dataset_split``, the trainset is the pool."""
+    async def acompile(self, student: Any, *, trainset: list[Any]) -> Any:
         items = [{"query": _query_of(ex), "ground_truth": ""} for ex in trainset]
         if (distinct := len({row.key for row in samples_from_dicts(items)})) != len(trainset):
             raise ValueError(

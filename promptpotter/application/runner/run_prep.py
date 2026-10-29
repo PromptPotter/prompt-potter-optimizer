@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from promptpotter.application.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.admission import open_spend_book
@@ -18,6 +17,7 @@ from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound
 from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import ceiling_meter
+from promptpotter.domain.campaign_config import CampaignConfig, apply_cycle_seed
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import RunSource
 from promptpotter.domain.pipeline_overlay import (
@@ -81,7 +81,7 @@ async def prepare_run(
     move_campaign_money(
         budget.standing,
         stores=session.store,
-        job_registry=JobRegistry.attach(),
+        job_registry=JobRegistry.attach(session.store.jobs_dir),
         campaign_id=session.hop.campaign_id,
     )
     stand_held_budget(session.store, session.hop, budget)
@@ -116,7 +116,7 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
     book = open_spend_book(
         session.state.held,
         stores=session.store,
-        job_registry=JobRegistry.attach(),
+        job_registry=JobRegistry.attach(session.store.jobs_dir),
         hop=session.hop,
         meters=ceiling_meter(session.purpose),
         opened=session.state.launch_clock().monotonic,
@@ -138,10 +138,10 @@ def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
 def rebase_held(session: Session, parent: CycleHop) -> None:
     """The job follows the fork, and its share stops counting *parent*'s metered spend, which the campaign's holds."""
     book, held = session.state.control.book, session.state.held
-    if book is None or held is None:
-        raise RuntimeError("a run rebases only once its book is armed")
+    if held is None:
+        raise RuntimeError("a run rebases only over what admission held for it")
     spent = session.store.campaigns.cycle_metered(parent, book.meters)
-    job_registry = JobRegistry.attach()
+    job_registry = JobRegistry.attach(session.store.jobs_dir)
     with job_registry.admission_gate():
         job = job_registry.get(held.job_id)
         if job is None:

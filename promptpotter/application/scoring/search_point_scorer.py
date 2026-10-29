@@ -12,9 +12,10 @@ from typing import TYPE_CHECKING
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
+from promptpotter.domain.arms import degradation_reading
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.measurement_provenance import grade_answer
 from promptpotter.domain.phases import WalkEnd
-from promptpotter.domain.results import ScoreSummary, degradation_reading
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, MeasuredCell, WalkedCell
 from promptpotter.domain.spend import ROLE_SPEND_KIND
@@ -95,7 +96,6 @@ def replayable_on(
 
 def _resolve_prior_cache(
     dataset: list[Sample],
-    session: Session,
     *,
     feed: ReplayFeed | None,
     label: str,
@@ -296,7 +296,7 @@ def open_walk(
     # No node configs, no cell identity: every such searchpoint would share one claim per sample.
     feed = ReplayFeed(store.archive, node_configs) if node_configs else None
     cached_sample_results, deprecated_samples = _resolve_prior_cache(
-        dataset, session, feed=feed, label=label
+        dataset, feed=feed, label=label
     )
     cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
     book = bound_spend_book()

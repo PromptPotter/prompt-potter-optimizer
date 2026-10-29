@@ -1,4 +1,10 @@
-"""Imports no ``promptpotter.application`` module and no sibling: a handler is NAMED, so ``--help`` loads no verb."""
+"""Imports no ``promptpotter.application`` module and no sibling: a handler is NAMED, so ``--help`` loads no verb.
+
+``new`` and ``resume`` dispatch their command as DATA (``CommandDispatcher(inline=Inline(…))``), so a
+terminal launch is a ``CommandRecord`` like the browser's; every other command verb derives from its
+payload model (``command_verb``). Run-invocation (``HeldRun.run_inline`` vs ``HeldRun.detach``) is the
+only CLI↔web difference, and each terminal-only flag says why no payload carries it.
+"""
 
 from __future__ import annotations
 
@@ -17,9 +23,10 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
 )
 from promptpotter.domain.cycle_paths import CyclePath, decode_cycle_path
+from promptpotter.domain.diagnostic_run import RescoreCount, rescore_count
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
-from promptpotter.domain.results import RescoreCount, VerifyStrategy, rescore_count
 from promptpotter.domain.spend import Budget
+from promptpotter.domain.verify_pass import VerifyStrategy
 from promptpotter.presentation.cli.parsers import (
     ACTIVE_CAMPAIGN,
     ACTIVE_CYCLE,
@@ -267,6 +274,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 help="List the paths that would be removed; touch nothing. Recommended first run.",
             ),
         ),
+        needs_registries=False,
     ),
     Verb(
         "verify",
@@ -316,6 +324,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         help="Rebuild the measurement index (measurements/index.jsonl) from the detail "
         "files and GC orphaned runs. The index is derived, so this loses nothing — use "
         "after a crash mid-append or to reclaim orphaned bytes. Pure disk work, zero spend.",
+        needs_registries=False,
     ),
     Verb(
         "compact-archive",
@@ -355,10 +364,12 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "every dropped key is reported with the value its file held. (2) Re-project each "
         "finished cycle's ledger onto the current record shape, dropping what the archive "
         "and the round files already hold. A cycle with a live producer is left alone. (3) "
-        "REPORT whether every banked round file still loads, grouped by what drifted — "
+        "Walk every file the measurement archive writes: prune retired keys, and remove a "
+        "record its model still refuses with what it alone describes. (4) "
+        "REPORT whether every ledger, manifest and archive file still loads — "
         "read-only, because "
         "pruning cannot restore a renamed field's value, so a repair there would be silently "
-        "wrong. The sanctioned remedy after a field rename or a record-shape change, and (3) is "
+        "wrong. The sanctioned remedy after a field rename or a record-shape change, and (4) is "
         "how you find out you need one. Dry-run by default. Pure disk work, zero spend.",
         args=(
             Arg("--apply", action="store_true", help="Rewrite the files (default: report only)."),
@@ -580,8 +591,8 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "the headline — the pass a `bench_trigger: manual` campaign (the default) sends only "
         "when asked, on the cycle holding its line. Reuses a pass the line already holds; refuses "
         "a line with a run in flight, a split holding nothing out and a selection already graded "
-        "— the served status's own answer (`bench_score.status`). Spends: two passes over the "
-        "bench rows.",
+        "— the served status's own answer (the course's `BenchStat.status`). Spends: two passes "
+        "over the bench rows.",
         args=(ACTIVE_CAMPAIGN,),
     ),
     Verb(
@@ -643,12 +654,21 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "the server refused and every command, the terminal's own included. Bare, this tenant's; "
         "with an EMAIL, every account on the box that carries it. Read-only, zero spend.",
         args=(Arg("email", nargs="?", default="", help="An account's email address."),),
+        needs_registries=False,
     ),
     Verb(
         "offer-extras",
         "offer:cmd_offer_extras",
         help="The pyproject extras the datasets this deployment offers (DATASET_OFFER) need to "
         "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Read-only.",
+        needs_registries=False,
+    ),
+    Verb(
+        "health",
+        "machine_status:cmd_health",
+        help="Check everything this box answers for — each remote backend, each configured "
+        "sign-in provider — one line each, led by held / broken / unverified; exits 1 on a broken "
+        "one. A change of state is recorded and told to the admin bot. Network only, zero LLM spend.",
     ),
     Verb(
         "pin-roster",
@@ -662,6 +682,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             Arg("dataset", help="The dataset's registry name (`harbor dataset list`)."),
             Arg("version", help="Its published version — a pin names one, never 'latest'."),
         ),
+        needs_registries=False,
     ),
 )
 
@@ -672,7 +693,8 @@ def _field_args(name: str, field: FieldInfo) -> tuple[Arg, ...]:
         return BUDGET_AXES
     flag = f"--{name.replace('_', '-')}"
     spec: dict[str, Any] = {"help": field.description}
-    if annotation is bool:
+    # Never `is bool`: past a final class, mypy narrows `type[Any]` away and drops every later arm.
+    if isinstance(annotation, type) and issubclass(annotation, bool):
         return (Arg(flag, dest=name, action="store_true", **spec),)
     if get_origin(annotation) is Literal:
         spec["choices"] = get_args(annotation)

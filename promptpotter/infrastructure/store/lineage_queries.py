@@ -3,19 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
+from promptpotter.domain.arm_reading import ArmElection, ArmReading
+from promptpotter.domain.arms import ArmState, arm_name
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
+from promptpotter.domain.origin_panel import line_by_individual, overlap_line
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.results import (
-    ArmElection,
-    ArmReading,
-    ArmState,
-    Election,
-    arm_name,
-    line_by_individual,
-    overlap_line,
-)
+from promptpotter.domain.results import Election
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -23,7 +18,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_verify,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, resolve_cycle_path
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -65,12 +59,8 @@ class _Reads:
         return self._campaigns[key]
 
 
-def _layout(stores: Stores, hop: CycleHop) -> CycleLayout:
-    return CycleLayout(cycle_dir_for(stores.base_dir, hop))
-
-
 def _read_index(stores: Stores, hop: CycleHop) -> CycleIndex | None:
-    return read_cycle_index(_layout(stores, hop).cycle_dir, moment=None)
+    return read_cycle_index(stores.campaigns.cycle_dir(hop), moment=None)
 
 
 def _child_courses(stores: Stores, path: CyclePath, reads: _Reads) -> list[FamilyCourse]:
@@ -160,7 +150,7 @@ def _course_spans(
 ) -> list[LedgerSpan]:
     """A sibling fork's lifted rounds are its parent's, so it reads its own ledger; a cycle cut from
     ANOTHER tree has no parent course here, and its prefix is its own record."""
-    layout = _layout(stores, hop)
+    layout = stores.campaigns.layout(hop)
     if index.parent is not None and index.parent_cycle_id is None:
         return ledger_chain(CycleDir(layout.cycle_dir), moment=moment)
     return [LedgerSpan(layout.ledger) if moment is None else moment.span(layout.ledger)]
@@ -176,16 +166,14 @@ def read_course(
     spans = _course_spans(stores, hop, index, moment=moment)
     standing = scan_standing_rounds(spans)
     closes = [standing.rounds[r].close for r in sorted(standing.rounds, reverse=True)]
-    line = line_by_individual(
-        next((c.overlap for c in closes if c.overlap is not None and overlap_line(c.overlap)), None)
-    )
+    line = line_by_individual(next((c.overlap for c in closes if overlap_line(c.overlap)), None))
     # A replay reads no verify: the verdict a fresh read banks is the head's, never the moment's.
     verify = (
         {}
         if moment is not None
         else {
             key: read
-            for key, (_, read) in scan_ledger_verify(_layout(stores, hop).ledger).graded.items()
+            for key, (_, read) in scan_ledger_verify(stores.campaigns.ledger(hop)).graded.items()
         }
     )
     bench = scan_bench_readings(spans)

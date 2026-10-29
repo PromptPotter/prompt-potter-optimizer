@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import functools
-import logging
 from collections.abc import Mapping
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -14,19 +11,15 @@ from promptpotter.application.scoring.evaluators import (
     JudgedTerm,
     validate_campaign_evaluator,
 )
+from promptpotter.application.scoring.judges.call import bind_cache
+from promptpotter.application.scoring.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
+from promptpotter.application.scoring.judges.simpleqa import SEALQA, SIMPLEQA
+from promptpotter.domain.judges import Judge, JudgeSpec
 from promptpotter.domain.scoring import JudgeReading
-from promptpotter.judges.call import absent, bind_cache
-from promptpotter.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
-from promptpotter.judges.protocol import Judge, JudgeSpec
-from promptpotter.judges.simpleqa import SEALQA, SIMPLEQA
-from promptpotter.shared.errors import CellSendRefusedError
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.plugin_registry import load_registry, lookup
-
-logger = logging.getLogger(__name__)
+from promptpotter.shared.plugin_registry import Registry
 
 if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import MeasuredCell
     from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache
 
@@ -67,28 +60,14 @@ def _validate(j: object, origin: str) -> Judge:
     return j
 
 
-@functools.cache
-def _load() -> tuple[Mapping[str, Judge], Mapping[str, str]]:
-    return load_registry(ENTRY_POINT_GROUP, ((__name__, j) for j in _BUILTIN), _validate)
-
-
-def registered() -> Mapping[str, Judge]:
-    return _load()[0]
-
-
-def judge_origins() -> Mapping[str, str]:
-    return _load()[1]
-
-
-def get(name: str) -> Judge:
-    return lookup(ENTRY_POINT_GROUP, _load(), name)
+JUDGES = Registry(ENTRY_POINT_GROUP, lambda: ((__name__, j) for j in _BUILTIN), _validate)
 
 
 def judge_instrument(specs: Mapping[str, JudgeSpec]) -> str | None:
     if not specs:
         return None
     return stable_hash(
-        [[term, get(spec.name).fingerprint(spec)] for term, spec in sorted(specs.items())]
+        [[term, JUDGES.get(spec.name).fingerprint(spec)] for term, spec in sorted(specs.items())]
     )
 
 
@@ -97,20 +76,11 @@ async def _compute(
     result: MeasuredCell,
     judge: Judge,
     spec: JudgeSpec,
-    term: str,
     cache: LLMReuseCache | None = None,
-    schema: PipelineSchema | None = None,
     **_: Any,
 ) -> JudgedTerm:
-    try:
-        with bind_cache(cache):
-            verdict = await judge.grade(spec, result)
-    except (KeyboardInterrupt, asyncio.CancelledError, CellSendRefusedError):
-        raise
-    except Exception as exc:
-        # Uncaught, `measure_sample`'s catch-all discards a backend answer already paid for.
-        logger.warning("judge %s failed to grade term %s: %s", judge.name, term, exc)
-        verdict = absent(judge.name, f"{type(exc).__name__}: {exc}")
+    with bind_cache(cache):
+        verdict = await judge.grade(spec, result)
     return JudgedTerm(
         verdict.score,
         JudgeReading(
@@ -130,7 +100,7 @@ def build_evaluators(
                 f"AST allowlist resolves a bare name only — so a term that is not a Python "
                 f"identifier materializes a value no formula can address."
             )
-        judge = get(spec.name)
+        judge = JUDGES.get(spec.name)
         if judge.max_stages is not None and len(spec.stages) > judge.max_stages:
             raise ValueError(
                 f"judge term {term!r}: {spec.name!r} asks {judge.max_stages} of the "
@@ -142,7 +112,7 @@ def build_evaluators(
             name=term,
             description=judge.description,
             scope="per_sample",
-            compute=partial(_compute, judge=judge, spec=spec, term=term, cache=cache),
+            compute=partial(_compute, judge=judge, spec=spec, cache=cache),
             # Undefined, not zero, on a verifier-graded bank: `materialize_sample_values` skips it.
             needs_labels=judge.needs_gold,
         )

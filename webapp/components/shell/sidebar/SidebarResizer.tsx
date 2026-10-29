@@ -52,6 +52,7 @@ export function SidebarResizer({ width, setWidth, min, max }: Props) {
   );
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- a focusable separator is the ARIA window-splitter widget
     <div
       className="sidebar-resizer"
       role="separator"

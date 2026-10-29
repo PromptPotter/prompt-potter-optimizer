@@ -4,7 +4,7 @@ from typing import Annotated, Any, Literal, get_args
 
 from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
-from promptpotter.domain.activity import ActivityRecord, ActivityState, SilentRecord
+from promptpotter.domain.activity import ActivityRecord, ActivityState
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.strict_model import FrozenModel
 
@@ -25,6 +25,7 @@ ProjectionKind = Literal[
     "error",
     "flight",
     "fork_graded",
+    "health",
     "intervention",
     "launch_claim",
     "launch_clock",
@@ -74,8 +75,8 @@ if _declared != _record_types:
 RECORD_KINDS: frozenset[str] = _record_types
 
 #: The licence not to validate the record at all; a kind outside it may still yield no item.
-NON_ACTIVITY_KINDS: frozenset[str] = frozenset(
-    arm.model_fields["record_type"].default for arm in get_args(SilentRecord)
+NON_ACTIVITY_KINDS: frozenset[str] = _record_types - frozenset(
+    arm.model_fields["record_type"].default for arm in get_args(ActivityRecord)
 )
 
 del _record_types, _declared

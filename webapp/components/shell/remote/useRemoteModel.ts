@@ -3,7 +3,13 @@ import { useMemo } from "react";
 import { cycleAddress, postCommand } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { phaseIs } from "@/lib/run-phase";
-import { indexLineage, readSpend, runningInnerRun, tagValue } from "@/lib/derivations";
+import {
+  benchStat,
+  indexLineage,
+  readSpend,
+  runningInnerRun,
+  tagValue,
+} from "@/lib/derivations";
 import { fmtDuration } from "@/lib/format";
 import { useCycleStream } from "@/lib/poll";
 import { useLineageTree } from "@/lib/lineage";
@@ -95,7 +101,8 @@ export function useRemoteModel() {
     lines,
     budget: dash.run_limits.budget,
     share: dash.allotment,
-    benchLiftPerUsd: dash.bench_score?.cost.lift_per_usd ?? null,
+    benchLiftPerUsd:
+      leafEntry?.level === "course" ? (benchStat(leafEntry)?.lift_per_usd ?? null) : null,
     lookahead,
     autoArmed,
     inFlight,

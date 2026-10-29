@@ -2,17 +2,17 @@ import type { MachineNotice } from "@/lib/api/types";
 import type { ServedDashboard } from "@/lib/api";
 import type { StatusKind } from "@/lib/poll";
 
-export interface CriticalAlert {
+interface CriticalAlert {
   severity: "critical" | "warn" | "info";
   title: string;
-  detail?: string;
+  detail: string | null;
   action?: "pause";
 }
 
 interface Args {
   bannerStatus: StatusKind;
   bannerText: string;
-  bannerHint?: string;
+  bannerHint: string;
   dash: ServedDashboard | null;
   connectorDown?: boolean;
   connectorName?: string | null;
@@ -49,7 +49,7 @@ export function criticalAlert({
     return {
       severity: "critical",
       title: `Backend unreachable — ${connectorName ?? "connector"}`,
-      detail: connectorDetail ?? undefined,
+      detail: connectorDetail ?? null,
     };
   }
   if (machineNotice) return { severity: "warn", ...machineNotice };
@@ -61,7 +61,7 @@ export function criticalAlert({
     return {
       severity: "critical",
       title: latest.health_alert,
-      detail: latest.health?.suggested_action ?? undefined,
+      detail: latest.health.suggested_action,
       action: "pause",
     };
   }

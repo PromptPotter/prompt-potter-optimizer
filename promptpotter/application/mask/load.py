@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.campaign_config import CampaignConfig, apply_config_overrides
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.mask.record import (
     Lens,
@@ -21,18 +20,15 @@ from promptpotter.application.scoring.formula.compiler import (
     realize_dials,
     split_scoring_block,
 )
+from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.application.scoring.metrics import fold_cells
+from promptpotter.domain.arms import ArmState, Cut, arm_elimination, is_electable
+from promptpotter.domain.campaign_config import CampaignConfig, apply_config_overrides
+from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.results import (
-    ArmState,
-    Cut,
-    RoundResult,
-    arm_elimination,
-    is_electable,
-    measured_cells,
-)
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import (
     CellSheet,
@@ -48,7 +44,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.judges.registry import judge_instrument
 from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:

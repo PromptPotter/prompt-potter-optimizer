@@ -29,6 +29,7 @@ from promptpotter.application.scoring.closed_rounds import (
     walked_rows,
 )
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
+from promptpotter.domain.arms import Cut, Measuring, Proposed, arm_name
 from promptpotter.domain.cells import (
     Cell,
     CellCandidate,
@@ -36,6 +37,7 @@ from promptpotter.domain.cells import (
     CellSpan,
     CellsResponse,
     DatasetItem,
+    HardSampleOrder,
     HardSamples,
     HeatmapScope,
     hit_spread,
@@ -43,14 +45,6 @@ from promptpotter.domain.cells import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.results import (
-    Cut,
-    HardSampleOrder,
-    Measuring,
-    Proposed,
-    arm_name,
-    individual_cells,
-)
 from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import (
@@ -72,11 +66,11 @@ from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
 from promptpotter.infrastructure.store.read_model import Moment, derived, file_sig
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
-from promptpotter.shared.measurement_context import RoleScope
+from promptpotter.shared.measurement_context import RoleScope, individual_cells
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.bench import PartitionRecord
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
     from promptpotter.domain.scoring import GradedCell, PipelineData, Scorer
@@ -491,7 +485,7 @@ def _cycle_cells(
     cells: list[CellRow] = []
     for (round_no, arm_key), arm in scan_standing_rounds(chain).arms.items():
         state = arm.state
-        if state is None or (isinstance(state, Cut) and state.kind == "invalid"):
+        if isinstance(state, Cut) and state.kind == "invalid":
             continue
         label, individual_id = arm_name(arm_key, state, round_no).label, state.individual.id
         live = isinstance(state, Proposed | Measuring)

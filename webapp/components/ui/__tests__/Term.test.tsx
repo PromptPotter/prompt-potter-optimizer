@@ -5,10 +5,10 @@ import { Term } from "../Term";
 describe("Term", () => {
   it("makes its trigger focusable, and opens on that focus", () => {
     render(<Term content="the metric the winner is elected on">θ</Term>);
-    const trigger = screen.getByText("θ");
-    expect(trigger.tabIndex).toBe(0);
+    const trigger = screen.getByText("θ").parentElement;
+    expect(trigger?.tabIndex).toBe(0);
 
-    fireEvent.focus(trigger);
+    fireEvent.focus(trigger!);
     expect(screen.getByRole("note").textContent).toContain("elected on");
   });
 

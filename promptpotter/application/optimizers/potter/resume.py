@@ -1,4 +1,4 @@
-"""Potter's half of resume and fork; the generic half, ``bench/resume_and_fork/``, reaches it only through ``OptimizerRuntime``."""
+"""Potter's half of resume and fork; the generic half, ``bench/resume_and_fork/``, reaches it only through its members' declarations."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ from promptpotter.application.scoring.selection import (
     elect_round_winner,
     paired_p_best,
 )
+from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.results import election_rows
 from promptpotter.domain.scoring import NO_CELLS, is_answer_collapsed
 from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.shared.errors import graceful
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def _replay_round_winner(
-    ctx: ReplayContext, inputs_ref: dict[str, Any], data: dict[str, Any]
+    ctx: ReplayContext, inputs_ref: dict[str, Any], _data: dict[str, Any]
 ) -> ArmKey | None:
     """The parent is the reference the round BANKED, never a panel rebuilt here: that one re-elects differently."""
     round_data = ctx.round_data
@@ -107,19 +107,21 @@ def _replay_leader_lock_in(
 
 
 # The two escalation triggers are archived: each folds the cycle's escalation history, which no replayer holds.
-POTTER_REPLAYERS: dict[str, Replayer] = {
+ELECTION_REPLAYERS: dict[str, Replayer] = {
     PotterCheckpointKind.ROUND_WINNER: _replay_round_winner,
+}
+RACE_REPLAYERS: dict[str, Replayer] = {
     PotterCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
     PotterCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
 }
 
 
-def _seat_on(cycle: Cycle, rounds: list[RoundResult], rr: RoundResult) -> NodeContext[Any]:
+def _seat_on(cycle: Cycle, rounds: list[RoundResult], rr: RoundResult) -> NodeContext:
     cycle.replay_priors([*(p for p in rounds if p.round < rr.round), rr])
     ledger = cycle.session.state.ledger
     assert ledger is not None, "a resume replays its rounds under the run's observers"
     seat = RoundContext(cycle=cycle, round_num=rr.round, callbacks=RunCallbacks(ledger=ledger))
-    return NodeContext[Any](seat, optimizers.member("l1_critique"))
+    return NodeContext(seat, optimizers.NODE_MEMBERS.get("l1_critique"))
 
 
 def round_packages(cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:

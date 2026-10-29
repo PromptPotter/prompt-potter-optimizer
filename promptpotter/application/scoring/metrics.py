@@ -6,15 +6,16 @@ from typing import TYPE_CHECKING
 from promptpotter.application.scoring.evaluators import materialize_round_values
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.selection import level_band
-from promptpotter.domain.results import CellFold, ScoreSummary, arm_end, recall_at
+from promptpotter.domain.arms import arm_end
+from promptpotter.domain.cell_fold import CellFold, ScoreSummary, recall_at
 from promptpotter.domain.results_health import is_degraded, is_deprecated
 from promptpotter.domain.scoring import ROW_GRADES
 from promptpotter.domain.spend import TokenAccount
 
 if TYPE_CHECKING:
+    from promptpotter.domain.arms import ArmState
     from promptpotter.domain.paired_reading import ArmKey
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.results import ArmState
     from promptpotter.domain.scoring import CellSheet, GradedCell
 
 

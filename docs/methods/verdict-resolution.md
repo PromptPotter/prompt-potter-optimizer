@@ -1,8 +1,8 @@
 # Verdict resolution — the statistical model and the two sample-selection mechanisms
 
-The model every score in this repo is expressed in, and the two mechanisms that decide **which**
-samples get measured and **in what order**. The split between those two is the whole point — they
-answer different questions, and the one the election reads is blind to every outcome:
+The model every score here is expressed in, and the mechanisms that decide **which** samples get
+measured and **in what order**. They answer different questions, and the one the election reads is
+blind to every outcome:
 
 | | Question | Function | When |
 |---|---|---|---|
@@ -10,24 +10,20 @@ answer different questions, and the one the election reads is blind to every out
 | **Acquisition score** | Which sample is hardest to call? | `pick_value = decision_information_gain + delta_learning_gain` | the persisted hard-samples ranking alone |
 | **Round order** | In what order do we score the round's samples? | `build_round_order` | **Within** a round — one deterministic order, shared by every candidate |
 
-The score lives in `application/intelligence/adaptive_queue_mechanism.py`, the order in
-`application/intelligence/rasch.py`. **There is no online per-sample
-re-fit** — the round order is static by design (§ The round order for why adaptivity made it worse).
+**There is no online per-sample re-fit** — the round order is static by design (§ The round order).
+Which *candidate* wins is [`candidate-elimination.md`](candidate-elimination.md)'s; both read θ, so
+they never disagree about what "better" means.
 
-Which *candidate* wins is the sibling question, owned by
-[`candidate-elimination.md`](candidate-elimination.md). Both read θ, which is why they never
-disagree about what "better" means.
+**Holm corrects across PAIRS and cannot correct across METRICS.** Any surface reporting a pairwise
+comparison must say so: trying several metrics and keeping the tightest is a comparison no column
+prices. `p` is null where nothing was tested (below two shared cells) — not a test that returned 1.00.
+`holm_adjusted` and `p_floor` reach every pair `application/scoring/paired.py::read_pair` takes, and
+**the floor gates the claim**: `p_value` is `max(Student-t p, p_floor)` and `side` is `spans` wherever
+`p_floor` exceeds `alpha` (`domain/paired_reading.py::interval_side`). `min_detectable_effect` and
+`panel_precision` serve reads only.
 
-**Holm corrects across PAIRS and cannot correct across METRICS.** Any surface reporting a
-pairwise comparison must say so: trying several metrics and keeping the tightest is a
-comparison no column prices, and the correction does not reach it. `p` is null where nothing
-was tested (below two shared cells) — a different fact from a test that returned 1.00.
-
-**What this model does not cover.** Within LLM-driven program evolution, PromptPotter targets the
-bounded case: fixed pipeline, labelled dataset, scalar fitness. Open-ended synthesis,
-multi-objective fitness and unlabelled tasks remain open problems for the paradigm and are not
-supported here — θ is a single latent ability per candidate, so a second objective has nowhere to
-land.
+**Scope:** fixed pipeline, labelled dataset, scalar fitness. θ is one latent ability per candidate,
+so multi-objective fitness, open-ended synthesis and unlabelled tasks are not supported.
 
 ---
 
@@ -37,49 +33,33 @@ land.
 P(hit_{c,s} = 1) = σ(θ_c − δ_s)
 ```
 
-Candidate ability × sample difficulty, fit jointly by MAP (alternating Newton on the sparse
-observation matrix, Laplace SEs, anchored to `mean(θ) == 0` for identifiability;
-`intelligence/rasch.py::fit_rasch`). That joint fit runs ONCE, at ruler lock — every reading
-after it holds δ fixed and solves θ alone (`::fit_theta_given_delta`), or the scale moves under the
-round it judges. Two consumers: `δ_s` selects samples and ranks hardness; `θ_c` is the
-**round-winner gate**.
+Candidate ability × sample difficulty, fit jointly by MAP (alternating Newton, Laplace SEs,
+`mean(θ) == 0`; `intelligence/rasch.py::fit_rasch`) ONCE, at ruler lock. Every later reading holds δ
+fixed and solves θ alone, one arm at a time (`::fit_theta`; PoBB's bounds `::theta_bounds_given_delta`
+fill the open cells through it), or the scale moves under the round it judges.
+`δ_s` selects samples and ranks hardness; `θ_c` is the **round-winner gate**.
 
-**θ is why per-round resubsetting is safe at all.** Score each candidate on a different,
-signal-chased subset and raw accuracy drifts — whoever drew the easier samples wins on paper — but
-θ is *subset-invariant*, because clearing a hard sample is worth more than clearing an easy one
-(Rasch specific objectivity). One small standard model applied wide, fixing sample-set drift at the
-root instead of patching the symptom downstream.
+**θ is why per-round resubsetting is safe.** On different subsets raw accuracy drifts — whoever drew
+the easier samples wins — but θ is subset-invariant (Rasch specific objectivity).
 
 **Responses are graded, not Bernoulli.** `Observation.response` is the continuous per-sample fitness
-∈ [0,1] — the same score `accuracy` and a paired lift read — never a binarized hit. The logistic
-MAP maximizes cross-entropy `Σ y·log p + (1−y)·log(1−p)`, valid for any `y ∈ [0,1]`, so a binary
-dataset is bit-identical to the old hit path while a graded backend (reciprocal-rank matching, the
-L4 outer proxy) keeps its gradient instead of collapsing to an all-miss θ where every posterior ties.
+∈ [0,1]; the cross-entropy MAP is valid for any `y ∈ [0,1]`, so a binary dataset is unchanged and a
+graded backend (reciprocal rank, the L4 outer proxy) keeps its gradient.
 
-**A graded response is not a coin flip, and θ's SE is corrected for it.** The logistic information
-`Σ a²·p(1−p)` is the variance of a coin flip, and a graded response varies far less about the same
-mean — a ranked answer at position 5 of 20 is neither a hit nor a miss — so assuming Bernoulli
-variance OVERSTATES the uncertainty. Measured against the true sampling spread of θ̂ at n=28: ×1.02
-on binary hit/miss, ×1.51 on reciprocal-rank-of-20, ×4.66 on the low-dispersion L4 outer composite —
-the inflation that left the outer election unable to crown and PoBB pinned at a tie.
-`fit_theta_given_delta` scales the SE by `√φ`, the Pearson dispersion estimated off the fit's own
-residuals (Wedderburn 1974). **An estimate, not a knob**, failing safe in both directions: `φ < 1`
-returns a graded backend's real precision, `φ > 1` widens the SE on an overdispersed one. **A sheet
-whose every response is 0/1 takes `φ = 1` exactly** (`rasch.py::_dispersion`): a Bernoulli's variance
-IS `p(1−p)`, and against a δ fit on those same rows its residuals read as underdispersion — measured,
-`φ = 0.10` on a hotpotqa arm, a θ_se of 0.28 where the information gives 0.89. It is shrunk toward the nominal 1.0 by an inverse-gamma
-prior rather than floored — a response with no residual variance carries no evidence about its own
-dispersion, and an unshrunk `φ→0` would report infinite confidence.
+**θ's SE is corrected for graded variance.** The logistic information `Σ a²·p(1−p)` assumes coin-flip
+variance and OVERSTATES a graded response's uncertainty — measured against θ̂'s true spread at n=28:
+×1.02 binary, ×1.51 reciprocal-rank-of-20, ×4.66 on the L4 outer composite (which left the outer
+election unable to crown). `fit_theta` scales the SE by `√φ`, the Pearson dispersion off
+the fit's residuals (Wedderburn 1974) — **an estimate, not a knob**, shrunk toward 1.0 by an
+inverse-gamma prior so `φ→0` cannot report infinite confidence. **An all-0/1 sheet takes `φ = 1`
+exactly** (`rasch.py::_dispersion`): its residuals against a δ fit on the same rows read as
+underdispersion (measured `φ = 0.10`, θ_se 0.28 where the information gives 0.89).
 
-**1PL by default; each dataset graduates to 2PL where it wins held-out CV**
-(`enable_2pl_graduation`, on by default). Elsewhere 2PL is the field default, so 1PL is the choice
-that needs defending here, not 2PL —
+**1PL by default; a dataset graduates to 2PL where it wins held-out CV** (`enable_2pl_graduation`, on).
+2PL is the field default, so 1PL is what needs defending —
 [`../research/external-constraints.md`](../research/external-constraints.md) § M14 carries the
-benchmarks that set it. With enough
-observations per sample a 2PL fit adds per-sample **discrimination** `aₛ` — how sharply a sample
-separates able from unable candidates, i.e. its signal-to-noise — giving both selection and the gate
-more power. It graduates **per-dataset**, behind the same θ interface, only when it provably beats
-1PL out-of-sample (cross-validated held-out fit + hysteresis), so it never regresses a thin dataset.
+benchmarks. 2PL adds per-sample discrimination `aₛ`; it graduates per dataset, behind the same θ
+interface, only when it beats 1PL out-of-sample (with hysteresis), so a thin dataset never regresses.
 
 ---
 
@@ -93,258 +73,149 @@ more power. It graduates **per-dataset**, behind the same θ interface, only whe
   </picture>
 </p>
 
-**It does not grade its own homework.** An optimizer that picks its own winner is the easiest thing in this field to fake: with three arms and no real difference between them, *some* arm scores above its parent most of the time. PromptPotter still promotes the best of what it saw — and says, per round, on screen and on disk, that the lift interval spans zero; the terminal prints the pick with `(ns)` beside its `p`. Beside θ below, two more guards: **degenerate candidates** — a constant answer, a shape that games the scorer — are caught before they count, and the layer that **validates** a fix is never the layer that proposed it.
+**It does not grade its own homework.** With three arms and no real difference, *some* arm beats its
+parent most of the time. PromptPotter promotes the best it saw and says, per round, on screen and on
+disk, that the lift interval spans zero (`(ns)` beside its `p`). Degenerate candidates (a constant
+answer, a scorer-gaming shape) are caught before they count, and the layer that validates a fix is
+never the one that proposed it.
 
-**θ is the verdict; accuracy is not.** Two things move raw accuracy without any change in ability,
-so it is not comparable across rounds or across arms within a round:
+**θ is the verdict; accuracy is not** — raw accuracy moves without ability:
 
-- **The subset moves.** `per_round_resubset` is ON by default, so consecutive rounds are scored on
-  different samples. Round N's accuracy and round N+1's are two different exams.
-- **Arms are truncated at different depths.** PoBB cuts a weak arm early, and `build_round_order`
-  front-loads the parent's misses (a hit enters only every 4th slot), so a cut arm was graded on
-  a harder prefix than a survivor. Its raw rate is penalised for where it stopped.
+- **The subset moves.** `per_round_resubset` is on, so consecutive rounds are different exams.
+- **Arms are truncated at different depths.** PoBB cuts a weak arm early and `build_round_order`
+  front-loads the parent's misses, so a cut arm was graded on a harder prefix.
 
-So **a winner with lower accuracy than a rival, or than the previous round, is normally correct** —
-`elect_round_winner` ranks difficulty-adjusted ability *against the noise it cleared*
-(`P(θ_cand > θ_parent)`, the same reading PoBB cuts on), which corrects for both. When an operator
-reads the accuracy column and calls the election wrong, say which column the election used; do not
-treat the inversion as a defect on their word.
+So **a winner with lower accuracy than a rival or the previous round is normally correct** —
+`elect_round_winner` ranks `P(θ_cand > θ_parent)`, the reading PoBB cuts on. When an operator calls
+the election wrong off the accuracy column, say which column it used.
 
-**So no harness rule ranks rounds by their own readings.** The `--halt-at` target stop
-(`runner/termination.py::target_tripped`) reads the optimizer's declared pick (`Cycle.selection`)
-on the round that picked it — the individual the bench grades — never the high-water of each round's
-composite, which can name a round that is not the pick and stop, or refuse to, on rows the pick never
-sat. The overlap line's members are those picks too (`overlap` below): a pick whose round's composite
-trails an earlier round's still joins it. Only potter's L2/L3 stall comparator keeps that
-high-water, as its own signal.
+**No harness rule ranks rounds by their own readings.** The `--halt-at` stop
+(`runner/termination.py::target_tripped`) reads the optimizer's declared pick (`Cycle.selection`) on
+the round that picked it, never each round's composite high-water; the overlap line's members are
+those picks too. Only potter's L2/L3 stall comparator keeps the high-water, as its own signal.
 
-**States where θ is NOT ability, and the pushback above is wrong.** Count them off
-`domain/ruler.py::ThetaCaveat`, not off prose.
+**States where θ is NOT ability, and the pushback above is wrong** — enumerated by
+`domain/ruler.py::ThetaCaveat`, served so the screen and the optimizer's `confounds` panel read one
+verdict. Read per level (`AbilityReading.caveat`), per arm (`ArmFit.theta_caveat`) and per series
+(`LevelSeries.caveat`, asked before differencing two levels); a sound round can carry a pinned arm.
+Checked in severity order (`ruler.py::theta_caveat`):
 
-**Every one is SERVED as a `ThetaCaveat` member, so the screen and the optimizer's
-`confounds` panel read one verdict rather than each deciding.** Each is read off the cells its θ
-was read on — one level's (`AbilityReading.caveat`), one arm's (`ArmFit.theta_caveat`), a whole
-series' (`LevelSeries.caveat`, which every reader asks before differencing two levels). A sound
-round can carry a pinned arm, and a pinned arm can sit on a sound ruler.
+- **Disjoint datasets** (`disjoint_scopes`). Each `RulerScope` is its own scale; a lift paired on
+  shared cells still holds.
+- **The 0% floor** (`floor_pinned`, per arm). An all-miss arm pins θ to a constant whatever it saw,
+  so every lift from it is `0.000`. Not answer-collapse (one answer everywhere, which PoBB cuts): an
+  arm can answer differently every time and be wrong every time.
+- **A flat ruler** (`flat_ruler`). The ruler's own δ span is below `BAND_COLLAPSE_LOGITS`, so θ is
+  accuracy plus a constant. What an all-zeros fit looks like; checked before `collapsed_band`,
+  whose ratio reads ~1 on a globally flat ruler.
+- **A cold ruler** (`cold_ruler`). Too few rows from individuals outside the election: θ is
+  logit-accuracy, not a shared scale. The lift (on cells both answered) holds, the level does not.
+  `calibration_model` `None` = cold; two θ are comparable only when `ruler.id` matches.
+- **A collapsed band** (`collapsed_band`). The round's cells span a sliver of the ruler (measured:
+  28 cells over 0.63 logits on a ruler spanning 11.4), so θ = `logit(accuracy) + c` and the parent's
+  floor tracks the band's centre (one origin read `-0.340` on round 0, `-1.385` on the band).
+  **Silent** — warm ruler, matching id, every number renders.
+- **A prior-pinned round** (`prior_pinned`). At least `PRIOR_PINNED_RATIO` of the cells share a δ
+  with another cell: ties are the PRIOR setting δ where no observation varied. The pin moves with
+  the ruler's composition, so an unchanged prompt walks up the scale round on round. Silent too.
+  **Read the LIFT, never the level, never a level across rounds** — the pin cancels within a round.
+- **Unmeasured difficulty** (`unmeasured_delta`). A cell the judging scale does not carry
+  (`DeltaRuler.unlinked`); θ leaves it out, and two arms can skip different cells, so it does not
+  cancel inside a lift. A later round reads it once this round's rows fold in.
 
-- **Disjoint datasets** (`disjoint_scopes`, both scopes, checked first). Each `RulerScope` is its own
-  scale, so θ over several datasets' cells mixes scales; a lift paired on shared cells still holds.
-- **The 0% floor** (`floor_pinned`, per-ARM). An arm that misses every cell gives the fit no
-  information, so θ pins to the same constant regardless of which samples it saw — every zero arm
-  reads identically. At 0% the column is a floor, not a measurement, and any lift computed from it
-  is exactly `0.000`. Distinct from an answer-COLLAPSED arm, which PoBB cuts: that one says a single
-  thing everywhere. An arm can answer differently every time and still be wrong every time, and
-  that is a real measurement — electable, scoreable, and still not a θ.
-- **A flat ruler** (`flat_ruler`). The instrument rather than the draw: the ruler's own δ span is
-  below `BAND_COLLAPSE_LOGITS`, so no round could have read wider and θ is accuracy plus a constant
-  however many cells it carries. This is what a ruler fitted on an all-zeros response matrix looks
-  like from the outside, which is how it went unseen — the collapsed-band check below is a RATIO,
-  and a globally flat ruler gives a ratio near 1.
-- **A cold ruler** (`cold_ruler`). Before the tenant ruler holds enough rows from individuals
-  outside the election, θ degenerates to logit-accuracy and is not on a shared scale. The election
-  then reads each arm and its parent on the cells both answered, so the lift holds and the level
-  does not. Check `calibration_model` (`None` = cold) and `ruler.id` — two θ readings are
-  comparable only when their `ruler.id` matches.
-- **A collapsed band** (`collapsed_band`). The round's cells span a razor-thin slice of the ruler —
-  measured, 28 cells spanning 0.63 logits on a ruler spanning 11.4. Inside a band that narrow every cell is equally hard, so the 1PL fit reduces
-  to `θ = logit(accuracy) + c` and the adjustment does no work: ranking on θ and ranking on accuracy
-  are the same ranking, and the parent's floor moves with the band's centre rather than its ability
-  (one origin read `-0.340` on round 0's spread and `-1.385` on the band). Unlike the two above this
-  one is SILENT — the ruler is warm, `ruler.id` matches, every number renders.
-  Check the round's own cells against the ruler's δ spread before trusting a θ lift: a panel whose
-  δ all sit within a logit of each other carries no difficulty information to adjust for, so the
-  θ column there is logit-accuracy wearing a ruler's name. `flat_ruler` above is checked FIRST,
-  on an absolute floor, because this ratio cannot see it.
-- **A prior-pinned round** (`prior_pinned`). At least `PRIOR_PINNED_RATIO` of the round's cells
-  sit on a δ the ruler hands to more than one cell. A continuous fit does not produce ties: a run of
-  identical δ is the PRIOR determining the value for cells whose observations carried no variance —
-  every arm that ever saw them answered the same way, which on a hard bank is most of them. Those
-  cells still enter the θ fit and still move it, against a difficulty nobody measured.
-  The damage is that the pin MOVES. It is a function of the ruler's current composition, so each
-  batch of never-solved cells shifts it, and an unchanged prompt — never promoted, never re-run,
-  replayed from cache — walks up the scale round on round. Silent for the
-  same reason `collapsed_band` is: warm ruler, matching id, every number renders.
-  **Read the LIFT, never the level, and never a level across rounds.** Within one round the pin is
-  shared by every arm, so it cancels out of a lift; between rounds it does not cancel at all.
-  Checked after the band (`ruler.py::theta_caveat` — order is severity).
-- **Unmeasured difficulty** (`unmeasured_delta`). A cell with NO δ: one the judging scale does not
-  carry, because no individual outside the election had answered it when the round opened
-  (`DeltaRuler.unlinked`). θ leaves that cell out, so it is read on fewer cells than the accuracy
-  beside it — and two arms can skip different cells, so unlike the pin it does not cancel inside a
-  lift. A level carries it for its own cells, an arm's row for its own, and a prior-pinned
-  round's arms still carry theirs. A later
-  round reads the cell once this round's rows have folded into the ruler.
-
-  **The question these two states make unanswerable — "is the round-N winner better than C0?" — has its
-  own answer, and it is not θ.** `RoundResult.overlap` (`domain/results.py::OverlapReading`) reads
-  C0 and each individual the optimizer has since declared its pick — the best-so-far the bench
-  grades, by the rule above, never a composite high-water (`domain/results.py::best_line`, the
-  same line for every optimizer) — on the ORIGIN PANEL (`domain/results.py::origin_panel`) — per
-  dataset, the cells the origin answered, or the line's where C0 sat none, every member topped up onto them once. Fixed because a set re-chosen from what the line happened to share CONTRACTED as the
-  line grew, so consecutive rounds' bars answered different questions and a winner that shared
-  too little simply had no bar. It is a rate, not an ability, so it needs
-  no ruler and no adjustment — which is the point: it is what remains readable when the scale
-  underneath θ has collapsed. The panel's rows also feed the election: before it, the parent and
-  every arm the coverage floor can read sit the panel cells their draw left, and θ, the verdict and
-  PoBB's final posterior read draw and panel pooled, less the parent's crowning cells
-  (`domain/results.py::election_rows`); mid-round cuts stay on the draw. So the panel is a REUSED
-  set: selecting on it round after round overfits it, and the overlap reading is optimistic for
-  every pick. The unbiased headline is the bench. Round files, `log.md`, `review.md`,
-  the round-close terminal line and the candidates chart's `overlap` series all render the same
-  reading, under that one name. It does not repair the scale — it measures around it.
-- **A ruler HOLE is never graded.** δ=0 is a *position* on the scale rather than a neutral value:
-  against a centre near +2.1 it scores an unmeasured cell as easier than anything ever measured and
-  pulls θ down ~2 logits. So `fit_theta_given_delta` reads θ on the cells the ruler carries and no
-  other. A cell off the scale is the `unmeasured_delta` state above.
+  **"Is the round-N winner better than C0?" has its own answer, and it is not θ.**
+  `RoundResult.overlap` (`domain/origin_panel.py::OverlapReading`) reads C0 and each declared pick
+  (`run_standing.py::best_line`, one line for every optimizer) on the fixed ORIGIN PANEL
+  (`origin_panel.py::origin_panel` — per dataset, the cells the origin answered, every member topped up onto them once). Fixed, because a
+  set re-chosen from what the line shared contracted as it grew. It is a rate, needing no ruler —
+  readable when θ's scale has collapsed. The panel's rows also feed the election (draw and panel
+  pooled, less the parent's crowning cells: `::election_rows`; mid-round cuts stay on the draw), so
+  it is a REUSED set and the overlap reading is optimistic for every pick: **the unbiased headline
+  is the bench.** Round files, `log.md`, `review.md`, the round-close line and the candidates
+  chart's `overlap` series all render this one reading.
+- **A ruler HOLE is never graded.** δ=0 is a position, not neutral: against a centre near +2.1 it
+  scores an unmeasured cell as easiest and pulls θ down ~2 logits, so `fit_theta` reads
+  only cells the ruler carries.
 
 ## What an arm's lift is read against — `lift_reference`
 
-Every arm's `vs_reference` reading — the blocked lift and its interval, the matched floor —
-is read against ONE individual per arm, the reading's side `a`
-(`Election.fit[ArmKey].vs_reference`), with its rows banked as an arm of the round
-(`RoundResult.reference_rows`). A repair re-measures the arms, never the bar. Which
-individual is a campaign-level choice, `OptimizationConfig.lift_reference`, and both values run
-under every optimizer so a comparison of the two readings is one knob apart:
+Every arm's `vs_reference` reading (blocked lift, interval, matched floor) is read against ONE
+individual per arm (`Election.fit[ArmKey].vs_reference`, its rows banked as
+`RoundResult.reference_rows`); a repair re-measures the arms, never the bar.
+`OptimizationConfig.lift_reference` picks it, both values under every optimizer:
 
-- **`best_so_far` (default)** — the round's selected best-so-far individual. It is re-scored on
-  the round's whole panel and paired with each arm on the cells both
-  measured, so a truncated arm keeps its lift and interval but gets no matched floor. It asks
-  whether an arm beats what the bench already holds. Potter's parent IS this individual — its
-  generator mutates the prior winner — so potter reads exactly what it read before the choice
-  existed.
-- **`parents`** — the arm's own `parent_ids`, each re-measured on exactly the cells the arm
-  measured, so every arm has a matched floor. It asks whether the operator that made the arm
-  added anything over its inputs. A crossover child is read against the BETTER of its parents on
-  those cells: the bar it must clear to have gained over what it recombined, and a conservative
-  one, since the better parent is picked on the same cells the lift is read on. An arm with no
-  parent has no reference. A parent is any individual a round measured — an archive elite no
-  round selected included — re-measured under the configuration its round banked
-  (`PointContext.measured`).
+- **`best_so_far` (default)** — the round's selected best-so-far, re-scored on the whole panel and
+  paired on cells both measured (a truncated arm keeps lift and interval, loses the matched floor).
+  Potter's parent IS this individual.
+- **`parents`** — the arm's own `parent_ids`, each re-measured on exactly the arm's cells, so every
+  arm has a matched floor. A crossover child is read against the BETTER parent on those cells — a
+  conservative bar. No parent, no reference. A parent is any measured individual, re-measured under
+  its round's banked configuration (`PointContext.measured`).
 
-Neither value moves what an optimizer's selector reads: potter elects on θ against the round's
-best-so-far and CAPO keeps its population on its own length-penalised objective, whichever lift is
-reported. What
-moves is every number above. The round's `overlap.advance` reads neither: it is the pick's lead over C0
-on the origin panel (`OverlapReading.lead`), and it drives potter's stall ladder. Under `parents`
-arms read against several individuals leave a sample-set mask no single bar to re-derive
-(`mask/load.py::_parent`), so a masked election there is undecidable rather than guessed.
+Neither moves what a selector reads (potter elects on θ against best-so-far; CAPO on its own
+objective). `overlap.advance` reads neither — it is the pick's lead over C0 on the origin panel
+(`OverlapReading.lead`) and drives potter's stall ladder. Under `parents` a masked election is
+undecidable rather than guessed (`mask/load.py::_parent`).
 
-## ⚠️ The crowning bar is an OPEN defect — be skeptical of anything resting on it
+**The crowning bar** is [`candidate-elimination.md`](candidate-elimination.md) § The θ rule's.
 
-**Unresolved as of 2026-08-29. This is not a caveat on a working mechanism; it is a known bug with
-no fix chosen.** Everything above tells you which COLUMN the election reads. This section says the
-BAR it reads that column against does not currently test anything, so a crowned winner is weaker
-evidence than the word "winner" implies. Treat any claim that rests on "this round improved" as
-provisional, and say so rather than passing it on.
+## One ruler, one clock
 
-- **The bar is the stopping rule, mirrored.** `selection.py::elect_round_winner` admits on
-  a raw θ lift over the parent above `rasch.py::FIT_SLACK`, more of the cells the arm shares
-  with the parent won than lost on their VERDICTS, AND `P(θ_arm > θ_parent)` bounded by those
-  discordant cells (`candidate-elimination.md` § The θ rule, step 4) above `1 − ε`, PoBB's own ε:
-  promoted only where the parent would be cut against the arm. A lift the fit's last digit or the δ
-  weighting made keeps the parent, a cost term's tie-break counts as neither, and one discordant
-  cell — whose support is 0.75 whatever θ reads — never promotes. A pick's rows on the cells it won its race on are
-  the max over its round's arms, and `rescore_parent` replays them, so the draw never puts those
-  cells in a later race (`selection.py::crowning_cells`): the parent's bar is read on cells no
-  election chose it by, and needs no credit for its own winner's curse. There is still no
-  interval and no multiplicity correction, and `RoundResult.improved` reads any selection past round 0 as a promotion.
-- **Separability is read against C0, not the parent.** One round's interval over its parent
-  spans 0 for almost any real edit at panel width, so a round closes `advanced` (`domain/results.py::round_advance`) only where
-  its pick leads C0 on the origin panel by an interval clear of 0 and tops every earlier pick
-  there. That one `RoundAdvance` gates the L1 patience reset and is
-  the clock a result quotes (`index.json::final.rounds_to_separable`) — it does NOT gate adoption,
-  which stays `improved`. A pick whose owed reading was NOT TAKEN — it failed, was refused, or has not
-  landed — closes `unread`, which neither resets patience nor counts as a stall; only a panel
-  holding no pair to read lets the promotion stand alone (`advanced_unpaired`). The panel is fixed, so the LEAD accumulates across rounds; its
-  width does not shrink.
-- **The right toolkit exists and is only PARTLY on this path.** `holm_adjusted` and `p_floor`
-  reach every pair `application/scoring/paired.py::read_pair` takes — the corrected family, and
-  the floor an exact sign test could reach on the cells that differ. **The floor gates the
-  claim**: a pair's `p_value` is `max(Student-t p, p_floor)`, and its `side` is `spans` wherever
-  `p_floor` is above the spec's `alpha`, whatever the t interval says
-  (`domain/paired_reading.py::interval_side`) — Student-t over a few `{-1, 0, 1}` differences
-  reads below what any exact test on them can, so a round separates only where enough cells
-  differ to carry it. `min_detectable_effect` and `panel_precision` serve
-  the reads; none reaches anything the election calls. One member crossed over: `sign_posterior` bounds the ELIMINATION threshold
-  and the election's ADMISSION (`candidate-elimination.md` § The θ rule, step 4), because a bar is
-  absolute and a rank is not. The election still RANKS on the unbounded posterior, and
-  deliberately — bounding it moved a banked crown across a 0.0007 gap.
-- **At the current width it could not pass anyway.** `exact_p_floor(6) = 0.031` on a 6-cell
-  panel, which Holm across three arms takes to 0.094, so no Holm-corrected exact verdict is
-  reachable at α=0.05 at ANY effect size.
+The tenant holds ONE δ ruler (`ruler.jsonl`, `infrastructure/store/ruler_store.py`), keyed by
+sample content, versioned by tick: a round's grade-A
+rows fold in after its walks and BEFORE its election (`DifficultyView.link`). An election reads that
+version less every row of the parent line (`bench/difficulty.py::judging_ruler`) — fit on the
+parent's rows, δ would be its hit pattern and θ would favour it every round.
 
-**Why it is still open rather than fixed.** Every number a bar could be designed against predates
-the tenant ruler (below), so redesigning it now would be tuning to noise. **The next step is to
-re-read separability on a run that used it, and only then choose a bar** — not to tighten one now.
-
-**One ruler, one clock.** The tenant holds ONE δ ruler (`ruler.jsonl`, `infrastructure/store/ruler_store.py`),
-keyed by sample content and versioned by a tick: a round's grade-A search rows fold in once its
-walks end and BEFORE its election (`DifficultyView.link`), so θ reads every cell the round bought.
-An election reads that version less every row of the parent line
-(`bench/difficulty.py::judging_ruler`, the one anchoring fit). Fit on the parent's rows, a run's
-δ would be its parent's hit pattern: the panel would draw the parent's known hits and θ would
-favour the parent every round. The round's arms, earlier losers, other campaigns and other
-optimizers do feed it.
-
-**The clock is the task's memory scope** (`archive_queries.py::MemoryScope`). An optimizing run
-reads the head at each round's open (`OpenAt`), so its election scale moves round to round. Its θ
-LEVELS do not: each close re-reads every round on one stamp (`LevelSeries`), banked once and read
-by every surface, so two levels difference wherever the series' `caveat` is null. An arm of a head-to-head reads
-the version its head-to-head froze at open plus its own campaign's lines since (`ArmOf`,
-`RulerReach`), so no arm reads another's rows and each warms as a fresh run of itself would. An L4 inner cell reads the version
-its outer round opened on (`CellOf`), so every candidate measured against a cell reads one scale
-and the origin level genuinely cancels in `variant − origin`.
+**The clock is the task's memory scope** (`archive_queries.py::MemoryScope`): an optimizing run reads
+the head at each round's open (`OpenAt`), and each close re-reads every round on one stamp
+(`LevelSeries`), so two levels difference wherever the series' `caveat` is null. A head-to-head arm
+reads its head-to-head's frozen version plus its own campaign's lines (`ArmOf`, `RulerReach`); an L4
+inner cell reads its outer round's (`CellOf`), so `variant − origin` cancels.
 
 **Every reading names its scale.** `AbilityReading.ruler` and `RoundOutcome.ruler` carry a
-`RulerStamp` — version, excluded individuals, purpose, scope — so a resume, a replay and `verify`
-re-fit the scale a reading was taken on rather than a grown one. `AbilityReading.cells` says how
-many cells θ was read on.
+`RulerStamp` (version, excluded individuals, purpose, scope), so resume, replay and `verify` re-fit
+the scale a reading was taken on. `AbilityReading.cells` counts θ's cells.
 
 ## What this is for — separability
 
-Most candidates are dead. The job is to discover that in the fewest measurements possible, by
-spending each measurement where it most changes what we believe.
+Most candidates are dead; the job is to discover that in the fewest measurements. Per-sample
+variance splits into **within-candidate** (re-run noise) and **between-candidate** (the signal an
+optimizer climbs). Where the second does not exceed the first, optimization fails *silently*: an
+unusable instrument reads as a stalled optimizer. Hence screening. The origin-*score* bar is
+[`../research/benchmarks.md`](../research/benchmarks.md) § The admission bar's.
 
-**Separability is the precondition both mechanisms assume.** Per-sample score variance splits in two:
-**within-candidate** (one candidate, one sample, re-run — generation stochasticity, noise) and
-**between-candidate** (hold the sample, vary the candidate — the signal an optimizer climbs). A
-dataset rewards optimization only where the second exceeds the first, and where it does not,
-optimization fails *silently*: a round whose samples carry no between-candidate variance cannot rank
-its arms however good the proposals are, so an unusable instrument reads as a stalled optimizer.
-That is the whole reason to screen. The origin-*score* bar is a different question, owned by
-[`../research/benchmarks.md`](../research/benchmarks.md) § The admission bar.
+*Within* → the `noise-floor` verb, only where a repeat is a real second call (above the sample level
+a re-ask replays the content-addressed caches, which is why the L4 panel carries no within-cell term).
+*Between* → `aₛ`. **Screen a whole dataset before wiring it, then pick the subset inside one** — the
+hard-sample leaderboard, `pick_value` below.
 
-**Both halves already have an instrument.** *Within* → the `noise-floor` verb, but only where a
-repeat is a real second call: above the sample level a re-ask replays the content-addressed caches
-and its spread is zero by construction, which is why the L4 panel carries no within-cell term.
-*Between* → discrimination `aₛ`, above: a high-`aₛ` item separates abilities by construction.
-**Screen a whole dataset before wiring it, then pick the subset inside one** — the second use is the
-hard-sample leaderboard, the same `pick_value` two sections down.
+Source: **`p1`, [arXiv:2604.08801](https://arxiv.org/abs/2604.08801)** (its *system* / *user prompt*
+= our *candidate* / *sample*) — justification for the open `aₛ`-weighted subset pick. **A small
+high-separation subset beats a large one**, and **a later edition of a dated benchmark is a
+contamination-resistant held-out set** (one year's AIME → the next; not a substitute for a canonical
+split). L4 calls it **informative width** ([`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md)).
 
-Source: **`p1`, [arXiv:2604.08801](https://arxiv.org/abs/2604.08801)** (its *system prompt* / *user
-prompt* are our *candidate* / *sample*) — published justification for the open `aₛ`-weighted subset
-pick, not a second mechanism. Two protocol findings travel with it: **a small high-separation subset
-beats a large one** (separability is the axis that buys signal, not subset size), and **a temporally
-later edition of a dated benchmark makes a contamination-resistant held-out set** (one year's AIME →
-the next: transfer rather than fit; not a general substitute for a canonical split). L4 calls the
-same property **informative width** ([`../specs/l4-outer-loop.md`](../specs/l4-outer-loop.md)).
+**Separability is read against C0, not the parent.** A round closes `advanced`
+(`domain/origin_panel.py::round_advance`) only where its pick leads C0 on the origin panel by an
+interval clear of 0 and tops every earlier pick there. That `RoundAdvance` resets L1 patience and is
+the clock a result quotes (`index.json::final.rounds_to_separable`); adoption stays `improved`, which
+reads any selection past round 0 as a promotion. A pick whose reading was not taken closes `unread`
+(neither reset nor stall); a panel with no pair lets the promotion stand alone (`advanced_unpaired`).
 
 ---
 
 ## The acquisition score — `pick_value`, and it has two terms
 
-For the current candidate `c` with 1PL ability posterior `(μ_c, var_c)`, against the seed
-`(μ_s, var_s)`, on sample `s` with population profile `(δ_s, se_δ_s)`:
+For candidate `c` with 1PL posterior `(μ_c, var_c)`, seed `(μ_s, var_s)`, sample `s` with `(δ_s, se_δ_s)`:
 
 ```
 pick_value(s) = decision_information_gain(s) + delta_learning_gain(s)
 ```
 
-**Term 1 — `decision_information_gain`: will this sample move the verdict?** The mutual information
-(nats) between the sample's next outcome and the verdict `θ_c > θ_s`. It rewards a sample only when
-the outcome is genuinely uncertain *and* either branch would shift the keep/abort belief. In the
-means-known limit it recovers Bernoulli Chernoff information (Garivier–Kaufmann 2016,
-Track-and-Stop).
+**Term 1 — `decision_information_gain`: will this sample move the verdict?** Mutual information
+(nats) between the next outcome and `θ_c > θ_s`; in the means-known limit, Bernoulli Chernoff
+information (Garivier–Kaufmann 2016, Track-and-Stop).
 
 ```
 p0      = Φ((μ_c − μ_s) / √(var_c + var_s))                    # current verdict belief
@@ -357,204 +228,78 @@ p̄       = marginal_hit_probability(...)
 decision_information_gain(s) = H(p0) − [ p̄ · H(p⁺) + (1 − p̄) · H(p⁻) ]
 ```
 
-**Term 2 — `delta_learning_gain`: will this sample teach us the ruler?** The expected entropy drop
-(nats) in the sample's own difficulty `δ_s`. One Bernoulli outcome adds Fisher information
-`p(1−p)/scale²` to the prior δ-precision `1/se_δ²`, giving `½·ln(1 + se_δ²·p(1−p)/scale²)` with
-`scale² = 1 + π·se_δ²/8`.
+**Term 2 — `delta_learning_gain`: will this sample teach us the ruler?** Expected entropy drop in
+`δ_s`: `½·ln(1 + se_δ²·p(1−p)/scale²)`, `scale² = 1 + π·se_δ²/8`.
 
-**This second term is not optional, and it is exactly the "bias toward unsolved samples":** without
-`delta_learning_gain` the seed-centred first pick degenerates to "prefer lowest `se_δ`" and
-**starves the unmeasured headroom**. It is largest for *under-measured* samples (large `se_δ`) whose
-outcome is a genuine coin flip (`p≈0.5`), and decays to zero both for well-measured samples and for
-resolved always-hit / always-miss ones (`p(1−p)→0`) — so it explores the unknown without
-re-promoting what the run has already pinned.
+**Term 2 is the "bias toward unsolved samples" and is not optional:** without it the first pick
+degenerates to lowest `se_δ` and starves the unmeasured headroom. It peaks for under-measured coin
+flips and decays to zero for well-measured and always-hit/always-miss samples. Together: a
+closed-form **Knowledge Gradient** acquisition under Laplace.
 
-Together they are a **Knowledge Gradient** acquisition — the one-step Bayesian question "how much
-would measuring `(c, s)` shift our point estimate of the best candidate?", closed-form for Bernoulli
-observations under Laplace.
+## The between-round draw — blind, so the election reads the pool
 
-**The between-round pick spends the two terms separately, not summed** — no swap thresholds.
-`select_round_subset` (`intelligence/rasch.py`) ranks the whole bank on term 1 alone
-(`promptpotter/application/intelligence/adaptive_queue_mechanism.py::decision_information_gain`) against the best θ among the arms in this race, so
-*exploit* falls out of the ranking (samples on the contested band `δ_s ≈ leader θ` sort to the
-top). Where cells differ in price, term 1 is weighted by `information_per_price`, read off the
-ORIGIN's rows so no arm under test moves a cell's rank. *Explore* is a reserved tail rather than a
-term: `_with_ruler_learning` gives the last few slots to the cells δ is least sure of, which holds
-the band open; `_with_stratum_cover` then fronts one cell per shared `source_pin` level, so a
-priced draw cannot narrow to one dataset or one model; and `_with_anchor_block` swaps
-already-anchored cells into the tail until the next ruler extension has enough to equate against.
-Those `elimination_n_min` anchored cells are the cells a warm θ is read on (`rasch.py::theta_cells`),
-so they are what PoBB's gates and the election's coverage floor count, and the round order walks
-them first (§ The round order).
-Summed, `delta_learning_gain` dominated — an unmeasured sample carries the population `σ_δ`, so
-unmeasured samples outranked measured ones and tied with each other, draining the bank in stored
-order. Term 1 still overstates what a draw buys for ONE arm, because δ is fit across arms; weighting
-it by a cell's own separation history is the obvious repair and ranks at chance on banked rounds —
-the width a round can read is set by how far apart the arms are, not by which cells are drawn.
-Cold start → bank-order prefix. The scoring-set floor is `elimination_n_min`.
+**No acquisition term chooses a round's cells.** The election's rows must be the rows the held-out
+bench would read: a draw ranked on θ or on the origin's headroom buys the parent's misses, and the
+lift is a lift on that slice (measured: a θ-elected winner trailed its parent on the bench while the
+iid panel's best arm went unchosen). `AdaptiveQueue.draw` (`optimizers/potter/members.py`) takes the
+search split less the parent's crowning cells and, once the ruler is warm, shuffles each stratum on
+the round's seeded `Replay.rng` (a resume redraws the same cells). `elimination_n_min` ruler
+cells lead the shuffle — the cells a warm θ is read on (`rasch.py::theta_cells`), which PoBB's gates
+and the coverage floor count. `adaptive_queue_mechanism.py::covered_prefix` fronts one cell per
+`source_pin` level. Where the parent misses is the round ORDER's business, never the draw's.
 
-**No acquisition term chooses a round's cells.** The election reads the round's rows, so they must
-be the rows the held-out bench would read: a draw ranked on the leader's θ, or priced on the
-origin's headroom, buys the cells the parent misses, and a lift read there is a lift on that slice
-— measured, a θ-elected winner trailing its parent on the bench while the iid panel's best arm went
-unchosen. `AdaptiveQueue.draw` (`optimizers/potter/members.py`) takes the search split less the
-parent's crowning cells (`scoring/selection.py::crowning_cells`) and, once the ruler is warm,
-shuffles each stratum on the round's seeded `NodeContext.rng`, so a resume redraws the same cells.
-`elimination_n_min` ruler cells, drawn as blindly, lead the shuffle: they are the cells a warm θ
-is read on (`rasch.py::theta_cells`), so they are what PoBB's gates and the election's coverage
-floor count, and the round order walks them first (§ The round order).
-`application/intelligence/adaptive_queue_mechanism.py::covered_prefix` then fronts one cell per shared `source_pin` level,
-so no draw narrows to one dataset or one model. Where the parent misses is the round ORDER's
-business, never the draw's.
-
-**On by default — but warm-gated.** `per_round_resubset` (default `True`): while the δ ruler is
-still cold the subset stays frozen to the campaign-start prefix (`bank[:budget]`), whose shared
-cells warm the ruler fastest, thawing to a fresh draw once the ruler locks. Off → that frozen
-prefix for the whole campaign, so the sample set is fixed across rounds and accuracies are
-directly comparable.
+**Warm-gated.** `per_round_resubset` (default `True`): while δ is cold the subset stays the
+campaign-start prefix (`bank[:budget]`), which warms the ruler fastest, thawing once it locks. Off →
+that prefix all campaign, so accuracies compare directly.
 
 ---
 
 ## The round order — `build_round_order`, one static order per round
 
-Within a round there is **one** scoring order, shared by every candidate, and nothing re-sorts
-mid-round. It is built by partitioning on the **parent's** per-sample grades — three strata,
-because the grade is a three-state fact:
+One scoring order per round, shared by every candidate, never re-sorted mid-round, partitioned on
+the **parent's** grades:
 
-- **MISS-stratum** — parent grade < 1.0. Ordered by **ascending δ**: easiest win opportunities
-  first — a live candidate proves itself immediately, and a dead one's misses on the easiest wins
-  are the strongest futility evidence.
-- **HIT-stratum** — parent grade ≥ 1.0. Ordered by **descending δ**: likeliest regression points first.
-- **UNKNOWN-stratum** — the parent never answered this cell. Ordered by **ascending |δ − μ_δ|**:
-  most discriminating first, since there is no evidence either way and neither end of the scale is
-  the useful one. Drained after the misses — a measured opportunity outranks an untried one.
+- **MISS** (grade < 1.0) — **ascending δ**: a live candidate proves itself at once; a dead one's
+  misses on the easiest wins are the strongest futility evidence.
+- **HIT** (grade ≥ 1.0) — **descending δ**: likeliest regressions first.
+- **UNKNOWN** (parent never answered) — **ascending |δ − μ_δ|**, drained after the misses. Unknown is
+  not a miss: under resubsetting round 1 shares no cell with the parent, and filing unknowns as
+  misses empties the hit stratum and never fires the probe.
 
-Every 4th position takes the next HIT-stratum sample (the regression probe) **while a miss or an
-unknown is still unplaced**; otherwise misses, then unknowns; when a stratum runs dry the remainder
-follows. The guard is what stops a tail of pure hits from being read as probes.
-
-**Why unknown is not a miss.** `is_hit` returns False for a miss and for `None` alike. Under
-`per_round_resubset` round 1's panel shares no cell with the parent, so filing unknowns as
-win-opportunities puts *every* cell in the miss stratum, leaves the hit stratum empty, never fires
-the `k=4` probe, and leads with the easiest cells — harmless only while δ is flat.
-
-**Why k=4.** Pure miss-first defers all regression evidence past the miss block. A proportional
-interleave spreads the misses so thin that a futility kill lands at the very end. k=4 costs a
-pure-tie kill a handful of extra samples and buys a regression probe inside the first
-`elimination_n_min` window, plus steady loss accrual for regressors.
+Every 4th slot takes the next HIT (the regression probe) **while a miss or unknown is unplaced**.
+**Why k=4:** pure miss-first defers all regression evidence; a proportional interleave makes a
+futility kill land at the end. k=4 buys a probe inside the first `elimination_n_min` window.
 
 **The first `elimination_n_min` slots take only cells θ is read on** (`theta_cells`: warm, the
-ruler's; cold, the parent's), under the same strata and probe rule; every later slot draws from
-all. PoBB's entry gate, ε ramp and lock-in, and the election's coverage floor, all count cells
-read, never rows walked: led by the strata alone, a panel holding exactly `elimination_n_min`
-ruler cells, mostly parent hits, reaches its last one at its final row, and no arm can be cut.
-The cost: a losing arm buys fewer off-ruler cells, so the ruler learns those more slowly.
+ruler's; cold, the parent's). PoBB's entry gate, ε ramp and lock-in and the coverage floor count
+cells read, not rows walked; led by the strata alone, a panel of mostly parent hits reaches its last
+ruler cell at its final row and no arm can be cut. Cost: the ruler learns off-ruler cells slower.
 
-It is a **pure function** of (parent grades, ruler, sample ids, `elimination_n_min`), so a resumed
-round re-derives the identical order with no recorded sidecar. The hard-samples artifact's
-`round_order` is this same function called on the frontier's grades and the cycle's ruler, over
-the samples the cycle has measured.
+It is a **pure function** of (parent grades, ruler, sample ids, `elimination_n_min`), so a resume
+re-derives it with no sidecar; the hard-samples artifact's `round_order` is the same call.
 
-**Why static beats adaptive here:** an ability re-fit after every measurement empirically front-loads
-the parent's hit set — the zero-information region, where every early paired comparison TIES, `p_best`
-pins at 0.5, and the elimination gates go blind until the tail. The round's actual decision is "can
-this candidate NET the adoption margin against the parent", and that evidence lives only in
-discordance-potential samples.
-
-**The static order reaches that same region by the other door, and there the symptom INVERTS — which
-is what hides it.** Where the parent's base rate is low enough that the candidate misses its
-MISS stratum too, miss-first also buys cells that cannot discriminate; but they near-tie rather than
-tie, and the k=4 probe above is then the entire discordant width — one cell. Ties narrow both SEs, so
-`p_best` reads DECISIVE rather than undecided and the gate fires on every arm (`sealqa/longseal-12`:
-four cut at `elimination_n_min`, identical to six decimals). Expect a confident cut, never a blind
-one, and read `n_discordant` on the p_best stream to tell the two doors apart.
+**Why static beats adaptive:** a per-measurement re-fit front-loads the parent's hit set, where every
+early paired comparison ties, `p_best` pins at 0.5 and the gates go blind; the decision lives only in
+discordance-potential samples. **At a low base rate the static order hits the same region with the
+symptom INVERTED:** the candidate misses the MISS stratum too, near-ties narrow both SEs, and `p_best`
+reads DECISIVE (`sealqa/longseal-12`: four arms cut at `elimination_n_min`, identical to six
+decimals). Read `n_discordant` on the p_best stream to tell the two apart.
 
 ---
 
-## The two round-boundary mutations, and what each writes
+## The round-boundary draw, and what it writes
 
-Both run at end of round, **zero-signal first**:
+The one end-of-round mutation is the round draw (§ The between-round draw), in memory only; no sample
+is removed. Triage reads each failure streak: **zero-signal** is deprioritized by `p(1−p)→0`;
+**chronically failing** goes to Critique and L2/L3; **intermittent** is kept — it discriminates.
 
-1. **Zero-signal filter** — samples with no variance across observations are physically dropped from
-   the active dataset, on disk. Pre-policy: they carry no signal to either exploit or explore. Answers
-   *"is this sample dead across the campaign?"*
-2. **The round draw** — `AdaptiveQueue.draw` draws the `budget` samples of the active scoring set,
-   in memory only (§ The between-round draw). Answers *"which samples does the next round score?"*
-
-Beside them, deterministic triage reads each sample's failure streak: **zero-signal** (always-hit or
-always-miss) is naturally deprioritized by `p(1−p)→0` with no physical removal; **chronically
-failing** is surfaced to Critique and L2/L3; **intermittent** is kept — it has the discrimination.
-
-**The hard-sample view fits nothing.** Every round's close rewrites `hard_samples.json`
-(`domain/cells.py::HardSamples`): the cycle's graded cells laid on the cycle's ONE ruler
-(`Cycle.difficulty.ruler`) and the abilities read on it — each arm's `Election.fit[ArmKey].theta`,
-the frontier's at the close (`AbilityScale.frontier`). A δ there is the ruler's δ, and a sample the ruler does not
-carry is served in its `DeltaState` (`domain/ruler.py`) with no δ and no pick score —
-never 0.0, which is a position on the scale. There is ONE file,
-`campaigns/{id}/cycles/{id}/hard_samples.json`, and a cycle that has not written one answers with
-its ledger's ruler over no cells. **Campaign scope names the cycle it reads**
-(`application/scoring/measurement_log.py::campaign_scope_cycle`): its cells, δ, sample order and ruler are
-all that one cycle's. Every surface reads the view in one ranking
-(`hard_sample_sorter.py::rank_hard_samples`). The active scoring set is in-memory only — restored
-on resume by re-running both mutations against the rebuilt observation history. **Dataset scope is
-never persisted**: it is cross-campaign, so no campaign owns it, and
-`GET /datasets/{name}/cells?scope=dataset` anchors a ruler per request on the dataset's archived
-cells alone (`bench/difficulty.py::calibrate_delta_ruler`). No θ was read on that anchor, and a
-campaign locking its own leaves its race out and reads its partition, so the two ids differ. That scope
-holds no stamped ability, so it serves δ and no pick score, and ranks on difficulty.
-
----
-
-## Where it lives in code
-
-- Acquisition score — `intelligence/adaptive_queue_mechanism.py::pick_value` (with
-  `::decision_information_gain` + `::delta_learning_gain`).
-- Round order — `intelligence/rasch.py::build_round_order`, called once per round by potter's sampler
-  (`optimizers/potter/members.py::AdaptiveQueue.draw`).
-- Between-round draw — `optimizers/potter/members.py::AdaptiveQueue.draw`, its stratum cover
-  `intelligence/adaptive_queue_mechanism.py::covered_prefix`.
-- Persisted view — `intelligence/hard_sample_sorter.py::build_hard_samples`, the one caller of
-  `pick_value`; its ranking is `::rank_hard_samples`.
-
-## Phase 2 sketch — origin-relative weighting (not shipped)
-
-Weight each archive observation by the producing candidate's relevance to the current one (similarity
-+ recency) instead of equally; same scoring framework, richer conditioning. Needs `Observation`
-extended with a timestamp + lineage hint — the open design question (archive-wide drift estimate vs
-per-node capability curve) determines that schema.
-
-## Phase 3 sketch — per-STEP difficulty for turn-structured cells (not shipped)
-
-For a task whose cell is a multi-turn conversation or a multi-step episode, fit δ and `a` **per step** rather than per cell — higher resolution about which step separates arms, and more information per cell, which on a backend at minutes and dollars a cell converts directly into fewer cells for the same SE.
-
-**The information gain is a theorem, not a hope**, and it is the same Fisher information § The acquisition score already spends: a single outcome's information `a²·p(1−p)` peaks where `θ ≈ δ` and collapses away from it, so one item resolves only a narrow band of ability, while a step-structured item contributes at each of its `k−1` thresholds and so spreads over a wider θ range. That spread is the half that matters, because a round's arms are not clustered at one ability.
-
-**A turn is not an item, and that is the whole difficulty.** Rasch assumes conditional independence, but turn 2 is conditioned on turn 1's context, so a model that poisoned its own context is not producing independent evidence about ability. Scoring turns as separate items claims `2N` observations where there are `N`, and the failure is **overstated precision** — SEs shrink, intervals narrow, and elimination cuts on confidence it never earned, silently and in the flattering direction. The classic *testlet* problem: a reading passage with five questions is one testlet, not five items.
-
-**So the cell stays the atom, and the fix is a testlet model** — Testlet Response Theory (Bradlow/Wainer/Wang) or a bi-factor equivalent: keep per-step `b_j`/`a_j`, add a person×testlet random effect absorbing the within-conversation dependence. That is what makes per-step parameters legal rather than a precision leak.
-
-**Half the win is already shipped, and it is easy to over-claim the rest.** § The model already takes a graded `[0,1]` response, so a weighted per-step composite reaches θ *today* with no zero-gradient cliff. What per-step fitting adds is that the thresholds are **fitted rather than imposed** — a hand-set `0.3·turn1 + 0.7·final` is a prior we invented and banked into the gate.
-
-Three things gate it, none of them theory:
-
-- **Identifiability.** Per-step 2PL plus testlet effects is many parameters against a round's
-  ~20–34 cells. `a` is already only fitted where a data-rich dataset graduates, and cold/flat
-  rulers are served caveats precisely because thin data cannot support a fit. Per-step `a` on 20
-  cells fits noise that reads as signal.
-- **Step-schema stability.** Per-step δ pools only if "step 2" is the same KIND of thing across
-  cells. An agentic episode takes however many turns it takes, so a turn *index* is not an item.
-  This needs a fixed SEMANTIC schema, decided when the dataset is cut —
-  [`../operations/dataset-selection-rationale.md`](../operations/dataset-selection-rationale.md)
-  § Adding a dataset owns that obligation, because retrofitting one means re-paying for every row.
-  The `retrieve → ground → answer` schema and the three graders that measure it have SHIPPED, and
-  [`../../promptpotter/judges/CLAUDE.md`](../../promptpotter/judges/CLAUDE.md) § The step schema
-  owns them; what has not shipped is fitting anything per step off what they bank.
-- **A new parameter space is a new `RulerScope`** — a hard cut, so nothing measured before it is
-  comparable across the line.
-
-**The enabling condition costs nothing and is the only thing that must not be skipped: bank each
-step's term separately.** The parts persist as named keys in `pipeline_data` (archive row + round
-file), compaction moves only fields declared *unread*, and `Scorer.grade` re-grades archived rows
-under the current formula — so re-weighting, or fitting a testlet model later, is a **re-read of
-banked data rather than a re-measure**. Collapse to a scalar and discard the parts and that door
-shuts permanently.
+**The hard-sample view fits nothing.** Each close rewrites
+`campaigns/{id}/cycles/{id}/hard_samples.json` (`domain/cells.py::HardSamples`,
+`intelligence/hard_sample_sorter.py::build_hard_samples`, the one `pick_value` caller): the cycle's
+graded cells on its ONE ruler (`Cycle.difficulty.ruler`) and the abilities read on it
+(`Election.fit[ArmKey].theta`, `AbilityScale.frontier`). A sample off the ruler is served in its
+`DeltaState` with no δ and no pick score — never 0.0. Campaign scope names the cycle it reads
+(`application/scoring/measurement_log.py::campaign_scope_cycle`); every surface ranks via
+`::rank_hard_samples`. **Dataset scope is never persisted** (no campaign owns it):
+`GET /datasets/{name}/cells?scope=dataset` anchors a ruler per request on archived cells
+(`bench/difficulty.py::calibrate_delta_ruler`) and serves δ with no pick score.

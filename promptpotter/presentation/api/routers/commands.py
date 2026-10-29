@@ -12,17 +12,19 @@ from promptpotter.application.commands.origin_resolving import (
     ResolveOriginResponse,
     dispatch_origin_resolution,
 )
-from promptpotter.application.commands.payloads import (
+from promptpotter.application.datasets.draft_build import DraftCampaignWire
+from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
+from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
+from promptpotter.domain.command_kinds import (
+    PAYLOAD_MODEL_FOR_KIND,
     CommandAcceptedBody,
+    CommandKind,
+    CommandPayload,
     CompactArchivePayload,
     EditDraftCampaignPayload,
     ResolveOriginPayload,
     StartCheckinPayload,
 )
-from promptpotter.application.datasets.draft_build import DraftCampaignWire
-from promptpotter.application.jobs.launcher.checkin import StartCheckinResponse
-from promptpotter.application.maintenance.archive_maintenance import ArchiveReport
-from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind, CommandPayload
 from promptpotter.presentation.api.deps import IdempotencyKeyDep, JobRegistryDep, StoresDep
 
 commands_router = APIRouter(prefix="/commands", tags=["Commands"])

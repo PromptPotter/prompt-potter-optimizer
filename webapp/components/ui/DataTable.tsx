@@ -39,8 +39,8 @@ export function DataTable<T>({
 }: {
   columns: readonly Column<T>[];
   // Exactly one of `rows` / `groups`.
-  rows?: readonly T[];
-  groups?: readonly RowGroup<T>[];
+  rows?: readonly T[] | undefined;
+  groups?: readonly RowGroup<T>[] | undefined;
   getRowId: (row: T) => string;
   activeRowId?: string | null;
   onRowClick?: (row: T) => void;
@@ -89,11 +89,11 @@ export function DataTable<T>({
   const placed = virtualized
     ? virtual.getVirtualItems().map((v) => ({
         index: v.index,
-        pos: { transform: `translateY(${v.start}px)`, height: v.size } as CSSProperties,
+        pos: { transform: `translateY(${v.start}px)`, height: v.size },
       }))
     : items.map((it, index) => ({
         index,
-        pos: { height: it.kind === "group" ? GROUP_PX : ROW_PX } as CSSProperties,
+        pos: { height: it.kind === "group" ? GROUP_PX : ROW_PX },
       }));
 
   const template: CSSProperties = {

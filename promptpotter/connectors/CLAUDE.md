@@ -1,337 +1,55 @@
 # connectors/ — backend-specific hook bundles
 
-Each connector packages everything PromptPotter needs to talk to one
-backend kind. A connector is one file under this package exporting a
-``Connector(...)`` binding (`protocol.py`) as `CONNECTOR`. Operating one is local too: model/provider switches go in
-`dataset.yaml` `pipeline.nodes.{name}.config`, picked from the menu
-`Connector.available_models` seeds into that file — never in the backend's repo.
+**A built-in connector is one module here defining `CONNECTOR`, a `Connector(...)` binding (`protocol.py`), never a `register()` call.** <!-- probe: git grep -cE "\bregister\(" -- promptpotter/connectors/*.py == 0 --> `_validate` and `scripts/gate.py::_LAYERING` refuse the rest. Two are not where the roster suggests: **`promptpotter` lives in `application/runner/inner/connector.py`** (named in `__init__.py::_APPLICATION_BUILT_INS`; [`runner/inner/CLAUDE.md`](../application/runner/inner/CLAUDE.md)), and **`llm_only` is a NODE, never a connector** — it rides a `termnorm` pipeline.
 
-**Adding one is local to `connectors/<name>.py` + a dataset directory, and the way that
-claim fails is what to watch for:** core INFERRING something a connector should DECLARE. The
-rule is not a file list; it is that **whatever the next connector has to reach into core to fix, the fix is a
-declaration on `Connector` or a fact derived from what `extract_experiment` already returns —
-never a branch at the site where the symptom showed up.**
-
-**Connector authoring is a product surface.** If adding one is hard, integrators ask the
-operator instead of doing it themselves. The bar on any defect found while adding one is not
-"this connector works" but *whatever it tripped over, connector #3 does not.*
-
-## Registered connectors
-
-| Name | File | Wire shape | Session | Use |
-|---|---|---|---|---|
-| `termnorm` | `termnorm.py` | `{query, steps, node_config}` posted to `/matches` | `POST /sessions` handshake with terms array | TermNorm production backend |
-| `promptpotter` | `application/runner/inner/connector.py` — application machinery, so it lives there and the table loads it by name (`__init__.py::_APPLICATION_BUILT_INS`); nothing in this package imports `application/`; its rules are [`runner/inner/CLAUDE.md`](../application/runner/inner/CLAUDE.md)'s | `{query, optimizer_prompt_overrides}` → in-process inner cycle (`in_process_run` → `runner/inner/spawn.py`) | Noop (no remote service) | Optimizer-of-the-optimizer (L4) |
-| `dspy` | `dspy_module.py` | `{query, prompt, params}` → the caller's `dspy.Module` | Noop (no remote service) | PromptPotter as a DSPy `Teleprompter` (`presentation/teleprompter.py`) |
-| `harbor` | `harbor.py` | `{query, prompt, model, provider, agent_kwargs}` → one containerized Harbor trial (`in_process_run` → `Trial.create(...).run()`) | Noop (no remote service) | Tuning an agent that works in a sandbox, graded by the task's own verifier |
-| `dbllmbench` | `dbllmbench.py` | `{query, prompt, config}` → one `db-llm-bench` run of that question in a container (`in_process_run` → `docker run <runner_image>`) | Noop (no remote service) | Tuning the prompt of a query-writing benchmark whose harness executes the query and grades the result |
-
-> **`import dspy` is function-local, and must stay that way.** Building the table imports every
-> built-in, so a module-level import would break every run for every install that did not ask
-> for the `[dspy]` extra — which is all of them by default. The
-> caller-facing half (`presentation/teleprompter.py`) imports it at module level instead, because
-> its only importer is the caller and a missing extra should stop them there, by name.
-
-> **`llm_only` is a NODE name, never a connector.** Every single-node benchmark
-> declares an `llm_only` node inside a `termnorm` pipeline and routes over HTTP to the
-> server like any other. Do not add an `llm_only` connector: its answer extraction would
-> duplicate what TermNorm's `_step_llm_only` already does over the wire.
-
-## What the second connector taught the boundary
-
-**Wire payload shape is connector-specific** — each decides its own outer key (`termnorm`
-flattens `pipeline_params` into `node_config`, `promptpotter` nests under
-`optimizer_prompt_overrides`). **The session contract works for in-process backends via a noop**
-(`protocol.py::NoopSession`, the `session_factory` default), at the cost of the HTTP shape leaking
-into the rest of `BackendClient`. And **`extract_experiment` is the impedance-match seam**:
-every panel-owning connector yields the same rows from a very different body, so **a new
-connector shapes its `experiment_data` to fit the loader, never the reverse**.
+**Core never infers what a connector should declare.** What the next connector must reach into core to fix becomes a declaration on `Connector` or a fact derived from what `extract_experiment` returns — never a branch at the symptom site; a connector shapes its `experiment_data` to fit the loader, never the reverse. **Backend tunables ride the dataset overlay** — owned by [`datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) § Sole route; this layer seeds it from `Connector.available_models`.
 
 ## TermNorm is not a third party
 
-**A structural bug whose cause sits in TermNorm's code gets fixed in TermNorm — never
-papered over on this side.** Where its checkout sits is a fact about the machine, so `CLAUDE.local.md` names it
-(`termnorm_checkout`; the backend is its `backend-api` folder) and a fresh clone goes beside this repo. It is the same project as PromptPotter, split into a separate
-repo for security reasons only; folding it back in is the goal. That makes it the
-exception to "backends are read-only" — and to nothing else: per-dataset config still
-rides the overlay, backend *behaviour* still earns a TermNorm root-fix, and which one
-you have is decided by which side actually holds the cause. **Cross-repo edits are
-authorized:** edit the local repo directly (runfish5 authors it); if unavailable,
-coordinate with **runfish5 on GitHub**. The PP↔TermNorm highway is a shape contract —
-touch one side, fix both. Debugging →
-[`../../docs/operations/backend-integration.md`](../../docs/operations/backend-integration.md)
-§ Debugging the highway.
+**A structural bug whose cause sits in TermNorm's code is fixed in TermNorm, never papered over here** — the one exception to "backends are read-only"; per-dataset config still rides the overlay. Its checkout is `termnorm_checkout` in `CLAUDE.local.md` (the backend is its `backend-api` folder).
+**Cross-repo edits are authorized** (else coordinate with runfish5 on GitHub); the PP↔TermNorm highway is a shape contract — touch one side, fix both. Debugging: [`backend-integration.md`](../../docs/operations/backend-integration.md) § Debugging the highway.
 
 ## Execution mode — declared, never name-branched
 
-**`BackendClient.run_query` dispatches on the declared `Connector.execution` (`remote_http` |
-`in_process`), never on the connector name** — so a new backend's transport is a capability it
-declares, not a branch in the core loop. `__init__.py::_validate` enforces the pairing with
-`in_process_run`, whose reply is the `{"data": {…}}` shape the scorer parses from a `/matches`
-body. **It is handed the `Sample`, and core clocks it** (`BackendClient._in_process_cell`): the row is
-`sample.source_pin`, never a search of the panel, and no connector stamps `total_time` /
-`step_timings`. **`in_process` is a statement about TRANSPORT — there is no HTTP — and about nothing else:**
-a `harbor` cell holds a container, spends real money and takes minutes.
-
-**Per-run state is the `workload` argument, never a ContextVar or a module cache.**
-`InProcessWorkload` (`protocol.py`) is built once by `init_services` and held by the run's own
-`BackendClient`: the `panel` its samples came from, already through
-`Connector.resolve_experiment`, and the `program` an embedded host passes to `open_session`. The
-run's samples, its workload and its identity fingerprint all read that one resolved document.
-Sibling campaigns are sibling tasks each building their own client, so neither sees the other's.
-What an inner cell spawns UNDER is not the workload: it names a cycle init has not minted yet,
-and moves every round.
-
-- **`harbor`** — `in_process_run` builds a `TrialConfig` and awaits Harbor's own
-  `Trial.create(...).run()`; the container, the verifier and the reward file are all theirs, so
-  this connector shapes payloads and reads a number rather than orchestrating anything. What it
-  decides, which the next episodic backend will face too: **the candidate prompt ships as an Agent
-  Skill** (`AgentConfig.skills`) whose frontmatter `description` is FIXED — one skill per episode, not the
-  multi-skill design — and whose body obeys the spec's limits (`harbor.py::_SKILL_NAME`;
-  [`external-constraints.md`](../../docs/research/external-constraints.md) § SKILL). **`nodes.agent.config.skill_delivery: system_prompt` is the
-  second channel** — the skill body at the head of terminus-2's prompt template — fixed per
-  campaign, never listed in `param_keys`, absent means the Agent Skill; it enters identity as the
-  node config it is. **The panel is the workload's `experiment`**, its published roster read by
-  `resolve_experiment` off `resources/harbor-roster.<dataset>@<version>.json` — written once by
-  the `pin-roster` verb (`python -m promptpotter pin-roster <dataset> <version>`), which refuses to
-  overwrite a pin upstream has since moved, so no read ever fetches the registry — and `extract_experiment` publishes nothing. **A local task's `path` is pinned relative to its panel's directory**, which `resolve_experiment` records beside the tasks, so its sample key reads the same on every machine; and the panel's `agent.kwargs` may set no key `nodes.agent.config` owns. **Trial scratch goes to the
-  system temp dir, never the workspace**, and nothing durable lives there — reward, digest and token
-  counts belong in the measurement archive. **The one thing a cell leaves on the Docker host is its
-  task image** (`hb__<content hash>`, one per distinct task environment, never one per cell); a hard
-  kill's leftover containers and scratch are swept by the next run (`infrastructure/docker_host.py::reap_dead_producers`).
-  **Never swept: the task images and the package cache**, which are what a resume is cheap on,
-  **nor any container that does not name our compose overlay**, because this Docker host has other
-  tenants. **A trial that measured the machine is never a cell**: `_infrastructure_failure` — asked
-  even when a reward exists, since a verifier whose tool download failed still grades — retries
-  it and then raises `CellInfrastructureError`, which halts the walk — at once and as
-  `CellSendRefusedError` when the provider account is out of credit. **Nor is one its model provider
-  throttled**: `CellThrottledError` hands it to the run's backpressure (`BackendClient.run_query`),
-  since the agent's own calls reach no client of ours. The rule, and the package cache that keeps
-  downloads out of a cell, are
-  [`../../docs/operations/package-cache.md`](../../docs/operations/package-cache.md).
-
-- **`dbllmbench`** — `in_process_run` runs TypeDB's `db-llm-bench` for ONE question in a container
-  built from a pinned upstream commit (`resources/dbllmbench.Dockerfile`). The retry loop, the
-  scorer and everything below their template's `{{skills}}` slot stay theirs, and the candidate
-  prompt is the one skill file their runner loads. **The dataset's
-  assets are the image's**, named by path in node config, so the image tag is measurement identity
-  and no dataset carries a second copy of a schema; the first cell refuses an image whose build
-  commit is not the one its tag names (`_check_image`). **The harness sends from its container**, so
-  the cell is held whole and billed off the token counts its results report (`_spent`). **One execution is
-  read at every retry budget** (`retry_levels`), the lower ones cut from the highest — sum across
-  them and an attempt is counted once per budget. A harness that ended without a full set of verdicts
-  measured its provider or its database (`_failure`), never the prompt. Where the database is rides
-  the environment (`DBLLMBENCH_DB_*`), because the same panel runs against a local container or a
-  cloud cluster.
+**`BackendClient.run_query` dispatches on `Connector.execution` (`remote_http` | `in_process`)**, and `_validate` refuses a mismatched pairing. **`in_process_run` is handed the `Sample`, and core clocks it** (`BackendClient._in_process_cell`): the row is `sample.source_pin`, and no connector stamps `total_time` / `step_timings`. <!-- probe: git grep -cE "total_time|step_timings" -- promptpotter/connectors/*.py == 0 -->
+**Per-run state is the `workload` argument (`InProcessWorkload`), never a ContextVar or a module cache** — harbor's one ContextVar scopes a single send's billing. <!-- probe: git grep -cE "ContextVar\(" -- promptpotter/connectors/*.py <= 1 -->
 
 ## The answer shape — declared in `extract_experiment`, never inferred
 
-**What one cell's ANSWER is, a connector declares by whether the queries it yields carry a
-`ground_truth`.** Two shapes, and every core reader that needs to know asks the LABEL:
+A **ranked-label** connector yields `ground_truth: "<label>"`, read by `label_match`; a **verifier-graded** one yields `ground_truth: None`, read off a `required_observation_keys` entry (`max(0.0, min(1.0, env_reward))`).
+**Ask `domain/scoring.py::is_verifier_graded` / `all_verifier_graded`, never `predicted == NO_RESULT`**, which a dataset's `node_role` decides. <!-- probe: git grep -cE "predicted == NO_RESULT" -- promptpotter/*.py <= 3 --> `Connector.answer_key` is a different fact — where the answer TEXT lives.
+**On a verifier-graded backend never invent a ranking or declare the node a `RANKER`** (it banks a `0.0` `candidate_recall`); a label-comparing formula raises at compile (`formula/compiler.py`).
 
-| shape | `extract_experiment` yields | who decides the score | the formula reads |
-|---|---|---|---|
-| **ranked-label** (`termnorm`, `dspy`) | `ground_truth: "<label>"` | a node emitting a ranking; `predicted` is compared to the label | `label_match(predicted, ground_truth)` |
-| **verifier-graded** (`harbor`, `promptpotter`, `dbllmbench`) | `ground_truth: None` | something else, with a NUMBER — the task's own verifier, L4's outer proxies | a `required_observation_keys` entry: `max(0.0, min(1.0, env_reward))` |
+## Injection is not consumption
 
-`domain/scoring.py::is_verifier_graded` (one label) and `all_verifier_graded` (a round, a bank,
-a dataset) are the ONE place that is asked. **Never `predicted == NO_RESULT`** — that sentinel is
-set by `terminal_ranking` returning nothing, which a *dataset's* `node_role` decides, so two
-labelless backends give opposite answers.
-
-**There is deliberately no second declaration** — never a `Connector` flag beside it: an author
-who writes `extract_experiment` correctly and forgets the flag gets back the misdiagnosis the flag
-would exist to prevent.
-
-**`Connector.answer_key` is not that flag, and the difference is the whole point.** The shape above
-answers *is this cell graded against a label* — one fact, one home, on what `extract_experiment`
-yields. `answer_key` answers *where the answer TEXT lives*, a different question the table never
-asked: a verifier-graded cell still ANSWERED something. Without it, `predicted` falls back to the
-terminal ranking, so a backend emitting none hands every text reader (a judge rubric) the literal
-`NO_RESULT`. The two declarations cannot disagree, because neither can
-answer the other's question. Declaring it is also where an answer goes instead of a ranking.
-
-Four things that follow:
-
-- **Do not invent a ranking to look ranked-label shaped** — every ranking reader then has to
-  un-believe it.
-- **Do not reach the same place by declaring the node a `RANKER`.** That switches on
-  `candidate_recall`, which walks a ranking for a ground truth the backend does not have and
-  banks the resulting `0.0` into `rounds/round_NNNN.json`.
-- **A label-comparing formula is refused at compile** (`formula/compiler.py`), because
-  `label_match` strips both sides and scores an empty answer against an empty label as a PERFECT
-  `1.0` — and that is the launcher's own default formula shape.
-- **Emit absence, not zero.** Rank buckets, top-k and recall are all comparisons against a label;
-  with none, every one reads `not_found` / `0.0` and reports a round that solved eight of ten as
-  having solved none.
-
-## A multi-turn cell — the turns are the backend's, the steps are the task's
-
-A backend whose cell is a CONVERSATION emits `pipeline_data::turns`
-(`domain/scoring.py::TurnRecord`), and everything about that channel is settled there. These rules
-belong here, because they are what a connector author gets wrong:
-
-- **Project a published turn format; never author one.** `TurnRecord` narrows Harbor's ATIF
-  (`harbor.models.trajectories.step`), dropping the training surface (token ids, logprobs,
-  per-turn metrics) that no prompt, ruler or formula reads. Parse it as plain JSON:
-  the file is upstream's PRIVATE trial layout, so a field they add must degrade the record, not
-  raise inside a cell already paid for.
-- **A turn carries the STEP it served, and never becomes one.** A step is a NAMED segment the task
-  declares (Harbor's `[[steps]]`, whose name we author to match the schema term, so there is no
-  third word for it); the turn's ordinal is not an axis, because an episode takes however many
-  turns it takes. Per-step rewards ride the row as TERMS beside the cell's aggregate — Harbor's own
-  `multi_step_reward_strategy` folds them into one number and that fold is the cell's score.
-  Treating either as an item claims kN observations where there are N.
-- **Absent is not empty.** No `turns` key means "this backend has no turn concept"; `[]` would mean
-  "it had none". Only one of those is ever true, and a reader has to be able to tell them apart.
-- **What the optimizer is shown is what the agent DECIDED — the environment is where a decision is
-  carried out, which is a different question.** `reasoning_trace` renders to L1 under the header
-  `MODEL REASONING`, so a digest built from the environment's log alone puts that header over
-  something that is not reasoning, and L1 reads it literally. Drop the `user` turns when you build
-  it — those are the task WE handed the agent, not something it produced.
-
-## Injection is not consumption — one backend, and the absence elsewhere is DECLARED
-
-**On every connector but one, the candidate prompt is IN the request, so "did the model receive it"
-is not a question.** Harbor's default channel is an Agent Skill whose BODY reaches the model only
-if the model opens the file (`protocol.py::Connector.prompt_delivery`), so arrival is MEASURED:
-`harbor.py::_skill_opened` — or `_skill_in_first_request` under `skill_delivery: system_prompt` —
-fills the required observation `SKILL_KEY`, and a round of unopened skills is a tie it never
-measured.
-
-**There is deliberately no core `turn_scalars` member for this.** A term decided by which backend
-you are on is not a core projection: on every other one it would be the constant `1.0`. **Ask of any
-new connector whether what it injects is what the model consumes** — if the two can diverge, that
-gap is a measured observation and not a diagnostic.
-
-**A per-step aggregate can flatter, and Harbor's does**: it drops a step with no verifier result
-from its denominator, so a crash scores UP (`harbor.py::_unscoreable_step` raises instead). A
-`min_reward` abort is deliberately not caught: every step it appended carries a verifier result.
-Ask what the next episodic backend's roll-up does with a step that produced nothing.
+**Ask of every new connector whether what it injects is what the model consumes**; where it is not, arrival is MEASURED through `protocol.py::Connector.prompt_delivery` (harbor's Agent Skill), never assumed.
 
 ## The measured unit — declared, never sniffed
 
-A connector declares what ONE measured row IS via `Connector.measured_unit` (`MeasuredUnit`):
-`sample` by default (`dbllmbench` included: one question, run `repetitions` times), `cell` on `promptpotter` (one outer row is a whole inner campaign) and on
-`harbor` (one row is a whole agent episode in a container). What the two share is not their
-transport but their SHAPE — a row that takes minutes, spends on its own account and can fail
-halfway — which is what the word marks. It rides the same declared-capability channel as
-`execution` (through `BackendClient.measured_unit` to `dashboard.json::measured_unit`), so **no prompt panel, CLI line or browser surface holds a literal
-`"cell"` / `"sample"` beside a count**. Pluralising and counting are `unit_plural` / `unit_count` on
-the producer, never an f-string at the render site.
-
-**A renderer may not infer it** — a statistical field (`mean_round_delta`) deciding vocabulary is the
-shape this field deletes.
-
-Two places keep their own word on purpose: the **evidence** surface calls every row a cell because a
-selection there spans campaigns, datasets and backends, so no single connector's noun applies; and
-`AbilityReading.cells` / `DeltaRuler` count **ruler cells**, a δ-scale membership that is the same on every
-backend ([`../../docs/methods/verdict-resolution.md`](../../docs/methods/verdict-resolution.md)).
-
-**And `cell` implies NOTHING about the run's CONTROL LOOP — a flag reasoning "a cell is expensive,
-therefore…" is the one to refuse.** A connector declares what a row costs (`max_cells_in_flight`,
-`cells_hold_the_machine`, `cell_envelope_s`, `cell_attempts` — each defined on its `Connector` field); how long an operator's look-ahead arming lasts is the round's
-and the operator's to decide — no connector can see the round it is inside. Refuse a second flag
-beside `measured_unit` set by RESEMBLING the recursion rather than by any fact about the run.
-
-**`cell_envelope_s` is the test passing, and the template for anything that wants to join it:** it
-is a fact about one cell of THIS backend, resolved from the same pair the request is built from,
-and it decides nothing — the round it sits in is neither consulted nor changed.
-`application/scoring/cell_envelope.py` enforces it. **Every connector declares one, never `None`**:
-a remote cell is bounded by the smaller of it and the launch's clock left (`SpendBook.clock_left`),
-so no cell runs unbounded. **A ceiling on measured COUNTS would fail the
-same test** — tokens and dollars jitter run to run, so the same cell would be cut on one run and not
-the next.
+**`Connector.measured_unit` declares what one row IS** (`sample`, or `cell`) and rides to `dashboard.json::measured_unit`.
+**No surface holds a literal `"cell"` / `"sample"` beside a count, and no renderer infers it** — use `unit_plural` / `unit_count`. Exceptions keep their own word: the **evidence** surface (spans backends) and **ruler cells** (`AbilityReading.cells` / `DeltaRuler`).
+**`cell` implies nothing about the run's control loop** — refuse a flag reasoning "a cell is expensive, therefore…".
+**`cell_envelope_s` is the template: a per-cell fact that decides nothing about the round** (`application/scoring/cell_envelope.py`). Never cap on measured counts — they jitter.
 
 ## Registering a connector
 
-**A built-in is a module under this package defining `CONNECTOR` — never a `register()` call, and
-every module here but `protocol` is one.** A built-in that IS application machinery lives beside
-it instead and is named in `__init__.py::_APPLICATION_BUILT_INS`, because **this package imports
-nothing from `application/`** (`scripts/gate.py::_LAYERING`). `registered()` walks both, merges the
-`promptpotter.connectors` entry points and runs `_validate` over both, once per process.
-**The connector table completes at a declared step, never at import** — owned by
-[`../application/initialization/CLAUDE.md`](../application/initialization/CLAUDE.md) § Registries complete; nothing here may read the
-table at module scope, and a check that must fail before a run spends is the connector's
-`completion_check`, which that step runs. A connector shipped from **another** package declares the entry point
-instead and touches nothing here ([`stable-api.md`](../../docs/developer/stable-api.md) §1).
+**Nothing reads the table at module scope** — it completes at [`initialization/CLAUDE.md`](../application/initialization/CLAUDE.md) § Registries complete; a pre-spend check is `completion_check`. Another package declares the `promptpotter.connectors` entry point ([`stable-api.md`](../../docs/developer/stable-api.md) §1).
 
 ## A connector is trusted code, not sandboxed — and that is stated, not implied
 
-Loading one imports its module into this process, where it sees the provider API keys, the
-tenant tree and the identity store, exactly as a module we ship does. Entry points do not
-weaken that boundary (anything that can install a distribution into this environment can
-already run code here), but they do make the trust *explicit*: installing a connector package
-is trusting its publisher completely, and this repo's capability scoping (ADR-0005) governs
-API principals, not in-process code. **`connector_origins()` is the audit surface** — it names
-the distribution behind every registered key, including the ones that are ours.
+**Loading a connector imports it into this process with the API keys, tenant tree and identity store in reach; installing one trusts its publisher completely.** Capability scoping ([`decisions.md`](../../docs/decisions.md) § 0005) governs API principals, not in-process code.
+**`CONNECTORS.origins` is the audit surface**; a plugin shadowing a built-in, or a broken one, raises (`shared/plugin_registry.py::Registry`).
 
-Two rules follow, both enforced by `shared/plugin_registry.py::load_registry`, the one loader
-every entry-point group rides. **A plugin may not shadow a
-built-in:** `get("promptpotter")` is read by name by the L4 inner runner
-(`application/runner/inner/tasks.py`), so which object answers that key is not a third
-party's call. **A broken plugin is fatal, never skipped:** skipping would trade a loud error
-naming the package for `'x' is not registered` at mint time, with nothing pointing at
-the cause.
+## The credential rides the connector
 
-**Discovery is two paths; validation is one. Deliberately.** Declaring the built-ins as entry
-points would make the table depend on this distribution's installed metadata, so a plain
-source-tree run would find zero backends. The property worth protecting — a half-wired connector fails before a run
-spends, never mid-campaign — lives in the validator, not in the channel it arrived through.
-
-## The credential and the endpoint ride the connector
-
-**`Connector.auth_token() -> str | None` is the ONLY route by which a bearer token reaches
-the wire, `Connector.endpoint() -> str` the ONLY place its host comes from, and a `BackendClient`
-(`infrastructure/backend.py`) is built from the `Connector` it HOLDS** — it reads each declared
-capability off that connector where it is used, and a caller reads one off the client. Both are
-operator config (`settings.TERMNORM_URL` beside `TERMNORM_TOKEN`), so no request, CLI flag or
-campaign field can aim the token at another host. An `in_process` connector has no wire, so
-declaring a token or an endpoint on one fails the registry guard, as does a `remote_http` one
-declaring no endpoint.
-
-**A check-in names only a connector with `serves_uploads`** (`draft_patch.py`): one that runs an
-uploaded table's rows and nothing beside them. A connector whose cells read operator files or
-start containers is never a tenant's choice.
+**`Connector.auth_token()` and `Connector.endpoint()` are operator config**, so nothing a request, flag or campaign sets can aim the bearer token elsewhere; no connector writes an `Authorization` header. <!-- probe: git grep -cE "Authorization" -- promptpotter/connectors/*.py == 0 -->
+**A check-in names only a connector with `serves_uploads`** (`draft_patch.py`) — one whose cells read operator files or start containers is never a tenant's choice.
 
 ## Conventions
 
-- **An optional import is DECLARED, on `Connector.extra`** — launch refuses on it
-  (`application/jobs/launcher/admission.py::probe_backend`) and the listing blocks on it before a row is read
-  (`application/datasets/startability.py::dataset_extra`), so no connector checks `installed()` itself.
-- Wire adapters are pure functions: `(query, pipeline_params) -> dict`.
-  No I/O, no logging beyond debug-level drops. The `identity_config` layer never reaches one —
-  `application/scoring/sample_measurement.py::measure_sample` removes it first.
-- `extract_experiment` returns the panel's rows, and declaring it is what `owns_panel`
-  reads; a connector with no panel states its answer shape on the
-  rows its dataset loads. The retrieval term index is run init's, never a connector's.
-- **A connector that `owns_panel` OWNS its dataset's `panel`, and
-  `infrastructure/store/dataset_access.py::dataset_experiment` is its ONE reader** — `init_services`, and every read
-  outside a run: `GET /datasets`, `/origins`, `/cells` and the campaign pipeline. L4's
-  `runner/inner/` reads the panel off the run's workload, never the file. Ordered before the row
-  ladder, never a fallback: rows cached under the same name describe a different instrument, and
-  a resolver that knows only MATERIALIZED banks answers a connector-owned one EMPTY, which is not
-  a fact about the dataset. Panel ORDER is the slot (`samples_from_dicts` numbers positionally),
-  never stored on a measurement; the archive and the δ scale key a cell by `Sample.key`, so a
-  reorder moves no δ and re-files no answer.
-- **`query` is whatever addresses one unit of work, and on an episodic backend that is an ID.**
-  A judge falling back to it then grades against an identifier, so a task carrying a real question
-  declares it and it rides `Sample.question` (`domain/sample.py`) — the only channel that reaches
-  a judge, which is handed the measured row and never the `Sample`.
-- **Declare every key the payload always carries** in
-  `Connector.required_observation_keys`. An undeclared key is dropped at
-  `application/scoring/sample_measurement.py::measure_sample` and never reaches `pipeline_data`, so the
-  scoring formula grades a measurement it never received and nothing raises;
-  `application/initialization/wiring.py::_verify_required_observation_keys` RAISES at init instead. Unlike
-  revision pinning below this is a wrong number, not drift — so it fails the run.
-  Empty (default) = the backend guarantees no key.
-- **A verifier-graded cell says WHY it scored as it did on `pipeline_data.outcome_note`** — one
-  line in the environment's own words, absent where it gave none. With no label there is no
-  said/true for `failing_samples` to show, so this line is all the generator learns about a miss.
-- **Revision pinning is opt-in.** A connector can set
-  `Connector.expected_revision` (the backend SHA/version this rev was
-  developed against) and a `Connector.version_check(http, base_url) -> str | None`
-  hook reading the backend's self-reported revision. Init
-  (`application/initialization/wiring.py::_verify_connector_revision`)
-  WARNs on drift; no-op when either field is `None` — cross-repo drift surfaces at session
-  start, not later in spend accounting.
+- **An optional import is declared on `Connector.extra`** — launch and the dataset listing refuse on it; no connector checks `installed()`. <!-- probe: git grep -cE "installed\(" -- promptpotter/connectors/*.py == 0 -->
+- **Wire adapters are pure functions** `(query, pipeline_params) -> dict` — no I/O; `identity_config` never reaches one.
+- **An `owns_panel` connector's panel is read by `infrastructure/store/dataset_access.py::dataset_experiment`**, ordered before the row ladder, never as a fallback; L4's `runner/inner/` reads it off the workload. Panel ORDER is the slot; the archive and δ key a cell by `Sample.key`, so a reorder moves nothing.
+- **On an episodic backend `query` is an ID** — a real question rides `Sample.question`, which is what a judge sees.
+- **Declare every always-present payload key in `Connector.required_observation_keys`** — an undeclared one is dropped silently.
+- **A verifier-graded cell says WHY it scored on `pipeline_data.outcome_note`** — one line in the environment's words, absent where it gave none.

@@ -12,7 +12,11 @@ from typing import TYPE_CHECKING, Any
 from pydantic import Field, ValidationError, model_validator
 
 from promptpotter import connectors
-from promptpotter.application.campaign_config import (
+from promptpotter.application.datasets.authored import dataset_campaign_block
+from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
+from promptpotter.domain.bench import DatasetSplit
+from promptpotter.domain.campaign import DeterminismClamp
+from promptpotter.domain.campaign_config import (
     DEFAULT_ORIGIN_BUDGET,
     ArmGateMode,
     CampaignConfig,
@@ -20,10 +24,6 @@ from promptpotter.application.campaign_config import (
     OptimizationConfig,
     merge_node_overlays,
 )
-from promptpotter.application.datasets.authored import dataset_campaign_block
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, resolve_optimizer
-from promptpotter.domain.bench import DatasetSplit
-from promptpotter.domain.campaign import DeterminismClamp
 from promptpotter.domain.cells import DEPTH_FIELDS, PinnedCell, Seat
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY, OUTER_PROXY_KEYS
 from promptpotter.domain.opt_search_point import OptimizerPromptTemplate
@@ -157,12 +157,13 @@ class InnerTasks(FrozenModel):
         for name in sorted(self.datasets):
             dataset_dir = resolve_dataset(stores, name).directory
             campaign = dataset_campaign_block(dataset_dir)
-            identity = _select_inner_optimizer(campaign, cfg.inner_nodes, {}, n_samples=None)
+            opt = CampaignConfig.model_validate(campaign).optimization
+            identity = _select_inner_optimizer(opt, cfg.inner_nodes, {}, n_samples=None)
             by_dataset[name] = InnerCell(
                 campaign_config=campaign,
                 pipeline=read_dataset_pipeline(dataset_dir),
                 optimizer=_select_inner_optimizer(
-                    campaign,
+                    opt,
                     cfg.inner_nodes,
                     cfg.inner_depth_nodes,
                     n_samples=cfg.n_samples_per_inner_round,
@@ -296,11 +297,11 @@ assert set(InnerTaskSpec.model_fields) >= DEPTH_FIELDS
 
 
 def _recursion_connector() -> Connector:
-    return connectors.get("promptpotter")
+    return connectors.CONNECTORS.get("promptpotter")
 
 
 def is_self_optimization(backend_type: str) -> bool:
-    return connectors.registered().get(backend_type) is _recursion_connector()
+    return connectors.CONNECTORS.table.get(backend_type) is _recursion_connector()
 
 
 INNER_ARM_GATE: ArmGateMode = "off"
@@ -324,21 +325,15 @@ def _inner_manifest_nodes(
 
 
 def _select_inner_optimizer(
-    campaign_config: Mapping[str, Any],
+    opt: OptimizationConfig,
     nodes: Mapping[str, ManifestNodeOverlay],
     depth_nodes: Mapping[str, ManifestNodeOverlay],
     *,
     n_samples: int | None,
 ) -> SelectedOptimizer:
-    opt = campaign_config.get("optimization") or {}
-    own = {
-        node: ManifestNodeOverlay.model_validate(raw)
-        for node, raw in (opt.get("nodes") or {}).items()
-    }
-    name = opt.get("optimizer", OptimizationConfig.model_fields["optimizer"].default)
     return resolve_optimizer(
-        name,
-        _inner_manifest_nodes(name, own, nodes, depth_nodes, n_samples=n_samples),
+        opt.optimizer,
+        _inner_manifest_nodes(opt.optimizer, opt.nodes, nodes, depth_nodes, n_samples=n_samples),
         gate=INNER_ARM_GATE,
     )
 
@@ -487,6 +482,7 @@ def inner_instrument_config(
         "arm_gate": INNER_ARM_GATE,
         # Under 2PL θ is in units of 1/a and each cycle graduates on its OWN CV, so the panel would average a mixture of scales.
         "enable_2pl_graduation": False,
+        # The nodes and gate `_select_inner_optimizer` resolves: the manifest a cell holds is the one it runs.
         "nodes": _inner_manifest_nodes(
             base.optimization.optimizer,
             base.optimization.nodes,
@@ -522,9 +518,7 @@ def inner_instrument_config(
         # The solver's SPEND AXES — model, effort, output cap, temperature — are the instrument, so the
         # inner generator writes prompt text alone: a lift bought with tokens is not optimizer learning.
         own = narrowing.get(prompt_node.name) or NodeSearchNarrowing()
-        narrowing[prompt_node.name] = own.model_copy(
-            update={"param_keys": list(prompt_node.prompt_fields)}
-        )
+        narrowing[prompt_node.name] = own.model_copy(update={"param_keys": []})
     return base.model_copy(
         update={
             "sp_budget_origin": n_search,

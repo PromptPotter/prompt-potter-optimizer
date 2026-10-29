@@ -35,11 +35,11 @@ export function PromptFieldsEditor({
   node: string;
   prompts: Record<string, NodePrompt>;
   fields: readonly string[];
-  onApply?: (patch: DraftPatch) => void;
-  locks?: Record<string, boolean>;
-  onLock?: (field: string, locked: boolean) => void;
+  onApply: ((patch: DraftPatch) => void) | undefined;
+  locks: Record<string, boolean>;
+  onLock: ((field: string, locked: boolean) => void) | undefined;
   readOnly?: boolean;
-  compact?: boolean;
+  compact?: boolean | undefined;
 }) {
   const own = prompts[node];
   const value = own?.fields ?? {};
@@ -83,7 +83,7 @@ export function PromptFieldsEditor({
       </span>
       <div className="prompt-editor-grid">
         {shown.map((f) => {
-          const locked = locks?.[f.key];
+          const locked = locks[f.key];
           return (
             // A div, not a label: the lock beside the name must not join the box's accessible name.
             <div key={f.key} className="prompt-field">

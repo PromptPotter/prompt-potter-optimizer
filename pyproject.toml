@@ -36,7 +36,7 @@ requires-python = ">=3.13"
 # measured, not asserted: `application/embedded_run.py` and the CLI entry each import to
 # exactly this closure and no further. Everything a SERVER needs is `[api]`, because the
 # fourth distribution tier is PromptPotter running inside someone else's program
-# (`docs/adr/0006-embeddable-core-and-extras.md`), and a library that drags a web server in is
+# (`docs/decisions.md` § 0006), and a library that drags a web server in is
 # one nobody adds.
 dependencies = [
     "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
@@ -45,8 +45,6 @@ dependencies = [
                                # `env_file`, and asks only for >=0.21.0. The direct pin is the
                                # floor past CVE-2026-28684 that the transitive one would not give.
     "httpx>=0.26.0",           # why kept: every LLM provider's wire (`infrastructure/llm/base.py::post_json`) + BackendClient's
-    "filelock>=3.29.4",        # why kept: every JSONL append and rewrite (store/io.py) + run admission
-                               # across processes. The floor: acquiring makes the lock's directory.
     "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
     "json-repair>=0.30,<1.0",  # why kept: structured repair of provider-returned JSON (invalid \X escapes, etc.) at the LLM boundary
     "pyyaml>=6.0",             # why kept: parse/emit the operator-authored config tier (store/io.py::read_yaml/write_yaml). It used to ride in transitively behind uvicorn[standard]; that is an extra now, so this line is what installs it.
@@ -63,7 +61,7 @@ api = [
     "scalar-fastapi>=1.0.0",   # why kept: API doc UI on the FastAPI app
     "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the API
     "sse-starlette>=2.4.1",    # why kept: EventSourceResponse owns events:subscribe SSE framing + heartbeat + teardown on client-disconnect/server-shutdown (patches uvicorn handle_exit, so one Ctrl+C shuts down clean)
-    "cryptography>=50.0.0",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (Stage-1 identity foundation, ADR-0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007, and now past GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle, fixed in 50.0.0). Held at 49 until `observability` moved off full mlflow, which required `cryptography<50`.
+    "cryptography>=50.0.0",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (the identity foundation, docs/decisions.md § 0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007, and now past GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle, fixed in 50.0.0). Held at 49 until `observability` moved off full mlflow, which required `cryptography<50`.
 ]
 excel = [
     # why kept: .xlsx ingest (`application/datasets/tabular_ingest.py::_xlsx_records`). Lazy behind `shared/extras.py::require_extra`,
@@ -86,7 +84,7 @@ dspy = [
     # no skinny-shaped swap. `uv lock` resolves EVERY declared extra, so a lock scanner sees this
     # whether or not anyone installs it — the alert is not evidence the surface is reachable.
     # Deleting the extra would drop exactly 4 packages (dspy, gepa, orjson, diskcache) and break
-    # `pip install promptpotter[dspy]`, which README + ADR-0006 + `docs/developer/dspy-optimizer.md`
+    # `pip install promptpotter[dspy]`, which README + `docs/decisions.md` § 0006 + `docs/developer/dspy-optimizer.md`
     # publish. Dismiss the alert; do not trade the published install path for it.
     #
     # 3.4 is the floor the connector's billing is verified on: an LM is an ENGINE there
@@ -186,6 +184,8 @@ promptpotter = "promptpotter.presentation.cli.campaign_runner:main"
 # The ONE uv pin: uv refuses any other, CI's setup-uv installs this, deploy-linux/uv.sh reads it.
 [tool.uv]
 required-version = "==0.11.21"
+# Security floors for packages only other dependencies pull in (GHSA advisories, Dependabot).
+constraint-dependencies = ["filelock>=4.2.1", "litellm>=1.100.4"]
 
 [tool.setuptools.packages.find]
 include = ["promptpotter*"]
@@ -243,6 +243,8 @@ filterwarnings = ["ignore::RuntimeWarning"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
+warn_unreachable = true
+enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code", "redundant-self"]
 plugins = ["pydantic.mypy"]
 namespace_packages = false
 # One SQLite DB instead of ~12.5k tiny JSON files — kills the Windows small-file
@@ -286,8 +288,8 @@ target-version = "py313"
 line-length = 100
 # The peers' Colab notebooks run promptolution and DSPy on Colab, never this repo.
 extend-exclude = [
-    "docs/research/bbeh-comparison/bbeh_capo.ipynb",
-    "docs/research/bbeh-comparison/bbeh_dspy.ipynb",
+    "paper/bbeh-comparison/bbeh_capo.ipynb",
+    "paper/bbeh-comparison/bbeh_dspy.ipynb",
 ]
 
 [tool.ruff.lint]
@@ -301,16 +303,30 @@ select = [
     "SIM",    # simplify
     "C4",     # flake8-comprehensions
     "RUF",    # ruff-specific
+    "ARG",    # unused arguments
+    "BLE",    # blind except
+    "ASYNC",  # async pitfalls
+    "C901",   # complexity, under the ceiling below
 ]
 ignore = [
     "E501",   # line length (handled by formatter)
     "RUF003", # ambiguous unicode in comments (multiplication sign × is intentional)
     "RUF002", # ambiguous unicode in docstrings
+    "ASYNC109", # `docker()` owns its deadline: it kills its child and names the command on expiry
 ]
+
+[tool.ruff.lint.mccabe]
+# A ceiling on package code: lowered as complexity falls, never raised.
+max-complexity = 23
+
+[tool.ruff.lint.per-file-ignores]
+# A journey test walks a whole run on purpose; the ceiling bounds production code.
+"tests/**" = ["C901"]
+".claude/hooks/**" = ["C901"]
 
 [tool.deptry]
 extend_exclude = [
-    "docs/research/bbeh-comparison/.*",
+    "paper/bbeh-comparison/.*",
     "notebooks/bbeh_potter.ipynb",
     "examples/.*",  # each a distribution of its own, with its own dependency list
 ]
@@ -341,7 +357,7 @@ DEP002 = [
 ]
 # `ipython` ([jupyter]) is in no gate env, so deptry cannot map it to the module it installs.
 DEP001 = ["IPython"]
-# Imported directly and deliberately left transitive: `infrastructure/llm/litellm_sends.py` wraps
+# Imported directly and deliberately left transitive: `connectors/harbor.py::_meter` wraps
 # the entry point HARBOR calls, so it must be the litellm Harbor resolved — a pin of our own could
 # split the two, and the meter would wrap a copy the agent never sends through.
 # `pydantic_core` likewise: pydantic pins it to one exact version, so the `core_schema` a model

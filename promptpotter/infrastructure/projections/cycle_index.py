@@ -71,7 +71,6 @@ class CycleIndexProjection(Projection):
     def __init__(self, cycle_dir: CycleDir) -> None:
         self._cycle_dir = Path(cycle_dir)
 
-    def on_record(self, record: CycleRecord, offset: int) -> None:
-        self.at_offset = offset
+    def feed(self, record: CycleRecord) -> None:
         if moves_index(record):
             write_cycle_index(self._cycle_dir)

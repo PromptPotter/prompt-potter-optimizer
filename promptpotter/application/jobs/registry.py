@@ -13,24 +13,22 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Annotated, ClassVar, Literal, assert_never, get_args
 
-from filelock import Timeout
 from pydantic import ConfigDict, Field, TypeAdapter
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import (
-    admission_lock,
+    AdmissionGate,
     producer_alive,
     this_producer,
     this_producer_lock,
 )
-from promptpotter.config.paths import default_jobs_dir
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.phases import LaunchStage, RunPhase
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.io import read_json, write_json
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, ServiceUnavailableError
+from promptpotter.shared.errors import ConflictError
 
 logger = logging.getLogger(__name__)
 
@@ -186,16 +184,16 @@ class JobRegistry:
     """No process sweeps another's jobs: one is cleared only by proving its producer gone."""
 
     @classmethod
-    def attach(cls) -> JobRegistry:
-        return cls(default_jobs_dir(), capacity=resolve_run_capacity)
+    def attach(cls, jobs_dir: Path) -> JobRegistry:
+        return cls(jobs_dir, capacity=resolve_run_capacity)
 
     def __init__(self, jobs_dir: Path, *, capacity: Callable[[int], int]) -> None:
         self._dir = jobs_dir
         self._dir.mkdir(parents=True, exist_ok=True)
         # Reentrant: `request_slot` → `list_running` → `_reap_if_orphaned` → `release` retake it.
         self._lock = threading.RLock()
-        # Its cross-process peer, and ONE instance so nesting is reentrant the same way.
-        self._gate = admission_lock(jobs_dir)
+        # Its cross-process peer, nesting the same way.
+        self._gate = AdmissionGate(jobs_dir)
         self._capacity = capacity
         self._tasks: dict[str, asyncio.Task[None]] = {}
 
@@ -232,15 +230,8 @@ class JobRegistry:
     @contextmanager
     def admission_gate(self) -> Iterator[None]:
         """Every ceiling read belongs inside: outside, two admissions read one free slot and take it."""
-        try:
-            with self._lock, self._gate:
-                yield
-        except Timeout as exc:
-            raise ServiceUnavailableError(
-                "The machine's admission gate is held by another process that has not released "
-                "it. Nothing was started; retry shortly.",
-                code="admission_gate_stuck",
-            ) from exc
+        with self._lock, self._gate.held():
+            yield
 
     def request_slot(
         self,

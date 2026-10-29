@@ -92,7 +92,7 @@ class _Billed:
         self._total = ZERO_SPEND
         self._held = HeldSends()
 
-    def feed(self, offset: int, record: HoldTrailRecord) -> None:
+    def feed(self, record: HoldTrailRecord) -> None:
         if isinstance(record, TokenUsageRecord) and not (record.cached or record.mirrored):
             self._total = self._total.plus(_billed_of(record))
         self._held.track(record)
@@ -117,7 +117,7 @@ class _Tombstones:
         self._metered: dict[tuple[str, CeilingMeter], Budget] = {}
         self._subjects: set[BankedSubject] = set()
 
-    def feed(self, offset: int, banked: SpendTombstoneRecord) -> None:
+    def feed(self, banked: SpendTombstoneRecord) -> None:
         self._subjects.add(banked.subject)
         spent = UserSpend(
             banked.used_usd,
@@ -161,7 +161,7 @@ class _Usage:
         self._rows: list[UsageRow] = []
         self._held: tuple[UsageRow, ...] | None = None
 
-    def feed(self, offset: int, usage: TokenUsageRecord) -> None:
+    def feed(self, usage: TokenUsageRecord) -> None:
         ts = epoch_seconds(usage.timestamp)
         if ts is None:
             return

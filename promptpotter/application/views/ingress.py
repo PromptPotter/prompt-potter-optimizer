@@ -9,6 +9,7 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.config.settings import settings
+from promptpotter.domain.arms import Proposal, candidate_label
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
     flatten_prompts,
@@ -24,22 +25,18 @@ from promptpotter.domain.phase_views import (
     SpDiffView,
     WarningEntry,
 )
-from promptpotter.domain.results import (
-    Proposal,
-    RoundResult,
-    RunStanding,
-    candidate_label,
-)
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import Budget, MeteredSpend
 from promptpotter.domain.wounds import collapse_reason
 from promptpotter.shared.answer_text import truncate
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizers.nodes import RoundOpening
     from promptpotter.application.preflight import PreflightWarning
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import NodePrompt
     from promptpotter.domain.sample import Sample
 
@@ -115,7 +112,7 @@ def propose_enter(
     model: str | None,
     pipeline_params: dict[str, Any] | None,
     parent_prompts: Mapping[str, NodePrompt],
-    run_standing: RunStanding,
+    run_standing: RunStanding | None,
 ) -> RoundStartView:
     # The header renders before candidates exist: it describes the parent.
     preview = prompt_preview.replace("\n", " ").strip()

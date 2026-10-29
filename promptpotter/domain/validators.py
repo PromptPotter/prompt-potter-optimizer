@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 if TYPE_CHECKING:
     import asyncio
 
+    from promptpotter.domain.arms import DegradationContext
     from promptpotter.domain.paired_reading import ArmKey
-    from promptpotter.domain.results import DegradationContext
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
 

@@ -71,6 +71,7 @@ from promptpotter.application.scoring.closed_rounds import (
     walked_rows,
 )
 from promptpotter.application.scoring.paired import MemberRows, as_family
+from promptpotter.domain.arms import Concluded, Proposed, arm_name
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
     flatten_prompts,
@@ -84,13 +85,6 @@ from promptpotter.domain.paired_reading import (
     Measurand,
     MemberAddress,
     PairedReading,
-)
-from promptpotter.domain.results import (
-    Concluded,
-    IndividualWalk,
-    Proposed,
-    arm_name,
-    individual_cells,
 )
 from promptpotter.domain.ruler import CellScopes
 from promptpotter.domain.scoring import CellSheet, GradedCell, ScoringFormulaError, WalkedCell
@@ -117,7 +111,7 @@ from promptpotter.infrastructure.store.stores import descend_store
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.measurement_context import RoleScope
+from promptpotter.shared.measurement_context import IndividualWalk, RoleScope, individual_cells
 from promptpotter.shared.statistics import sample_sd
 
 if TYPE_CHECKING:
@@ -676,10 +670,10 @@ def _resolve_head(at: _Located, spec: SubjectSpec) -> _Head | None:
 
 
 def _authorship(point: _ChainPoint, index: CycleIndex | None) -> str:
-    state = point.arm.state
-    source = "" if state is None else state.individual.lineage.source
     fork = None if index is None else index.fork
-    return authorship_of(source, None if fork is None else fork.issued_by)
+    return authorship_of(
+        point.arm.state.individual.lineage.source, None if fork is None else fork.issued_by
+    )
 
 
 def _masked(point: _ChainPoint, keys: frozenset[str] | None) -> _ChainPoint:
@@ -764,11 +758,11 @@ def _winner_chain(
 
 
 def _config_of(point: _ChainPoint) -> dict[str, str]:
-    state = point.arm.state
+    individual = point.arm.state.individual
     return build_candidate_flat(
-        flatten_sp_summary(None if state is None else state.individual.pipeline_params),
+        flatten_sp_summary(individual.pipeline_params),
         pipeline_overlay=None,
-        prompt_flat={} if state is None else flatten_prompts(state.individual.prompts),
+        prompt_flat=flatten_prompts(individual.prompts),
     )
 
 

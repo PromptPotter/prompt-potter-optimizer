@@ -1,102 +1,76 @@
 # Self-Healing Internals
 
-Failures attach to the **candidate that produced them** (direct fields on `OptSearchPoint`), never to the round, so a losing candidate's problem never disrupts the round winner.
+## Errors heal upward
 
-Every wound is two axes, not a four-item taxonomy:
+**One error is innocent.** A single failed measurement — a validation failure on L1 output, a runtime failure mid-eval, a deprecated cache entry from a transient backend hiccup — is a technical issue, not the candidate's fault: the row is skipped, never scored, and evidence keeps accumulating on the same candidate. The default posture is "ignore and continue"; aborting requires evidence.
+
+**Repeats are the candidate's.** Errors that keep repeating on ONE candidate are its fault: `application/scoring/classification.py::DegradationCheck` — a bench check, run on every optimizer's arms whatever its eliminator — stops it as **`broken`** once its fraction of failed measurements crosses the campaign's `optimization.degradation_threshold`, or on a single fatal-classified sighting (`optimization.degradation_fatal_fastpath`). A broken arm is charged to the candidate as a wound the next proposals read, recorded apart from **`eliminated`**, which only the optimizer's eliminator says (`domain/arms.py::Cut.kind`).
+
+**Errors on every arm are an outage**, nobody's fault: the run halts (`StopReason.BACKEND_UNREACHABLE`).
+
+**No measurement-level retry of the same (sample, candidate) pair** — same inputs, same error, wasted budget. Transport resends below the measurement (`infrastructure/llm/spend_book.py::SendOutcome.resendable`) and the origin's one fresh re-score after a transient abort are not second verdicts. No mid-round LLM diagnostic, no per-error branching: a discarded candidate is cheap, since next round's proposal produces siblings on the same axis. Aggregated failures surface at round end and flow upward through the dispatch hub; an L1 validation failure reaches L1's own next call, not L2.
+
+## Two axes, and who nurses
+
+Failures attach to the **candidate that produced them** (direct fields on `OptSearchPoint`), never to the round, so a losing candidate's problem never disrupts the round winner. Every wound is two axes:
 
 - **Detection point** picks the record type, the score effect and the lifecycle. Parse-time → `ValidationFailure`, synthetic-0, per-candidate. Mid-eval → `RuntimeFailure`, real score + rate, accumulated and deduped. Post-parse → `ValidatorOutcome`, no score effect, per-round.
-- **Nurse owner** picks who heals it, and falls out of the record type. Only a `RuntimeFailure` carries a real choice, so only it carries `owner: NurseOwner` ∈ `{L1, OPERATOR}` — an L1-retunable rate degradation, or an operator-terminal break (the token blowout) no in-loop layer can reach.
+- **Nurse owner** falls out of the record type. Only a `RuntimeFailure` carries a real choice, so only it carries `owner: NurseOwner` ∈ `{L1, OPERATOR}` — an L1-retunable rate degradation, or an operator-terminal break (the token blowout) no in-loop layer can reach.
 
-The **nurse is not the producer**: L1 tends its own malformed proposal because it owns `pipeline_params`, and a break whose only fix is a locked surface escalates to the operator rather than churning at a layer that cannot reach the lever. L2 produces wounds and heals none. No field keys a nurse by producer, and none may be added.
+The **nurse is not the producer**: L1 tends its own malformed proposal because it owns `pipeline_params`, and a break whose only fix is a locked surface escalates to the operator. L2 produces wounds and heals none. No field keys a nurse by producer, and none may be added. Post-parse lands on each layer's OWN memory (`L2Memory.guard_breaches`, `L3Memory.guard_breaches`), so neither layer writes the other's state.
 
-Three detection points, and post-parse lands on each layer's OWN memory: `L2Memory.guard_breaches` and `L3Memory.guard_breaches`, each written by the layer whose output it judged, so neither layer writes the other's state. `L3Memory.note` beside them is a sticky free-text L3→L2 steer, not a failure record.
-
-**Healing is gradual.** One nurse firing is one nudge, not a guaranteed fix. Soft pointers toward the right region beat hard one-shot briefs ("do NOT propose X"), because the nurse is built to retry — wounds 1 and 4 retrigger on the new evidence, wound 2's trail accumulates so L2 must change angle if ACCUMULATED survives, and wound 3 fires only on stall but reshapes both L1 and L2.
-
-**User-visible surface:** per-sample `⚠ … ↳` annotations on round reports. An audit trail, not alerts. Separately, `l1_critique → l1_generate` fires every round regardless of failure — performance-driven feedback, not failure-driven healing.
+**Healing is gradual.** One nurse firing is one nudge: soft pointers toward the right region beat hard one-shot briefs ("do NOT propose X"), because wounds 1 and 4 retrigger on the new evidence, wound 2's trail accumulates, and wound 3 fires only on stall but reshapes both L1 and L2. The operator sees per-sample `⚠ … ↳` annotations on round reports — an audit trail, not alerts. `l1_critique → l1_generate` fires every round regardless: performance feedback, not healing.
 
 ## The wounds, mapped to the two axes
 
-Storage is the arm's own rejects, the runtime stream the cycle derives, and the two layers' guard breaches (+ `L3Memory.note`); **rendering collapses to two owner-grouped signals** — `l1_wounds` = validation + runtime, `guard_breaches` = L2 + L3 post-parse. This table is the roster; each § below adds only what it cannot hold.
+Rendering collapses to two owner-grouped signals: `l1_wounds` = validation + runtime, `guard_breaches` = L2 + L3 post-parse.
 
 |  | Wound 1 | Wound 2 | Wound 3 | Wound 4 |
 |---|---|---|---|---|
-| **Producer → Nurse** (owner-keyed, not producer-keyed) | L1 → **L1** | L1 → **L1 / OPERATOR** | L2 → L3 | L2 → L3 |
-| **Owner source** | structural (L1's own output) | `RuntimeFailure.owner`: `L1` (rate) · `OPERATOR` (fatal) | (patience event) | structural (layout refusal → L3) |
-| **Detector** | the bench's `overlay_failures` (`bench/children.py`) and L1's own registry (`validators/l1_strict.py`), at `parse_population()` | `DegradationCheck` (`scoring/classification.py`), mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
-| **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
-| **Storage** | the arm's `ArmState.validation_failures` on its round; a round with no arm, `L1Readout.l1_parse_failure` | `runtime_failures` | `Ladder.l2.stall_count` (a banked slice, not the OSP) | `L2Memory.guard_breaches` |
-| **Outer-memory mirror** | none — `_r_l1_wounds` reads the last measured round's arms | none — `Cycle.runtime_failures` derives it off the banked rounds at each read | none | none — a banked `L2Memory` slice |
-| **Nurse prompt slot** | `{{l1_wounds}}` | `{{l1_wounds}}` | (whole `l3_plan` template) | `{{guard_breaches}}` |
-| **Renderer** | `_r_l1_wounds` | `_r_l1_wounds` | `_r_l1_wounds` | `_r_guard_breaches` |
+| **Producer → Nurse** | L1 → **L1** | L1 → **L1 / OPERATOR** | L2 → L3 | L2 → L3 |
+| **Detector** | `bench/children.py::overlay_failures` + `validators/l1_strict.py`, at `parse_population()` | `DegradationCheck`, mid-eval | `escalate_l2` patience (`escalation/firing.py`) | `validate_l1_layout` (post-parse) |
+| **Record** | `ValidationFailure` | `RuntimeFailure` | (patience event) | `ValidatorOutcome` |
+| **Storage** | the arm's `ArmState.validation_failures`; a round with no arm, `L1Readout.l1_parse_failure` | `Cycle.runtime_failures`, derived off the banked rounds | `Ladder.l2.stall_count` | `L2Memory.guard_breaches` |
 | **Nurse's writeback** | L1 re-proposes a valid override | L1 retunes the node config · or operator trims schema/model | `L3Memory.plan` | `L3Memory.plan` |
 | **Score effect** | synthetic 0 (`runner/measurement.py::_conclude_arm`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
 ## Wound 1 — what trips the validator
 
-The bench's `overlay_failures()` (`application/bench/children.py`) runs on every optimizer's child and fires when its `pipeline_overlay` proposes a value outside the axis's resolved space (`PipelineSchema.param_options`, which answers for every axis including `model` — so a rung the node declared but the chosen model refuses is caught here too), mismatched against the declared `param_types`, or touching a cost lever (`PARAM_FORBIDDEN_KEYS` — `provider`/`route_order`, always locked; `model` is an ordinary axis and validates against the node's permitted set). `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`, and `reason` is this validator's subset of the vocabulary `ValidationFailure.reason` declares: `not_in_available_models`, `not_in_param_allowed_values`, `not_accepted_by_model`, `type_mismatch`, `unknown_param`, `forbidden_axis`, `hallucinated_node`.
+`bench/children.py::overlay_failures` runs on every optimizer's child and fires when its `pipeline_overlay` proposes a value outside the axis's resolved space (`PipelineSchema.param_options`, `model` included), mismatches `param_types`, or touches a cost lever (`PARAM_FORBIDDEN_KEYS`). Its `reason` is a subset of the vocabulary `ValidationFailure.reason` declares.
 
-**Exception — `hallucinated_node` is non-fatal.** The override named a node absent from the active schema, the node-name twin of `validate_l1_layout`'s unknown-placeholder wound (`build_l1_response_schema`'s node-name enum is advisory under `strict=False`). The phantom edit is stripped from the wire — `merge_pipeline_params` drops nodes outside `active_steps` — so the candidate's real edits still score; the reason-aware Path-1 gate skips synthetic-0 and the wound rides along only as routed signal, feeding `l1_wounds` self-correction and the `validation_failure_rate` evaluator, which makes hallucination-rate an L4-visible quality axis.
+**`hallucinated_node` is non-fatal.** The override named a node absent from the active schema; `merge_pipeline_params` strips the phantom edit, so the candidate's real edits still score, and the wound rides only as routed signal — `l1_wounds` self-correction and the `validation_failure_rate` evaluator, which makes hallucination-rate an L4-visible quality axis.
 
 ## Wound 2 — two paths, and why ACCUMULATED is the signal
 
 `DegradationCheck` fires on either path, both producing `StopSignal(outcome=BROKEN)`:
 
-1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape. One sighting ends the candidate; bypasses `min_samples`/`threshold`.
-2. **Rate-based.** After `min_samples=3`, if `degraded_rate >= 0.4`, eliminate.
+1. **Fatal-code fast path.** `classify_result()` derives a fatal code from raw response shape; one sighting ends the candidate, bypassing `min_samples` and the threshold.
+2. **Rate-based.** Past `DegradationCheck.min_samples`, eliminate once `degraded_rate >= optimization.degradation_threshold`.
 
-The measurement (`application/scoring/arm_states.py::read_breakage`) synthesises `RuntimeFailure(source, dominant_warning, degraded_rate, …)` from the check plus the observed pipeline_params, then continues with the next candidate. Each record rides its `Cut` arm's `Broken` reason as `failure`, and `Cycle.runtime_failures` derives the stream from the banked rounds — concluded siblings' first, then this cycle's — deduplicated by `(source, dominant_warning, observed_config)`; nothing clears them, since they represent discovered runtime constraints.
+`application/scoring/arm_states.py::read_breakage` synthesises `RuntimeFailure(source, dominant_warning, degraded_rate, …)` from the check plus the observed pipeline_params. Each record rides its `Cut` arm's `Broken` reason, and `Cycle.runtime_failures` derives the stream from the banked rounds — concluded siblings' first — deduplicated by `(source, dominant_warning, observed_config)`; nothing clears them, since they are discovered runtime constraints. `_r_l1_wounds()` partitions it into NEW vs ACCUMULATED (`first_seen_round != current_round`), tagged `[owner=l1|operator]`. **ACCUMULATED is the real signal** — a surviving item means L2's prior angle didn't take; if it keeps growing, Wound 3 takes over.
 
-`_r_l1_wounds()` partitions the runtime block into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`) and tags each entry `[owner=l1|operator]`. **ACCUMULATED is the real signal** — a surviving item means L2's prior angle didn't take. If it keeps growing, Wound 3 takes over.
+`PoBBCheck` also stops a candidate mid-eval and is **not** a wound: it writes no failure record and informs no LLM ([`../methods/candidate-elimination.md`](../methods/candidate-elimination.md) § The full elimination ladder).
 
 ## Wound 3 — what L3 reads and writes
 
-L3 fires when `Ladder.l2.stall_count >= opt.l2_patience`, subject to its own `l3_patience`. What its prompt reads is its layout, `dispatch/layout.py::NODE_LAYOUTS["l3_plan"]` — read the membership there; what it writes is `dispatch/schemas.py::L3PlanOutput` (`plan`, `note` → `L3Memory.note`, `rationale`, `fork_proposal`, `terminate_proposal`). The new `plan` feeds every node whose layout places it, L1 and the next L2 fire included. The only wound with cross-layer authority — L3 changes the strategy L2 and L1 work within.
+L3 fires when `Ladder.l2.stall_count >= opt.l2_patience`, subject to its own `l3_patience`. It reads its layout, `NODE_LAYOUTS["l3_plan"]`, and writes `dispatch/schemas.py::L3PlanOutput`; the new `plan` feeds every node whose layout places it. The only wound with cross-layer authority — L3 changes the strategy L2 and L1 work within.
 
 ## Wound 4 — immediate, never patient
 
-A REFUSED L2 layout edit makes `escalate_l2` run `_run_transition(L3, …)` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output, already on the round file, so resume reproduces it without a separate decision record. It is suppressed on an `escalation_ladder` that stops short of L3.
+A REFUSED L2 layout edit makes `escalate_l2` run `_run_transition(L3, …)` *immediately*, bypassing `l2_patience` and `l3_patience`: broken L2 output is not "wait and see". The trigger is deterministic from L2's output on the round file, so resume reproduces it without a separate decision record; it is suppressed on an `escalation_ladder` that stops short of L3.
 
-**The trigger reads the refusal, not the breach stream** — owned by [`dispatch-hub.md`](dispatch-hub.md) § Wound 4, which also holds the breach set. This layer must route off `TransitionResult.l1_layout_refused`.
+`TransitionResult.l2_guard_breaches` (`escalation/firing.py`) holds every outcome `validate_l1_layout` returned, plus `l1_layout_unparseable`, which `dispatch/layout.py::unplaceable_edit` returns for an edit naming a slot no layout has. `L2Context.land` puts them on `L2Memory.guard_breaches`, which L2 and L3 read through the `guard_breaches` injection on their next fire.
+
+**The force-trigger reads the REFUSAL, not the stream** (`TransitionResult.l1_layout_refused`: a HARD breach or an unparseable edit). The stream also carries two inert members — `l1_layout_voids_prefix` (a cache-cost report on an ACCEPTED layout) and `l1_layout_unchanged_from_prior` (a no-op) — and reading it replanned the cycle on both. A heal answers a refusal, not a stall, so it leaves the reading `l3_patience` compares against untouched (`escalation/state.py::l3_fired`). Every L3 fire banks an `L3_ESCALATION_TRIGGER` whose `data.heal` says which kind it was. There is no `task_context` validator: no L1/L2/L3 wire schema declares a field of the frozen framing, so a stale-repeat breach is not representable.
 
 ## Validators are Evaluator-shaped
 
-A gen-time check is a plain function returning the `ValidationFailure`s it convicts; a post-parse check returns `ValidatorOutcome{validator_id, evidence}`s. An outcome exists only for a failure, so there is no `passed` flag; the self-healers count **events** rather than graded scores, so there is no `score` field; and a guard-breach outcome routes to L3 structurally, so there is no owner to store.
-
-## Optimizer-memory state
-
-The fields that travel cross-round are the cycle's `optimizers/potter/records.py::L2Memory` and `L3Memory`, each written by its own layer alone and banked on every round's close as its `optimizer_state` — read the roster and each field's lifecycle off the models, which cannot drift from themselves.
-
-Two that the models cannot tell you. **`L3Memory.note` is sticky free-text and not a failure record** — L3 sets it to steer L2, and it survives every parent swap (an L1 win as well as an L2/L3 transition) and is cleared only when L3 fires again. And **the L1 critique is on neither memory**: it lives on `RoundResult.critique`, which the dispatch hub's `critique` injection reads through `bundle.digest.critique` (`build_bundle`, off the latest round), the same way per-round trajectory lives on `Cycle.rounds` rather than the memory.
-
-## The prompt-budget unit (a separate mechanism)
-
-Not a wound: it guards the size of a composed optimizer prompt, has no producer→nurse pair, and rides the `injection_table()` registry, `DispatchHub` and the existing `StopLoop` / round-loop teardown rather than a sidecar. Two healing modes:
-
-1. **Select** — the composition (`dispatch/compose.py::select`) places whole items under the node's `discretionary_chars` allowance (`dispatch/layout.py::NODE_LAYOUTS`) and drops the rest; the rules are owned by [`dispatch-hub.md`](dispatch-hub.md) § Every item that reaches an LLM carries an upper limit. `char_cap` is only the runaway backstop on indivisible panels (`facade.py::_cap_runaway`), which emits an `injection_budget_overrun` warning.
-2. **Halt** — `RENDER_ERROR`: an injection renderer *raised* (usually code drift), or `MandatoryPanelStarvedError`: a mandatory panel rendered but was not placed; operator-recoverable stop.
-
-## Mid-eval termination — what is and isn't healing
-
-Two mid-eval checks stop a candidate and only one is healing. `DegradationCheck` is Wound 2. **`PoBBCheck` is not a wound** — it stops scoring because the candidate's posterior probability of being the round's best fell below ε after `n_min` queries, writes no failure record and informs no LLM. See [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md).
+A gen-time check is a plain function returning the `ValidationFailure`s it convicts; a post-parse check returns `ValidatorOutcome{validator_id, evidence}`s. An outcome exists only for a failure, so there is no `passed` flag; the self-healers count **events**, not graded scores, so there is no `score` field; and a guard-breach outcome routes to L3 structurally, so there is no owner to store.
 
 ## `classify_result()` — fatal classification
 
-`classify_result()` (`domain/results_health.py`) derives **fatal** and **infra** codes from the backend's neutral advisories and raw response shape (`pipeline_data.step_tokens.{node}`: normalised `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy. **Read the rule table in the function, never from a copy here** — its comments state why each row routes where it does.
+`classify_result()` (`domain/results_health.py`) derives **fatal** and **infra** codes from the backend's neutral advisories and raw response shape (`pipeline_data.step_tokens.{node}`). Backend = facts, optimizer = policy. **Read the rule table in the function, never from a copy here.**
 
-Two rules a new row must keep. Every `content_empty` row is gated on **the result not having answered** — the advisory describes one ATTEMPT, and the backend's retry beside it can succeed. And a fatal code is deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, which is why a rule allowed to fire on a row that answered *correctly* eliminates a good candidate. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
+Two rules a new row must keep. Every `content_empty` row is gated on **the result not having answered** — the advisory describes one ATTEMPT, and the backend's retry beside it can succeed. And a fatal code is deterministic for the whole config — one sighting eliminates the candidate, so a rule allowed to fire on a row that answered *correctly* eliminates a good one. Grow the rule table (never expose it as a tunable) when a new pattern proves equally conclusive.
 
-Two load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates the candidate on first sighting; and `open_walk` splits deprecated entries off its `ReplayFeed` (`_split_off_deprecated_samples`) so fatal entries are evicted from cache and re-measured with `retry_of_deprecated_cache=True`. `_compute_accuracy` counts them apart as `deprecated`, a count WITHIN `total`: a deprecated row stays in every denominator as the miss the formula grades — which rows a reading counts is [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#which-rows-a-reading-counts)'s.
-
-This is a load-boundary filter, not a score-time fallback: trace records are still archived for forensic value, and only cache reuse is blocked. Sanctioned alongside the measurement's validation-failure synthetic-0 — see [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
-
-## Adding a new mechanism
-
-Pick the storage stream by detector + score-effect; the owner falls out of the record type, so you never wire a nurse by hand.
-
-- New gen-time check on L1's output → **Wound 1**. Add a function to `validators/l1_strict.py` and call it from `parse_population` — or to `bench/children.py` when every optimizer's child owes it.
-- New runtime measurement pointing at a candidate config region → **Wound 2**. Add a check that emits `RuntimeFailure` from `application/scoring/arm_states.py::read_breakage`; stamp `owner=NurseOwner.L1` when L1 can retune it, `owner=NurseOwner.OPERATOR` when only the operator can.
-- New strategic-stall trigger → **Wound 3** isn't a registry; it's the patience timer.
-- New post-parse check on L2/L3's output → **Wound 4**. L3's is `validators/l3_output.py::l3_plan_breaches`; L2's is the layout check itself (`dispatch/layout.py::validate_l1_layout`). Extend the one that owns the output.
-
-For each: a stable `validator_id` (Wound 4) or `reason` (Wound 1). Prompt-section render and persistence path are already wired — they iterate the outcomes, not a hard-coded list. Only add a `NurseOwner` member when a producer actually stamps it (today only `RuntimeFailure` does).
+Load-boundary effects, consumed via `is_deprecated()`: `DegradationCheck` eliminates on first sighting; `search_point_scorer.py::_split_off_deprecated_samples` evicts deprecated entries from the replay cache so they are re-measured with `retry_of_deprecated_cache=True`; and `scoring/metrics.py::fold_cells` counts them apart as `CellFold.deprecated`. Which rows a reading counts is [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#which-rows-a-reading-counts)'s. This is a load-boundary filter, not a score-time fallback: trace records are still archived, and only cache reuse is blocked — [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).

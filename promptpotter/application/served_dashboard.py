@@ -5,14 +5,12 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.campaign_config import CampaignConfig
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
-from promptpotter.application.runner.campaign_result import cycle_bench
 from promptpotter.domain.backend import ServedBackpressure
-from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import ceiling_meter
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits, ServedRound, served_rounds
 from promptpotter.domain.paired_reading import ArmName
@@ -23,8 +21,8 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.results import closed_after_origin
-from promptpotter.domain.run_records import ForkRemainder
+from promptpotter.domain.run_records import ForkRemainder, RunWiringRecord
+from promptpotter.domain.run_standing import closed_after_origin
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import Budget, CeilingMeter, MeteredSpend
 from promptpotter.domain.strict_model import StrictModel
@@ -43,7 +41,7 @@ from promptpotter.infrastructure.runtime_flags import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,
-    scan_ledger_run_wiring,
+    scan_last,
     scan_ledger_verify,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
@@ -131,7 +129,7 @@ def _walk(state: LiveDashboardState, hop: CycleHop, *, live: bool) -> SampleWalk
         if any(r.round == current.round and r.candidates for r in state.rounds)
         else (current.candidates)
     )
-    measured = [s.position for s in rows[-1].samples if s.position is not None] if rows else []
+    measured = [s.position for s in rows[-1].samples] if rows else []
     in_flight = state.current_position
     key = f"{hop.cycle_id}:{current.round}:{len(rows) - 1 if rows else '-'}"
     if axis := state.declared_sample_order:
@@ -255,7 +253,6 @@ class _Standing(NamedTuple):
     # A pass still running on the ledger that no attached run and no paid pass's job scores.
     orphaned: bool
     fork_remainder: ForkRemainder
-    bench_score: BenchScore | None
     # ``None`` where the manifest, and so the meter, is gone.
     campaign_metered: Budget | None
     at: float
@@ -265,8 +262,8 @@ def binding_run_limits(
     stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring yet."""
-    wiring = scan_ledger_run_wiring(
-        ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None)
+    wiring = scan_last(
+        ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None), RunWiringRecord
     )
     return None if wiring is None else _binding(stores, hop, config, run, wiring.run_limits)
 
@@ -285,7 +282,7 @@ def _allotment(stores: Stores, hop: CycleHop, run: RunState) -> Budget | None:
     # The share lives on the run's job, which a reshare moves mid-run; no run, no share.
     if not run.producer.appending:
         return None
-    job = JobRegistry.attach().running_job_for(stores.campaigns.workspace, hop)
+    job = JobRegistry.attach(stores.jobs_dir).running_job_for(stores.campaigns.workspace, hop)
     return None if job is None else job.allotment
 
 
@@ -342,9 +339,6 @@ def _serve(
     banked["backpressure"] = None
     if standing is not None:
         banked["run_limits"] = standing.run_limits
-        if standing.bench_score is not None:
-            # The stored one is as the run last declared it; askability moves with the producer.
-            banked["bench_score"] = standing.bench_score
         if not run.producer.appending:
             # A killed run never publishes its closing zero, so it would go on reporting calls out.
             banked.update(in_flight=0, lookahead_allowed=0, waiting_on=None)
@@ -459,11 +453,9 @@ def served_dashboard(
             verify=scan_ledger_verify(CycleLayout(cycle_path).ledger),
             orphaned=any(m.state == "running" for m in state.verification)
             and not run.producer.attached
-            and JobRegistry.attach().pass_on(stores.campaigns.workspace, hop) is None,
+            and JobRegistry.attach(stores.jobs_dir).pass_on(stores.campaigns.workspace, hop)
+            is None,
             fork_remainder=_remainder(stores, hop, limits),
-            bench_score=None
-            if campaign is None or config is None
-            else cycle_bench(stores, campaign, hop, config),
             campaign_metered=None
             if meter is None
             else stores.campaigns.metered_spend(hop.campaign_id, meter),

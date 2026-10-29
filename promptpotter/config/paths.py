@@ -35,11 +35,12 @@ def _os_app_data_dir() -> Path:
         local = os.environ.get("LOCALAPPDATA")
         base = Path(local) if local else Path.home() / "AppData" / "Local"
         return base / "PromptPotter"
-    if sys.platform == "darwin":
+    elif sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "PromptPotter"
-    xdg = os.environ.get("XDG_DATA_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".local" / "share"
-    return base / "promptpotter"
+    else:
+        xdg = os.environ.get("XDG_DATA_HOME")
+        base = Path(xdg) if xdg else Path.home() / ".local" / "share"
+        return base / "promptpotter"
 
 
 def user_data_root() -> Path:
@@ -58,8 +59,12 @@ def install_cache_root() -> Path:
     return (checkout if checkout is not None else _os_app_data_dir()) / ".cache"
 
 
-def default_jobs_dir() -> Path:
-    return user_data_root() / "jobs"
+def default_projects_root() -> Path:
+    return user_data_root() / "projects"
+
+
+def jobs_dir(projects_root: Path) -> Path:
+    return projects_root.parent / "jobs"
 
 
 def optimizers_root() -> Path:
@@ -82,7 +87,7 @@ def _shadowed(relative: Path, shipped: Path) -> Path:
 
 
 def optimizer_manifest_path(shipped: Path) -> Path:
-    """Keyed by the registered runtime's own directory, so no requested name ever reaches a path."""
+    """Keyed by the registered manifest's own directory, so no requested name ever reaches a path."""
     return _shadowed(Path("optimizers") / shipped.name / "pipeline.yaml", shipped / "pipeline.yaml")
 
 
@@ -119,9 +124,6 @@ def webapp_static_root() -> Path:
         checkout / "webapp" / "out" if checkout is not None else PACKAGE_ROOT / "assets" / "webapp"
     )
 
-
-# Bound at import: `$PROMPTPOTTER_HOME` is an environment decision, never a runtime one.
-DEFAULT_PROJECTS_ROOT = user_data_root() / "projects"
 
 MEASUREMENTS_DIR = "measurements"
 OPTIMIZER_REUSE_DIR = "optimizer_reuse"

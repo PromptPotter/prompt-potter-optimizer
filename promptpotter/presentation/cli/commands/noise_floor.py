@@ -5,9 +5,9 @@ import argparse
 from promptpotter.application.cycle_addressing import resolve_campaign_id, resolve_cycle_id
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.arms import BankedSearchPointError
 from promptpotter.domain.command_kinds import PauseCyclePayload
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.results import BankedSearchPointError
 from promptpotter.presentation.cli.commands.launch import ctrl_c_pauses
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.workspace import open_stores

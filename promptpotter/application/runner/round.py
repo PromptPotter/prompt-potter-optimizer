@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.cycle import Cycle
 from promptpotter.application.bench.node_context import NodeContext, bank_proposals
@@ -31,7 +31,10 @@ from promptpotter.application.runner.overlap import measure_overlap
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.primitives import overlap_series
+from promptpotter.domain.arms import ArmState, Concluded, Measured, Proposal, is_leader_eligible
+from promptpotter.domain.cell_fold import unscoreable_cells
 from promptpotter.domain.optimizer_state import RoundOutput
+from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, OverlapReading, RoundAdvance
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, ReadingState
 from promptpotter.domain.phase_views import MeasureEnterView
 from promptpotter.domain.phases import (
@@ -40,24 +43,10 @@ from promptpotter.domain.phases import (
     StopLoop,
     StopReason,
 )
-from promptpotter.domain.results import (
-    ROUND_ADVANCE_INFO,
-    ArmState,
-    Concluded,
-    Election,
-    Measured,
-    OverlapReading,
-    Proposal,
-    RoundAdvance,
-    RoundResult,
-    RunStanding,
-    is_leader_eligible,
-    line_reference,
-    stalls_left,
-    unscoreable_cells,
-)
+from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
 from promptpotter.domain.run_records import BenchCheckpointKind
+from promptpotter.domain.run_standing import line_reference, stalls_left
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -73,7 +62,7 @@ if TYPE_CHECKING:
         Proposer,
         Selection,
     )
-    from promptpotter.domain.results import DisplayMetric
+    from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
@@ -111,14 +100,14 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
         last: Exception | None = None
         for attempt in range(1, OWED_WRITE_ATTEMPTS + 1):
             try:
-                await adapter.adapt(NodeContext(at_prior, adapter), prior)
+                await adapter.adapt(NodeContext(at_prior, adapter))
                 break
             # A refused send is decided: swallowed, it halts as a PAUSE that `resume` re-enters forever.
             except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
                 raise
             except Exception as exc:
                 last = exc
-                logger.warning(
+                logger.exception(
                     "round %d %s re-run %d/%d failed: %s",
                     prior.round,
                     adapter.name,
@@ -298,7 +287,7 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
 
 def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     cycle = ctx.cycle
-    opening = cycle.optimizer.runtime.opening(ctx, walk)
+    opening = walk.lead.opening(ctx, walk)
     fold = cycle.parent_fold
     node = walk.proposer
     cb = ctx.callbacks
@@ -320,10 +309,7 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
             model=cycle.optimizer.model(node),
             pipeline_params=cycle.parent_point.pipeline_params,
             parent_prompts=cycle.parent.prompts,
-            run_standing=RunStanding.after(
-                cycle.rounds,
-                lives=None if (lives := cycle.config.optimization.lives) is None else lives.bank,
-            ),
+            run_standing=cycle.standing,
         ),
     )
     return opening
@@ -404,14 +390,14 @@ async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -
     return replace(population, proposals=arms)
 
 
-async def _adapt(ctx: RoundContext, plan: RoundPlan, round_result: RoundResult) -> None:
+async def _adapt(ctx: RoundContext, plan: RoundPlan) -> None:
     if not plan.adapters:
         return
     ctx.callbacks.on_phase(CampaignPhase.ADAPT, "enter", round=ctx.round_num)
     for adapter in plan.adapters:
         # Survived here: the next walk re-runs it first (`settle_owed_outputs`).
         with graceful(f"round {ctx.round_num} {adapter.name} landed nothing"):
-            await adapter.adapt(NodeContext(ctx, adapter), round_result)
+            await adapter.adapt(NodeContext(ctx, adapter))
     ctx.callbacks.on_phase(CampaignPhase.ADAPT, "exit", round=ctx.round_num)
 
 
@@ -453,7 +439,8 @@ async def execute_round(
     )
     callbacks.on_phase(CampaignPhase.MEASURE, "exit", round=round_num)
     callbacks.on_phase(CampaignPhase.SELECT, "enter", round=round_num)
-    selection = plan.selector.select(NodeContext(ctx, plan.selector), measured, population)
+    selection = plan.selector.select(NodeContext(ctx, plan.selector), measured)
+    cycle.population = list(selection.population)
     round_result = _round_result(ctx, measured, selection, elects_on=plan.selector.elects_on)
     callbacks.on_phase(
         CampaignPhase.SELECT,
@@ -479,7 +466,7 @@ async def execute_round(
             or (lives is not None and stalls_left(cycle.rounds, lives.bank) == 0)
         )
         if population.proposals and round_result.results and not will_stop:
-            await _adapt(ctx, plan, round_result)
+            await _adapt(ctx, plan)
     except BaseException:
         overlap.cancel()
         raise
@@ -494,11 +481,7 @@ async def execute_round(
 
 async def emit_origin_round(cycle: Cycle, session: Session, cb: RunCallbacks) -> None:
     if cycle.origin_round.results:
-        await _adapt(
-            RoundContext(cycle=cycle, round_num=0, callbacks=cb),
-            cycle.optimizer.plan,
-            cycle.origin_round,
-        )
+        await _adapt(RoundContext(cycle=cycle, round_num=0, callbacks=cb), cycle.optimizer.plan)
     round_result = cycle.origin_round
 
     # The origin's cells fold after the election that adopted it, and before the close.
@@ -523,12 +506,12 @@ async def close_round(
     round_num: int,
     session: Session,
     cb: RunCallbacks,
-) -> tuple[RoundResult, RunStanding]:
+) -> RoundResult:
     stood = round_result.model_copy(update={"optimizer_state": cycle.close_state(round_num)})
-    facts = cycle.optimizer.runtime.round_facts(cycle.optimizer, stood)
+    facts = cycle.optimizer.round_facts(stood)
     closing = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
     flush_pending_decisions(cycle, cb.ledger)
-    offset, standing = cb.on_round_close(
+    offset, cycle.standing = cb.on_round_close(
         closing,
         cycle.rounds,
         session.bank.slot_of,
@@ -551,7 +534,7 @@ async def close_round(
             session.store,
             scorer=session.state.scoring.require_scorer(),
         )
-    return round_result, standing
+    return round_result
 
 
 async def post_round(
@@ -566,7 +549,7 @@ async def post_round(
     controller = cycle.optimizer.plan.controller
     rule: str | None = None
     if controller is not None:
-        ctx = NodeContext[Any](
+        ctx = NodeContext(
             RoundContext(
                 cycle=cycle, round_num=round_num, callbacks=cb, is_final_round=is_final_round
             ),
@@ -574,7 +557,7 @@ async def post_round(
         )
         rule = controller.observe(ctx, round_result)
 
-    round_result, standing = await close_round(cycle, round_result, round_num, session, cb)
+    round_result = await close_round(cycle, round_result, round_num, session, cb)
 
     # Before the stop below, so a perfect round that also ends the campaign still gets its check.
     fold, election = round_result.fold, round_result.election
@@ -589,7 +572,7 @@ async def post_round(
     await grade_round_selection(cycle, session, round_result, cb=cb)
     reserve_selection_pass(cycle, session)
 
-    if (stop := standing_tripped(cycle, standing)) is not None:
+    if (stop := standing_tripped(cycle)) is not None:
         raise StopLoop(stop)
     if rule is not None and not is_final_round:
         assert controller is not None

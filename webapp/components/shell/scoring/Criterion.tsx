@@ -42,9 +42,9 @@ const KINDS = [
   },
 ];
 
-export type CriterionRung = 0 | 1 | 2;
+type CriterionRung = 0 | 1 | 2;
 
-export interface CriterionMatcher {
+interface CriterionMatcher {
   value: string;
   options?: readonly string[];
   onPick?: (matcher: string) => void;
@@ -68,7 +68,7 @@ export function CriterionLine({
   matcher,
 }: {
   mask: ScoringMask;
-  matcher?: CriterionMatcher;
+  matcher?: CriterionMatcher | undefined;
 }) {
   return (
     <span className="criterion-line">
@@ -263,7 +263,7 @@ export function Criterion({
             </div>
           )}
 
-          {(formula || onSamples || (onMask && !dialsOnly)) && (
+          {(!!formula || !!onSamples || (!!onMask && !dialsOnly)) && (
             <button
               type="button"
               className="cmp-link"
@@ -291,8 +291,8 @@ function DialRow({
   term: CellTermMeta;
   weight: number;
   anchor: number | undefined;
-  onWeight?: (weight: number) => void;
-  onRemove?: () => void;
+  onWeight: ((weight: number) => void) | undefined;
+  onRemove: (() => void) | undefined;
 }) {
   // Commits on release: on Compare the mask is in the fetch key, so a drag is one read.
   const [draft, setDraft] = useState(weight);

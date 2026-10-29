@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from promptpotter.application.account import registered_or_default_identity
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import (
@@ -36,7 +36,7 @@ def active_pointer(stores: Stores, *, inside: CyclePath = ()) -> ActivePointer:
 
 def holds_active_pointer(*, tenant: str | None) -> bool:
     identity = registered_or_default_identity(tenant)
-    return active_pointer_exists(tenant_workspace(DEFAULT_PROJECTS_ROOT, identity.tenant_id))
+    return active_pointer_exists(tenant_workspace(default_projects_root(), identity.tenant_id))
 
 
 def _listed(ids: list[str]) -> str:

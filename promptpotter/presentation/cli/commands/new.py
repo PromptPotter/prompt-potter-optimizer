@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -11,22 +12,11 @@ from promptpotter.application.commands.dispatcher import CommandCall, CommandDis
 from promptpotter.application.commands.draft_editing import dispatch_draft_patch
 from promptpotter.application.commands.launching import dispatch_start_checkin
 from promptpotter.application.commands.origin_resolving import dispatch_origin_resolution
-from promptpotter.application.commands.payloads import (
-    EditDraftCampaignPayload,
-    MintCampaignPayload,
-    ResolveOriginPayload,
-    StartCheckinPayload,
-)
 from promptpotter.application.datasets.authored import (
     campaign_file_block,
     validated_campaign_config,
 )
-from promptpotter.application.datasets.draft_campaign import (
-    SETTABLE_SCALARS,
-    EditDraftPatch,
-    OptimizationOverrides,
-    owned_draft,
-)
+from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.ingest import SlugTakenError, ingest_draft
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.datasets.origin_readiness import origin_readiness
@@ -34,7 +24,14 @@ from promptpotter.application.datasets.origin_resolve import FINDING_PATCH_KEYS
 from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Arm, Compare, Optimize, Purpose
+from promptpotter.domain.command_kinds import (
+    EditDraftCampaignPayload,
+    MintCampaignPayload,
+    ResolveOriginPayload,
+    StartCheckinPayload,
+)
 from promptpotter.domain.connector import BackendUnreachableError
+from promptpotter.domain.draft_edit import SETTABLE_SCALARS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
@@ -165,7 +162,7 @@ async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
     try:
         draft = await ingest_draft(
             stores=stores,
-            blob=file_path.read_bytes(),
+            blob=await asyncio.to_thread(file_path.read_bytes),
             filename=file_path.name,
             slug=args.slug,
         )
@@ -269,7 +266,7 @@ def cmd_new(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
 
 async def _new(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
-    if not (args.dataset and Path(args.dataset).is_file()):
+    if not (args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)):
         stores = open_stores(args)
         return await mint_and_run(stores, _named_mint(args, stores), inline_launch(args))
     if args.arm is not None:

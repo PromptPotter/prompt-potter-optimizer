@@ -52,7 +52,6 @@ export interface ServedDashboard {
   round: number;
   measuring_arm: ArmName | null;
   rounds: ServedRound[];
-  bench_score: BenchScore | null;
   /** Each arm's latest verify and held-out bench pass on this cycle's ledger, in
    * flight or ended; its rows are no round's cells. */
   verification: VerificationMark[];
@@ -191,7 +190,7 @@ export interface ServedRound {
   verdict_reason: string | null;
   candidates: DashboardCandidate[];
   selection: number[];
-  health: RoundHealth | null;
+  health: RoundHealth;
   /** The alert a `critical` `health` raises, worded
    * (`results_health.py::critical_health_title`); null on every other grade. */
   health_alert: string | null;
@@ -555,7 +554,7 @@ export interface LineRate {
 
 /** A round's degradation grade as a surface reads it; the whole verdict stays on its close. */
 export interface RoundHealth {
-  grade: 'healthy' | 'degraded' | 'critical';
+  grade: 'healthy' | 'degraded' | 'critical' | 'unmeasured';
   suggested_action: string | null;
 }
 
@@ -644,94 +643,6 @@ export interface SeriesReading {
   /** The level's own caveat, else its series'. Null, and it differences any other
    * level of the series that is null too. */
   caveat: 'floor_pinned' | 'disjoint_scopes' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
-}
-
-/** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
-export interface BenchScore {
-  bench_size: number;
-  /** The grader every number here was read under. A stored copy is a cache of that
-   * reading: a reader under another grader reads the passes again, never
-   * this. */
-  scorer_id: string;
-  /** Which column the headline reads; `vs_origin.headline` is its lift. */
-  headline: 'accuracy' | 'composite';
-  status: BenchStatus;
-  /** The origin's own level; `None` where its pass read nothing. */
-  origin: BenchReading | null;
-  /** The selection's own level — the headline. `None` where its pass read nothing. */
-  selected: BenchReading | null;
-  /** `selected` over `origin`, paired on the bench rows both scored.
-   * `same_individual` where the origin is the selection: nothing was
-   * compared. */
-  vs_origin: PairedReading;
-  cost: LiftCost;
-  /** Per dataset, where the bench rows measure several; empty on one. The two
-   * levels above then read no column, since two datasets' levels never
-   * average, while `vs_origin` still pairs every row. */
-  scopes: BenchScope[];
-  /** The headline on one line — both levels, the lift in each column and the held-
-   * out row count, or `status.sentence` where the bench is not graded. The
-   * ONE wording of it: the completion box, the `bench` verb and every screen
-   * print this. Stamped by :meth:`of` alone. */
-  line: string;
-}
-
-/** Where a campaign's bench stands, and whether asking for its pass would be admitted. */
-export interface BenchStatus {
-  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
-  trigger: 'manual' | 'at_end' | 'each_round';
-  /** `state` in words, with the rows and the stop behind it. */
-  sentence: string;
-  /** Whether `bench` / `grade-bench` is admitted now. Every entry point reads this
-   * one answer. */
-  can_grade: boolean;
-  /** Why not, exactly where `can_grade` is false. */
-  refusal: string | null;
-  /** Whether the grade control shows: admitted, or a pass still waited on. Never on
-   * an inner run, whose line no command grades. */
-  offered: boolean;
-  /** Whose pass `state` names, where one pass decides it. */
-  subject: 'origin' | 'selected' | null;
-  /** The cycle holding the campaign's line, where that is another one. */
-  held_by: string | null;
-  stop: PassStop | null;
-  scored: number | null;
-  expected: number | null;
-  /** Individuals the archive had graded on these held-out rows when the selection's
-   * pass was sent: each one chosen off a headline spent the holdout. `None`
-   * where no pass of the selection stands. */
-  reads_before: number | null;
-}
-
-/** Why a bench pass holds fewer rows than it was sent on. */
-export interface PassStop {
-  /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
-   * spent budget before it was sent. */
-  cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
-  /** The backend's dominant warning, where errors ended the pass. */
-  warning: string | null;
-}
-
-/** The headline lift per USD its SEARCH incurred, or why there is none. */
-export interface LiftCost {
-  /** Priced on INCURRED spend, never the bill — a replayed cell is billed nothing,
-   * which would price arriving second — and never on the bench's own pass. */
-  lift_per_usd: number | null;
-  absent: 'no_lift' | 'unpriced_tokens' | 'zero_spend' | null;
-}
-
-/** One dataset's rows of a bench spanning several, read apart: a level is never averaged */
-export interface BenchScope {
-  /** The dataset these rows measure; `None` is the one the cycle is filed under. */
-  dataset: string | null;
-  rows: number;
-  /** `None` where the origin's pass read nothing. */
-  origin: OwnLevel | null;
-  /** `None` where the selection's read nothing. */
-  selected: OwnLevel | null;
-  /** `selected` over `origin` on this dataset's rows alone; `None` where either
-   * read nothing. */
-  vs_origin: PairedReading | null;
 }
 
 /** The latest verify or bench pass on one arm, as its records left it. */
@@ -1425,7 +1336,7 @@ export interface RoundAudit {
 /** One outbound SSE frame, whose receiver treats an unknown field as a drift signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'decision' | 'command' | 'command_ack' | 'cycle_final' | 'cycle_minted' | 'cycle_seed' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'intervention' | 'launch_claim' | 'launch_clock' | 'launch_released' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_hold' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -1726,6 +1637,94 @@ export interface DeterminismClamp {
 export interface RunStatus {
   label: string;
   mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+}
+
+/** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
+export interface BenchScore {
+  bench_size: number;
+  /** The grader every number here was read under. A stored copy is a cache of that
+   * reading: a reader under another grader reads the passes again, never
+   * this. */
+  scorer_id: string;
+  /** Which column the headline reads; `vs_origin.headline` is its lift. */
+  headline: 'accuracy' | 'composite';
+  status: BenchStatus;
+  /** The origin's own level; `None` where its pass read nothing. */
+  origin: BenchReading | null;
+  /** The selection's own level — the headline. `None` where its pass read nothing. */
+  selected: BenchReading | null;
+  /** `selected` over `origin`, paired on the bench rows both scored.
+   * `same_individual` where the origin is the selection: nothing was
+   * compared. */
+  vs_origin: PairedReading;
+  cost: LiftCost;
+  /** Per dataset, where the bench rows measure several; empty on one. The two
+   * levels above then read no column, since two datasets' levels never
+   * average, while `vs_origin` still pairs every row. */
+  scopes: BenchScope[];
+  /** The headline on one line — both levels, the lift in each column and the held-
+   * out row count, or `status.sentence` where the bench is not graded. The
+   * ONE wording of it: the completion box, the `bench` verb and every screen
+   * print this. Stamped by :meth:`of` alone. */
+  line: string;
+}
+
+/** Where a campaign's bench stands, and whether asking for its pass would be admitted. */
+export interface BenchStatus {
+  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+  trigger: 'manual' | 'at_end' | 'each_round';
+  /** `state` in words, with the rows and the stop behind it. */
+  sentence: string;
+  /** Whether `bench` / `grade-bench` is admitted now. Every entry point reads this
+   * one answer. */
+  can_grade: boolean;
+  /** Why not, exactly where `can_grade` is false. */
+  refusal: string | null;
+  /** Whether the grade control shows: admitted, or a pass still waited on. Never on
+   * an inner run, whose line no command grades. */
+  offered: boolean;
+  /** Whose pass `state` names, where one pass decides it. */
+  subject: 'origin' | 'selected' | null;
+  /** The cycle holding the campaign's line, where that is another one. */
+  held_by: string | null;
+  stop: PassStop | null;
+  scored: number | null;
+  expected: number | null;
+  /** Individuals the archive had graded on these held-out rows when the selection's
+   * pass was sent: each one chosen off a headline spent the holdout. `None`
+   * where no pass of the selection stands. */
+  reads_before: number | null;
+}
+
+/** Why a bench pass holds fewer rows than it was sent on. */
+export interface PassStop {
+  /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
+   * spent budget before it was sent. */
+  cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
+  /** The backend's dominant warning, where errors ended the pass. */
+  warning: string | null;
+}
+
+/** The headline lift per USD its SEARCH incurred, or why there is none. */
+export interface LiftCost {
+  /** Priced on INCURRED spend, never the bill — a replayed cell is billed nothing,
+   * which would price arriving second — and never on the bench's own pass. */
+  lift_per_usd: number | null;
+  absent: 'no_lift' | 'unpriced_tokens' | 'zero_spend' | null;
+}
+
+/** One dataset's rows of a bench spanning several, read apart: a level is never averaged */
+export interface BenchScope {
+  /** The dataset these rows measure; `None` is the one the cycle is filed under. */
+  dataset: string | null;
+  rows: number;
+  /** `None` where the origin's pass read nothing. */
+  origin: OwnLevel | null;
+  /** `None` where the selection's read nothing. */
+  selected: OwnLevel | null;
+  /** `selected` over `origin` on this dataset's rows alone; `None` where either
+   * read nothing. */
+  vs_origin: PairedReading | null;
 }
 
 /** The bench set and grader behind a headline; two compare only where every field agrees. */
@@ -2387,8 +2386,9 @@ export interface NestedPipelineRef {
 export interface ForkPreviewResponse {
   /** The overlay picks a responder the campaign's declared `optimizer_narrowing`
    * never sanctioned, or touches a cost lever, which no permitted set can
-   * sanction. True means the fork is the ADR-0005 babysit act: it needs
-   * `campaign.babysit` (404 without it) and stamps the branch grade C. */
+   * sanction. True means the fork is the babysit act (decisions.md § 0005):
+   * it needs `campaign.babysit` (404 without it) and stamps the branch grade
+   * C. */
   steers_disallowed_model: boolean;
   /** What the verdict above was compared AGAINST, per node — this campaign's
    * declared `optimizer_narrowing[node].param_allowed_values.model`. Served
@@ -2681,7 +2681,7 @@ export interface StartPrompt {
   versions_declared: number;
 }
 
-/** The optimizers this install can run, the default first: one per runtime the registry holds. */
+/** The optimizers this install can run, the default first: one per manifest the registry holds. */
 export interface OptimizerRoster {
   /** What a campaign naming no `optimization.optimizer` runs */
   default: string;
@@ -2768,7 +2768,7 @@ export interface HierarchyCampaign {
   caveat: string | null;
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
+  stats: (HierarchyStat | BenchStat)[];
   state: HierarchyState;
   span: HierarchySpan;
   level: 'campaign';
@@ -2789,12 +2789,27 @@ export interface HierarchyTag {
 
 /** One number an entry shows, worded by the server in the order it is served. */
 export interface HierarchyStat {
-  key: 'spend_lifetime' | 'spend' | 'bench' | 'rounds' | 'accuracy' | 'lives' | 'ability' | 'lift';
+  key: 'spend_lifetime' | 'spend' | 'rounds' | 'accuracy' | 'lives' | 'ability' | 'lift';
   label: string;
   /** The number as it reads: `≥ $1.20`, `3 of 10`, `+2.1 pp`. */
   value: string;
   /** The second line under the value; null where none. */
   sub: string | null;
+}
+
+/** The bench as one stat: its wording, and the readings a control or a headline acts on. */
+export interface BenchStat {
+  key: 'bench';
+  label: string;
+  value: string;
+  /** `BenchScore.line`, or why the bench is not read here. */
+  sub: string | null;
+  /** Null on a course beside the line, which no command grades. */
+  status: BenchStatus | null;
+  /** `BenchScore.vs_origin`; null with `status`. */
+  vs_origin: PairedReading | null;
+  /** `BenchScore.cost.lift_per_usd`; null where the lift is unpriced or unread. */
+  lift_per_usd: number | null;
 }
 
 /** A run's state as one value: the phase, its word and mark, whether it is held, the verbs. */
@@ -2915,7 +2930,7 @@ export interface HierarchyCourse {
   caveat: string | null;
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
+  stats: (HierarchyStat | BenchStat)[];
   state: HierarchyState;
   span: HierarchySpan;
   level: 'course';
@@ -3046,7 +3061,7 @@ export interface SubtreeCampaign {
   caveat: string | null;
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
+  stats: (HierarchyStat | BenchStat)[];
   state: HierarchyState;
   span: HierarchySpan;
   level: 'campaign';
@@ -3091,7 +3106,7 @@ export interface SubtreeCourse {
   caveat: string | null;
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
+  stats: (HierarchyStat | BenchStat)[];
   state: HierarchyState;
   span: HierarchySpan;
   level: 'course';
@@ -3191,7 +3206,7 @@ export interface HierarchyCandidate {
   caveat: string | null;
   tags: HierarchyTag[];
   /** Server-ordered; `stats[0]` is the headline. */
-  stats: HierarchyStat[];
+  stats: (HierarchyStat | BenchStat)[];
   level: 'candidate';
   facts: CandidateFacts;
   children: SubtreeCampaign[];
@@ -3877,6 +3892,7 @@ export interface CampaignConfig {
   /** Per-node declaration over the dataset's optimizer search space — the per-
    * campaign param-lock + value-space lever beside `exclude_nodes` (whole
    * node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS
+   * the config axes, `prompt_fields_held` holds the prompt fields it names,
    * and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied
    * at pipeline setup): a campaign may only close axes the dataset opened,
    * but the value space is its own statement — which is what lets an operator
@@ -3960,9 +3976,10 @@ export interface CampaignConfig {
   optimization: OptimizationConfig;
 }
 
-/** A campaign's own declaration over the dataset's, whose two halves compose differently. */
+/** A campaign's own declaration over the dataset's, whose three parts compose differently. */
 export interface NodeSearchNarrowing {
   param_keys: string[] | null;
+  prompt_fields_held: string[];
   param_allowed_values: Record<string, string[]>;
 }
 
@@ -4495,11 +4512,11 @@ export const READING_STATE_KINDS: Record<ReadingState, ReadingStateKind> = {
   'instrument_differs': 'refused',
 };
 
-// What a closed round did to the best-so-far line (domain/results.py::RoundAdvance).
+// What a closed round did to the best-so-far line (domain/origin_panel.py::RoundAdvance).
 export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
 
 // The served label and sentence per advance. Mirror of
-// domain/results.py::ROUND_ADVANCE_INFO — the single wording source.
+// domain/origin_panel.py::ROUND_ADVANCE_INFO — the single wording source.
 export const ROUND_ADVANCE_LABELS: Record<RoundAdvance, string> = {
   'origin': 'origin',
   'advanced': 'advanced',
@@ -4562,7 +4579,7 @@ export const THETA_CAVEAT_INFO: Record<'disjoint_scopes' | 'cold_ruler' | 'flat_
   'floor_pinned': { head: "θ reads nothing for an all-miss arm", body: "This arm missed every cell it answered. With no hit the fit has nothing to read: every all-miss arm lands on the same floor whatever cells it saw, so its θ, and any lift taken from it, is not a measurement. The ruler, the election and the other arms' θ are unaffected." },
 };
 
-// Mirror of domain/results.py::ARM_VERDICT_LABELS — the single wording.
+// Mirror of domain/arm_reading.py::ARM_VERDICT_LABELS — the single wording.
 export const ARM_VERDICT_LABELS: Record<'retired' | 'invalid' | 'origin' | 'elected' | 'uncontested' | 'selected' | 'not_elected' | 'unmeasured' | 'awaiting', string> = {
   'retired': "retired",
   'invalid': "invalid — never measured",
@@ -4608,10 +4625,10 @@ export const MOVABLE_AGENT_LABELS: Record<"proposer" | "optimizer", string> = {
 // domain/pipeline_schema.py::SCHEMA_DESCRIPTION_PREFIX.
 export const SCHEMA_DESCRIPTION_PREFIX = "output_schema_descriptions.";
 
-// A column every arm carries (domain/results.py::DisplayMetric).
+// A column every arm carries (domain/arm_reading.py::DisplayMetric).
 export type DisplayMetric = 'accuracy' | 'ability' | 'composite';
 
-// Each column's words, in pick order. Mirror of domain/results.py::DISPLAY_METRIC_INFO.
+// Each column's words, in pick order. Mirror of domain/arm_reading.py::DISPLAY_METRIC_INFO.
 export const DISPLAY_METRICS: readonly {
   id: DisplayMetric;
   label: string;
@@ -4629,7 +4646,7 @@ export const DISPLAY_METRIC_LABELS: Record<DisplayMetric, string> = {
   'composite': 'composite',
 };
 
-// A displayed level's unit (domain/results.py::LevelUnit).
+// A displayed level's unit (domain/arm_reading.py::LevelUnit).
 export type LevelUnit = 'rate' | 'score' | 'theta';
 
 export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {
@@ -4639,7 +4656,7 @@ export const DISPLAY_METRIC_UNITS: Record<DisplayMetric, LevelUnit> = {
 };
 
 // How a verify pass's pick of fresh cells reads, by strategy. Mirror of
-// domain/results.py::VERIFY_STRATEGY_LABELS.
+// domain/verify_pass.py::VERIFY_STRATEGY_LABELS.
 export const VERIFY_STRATEGY_LABELS: Record<VerifyReading["strategy"], string> = {
   'random': 'picked at random',
   'hard': 'hardest first',

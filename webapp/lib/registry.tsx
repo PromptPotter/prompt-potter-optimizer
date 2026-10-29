@@ -96,7 +96,7 @@ export function useCampaign(address: string | null): HierarchyCampaign | null {
   return address === null ? null : campaignAt(byAddress, address);
 }
 
-export interface ActivePointer {
+interface ActivePointer {
   campaignId: string | null;
   cycleId: string | null;
   // "No active session" is null ids on a 200 (`active.py::get_active_session`), never this.

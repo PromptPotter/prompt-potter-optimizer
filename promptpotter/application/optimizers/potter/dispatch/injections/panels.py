@@ -44,6 +44,7 @@ from promptpotter.application.optimizers.potter.pobb.checks import EliminationGa
 from promptpotter.application.scoring.evaluators import DEFAULT_CELL_FORMULA, compute_accuracy
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
+from promptpotter.domain.arms import Concluded, Cut, Measured, arm_elimination
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
     candidate_delta,
@@ -52,21 +53,13 @@ from promptpotter.domain.candidate_diff import (
     flatten_sp_summary,
     same_idea,
 )
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit, unit_count, unit_plural
 from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
+from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
 from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading
-from promptpotter.domain.results import (
-    ROUND_ADVANCE_INFO,
-    Concluded,
-    Cut,
-    Measured,
-    RoundResult,
-    ScoreSummary,
-    arm_elimination,
-    overlap_line,
-    triggered_rates,
-)
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import evidence_starved_node, ran_to_output_ceiling
 from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.scoring import (

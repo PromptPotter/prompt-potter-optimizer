@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from promptpotter.domain.results import DiagnosticRunRecord
+from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.infrastructure.store.io import write_json
 
 

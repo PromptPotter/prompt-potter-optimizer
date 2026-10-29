@@ -6,7 +6,7 @@ import functools
 import hashlib
 import json
 import pkgutil
-from abc import ABC, abstractmethod
+import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,10 +25,13 @@ from typing import (
 
 from pydantic import Field
 
-from promptpotter.application.campaign_config import CampaignConfig, Estimand, Knob, Scope
+from promptpotter.domain.arms import ArmSlot, Proposed
+from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, Scope
 from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
+from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import ArmSlot, Proposed, election_rows, rounds_without_advance
+from promptpotter.domain.pool import DemoPool
+from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import CatchUps
@@ -49,6 +52,9 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
+    from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
+    from promptpotter.domain.arms import Concluded, Elimination, Proposal
+    from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
     from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
@@ -56,16 +62,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.phases import StopReason
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Access, Pool
-    from promptpotter.domain.results import (
-        ArmFit,
-        Concluded,
-        DisplayMetric,
-        Elimination,
-        OptimizerFact,
-        Proposal,
-        RoundResult,
-        ScoreSummary,
-    )
+    from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell
@@ -113,6 +110,14 @@ class RewriteKnobs(StrictModel):
     )
 
 
+class ShotKnobs(StrictModel):
+    k_max: Annotated[int, Knob(Scope.POLICY, Estimand.SEARCH)] = Field(
+        ge=0,
+        description="The most shots an individual this node writes may carry; 0 withdraws the "
+        "demo pool from it.",
+    )
+
+
 @dataclass(frozen=True)
 class AccessKnob:
     """A reader's access to a pool is the value of one ``Access`` knob, its own or a consulted member's."""
@@ -120,8 +125,8 @@ class AccessKnob:
     knobs: type[StrictModel]
     knob: str
 
-    def access(self, values: StrictModel) -> Access:
-        return cast("Access", getattr(values, self.knob))
+    def access(self, selected: SelectedOptimizer, member: NodeMember) -> Access:
+        return cast("Access", getattr(selected.reached_knobs(member, self.knobs), self.knob))
 
 
 @dataclass(frozen=True)
@@ -131,62 +136,101 @@ class CountKnob:
     knobs: type[StrictModel]
     knob: str
 
-    def access(self, values: StrictModel) -> Access:
-        return "closed" if getattr(values, self.knob) > 0 else "off"
+    def count(self, selected: SelectedOptimizer, member: NodeMember) -> int:
+        return cast("int", getattr(selected.reached_knobs(member, self.knobs), self.knob))
+
+    def access(self, selected: SelectedOptimizer, member: NodeMember) -> Access:
+        return "closed" if self.count(selected, member) > 0 else "off"
 
 
-Draw = AccessKnob | CountKnob
+@dataclass(frozen=True)
+class ShotCap:
+    """The bench seat's draw: as many shots as any proposer of the round may draw (``SelectedOptimizer.shot_cap``)."""
+
+    def access(self, selected: SelectedOptimizer, _member: NodeMember) -> Access:
+        return "closed" if selected.shot_cap > 0 else "off"
+
+
+# A manifest member's draw: one knob sets it.
+KnobDraw = AccessKnob | CountKnob
+Draw = KnobDraw | ShotCap
 
 
 class CycleRead:
-    """A typed read of the cycle a member names in ``sees``; ``NodeContext.read`` hands it over."""
+    """A typed read a member names in ``sees``, refused at load where ``refusal`` names why; ``NodeContext.read`` hands it over."""
 
-    def __init__(self, round_: RoundContext) -> None:
+    def __init__(self, round_: RoundContext, member: NodeMember) -> None:
         self._round = round_
         self._cycle = round_.cycle
+        self._member = member
+
+    @classmethod
+    def refusal(cls, _member: NodeMember) -> str | None:
+        return None
 
 
 class NodeMember(Protocol):
-    """Every edge to another member is declared here, and ``optimizer_manifest.py::_open_edges`` closes them before a mint."""
+    """Every edge to another member is declared here, and ``optimizer_manifest.py::_open_edges`` closes them before a mint; a member subclassing it states only what it holds."""
 
     @property
     def name(self) -> str: ...
     @property
     def kind(self) -> NodeKind: ...
-    @property
-    def knobs(self) -> type[StrictModel]: ...
-    @property
-    def prompt_arity(self) -> PromptArity: ...
-    @property
-    def reads(self) -> frozenset[type[StatePart]]: ...
-    @property
-    def writes(self) -> frozenset[type[StatePart]]: ...
-    # The cycle reads beyond its own state it is handed (`NodeContext.read`).
-    @property
-    def sees(self) -> frozenset[type[CycleRead]]: ...
-    # The pools it draws from, each under the knob that sets its access; read only through `NodeContext.drawn`.
-    @property
-    def draws(self) -> Mapping[type[Pool], Draw]: ...
-    # The members whose knobs it reads (`NodeContext.knobs_of`), and nothing else of theirs.
-    @property
-    def consults(self) -> frozenset[type]: ...
 
-
-class Member:
-    """What a member declares where it states nothing: no prompt, no state, no cycle read, no pool, no other member."""
-
-    name: ClassVar[str]
-    kind: ClassVar[NodeKind]
     knobs: ClassVar[type[StrictModel]] = StrictModel
     prompt_arity: ClassVar[PromptArity] = "none"
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset()
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
+    # Every read beyond its own state, knobs and pools it is handed (`NodeContext.read`).
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
+    # The pools it draws from, each under the draw that sets its access; read only through `NodeContext.drawn`.
     draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType({})
+    # The modules deciding what its prompts SAY; `source_digest` hashes them beside its own module.
+    prompt_sources: ClassVar[tuple[ModuleType, ...]] = ()
+    # By decision kind, pure over one round; registering one is what makes a resume re-derive that kind.
+    replayers: ClassVar[Mapping[str, Replayer]] = MappingProxyType({})
+    couplings: ClassVar[tuple[MemberCoupling, ...]] = ()
+    # `{row: count}` of declared surface no manifest shows, which `complexity_ledger` sums.
+    priced_surface: ClassVar[Mapping[str, int]] = MappingProxyType({})
 
     @property
     def consults(self) -> frozenset[type]:
+        """The members whose knobs it reads (`NodeContext.knobs`), and nothing else of theirs."""
         return frozenset()
+
+    def limits(self, _selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
+        return ()
+
+    def round_facts(
+        self, _selected: SelectedOptimizer, _round_result: RoundResult
+    ) -> list[OptimizerFact]:
+        """Read off the round file ALONE; the close stamps the roster's as ``RoundResult.optimizer_facts``."""
+        return []
+
+    def refuse_origin(self, _origin_results: CellSheet) -> None:
+        """Raise where the origin's measurement holds what this member cannot start from."""
+        return None
+
+    def round_packages(
+        self, _cycle: Cycle, _rounds: list[RoundResult]
+    ) -> dict[int, dict[str, str]]:
+        """``{round: {node: fingerprint}}`` of what the nodes it speaks for were handed; a repair moving one forks the rounds after it."""
+        return {}
+
+    async def rederive(
+        self,
+        _campaign_store: CampaignStore,
+        _hop: CycleHop,
+        _cycle: Cycle,
+        rounds: list[RoundResult],
+        _drifted: list[int],
+    ) -> list[RoundResult]:
+        """Re-derives what it wrote in each *drifted* round and restates it on *hop*'s ledger."""
+        return rounds
+
+    def complete(self) -> None:
+        """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
+        return None
 
 
 @dataclass(frozen=True)
@@ -264,7 +308,7 @@ class OptimizerPhase:
     activity: str
 
 
-class LlmNode(Member):
+class LlmNode(NodeMember):
     kind: ClassVar[NodeKind] = NodeKind.LLM
     # ``None`` where the node answers in free text; else ``build_optimizer_schemas.py`` writes its schema.
     response_model: ClassVar[type[BaseModel] | None] = None
@@ -275,7 +319,7 @@ class LlmNode(Member):
     # Params beyond the prompt fields an L4 override of this node carries, by JSON type.
     outer_levers: ClassVar[Mapping[str, str]] = {}
 
-    def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:
+    def resolved_levers(self, _declared: Mapping[str, Any]) -> dict[str, Any]:
         """The L4 override levers its optimizer resolves itself, as they RESOLVE: the inner cell's identity reads them."""
         return {}
 
@@ -310,6 +354,11 @@ class RoundWalk:
         return bool(self.seeds) or self.pipeline == INITIAL_POPULATION
 
     @property
+    def lead(self) -> Proposer:
+        """The proposer making the round's arms, which states its opening; a seed ahead of it does not."""
+        return self.proposers[0]
+
+    @property
     def proposer(self) -> str:
         """Its first llm node, whose model the round's opening names."""
         return next(m.name for m in self.members if m.kind is NodeKind.LLM)
@@ -327,99 +376,30 @@ def member_package(member: object) -> str | None:
     return package if package in BUILTIN_PACKAGES else None
 
 
+def source_digest(members: Iterable[NodeMember], *covered: ModuleType) -> str:
+    """Every member's own module and its ``prompt_sources``, then the prompt shapers their packages hold; ``covered`` modules another digest already hashes."""
+    held = list(members)
+    own = {sys.modules[type(member).__module__] for member in held}
+    spoken = {source for member in held for source in member.prompt_sources}
+    roster = frozenset(p for member in held if (p := member_package(member)) is not None)
+    return _source_digest(_by_name(own - spoken), _by_name(spoken), covered, roster)
+
+
+def _by_name(modules: Iterable[ModuleType]) -> tuple[ModuleType, ...]:
+    return tuple(sorted(modules, key=lambda module: module.__name__))
+
+
 @functools.cache
 def _source_digest(
-    sources: tuple[ModuleType, ...], covered: tuple[ModuleType, ...], roster: frozenset[str]
+    own: tuple[ModuleType, ...],
+    spoken: tuple[ModuleType, ...],
+    covered: tuple[ModuleType, ...],
+    roster: frozenset[str],
 ) -> str:
-    own = sources[-1].__name__.removeprefix(f"{_PACKAGE}.").split(".")[0]
-    foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - {own} - roster)
-    return module_source_digest(
-        *sources, *optimizer_prompt_shapers(sources, covered=covered, foreign=foreign)
-    )
-
-
-class OptimizerRuntime(ABC):
-    """Every non-abstract member answers "none": the bench reads the same member of every optimizer and branches on no name."""
-
-    name: ClassVar[str]
-    manifest_dir: ClassVar[Path]
-    # The modules deciding what its prompts SAY, its own package's last: ``Treatment.source``.
-    prompt_sources: ClassVar[tuple[ModuleType, ...]]
-    # ``{row: count}`` of declared surface no manifest shows, which ``complexity_ledger`` sums.
-    priced_surface: ClassVar[Mapping[str, int]] = {}
-    # By decision kind, pure over one round; registering one is what makes a resume re-derive that kind.
-    replayers: ClassVar[Mapping[str, Replayer]] = {}
-    couplings: ClassVar[Mapping[str, tuple[MemberCoupling, ...]]] = {}
-
-    def refuse_origin(self, origin_results: CellSheet) -> None:
-        """Raise where the origin's measurement holds what this optimizer cannot start from."""
-        return None
-
-    @abstractmethod
-    def arms(self, selected: SelectedOptimizer) -> int:
-        """The most arms one round races."""
-
-    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
-        """Overridden only where a round's walks are not every arm plus the parent on the sampler's draw."""
-        return (self.arms(selected) + 1) * selected.round_cells(search)
-
-    def limits(self, selected: SelectedOptimizer) -> tuple[OptimizerLimit, ...]:
-        return ()
-
-    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
-        return RoundOpening(
-            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
-            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
-            arms=None
-            if walk.pipeline == INITIAL_POPULATION
-            else ctx.cycle.optimizer.arms_per_round,
-            proposer=walk.proposer,
-            replayed=False,
-        )
-
-    def complete(self) -> None:
-        """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
-        return None
-
-    def source_digest(self, roster: frozenset[str], *covered: ModuleType) -> str:
-        """``roster`` are the built-in packages its manifest's members come from; ``covered`` modules another digest already hashes."""
-        return _source_digest(self.prompt_sources, covered, roster)
-
-    def round_packages(self, cycle: Cycle, rounds: list[RoundResult]) -> dict[int, dict[str, str]]:
-        """``{round: {node: fingerprint}}`` of what its nodes were handed; a repair moving one forks the rounds after it."""
-        return {}
-
-    async def rederive(
-        self,
-        campaign_store: CampaignStore,
-        hop: CycleHop,
-        cycle: Cycle,
-        rounds: list[RoundResult],
-        drifted: list[int],
-    ) -> list[RoundResult]:
-        """Re-derives what the nodes of each *drifted* round wrote and restates it on *hop*'s ledger."""
-        return rounds
-
-    async def show_round(self, ctx: RoundContext) -> None:
-        """Propose *ctx*'s round and bank it UNMEASURED: ``--diag``'s last step."""
-        raise NotImplementedError(f"optimizer {self.name!r} shows no unmeasured round")
-
-    def review(
-        self,
-        selected: SelectedOptimizer,
-        rounds: list[RoundResult],
-        audits: list[RoundAudit | None],
-        *,
-        context_object: list[str],
-    ) -> ReviewReading | None:
-        """``None`` where the optimizer keeps no reading of its own; ``review.md`` then says N/A."""
-        return None
-
-    def round_facts(
-        self, selected: SelectedOptimizer, round_result: RoundResult
-    ) -> list[OptimizerFact]:
-        """Read off the round file ALONE; the close stamps it as ``RoundResult.optimizer_facts``."""
-        return []
+    # The members' own modules are hashed whole; only `spoken` is scanned for the shapers it reads.
+    foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - roster)
+    shapers = optimizer_prompt_shapers(spoken, covered=(*own, *covered), foreign=foreign)
+    return module_source_digest(*spoken, *own, *shapers)
 
 
 def rows_read_packages(
@@ -480,7 +460,7 @@ class Panel:
 
 @dataclass(frozen=True)
 class Proposals:
-    """The round's ARMS; the population carried between rounds is ``NodeContext.population``."""
+    """The round's ARMS; the population carried between rounds is ``Selection.population``."""
 
     proposals: list[Proposal]
 
@@ -574,6 +554,8 @@ class Selection:
     selected: ArmKey | None
     leading: ArmKey | None
     verdict_reason: str
+    # What the next round's walk reads as the population, which the bench seats.
+    population: Sequence[OptSearchPoint]
 
 
 class Sampler(NodeMember, Protocol):
@@ -586,7 +568,11 @@ class Sampler(NodeMember, Protocol):
         """Cells a round after the first asks for under its own *knobs*, read BEFORE any round runs; 0 where the search split holds no panel."""
         ...
 
-    def draw(self, ctx: NodeContext[Any], pool: list[Sample]) -> Panel: ...
+    def round_cells_ceiling(self, selected: SelectedOptimizer, search: int) -> int:
+        """The most cells one round's walks read, the parent's among them; 0 where ``round_cells`` is."""
+        return (selected.arms_per_round + 1) * selected.round_cells(search)
+
+    def draw(self, ctx: NodeContext, pool: list[Sample]) -> Panel: ...
 
 
 class Proposer(NodeMember, Protocol):
@@ -602,9 +588,23 @@ class Proposer(NodeMember, Protocol):
         """How it makes a child, which every child it writes records."""
         ...
 
-    async def propose(
-        self, ctx: NodeContext[Any], panel: Panel, proposals: Proposals
-    ) -> Proposals: ...
+    def arms(self, _selected: SelectedOptimizer) -> int:
+        """The arms it adds to its walk, whose arms are the sum and a round's the most of any walk it runs alone; an editor of arms another made adds none."""
+        return 0
+
+    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
+        """Asked of the walk's ``lead``."""
+        return RoundOpening(
+            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
+            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
+            arms=None
+            if walk.pipeline == INITIAL_POPULATION
+            else ctx.cycle.optimizer.arms_per_round,
+            proposer=walk.proposer,
+            replayed=False,
+        )
+
+    async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals: ...
 
 
 @dataclass(frozen=True)
@@ -633,12 +633,7 @@ class Race(CatchUps, Protocol):
     def open_turn(self, key: ArmKey) -> None: ...
 
     def judge(
-        self,
-        signal: StopSignal | None,
-        *,
-        key: ArmKey,
-        results: Sequence[GradedCell],
-        labels: Mapping[ArmKey, str],
+        self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
     ) -> Elimination | None: ...
 
     def admit(self, key: ArmKey, results: Sequence[GradedCell], sp: JobSearchPoint) -> None: ...
@@ -647,22 +642,22 @@ class Race(CatchUps, Protocol):
 class NoCatchUps:
     """The catch-up half of a ``Race`` whose arms all walk one panel, so no prior is paired."""
 
-    def start_backfill(self, sample: Sample, room: int) -> list[asyncio.Future[Any]]:
+    def start_backfill(self, _sample: Sample, _room: int) -> list[asyncio.Future[Any]]:
         return []
 
-    def owed_backfills(self, sample: Sample) -> int:
+    def owed_backfills(self, _sample: Sample) -> int:
         return 0
 
     def backfills_in_flight(self) -> list[asyncio.Future[Any]]:
         return []
 
-    def backfills_for(self, sample: Sample) -> list[asyncio.Future[Any]]:
+    def backfills_for(self, _sample: Sample) -> list[asyncio.Future[Any]]:
         return []
 
-    def commit_backfills(self, sample: Sample) -> None:
+    def commit_backfills(self, _sample: Sample) -> None:
         return None
 
-    def bank_backfills(self, samples: Sequence[Sample]) -> None:
+    def bank_backfills(self, _samples: Sequence[Sample]) -> None:
         return None
 
     def discard_backfills(self) -> None:
@@ -680,9 +675,7 @@ class Eliminator(NodeMember, Protocol):
         """False where a stop only ends the buying of an arm the selector still reads; True takes it out of ``MeasuredRound.electable``."""
         ...
 
-    def race(
-        self, ctx: NodeContext[Any], panel: Panel, proposals: Proposals, catch_up: CatchUpFn
-    ) -> Race: ...
+    def race(self, ctx: NodeContext, panel: Panel, catch_up: CatchUpFn) -> Race: ...
 
 
 class Selector(NodeMember, Protocol):
@@ -697,34 +690,12 @@ class Selector(NodeMember, Protocol):
         ...
 
     def parent_cells(
-        self, ctx: NodeContext[Any], panel: Panel, rows: Mapping[ArmKey, CellSheet]
+        self, ctx: NodeContext, panel: Panel, rows: Mapping[ArmKey, CellSheet]
     ) -> list[Sample]:
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
         ...
 
-    def select(
-        self, ctx: NodeContext[Any], measured: MeasuredRound, proposals: Proposals
-    ) -> Selection: ...
-
-
-class OperatorSeat:
-    """The arm gate's seat, declared as a member is: it writes the round's arms and no state, and draws what the proposers it stands in for draw, under their knobs."""
-
-    name: ClassVar[str] = "operator_seat"
-    kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
-    prompt_arity: ClassVar[PromptArity] = "none"
-    knobs: ClassVar[type[StrictModel]] = StrictModel
-    reads: ClassVar[frozenset[type[StatePart]]] = frozenset()
-    writes: ClassVar[frozenset[type[StatePart]]] = frozenset()
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset()
-    variation_mode: ClassVar[VariationMode] = "operator"
-
-    def __init__(self, proposers: Sequence[Proposer]) -> None:
-        # The opening proposer's draw wins where two draw one pool.
-        self.draws: Mapping[type[Pool], Draw] = MappingProxyType(
-            {pool: draw for p in reversed(proposers) for pool, draw in p.draws.items()}
-        )
-        self.consults: frozenset[type] = frozenset(type(p) for p in proposers)
+    def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection: ...
 
 
 class MintFacts(NamedTuple):
@@ -750,18 +721,18 @@ class Initializer(NodeMember, Protocol):
     def active(self, selected: SelectedOptimizer) -> list[str]: ...
 
     def refusal(
-        self, selected: SelectedOptimizer, *, closed: bool, mint: MintFacts | None
+        self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None
     ) -> str | None:
         """At load with ``mint`` ``None``, again before the mint."""
         ...
 
-    def initialize(self, ctx: NodeContext[Any]) -> None: ...
+    def initialize(self, ctx: NodeContext) -> None: ...
 
 
 class Adapter(NodeMember, Protocol):
     """Writes off the round just absorbed; raises where it lands nothing, which the round survives and the next walk re-runs first."""
 
-    async def adapt(self, ctx: NodeContext[Any], round_result: RoundResult) -> None: ...
+    async def adapt(self, ctx: NodeContext) -> None: ...
 
 
 class Controller(NodeMember, Protocol):
@@ -772,12 +743,41 @@ class Controller(NodeMember, Protocol):
         """The members it runs, each under its own context (``NodeContext.fire``)."""
         ...
 
-    def observe(self, ctx: NodeContext[Any], round_result: RoundResult) -> str | None:
+    def observe(self, ctx: NodeContext, round_result: RoundResult) -> str | None:
         """Read the closed round into its own state; the rule that makes it act at this boundary, ``None`` where none does."""
         ...
 
-    async def act(self, ctx: NodeContext[Any], cause: str) -> None: ...
+    async def act(self, ctx: NodeContext, cause: str) -> None: ...
 
-    async def diagnose(self, ctx: NodeContext[Any]) -> None:
-        """``--diag``: act on the round just closed, then show the next round's proposals unmeasured."""
+    async def diagnose(self, ctx: NodeContext) -> None:
+        """``--diag``: act on the round just closed; the bench then shows the next round unmeasured."""
         ...
+
+    async def show_round(self, ctx: RoundContext) -> None:
+        """Propose *ctx*'s round and bank it UNMEASURED: ``--diag``'s last step."""
+        ...
+
+
+@runtime_checkable
+class Reviewer(NodeMember, Protocol):
+    """The member whose reading ``review.md`` prints; a roster holds at most one, and none says N/A."""
+
+    def review(
+        self,
+        rounds: list[RoundResult],
+        audits: list[RoundAudit | None],
+        *,
+        context_object: list[str],
+    ) -> ReviewReading: ...
+
+
+class OperatorSeat(NodeMember):
+    """The arm gate's seat, the bench's own and no manifest's: an operator's arm is a child it admits as any other (`runner/arm_gate.py`)."""
+
+    name: ClassVar[str] = "operator_seat"
+    kind: ClassVar[NodeKind] = NodeKind.ALGORITHM
+    variation_mode: ClassVar[VariationMode] = "operator"
+    draws: ClassVar[Mapping[type[Pool], Draw]] = MappingProxyType({DemoPool: ShotCap()})
+
+
+OPERATOR_SEAT = OperatorSeat()

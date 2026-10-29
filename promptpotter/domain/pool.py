@@ -1,4 +1,7 @@
-"""A pool is the entries a variation node may draw from, banked so a round reads only what its own state holds."""
+"""A pool is the entries a variation node may draw from, banked so a round reads only what its own state holds.
+
+Each pool is a ``StateSlice`` of one kind from one ``PoolSource``, banking what a reader draws.
+"""
 
 from __future__ import annotations
 
@@ -67,7 +70,7 @@ class Pool(StateSlice, kind=None):
     writers = "many"
 
     @abstractmethod
-    def drawn(self, demo: Mapping[str, Sample]) -> tuple[object, ...]:
+    def drawn(self, demo: Mapping[str, Sample], /) -> tuple[object, ...]:
         """Its entries in draw order, read off this slice and the cycle's demo split alone."""
 
 
@@ -76,7 +79,7 @@ class BlockPool(Pool, kind="block_pool"):
     # Required, so a reader no walked initializer writes for is refused at load.
     entries: tuple[PoolEntry, ...]
 
-    def drawn(self, demo: Mapping[str, Sample]) -> tuple[PoolEntry, ...]:
+    def drawn(self, _demo: Mapping[str, Sample]) -> tuple[PoolEntry, ...]:
         return self.entries
 
 

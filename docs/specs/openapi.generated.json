@@ -1615,6 +1615,82 @@
         "title": "BenchSet",
         "type": "object"
       },
+      "BenchStat": {
+        "additionalProperties": false,
+        "description": "The bench as one stat: its wording, and the readings a control or a headline acts on.",
+        "properties": {
+          "key": {
+            "const": "bench",
+            "default": "bench",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lift_per_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`BenchScore.cost.lift_per_usd`; null where the lift is unpriced or unread.",
+            "title": "Lift Per Usd"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null on a course beside the line, which no command grades."
+          },
+          "sub": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`BenchScore.line`, or why the bench is not read here.",
+            "title": "Sub"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          },
+          "vs_origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairedReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`BenchScore.vs_origin`; null with `status`."
+          }
+        },
+        "required": [
+          "label",
+          "value",
+          "sub",
+          "status",
+          "vs_origin",
+          "lift_per_usd"
+        ],
+        "title": "BenchStat",
+        "type": "object"
+      },
       "BenchStatus": {
         "additionalProperties": false,
         "description": "Where a campaign's bench stands, and whether asking for its pass would be admitted.",
@@ -1964,7 +2040,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/NodeSearchNarrowing"
             },
-            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
+            "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
             "title": "Optimizer Narrowing",
             "type": "object"
           },
@@ -4912,7 +4988,7 @@
       },
       "DraftCampaignWire": {
         "additionalProperties": false,
-        "description": "A check-in's draft as every check-in route answers it; Start mints its campaign. No\n``tenant_id`` rides it (ADR-0002 no-drift gate #3).",
+        "description": "A check-in's draft as every check-in route answers it; Start mints its campaign. No\n``tenant_id`` rides it (decisions.md § 0002).",
         "properties": {
           "active_steps": {
             "description": "The pipeline this draft runs. Who may move a node's axes is `node_config_schema`'s answer alone.",
@@ -5665,6 +5741,29 @@
         ],
         "title": "Elimination",
         "type": "object"
+      },
+      "EntryStat": {
+        "discriminator": {
+          "mapping": {
+            "ability": "#/components/schemas/HierarchyStat",
+            "accuracy": "#/components/schemas/HierarchyStat",
+            "bench": "#/components/schemas/BenchStat",
+            "lift": "#/components/schemas/HierarchyStat",
+            "lives": "#/components/schemas/HierarchyStat",
+            "rounds": "#/components/schemas/HierarchyStat",
+            "spend": "#/components/schemas/HierarchyStat",
+            "spend_lifetime": "#/components/schemas/HierarchyStat"
+          },
+          "propertyName": "key"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/HierarchyStat"
+          },
+          {
+            "$ref": "#/components/schemas/BenchStat"
+          }
+        ]
       },
       "EnvironmentReading": {
         "additionalProperties": false,
@@ -6629,7 +6728,7 @@
             "type": "object"
           },
           "steers_disallowed_model": {
-            "description": "The overlay picks a responder the campaign's declared `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the ADR-0005 babysit act: it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
+            "description": "The overlay picks a responder the campaign's declared `optimizer_narrowing` never sanctioned, or touches a cost lever, which no permitted set can sanction. True means the fork is the babysit act (decisions.md § 0005): it needs `campaign.babysit` (404 without it) and stamps the branch grade C.",
             "title": "Steers Disallowed Model",
             "type": "boolean"
           }
@@ -7175,7 +7274,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"
@@ -7273,7 +7372,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"
@@ -7368,7 +7467,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"
@@ -7489,7 +7588,17 @@
         "description": "One number an entry shows, worded by the server in the order it is served.",
         "properties": {
           "key": {
-            "$ref": "#/components/schemas/StatKey"
+            "enum": [
+              "spend_lifetime",
+              "spend",
+              "rounds",
+              "accuracy",
+              "lives",
+              "ability",
+              "lift"
+            ],
+            "title": "Key",
+            "type": "string"
           },
           "label": {
             "title": "Label",
@@ -10077,7 +10186,7 @@
       },
       "NodeSearchNarrowing": {
         "additionalProperties": false,
-        "description": "A campaign's own declaration over the dataset's, whose two halves compose differently.\n\n``param_keys`` SUBSETS the dataset's tunable surface, prompt fields included;\n``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.",
+        "description": "A campaign's own declaration over the dataset's, whose three parts compose differently.\n\n``param_keys`` SUBSETS the dataset's config axes and never touches a prompt field;\n``prompt_fields_held`` holds the prompt fields it names, and only those;\n``param_allowed_values`` REPLACES its value space, so an operator may ADD a value.",
         "properties": {
           "param_allowed_values": {
             "additionalProperties": {
@@ -10102,6 +10211,13 @@
               }
             ],
             "title": "Param Keys"
+          },
+          "prompt_fields_held": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Prompt Fields Held",
+            "type": "array"
           }
         },
         "title": "NodeSearchNarrowing",
@@ -10618,7 +10734,7 @@
       },
       "OptimizerRoster": {
         "additionalProperties": false,
-        "description": "The optimizers this install can run, the default first: one per runtime the registry holds.",
+        "description": "The optimizers this install can run, the default first: one per manifest the registry holds.",
         "properties": {
           "default": {
             "description": "What a campaign naming no `optimization.optimizer` runs",
@@ -11929,6 +12045,7 @@
               "error",
               "flight",
               "fork_graded",
+              "health",
               "intervention",
               "launch_claim",
               "launch_clock",
@@ -12595,7 +12712,8 @@
             "enum": [
               "healthy",
               "degraded",
-              "critical"
+              "critical",
+              "unmeasured"
             ],
             "title": "Grade",
             "type": "string"
@@ -13496,16 +13614,6 @@
               }
             ]
           },
-          "bench_score": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchScore"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "campaign_id": {
             "title": "Campaign Id",
             "type": "string"
@@ -14039,14 +14147,7 @@
             "title": "Composite Fitness"
           },
           "health": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RoundHealth"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/RoundHealth"
           },
           "health_alert": {
             "anyOf": [
@@ -14208,6 +14309,7 @@
           "accuracy",
           "composite_fitness",
           "total",
+          "health",
           "overlap",
           "overlap_line",
           "panel_precision_verdict",
@@ -14713,19 +14815,6 @@
         ],
         "title": "StartRunPayload",
         "type": "object"
-      },
-      "StatKey": {
-        "enum": [
-          "spend_lifetime",
-          "spend",
-          "bench",
-          "rounds",
-          "accuracy",
-          "lives",
-          "ability",
-          "lift"
-        ],
-        "type": "string"
       },
       "StatusMark": {
         "enum": [
@@ -15429,7 +15518,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"
@@ -15610,7 +15699,7 @@
           "stats": {
             "description": "Server-ordered; `stats[0]` is the headline.",
             "items": {
-              "$ref": "#/components/schemas/HierarchyStat"
+              "$ref": "#/components/schemas/EntryStat"
             },
             "title": "Stats",
             "type": "array"
@@ -20531,7 +20620,7 @@
     },
     "/api/v1/optimizers": {
       "get": {
-        "description": "The optimizers this install can run, one per registered runtime: what ``optimization.optimizer`` accepts.",
+        "description": "The optimizers this install can run, one per registered manifest: what ``optimization.optimizer`` accepts.",
         "operationId": "get_optimizers_api_v1_optimizers_get",
         "responses": {
           "200": {

@@ -1,356 +1,258 @@
 # External constraints — decisions the outside world has already made
 
-**What this page is.** It lists external standards, published findings and review norms that
-take a design decision away from us. If we design our own shape first, conforming later means
-unravelling it. Each entry states:
-- the **decision it removes**;
-- the **milestone it binds**: M13 (the plug point), M14 (the preprint), SKILL (the
-  skilled-agent target), L4 (self-optimization) or TOOL (callable as a tool / MCP);
-- its **source**;
-- whether that source was **read** or only seen through search summaries.
+External standards, published findings and review norms that take a design decision away from us —
+design our own shape first and conforming later means unravelling it. Each entry states the
+**decision it removes**, the **milestone it binds** (M13 plug point, M14 preprint, SKILL skilled-agent
+target, L4 self-optimization, TOOL callable as a tool / MCP), its **source**, and whether that source
+was **read**. An entry not marked *read* is unverified and is read at its source before anything is
+built or cited on it.
 
-An entry that does not say *read* counts as unverified, and an unverified entry must be read at
-its source before anything is built or cited on it.
-
-**What it is not.** Tools and competitors go in [`landscape.md`](landscape.md), and the argument
-against the peers that matter goes in [`related-work.md`](related-work.md). This page records only
-what binds us, whoever it comes from.
-
-**Checked** 2026-09-24. Re-check
-an entry before quoting it; standards on this page are still moving.
+Tools and competitors are [`landscape.md`](landscape.md)'s; the argument against the peers that
+matter is [`related-work.md`](related-work.md)'s. **Checked** 2026-09-24 — re-check before quoting;
+these standards still move.
 
 ## Ranked — the five that cost most to get wrong
 
-1. **The scorer sits outside anything the loop can see or edit** (L4). Sakana's DGM, when it could
-   see its own hallucination checker, rewrote the checker's logging to fake a pass. It cheated more
-   often when the check was visible. An audit of five self-improving systems found harness
-   tampering persisting in the lineage of the *best-scoring* agent.
-   - Our scoring is already out of the target's reach. For L4 this has to be a **stated
-     invariant**, not a property of today's code: the inner cycle's scorer, formula and held-out
-     cells can never be a `pipeline_param`.
-   - Sources: [DGM](https://arxiv.org/abs/2505.22954) (read);
-     [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) (read). Its tampering rates were
-     ADAS 84.6%, DGM 63.1%, HyperAgents 73.6%, ScientistOne 29.6% and AFlow 18.3%. Its safeguards
-     are tamper-proof evaluation channels, provenance-aware state tracking and continuous
-     auditing.
+1. **The scorer sits outside anything the loop can see or edit** (L4). DGM, seeing its own
+   hallucination checker, rewrote the checker's logging to fake a pass, and cheated more when the
+   check was visible; an audit of five self-improving systems found tampering persisting in the
+   *best-scoring* agent's lineage. For L4 a **stated invariant**: the inner cycle's scorer, formula
+   and held-out cells can never be a `pipeline_param`.
+   Sources: [DGM](https://arxiv.org/abs/2505.22954) (read);
+   [Auditing Harness Tampering](https://arxiv.org/abs/2609.00069) (read) — tampering ADAS 84.6%, DGM
+   63.1%, HyperAgents 73.6%, ScientistOne 29.6%, AFlow 18.3%; safeguards: tamper-proof evaluation
+   channels, provenance-aware state tracking, continuous auditing.
 2. **Selection must be able to see lineage, not only the round's best** (L4, M13). The
-   [Huxley-Gödel Machine](https://arxiv.org/abs/2510.21614) (ICLR 2026 oral) found a
-   *metaproductivity–performance mismatch*: the top scorer of a round often has unproductive
-   descendants, and a lower scorer seeds the better lineage. HGM fixes this by scoring clades.
-   - Our lineage graph and content-addressed archive already hold what a clade score needs.
-   - The decision this removes: **never discard a non-winner's lineage on the grounds that it lost
-     one round**. Keep the archive whole, which it is today.
-3. **Early stopping must be defensible under optional stopping** (M14). Stopping on the data seen
-   so far is PoBB's whole point. Repeating a fixed-α test under optional stopping inflates the
-   false-positive rate well above α; that is a textbook sequential-testing result, with no single
-   paper behind a number. The answer the 2025–26 literature gives is confidence sequences built
-   from test supermartingales, which stay valid at any stopping time
+   [Huxley-Gödel Machine](https://arxiv.org/abs/2510.21614) (ICLR 2026 oral): a
+   *metaproductivity–performance mismatch* — a round's top scorer often has unproductive descendants
+   while a lower scorer seeds the better lineage; HGM scores clades. Our lineage graph and
+   content-addressed archive hold what a clade score needs. **Never discard a non-winner's lineage
+   for losing one round** — keep the archive whole.
+3. **Early stopping must be defensible under optional stopping** (M14). Repeating a fixed-α test
+   under optional stopping inflates false positives above α (textbook sequential testing). The field's
+   answer: confidence sequences from test supermartingales, valid at any stopping time
    ([Hsu & Shekhar, *Efficient Sequential Evaluation of LLMs*](https://arxiv.org/abs/2607.17409),
-   read).
-   - Before the preprint, either state PoBB's guarantee in those terms, or disclose that it is
-     not anytime-valid and measure the inflation on our own runs.
-4. **Budget-matched comparison is what reviewers will ask for first** (M13, M14). Optimizer gains
-   shrink or reverse once rollout budgets are matched.
-   [LEVI](https://arxiv.org/abs/2605.09764) "matches or exceeds GEPA at less than half of its
-   rollout budget on four different benchmarks" (abstract read; read the body's table before
-   quoting numbers).
-   - A head-to-head must hold the **number of calls** equal and report it next to dollars and wall
-     clock.
-   - [HAL](https://arxiv.org/abs/2510.11977) (ICLR 2026) and
-     [AI Agents That Matter](https://arxiv.org/abs/2407.01502) (TMLR 2025) set the template: a
-     cost–accuracy Pareto frontier, dollars and tokens as separate axes, and a holdout never used
-     for tuning.
-   - Status: HAL read.
+   read). Before the preprint, state PoBB's guarantee in those terms, or disclose it is not
+   anytime-valid and measure the inflation on our runs.
+4. **Budget-matched comparison is what reviewers ask for first** (M13, M14). Optimizer gains shrink or
+   reverse at matched rollout budgets: [LEVI](https://arxiv.org/abs/2605.09764) "matches or exceeds
+   GEPA at less than half of its rollout budget on four different benchmarks" (abstract read; read the
+   body's table before quoting numbers). A head-to-head holds the **number of calls** equal and
+   reports it beside dollars and wall clock. [HAL](https://arxiv.org/abs/2510.11977) (ICLR 2026, read)
+   and [AI Agents That Matter](https://arxiv.org/abs/2407.01502) (TMLR 2025) set the template: a
+   cost–accuracy Pareto frontier, dollars and tokens as separate axes, a holdout never used for tuning.
 5. **A skill candidate must conform to the Agent Skills specification** (SKILL). The
-   [spec](https://agentskills.io/specification) (read) is implemented by 16+ runtimes, including
-   Claude Code, Codex CLI, Gemini CLI, Copilot and Cursor.
-   - **Frontmatter is a closed set:**
-     - `name` is required: at most 64 chars, lowercase letters, digits and hyphens, and it must
-       equal the parent directory name;
-     - `description` is required: at most 1024 chars;
-     - `license`, `compatibility` (at most 500 chars), `metadata` (a string→string map) and the
-       experimental `allowed-tools` are optional;
-     - any other top-level key is non-conformant.
-   - **Size:** the body should stay under about 5000 tokens, and the file under 500 lines.
-   - **Layout:** `skill-name/{SKILL.md, scripts/, references/, assets/}`.
+   [spec](https://agentskills.io/specification) (read; 16+ runtimes incl. Claude Code, Codex CLI,
+   Gemini CLI, Copilot, Cursor):
+   - **Frontmatter is a closed set:** `name` required (≤64 chars, lowercase letters, digits, hyphens,
+     equal to the parent directory); `description` required (≤1024 chars); optional `license`,
+     `compatibility` (≤500), `metadata` (string→string), experimental `allowed-tools`; any other
+     top-level key is non-conformant.
+   - **Size:** body under ~5000 tokens, file under 500 lines. **Layout:**
+     `skill-name/{SKILL.md, scripts/, references/, assets/}`.
    - The tier-1 check in the L2/L3 prompts ([`../specs/roadmap.md`](../specs/roadmap.md) § Evolving
-     agent harnesses) means *this* spec. A candidate that outgrows its limits is invalid before
-     it runs.
+     agent harnesses) means *this* spec; a candidate past its limits is invalid before it runs.
 
 ## SKILL — the skilled-agent target
 
-- **Library size has a measured failure point.** In
-  [More Skills, Worse Agents?](https://arxiv.org/abs/2605.24050) (read), performance degrades by
-  up to 21% at 202 skills.
-  - The cause is *wrong-skill selection* ("skill shadowing"). The context overhead measured as
-    indistinguishable from zero.
-  - The expanded libraries tested were 52, 102 and 202 skills, and the degradation grew with
-    size. The paper gives no safe threshold.
-  - This decides two things: **deduplication (NVIDIA's tier 2) is enforced from the first skill,
-    not added later**, and the skilled agent needs a routing design before its library reaches
-    the few-dozen range the paper starts at.
-- **Selection sees only the description.** Under the spec's progressive disclosure, a runtime
-  loads `name` + `description` (about 100 tokens) at startup and the body only on activation. So
-  **the `description` is the routing surface**, and optimizing a skill's body without its
-  description optimizes the half that selection never reads.
-  - Today the harbor connector writes the frontmatter itself and holds `description` fixed
-    (`connectors/harbor.py::_write_skill`), deliberately: with one skill there is nothing to
-    choose between. terminus-2 finds
-    `<skills_dir>/<name>/SKILL.md` with a depth-2 `find`, and silently skips a skill whose
-    frontmatter lacks `name` / `description` or whose line endings are not LF.
-  - That makes the candidate the body alone, so the spec's frontmatter rules cannot be broken by a
-    mutation. The body's size limit still applies to it.
-  - **The skilled agent reverses this.** With many skills, `description` has to become a search
-    axis, and the frontmatter rules then bind every candidate.
+- **Library size has a measured failure point.**
+  [More Skills, Worse Agents?](https://arxiv.org/abs/2605.24050) (read): up to −21% at 202 skills
+  (libraries of 52, 102, 202; worse with size, no safe threshold), caused by *wrong-skill selection*
+  ("skill shadowing"); context overhead indistinguishable from zero. So **deduplication (NVIDIA's
+  tier 2) is enforced from the first skill**, and the skilled agent needs a routing design before its
+  library reaches a few dozen.
+- **Selection sees only the description.** Runtimes load `name` + `description` (~100 tokens) at
+  startup and the body on activation, so **`description` is the routing surface**. Today
+  `connectors/harbor.py::_write_skill` writes the frontmatter and holds `description` fixed — with one
+  skill there is nothing to route — so the candidate is the body alone and mutation cannot break the
+  frontmatter rules (the body's size limit still binds). terminus-2 finds `<skills_dir>/<name>/SKILL.md`
+  with a depth-2 `find` and silently skips a skill lacking `name` / `description` or with non-LF line
+  endings. **The skilled agent reverses this:** `description` becomes a search axis and the
+  frontmatter rules bind every candidate.
 - **A skill a model writes for itself, unscored, helps nobody.**
-  [SkillsBench](https://arxiv.org/abs/2602.12670) (87 tasks, deterministic verifiers) compared
-  three conditions:
-  - curated skills: +16.2 pp on average, but 16 of 84 tasks got worse;
-  - self-generated skills: **zero** average benefit;
-  - focused skills of 2–3 modules beat comprehensive documents.
-
-  This is the strongest argument *for* our loop and the sharpest warning against shortcutting it:
-  - A skill is admitted only by its measured lift on verifier-graded cells, never by an LLM's
-    rewrite alone.
-  - SkillsBench is the external harness to report skill results on.
-  - Trajectory-grounded writers are the proposer pattern to prefer over a free rewrite:
-    [Trace2Skill](https://arxiv.org/abs/2603.25158) patches from success and failure traces and
-    merges them into one conflict-free skill.
-- **A security floor that no candidate may cross.** Scanners have converged:
-  [SkillSpector](https://github.com/nvidia/skillspector) (NVIDIA; 71 patterns, a risk score above
-  50 means do not install) and [Cisco skill-scanner](https://github.com/cisco-ai-defense/skill-scanner).
-  Audits of public skills found 26–37% flawed and dozens confirmed malicious (no audit linked;
-  unverified). The attacks seen
-  include hidden instructions, invisible Unicode Tag characters, and agent-settings injection
-  (CVE-2025-59536). A mutated skill body must never:
-  - carry Unicode Tag characters;
-  - instruct reading secrets or environment variables;
-  - instruct outbound calls or exec/eval.
-
-  Tier 1 is where that is checked. Running a SkillSpector-class scan before a candidate is
-  measured is the long-run form.
-- **Descriptions must distinguish, not only describe.** Overlapping descriptions are what seeds
-  skill shadowing. For the skilled agent, *mutual distinguishability* against sibling skills is a
-  measurable objective. [SkillRouter](https://arxiv.org/abs/2603.22455) shows retrieval at library
-  scale is embedding-based, and it also reads skill bodies.
-- **The format is cross-runtime now.** Microsoft Agent Framework (GA, July 2026), Google ADK and
-  Codex skills all load SKILL.md with progressive disclosure (no source linked; unverified), so an
-  optimized skill should assume it will run on more than one runtime.
-- **Executable skills transfer; prose skills are unproven.** In
-  [SkillWeaver](https://arxiv.org/abs/2504.07079), skills written as callable APIs transferred from
-  a strong agent to a weak one (+54% on WebArena). Our skill target is prose today. That is
-  acceptable, but it is the open question, not a settled one.
+  [SkillsBench](https://arxiv.org/abs/2602.12670) (87 tasks, deterministic verifiers): curated skills
+  +16.2 pp on average but 16 of 84 tasks worse; self-generated **zero** benefit; focused 2–3-module
+  skills beat comprehensive documents. So a skill is admitted only by measured lift on verifier-graded
+  cells; SkillsBench is the external harness to report on; prefer trajectory-grounded writers
+  ([Trace2Skill](https://arxiv.org/abs/2603.25158): patches from success and failure traces merged
+  into one conflict-free skill) over a free rewrite.
+- **A security floor no candidate may cross.** [SkillSpector](https://github.com/nvidia/skillspector)
+  (NVIDIA; 71 patterns, risk > 50 = do not install) and
+  [Cisco skill-scanner](https://github.com/cisco-ai-defense/skill-scanner). Audits of public skills
+  found 26–37% flawed and dozens malicious (no audit linked; unverified); attacks include hidden
+  instructions, invisible Unicode Tag characters and agent-settings injection (CVE-2025-59536). A
+  mutated body must never carry Unicode Tag characters, instruct reading secrets or environment
+  variables, or instruct outbound calls or exec/eval — checked at tier 1; a SkillSpector-class scan
+  before measurement is the long-run form.
+- **Descriptions must distinguish, not only describe.** Overlap seeds shadowing; *mutual
+  distinguishability* against siblings is a measurable objective.
+  [SkillRouter](https://arxiv.org/abs/2603.22455): retrieval at scale is embedding-based and reads
+  bodies too.
+- **The format is cross-runtime.** Microsoft Agent Framework (GA July 2026), Google ADK and Codex load
+  SKILL.md with progressive disclosure (no source linked; unverified) — assume more than one runtime.
+- **Executable skills transfer; prose skills are unproven.** [SkillWeaver](https://arxiv.org/abs/2504.07079):
+  skills as callable APIs transferred strong → weak agent (+54% WebArena). Our target is prose — the
+  open question.
 - **Evaluation half:** NVIDIA SkillEvaluator's three tiers (validation, deduplication, lift against
-  the skill's absence), [`landscape.md`](landscape.md) § NVIDIA SkillEvaluator.
+  absence), [`landscape.md`](landscape.md) § NVIDIA SkillEvaluator.
 
 ## L4 — self-optimization
 
 Beyond ranked items 1 and 2:
-- **An overseer that watches the run, not only a score at the end.**
-  [SICA](https://arxiv.org/abs/2504.15228) (read; 17% → 53% on SWE-bench Verified) runs an
-  asynchronous LLM overseer, about every 30 s. It can steer a running agent or cancel it when it
-  drifts or stalls.
-  - It does **not** gate a self-edit before it lands. It is a runtime monitor.
-  - Our heartbeat and the pause contract are the same shape. A pre-landing review gate would be
-    our own addition, not SICA's.
-- **Hardening the environment is cheap and works.**
-  [Reward Hacking Benchmark](https://arxiv.org/abs/2605.02964) (read) measured 13 frontier models
-  and found exploit rates of 0–13.9%. Simple environment hardening cut them by 87.7% relative,
-  without hurting task success.
-  - Our own rule follows from item 1: in L4, the cells that choose a winner are not the cells
-    that certify it.
-- **Separate the search algorithm from the workflow shape.**
-  [EvoAgentX](https://arxiv.org/abs/2507.03616) plugs AFlow, TextGrad and MIPRO in as swappable
-  evolution algorithms, apart from the workflow topology.
-  - This is M13's proposer seam, seen from the other side.
-  - The decision it removes: the plug point must not assume the L1 → L2 → L3 shape is the only
-    one a proposer runs in.
-- **"More agentic" is not better by default.** Two findings pull against each other:
-  - [AFlow](https://arxiv.org/abs/2410.10762) (ICLR 2025 oral) searches workflows as code graphs
-    with MCTS, and beat hand-designed ones by 5.7%.
-  - [AI Scientist v2](https://github.com/SakanaAI/AI-Scientist-v2), the more agentic version, did
-    not reliably beat the templated v1 where a strong template existed.
 
-  The fixed L1–L3 loop against an optimizer built as an agent with skills
-  ([`../specs/roadmap.md`](../specs/roadmap.md)) is therefore an **empirical question M13 can
-  answer**, not a design to adopt on argument.
-- **Sample efficiency is available from selection, not only from proposers.**
-  [ShinkaEvolve](https://arxiv.org/abs/2509.19349) (Sakana, ICLR 2026) reports a state-of-the-art
-  circle-packing result with only 150 samples (read). It combines three mechanisms:
-  - parent sampling that balances exploration and exploitation;
-  - novelty rejection-sampling of code;
-  - a bandit over an ensemble of LLM mutators.
-
-  Read its sampling policy before designing L4 candidate selection.
-- **Algorithm configuration already settled how to race configurations** — from a 2026-10-14
-  literature pass, not re-read here, so unverified under this page's rule:
-  - the unit of replication is the environment, one pass per cell, every marginal dollar on a new
-    cell; repeats only to measure the noise floor (Birattari; COCO's "instances are repetitions");
-  - block on instance and pair in the same order with the same seeds; correct only the published
-    verdict, not the tests inside a race (ParamILS, irace, SMAC);
-  - irace tests first after 5 instances, then after every one, and closes a race after two tests
-    that eliminate nothing; SMAC's intensification meets the incumbent on 1, 2, 4… of its cells;
-  - retire saturated and flat environments and prefer high signal-to-noise ones; cut examples,
-    never scenarios (metabench, Signal and Noise);
-  - headroom does not predict a prompt's lift (ρ = 0.047 over 19.8k prompt pairs,
-    [2605.26655](https://arxiv.org/abs/2605.26655)), so headroom admits a dataset and never ranks it;
-  - among prompt-optimizer papers only RRSI gates on a noise floor measured by re-running the
-    unchanged harness (δ 0.004–0.020).
-- **Proposer mechanisms with their own ablation row** — from a 2026-10-07 citation harvest, not
-  re-read here, so unverified: failures alone to the proposer beat a natural mix, 53.9 vs 49.6
-  (2609.32452); a generalization-gate block in the proposer prompt, 51.6 → 58.4 held-out
-  (HarnessCompass, 2608.01918); per-operator win/loss history in the planner's prompt, 65.88 vs
-  34.12 without it (StraTune, 2609.32886); raw per-sample traces of earlier candidates, where a
-  summary was no better than scores alone (Meta-Harness, 2603.28052); the proposer emits only a
-  delta that a deterministic merge applies, 56.9 → 70.3 (ACE, 2510.04618). Against the whole idea
-  of a phrase library: GRACE's paraphrase ablation moved its result by about 0.2 points — the
-  acceptance gate may carry more than the wording.
-- **Precedent to cite:**
-  - [STOP](https://arxiv.org/abs/2310.02304) is the closest prior art: an improver improving its
-    own code with weights frozen.
-  - [Gödel Agent](https://arxiv.org/abs/2410.04444) (ACL 2025) and
-    [ADAS](https://arxiv.org/abs/2408.08435) both keep an **archive of past designs**, not only
-    the current best.
+- **An overseer that watches the run.** [SICA](https://arxiv.org/abs/2504.15228) (read; 17% → 53% on
+  SWE-bench Verified): an async LLM overseer every ~30 s steers or cancels a drifting agent. A runtime
+  monitor — it does **not** gate a self-edit before landing. Our heartbeat and pause contract are the
+  same shape; a pre-landing gate would be ours.
+- **Hardening the environment is cheap and works.** [Reward Hacking Benchmark](https://arxiv.org/abs/2605.02964)
+  (read): 13 frontier models, exploit rates 0–13.9%, cut 87.7% relative by simple hardening without
+  hurting success. Ours, from item 1: in L4 the cells that choose a winner are not the cells that
+  certify it.
+- **Separate the search algorithm from the workflow shape.** [EvoAgentX](https://arxiv.org/abs/2507.03616)
+  plugs AFlow, TextGrad and MIPRO in as swappable algorithms apart from topology — M13's proposer
+  seam from the other side: the plug point must not assume L1 → L2 → L3 is the only shape.
+- **"More agentic" is not better by default.** [AFlow](https://arxiv.org/abs/2410.10762) (ICLR 2025
+  oral; MCTS over code-graph workflows) beat hand-designed ones by 5.7%;
+  [AI Scientist v2](https://github.com/SakanaAI/AI-Scientist-v2) did not reliably beat templated v1
+  where a strong template existed. Fixed L1–L3 vs an optimizer-as-agent
+  ([`../specs/roadmap.md`](../specs/roadmap.md)) is an **empirical question M13 answers**.
+- **Sample efficiency from selection, not only proposers.** [ShinkaEvolve](https://arxiv.org/abs/2509.19349)
+  (Sakana, ICLR 2026, read): SOTA circle packing in 150 samples via exploration-balanced parent
+  sampling, novelty rejection-sampling, and a bandit over an LLM-mutator ensemble. Read its sampling
+  policy before designing L4 candidate selection.
+- **Algorithm configuration already settled how to race configurations** (2026-10-14 literature pass,
+  unverified):
+  - replicate over environments — one pass per cell, every marginal dollar on a new cell, repeats only
+    for the noise floor (Birattari; COCO's "instances are repetitions");
+  - block on instance, pair in one order with one seed; correct only the published verdict, not the
+    tests inside a race (ParamILS, irace, SMAC);
+  - irace tests first after 5 instances, then every one, closing after two tests that eliminate
+    nothing; SMAC's intensification meets the incumbent on 1, 2, 4… cells;
+  - retire saturated and flat environments, prefer high SNR; cut examples, never scenarios
+    (metabench, Signal and Noise);
+  - headroom does not predict lift (ρ = 0.047 over 19.8k prompt pairs,
+    [2605.26655](https://arxiv.org/abs/2605.26655)) — it admits a dataset, never ranks it;
+  - among prompt-optimizer papers only RRSI gates on a noise floor from re-running the unchanged
+    harness (δ 0.004–0.020).
+- **Proposer mechanisms with their own ablation row** (2026-10-07 citation harvest, unverified):
+  failures alone beat a natural mix, 53.9 vs 49.6 (2609.32452); a generalization-gate block in the
+  proposer prompt, 51.6 → 58.4 held-out (HarnessCompass, 2608.01918); per-operator win/loss history
+  in the planner, 65.88 vs 34.12 (StraTune, 2609.32886); raw per-sample traces of earlier candidates,
+  a summary no better than scores alone (Meta-Harness, 2603.28052); a delta applied by deterministic
+  merge, 56.9 → 70.3 (ACE, 2510.04618). Against a phrase library: GRACE's paraphrase ablation moved
+  ~0.2 points — the acceptance gate may carry more than the wording.
+- **Precedent to cite:** [STOP](https://arxiv.org/abs/2310.02304), the closest (an improver improving
+  its own code, weights frozen); [Gödel Agent](https://arxiv.org/abs/2410.04444) (ACL 2025) and
+  [ADAS](https://arxiv.org/abs/2408.08435) keep an **archive of past designs**.
 
 ## M13 — the plug point
 
-- **Opik's optimizer interface is fixed and read**
-  ([extending optimizers](https://www.comet.com/docs/opik/agent_optimization/)).
-  - Subclass `BaseOptimizer` and define `DEFAULT_PROMPTS`.
-  - `__init__(self, model: str, **kwargs)`.
-  - `optimize_prompt(prompt: ChatPrompt, dataset, metric, agent=None, experiment_config=None,
-    n_samples=None, project_name=None, validation_dataset=None, max_trials=None) ->
-    OptimizationResult`.
-  - Reuse the inherited `evaluate_prompt()` / `call_model()`.
+- **Opik's optimizer interface** (read, [extending optimizers](https://www.comet.com/docs/opik/agent_optimization/)):
+  subclass `BaseOptimizer`, define `DEFAULT_PROMPTS`; `__init__(self, model: str, **kwargs)`;
+  `optimize_prompt(prompt: ChatPrompt, dataset, metric, agent=None, experiment_config=None,
+  n_samples=None, project_name=None, validation_dataset=None, max_trials=None) -> OptimizationResult`;
+  reuse the inherited `evaluate_prompt()` / `call_model()`. "PromptPotter reachable through Opik" is
+  a `BaseOptimizer` subclass; its repo is [`../specs/roadmap.md`](../specs/roadmap.md) § What
+  PromptPotter emits.
+- **DSPy's optimizer interface** (read in source, `dspy/teleprompt/teleprompt.py`, `gepa/gepa.py`):
+  `Teleprompter.compile(self, student: Module, *, trainset, teacher=None, valset=None, **kwargs) ->
+  Module`. `dspy.GEPA` budgets by `auto` (light / medium / heavy), `max_full_evals`,
+  `max_metric_calls` — the last is what a budget-matched head-to-head sets.
 
-  This decides the shape of "PromptPotter reachable through Opik": a `BaseOptimizer` subclass.
-  Which repo it lives in is [`../specs/roadmap.md`](../specs/roadmap.md) § Application radius's.
-- **DSPy's optimizer interface** was read in source (`dspy/teleprompt/teleprompt.py`,
-  `gepa/gepa.py`):
-  - The base class is `Teleprompter`, with `compile(self, student: Module, *, trainset,
-    teacher=None, valset=None, **kwargs) -> Module`.
-  - `dspy.GEPA` takes three budget knobs: `auto` (light / medium / heavy), `max_full_evals` and
-    `max_metric_calls`.
-  - `max_metric_calls` is the knob a budget-matched head-to-head sets.
+## Survey round — many cheap starts, the band near p ≈ 0.5
+
+For [`../specs/survey-round.md`](../specs/survey-round.md):
+
+- **Starts are cheap and many, judged small, then raced**: MIPROv2 ([2406.11695](https://arxiv.org/html/2406.11695)
+  §3.1), APE ([2211.01910](https://arxiv.org/html/2211.01910) §3.2), CAPO ([2504.16005](https://arxiv.org/html/2504.16005)),
+  BOHB ([1807.01774](https://arxiv.org/html/1807.01774v1)).
+- **Whether the start matters depends on the model** — OPRO ([2309.03409](https://arxiv.org/html/2309.03409) §5.3),
+  EvoPrompt ([2309.08532](https://arxiv.org/html/2309.08532) Table 6) — so the survey stays ablatable.
+- **Signal lives near p ≈ 0.5**: SFL ([2408.15099](https://arxiv.org/html/2408.15099v3) §4.1), DAPO
+  ([2503.14476](https://arxiv.org/html/2503.14476)). No source measures a mid-accuracy band for prompt optimization.
 
 ## M14 — the preprint
 
 Beyond ranked items 3 and 4:
-- **Clustered and paired standard errors, not binomial ones.**
-  [Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640) (Anthropic, 2024) shows
-  clustering can inflate SEs up to 3×. A head-to-head differences the two arms per cell.
-- **Small samples need exact or bootstrap intervals.**
-  ["Don't use the CLT…"](https://arxiv.org/abs/2503.01747) (2025) applies below a few hundred
-  datapoints, which covers most of our panels.
-- **Report signal-to-noise per benchmark.** [Signal and Noise](https://arxiv.org/abs/2508.13144)
-  (2025, 900K runs) filters or down-weights low-SNR subtasks before a delta is trusted.
-- **IRT: the field default is 2PL, and we use Rasch.**
-  - tinyBenchmarks, metabench (ICLR 2025) and
-    [Fluid Benchmarking](https://arxiv.org/abs/2509.11106) (COLM 2025) all validate IRT ability
-    as the comparability tool, which supports θ.
-  - They fit discrimination as well as difficulty. The preprint either justifies Rasch's stronger
-    invariance or upgrades. The roadmap already queues feeding a discrimination term into
-    subset selection (§ Fitness comparability).
-  - Fluid Benchmarking's four metrics (validity, variance, saturation, efficiency) are the
-    comparison table reviewers will know.
-- **The [Agentic Benchmark Checklist](https://arxiv.org/abs/2507.02825)** found 10 of 10 popular
-  agent benchmarks failing its reporting section. Fill it in for our bench and publish it as an
-  appendix.
-- **Holm or Benjamini–Hochberg correction** on any pairwise matrix of more than two proposers
-  (common practice; no single canonical source verified).
-- **Venue and arXiv requirements.**
-  - The NeurIPS Datasets & Benchmarks track requires Croissant metadata and non-gated public
-    hosting (no source linked; unverified).
-  - arXiv's moderation policy says each author takes "full responsibility for all its contents,
-    irrespective of how the contents were generated"
-    ([info.arxiv.org/help/moderation](https://info.arxiv.org/help/moderation)).
-  - Since May 2026, "incontrovertible evidence" of unchecked AI output earns a one-year ban.
-    Examples are hallucinated references, leftover chatbot text and unedited placeholders.
-    This rests on consistent secondary reporting.
-  - So every reference and number in the preprint is checked by hand, and AI use is disclosed.
+
+- **Clustered and paired SEs, not binomial.** [Adding Error Bars to Evals](https://arxiv.org/abs/2411.00640)
+  (Anthropic, 2024): clustering can inflate SEs up to 3×; a head-to-head differences arms per cell.
+- **Small samples need exact or bootstrap intervals.** ["Don't use the CLT…"](https://arxiv.org/abs/2503.01747)
+  (2025) — below a few hundred datapoints, most of our panels.
+- **Report SNR per benchmark.** [Signal and Noise](https://arxiv.org/abs/2508.13144) (2025, 900K runs)
+  filters or down-weights low-SNR subtasks before trusting a delta.
+- **IRT: the field default is 2PL.** tinyBenchmarks, metabench (ICLR 2025) and
+  [Fluid Benchmarking](https://arxiv.org/abs/2509.11106) (COLM 2025) validate IRT ability for
+  comparability and fit discrimination too. We start at 1PL and graduate per dataset
+  ([`../methods/verdict-resolution.md`](../methods/verdict-resolution.md) § The model); the preprint
+  says why. Fluid Benchmarking's four metrics (validity, variance, saturation, efficiency) are the
+  table reviewers know.
+- **The [Agentic Benchmark Checklist](https://arxiv.org/abs/2507.02825)** failed 10 of 10 popular agent
+  benchmarks on reporting — fill it for our bench, publish as an appendix.
+- **Holm or Benjamini–Hochberg** on any pairwise matrix of more than two proposers (common practice; no
+  canonical source verified).
+- **Venue and arXiv.** NeurIPS D&B requires Croissant metadata and non-gated hosting (unverified).
+  arXiv: each author takes "full responsibility for all its contents, irrespective of how the contents
+  were generated" ([moderation](https://info.arxiv.org/help/moderation)); since May 2026
+  "incontrovertible evidence" of unchecked AI output (hallucinated references, leftover chatbot text,
+  placeholders) earns a one-year ban (consistent secondary reporting). So every reference and number
+  is hand-checked and AI use disclosed.
 
 ## Cost reporting — binds every run from now, not only the preprint
 
-- **Record raw token counts and the price table's date with every run**, so dollars can be
-  recomputed if prices move before publication.
-  - HAL and Terminal-Bench price tokens at the provider's public rate *at run time*.
-  - Terminal-Bench also reports wall clock per step and in total.
-  - Tokens are already on every row. The **price date** is the piece to check.
+- **Record raw token counts and the price table's date with every run**, so dollars recompute if
+  prices move. HAL and Terminal-Bench price at the provider's public rate *at run time*; Terminal-Bench
+  also reports wall clock per step and total. Tokens are on every row; the **price date** is the piece
+  to check.
 - **Amortized lifetime cost is the buyer's number.**
   [Databricks](https://www.databricks.com/blog/building-state-art-enterprise-agents-90x-cheaper-automated-prompt-optimization)
-  (2025-09-24, read) counts optimization cost plus serving cost over 100k requests.
-  - On that basis, a GEPA-optimized gpt-oss-120b beats un-optimized Claude Opus 4.1 by 2.2 points
-    at about 90× less serving cost.
-  - GEPA on GPT-4.1 gained +2.1 against SFT's +1.9, at about 20% lower serving cost. SFT and GEPA
-    together gained +4.8.
-  - **Where this points:** a small open model, optimized, against a frontier model un-optimized.
-    Prompt optimization is **complementary to fine-tuning, not a rival to it**. Our "harness
-    before weights" pitch should say *before*, never *instead of*.
-  - **Where not to go:** a headline that omits the optimization spend. Their accounting includes
-    it, and ours already meters it.
+  (2025-09-24, read): optimization plus serving over 100k requests. GEPA-optimized gpt-oss-120b beats
+  un-optimized Claude Opus 4.1 by 2.2 points at ~90× less serving cost; GEPA on GPT-4.1 +2.1 vs SFT's
+  +1.9 at ~20% lower serving cost, both together +4.8. So: a small optimized open model against an
+  un-optimized frontier one, and prompt optimization is **complementary to fine-tuning** — "harness
+  before weights" says *before*, never *instead of*. Never a headline omitting the optimization spend.
 
 ## Direction — where optimization pays, and where it does not
 
 - **An optimized prompt is bound to its model.**
   [Why Prompt Optimization Works, and Why It Sometimes Doesn't](https://arxiv.org/abs/2605.26655)
-  (2026) tested DSPy, TextGrad and GEPA across four model families. Edits that help one benchmark
-  often fail on another, and the effect depends on edit type × task type.
-  [Prompting Inversion](https://arxiv.org/abs/2510.22251) (2025) reports a scaffold that helps
-  GPT-4o and *hurts* GPT-5; its numeric table is unverified.
+  (2026; DSPy, TextGrad, GEPA across four families): edits that help one benchmark often fail on
+  another, by edit type × task type. [Prompting Inversion](https://arxiv.org/abs/2510.22251) (2025): a
+  scaffold helping GPT-4o *hurts* GPT-5 (table unverified).
   [Benchmarking Prompt Optimization With Chess](https://arxiv.org/abs/2610.00416) (2026; abstract,
-  setup and section takeaways read, tables not) moved each of eight models' winning prompts onto
-  the other seven: of 49 pairs, 31 improved, 16 got worse and two were unchanged, and the prompt
-  with the largest gain on its own model degraded five of the seven others. Transfer is a property
-  of the pair, not of the prompt. Its puzzle gains also did not carry into game play by a
-  significant margin, so a lift on the scored task is not a lift on the task next to it. Two
-  consequences:
-  - A **model swap is a new optimization run**, never a copy of the winner, so an export has to
-    name the model it was won on.
-  - Pitch mid-tier and open-weight serving models first. Gains shrink or invert on the strongest
-    reasoning models.
-- **The harness can beat the wording.** LangChain's deepagents went from 52.8% to 66.5% on
-  Terminal-Bench 2.0 with the *same* model, through prompt, tool and middleware changes
-  ([harness engineering](https://www.langchain.com/blog/improving-deep-agents-with-harness-engineering)).
-  This supports moving pipeline parameters, skills and harnesses jointly with the prompt. Wording
-  alone is the smaller lever on agentic tasks.
+  setup, takeaways read, tables not): each of eight models' winning prompts moved onto the other
+  seven — of 49 pairs, 31 improved, 16 worse, two unchanged; the biggest own-model gain degraded five
+  of seven others; puzzle gains did not carry into play significantly. Transfer belongs to the pair,
+  and a lift on the scored task is not a lift on its neighbour. So a **model swap is a new
+  optimization run** (an export names its model), and pitch mid-tier and open-weight models first.
+- **The harness can beat the wording.** LangChain's deepagents: 52.8% → 66.5% on Terminal-Bench 2.0,
+  same model, via prompt, tool and middleware changes
+  ([harness engineering](https://www.langchain.com/blog/improving-deep-agents-with-harness-engineering)) —
+  move pipeline params, skills and harnesses jointly with the prompt.
 - **Against weight updates, reflective search wins on rollout economics.**
-  [GEPA](https://arxiv.org/abs/2507.19457) (ICLR 2026 oral) beats GRPO by 6% on average, using up
-  to 35× fewer rollouts. Combined with Databricks' result that SFT and GEPA compound, the pitch is
-  that the harness comes *before* weights, and the two work together.
-- **Buyers lack evidence and audit trails, not optimizer horsepower.** MIT's *GenAI Divide*
-  (2025, 300 deployments) found 95% of pilots show zero P&L impact (no source linked; unverified).
-  Vendor case studies are mostly anecdotes without controls (none linked; unverified):
-  - Bedrock's +143% on a function-calling prompt;
-  - Anthropic's prompt improver at +30% on a classification task;
-  - no quantified results published by Vertex, OpenAI, Opik or Arize.
-
-  A controlled lift with its spend on one ledger is the thing that market lacks. Lead with it, and
-  pair it with the cheap-serving-model story, which is what Databricks' 90× headline and
-  PromptWizard's pitch share.
+  [GEPA](https://arxiv.org/abs/2507.19457) (ICLR 2026 oral) beats GRPO by 6% on average with up to 35×
+  fewer rollouts; with Databricks' SFT+GEPA compounding, the harness comes *before* weights.
+- **Buyers lack evidence and audit trails, not horsepower.** MIT's *GenAI Divide* (2025, 300
+  deployments): 95% of pilots zero P&L impact (unverified). Vendor case studies are anecdotes without
+  controls (unverified): Bedrock +143% on a function-calling prompt; Anthropic's prompt improver +30%
+  on classification; none quantified by Vertex, OpenAI, Opik or Arize. Lead with a controlled lift
+  with its spend on one ledger, paired with the cheap-serving-model story (Databricks' 90×,
+  PromptWizard's pitch).
 
 ## TOOL and interop — pick one, never invent a third
 
-- **MCP 2026-07-28**
-  ([spec](https://modelcontextprotocol.io/specification/2026-07-28)).
-  - A long-running tool call returns a **task handle** through the Tasks extension (`tasks/get`,
-    `tasks/update`, `tasks/cancel`).
-  - Auth is OAuth / OIDC with dynamic client registration.
-  - A campaign exposed over MCP uses that shape, not a polling or webhook scheme of our own. It
-    also meets the inbound-credential gap the roadmap already holds MCP on.
-- **Tracing conventions.** Two conventions compete, and one must be chosen as primary.
-  - **OpenTelemetry GenAI** (all `gen_ai.*` attributes are still *Development*, v1.42.0,
-    2026-06-12, now in its own repo): pin a version rather than tracking head.
-  - **OpenInference** (Arize, active; `openinference.span.kind` required on every span).
-  - Langfuse and MLflow sit downstream of both.
-- **Prompt registries.**
-  - **MLflow:** `{{variable}}` placeholders, immutable integer versions, and aliases for
-    promotion.
-  - **Langfuse:** labels as the deployment pointer.
-  - Write-back maps onto those semantics and invents no branch model.
-  - `.prompty` and dotprompt have not converged. None binds, but all three formats (and
-    SKILL.md) share frontmatter plus body.
-- **Not binding, checked:**
-  - **A2A v1.0:** a signed Agent Card, only if we are ever called agent-to-agent.
-  - **Inspect AI `.eval` logs:** only for cross-tool log compatibility.
-  - **AGENTS.md / llms.txt:** not standards.
-  - **EU AI Act GPAI duties:** we modify no model weights.
+- **MCP 2026-07-28** ([spec](https://modelcontextprotocol.io/specification/2026-07-28)): a long-running
+  call returns a **task handle** via the Tasks extension (`tasks/get`, `tasks/update`,
+  `tasks/cancel`); auth is OAuth / OIDC with dynamic client registration. A campaign over MCP uses
+  that shape, no polling or webhook scheme of ours; it also meets the inbound-credential gap the
+  roadmap holds MCP on.
+- **Tracing — choose one primary.** **OpenTelemetry GenAI** (all `gen_ai.*` still *Development*,
+  v1.42.0, 2026-06-12, own repo — pin a version) vs **OpenInference** (Arize;
+  `openinference.span.kind` on every span). Langfuse and MLflow sit downstream of both.
+- **Prompt registries.** MLflow: `{{variable}}` placeholders, immutable integer versions, aliases for
+  promotion; Langfuse: labels as the deployment pointer. Write-back maps onto those and invents no
+  branch model. `.prompty` and dotprompt have not converged; all three (and SKILL.md) share
+  frontmatter plus body.
+- **Not binding, checked:** A2A v1.0 (signed Agent Card, only if called agent-to-agent); Inspect AI
+  `.eval` logs (cross-tool logs only); AGENTS.md / llms.txt (not standards); EU AI Act GPAI duties (we
+  modify no weights).

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import httpx
 
 from promptpotter import connectors
 from promptpotter.application import optimizers
@@ -24,7 +25,9 @@ from promptpotter.application.pipeline_resolve import (
     overlay_dataset_pipeline,
     resolve_campaign_config,
 )
-from promptpotter.config.paths import DEFAULT_PROJECTS_ROOT
+from promptpotter.application.run_observers import check_every_record_reported
+from promptpotter.application.scoring.judges import registry as judge_registry
+from promptpotter.config.paths import default_projects_root
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -41,13 +44,12 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
-from promptpotter.judges import registry as judge_registry
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.cycle_paths import CycleHop
 
 logger = logging.getLogger(__name__)
@@ -63,9 +65,7 @@ async def _verify_connector_revision(
         return
     try:
         actual = await check(client.http, client.base_url)
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        raise
-    except Exception as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         logger.warning(
             "connector[%s]: could not verify backend revision (%s) — expected %s",
             connector.name,
@@ -213,16 +213,17 @@ def _session_bank(
 
 def complete_registries(*, every_treatment: bool = True) -> None:
     """Every process calls it once, before it reads a ledger; one running ONE campaign passes ``False``."""
-    table = connectors.registered()
-    judge_registry.registered()
-    optimizers.registered()
-    for runtime in optimizers.runtimes().values():
-        runtime.complete()
-        # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
-        if every_treatment:
-            resolve_optimizer(runtime.name, {}, gate="off").treatment()
+    connectors.CONNECTORS.complete()
+    judge_registry.JUDGES.complete()
+    optimizers.MANIFESTS.complete()
+    for member in optimizers.NODE_MEMBERS.table.values():
+        member.complete()
+    # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
+    for name in optimizers.MANIFESTS.table if every_treatment else ():
+        resolve_optimizer(name, {}, gate="off").treatment()
     replayers()
-    for connector in table.values():
+    check_every_record_reported()
+    for connector in connectors.CONNECTORS.table.values():
         if connector.completion_check is not None:
             connector.completion_check()
 
@@ -237,12 +238,12 @@ async def init_services(
 ) -> Session:
     """*stores* is the ONE way to relocate the tree: the L4 inner runner passes a sandboxed one."""
     if stores is None:
-        stores = build_stores(identity, projects_root=DEFAULT_PROJECTS_ROOT)
+        stores = build_stores(identity, projects_root=default_projects_root())
 
     await ensure_model_capabilities(Path(stores.base_dir))
 
     dataset = resolve_dataset(stores, dataset_name)
-    connector = connectors.get(declared_backend_type(dataset.directory))
+    connector = connectors.CONNECTORS.get(declared_backend_type(dataset.directory))
     panel = dataset_experiment(stores, dataset, connector)
     if panel is None and connector.owns_panel and build_panel(stores, dataset):
         panel = dataset_experiment(stores, dataset, connector)
@@ -255,6 +256,7 @@ async def init_services(
             experiment_dir=None if panel is None else panel.directory,
             program=program,
         ),
+        jobs_dir=stores.jobs_dir,
     )
     logger.info("Backend: %s %s", connector.name, client.base_url)
 

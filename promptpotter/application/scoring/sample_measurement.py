@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -415,7 +416,7 @@ def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
         return ""
     try:
         body = exc.response.json()
-    except Exception:
+    except ValueError:
         return body_text[:300]
     detail = body.get("detail") if isinstance(body, dict) else None
     if isinstance(detail, dict):
@@ -440,9 +441,10 @@ _OUTPUT_FAILURE_CODES = frozenset(
 
 def _answered_nothing(exc: httpx.HTTPStatusError) -> dict[str, Any] | None:
     try:
-        detail = exc.response.json().get("detail")
-    except Exception:
+        body = exc.response.json()
+    except ValueError:
         return None
+    detail = body.get("detail") if isinstance(body, dict) else None
     if not isinstance(detail, dict) or detail.get("error_code") not in _OUTPUT_FAILURE_CODES:
         return None
     return {"step_tokens": detail.get("step_tokens") or {}}
@@ -471,6 +473,7 @@ async def measure_sample(
     sample: Sample,
     session: Session,
     pipeline_params: dict[str, Any] | None = None,
+    /,
 ) -> MeasuredCell:
     """One cell's FACTS — ungraded; the walk grades every row it takes, fresh or replayed."""
     # A verifier-graded cell carries `""`, which no answer matches.
@@ -531,7 +534,13 @@ async def measure_sample(
         # A refused send is refused for every cell after it: a stop, never a row.
         raise
     except Exception as exc:
-        return _unmeasured(sample, exc)
+        if (row := _known_failure(sample, exc)) is not None:
+            return row
+        # Named by TYPE: a bare `TimeoutError()` has no message.
+        failure = f"{type(exc).__name__}: {exc}"
+        logger.exception("measure_sample failed for %s: %s", sample.query[:60], failure)
+        category = failed_send(exc).failure or ErrorCategory.UNKNOWN
+        return _error_result(sample, failure, category=category)
 
 
 async def _send_cell(
@@ -593,15 +602,8 @@ async def _send_cell(
                 data, spent = answered, _reply_spend(answered, pairs)
     finally:
         heartbeat_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await heartbeat_task
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.warning(
-                "heartbeat task for backend scoring raised on teardown",
-                exc_info=True,
-            )
     return data, spent, envelope
 
 
@@ -646,7 +648,7 @@ def _candidate_and_sample_facts(
     return facts
 
 
-def _unmeasured(sample: Sample, exc: Exception) -> MeasuredCell:
+def _known_failure(sample: Sample, exc: Exception) -> MeasuredCell | None:
     query = sample.query
     if isinstance(exc, CellUnscoreableError):
         logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
@@ -665,10 +667,7 @@ def _unmeasured(sample: Sample, exc: Exception) -> MeasuredCell:
         error_msg = f"{type(exc).__name__}: {exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(sample, error_msg, category=category)
-    # Named by TYPE: a bare `TimeoutError()` has no message.
-    failure = f"{type(exc).__name__}: {exc}"
-    logger.warning("measure_sample failed for %s: %s", query[:60], failure, exc_info=exc)
-    return _error_result(sample, failure, category=category)
+    return None
 
 
 def compare_rerun(
@@ -750,7 +749,7 @@ async def execute_stale_data_protocol(
                     cached_result, config_fundamental_skip=True
                 ), "skipped_config_fundamental"
 
-            rerun = await measure_sample(sample, session, pipeline_params=pipeline_params)
+            rerun = await measure_sample(sample, session, pipeline_params)
             result = replace(
                 rerun,
                 retry_of_degraded=True,

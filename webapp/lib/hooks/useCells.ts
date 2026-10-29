@@ -30,7 +30,7 @@ interface ScopeSlice {
   totals: SeriesTotals | null;
 }
 
-export interface CellsState extends ScopeSlice {
+interface CellsState extends ScopeSlice {
   order: HardSampleOrder | null;
   isStale: boolean;
   // Consumers MUST render it: a failed read and an empty slice spell `items` the same way.

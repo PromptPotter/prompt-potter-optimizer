@@ -23,7 +23,7 @@ export function AllowanceExhausted() {
 
   const open = status === "authed" && !!me && quota?.allowance_exhausted === true && !dismissed;
 
-  if (!open || quota == null) return null;
+  if (!open) return null;
 
   const onDismiss = () => {
     try {

@@ -7,8 +7,8 @@ from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.cycle_paths import CycleHop
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign_config import CampaignConfig
     from promptpotter.domain.campaign import Campaign
+    from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.infrastructure.store.stores import Stores
 
 

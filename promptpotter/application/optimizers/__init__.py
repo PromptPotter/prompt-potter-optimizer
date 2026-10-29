@@ -1,27 +1,26 @@
 from __future__ import annotations
 
-import functools
 import importlib
 import typing
 from collections.abc import Mapping
+from pathlib import Path
 
 from promptpotter.application.optimizers.nodes import (
     BUILTIN_PACKAGES,
-    AccessKnob,
-    CountKnob,
     CycleRead,
+    KnobDraw,
     LlmNode,
     NodeMember,
-    OptimizerRuntime,
     PromptArity,
     RewriteKnobs,
 )
+from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind
 from promptpotter.domain.pool import Pool
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-from promptpotter.shared.plugin_registry import load_registry, lookup
+from promptpotter.shared.plugin_registry import Registry
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterator
@@ -35,8 +34,15 @@ shapes_optimizer_prompt(__name__)
 ENTRY_POINT_GROUP = "promptpotter.optimizer_nodes"
 """Published, keyed by manifest node name: renaming it un-registers every plugin at once."""
 
-RUNTIME_ENTRY_POINT_GROUP = "promptpotter.optimizer_runtimes"
+MANIFEST_ENTRY_POINT_GROUP = "promptpotter.optimizer_manifests"
 """Published, keyed by manifest name: renaming it un-registers every plugin at once."""
+
+
+class ManifestDir(typing.NamedTuple):
+    # What `optimization.optimizer` selects.
+    name: str
+    directory: Path
+
 
 _MEMBER_KINDS = MEMBER_KINDS | {NodeKind.LLM}
 
@@ -72,6 +78,9 @@ def _validate(obj: object, origin: str) -> NodeMember:
         isinstance(s, type) and issubclass(s, CycleRead) for s in sees
     ):
         raise RuntimeError(f"{where}: `sees` must be a frozenset of CycleRead kinds.")
+    member = typing.cast("NodeMember", obj)
+    if refused := sorted(why for kind in sees if (why := kind.refusal(member)) is not None):
+        raise RuntimeError(f"{where}: " + "; ".join(refused) + ".")
     consults = getattr(obj, "consults", None)
     if not isinstance(consults, frozenset) or not all(isinstance(c, type) for c in consults):
         raise RuntimeError(f"{where}: `consults` must be a frozenset of member classes.")
@@ -81,7 +90,7 @@ def _validate(obj: object, origin: str) -> NodeMember:
         isinstance(pool, type)
         and issubclass(pool, Pool)
         and pool.__dict__.get("kind")
-        and isinstance(draw, AccessKnob | CountKnob)
+        and isinstance(draw, KnobDraw)
         and draw.knobs in reached
         and draw.knob in draw.knobs.model_fields
         for pool, draw in draws.items()
@@ -95,15 +104,14 @@ def _validate(obj: object, origin: str) -> NodeMember:
             f"{where}: knobs {defaulted} carry a default. The manifest declares every value, so "
             "a code default would be a second source for one number."
         )
-    return typing.cast("NodeMember", obj)
+    return member
 
 
-def _validate_runtime(obj: object, origin: str) -> OptimizerRuntime:
-    name = getattr(obj, "name", None)
-    if not isinstance(obj, OptimizerRuntime) or not isinstance(name, str) or not name:
+def _validate_manifest(obj: object, origin: str) -> ManifestDir:
+    if not isinstance(obj, ManifestDir) or not obj.name or not obj.directory.is_dir():
         raise RuntimeError(
-            f"[{origin}] resolved to {obj!r}: an optimizer runtime is an `OptimizerRuntime` "
-            "instance naming the manifest it implements in `name`."
+            f"[{origin}] resolved to {obj!r}: an optimizer manifest is a `ManifestDir` naming "
+            "what `optimization.optimizer` selects and the directory holding its pipeline.yaml."
         )
     return obj
 
@@ -119,50 +127,35 @@ def _builtins() -> Iterator[tuple[str, object]]:
             yield module.__name__, obj
 
 
-@functools.cache
-def _load() -> tuple[Mapping[str, NodeMember], Mapping[str, str]]:
-    return load_registry(ENTRY_POINT_GROUP, _builtins(), _validate)
+def _manifests() -> Iterator[tuple[str, object]]:
+    for directory in sorted(optimizers_root().iterdir()):
+        if (directory / "pipeline.yaml").is_file():
+            yield str(directory), ManifestDir(directory.name, directory)
 
 
-@functools.cache
-def _load_runtimes() -> tuple[Mapping[str, OptimizerRuntime], Mapping[str, str]]:
-    # A preset shipping members alone declares no runtime; a manifest without one fails at lookup.
-    runtimes = (
-        (module.__name__, module.RUNTIME) for module in _members() if hasattr(module, "RUNTIME")
-    )
-    return load_registry(RUNTIME_ENTRY_POINT_GROUP, runtimes, _validate_runtime)
-
-
-def registered() -> Mapping[str, NodeMember]:
-    return _load()[0]
-
-
-def member(name: str) -> NodeMember:
-    return lookup(ENTRY_POINT_GROUP, _load(), name)
+NODE_MEMBERS = Registry(ENTRY_POINT_GROUP, _builtins, _validate)
+MANIFESTS = Registry(MANIFEST_ENTRY_POINT_GROUP, _manifests, _validate_manifest)
 
 
 def llm_nodes() -> Mapping[str, LlmNode]:
-    return {name: found for name, found in registered().items() if isinstance(found, LlmNode)}
-
-
-def runtimes() -> Mapping[str, OptimizerRuntime]:
-    return _load_runtimes()[0]
-
-
-def runtime(name: str) -> OptimizerRuntime:
-    return lookup(RUNTIME_ENTRY_POINT_GROUP, _load_runtimes(), name)
-
-
-def runtime_origins() -> Mapping[str, str]:
-    return _load_runtimes()[1]
+    return {name: found for name, found in NODE_MEMBERS.table.items() if isinstance(found, LlmNode)}
 
 
 def unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> str | None:
     """Why *selected* cannot write *schema*'s prompt nodes, asked before a mint spends; ``None`` where it can."""
     prompt_nodes = schema.prompt_nodes()
+    if not any(n.open_prompt_fields for n in prompt_nodes) and not any(
+        schema.node_param_keys().values()
+    ):
+        return (
+            "this campaign leaves its optimizer nothing to edit: every prompt field is held and "
+            "no config axis is open on any node, so each variant would be a no-op. Open a "
+            "prompt field (`prompt_fields_held`) or a config axis (`param_keys`) in "
+            "`optimizer_narrowing`."
+        )
     roster = [node.name for node in prompt_nodes]
     for name in selected.member_nodes:
-        arity = member(name).prompt_arity
+        arity = NODE_MEMBERS.get(name).prompt_arity
         if arity == "one" and len(prompt_nodes) != 1:
             return (
                 f"optimizer {selected.name!r} node {name!r} rewrites the pipeline's one prompt "

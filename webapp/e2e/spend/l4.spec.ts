@@ -114,7 +114,8 @@ test.describe("the recursion, end to end", () => {
         async () => {
           const d = await dashboard(request, outer!);
           const blob = JSON.stringify(d ?? {});
-          completed = ((d?.rounds as unknown[]) ?? []).length;
+          const rounds = d?.rounds;
+          completed = Array.isArray(rounds) ? rounds.length : 0;
           stopped = String(d?.stop_reason ?? "");
           if (!gated && /origin_gate/.test(blob)) {
             gated = true;

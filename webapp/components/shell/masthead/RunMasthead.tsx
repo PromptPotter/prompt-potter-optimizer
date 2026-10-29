@@ -6,6 +6,7 @@ import { PairedLift } from "@/components/shell/PairedLift";
 import { CriterionLine } from "@/components/shell/scoring/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import {
+  benchStat,
   budgetAxis,
   capLines,
   fmtLift,
@@ -49,7 +50,7 @@ export function RunMasthead() {
   );
 
   const best = course?.facts.standing ?? null;
-  const bench = course?.stats.find((s) => s.key === "bench") ?? null;
+  const bench = benchStat(course);
   const round = dash?.round_axis.position ?? null;
   const roundsCap = dash ? budgetAxis(dash.run_limits.budget, "rounds") : null;
   const position = measuringArm(dash)?.label ?? (round != null ? `R${round}` : "—");

@@ -5,7 +5,10 @@ import { LockButton } from "./NodeConfigEditor";
 type Schema = Record<string, unknown>;
 type Fields = (readonly [string, Schema])[];
 // Keyed by dotted field path; a list's `items` adds no segment.
-type Locks = { locks?: Record<string, boolean>; onLock?: (path: string, locked: boolean) => void };
+type Locks = {
+  locks?: Record<string, boolean> | undefined;
+  onLock?: ((path: string, locked: boolean) => void) | undefined;
+};
 
 const TYPES = ["string", "number", "boolean", "object", "list"];
 
@@ -72,7 +75,7 @@ export function SchemaTreeEditor({
   ...lock
 }: Locks & {
   schema: Schema;
-  answer?: string;
+  answer: string | undefined;
   onChange: (schema: Schema, answer?: string) => void;
 }) {
   const names = fieldsOf(schema).map(([k]) => k);
@@ -109,7 +112,7 @@ function FieldList({
 }: Locks & {
   obj: Schema;
   prefix: string;
-  answer?: string;
+  answer?: string | undefined;
   onAnswer?: (field: string) => void;
   onChange: (obj: Schema, answer?: string) => void;
 }) {
@@ -159,10 +162,10 @@ function FieldRow({
   field: Schema;
   taken: readonly string[];
   isAnswer: boolean;
-  onAnswer?: () => void;
+  onAnswer: (() => void) | undefined;
   onRename: (to: string) => void;
   onChange: (field: Schema) => void;
-  onRemove?: () => void;
+  onRemove: (() => void) | undefined;
 }) {
   const type = typeOf(field);
   const list = field.type === "array";

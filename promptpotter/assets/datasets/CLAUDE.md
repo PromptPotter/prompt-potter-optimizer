@@ -1,13 +1,7 @@
 # assets/datasets/ — the shipped template definitions
 
-Each directory holding a `dataset.yaml` is a **first-class dataset definition**, named by its path below
-this one (`justlogic/d234`, `promptpotter-self/panel`). It ships in the wheel and is read-only there.
-**This directory is a template set, not a benchmark library**: every other definition, an operator's
-backends and the paper's benchmarks alike, is a tenant definition under `.promptpotter/`, resolved
-first. Configs are the **source of truth** — no parallel default ladders elsewhere in code.
-
-> Architecture entry point: [`docs/architecture.md`](../../../docs/architecture.md) §0 + §0.5.
-> Per-dataset prompt store + overlay merge contract: [`application/CLAUDE.md`](../../application/CLAUDE.md) § Backend overlay.
+**This directory is a template set, not a benchmark library**: each `dataset.yaml` directory is a definition
+named by its path, read-only in the wheel; every other definition is a tenant one, resolved first.
 
 ## Canonical layout
 
@@ -22,92 +16,61 @@ assets/datasets/
     └── README.md          # operator-facing: source, split, sample shape, model screens
 ```
 
-A dataset may also be a family: a directory with `dataset.yaml` and children is both. A leaf with no
-values of its own carries a one-line `dataset.yaml` as its marker.
-
 ## A dataset file is a partial
 
 **Every reader sees the definition chain laid together** (`infrastructure/store/dataset_access.py::definition_chain`):
-`defaults.yaml`, then each `family.yaml` / `dataset.yaml` from the root down, then the leaf. Each section
-merges by the kind it is: `campaign` depth-first (`application/campaign_config.py::merge_config_layers`); `pipeline`
-by top-level replacement with nodes through `domain/pipeline_parsing.py::merge_node_blocks` — a default node is a
-TEMPLATE, so only a node the dataset itself names receives it; `source` and `panel` key by key, a panel's local paths resolving against the deepest layer declaring a panel key.
-`task.md` and `README.md` are the nearest file; `origin.yaml` merges root-first. A value equal to what
-the chain already holds is deleted from the lower file, never restated; one that needs less than an upper
-layer holds cannot unsay a key, so a key goes up only where every dataset reading it agrees. So is a value
-its reader derives: a knob at its schema default, a `pipelines.default` naming every node in order, and
-the dataset's name, which is its path.
-
-**What a cell hashes is the merged document**, so moving a value between layers moves no key — and the
-campaign half validated, through `application/campaign_config.py::CampaignConfig.identity`, which drops every schema
-default and the `optimizer`/`nodes` its optimizer's `Treatment` resolves against the manifest. Only
-install content has a chain: a tenant upload is whole.
+`defaults.yaml`, each `family.yaml` / `dataset.yaml` root-down, then the leaf. **A value equal to what the chain
+already holds is deleted from the lower file**, and a key goes up only where every dataset reading it agrees; a
+value its reader derives (a schema default, the name) is not written. **A cell hashes the merged document**, so
+moving a value between layers moves no key. Only install content has a chain: a tenant upload is whole.
 
 ## `source:` is where the rows come from
 
-**A definition's rows are a recipe plus the data half beside it** (`application/datasets/loaders.py`):
-`recipe` names the code in `BANK_RECIPES` (rows) or `PANEL_RECIPES` (a connector-owned panel built into the
-tenant tier), and every other key is the cut — `hub:` / `github:` with its pinned `rev`, splits, configs,
-caps. A section with no `hub:`/`github:` is INLINE: its keys are the rows' inputs. A bank that is two
-columns of a hub split takes `recipe: columns`; code is only for a cut that builds text. A new cut is a
-new definition, never a recipe edit. **Every fetched source is pinned to a commit** — an
-unpinned one raises at parse; a moving ref would move the name onto a bank nobody chose.
+A definition's rows are a recipe (`BANK_RECIPES` / `PANEL_RECIPES`) plus the cut beside it; a new cut is a new
+definition, never a recipe edit; a split is the source's canonical one, never invented. An unpinned fetched
+source raises at parse.
 
 ## A ceiling is DECLARED, or the clock that needs it reports nothing
 
-`campaign_config.accuracy_ceiling` is the accuracy a best-reachable prompt would score on this dataset at this campaign's model, and only the dataset owner can state it — it is a joint claim about the two, so it is not derivable from the bank, the schema or a literature number. Declaring one turns on `index.json::final.rounds_to_ceiling`; leaving it unset leaves that clock unset too, which is the honest reading and costs nothing else. **Declare it only where you can say what measured it** — a saturation screen on the same model, a published ceiling for the same split. A guessed value makes every campaign on the dataset publish a round count nobody can defend, and no run says so.
+**Declare `campaign_config.accuracy_ceiling` only where you can say what measured it** — a saturation screen on
+the same model, a published ceiling for the same split. Unset leaves `rounds_to_ceiling` unset, the honest reading.
 
-## A demo pool is declared in the split, and every row in it needs an answer
+## A demo pool is declared in the split
 
-`campaign_config.dataset_split: {bench: N, demo: M}` holds `M` rows out as the **demo pool** — the only rows a prompt node's `shots` may name (by sample key), rendered into that node's prompt as query and ground truth. Run init partitions them away from the search split and the bench set, so no demo row is ever scored. `partition_bank` refuses a demo row with no ground truth, so a verifier-graded bank declares none; `demo` omitted is a pool of zero, which silences every shot surface.
+`dataset_split: {bench: N, demo: M}` holds out the only rows a node's `shots` may name; `partition_bank` refuses a
+demo row with no ground truth.
 
 ## Sole route for backend tunable changes
 
-**Backend overlay (`dataset.yaml` `pipeline.nodes.{name}.config`) is the only way to switch model, provider, temperature, or anything in a node's `optimizer.param_keys`.** Never edit the backend repo (including the co-owned TermNorm backend) to achieve a tunable switch. Pipeline-agnostic is a §0 commitment.
-
-`load_dataset_node_overlay` → `configure_and_apply_pipeline()` (`application/pipeline_resolve.py`) merges the overlay onto each wire payload. **The dataset owns its task model** in `nodes.{node}.config.model` — every LLM node must declare one, or `configure_and_apply_pipeline` raises a loud setup error (no silent fall-through to the backend's own default).
-
-**`route_order` is the third key on that overlay, and only two of the three are locked.** `model` names WHAT answers, `provider` the GATEWAY it is asked through, and `route_order: [<host>, …]` which of that gateway's upstream HOSTS to try, in order (`nodes.{name}.config.route_order`; `current_config` carries it to `llm_call` untouched). Names are the gateway's own `provider_name` — read them off `served_by` in the ledger, never from a catalogue. **Which of the three the optimizer may search** — owned by [`application/optimizers/potter/CLAUDE.md`](../../application/optimizers/potter/CLAUDE.md) § The optimizer never searches the GATEWAY or the ROUTE; a dataset opens `model` by listing it in `optimizer.param_keys` and bounds it with `param_allowed_values.model` (absent ⇒ the whole `available_models` menu). Why an order pays at all: [`infrastructure/llm/CLAUDE.md`](../../infrastructure/llm/CLAUDE.md) § LLM client.
+**The backend overlay (`dataset.yaml` `pipeline.nodes.{name}.config`) is the only way to switch model, provider,
+temperature or any `optimizer.param_keys` tunable — never edit the backend repo**, TermNorm included. **The dataset
+owns its task model**: an LLM node declaring no `model` raises at `configure_and_apply_pipeline`. `route_order` is
+[`infrastructure/llm/CLAUDE.md`](../../infrastructure/llm/CLAUDE.md)'s.
 
 ## Registered datasets
 
-The roster is the directory tree; each dataset's connector is read off its merged `pipeline.nodes` — don't mirror either here. A definition stays here only when the package needs it with no tenant tier behind it. The special cases worth knowing:
+The roster is the directory tree. Special cases:
 
-- **`email-tagging`** — inline rows, so it is the one definition that runs with no network; the browser walk (`webapp/e2e/`) runs on it.
-- **`justlogic/d234`** — the L4 inner benchmark, an iid mix of depths 2-4 ([§ L4 below](#l4--promptpotter-self)). **`promptpotter-self/`** ships two on the `promptpotter` connector: `panel` — the fixed calibration panel and the only one to read a result off; `e2e` — a degenerate one-cell twin the browser walk runs for cents, a fixture and never a second instrument. `pool`, which draws environments per round, is a tenant definition, since its seats name tenant benchmarks.
-- **The optimizer's own prompt homes are not in this directory.** One manifest per optimizer lives under `promptpotter/assets/optimizers/`, which a campaign picks with `optimization.optimizer` and adjusts with `optimization.nodes`. Still **operator-owned files** — nothing writes them. `application/evidence/read.py` ranks the measured edits; graduating a winner into `assets/optimizers/potter/pipeline.yaml` is a deliberate hand-edit, and an installed operator shadows one file via `config/paths.py::optimizer_manifest_path`.
+- **`email-tagging`** — inline rows, runs with no network; the browser walk runs on it.
+- **`promptpotter-self/`** — read a result off `panel` alone; `e2e` is a one-cell fixture for the browser walk.
+- **Optimizer prompt homes are `promptpotter/assets/optimizers/`**, operator-owned; graduating a winner there is a hand-edit.
 
 ## A dataset is its content; its name is a label
 
-**A bank's identity is the hash of its rows as stored** (`shared/hashing.py::dataset_hash` over `Sample.banked`) — each row's query, label, question, connector-resolved `source_pin` and placement, in order. A measurement is filed under that hash and carries no position: replay matches a cell on its `sample_key` under the same instrument configuration, whichever bank filed it, so a sample carried into a wider panel or under a new name replays every cell already measured on it (`application/scoring/search_point_scorer.py::replayable_on`). A row's position is derived from the bank a cycle drew (`domain/sample.py::Bank`) and is never stored on a measurement; a cycle keeps the bank it drew for life. So a re-cut — editing, replacing or reordering rows, any `source:` cut parameter — is a new hash and needs no new name: the next `new` moves the label (`TenantDatasetStore.relabel`), no measurement or campaign is rewritten, and every per-sample history (δ, hit rate, hard samples) carries over by `sample_key` for the rows the cuts share.
+**A bank's identity is the hash of its rows as stored** (`shared/hashing.py::dataset_hash`). A re-cut (rows, `source:`
+section or the recipe's code, `loaders.py::Source.identity`) is a new hash and needs no new name: the next `new` moves the label, and per-sample history carries over by `sample_key`.
 
 ## L4 — `promptpotter-self`
 
-`promptpotter-self/` is the **recursive case**: the outer cycle mutates the inner cycle's optimizer prompt template fields. **Its `pipeline` declares no nodes and no pipelines**: the connector serves the graph (`Connector.pipeline_declaration`), derived from the manifest the panel's cells run — every llm node of it, never only the ones a round runs, or an escalation node reached on a stall could never be told to improve. So any preset can be an inner, and an edit evolved on either layer lifts onto the other with no copy to keep in step.
+**Its `pipeline` declares no nodes**: the connector serves the graph from the manifest the panel's cells run, every
+llm node of it, so any preset can be an inner and an edit lifts across layers with no copy.
 
-**L4 is a recursion, not a 4th layer** — owned by [`application/optimizers/potter/CLAUDE.md`](../../application/optimizers/potter/CLAUDE.md) § Add no 4th layer; here it is one more dataset, run through the `promptpotter` connector.
-
-**The inner instrument is `justlogic/d234`, and a cut switch is never advice.** Each depth cut is a separate `dataset_name` with its own δ scale, so comparing "bands" across cuts reads a difference of rulers as a capability difference. A new cut is a new `justlogic/dNNN/` whose `source.depths` names its depths, never a re-cut of this one.
-
-The remaining work lives in ONE place — [`docs/specs/l4-outer-loop.md`](../../../docs/specs/l4-outer-loop.md) § Open (don't restate it here).
-
-## Reference points — consult on every dataset question
-
-- **Adding a dataset, canonical splits, and why X is or isn't wired** → [`docs/operations/dataset-selection-rationale.md`](../../../docs/operations/dataset-selection-rationale.md) § Adding a dataset. Research the canonical split; never invent one; check here first for "why didn't we use Y?" and "have we trialed Z?".
-- **Per-dataset model + `reasoning_effort` + `max_tokens`, BBEH output-ceiling traps** → [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md). This — not self-optimizing campaign NOTES.md — is the canonical source for model recommendations.
-
-## A bank is the item bank, not a score cache
-
-**Don't reason about origin cost from it.** A shipped definition's rows are its `source:` recipe's —
-fetched, generated, or held inline under `recipe: rows` — and the bank it yields is the operator's — owned by
-[`infrastructure/store/CLAUDE.md`](../../infrastructure/store/CLAUDE.md) § Dataset content has two tiers;
-nothing writes a bank into this directory. Measurements live in the tenant-global content-addressed
-`measurements/` archive (`infrastructure/store/archive_queries.py`), which is what replays origin rows
-across cycles, forks and resumes.
+**The inner instrument is `justlogic/d234`, and a cut switch is never advice** — each depth cut has its own δ
+scale; a new cut is a new `justlogic/dNNN/`, never a re-cut of this one.
 
 ## Conventions
 
-- **Origin = conservative floor** — owned by [`application/optimizers/potter/CLAUDE.md`](../../application/optimizers/potter/CLAUDE.md) § Origin = conservative floor. Every tunable in this directory's overlay starts at its floor.
-- **`task.md` is L1's framing input** — written for the LLM that will generate candidates, not for human readers (though it should be readable). **Its front matter is that description DECOMPOSED, and it is optional.** When absent, the first mint of a framed campaign decomposes the body — one `checkin` call, billed on that run's ledger, at every entry point that mints (`application/jobs/mint.py::mint_framed_cycle`) — and lands it in `.promptpotter/{tenant}/task-context/{name}.yaml`, **not** back here, which is read-only under a wheel. Resolved by `readable_task_context`; hand-editing either tier's copy is supported.
-- **Unframed is a declaration, never an absence.** `campaign_config.task_framing: off` runs with no framing even where one is committed — the ablation arm — and the campaign manifest keeps the delta, so a result never reads as a framed one.
-- **`README.md` is operator-facing** — describes source, split, sample shape and every model screen run on it; cite the canonical evaluation protocol.
+- **`task.md` is L1's framing input**, written for the LLM. Its front matter is optional: absent, the first framed
+  mint decomposes the body into the tenant's `task-context/{dataset_id_prefix(name)}.yaml`, never back here.
+- **Unframed is a declaration, never an absence** — `task_framing: off` is the ablation arm, kept in the manifest.
+- **`README.md` is operator-facing** — source, split, sample shape, every model screen, the canonical protocol.

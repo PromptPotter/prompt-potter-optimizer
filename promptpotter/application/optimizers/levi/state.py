@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import Field
 
 from promptpotter.domain.optimizer_state import StateSlice
 from promptpotter.domain.strict_model import StrictModel
-
-LeviManifest = Literal["levi"]
-LEVI_MANIFEST: LeviManifest = "levi"
 
 
 class DescriptorStats(StrictModel):

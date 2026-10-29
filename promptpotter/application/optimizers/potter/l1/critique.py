@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.bench.llm_call import run_optimizer_node
+from promptpotter.application.bench.node_context import Calls
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
     build_bundle,
@@ -46,7 +47,7 @@ def spanning_clusters(
     return kept, dropped
 
 
-async def distil_critique(ctx: NodeContext[Any]) -> Critique:
+async def distil_critique(ctx: NodeContext) -> Critique:
     """Of the round *ctx* stands on, whether the round adapts or a later walk re-runs it; the readout a dict so persistence does not drag Pydantic into the domain serialization path."""
     bundle = build_bundle(ctx, ctx.slice(Ladder))
     filled = DispatchHub.fill(load_optimizer_prompt("l1_critique"), bundle, node="l1_critique")
@@ -57,7 +58,7 @@ async def distil_critique(ctx: NodeContext[Any]) -> Critique:
         prompt_vars=filled.injection_vars,
         template=filled.template,
         response_model=L1CritiqueOutput,
-        context=ctx.call_context(round_num=round_num, injections=filled.breakdown),
+        context=ctx.read(Calls).call_context(filled.breakdown),
     )
     assert isinstance(result, L1CritiqueOutput), (
         f"l1_critique must return L1CritiqueOutput, got {type(result).__name__}"
