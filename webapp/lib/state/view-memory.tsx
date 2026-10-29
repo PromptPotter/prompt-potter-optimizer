@@ -1,10 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
-import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { ownerOfAddress } from "@/lib/ids";
-
-const VIEW_MEMORY_KEY = "promptpotter.view.byCampaign";
 
 // Bumping this DROPS every stored record rather than migrating it.
 const RECORD_VERSION = 2;
@@ -75,7 +73,7 @@ const ViewMemoryContext = createContext<ViewMemory | null>(null);
 const EMPTY_TOGGLED: ReadonlySet<string> = new Set();
 
 export function ViewMemoryProvider({ children }: { children: ReactNode }) {
-  const [store, setStore] = useLocalStorage<Store>(VIEW_MEMORY_KEY, EMPTY_STORE, viewMemoryCodec);
+  const [store, setStore] = useLocalStorage<Store>(STORAGE_KEYS.viewMemory, EMPTY_STORE, viewMemoryCodec);
 
   const viewFor = useCallback(
     (owner: string | null): CampaignView => {

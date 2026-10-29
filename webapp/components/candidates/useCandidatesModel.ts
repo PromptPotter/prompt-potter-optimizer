@@ -2,11 +2,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { activeSeries, type SeriesCtx } from "./series";
 import { type PlotGeometry, geomEqual } from "./FitnessChart";
-import { setCandidatesState, useCandidatesState } from "@/lib/candidates-store";
+import { setCandidatesState, useCandidatesState } from "@/lib/state/candidates";
 import { useCandidateBars } from "./useCandidateBars";
 import { measuringArm, useCycleStream } from "@/lib/poll";
 import { subjectKey, withMask } from "@/lib/api/reads";
-import { useCompareSelection } from "@/lib/compare-selection";
+import { useCompareSelection } from "@/lib/state/compare-selection";
 import { useSelection } from "@/lib/SelectionContext";
 import { lensOf, useScoringMask } from "@/lib/scoring-mask";
 import type { HierarchyCourse, ServedDashboard } from "@/lib/api";

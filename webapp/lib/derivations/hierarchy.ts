@@ -7,7 +7,7 @@ import type {
   HierarchyTag,
 } from "@/lib/api";
 import { decodeCyclePath } from "@/lib/ids";
-import { dockPriority } from "@/lib/run-phase";
+import { dockPriority } from "./run-phase";
 
 export interface RootGroup {
   rootCycleId: string;

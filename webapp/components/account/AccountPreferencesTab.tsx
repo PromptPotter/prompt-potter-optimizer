@@ -1,19 +1,18 @@
 "use client";
 
 import { AccountSection } from "./AccountSection";
-import { Switch } from "@/components/ui";
+import { FailureLine, ReadState, Switch } from "@/components/ui";
 import { patchUserSettings, userSettingsRead } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { shownData, useRead } from "@/lib/hooks/useRead";
+import { useRead } from "@/lib/hooks/useRead";
 import { invalidateReads } from "@/lib/read-cache";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
-import { useShowCandidates } from "@/lib/tree-prefs";
+import { useShowCandidates } from "@/lib/prefs/tree";
 
 export function AccountPreferencesTab() {
   const read = useRead(userSettingsRead());
   // No blanket revalidate: the write re-asks the one read carrying the setting.
   const cmd = useCommand<"user-settings">("preferences", { revalidate: false });
-  const demo = shownData(read)?.demo_mode_enabled ?? null;
 
   const toggle = (next: boolean) =>
     void cmd.run(
@@ -23,9 +22,6 @@ export function AccountPreferencesTab() {
     );
 
   const busy = cmd.pending !== null;
-  const error =
-    cmd.failure?.message ??
-    (read.status === "failed" ? "Could not read this setting. Reopen the pane to retry." : null);
 
   return (
     <>
@@ -33,22 +29,20 @@ export function AccountPreferencesTab() {
         title="Try & learn"
         lede="A small support-ticket dataset, ready to optimize, in your collection. Turn it off once you are set up."
         aside={
-          <Switch
-            label="Show the try-and-learn demo dataset"
-            checked={demo ?? false}
-            locked={demo === null || busy}
-            lockedNote={busy ? "saving" : "reading"}
-            onChange={() => {
-              if (demo !== null) toggle(!demo);
-            }}
-          />
+          <ReadState read={read} subject="this setting">
+            {(settings) => (
+              <Switch
+                label="Show the try-and-learn demo dataset"
+                checked={settings.demo_mode_enabled}
+                locked={busy}
+                lockedNote="saving"
+                onChange={() => toggle(!settings.demo_mode_enabled)}
+              />
+            )}
+          </ReadState>
         }
       >
-        {error ? (
-          <p className="account-failure" role="alert">
-            {error}
-          </p>
-        ) : null}
+        <FailureLine failure={cmd.failure} />
       </AccountSection>
       <CampaignTreeSection />
       <ThemeSection />

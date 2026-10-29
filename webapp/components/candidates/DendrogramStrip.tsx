@@ -2,6 +2,7 @@
 import { memo, useMemo } from "react";
 import { cx } from "@/lib/cx";
 import { barValueLabel, type DisplayMetric } from "@/lib/derivations";
+import { cssPct, PLACEHOLDER } from "@/lib/format";
 import { useStableContent } from "@/lib/stable";
 import { pressable } from "@/components/ui";
 import type { HierarchyCourse } from "@/lib/api";
@@ -34,8 +35,6 @@ export const DendrogramStrip = memo(function DendrogramStrip({
 
   if (!plot) return null;
 
-  const pct = (f: number) => `${f * 100}%`;
-
   return (
     <div
       className="cand-dendro"
@@ -52,9 +51,9 @@ export const DendrogramStrip = memo(function DendrogramStrip({
           <line
             key={b.key}
             className={cx("cand-dendro-beam", b.variant !== "chain" && b.variant)}
-            x1={pct(b.x1f)}
+            x1={cssPct(b.x1f)}
             y1={b.y}
-            x2={pct(b.x2f)}
+            x2={cssPct(b.x2f)}
             y2={b.y}
           />
         ))}
@@ -62,9 +61,9 @@ export const DendrogramStrip = memo(function DendrogramStrip({
           <line
             key={`s${i}`}
             className={cx("cand-dendro-stub", s.variant !== "chain" && s.variant)}
-            x1={pct(s.xf)}
+            x1={cssPct(s.xf)}
             y1={s.y1}
-            x2={pct(s.xf)}
+            x2={cssPct(s.xf)}
             y2={s.y2}
           />
         ))}
@@ -73,7 +72,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
           const view = byKey.get(n.key);
           const selected = n.key === selectedKey;
           const forkCycle = forkedFrom.get(n.address);
-          const value = view ? barValueLabel(metric, view) : "—";
+          const value = view ? barValueLabel(metric, view) : PLACEHOLDER;
           return (
             <g key={`${n.key}|${i}`} className="cand-dendro-node">
               <g
@@ -93,10 +92,10 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                         : " · eliminated"}
                 </title>
                 {/* Centred on the dot: a full-height stub would take the hit test off every node it crosses. */}
-                <circle cx={pct(n.xf)} cy={n.y} r={8} className="cand-dendro-hitarea" />
+                <circle cx={cssPct(n.xf)} cy={n.y} r={8} className="cand-dendro-hitarea" />
                 <circle
                   className={cx("cand-dendro-dot", n.isWinner ? "winner" : "eliminated")}
-                  cx={pct(n.xf)}
+                  cx={cssPct(n.xf)}
                   cy={n.y}
                   r={3}
                 />
@@ -108,7 +107,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                   className="cand-dendro-fork"
                 >
                   <title>Forked here — open the forest view on the sibling cycle</title>
-                  <text className="cand-dendro-fork-glyph" x={pct(n.xf)} y={n.y - 6}>
+                  <text className="cand-dendro-fork-glyph" x={cssPct(n.xf)} y={n.y - 6}>
                     ⑂
                   </text>
                 </g>

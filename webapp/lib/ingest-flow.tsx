@@ -26,7 +26,7 @@ interface IngestFlowValue {
   compose: () => void;
 }
 
-const Ctx = createContext<IngestFlowValue | null>(null);
+const IngestFlowContext = createContext<IngestFlowValue | null>(null);
 
 export function IngestFlowProvider({ children }: { children: ReactNode }) {
   const [composing, setComposing] = useState(false);
@@ -82,11 +82,11 @@ export function IngestFlowProvider({ children }: { children: ReactNode }) {
     }),
     [flow, collection, composing, startNew, composerOpen, openComposer, closeComposer, compose],
   );
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return <IngestFlowContext.Provider value={value}>{children}</IngestFlowContext.Provider>;
 }
 
 export function useIngest(): IngestFlowValue {
-  const v = useContext(Ctx);
+  const v = useContext(IngestFlowContext);
   if (!v) throw new Error("useIngest must be used inside IngestFlowProvider");
   return v;
 }

@@ -1,11 +1,11 @@
 "use client";
 import { Fragment, useMemo } from "react";
-import { Menu, MenuItem } from "@/components/ui";
-import { useAuth } from "@/lib/auth-context";
+import { FailureLine, Menu, MenuItem } from "@/components/ui";
+import { useAuth } from "@/lib/state/auth";
 import type { HierarchyCampaign } from "@/lib/api";
 import { tagValue } from "@/lib/derivations";
 import { decodeCyclePath, encodeCyclePath, type CyclePath } from "@/lib/ids";
-import { useRegistry } from "@/lib/registry";
+import { useRegistry } from "@/lib/state/registry";
 import { useWorkspace } from "@/lib/workspace";
 import { CampaignRowLabel, PhaseMark } from "../sidebar/CampaignRowLabel";
 
@@ -32,7 +32,7 @@ export function CampaignSwitcher() {
   };
 
   if (failure && listed.length === 0) {
-    return <span className="run-switch-err">campaigns: {failure.message}</span>;
+    return <FailureLine failure={failure} lead="campaigns:" />;
   }
   if (!loaded) {
     // Anon never loads the workspace: a terminal label, not a perpetual "loading…".

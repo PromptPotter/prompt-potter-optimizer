@@ -1,17 +1,18 @@
 "use client";
 
-import { Button, Dialog } from "@/components/ui";
+import { Button, Dialog, FailureLine } from "@/components/ui";
+import type { CommandFailure } from "@/lib/hooks/useCommand";
 
 export function CleanupConfirmModal({
   stubCount,
   cleaning,
-  error,
+  failure,
   onCancel,
   onConfirm,
 }: {
   stubCount: number;
   cleaning: boolean;
-  error: string | null;
+  failure: CommandFailure | null;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -36,7 +37,7 @@ export function CleanupConfirmModal({
         <code>n_rounds = 0</code> and no descendants. Units that ran real work,
         the active unit, session roots, and units with children are skipped.
       </p>
-      {error && <p className="family-tree-modal-error">{error}</p>}
+      <FailureLine failure={failure} />
     </Dialog>
   );
 }

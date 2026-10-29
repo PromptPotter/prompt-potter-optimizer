@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useMemo, useRef } from "react";
 import { cx } from "@/lib/cx";
-import { fmtGap } from "@/lib/format";
+import { fmtGap, PLACEHOLDER } from "@/lib/format";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { useCycleStream, useTimeRay } from "@/lib/poll";
@@ -175,7 +175,7 @@ function HeadCap({
 }) {
   const body = (
     <>
-      <span className="dash-time-ray-head-label">{head ? head.label : "—"}</span>
+      <span className="dash-time-ray-head-label">{head ? head.label : PLACEHOLDER}</span>
       {head?.detail && <span className="dash-time-ray-head-detail">{head.detail}</span>}
     </>
   );

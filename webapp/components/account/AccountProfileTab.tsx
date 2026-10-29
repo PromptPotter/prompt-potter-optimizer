@@ -1,8 +1,8 @@
 "use client";
 
-import { AccountEmpty, AccountSection } from "./AccountSection";
+import { AccountSection } from "./AccountSection";
 import { PROVIDER_LABEL, ProviderIcon } from "./providers";
-import { Badge, Button, CopyButton } from "@/components/ui";
+import { Badge, Button, CopyButton, Empty, FailureLine } from "@/components/ui";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { postLogout, type MeResponse } from "@/lib/api";
 
@@ -72,11 +72,11 @@ function EmailSection({ me }: { me: MeResponse }) {
           <Badge>Primary</Badge>
         </div>
       ) : (
-        <AccountEmpty title="No email on this account">
+        <Empty title="No email on this account">
           {me.provider
             ? `${providerName(me.provider)} did not share a verified address. Add one there and sign in again.`
             : "The local workspace has no sign-in, so there is no address to show. Turn sign-in on to give each person their own account."}
-        </AccountEmpty>
+        </Empty>
       )}
     </AccountSection>
   );
@@ -103,10 +103,10 @@ function SignInSection({ me }: { me: MeResponse }) {
           ))}
         </ul>
       ) : (
-        <AccountEmpty title="No sign-in provider">
+        <Empty title="No sign-in provider">
           This server runs with sign-in off, so whoever can reach it acts as this workspace. Put
           it behind Google or GitHub sign-in before sharing the address.
-        </AccountEmpty>
+        </Empty>
       )}
       {me.provider && me.available_providers.length > 0 ? (
         <div className="account-connect">
@@ -139,10 +139,10 @@ function PermissionsSection({ capabilities }: { capabilities: string[] }) {
           ))}
         </ul>
       ) : (
-        <AccountEmpty title="No permissions">
+        <Empty title="No permissions">
           This account can read what it already has but cannot start, steer or change anything.
           Whoever runs this server grants access.
-        </AccountEmpty>
+        </Empty>
       )}
     </AccountSection>
   );
@@ -178,11 +178,7 @@ function SessionSection({ me }: { me: MeResponse }) {
         </Button>
       }
     >
-      {cmd.failure ? (
-        <p className="account-failure" role="alert">
-          {cmd.failure.message}
-        </p>
-      ) : null}
+      <FailureLine failure={cmd.failure} />
     </AccountSection>
   );
 }

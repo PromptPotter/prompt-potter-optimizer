@@ -1,6 +1,6 @@
 // served: `SubjectReading.cell_means`; a channel no cell carries is absent.
 
-import { fmtMetricValue } from "@/lib/format";
+import { fmtUnit } from "@/lib/format";
 
 interface CellMeanRow {
   key: string;
@@ -16,7 +16,7 @@ export const CELL_MEAN_ROWS: readonly CellMeanRow[] = [
     fmt: (v) => `${Math.round(v).toLocaleString()} chars`,
     lead: true,
   },
-  { key: "latency", label: "avg time / cell", fmt: (v) => fmtMetricValue("seconds", v), lead: true },
-  { key: "cost", label: "avg cost / cell", fmt: (v) => fmtMetricValue("usd", v) },
-  { key: "tokens", label: "avg tokens / cell", fmt: (v) => fmtMetricValue("tokens", v) },
+  { key: "latency", label: "avg time / cell", fmt: (v) => fmtUnit("seconds", v), lead: true },
+  { key: "cost", label: "avg cost / cell", fmt: (v) => fmtUnit("usd", v) },
+  { key: "tokens", label: "avg tokens / cell", fmt: (v) => fmtUnit("tokens", v) },
 ];

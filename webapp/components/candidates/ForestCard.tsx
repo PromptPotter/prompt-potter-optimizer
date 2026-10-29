@@ -6,12 +6,14 @@ import {
   CardFrame,
   Chip,
   CopyButton,
+  Empty,
   IconBroom,
+  Loading,
   Toolbar,
   ToolbarSpacer,
 } from "@/components/ui";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
-import { useCycleStream } from "@/lib/poll";
+import { DASHBOARD_PENDING, useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import { useSelection } from "@/lib/SelectionContext";
 import { isSelectedCandidate } from "@/lib/types";
@@ -28,7 +30,7 @@ export function ForestCard() {
   if (!dash) {
     return (
       <CardFrame className="forest-card" title={<span className="cand-title">Lineage</span>}>
-        <div className="lineage-empty">Waiting for this run&rsquo;s dashboard…</div>
+        <Loading className="lineage-empty">{DASHBOARD_PENDING}</Loading>
       </CardFrame>
     );
   }
@@ -138,7 +140,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
             )}
           </div>
           {!viewedHasRounds && (
-            <div className="lineage-empty">
+            <Empty className="lineage-empty">
               {isInheritedSibling && parentId ? (
                 <>
                   inherited from{" "}
@@ -160,13 +162,13 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
               ) : (
                 "No rounds on disk yet — the tree appears once round 1 lands."
               )}
-            </div>
+            </Empty>
           )}
           {cleanup.open && cleanup.stubCount !== null && (
             <CleanupConfirmModal
               stubCount={cleanup.stubCount}
               cleaning={cleanup.cleaning}
-              error={cleanup.error}
+              failure={cleanup.failure}
               onCancel={cleanup.cancel}
               onConfirm={cleanup.confirm}
             />

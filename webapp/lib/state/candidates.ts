@@ -1,7 +1,7 @@
 "use client";
 
 import type { DisplayMetric } from "@/lib/derivations";
-import { createModuleStore } from "@/lib/module-store";
+import { createModuleStore } from "@/lib/state/module-store";
 
 interface CandidatesState {
   showForest: boolean;

@@ -4,7 +4,7 @@ import { useMemo, useState, type CSSProperties } from "react";
 import type { Evidence, SubjectReading } from "@/lib/api";
 import { readingPath } from "@/lib/api/reads";
 import type { CladogramChannel } from "@/components/candidates/Forest";
-import { useCompareSelection } from "@/lib/compare-selection";
+import { useCompareSelection } from "@/lib/state/compare-selection";
 import type { HierarchyEntry } from "@/lib/api";
 import { campaignAt, compareItems } from "@/lib/derivations";
 import { cx } from "@/lib/cx";

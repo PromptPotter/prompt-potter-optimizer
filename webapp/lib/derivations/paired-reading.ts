@@ -5,7 +5,7 @@ import {
   type ReadingStateKind,
 } from "@/lib/api/types.generated";
 import type { LiftEstimate, MeasuredLift, PairedReading } from "@/lib/api/types";
-import { fmtLevel, fmtSigned } from "@/lib/format";
+import { fmtUnit } from "@/lib/format";
 
 type PairRead =
   | { read: true; lift: MeasuredLift; cells: number }
@@ -33,9 +33,9 @@ export function liftOf(reading: PairedReading | null): LiftEstimate | null {
 export type PairFacet = "rates" | "lift";
 
 export function fmtLift(lift: MeasuredLift, facet: PairFacet): string {
-  if (facet === "lift") return fmtSigned(lift.estimate.value);
+  if (facet === "lift") return fmtUnit("delta", lift.estimate.value);
   const { unit } = lift.measurand;
-  return `${fmtLevel(unit, lift.rate_a)} → ${fmtLevel(unit, lift.rate_b)}`;
+  return `${fmtUnit(unit, lift.rate_a)} → ${fmtUnit(unit, lift.rate_b)}`;
 }
 
 export function fmtPaired(reading: PairedReading, facet: PairFacet): string {

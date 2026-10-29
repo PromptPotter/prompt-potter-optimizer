@@ -17,9 +17,9 @@ import {
   type ObserveState,
   type ObserveSubject,
 } from "@/lib/derivations";
-import { fmtPct0, fmtSecs, fmtValue } from "@/lib/format";
+import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
 import { nodeKind } from "@/lib/types";
-import { CopyButton, SegmentedControl } from "@/components/ui";
+import { CopyButton, Empty, Loading, SegmentedControl } from "@/components/ui";
 import { NodeSurface } from "./NodeSurface";
 import { MeasurementRun } from "./MeasurementRun";
 import { L1Variants, variantsOf } from "./L1Variants";
@@ -129,7 +129,7 @@ export function NodeDetail({ node: selected, authoring, onClose, onPromptApply }
           {/* A div: `CopyButton`'s choices menu opens a `Popover`, which is flow content. */}
           <div className="setup-preview-side">
             <span className={cx("opt-detail-status", isLiveNow && "live")}>
-              ● {isLiveNow ? `live · round ${liveRound ?? "—"}` : scopeLabel(isOptimizer)}
+              ● {isLiveNow ? `live · round ${liveRound ?? PLACEHOLDER}` : scopeLabel(isOptimizer)}
             </span>
             {isOptimizer && viewedRound != null && (
               <span
@@ -329,11 +329,11 @@ function RunSection({
     <>
       <hr className="setup-preview-divider" />
       {kind == null ? (
-        <div className="opt-detail-empty">
-          {kindLoading
-            ? "Reading the optimizer manifest…"
-            : "This node is not in the served pipeline."}
-        </div>
+        kindLoading ? (
+          <Loading className="opt-detail-empty">Reading the optimizer manifest…</Loading>
+        ) : (
+          <Empty className="opt-detail-empty">This node is not in the served pipeline.</Empty>
+        )
       ) : kind === "measurement" ? (
         <MeasurementRun round={round} />
       ) : (
@@ -387,12 +387,12 @@ function CallRun({
         prefix?.state === "unreported"
           ? "not reported"
           : prefix?.share != null
-            ? `${fmtPct0(prefix.share)} of prompt`
+            ? `${fmtUnit("rate", prefix.share)} of prompt`
             : "",
     },
     { label: "template", value: block?.input.template_name ?? "" },
     { label: "ts", value: block?.timestamp ?? "" },
-  ].filter((c) => c.value !== "" && c.value !== "—");
+  ].filter((c) => c.value !== "" && c.value !== PLACEHOLDER);
 
   return (
     <>
@@ -408,11 +408,11 @@ function CallRun({
       )}
 
       {!block ? (
-        <div className="opt-detail-empty">
-          {loading
-            ? "Loading this round's audit trail…"
-            : "This node has not fired in any cached round yet."}
-        </div>
+        loading ? (
+          <Loading className="opt-detail-empty">Loading this round&apos;s audit trail…</Loading>
+        ) : (
+          <Empty className="opt-detail-empty">This node has not fired in any cached round yet.</Empty>
+        )
       ) : (
         <>
           {variants && variants.length > 0 && <L1Variants variants={variants} />}
@@ -438,7 +438,7 @@ function CallRun({
                     ))}
                   </dl>
                 ) : (
-                  <div className="opt-detail-col-empty">No template fields on this block.</div>
+                  <Empty className="opt-detail-col-empty">No template fields on this block.</Empty>
                 )}
               </div>
             </section>
@@ -452,11 +452,11 @@ function CallRun({
                   {response != null ? (
                     <pre className="opt-detail-pre">{fmtValue(response, { pretty: true })}</pre>
                   ) : inFlight ? (
-                    <div className="opt-detail-col-empty">
+                    <Loading className="opt-detail-col-empty">
                       In flight — response not yet written.
-                    </div>
+                    </Loading>
                   ) : (
-                    <div className="opt-detail-col-empty">No response on this block.</div>
+                    <Empty className="opt-detail-col-empty">No response on this block.</Empty>
                   )}
                 </div>
               </section>

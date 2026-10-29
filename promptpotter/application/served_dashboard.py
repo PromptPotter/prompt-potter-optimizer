@@ -15,6 +15,7 @@ from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits, ServedRound, served_rounds
 from promptpotter.domain.paired_reading import ArmName
 from promptpotter.domain.phases import (
+    RUN_PHASE_INFO,
     PauseReading,
     ProducerReading,
     RunAdmission,
@@ -77,6 +78,69 @@ class SampleWalk(StrictModel):
         "last measured."
     )
     key: str = Field(description="Changes when the walk does — a new arm is a new axis.")
+
+
+class LookaheadDepth(StrictModel):
+    """One depth the look-ahead control offers: that many calls held in flight."""
+
+    cells: int
+    label: str
+    fill: Literal["full", "part"] | None = Field(
+        description="`full` where that many calls are out now, `part` where the gauge allows that "
+        "many; null past both."
+    )
+    pickable: bool = Field(
+        description="Whether a press of this depth is admitted now: the control applies, the run "
+        "admits `set-sample-lookahead` and the next walk can take that many."
+    )
+
+
+class SampleLookahead(StrictModel):
+    """The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its
+    control offers. A replay takes no armed control, so it reads depth 1 and nothing armed."""
+
+    depth: int = Field(
+        description="The depth IN FORCE — how many cells the walk holds in flight: the armed "
+        "request bounded by `ceiling`."
+    )
+    auto: bool = Field(
+        description="Whether that depth outlives its round — the operator's auto-arm."
+    )
+    ceiling: int = Field(
+        description="The backend's `max_cells_in_flight`; 1 says the control does not apply."
+    )
+    in_flight: int = Field(description="Calls out now; 0 once no producer is appending.")
+    allowed: int = Field(description="Calls the gauge admits out now; 0 with `in_flight`.")
+    most: int = Field(
+        description="The most calls the stop rules allow out; between phases, the next round's."
+    )
+    scoring_now: bool = Field(
+        description="Whether a walk holds or admits any call now; otherwise `most` speaks for the "
+        "next round alone."
+    )
+    pick_max: int = Field(description="The deepest press the next walk can take.")
+    money_hold: str | None = Field(
+        description="How many more cells the spend limits admit, in words, where money and not "
+        "the armed depth holds the walk; null where it does not."
+    )
+    cell_reserve_usd: float | None = Field(
+        description="What each call out holds of the ceiling; null where no book binds."
+    )
+    unavailable: str = Field(
+        description="Why holding calls ahead does not apply to this backend at all (`ceiling` of "
+        "1); empty where it applies."
+    )
+    explained: str = Field(
+        description="What the armed depth does, as the control explains itself: the mode in "
+        "force, its bound and the calls discarded so far — or `unavailable`."
+    )
+    auto_refusal: str = Field(
+        description="Why the auto-arm switch is shut: `unavailable`, or the cycle has settled. A "
+        "mode, not a press, so a paused run takes it for its relaunch; empty where offered."
+    )
+    depths: list[LookaheadDepth] = Field(
+        description="Each depth the control draws, 1 to `ceiling`."
+    )
 
 
 class RoundAxis(StrictModel):
@@ -188,26 +252,7 @@ class ServedDashboard(DashboardFacts):
     composite_fitness_anchors: dict[str, float] | None = Field(
         description="The level each anchored dial in it is read against, by term."
     )
-    sample_lookahead: int = Field(
-        description="The depth IN FORCE — how many cells the walk holds in flight: the armed "
-        "request bounded by `max_cells_in_flight`. 1 on a replay, which takes no armed control."
-    )
-    sample_lookahead_auto: bool = Field(
-        description="Whether that depth outlives its round — the operator's auto-arm."
-    )
-    lookahead_money_hold: str | None = Field(
-        description="How many more cells the spend limits admit, in words, where money and not "
-        "the armed depth holds the walk; null where it does not."
-    )
-    lookahead_pick_max: int = Field(description="The deepest press the next walk can take.")
-    lookahead_unavailable: str = Field(
-        description="Why holding calls ahead does not apply to this backend at all "
-        "(`max_cells_in_flight` of 1); empty where it applies."
-    )
-    lookahead_explained: str = Field(
-        description="What the armed depth does, as the control explains itself: the mode in "
-        "force, its bound and the calls discarded so far — or `lookahead_unavailable`."
-    )
+    lookahead: SampleLookahead
     spend_metered: MeteredSpend | None = Field(
         description="The cycle's spend under the campaign's ceiling meter, a manifest fact no "
         "ledger record carries; null where the campaign's manifest is gone."
@@ -323,6 +368,62 @@ def _lookahead_explained(*, auto: bool, ceiling: int, pick_max: int, discards: i
     )
 
 
+def _lookahead(
+    state: LiveDashboardState,
+    *,
+    run: RunState,
+    standing: _Standing | None,
+    in_flight: int,
+    allowed: int,
+) -> SampleLookahead:
+    ceiling = state.max_cells_in_flight
+    depth = 1 if standing is None else effective_lookahead(standing.lookahead, ceiling)
+    affordable, most = state.lookahead_affordable, state.lookahead_most
+    # Both verdicts read the depth and the gauge as just corrected.
+    money_hold = (
+        _money_hold(affordable)
+        if standing is not None
+        and affordable is not None
+        and in_flight + affordable < min(depth, allowed)
+        else None
+    )
+    pick_max = max(1, min(ceiling, most)) if most > 0 else ceiling
+    auto = standing is not None and standing.lookahead_auto
+    unavailable = _ONE_AT_A_TIME if ceiling <= 1 else ""
+    pressable = unavailable == "" and run.admission.lookahead_refusal == ""
+    return SampleLookahead(
+        depth=depth,
+        auto=auto,
+        ceiling=ceiling,
+        in_flight=in_flight,
+        allowed=allowed,
+        most=most,
+        scoring_now=in_flight > 0 or allowed > 0,
+        pick_max=pick_max,
+        money_hold=money_hold,
+        cell_reserve_usd=state.cell_reserve_usd,
+        unavailable=unavailable,
+        explained=unavailable
+        or _lookahead_explained(
+            auto=auto,
+            ceiling=ceiling,
+            pick_max=pick_max,
+            discards=state.sample_lookahead_discards,
+        ),
+        auto_refusal=unavailable
+        or ("not available now" if RUN_PHASE_INFO[run.run_phase].settled else ""),
+        depths=[
+            LookaheadDepth(
+                cells=n,
+                label="One at a time" if n == 1 else f"Hold {n} in flight",
+                fill="full" if n <= in_flight else "part" if n <= allowed else None,
+                pickable=pressable and n <= pick_max,
+            )
+            for n in range(1, ceiling + 1)
+        ],
+    )
+
+
 def _serve(
     state: LiveDashboardState,
     *,
@@ -332,16 +433,16 @@ def _serve(
     standing: _Standing | None,
 ) -> ServedDashboard:
     """*standing* is ``None`` for a replay: the moment it folded, and nothing armed since."""
-    ceiling = state.max_cells_in_flight
-    depth = 1 if standing is None else effective_lookahead(standing.lookahead, ceiling)
     banked: dict[str, Any] = {name: getattr(state, name) for name in DashboardFacts.model_fields}
+    in_flight, allowed = state.in_flight, state.lookahead_allowed
     # A hold is read against the clock: a past moment has none, and a dead producer holds nothing.
     banked["backpressure"] = None
     if standing is not None:
         banked["run_limits"] = standing.run_limits
         if not run.producer.appending:
             # A killed run never publishes its closing zero, so it would go on reporting calls out.
-            banked.update(in_flight=0, lookahead_allowed=0, waiting_on=None)
+            banked["waiting_on"] = None
+            in_flight = allowed = 0
         if standing.orphaned:
             banked["verification"] = [
                 m.orphaned() if m.state == "running" else m for m in state.verification
@@ -356,18 +457,6 @@ def _serve(
     )
     formula = state.composite_fitness_formula
     dials = None if formula is None else anchored_criterion_dials(formula)
-    affordable, most = state.lookahead_affordable, state.lookahead_most
-    # Both lookahead verdicts read the depth and the gauge as just corrected.
-    money_hold = (
-        _money_hold(affordable)
-        if standing is not None
-        and affordable is not None
-        and banked["in_flight"] + affordable < min(depth, banked["lookahead_allowed"])
-        else None
-    )
-    pick_max = max(1, min(ceiling, most)) if most > 0 else ceiling
-    auto = standing is not None and standing.lookahead_auto
-    unavailable = _ONE_AT_A_TIME if ceiling <= 1 else ""
     live = standing is not None and run.producer.appending
     line_round = next((r for r in reversed(rounds) if r.overlap_line), None)
     campaign_metered = None if standing is None else standing.campaign_metered
@@ -387,17 +476,8 @@ def _serve(
         composite_fitness_anchors=None
         if dials is None
         else {name: d.anchor for name, d in dials.items() if d.anchor is not None},
-        sample_lookahead=depth,
-        sample_lookahead_auto=auto,
-        lookahead_money_hold=money_hold,
-        lookahead_pick_max=pick_max,
-        lookahead_unavailable=unavailable,
-        lookahead_explained=unavailable
-        or _lookahead_explained(
-            auto=auto,
-            ceiling=ceiling,
-            pick_max=pick_max,
-            discards=state.sample_lookahead_discards,
+        lookahead=_lookahead(
+            state, run=run, standing=standing, in_flight=in_flight, allowed=allowed
         ),
         spend_metered=None if meter is None else MeteredSpend.of(state.spend, meter),
         spend_metered_by_round=None

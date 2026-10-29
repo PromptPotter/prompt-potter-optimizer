@@ -10,10 +10,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { DASHBOARD_LIVE_POLL_MS, DASHBOARD_RECONNECT_POLL_MS } from "@/lib/cadence";
 import { reportIncident } from "@/lib/diagnostics";
 import { dashboardRead, isWarming, stepsRead } from "./api";
 import { encodeCyclePath, type CyclePath } from "./ids";
-import { useAuthGate } from "./auth-context";
+import { useAuthGate } from "./state/auth";
 import type { ArmName, HierarchyStep, LiveCandidate, ServedDashboard } from "./api/types";
 import { shownData, useRead } from "./hooks/useRead";
 import { invalidateReads, readThrough } from "./read-cache";
@@ -59,13 +60,15 @@ interface CycleStreamState {
 
 const CONNECTED = { status: "connected", statusText: "", statusHint: "" } as const;
 
-const OFFLINE = {
+export const DASHBOARD_PENDING = "Waiting for this run’s dashboard…";
+
+export const OFFLINE = {
   status: "offline",
   statusText: "PromptPotter API unreachable",
   statusHint: "Reconnecting every 5 s — check the server is running.",
 } as const;
 
-const GONE = {
+export const GONE = {
   dash: null,
   status: "gone",
   statusText: "This campaign no longer exists",
@@ -75,9 +78,6 @@ const GONE = {
 // Neither is a fault: no unit is a steady state, and a unit's first read is merely in flight.
 const IDLE = { dash: null, status: "idle", statusText: "", statusHint: "" } as const;
 const LOADING = { dash: null, status: "loading", statusText: "", statusHint: "" } as const;
-
-const RECONNECT_INTERVAL_MS = 5000;
-const LIVE_INTERVAL_MS = 2000;
 
 const RAY_WINDOW = 200;
 
@@ -214,7 +214,7 @@ export function CycleStreamProvider({
 }) {
   const unit = path ? encodeCyclePath(path) : null;
   const [slow, setSlow] = useState(false);
-  const intervalMs = slow ? RECONNECT_INTERVAL_MS : LIVE_INTERVAL_MS;
+  const intervalMs = slow ? DASHBOARD_RECONNECT_POLL_MS : DASHBOARD_LIVE_POLL_MS;
   const { state, replaying } = useDashboard(path, unit, intervalMs);
   // A replayed moment polls on the slow beat too: a fold at a past offset is immutable.
   const wantSlow = state.status === "offline" || replaying;

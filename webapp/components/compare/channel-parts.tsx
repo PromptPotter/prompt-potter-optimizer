@@ -1,7 +1,7 @@
 import { CELL_MEAN_ROWS } from "@/lib/cell-means";
 import type { HeadToHeadRow, MeteredSpend } from "@/lib/api";
 import type { LiftEstimate } from "@/lib/api/types";
-import { GuardBadge } from "@/components/shell/GuardBadge";
+import { GuardBadge } from "./GuardBadge";
 import { CEILING_METER_LABELS } from "@/lib/api/types.generated";
 import {
   liftOf,
@@ -15,11 +15,11 @@ import { cx } from "@/lib/cx";
 import {
   sideTone,
   fmtDuration,
-  fmtMetricInterval,
-  fmtMetricValue,
-  fmtPct0,
+  fmtInterval,
   fmtSigned,
+  fmtUnit,
   fmtUsd,
+  PLACEHOLDER,
 } from "@/lib/format";
 import { Badge } from "@/components/ui";
 
@@ -57,11 +57,11 @@ export function MainLine({ steps }: { steps: readonly LineStep[] }) {
             <span className="cmp-line-round">R{reading.arm.round}</span>
             <span className="cmp-line-label">{s.node.label}</span>
             <span className="cmp-line-score">
-              {fmtPct0(reading.own?.accuracy?.value ?? null)}
+              {fmtUnit("rate", reading.own?.accuracy?.value)}
               <StepLift lift={liftOf(reading.vs_reference)} />
             </span>
             <span className="cmp-line-change" title={reading.changes_description || undefined}>
-              {reading.arm.round === 0 ? "origin" : reading.changes_description || "—"}
+              {reading.arm.round === 0 ? "origin" : reading.changes_description || PLACEHOLDER}
             </span>
           </li>
         );
@@ -93,18 +93,18 @@ export function benchLead(row: HeadToHeadRow | null): {
   return {
     score:
       bench === null || s === null
-        ? { value: "—", band: bench?.status.sentence ?? "" }
+        ? { value: PLACEHOLDER, band: bench?.status.sentence ?? "" }
         : {
-            value: fmtMetricValue("level", level?.value ?? null),
-            band: `${s.headline} ${fmtMetricInterval("level", level?.ci_lo ?? null, level?.ci_hi ?? null)} · ${s.n}/${bench.bench_size} rows`,
+            value: fmtUnit("level", level?.value),
+            band: `${s.headline} ${fmtInterval("level", level?.ci_lo, level?.ci_hi)} · ${s.n}/${bench.bench_size} rows`,
           },
     lift:
       lift === null
-        ? { value: "—", band: "" }
+        ? { value: PLACEHOLDER, band: "" }
         : lift.read
           ? {
-              value: fmtSigned(lift.lift.estimate.value),
-              band: fmtMetricInterval(
+              value: fmtUnit("delta", lift.lift.estimate.value),
+              band: fmtInterval(
                 "delta",
                 lift.lift.estimate.ci_lo,
                 lift.lift.estimate.ci_hi,
@@ -116,7 +116,7 @@ export function benchLead(row: HeadToHeadRow | null): {
 }
 
 export function SpentReading({ metered }: { metered: MeteredSpend | null }) {
-  if (metered === null) return "—";
+  if (metered === null) return PLACEHOLDER;
   const priced = ratePricedText(metered.rate_priced_usd, metered.calls_rate_priced);
   const sub =
     `${priced ? `${priced} · ` : ""}Incurred ${fmtUsd(metered.incurred_usd)} · ` +
@@ -165,15 +165,15 @@ export function CostFacts({ row }: { row: HeadToHeadRow }) {
       </div>
       <div>
         <dt>worked</dt>
-        <dd>{row.worked_s === null ? "—" : fmtDuration(row.worked_s)}</dd>
+        <dd>{fmtDuration(row.worked_s)}</dd>
       </div>
       <div>
         <dt>calls</dt>
-        <dd>{row.calls ?? "—"}</dd>
+        <dd>{row.calls ?? PLACEHOLDER}</dd>
       </div>
       <div>
         <dt>replayed</dt>
-        <dd>{row.spend_metered === null ? "—" : fmtPct0(row.spend_metered.replay_share)}</dd>
+        <dd>{fmtUnit("rate", row.spend_metered?.replay_share)}</dd>
       </div>
     </dl>
   );

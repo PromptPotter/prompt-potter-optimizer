@@ -58,33 +58,43 @@ acting.
 
 **Rides with:** the next arc's first builder wave.
 
-### The webapp's vanilla pass (audit 2026-10-29, counts are grep counts)
+### The webapp's vanilla pass (audit 2026-10-29)
 
-**Rides with:** roadmap § Variation and pools item 10, which rebuilds the setup screen on these.
-
-- **Read/command states are hand-rolled per panel**: `status === "failed"` branched in 12 components,
-  failures rendered under 17 wrappers (`ErrorNote`, `AccountFailure`, `run-ctl-err`, …), 16 empty-state
-  classes, 73 `-err|-error|-failure|-empty|-note` selectors. Canonical: one `ui/` `ReadState` over
-  `useRead`'s union and one `FailureLine`. **Re-test:** one failure wrapper.
-- **Formatting bypasses `lib/format.ts`**: 12 inline `.toFixed(`, 7 inline `* 100`, `"—"` written 70 times
-  in 32 files, and name-keyed twins (`fmtPct0/1`, `fmtTheta`, `fmtFitness`, `fmtNum`, `fmtSigned`) beside
-  the unit-keyed `fmtMetricValue`. Canonical: unit-keyed only. **Re-test:** `"—"` in one file.
-- **Wording authored in the browser**: 15 client label tables (`NODE_KINDS`, `PROMPT_FIELD_LABEL` and
-  `PromptFieldsEditor::FIELD_META` over one field set, `SampleTrajectory::MINI_CELL_CLASS` vs
-  `TrajectorySeriesView::CELL_CLASS` naming one `SampleMovement` two ways, …), sentences written twice
-  (the `QuotaStatus` narration in `AccountSpend` and `AccountUsageTab`), 5 good/bad tone vocabularies.
-  Canonical: served label constants, one tone. **Re-test:** each table served or deleted.
-- **Cadence and size literals**: 12 poll intervals in 11 files (`LIVE_EVIDENCE_MS` declared twice), chart
-  `height: 140` ×3 beside `--chart-h`, 8 `promptpotter.*` storage keys in 7 files with the `BOOL`
-  serializer copied 4×, the seed-once latch hand-built 4×. **Re-test:** one cadence module, one key registry.
-- **`lib/` and `shell/` cluster by accident**: `lib/` flat with 36 files and 4 state mechanisms; 17
-  contexts in 4 naming styles, 3 outside `lib/`; `shell/` (chrome) holds 6 surfaces; hard samples and
-  compare each spread over 5–6 folders; 7 hand `<table>`s (tracked `_KNOWN_FALSE`).
-- **Adapters over a flat served shape**: `shell/remote/useRemoteModel.ts` folds 8 flat `lookahead_*`
-  fields `served_dashboard.py` should serve as one sub-object; `useCandidatesModel.ts` joins 10 sources;
-  `.facts.` opened at 92 sites; `isLive` re-derived at 4 (`SteerForkPanel` via `phaseWalks`).
-- **Several doors into one state**: candidate selection minted at 3 sites, the sample set written from 3
-  surfaces, `TrendChart.onOpen` exists so a caller can `openView`, `FileTree::onSelect` drilled 3 levels.
+- **Failures dropped to booleans before `FailureLine` can render them**: `useConnector` folds its read
+  failure into `schema.status: "error"`, `useTimeRay` serves `failed`, ChannelMap's tree `failed`/`loaded`,
+  `OriginChanges` flattens to `message`. `useCommand` `describe` tables (ArchiveCompactionControl,
+  AccountUsageTab, AccountProfileTab) and `AuthCore::AUTH_ERROR_COPY[code] ?? FALLBACK` sit beside
+  `operatorMessage`. The protected run card and `chat.css` (`.hsp-note`, `.chat-tools-err`,
+  `.chat-decision-err`) are still on the old form. **Re-test:** every hook carries a failure object.
+- **Wording authored in the browser**: label tables still client-side (`NODE_KINDS`,
+  `lib/prompt-fields.ts::PROMPT_FIELD`, `lib/derivations/sample-trajectory.ts::MOVEMENT_CLASS`,
+  `WINDOW_LABEL`, `TAB_TITLES`, …) and the tone vocabularies (`BadgeTone`, `MessageTone`, the time ray's
+  served tone, `l4-eff-*`, `verdictTone`, HardSamplesPreview's, PipelineFlow's). Canonical: served label
+  constants, one tone. **Re-test:** each table served or deleted.
+- **Size literals and the seed-once latch**: chart `height: 140`
+  (`git grep -n "height: 140" -- webapp/components`) beside `--chart-h`, which is a `clamp()`, so the
+  two disagree on purpose or by accident; the seed-once latch hand-built at each
+  `git grep -n -i "seeded" -- webapp/components webapp/lib` site; `STORAGE_KEYS` mixes hook and
+  non-hook keys and `side-panel:*` has no `promptpotter.` prefix. Waiting on the run-card session's
+  unlanded `lib/run-card-prefs.ts`: it keeps a second `BOOL` and a literal key.
+  **Re-test:** one latch, one `BOOL`.
+- **Modules still off the `lib/CLAUDE.md` § Where a module lives rule**, blocked by the run-card
+  session's files and the ingest rebuild, which import them: to `state/` — `hard-samples`, `lineage`,
+  `poll`, `workspace`, `ingest-flow`, `scoring-mask`, `chat/thread`, `SelectionContext` (as
+  `selection.tsx`), `hooks/useConnector`'s provider; to `derivations/` — `cell-means`,
+  `prompt-fields`, `origin-readiness`; to `prefs/` — `run-card-prefs`, once that unlanded file lands.
+  Chrome still holding a surface: `shell/searchpoint/`, `shell/scoring/` (ingest imports it),
+  `shell/node-surface/`, root `PairedLift` / `SummaryBlock`. Hard samples and compare each spread over
+  several folders (`git ls-files webapp/components | grep -i -E "hard-?sample|compare"`); hand
+  `<table>`s at `git grep -l "<table" -- webapp/components` (tracked `_KNOWN_FALSE`).
+  **Re-test:** `git ls-files ':(glob)webapp/lib/*.tsx'` lists none.
+- **Adapters over a flat served shape**: `useCandidatesModel.ts` joins every source it imports;
+  `.facts.` opened at `git grep -c "\.facts\." -- webapp/components webapp/lib`; liveness
+  re-derived at each `git grep -n "phaseWalks(" -- webapp/components` site.
+- **Several doors into one state**: candidate selection minted at each
+  `git grep -n "selectedCandidateOf(" -- webapp` site, the sample set written through
+  `setSelectionForSampleSet` from several surfaces, `TrendChart.onOpen` exists so a caller can
+  `openView`, `FileTree::onSelect` drilled through its parents.
 
 ### The member backbone
 
@@ -214,9 +224,49 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   miss. **Rides with:** the next head-to-head read. **Re-test:** per arm, the hit rate of error rows
   against the arm's other rows.
 
+## Open — renames the operator picked (2026-10-29, low priority)
+
+**Rides with:** a pass touching the name, or the post-2026-10-30 wipe for on-disk keys. Names are root
+`CLAUDE.md`'s rule; each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** the old
+word's `git grep -c` for that sense is 0.
+
+- **`candidate_library` → `answer_terms`** (the target's answer-term list, beside
+  `DraftCampaign.answer_space`), and `PoolSource.LIBRARY` → `PACKS`: the route
+  `/datasets/draft/candidate-library`, `EditDraftPatch` and the dataset file move, and
+  `shared/hashing.py::content_hash`'s key re-keys root ids.
+- **"course" → "cycle" in the served and doc layer** (`HierarchyCourse`, `level: "course"`,
+  `/hierarchy/{course}`, `ids.ts::courseAddressOf`); `CycleHop` stays an element of a `CyclePath`.
+- **"line" in its live-cycle sense → `live_cycle`** (`command_kinds.py::LinePayload`,
+  `BenchLine.on_line`, `domain/bench.py::LineRun`); "selection line" is never bare "line". A command
+  payload kind, so ledger shape.
+- **`nodes.py::Panel` / served `ArmPanel` → `RoundSamples` / `ArmSamples`**, the L4 roster → `inner_panel`;
+  "panel" stays the evidence section an LLM reads.
+- **"slot"**: prompt slot → prompt field, layout slot → region, `domain/arms.py::ArmSlot` →
+  `ArmPosition` (ledger field), bank `slot_of` → `position_of`. The layout key is optimizer-prompt text.
+- **`CycleSeed*` / `ForkSeed` → `CycleStart*` / `ForkStart`**, so "seed" is the RNG seed alone. A
+  ledger record.
+- **"member" for an individual → "individual"** (`run_standing.py`, `origin_panel.py`); "member" is the
+  optimizer node; "candidate", an individual at a round address, is owed to the Vocabulary row.
+- **The served hierarchy discriminator `level` → `entry_kind`**
+  (`git grep -c -w level -- webapp/components webapp/lib`).
+- **The READING node → reader node** in `resolved_schemas.json`'s layout prose: prompt text, so a
+  re-measure.
+- **draft vs check-in, by rule, no rename**: "check-in" is the resolver-and-gates process, "draft" the
+  object (`DraftCampaign`); owed to root `CLAUDE.md`'s Vocabulary row.
+
 ## Open — from the structure pass
 
 **Rides with:** any change to the file named. **Re-test:** the `file::symbol` still holding it.
+
+- **Seen in the `lib/` regroup**: `lib/state/registry.tsx` and `lib/workspace.tsx` import `derivations/hierarchy` past the barrel
+  to dodge a cycle (barrel → search-point → poll → workspace); `shell/Modal.tsx` beside the `ui/` modal
+  rule; `lib/theme.ts` mixes chart setup with the theme preference; `RemotePanel` keeps a "not available
+  now" fallback beside the served `lookahead.auto_refusal`.
+
+- **A ledger field removal broke the operator's campaigns silently**: 5b023674e dropped
+  `llm_call_start.injection_silent`, leaving 6 of 8 local campaigns unreadable until `restamp --apply`
+  (2026-10-29). Nothing runs `restamp`'s report after a record-shape change. **Re-test:** a gate or
+  commit check that a removed ledger field is prunable, or a removing commit's body naming the restamp.
 
 - **Two "waiting" predicates** — `useRemoteModel.ts::waitNote` and `lib/derivations/time-ray.ts`.
   **Decided:** a call is open AND its wait target is known; serve `dash.wait_line` once.
@@ -259,8 +309,8 @@ each fix is one more copy; the remedy is the upstream redesign.
   TermNorm's `_enrich_with_registries` must carry `meta["fields"]`, its prompt metadata declare
   `fields`, and `direct_prompt` gain a `prompt_info`. **Blocker:** the operator's go to edit the
   TermNorm checkout. **Re-test:** `python -m promptpotter new llm_only` parses its pipeline.
-- **Three readings wait on the operator:** a declared slot before `rewrites` + `field` fold into one
-  knob; which ruler `ab_replay` reads; one precision for `SearchpointDrillIn.tsx` vs `webapp/lib/format.ts::fmtLevel`.
+- **Two readings wait on the operator:** a declared slot before `rewrites` + `field` fold into one
+  knob; which ruler `ab_replay` reads.
 - **`infrastructure/llm/anthropic.py::AnthropicClient` cannot run a node on a current Claude model**
   (no effort mapping, sends `temperature`, never sends the schema, stale `max_tokens`). **Blocker:** no
   Anthropic credential. **Re-test:** `settings.ANTHROPIC_API_KEY` non-empty, then `probe-reasoning`.

@@ -15,6 +15,7 @@ import {
   type BackendResponse,
   type CampaignPipelineResponse,
 } from "@/lib/api";
+import { CONNECTOR_HEALTH_POLL_MS } from "@/lib/cadence";
 import { readyData, shownData, useRead, type ReadResult } from "@/lib/hooks/useRead";
 import type { ConnectorView, PipelineStatus } from "@/lib/types";
 
@@ -36,7 +37,6 @@ const EMPTY: ConnectorView = {
   nests: [],
 };
 
-const HEALTH_INTERVAL_MS = 5000;
 const NO_BACKENDS: BackendResponse[] = [];
 
 export function useCampaignPipeline(
@@ -72,7 +72,7 @@ function useConnectorViewEngine(campaignId: string | null, at: string | null): C
   const health = readyData(
     useRead(activeId ? backendHealthRead(activeId) : null, {
       auth: true,
-      intervalMs: HEALTH_INTERVAL_MS,
+      intervalMs: CONNECTOR_HEALTH_POLL_MS,
     }),
   );
 

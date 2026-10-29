@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { sidePanelKey, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { Button } from "./Button";
 import s from "./SidePanel.module.css";
 
@@ -33,7 +33,7 @@ export function SidePanel({
   onStep?: (shift: -1 | 1) => void;
   children: ReactNode;
 }) {
-  const [stored, setStored] = useLocalStorage<number>(`side-panel:${panelId}`, DEFAULT_PX);
+  const [stored, setStored] = useLocalStorage<number>(sidePanelKey(panelId), DEFAULT_PX);
   const [dragging, setDragging] = useState<number | null>(null);
   const width = dragging ?? (Number.isFinite(stored) && stored >= MIN_PX ? stored : DEFAULT_PX);
   const endDrag = useRef<(() => void) | null>(null);

@@ -4,7 +4,7 @@ import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import type { CyclePath } from "@/lib/ids";
-import { Hearts } from "@/components/ui";
+import { FailureLine, Hearts } from "@/components/ui";
 import type {
   ActivityDecision,
   ActivityItem,
@@ -99,11 +99,7 @@ export function LiveSegment({
               </button>
             ))}
           </div>
-          {cmd.failure ? (
-            <p className="chat-decision-err" role="alert">
-              {cmd.failure.message}
-            </p>
-          ) : null}
+          <FailureLine failure={cmd.failure} />
         </div>
       ) : null}
     </div>

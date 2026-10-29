@@ -3,8 +3,9 @@ import { useMemo, useState } from "react";
 import type { DatasetItem } from "@/lib/api";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
-import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
-import { fmtDuration, fmtPct0 } from "@/lib/format";
+import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
+import { RosterNote } from "@/components/measurements/RosterNote";
+import { fmtDuration, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
 
 const ROWS = 3;
@@ -12,7 +13,7 @@ const ROWS = 3;
 type SampleBucket = Exclude<DatasetItem["hit_spread"], "unmeasured">;
 
 export function HardSamplesPreview() {
-  const { datasetName, items, measuredCount, totals, stale, error } = useHardSamples();
+  const { items, measuredCount, totals, failure } = useHardSamples();
   const { dash, isLive } = useCycleStream();
   const [showAll, setShowAll] = useState(false);
   const ranked = useMemo(() => items.map((it) => it.position), [items]);
@@ -32,20 +33,7 @@ export function HardSamplesPreview() {
 
   const byId = useMemo(() => new Map(items.map((it) => [it.position, it])), [items]);
 
-  if (error) {
-    return (
-      <p className="hsp-note" role="status">
-        Couldn’t read this campaign’s samples{datasetName ? ` (${datasetName})` : ""}.
-      </p>
-    );
-  }
-  if (items.length === 0) {
-    return (
-      <p className="hsp-note" role="status">
-        {stale ? "Loading samples…" : "No samples on this campaign’s dataset yet."}
-      </p>
-    );
-  }
+  if (failure !== null || items.length === 0) return <RosterNote />;
 
   const maxStart = Math.max(0, ids.length - ROWS);
   const follow = Math.min(maxStart, Math.max(0, cursor - 1));
@@ -57,13 +45,13 @@ export function HardSamplesPreview() {
 
   const rateOf = (id: number): { text: string; bucket: SampleBucket | null } => {
     const it = byId.get(id);
-    if (it === undefined) return { text: "—", bucket: null };
+    if (it === undefined) return { text: PLACEHOLDER, bucket: null };
     const n = it.n_measured;
     if (n === 0 || it.mean_fitness == null || it.hit_spread === "unmeasured") {
       return { text: "not measured yet", bucket: null };
     }
     return {
-      text: `${fmtPct0(it.mean_fitness)} of ${n} ${n === 1 ? "try" : "tries"}`,
+      text: `${fmtUnit("rate", it.mean_fitness)} of ${n} ${n === 1 ? "try" : "tries"}`,
       bucket: it.hit_spread,
     };
   };
@@ -140,7 +128,7 @@ export function HardSamplesPreview() {
           ) : (
             <span className="hsp-of">
               {items.length} rows, none measured here yet
-              {totals?.mean_fitness != null ? ` · ${fmtPct0(totals.mean_fitness)} elsewhere` : ""}
+              {totals?.mean_fitness != null ? ` · ${fmtUnit("rate", totals.mean_fitness)} elsewhere` : ""}
             </span>
           )}
         </button>

@@ -7,9 +7,10 @@ import {
   type HierarchyCampaign,
   type HierarchyCourse,
   type HierarchyEntry,
-} from "./api";
-import { campaignAt, runningCourses } from "./derivations/hierarchy";
-import { shownData, useRead, type ReadFailure } from "./hooks/useRead";
+} from "@/lib/api";
+import { ACTIVE_POINTER_POLL_MS, REGISTRY_POLL_MS } from "@/lib/cadence";
+import { campaignAt, runningCourses } from "../derivations/hierarchy";
+import { shownData, useRead, type ReadFailure } from "@/lib/hooks/useRead";
 
 interface Registry {
   // Every lifecycle, so an address resolves whatever the filter lists.
@@ -29,17 +30,13 @@ export type ListedLifecycle = HierarchyCampaign["facts"]["lifecycle"];
 
 const RegistryContext = createContext<Registry | null>(null);
 
-const REGISTRY_INTERVAL_MS = 10000;
-// Matches the dashboard's live beat, so a CLI-minted cycle is followed without the registry's lag.
-const POINTER_INTERVAL_MS = 2000;
-
 const NO_ENTRIES: HierarchyCampaign[] = [];
 
 export function RegistryProvider({ children }: { children: ReactNode }) {
   const [listedLifecycle, setListedLifecycle] = useState<ListedLifecycle>("active");
   const read = useRead(hierarchyRead(), {
     auth: true,
-    intervalMs: REGISTRY_INTERVAL_MS,
+    intervalMs: REGISTRY_POLL_MS,
   });
 
   const landed = shownData(read)?.entries ?? null;
@@ -105,7 +102,7 @@ interface ActivePointer {
 
 // The tenant's LATEST launch, not the live set.
 export function useActivePointer(): ActivePointer {
-  const read = useRead(activeRead(), { auth: true, intervalMs: POINTER_INTERVAL_MS });
+  const read = useRead(activeRead(), { auth: true, intervalMs: ACTIVE_POINTER_POLL_MS });
   const active = shownData(read);
   const campaignId = active?.campaign_id || null;
   const cycleId = active?.cycle_id || null;

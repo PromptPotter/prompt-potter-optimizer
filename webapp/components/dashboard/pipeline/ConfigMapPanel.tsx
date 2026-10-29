@@ -1,9 +1,9 @@
 "use client";
 
 import { useRead } from "@/lib/hooks/useRead";
-import { configMapRead, type ConfigCoupling } from "@/lib/api";
+import { configMapRead, type ConfigCoupling, type ConfigMapResponse } from "@/lib/api";
 import { useWorkspace } from "@/lib/workspace";
-import { CardFrame, Badge, type BadgeTone } from "@/components/ui";
+import { CardFrame, Badge, Empty, ReadState, type BadgeTone } from "@/components/ui";
 import { fmtValue } from "@/lib/format";
 
 const SEVERITY_TONE: Record<ConfigCoupling["severity"], BadgeTone> = {
@@ -35,14 +35,19 @@ function CouplingRow({ c }: { c: ConfigCoupling }) {
 export function ConfigMapPanel() {
   const { campaignId } = useWorkspace();
   const read = useRead(campaignId ? configMapRead(campaignId) : null);
+  return (
+    <ReadState
+      read={read}
+      subject="the config map"
+      className="mech-empty"
+      idle={<Empty className="mech-empty">Select a campaign to see its config map.</Empty>}
+    >
+      {(map) => <ConfigMap map={map} />}
+    </ReadState>
+  );
+}
 
-  if (read.status === "idle") {
-    return <p className="mech-empty">Select a campaign to see its config map.</p>;
-  }
-  if (read.status === "failed") return <p className="mech-empty">Could not load the config map.</p>;
-  if (read.status === "loading") return <p className="mech-empty">Loading config map…</p>;
-  const map = read.data;
-
+function ConfigMap({ map }: { map: ConfigMapResponse }) {
   const active = map.couplings.filter((c) => c.active);
   const hasCollision = active.some((c) => c.severity === "collision");
 

@@ -1,8 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
-import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
-
-const KEY_PREFIX = "promptpotter.dash.lane.";
+import { BOOL, laneKey, useLocalStorage } from "@/lib/hooks/useLocalStorage";
 
 interface Props {
   id: string;
@@ -13,11 +11,7 @@ interface Props {
 }
 
 export function Lane({ id, title, subtitle, defaultOpen = true, children }: Props) {
-  const [open, setOpen] = useLocalStorage<boolean>(
-    `${KEY_PREFIX}${id}`,
-    defaultOpen,
-    { serialize: (v) => (v ? "1" : "0"), deserialize: (raw) => raw === "1" },
-  );
+  const [open, setOpen] = useLocalStorage<boolean>(laneKey(id), defaultOpen, BOOL);
   const toggle = () => setOpen((prev) => !prev);
 
   return (

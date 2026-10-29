@@ -2,9 +2,9 @@
 // Not in `view-memory.tsx`: that record is per campaign, and a comparison spans several.
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
-import type { HierarchyCampaign } from "./api";
-import { subjectKey } from "./api/reads";
-import { decodeCyclePath } from "./ids";
+import type { HierarchyCampaign } from "@/lib/api";
+import { subjectKey } from "@/lib/api/reads";
+import { decodeCyclePath } from "@/lib/ids";
 
 export interface CompareChannel {
   /** For an L4 seed, the OUTER campaign: an inner one is in no registry and roots no tree. */
@@ -37,7 +37,7 @@ interface CompareSelection {
   clear: () => void;
 }
 
-const Ctx = createContext<CompareSelection | null>(null);
+const CompareSelectionContext = createContext<CompareSelection | null>(null);
 
 export function CompareSelectionProvider({ children }: { children: ReactNode }) {
   const [channels, setChannels] = useState<readonly CompareChannel[]>([]);
@@ -89,11 +89,11 @@ export function CompareSelectionProvider({ children }: { children: ReactNode }) 
     }),
     [channels, toggleCampaign, addCampaigns, addSubject, show, replace, remove, clear],
   );
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  return <CompareSelectionContext.Provider value={value}>{children}</CompareSelectionContext.Provider>;
 }
 
 export function useCompareSelection(): CompareSelection {
-  const ctx = useContext(Ctx);
+  const ctx = useContext(CompareSelectionContext);
   if (!ctx) throw new Error("useCompareSelection outside CompareSelectionProvider");
   return ctx;
 }

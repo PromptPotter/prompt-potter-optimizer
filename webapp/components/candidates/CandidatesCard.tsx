@@ -6,14 +6,14 @@ import { DendrogramStrip } from "./DendrogramStrip";
 import { ThetaCaveatNotice } from "./AbilityInfo";
 import { CandidatesToolbar } from "./CandidatesToolbar";
 import { useCandidatesModel, type CandidatesModel } from "./useCandidatesModel";
-import { CardFrame, Chip, IconTree } from "@/components/ui";
+import { CardFrame, Chip, IconTree, Loading } from "@/components/ui";
 import { Criterion } from "@/components/shell/scoring/Criterion";
 import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
 import { setScoringMask } from "@/lib/scoring-mask";
 import { FitnessRankSummary } from "./FitnessRankSummary";
 import { SampleSetControl } from "./SampleSetControl";
 import { cx } from "@/lib/cx";
-import { useCycleStream } from "@/lib/poll";
+import { DASHBOARD_PENDING, useCycleStream } from "@/lib/poll";
 
 function ForestToggle({ model: m }: { model: CandidatesModel }) {
   const { showForest, totalDescendants } = m;
@@ -65,7 +65,7 @@ export function CandidatesCard() {
   if (!dash) {
     return (
       <CardFrame className="cand-card" title={<span className="cand-title">Candidates</span>}>
-        <div className="lineage-empty">Waiting for this run&rsquo;s dashboard…</div>
+        <Loading className="lineage-empty">{DASHBOARD_PENDING}</Loading>
       </CardFrame>
     );
   }

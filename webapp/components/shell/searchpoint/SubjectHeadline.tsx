@@ -1,7 +1,7 @@
 "use client";
 import { ratePricedText, spendHeadline, type SpendView } from "@/lib/derivations";
 import type { ArmReading, PairedReading } from "@/lib/api/types";
-import { fmtPct0 } from "@/lib/format";
+import { fmtUnit } from "@/lib/format";
 import { HoverCard, Term } from "@/components/ui";
 import { PairedLift } from "@/components/shell/PairedLift";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
@@ -79,7 +79,7 @@ function Lift({ reading, bench }: { reading: ArmReading | null; bench: PairedRea
       }
     >
       <span className="subject-headline-acc">
-        {fmtPct0(accuracy)}
+        {fmtUnit("rate", accuracy)}
         {cut ? (
           <span className="subject-headline-cut">
             {" "}

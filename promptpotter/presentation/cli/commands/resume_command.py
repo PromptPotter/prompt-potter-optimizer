@@ -140,7 +140,7 @@ async def _fork_operator_rewind(args: argparse.Namespace, ctx: SessionCtx) -> He
 
 
 def _steer_overlay(specs: list[str], schema: PipelineSchema) -> dict[str, dict[str, Any]]:
-    """A value is read in the param's DECLARED type, as the browser coerces (`nodeConfig.ts::coerce`): a string stays text, anything else is JSON."""
+    """A value is read in the param's DECLARED type, as the browser coerces (`node-config.ts::coerce`): a string stays text, anything else is JSON."""
     overlay: dict[str, dict[str, Any]] = {}
     for spec in specs:
         key, sep, raw = spec.partition("=")

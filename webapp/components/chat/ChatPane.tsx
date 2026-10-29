@@ -11,7 +11,7 @@ import type { HierarchyCourse } from "@/lib/api";
 import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
 import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
 import { useSelection } from "@/lib/SelectionContext";
-import { useCycleEvents } from "@/lib/chat/useCycleEvents";
+import { useCycleEvents } from "@/lib/hooks/useCycleEvents";
 import { useThread, type ThreadItem } from "@/lib/chat/thread";
 import { Thread } from "@/components/chat/Thread";
 import { LiveSegment } from "@/components/chat/LiveSegment";

@@ -4,9 +4,9 @@ import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
 import type { Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api";
 import { maskedSubject } from "@/lib/api/reads";
+import { Empty } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { fmtMetricInterval, fmtMetricValue, shortId } from "@/lib/format";
-import type { MetricUnit } from "@/lib/format";
+import { fmtInterval, fmtUnit, shortId, type MetricUnit } from "@/lib/format";
 import { barChartDefaults, ensureChartRegistered, getCss, lineChartDefaults, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
 
 ensureChartRegistered();
@@ -54,9 +54,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
 
   if (cells.length === 0) {
     return (
-      <p className="note-empty">
-        No selected subject reached a cell under this metric, so there is nothing to plot.
-      </p>
+      <Empty>No selected subject reached a cell under this metric, so there is nothing to plot.</Empty>
     );
   }
 
@@ -166,7 +164,7 @@ function Merged({ evidence }: { evidence: Evidence }) {
   const x = scaleOver([...rows, ...rows.flatMap((r) => r.winner_chain ?? [])]);
   if (x === null) {
     return (
-      <p className="note-empty">No subject in this selection could be read under this metric.</p>
+      <Empty>No subject in this selection could be read under this metric.</Empty>
     );
   }
   return (
@@ -220,8 +218,8 @@ function MergedRow({
   muted?: boolean;
   nested?: boolean;
 }) {
-  const value = fmtMetricValue(unit, row.value);
-  const interval = fmtMetricInterval(unit, row.ci_lo, row.ci_hi);
+  const value = fmtUnit(unit, row.value);
+  const interval = fmtInterval(unit, row.ci_lo, row.ci_hi);
   const cells = `${row.n_cells} cell${row.n_cells === 1 ? "" : "s"}`;
   return (
     <div className={cx("ov-row", nested && "cmp-row-nested", muted && "cmp-row-muted")}>

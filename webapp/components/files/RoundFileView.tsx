@@ -1,10 +1,10 @@
 "use client";
 import { useState } from "react";
-import { Badge, CardFrame, DataTable, ErrorNote, Term, type Column } from "@/components/ui";
-import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
+import { Badge, CardFrame, DataTable, FailureLine, Term, type Column } from "@/components/ui";
+import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { PairedLift } from "@/components/shell/PairedLift";
 import type { PairedReading, ScoreboardRow } from "@/lib/api/types";
-import { fmtNum, fmtPct1, fmtSigned } from "@/lib/format";
+import { fmtInterval, fmtPct1, fmtUnit } from "@/lib/format";
 import { useRound } from "@/lib/hooks/useRound";
 import type { CyclePath } from "@/lib/ids";
 
@@ -14,7 +14,7 @@ function ArmLift({ reading }: { reading: PairedReading | null }) {
   return (
     <PairedLift reading={reading}>
       {({ estimate }) =>
-        `${fmtSigned(estimate.value, 3)} [${fmtSigned(estimate.ci_lo, 3)}, ${fmtSigned(estimate.ci_hi, 3)}]`
+        `${fmtUnit("delta", estimate.value)} ${fmtInterval("delta", estimate.ci_lo, estimate.ci_hi)}`
       }
     </PairedLift>
   );
@@ -46,7 +46,7 @@ function scoreboardColumns(wonOnTheta: boolean): Column<ScoreboardRow>[] {
       label: "Composite",
       width: "6rem",
       align: "end",
-      cell: ({ reading: s }) => fmtNum(s.own?.composite?.value),
+      cell: ({ reading: s }) => fmtUnit("composed", s.own?.composite?.value),
     },
     {
       id: "theta",
@@ -59,7 +59,7 @@ function scoreboardColumns(wonOnTheta: boolean): Column<ScoreboardRow>[] {
       ),
       width: "5rem",
       align: "end",
-      cell: ({ reading: s }) => fmtSigned(s.ability?.theta, 3),
+      cell: ({ reading: s }) => fmtUnit("delta", s.ability?.theta),
     },
     {
       id: "lift",
@@ -103,7 +103,7 @@ export function RoundFileView({
           {own && (
             <>
               <span>accuracy {fmtPct1(own.accuracy?.value)}</span>
-              <span>composite {fmtNum(own.composite?.value)}</span>
+              <span>composite {fmtUnit("composed", own.composite?.value)}</span>
               <span>n {own.n}</span>
             </>
           )}
@@ -119,7 +119,7 @@ export function RoundFileView({
         {election?.verdict_reason && (
           <div className="round-file-summary-row round-file-dim">{election.verdict_reason}</div>
         )}
-        {failure && <ErrorNote>{failure.message}</ErrorNote>}
+        <FailureLine failure={failure} />
       </div>
 
       {doc && doc.scoreboard.length > 0 && (

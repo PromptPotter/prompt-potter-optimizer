@@ -1,13 +1,14 @@
 import type { HeadToHead } from "@/lib/api";
-import { GuardBadge } from "@/components/shell/GuardBadge";
+import { GuardBadge } from "./GuardBadge";
 import { PairedLift } from "@/components/shell/PairedLift";
 import { readPaired } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
 import {
   sideTone,
-  fmtMetricInterval,
+  fmtInterval,
   fmtPValue,
-  fmtSigned,
+  fmtUnit,
+  PLACEHOLDER,
   shortId,
   verdictTone,
 } from "@/lib/format";
@@ -74,8 +75,8 @@ const PAIR_COLUMNS: readonly Column<SelectionPair>[] = [
         <PairedLift reading={reading}>
           {({ estimate }) => (
             <span className={sideTone(estimate.side)}>
-              {fmtSigned(estimate.value)}{" "}
-              {fmtMetricInterval("delta", estimate.ci_lo, estimate.ci_hi)}
+              {fmtUnit("delta", estimate.value)}{" "}
+              {fmtInterval("delta", estimate.ci_lo, estimate.ci_hi)}
             </span>
           )}
         </PairedLift>
@@ -92,7 +93,7 @@ const PAIR_COLUMNS: readonly Column<SelectionPair>[] = [
     align: "end",
     cell: ({ reading }) => {
       const pair = readPaired(reading);
-      return pair.read ? pair.cells : "—";
+      return pair.read ? pair.cells : PLACEHOLDER;
     },
   },
   {

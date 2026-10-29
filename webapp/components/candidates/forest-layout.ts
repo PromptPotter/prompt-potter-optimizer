@@ -11,7 +11,7 @@ import type {
 import { candidatesOf, descentOf, tagValue } from "@/lib/derivations";
 import type { CyclePath } from "@/lib/ids";
 import { pathOfAddress } from "@/lib/ids";
-import { fmtPct0 } from "@/lib/format";
+import { fmtUnit } from "@/lib/format";
 
 export interface Density {
   colW: number;
@@ -425,7 +425,7 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
     for (const gene of genes) {
       const source = nodeByCandidate.get(gene.source);
       if (source && source !== from && source !== giver) {
-        const note = `${gene.locus} resembles ${source.candidateLabel} (${fmtPct0(gene.similarity)} alike)`;
+        const note = `${gene.locus} resembles ${source.candidateLabel} (${fmtUnit("rate", gene.similarity)} alike)`;
         segs.push({ x1: source.x, y1: source.y, ...to, variant: "gene", note });
       }
     }

@@ -9,7 +9,7 @@ import {
 import { SegmentedControl, Switch, Term } from "@/components/ui";
 import { TERMS } from "@/lib/terms";
 import { spendHeadline } from "@/lib/derivations";
-import { fmtText, fmtDuration, fmtUsd, fmtTokens } from "@/lib/format";
+import { fmtText, fmtDuration, fmtUsd, fmtTokens, PLACEHOLDER } from "@/lib/format";
 import { RunLimitsControl } from "@/components/shell/remote/RunLimitsControl";
 import type { RemoteModel } from "./useRemoteModel";
 
@@ -54,11 +54,11 @@ function IdentityAndSpend({ model: m }: { model: RemoteModel }) {
           </span>
         </div>
       ))}
-      <div className="row"><span className="lbl">Billed</span><span className="val">{metered ? spendHeadline(metered) : "—"}</span></div>
+      <div className="row"><span className="lbl">Billed</span><span className="val">{metered ? spendHeadline(metered) : PLACEHOLDER}</span></div>
       {metered?.calls_rate_priced ? (
         <div className="row"><span className="lbl">{RATE_PRICED_LABEL}</span><span className="val">{fmtUsd(metered.rate_priced_usd)}</span></div>
       ) : null}
-      <div className="row"><span className="lbl">Tokens</span><span className="val">{metered ? fmtTokens(metered.billed_tokens) : "—"}</span></div>
+      <div className="row"><span className="lbl">Tokens</span><span className="val">{metered ? fmtTokens(metered.billed_tokens) : PLACEHOLDER}</span></div>
       {metered?.bill_is_floor ? (
         <div className="row">
           <span className="lbl">USD cap</span>
@@ -72,16 +72,17 @@ function IdentityAndSpend({ model: m }: { model: RemoteModel }) {
 }
 
 function SamplesInFlight({ model: m }: { model: RemoteModel }) {
-  const { most, providerHeld } = m;
+  const { lookahead: la, providerHeld } = m;
+  const pending = m.pending !== null;
   return (
     <div className="remote-panel-section">
       <div className="section-title">Samples in flight</div>
       <Term className="row" content={TERMS.remote_flight}>
-        <span className="lbl">{m.scoringNow ? "Now" : "Next round"}</span>
+        <span className="lbl">{la.scoring_now ? "Now" : "Next round"}</span>
         <span className="val">
-          {m.scoringNow
-            ? `${m.inFlight} out · ${m.allowed} allowed · ${most} at most`
-            : `${most} at most`}
+          {la.scoring_now
+            ? `${la.in_flight} out · ${la.allowed} allowed · ${la.most} at most`
+            : `${la.most} at most`}
         </span>
       </Term>
       {m.waitNote ? (
@@ -90,16 +91,16 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
           <span className="val remote-spend-warn">{m.waitNote}</span>
         </div>
       ) : null}
-      {m.moneyHold !== null ? (
+      {la.money_hold !== null ? (
         <div className="row">
           <span className="lbl">Ceiling</span>
           <Term
             className="val remote-spend-warn"
             content={`Each call out holds part of the ceiling${
-              m.cellReserve != null ? `, ${fmtUsd(m.cellReserve)} here` : ""
+              la.cell_reserve_usd != null ? `, ${fmtUsd(la.cell_reserve_usd)} here` : ""
             }, so once the ceiling cannot hold another the walk runs one at a time — whatever depth is armed. Raise the budget below to widen it.`}
           >
-            {m.moneyHold}
+            {la.money_hold}
           </Term>
         </div>
       ) : null}
@@ -111,27 +112,33 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
           </Term>
         </div>
       ) : null}
-      <span className="remote-cells-group" title={m.concurrencyTitle}>
+      <span className="remote-cells-group" title={la.explained}>
         <span aria-hidden="true" className="remote-cells-icon">
           ⇉
         </span>
         <SegmentedControl
-          ariaLabel={`Calls to hold in flight, up to ${m.pickMax}`}
+          ariaLabel={`Calls to hold in flight, up to ${la.pick_max}`}
           className="remote-cells"
-          value={String(m.lookahead)}
+          value={String(la.depth)}
           onChange={m.armCells}
-          options={m.depthSegments}
+          options={la.depths.map((d) => ({
+            value: String(d.cells),
+            label: String(d.cells),
+            fill: d.fill ?? undefined,
+            disabled: pending || !d.pickable,
+            title: d.label,
+          }))}
         />
       </span>
       <div className="row">
         <span className="lbl">Every round</span>
         <span className="val">
           <Switch
-            checked={m.autoArmed}
+            checked={la.auto}
             label="Hold as many as the stop rules allow, every round"
-            locked={m.autoDisabled}
-            lockedNote={m.concurrencyUnavailable || "not available now"}
-            onChange={() => m.arm(m.lookahead, !m.autoArmed)}
+            locked={pending || la.auto_refusal !== ""}
+            lockedNote={la.auto_refusal || "not available now"}
+            onChange={() => m.arm(la.depth, !la.auto)}
           />
         </span>
       </div>

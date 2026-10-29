@@ -1,6 +1,7 @@
 "use client";
 
 import type { DraftCampaignWire } from "@/lib/api";
+import { PLACEHOLDER } from "@/lib/format";
 
 // A check-in has no `datasets/{slug}/` until Start, so `/cells` cannot answer.
 export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
@@ -35,7 +36,7 @@ export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
                 const v = row[h];
                 return (
                   <td key={h} title={v ?? "This row carries no value for this column."}>
-                    {v ?? "—"}
+                    {v ?? PLACEHOLDER}
                   </td>
                 );
               })}

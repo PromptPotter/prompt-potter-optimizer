@@ -1,9 +1,9 @@
 "use client";
 import { useMemo, useState } from "react";
 import { filesRead, type FileEntry } from "@/lib/api";
-import { useActivePointer, useRegistry } from "@/lib/registry";
-import { readyData, useRead } from "@/lib/hooks/useRead";
-import { Empty, Loading, ErrorNote } from "@/components/ui";
+import { useActivePointer, useRegistry } from "@/lib/state/registry";
+import { useRead } from "@/lib/hooks/useRead";
+import { Empty, FailureLine, ReadState } from "@/components/ui";
 
 interface DirNode {
   dirs: Record<string, DirNode>;
@@ -61,28 +61,36 @@ interface Props {
 export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
   const registryFailure = useRegistry().failure;
   const pointerFailure = useActivePointer().failure;
-  const unreachable = registryFailure !== null || pointerFailure !== null;
   const read = useRead(campaignId && cycleId ? filesRead(campaignId, cycleId) : null);
-  const listing = readyData(read);
-  const tree = useMemo(
-    () => (listing ? buildTree(listing.entries) : null),
-    [listing],
+  const netFailure = pointerFailure ?? registryFailure;
+
+  return (
+    <ReadState
+      read={read}
+      subject="this cycle’s files"
+      idle={
+        netFailure !== null ? (
+          <FailureLine failure={netFailure} />
+        ) : (
+          <Empty>No active campaign — pick one from the sidebar, or start one in a terminal.</Empty>
+        )
+      }
+    >
+      {(listing) => <FileScopes entries={listing.entries} selected={selected} onSelect={onSelect} />}
+    </ReadState>
   );
+}
 
-  if (!cycleId) {
-    return unreachable ? (
-      <ErrorNote>Server unreachable — retrying</ErrorNote>
-    ) : (
-      <Empty>No active campaign — pick one from the sidebar, or start one in a terminal.</Empty>
-    );
-  }
-  if (read.status === "failed") {
-    return <ErrorNote>Could not load this cycle&rsquo;s files.</ErrorNote>;
-  }
-  if (!tree) {
-    return <Loading>Loading file tree…</Loading>;
-  }
-
+function FileScopes({
+  entries,
+  selected,
+  onSelect,
+}: {
+  entries: FileEntry[];
+  selected: Props["selected"];
+  onSelect: Props["onSelect"];
+}) {
+  const tree = useMemo(() => buildTree(entries), [entries]);
   return (
     <div>
       <ScopeBlock label="unit (root)" node={tree.cycle} scope="cycle" selected={selected} onSelect={onSelect} />

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
 import {
   Chart as ChartJS,
   BarElement,
@@ -85,14 +86,12 @@ export function applyChartDefaults(): void {
   ChartJS.defaults.borderColor = getCss("--color-border");
 }
 
-const THEME_STORAGE_KEY = "promptpotter.theme";
-
 type Theme = "light" | "dark";
 
 export function readStoredTheme(): Theme {
   if (typeof window === "undefined") return "light";
   try {
-    const v = window.localStorage.getItem(THEME_STORAGE_KEY);
+    const v = window.localStorage.getItem(STORAGE_KEYS.theme);
     if (v === "dark" || v === "light") return v;
   } catch {
     /* ignore */
@@ -108,7 +107,7 @@ export function applyTheme(t: Theme): void {
     document.documentElement.removeAttribute("data-theme");
   }
   try {
-    window.localStorage.setItem(THEME_STORAGE_KEY, t);
+    window.localStorage.setItem(STORAGE_KEYS.theme, t);
   } catch {
     /* ignore */
   }

@@ -67,7 +67,7 @@
 
 .remote-spend-cache{color:var(--color-text-secondary);font-weight:400}
 
-.remote-err{color:var(--color-danger);max-width:200px}
+.remote-err{max-width:200px}
 
 .remote-readout{
   display:inline-flex;align-items:center;gap:var(--space-10);

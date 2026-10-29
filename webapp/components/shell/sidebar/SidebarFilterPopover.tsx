@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { Icon, Popover, SegmentedControl, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import type { ListedLifecycle } from "@/lib/registry";
+import type { ListedLifecycle } from "@/lib/state/registry";
 
 interface Props {
   listedLifecycle: ListedLifecycle;

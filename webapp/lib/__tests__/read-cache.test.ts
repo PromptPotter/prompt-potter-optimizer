@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { READ_BEAT_MS } from "@/lib/cadence";
 import {
-  READ_BEAT_MS,
   READ_CACHE_MAX_KEYS,
   cachedRead,
   clearReadCache,

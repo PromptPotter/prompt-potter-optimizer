@@ -2,7 +2,7 @@
 import { metricInkToken } from "./series";
 import { AbilityHelp } from "./AbilityInfo";
 import type { CandidatesModel } from "./useCandidatesModel";
-import { setCandidatesState, toggleMetric } from "@/lib/candidates-store";
+import { setCandidatesState, toggleMetric } from "@/lib/state/candidates";
 import {
   Badge,
   Chip,

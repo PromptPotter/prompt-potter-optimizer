@@ -1,7 +1,7 @@
 "use client";
 
 import type { DatasetIndexEntry, DraftSummary, OriginEntry } from "@/lib/api";
-import { fmtAgo, fmtPct0 } from "@/lib/format";
+import { fmtAgo, fmtUnit, PLACEHOLDER } from "@/lib/format";
 
 export function DatasetPickList({
   drafts,
@@ -35,7 +35,7 @@ export function DatasetPickList({
 
   const originMeta = (o: OriginEntry): string => {
     if (o.n_campaigns === 0) return "prepared";
-    const acc = o.origin_accuracy == null ? "" : ` · ${fmtPct0(o.origin_accuracy)}`;
+    const acc = o.origin_accuracy == null ? "" : ` · ${fmtUnit("rate", o.origin_accuracy)}`;
     return `${o.n_campaigns} campaign${o.n_campaigns === 1 ? "" : "s"}${acc}`;
   };
 
@@ -112,7 +112,7 @@ export function DatasetPickList({
                   <span className="ingest-pick-name">
                     {d.title ? `${d.name} — ${d.title}` : d.name}
                   </span>
-                  <span className="ingest-pick-meta">{d.n_samples ?? "—"}</span>
+                  <span className="ingest-pick-meta">{d.n_samples ?? PLACEHOLDER}</span>
                 </button>
                 {d.start_block ? (
                   <p className="ingest-pick-why">

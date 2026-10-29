@@ -11,7 +11,7 @@ import {
   permittedModels,
   seedOverlayFromRows,
   type ConfigRow,
-} from "../nodeConfig";
+} from "../node-config";
 import type { KnobRow, ModelCapability, NodeConfigParam } from "@/lib/api";
 import { SCHEMA_DESCRIPTION_PREFIX as DESCRIPTION_PREFIX } from "@/lib/api/types.generated";
 

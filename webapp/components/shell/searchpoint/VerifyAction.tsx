@@ -5,13 +5,20 @@ import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
 import { cycleAddress, postCommand, type VerifyStrategy } from "@/lib/api/commands";
 import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
+import { VERIFY_PASS_POLL_MS } from "@/lib/cadence";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
 import { unitCount } from "@/lib/format";
-import { Chip, CommitInput, IconMore, Menu, MenuRadioGroup, MenuSep } from "@/components/ui";
+import {
+  Chip,
+  CommitInput,
+  FailureLine,
+  IconMore,
+  Menu,
+  MenuRadioGroup,
+  MenuSep,
+} from "@/components/ui";
 import { VerifyReading } from "./VerifyReading";
-
-const PASS_POLL_MS = 5000;
 
 const STRATEGIES = (Object.keys(VERIFY_STRATEGY_LABELS) as VerifyStrategy[]).map((value) => ({
   value,
@@ -29,7 +36,7 @@ export function VerifyAction({
   const [strategy, setStrategy] = useState<VerifyStrategy>("random");
   const [samples, setSamples] = useState("");
   const sending = cmd.pending !== null;
-  const { readings, passes, unit } = useVerify(path, sending ? PASS_POLL_MS : undefined);
+  const { readings, passes, unit } = useVerify(path, sending ? VERIFY_PASS_POLL_MS : undefined);
 
   if (!path || !candidate.label) return null;
 
@@ -114,7 +121,7 @@ export function VerifyAction({
           This mints no round, so the cycle&rsquo;s own series does not move.
         </p>
       )}
-      {cmd.failure ? <p className="verify-action-note error">{cmd.failure.message}</p> : null}
+      <FailureLine failure={cmd.failure} />
       {!busy && last?.failure != null && (
         <p className="verify-action-note error">The last verify failed: {last.failure}</p>
       )}

@@ -68,11 +68,8 @@
 .unit-library-active-filter-text span{padding:1px var(--space-8);background:var(--color-background-tint-active);border-radius:10px;font-size:var(--text-xs);color:var(--color-accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .unit-library-active-filter-clear{margin-left:auto;background:transparent;border:0;color:var(--color-text-secondary);font-size:var(--text-xs);line-height:1;cursor:pointer;padding:2px var(--space-4);border-radius:4px}
 .unit-library-active-filter-clear:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
-.unit-library-note{padding:var(--space-4) var(--space-8);font-size:var(--text-sm);color:var(--color-text-secondary)}
+.unit-library-note{padding:var(--space-4) var(--space-8)}
 .unit-library-note code{font-size:var(--text-xs)}
-.unit-library-empty{padding:var(--space-12) var(--space-10);display:flex;flex-direction:column;gap:var(--space-6)}
-.unit-library-empty .empty-headline{font-size:var(--text-base);font-weight:500;color:var(--color-text-secondary)}
-.unit-library-empty .empty-body{font-size:var(--text-sm);color:var(--color-text-secondary)}
 .sidebar-filter-lifecycle{display:flex;margin-bottom:var(--space-6)}
 .sidebar-filter-lifecycle > *{flex:1}
 .campaign-menu-trigger{background:transparent;border:0;color:var(--color-text-secondary);font-size:var(--text-md);line-height:1;padding:2px var(--space-6);cursor:pointer;border-radius:4px}

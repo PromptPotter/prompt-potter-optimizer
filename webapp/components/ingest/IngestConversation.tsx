@@ -8,6 +8,7 @@ import type {
   OriginEntry,
   StartCheckinOptions,
 } from "@/lib/api";
+import { ELAPSED_TICK_MS } from "@/lib/cadence";
 import { budgetAxis } from "@/lib/derivations";
 import type { IngestFlow } from "@/lib/hooks/useIngestFlow";
 import type { BlockItem } from "@/lib/chat/thread";
@@ -15,6 +16,7 @@ import { useIngest } from "@/lib/ingest-flow";
 import { Composer } from "@/components/chat/Composer";
 import { useThreadFollow } from "@/components/chat/Thread";
 import { Criterion } from "@/components/shell/scoring/Criterion";
+import { FailureLine } from "@/components/ui";
 import { dialsOf, dialsText } from "@/lib/scoring-mask";
 import { ORIGIN_KEY } from "@/lib/origin-readiness";
 import { DatasetPreview } from "./DatasetPreview";
@@ -36,7 +38,7 @@ import { DatasetPickList } from "./DatasetPickList";
 function CheckinLoadingWindow({ model }: { model: string }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setSecs((s) => s + 1), 1000);
+    const id = setInterval(() => setSecs((s) => s + 1), ELAPSED_TICK_MS);
     return () => clearInterval(id);
   }, []);
   return (
@@ -113,9 +115,9 @@ function SetupBlocks({ flow }: { flow: IngestFlow }) {
             cases the model must respect — a few sentences is plenty.
           </p>
           {!flow.inputText.trim() ? (
-            <p className="new-campaign-error" role="alert">
-              Context can’t be empty — the check-in needs it to set things up.
-            </p>
+            <FailureLine
+              failure={{ message: "Context can’t be empty — the check-in needs it to set things up." }}
+            />
           ) : null}
         </div>
       ) : null}
@@ -306,11 +308,7 @@ function ReadyBlock({ flow }: { flow: IngestFlow }) {
         </ul>
       ) : null}
 
-      {problem ? (
-        <p className="new-campaign-error" role="alert">
-          {problem}
-        </p>
-      ) : null}
+      {problem ? <FailureLine failure={{ message: problem }} /> : null}
 
       {/* `saving` never disables Start: that would eat the tap whose blur committed the field. */}
       <button

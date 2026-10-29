@@ -22,11 +22,9 @@ import { usePresetCells, type CellsPreset } from "@/lib/hard-samples";
 import { readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { useLineageTree } from "@/lib/lineage";
-import { fmtMetricInterval, fmtMetricValue, shortId } from "@/lib/format";
+import { fmtInterval, fmtUnit, shortId, type MetricUnit } from "@/lib/format";
 import { type CyclePath, decodeCyclePath, encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import { editsFor, pointKeyOf, useScenarioEdits } from "./config-edit";
-
-export type MetricUnit = Parameters<typeof fmtMetricValue>[0];
 
 type Fold = "detail" | "map" | "setup";
 
@@ -189,10 +187,10 @@ export function useChannelModel(
 
   const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
   const level = reading && {
-    value: withdrawn ? "?" : fmtMetricValue(unit, reading.value),
+    value: withdrawn ? "?" : fmtUnit(unit, reading.value),
     band: withdrawn
       ? "? · ? cells"
-      : `${fmtMetricInterval(unit, reading.ci_lo, reading.ci_hi)} · ${reading.n_cells} cell${
+      : `${fmtInterval(unit, reading.ci_lo, reading.ci_hi)} · ${reading.n_cells} cell${
           reading.n_cells === 1 ? "" : "s"
         }`,
   };

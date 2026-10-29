@@ -15,7 +15,7 @@ import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDr
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
 import { CompareOriginAction } from "@/components/shell/searchpoint/CompareOriginAction";
-import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
+import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 
 interface Props {
   selected: SelectedCandidate | null;

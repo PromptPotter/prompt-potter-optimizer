@@ -1,10 +1,10 @@
 "use client";
-import { useRegistry } from "@/lib/registry";
+import { useRegistry } from "@/lib/state/registry";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import { decodeCyclePath, encodeCyclePath } from "@/lib/ids";
 import { fmtAgo } from "@/lib/format";
-import { STATUS_MARK, statusTone } from "@/lib/run-phase";
+import { STATUS_MARK, statusTone } from "@/lib/derivations";
 import { readyData } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import type { HierarchyCourse, MachineSlot } from "@/lib/api";

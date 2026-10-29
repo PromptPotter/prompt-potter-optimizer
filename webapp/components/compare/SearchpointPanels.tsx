@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api";
-import { CardFrame } from "@/components/ui";
+import { CardFrame, Empty, Loading } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { indexLineage } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
@@ -26,12 +26,13 @@ function ConfigPanels({ evidence, loading }: { evidence: Evidence; loading: bool
   const withoutConfig = evidence.subjects.filter((s) => s.config === null);
 
   if (rows.length === 0) {
-    return (
-      <p className={loading ? "note-lede" : "note-empty"}>
-        {loading
-          ? "Reading the searchpoints…"
-          : "None of these searchpoints recorded a configuration. A proposed arm resolves none, and nothing here reconstructs one."}
-      </p>
+    return loading ? (
+      <Loading>Reading the searchpoints…</Loading>
+    ) : (
+      <Empty>
+        None of these searchpoints recorded a configuration. A proposed arm resolves none, and
+        nothing here reconstructs one.
+      </Empty>
     );
   }
 
@@ -203,7 +204,7 @@ function CampaignSpines({
   if (failed) {
     return <p className="note-warn">Could not read {shortId(campaignId)}&rsquo;s lineage.</p>;
   }
-  if (!loaded) return <p className="note-empty">Reading {shortId(campaignId)}&rsquo;s lineage…</p>;
+  if (!loaded) return <Loading>Reading {shortId(campaignId)}&rsquo;s lineage…</Loading>;
   if (spines.length === 0) {
     return (
       <p className="note-info">

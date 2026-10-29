@@ -4,7 +4,7 @@ import type { HierarchyCampaign } from "@/lib/api";
 import type { RunStatus } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
 import { fmtAgo } from "@/lib/format";
-import { STATUS_MARK } from "@/lib/run-phase";
+import { STATUS_MARK } from "@/lib/derivations";
 
 export function PhaseMark({ status }: { status: RunStatus }) {
   const mark = STATUS_MARK[status.mark];

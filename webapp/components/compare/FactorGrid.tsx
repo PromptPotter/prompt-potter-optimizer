@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { CardFrame } from "@/components/ui";
+import { CardFrame, Empty } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
-import { fmtMetricInterval, fmtMetricValue } from "@/lib/format";
+import { fmtInterval, fmtUnit } from "@/lib/format";
 
 function clip(value: string, width: number): string {
   return value.length <= width ? value : `${value.slice(0, width - 1)}…`;
@@ -66,10 +66,10 @@ export function FactorGrid({
   if (factors.length === 0) {
     return (
       <CardFrame title="Factor grid">
-        <p className="note-empty">
+        <Empty>
           Nothing varies across these subjects — they ran the same way on the same dataset, which
           makes them replicates rather than a grid. The spread between them is the noise reading.
-        </p>
+        </Empty>
       </CardFrame>
     );
   }
@@ -166,8 +166,8 @@ export function FactorGrid({
                           {!cell ? (
                             <span title="No subject in this selection ran that combination.">—</span>
                           ) : (
-                            <span title={fmtMetricInterval(unit, cell.ci_lo, cell.ci_hi)}>
-                              {fmtMetricValue(unit, cell.value)}
+                            <span title={fmtInterval(unit, cell.ci_lo, cell.ci_hi)}>
+                              {fmtUnit(unit, cell.value)}
                               <span className="l4-cell-n">
                                 {" "}
                                 · {cell.n_cells} cells, {cell.subjects.length} subj
@@ -177,8 +177,8 @@ export function FactorGrid({
                         </td>
                       );
                     })}
-                    <td className="l4-margin" title={fmtMetricInterval(unit, rlv.ci_lo, rlv.ci_hi)}>
-                      {fmtMetricValue(unit, rlv.value)}
+                    <td className="l4-margin" title={fmtInterval(unit, rlv.ci_lo, rlv.ci_hi)}>
+                      {fmtUnit(unit, rlv.value)}
                     </td>
                   </tr>
                 ))}
@@ -190,9 +190,9 @@ export function FactorGrid({
                     <td
                       key={clv.level}
                       className="l4-margin"
-                      title={fmtMetricInterval(unit, clv.ci_lo, clv.ci_hi)}
+                      title={fmtInterval(unit, clv.ci_lo, clv.ci_hi)}
                     >
-                      {fmtMetricValue(unit, clv.value)}
+                      {fmtUnit(unit, clv.value)}
                     </td>
                   ))}
                   <td />

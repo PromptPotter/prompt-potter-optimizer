@@ -33,9 +33,10 @@ import {
   type CampaignTab,
   type Tab,
 } from "./view-tab";
+import { GONE_NOTICE_MS } from "./cadence";
 import { hasTag, tagValue } from "./derivations/hierarchy";
-import { useActivePointer, useEntry, useRegistry } from "./registry";
-import { useViewMemory } from "./view-memory";
+import { useActivePointer, useEntry, useRegistry } from "./state/registry";
+import { useViewMemory } from "./state/view-memory";
 
 interface NavigateOptions {
   candidate?: string | null;
@@ -109,8 +110,6 @@ function urlAddress(): Address | null {
   if (typeof window === "undefined") return null;
   return parseAddress(window.location.hash);
 }
-
-const GONE_NOTICE_MS = 8000;
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [pinnedPath, setPinnedPath] = useState<CyclePath | null>(null);

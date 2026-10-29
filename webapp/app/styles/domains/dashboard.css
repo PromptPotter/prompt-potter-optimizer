@@ -111,7 +111,7 @@
 .pcr-note{flex:0 0 auto;font-size:var(--text-xs);font-style:italic}
 
 .mech-lead{margin:0 0 var(--space-12);font-size:var(--text-sm);line-height:1.5;color:var(--color-text-secondary)}
-.mech-empty{margin:0;padding:var(--space-8) var(--space-4);font-size:var(--text-sm);color:var(--color-text-secondary)}
+.mech-empty{padding:var(--space-8) var(--space-4)}
 .mech-groups{display:flex;flex-direction:column;gap:var(--space-12)}
 .mech-pools{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,calc(var(--box-min) / 2)),1fr));gap:var(--space-12)}
 .mech-pools-col > .mech-card-title{margin:0 0 var(--space-6)}

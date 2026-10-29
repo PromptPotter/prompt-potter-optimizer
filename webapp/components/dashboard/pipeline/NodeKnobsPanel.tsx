@@ -6,12 +6,25 @@ import {
   optimizerRosterRead,
   type KnobRow,
   type ManifestNodeOverlay,
+  type OptimizerKnobsResponse,
+  type OptimizerRoster,
+  type OptimizerSetup,
   type PoolRow,
 } from "@/lib/api";
 import { knobRange, knobText, parseKnob } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
-import { Badge, Button, Chip, ChipGroup, CommitInput, Switch } from "@/components/ui";
+import {
+  Badge,
+  Button,
+  Chip,
+  ChipGroup,
+  CommitInput,
+  Empty,
+  Loading,
+  ReadState,
+  Switch,
+} from "@/components/ui";
 import { fmtValue } from "@/lib/format";
 
 export function NodeKnobsPanel({
@@ -28,24 +41,50 @@ export function NodeKnobsPanel({
   const setup = cv.optimizerSetup;
 
   if (!editable && !campaignId) {
-    return <p className="mech-empty">Select a campaign to see its optimizer&apos;s knobs.</p>;
+    return <Empty className="mech-empty">Select a campaign to see its optimizer&apos;s knobs.</Empty>;
   }
-  if (knobsRead.status === "failed" || cv.schema.status === "error") {
-    return <p className="mech-empty">Could not load the optimizer&apos;s knobs.</p>;
+  if (cv.schema.status === "error") {
+    return <Empty className="mech-empty">Could not load the optimizer&apos;s knobs.</Empty>;
   }
-  if (knobsRead.status !== "ready" || setup === null) {
-    return <p className="mech-empty">Loading knobs…</p>;
-  }
-  const menu = knobsRead.data;
+  const reading = <Loading className="mech-empty">Reading the optimizer&apos;s knobs…</Loading>;
+  return (
+    <ReadState read={knobsRead} subject="the optimizer’s knobs" className="mech-empty" idle={reading}>
+      {(menu) =>
+        setup === null ? (
+          reading
+        ) : (
+          <KnobGroups
+            menu={menu}
+            setup={setup}
+            entry={readyData(rosterRead)?.optimizers.find((o) => o.name === menu.optimizer)}
+            onChange={onChange}
+          />
+        )
+      }
+    </ReadState>
+  );
+}
+
+function KnobGroups({
+  menu,
+  setup,
+  entry,
+  onChange,
+}: {
+  menu: OptimizerKnobsResponse;
+  setup: OptimizerSetup;
+  entry: OptimizerRoster["optimizers"][number] | undefined;
+  onChange: ((patch: Record<string, ManifestNodeOverlay>) => void) | undefined;
+}) {
+  const editable = onChange != null;
   const valueOf = (node: string, k: KnobRow): unknown => setup.knobs[node]?.[k.key];
-  const entry = readyData(rosterRead)?.optimizers.find((o) => o.name === menu.optimizer);
   const declared = entry?.paper ? "Paper" : "Default";
 
   const set = (node: string, knob: KnobRow, next: unknown) =>
     onChange!({ [node]: { config: { [knob.key]: next } } });
 
   if (menu.nodes.length === 0) {
-    return <p className="mech-empty">{menu.optimizer} declares no knobs.</p>;
+    return <Empty className="mech-empty">{menu.optimizer} declares no knobs.</Empty>;
   }
   return (
     <div className="mech-groups">

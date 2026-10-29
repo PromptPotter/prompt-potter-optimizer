@@ -2,11 +2,11 @@
 import { CardFrame } from "@/components/ui";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useOptimizerPipeline } from "@/lib/hooks/useOptimizerPipeline";
-import { useCandidatesState } from "@/lib/candidates-store";
+import { useCandidatesState } from "@/lib/state/candidates";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useSelection } from "@/lib/SelectionContext";
 import { hasTag } from "@/lib/derivations";
-import { useEntry } from "@/lib/registry";
+import { useEntry } from "@/lib/state/registry";
 import { useWorkspace } from "@/lib/workspace";
 import { RunErrorBanner } from "./RunErrorBanner";
 import { TopStrip } from "./TopStrip";

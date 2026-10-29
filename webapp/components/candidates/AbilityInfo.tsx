@@ -2,8 +2,7 @@
 
 import { THETA_CAVEAT_INFO, type AbilityReading } from "@/lib/api/types.generated";
 import type { ThetaCaveat as Caveat } from "@/lib/types";
-
-const fmtSpan = (v: number | null) => (v == null ? null : `${v.toFixed(2)} logits`);
+import { fmtLogits } from "@/lib/format";
 
 export function ThetaCaveatNotice({
   caveat,
@@ -14,15 +13,15 @@ export function ThetaCaveatNotice({
 }) {
   if (!caveat) return null;
   const { head, body } = THETA_CAVEAT_INFO[caveat];
-  const round = fmtSpan(ability?.round_span ?? null);
-  const ruler = fmtSpan(ability?.ruler_span ?? null);
+  const round = ability?.round_span;
+  const ruler = ability?.ruler_span;
   return (
     <div className="theta-caveat" role="note">
       <strong>{head}</strong> {body}
-      {round && ruler ? (
+      {round != null && ruler != null ? (
         <span className="theta-caveat-spans">
           {" "}
-          This round&rsquo;s cells span {round}; the ruler spans {ruler}.
+          This round&rsquo;s cells span {fmtLogits(round)}; the ruler spans {fmtLogits(ruler)}.
         </span>
       ) : null}
     </div>

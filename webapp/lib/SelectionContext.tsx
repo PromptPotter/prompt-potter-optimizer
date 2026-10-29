@@ -11,7 +11,7 @@ export interface SelectedNode {
   scope: NodeScope;
 }
 
-interface Ctx {
+interface Selection {
   candidate: SelectedCandidate | null;
   // null follows live.
   round: number | null;
@@ -27,7 +27,7 @@ interface Ctx {
   setSelectionForSampleSet: (ids: number[] | null) => void;
 }
 
-const SelectionCtx = createContext<Ctx | null>(null);
+const SelectionContext = createContext<Selection | null>(null);
 
 export function SelectionProvider({
   cycleId,
@@ -78,7 +78,7 @@ export function SelectionProvider({
     setSampleSet(ids);
   }, []);
 
-  const value = useMemo<Ctx>(
+  const value = useMemo<Selection>(
     () => ({
       candidate,
       round,
@@ -104,11 +104,11 @@ export function SelectionProvider({
     ],
   );
 
-  return <SelectionCtx.Provider value={value}>{children}</SelectionCtx.Provider>;
+  return <SelectionContext.Provider value={value}>{children}</SelectionContext.Provider>;
 }
 
-export function useSelection(): Ctx {
-  const c = useContext(SelectionCtx);
+export function useSelection(): Selection {
+  const c = useContext(SelectionContext);
   if (!c) throw new Error("useSelection must be used inside SelectionProvider");
   return c;
 }

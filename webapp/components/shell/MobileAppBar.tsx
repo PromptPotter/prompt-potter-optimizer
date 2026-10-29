@@ -1,7 +1,7 @@
 "use client";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/state/auth";
 import { useIngest } from "@/lib/ingest-flow";
-import { useCampaign, useRegistry } from "@/lib/registry";
+import { useCampaign, useRegistry } from "@/lib/state/registry";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
 import { WORKSPACE_LABEL, isWorkspaceTab } from "@/lib/view-tab";

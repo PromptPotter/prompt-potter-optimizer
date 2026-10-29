@@ -8578,6 +8578,49 @@
         "title": "LivesReading",
         "type": "object"
       },
+      "LookaheadDepth": {
+        "additionalProperties": false,
+        "description": "One depth the look-ahead control offers: that many calls held in flight.",
+        "properties": {
+          "cells": {
+            "title": "Cells",
+            "type": "integer"
+          },
+          "fill": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full",
+                  "part"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`full` where that many calls are out now, `part` where the gauge allows that many; null past both.",
+            "title": "Fill"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "pickable": {
+            "description": "Whether a press of this depth is admitted now: the control applies, the run admits `set-sample-lookahead` and the next walk can take that many.",
+            "title": "Pickable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cells",
+          "label",
+          "fill",
+          "pickable"
+        ],
+        "title": "LookaheadDepth",
+        "type": "object"
+      },
       "LoopWarning": {
         "additionalProperties": false,
         "description": "One optimizer-loop degradation the self-healing rails recovered from.",
@@ -13380,6 +13423,117 @@
         "title": "RuntimeFailure",
         "type": "object"
       },
+      "SampleLookahead": {
+        "additionalProperties": false,
+        "description": "The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its\ncontrol offers. A replay takes no armed control, so it reads depth 1 and nothing armed.",
+        "properties": {
+          "allowed": {
+            "description": "Calls the gauge admits out now; 0 with `in_flight`.",
+            "title": "Allowed",
+            "type": "integer"
+          },
+          "auto": {
+            "description": "Whether that depth outlives its round — the operator's auto-arm.",
+            "title": "Auto",
+            "type": "boolean"
+          },
+          "auto_refusal": {
+            "description": "Why the auto-arm switch is shut: `unavailable`, or the cycle has settled. A mode, not a press, so a paused run takes it for its relaunch; empty where offered.",
+            "title": "Auto Refusal",
+            "type": "string"
+          },
+          "ceiling": {
+            "description": "The backend's `max_cells_in_flight`; 1 says the control does not apply.",
+            "title": "Ceiling",
+            "type": "integer"
+          },
+          "cell_reserve_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What each call out holds of the ceiling; null where no book binds.",
+            "title": "Cell Reserve Usd"
+          },
+          "depth": {
+            "description": "The depth IN FORCE — how many cells the walk holds in flight: the armed request bounded by `ceiling`.",
+            "title": "Depth",
+            "type": "integer"
+          },
+          "depths": {
+            "description": "Each depth the control draws, 1 to `ceiling`.",
+            "items": {
+              "$ref": "#/components/schemas/LookaheadDepth"
+            },
+            "title": "Depths",
+            "type": "array"
+          },
+          "explained": {
+            "description": "What the armed depth does, as the control explains itself: the mode in force, its bound and the calls discarded so far — or `unavailable`.",
+            "title": "Explained",
+            "type": "string"
+          },
+          "in_flight": {
+            "description": "Calls out now; 0 once no producer is appending.",
+            "title": "In Flight",
+            "type": "integer"
+          },
+          "money_hold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many more cells the spend limits admit, in words, where money and not the armed depth holds the walk; null where it does not.",
+            "title": "Money Hold"
+          },
+          "most": {
+            "description": "The most calls the stop rules allow out; between phases, the next round's.",
+            "title": "Most",
+            "type": "integer"
+          },
+          "pick_max": {
+            "description": "The deepest press the next walk can take.",
+            "title": "Pick Max",
+            "type": "integer"
+          },
+          "scoring_now": {
+            "description": "Whether a walk holds or admits any call now; otherwise `most` speaks for the next round alone.",
+            "title": "Scoring Now",
+            "type": "boolean"
+          },
+          "unavailable": {
+            "description": "Why holding calls ahead does not apply to this backend at all (`ceiling` of 1); empty where it applies.",
+            "title": "Unavailable",
+            "type": "string"
+          }
+        },
+        "required": [
+          "depth",
+          "auto",
+          "ceiling",
+          "in_flight",
+          "allowed",
+          "most",
+          "scoring_now",
+          "pick_max",
+          "money_hold",
+          "cell_reserve_usd",
+          "unavailable",
+          "explained",
+          "auto_refusal",
+          "depths"
+        ],
+        "title": "SampleLookahead",
+        "type": "object"
+      },
       "SampleWalk": {
         "additionalProperties": false,
         "description": "The scoring walk of the arm being measured: the axis it DECLARED plus a cursor. Past the\ncursor is declared, never promised — an eliminator can stop the arm before its tail.",
@@ -13738,17 +13892,6 @@
             "title": "Catch Up Log",
             "type": "array"
           },
-          "cell_reserve_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cell Reserve Usd"
-          },
           "composite_fitness_anchors": {
             "anyOf": [
               {
@@ -13859,11 +14002,6 @@
             ],
             "description": "What an offshoot of this cycle starts under; null on a replay."
           },
-          "in_flight": {
-            "default": 0,
-            "title": "In Flight",
-            "type": "integer"
-          },
           "langfuse_trace_url": {
             "anyOf": [
               {
@@ -13886,46 +14024,8 @@
             ],
             "title": "Last Query Elapsed S"
           },
-          "lookahead_allowed": {
-            "default": 0,
-            "title": "Lookahead Allowed",
-            "type": "integer"
-          },
-          "lookahead_explained": {
-            "description": "What the armed depth does, as the control explains itself: the mode in force, its bound and the calls discarded so far — or `lookahead_unavailable`.",
-            "title": "Lookahead Explained",
-            "type": "string"
-          },
-          "lookahead_money_hold": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How many more cells the spend limits admit, in words, where money and not the armed depth holds the walk; null where it does not.",
-            "title": "Lookahead Money Hold"
-          },
-          "lookahead_most": {
-            "default": 0,
-            "title": "Lookahead Most",
-            "type": "integer"
-          },
-          "lookahead_pick_max": {
-            "description": "The deepest press the next walk can take.",
-            "title": "Lookahead Pick Max",
-            "type": "integer"
-          },
-          "lookahead_unavailable": {
-            "description": "Why holding calls ahead does not apply to this backend at all (`max_cells_in_flight` of 1); empty where it applies.",
-            "title": "Lookahead Unavailable",
-            "type": "string"
-          },
-          "max_cells_in_flight": {
-            "title": "Max Cells In Flight",
-            "type": "integer"
+          "lookahead": {
+            "$ref": "#/components/schemas/SampleLookahead"
           },
           "measured_unit": {
             "enum": [
@@ -14053,21 +14153,6 @@
             "$ref": "#/components/schemas/RunPhase",
             "description": "The cycle's phase, derived at the read (`derive_run_state`) — never the runner's own `declared_phase`, which says `running` forever after a kill."
           },
-          "sample_lookahead": {
-            "description": "The depth IN FORCE — how many cells the walk holds in flight: the armed request bounded by `max_cells_in_flight`. 1 on a replay, which takes no armed control.",
-            "title": "Sample Lookahead",
-            "type": "integer"
-          },
-          "sample_lookahead_auto": {
-            "description": "Whether that depth outlives its round — the operator's auto-arm.",
-            "title": "Sample Lookahead Auto",
-            "type": "boolean"
-          },
-          "sample_lookahead_discards": {
-            "default": 0,
-            "title": "Sample Lookahead Discards",
-            "type": "integer"
-          },
           "spend_metered": {
             "anyOf": [
               {
@@ -14158,7 +14243,6 @@
           "rounds",
           "display_metric",
           "backpressure",
-          "max_cells_in_flight",
           "measured_unit",
           "at_time",
           "round_cells_ceiling",
@@ -14173,12 +14257,7 @@
           "overlap_line_n",
           "composite_fitness_weights",
           "composite_fitness_anchors",
-          "sample_lookahead",
-          "sample_lookahead_auto",
-          "lookahead_money_hold",
-          "lookahead_pick_max",
-          "lookahead_unavailable",
-          "lookahead_explained",
+          "lookahead",
           "spend_metered",
           "spend_metered_by_round",
           "campaign_metered_usd",

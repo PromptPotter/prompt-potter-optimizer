@@ -66,14 +66,8 @@ export interface ServedDashboard {
   total_backend_calls: number;
   current_query_payload: string | null;
   open_positions: number[];
-  sample_lookahead_discards: number;
-  in_flight: number;
-  lookahead_allowed: number;
-  lookahead_most: number;
-  cell_reserve_usd: number | null;
   waiting_on: string | null;
   backpressure: ServedBackpressure | null;
-  max_cells_in_flight: number;
   measured_unit: 'sample' | 'cell';
   last_query_elapsed_s: number | null;
   at_time: string;
@@ -114,23 +108,7 @@ export interface ServedDashboard {
   composite_fitness_weights: Record<string, number> | null;
   /** The level each anchored dial in it is read against, by term. */
   composite_fitness_anchors: Record<string, number> | null;
-  /** The depth IN FORCE — how many cells the walk holds in flight: the armed
-   * request bounded by `max_cells_in_flight`. 1 on a replay, which takes no
-   * armed control. */
-  sample_lookahead: number;
-  /** Whether that depth outlives its round — the operator's auto-arm. */
-  sample_lookahead_auto: boolean;
-  /** How many more cells the spend limits admit, in words, where money and not the
-   * armed depth holds the walk; null where it does not. */
-  lookahead_money_hold: string | null;
-  /** The deepest press the next walk can take. */
-  lookahead_pick_max: number;
-  /** Why holding calls ahead does not apply to this backend at all
-   * (`max_cells_in_flight` of 1); empty where it applies. */
-  lookahead_unavailable: string;
-  /** What the armed depth does, as the control explains itself: the mode in force,
-   * its bound and the calls discarded so far — or `lookahead_unavailable`. */
-  lookahead_explained: string;
+  lookahead: SampleLookahead;
   /** The cycle's spend under the campaign's ceiling meter, a manifest fact no
    * ledger record carries; null where the campaign's manifest is gone. */
   spend_metered: MeteredSpend | null;
@@ -1006,6 +984,57 @@ export interface PauseReading {
   detail: string;
   next_step: string;
   at: string;
+}
+
+/** The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its */
+export interface SampleLookahead {
+  /** The depth IN FORCE — how many cells the walk holds in flight: the armed
+   * request bounded by `ceiling`. */
+  depth: number;
+  /** Whether that depth outlives its round — the operator's auto-arm. */
+  auto: boolean;
+  /** The backend's `max_cells_in_flight`; 1 says the control does not apply. */
+  ceiling: number;
+  /** Calls out now; 0 once no producer is appending. */
+  in_flight: number;
+  /** Calls the gauge admits out now; 0 with `in_flight`. */
+  allowed: number;
+  /** The most calls the stop rules allow out; between phases, the next round's. */
+  most: number;
+  /** Whether a walk holds or admits any call now; otherwise `most` speaks for the
+   * next round alone. */
+  scoring_now: boolean;
+  /** The deepest press the next walk can take. */
+  pick_max: number;
+  /** How many more cells the spend limits admit, in words, where money and not the
+   * armed depth holds the walk; null where it does not. */
+  money_hold: string | null;
+  /** What each call out holds of the ceiling; null where no book binds. */
+  cell_reserve_usd: number | null;
+  /** Why holding calls ahead does not apply to this backend at all (`ceiling` of
+   * 1); empty where it applies. */
+  unavailable: string;
+  /** What the armed depth does, as the control explains itself: the mode in force,
+   * its bound and the calls discarded so far — or `unavailable`. */
+  explained: string;
+  /** Why the auto-arm switch is shut: `unavailable`, or the cycle has settled. A
+   * mode, not a press, so a paused run takes it for its relaunch; empty where
+   * offered. */
+  auto_refusal: string;
+  /** Each depth the control draws, 1 to `ceiling`. */
+  depths: LookaheadDepth[];
+}
+
+/** One depth the look-ahead control offers: that many calls held in flight. */
+export interface LookaheadDepth {
+  cells: number;
+  label: string;
+  /** `full` where that many calls are out now, `part` where the gauge allows that
+   * many; null past both. */
+  fill: 'full' | 'part' | null;
+  /** Whether a press of this depth is admitted now: the control applies, the run
+   * admits `set-sample-lookahead` and the next walk can take that many. */
+  pickable: boolean;
 }
 
 /** What a run's spend caps have counted, in the units they meter, by kind. */

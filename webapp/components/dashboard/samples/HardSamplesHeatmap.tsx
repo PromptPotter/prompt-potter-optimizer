@@ -1,10 +1,11 @@
 "use client";
 import { useState } from "react";
-import { fmtPct0 } from "@/lib/format";
+import { fmtUnit } from "@/lib/format";
 import { fitnessStyle } from "@/lib/derivations";
 import { useHardSamples } from "@/lib/hard-samples";
 import { useCycleStream } from "@/lib/poll";
-import { MeasurementsPane } from "@/components/shell/measurements/MeasurementsPane";
+import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
+import { RosterNote } from "@/components/measurements/RosterNote";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 import { RotatePrompt } from "@/components/shell/RotatePrompt";
 
@@ -13,24 +14,16 @@ export function HardSamplesHeatmap() {
     datasetName,
     items: datasetItems,
     totals: datasetTotals,
-    stale: datasetStale,
-    error: datasetError,
+    failure: datasetFailure,
   } = useHardSamples();
   const { dash } = useCycleStream();
   const [heatExpanded, setHeatExpanded] = useState(false);
   const [bankExpanded, setBankExpanded] = useState(false);
-
-  const rosterNote = datasetError
-    ? `Couldn’t read this campaign’s samples${datasetName ? ` (${datasetName})` : ""}.`
-    : datasetItems.length > 0
-      ? null
-      : datasetStale
-        ? "Loading this campaign’s samples…"
-        : "No samples on this campaign’s dataset yet.";
+  const rosterShown = datasetFailure === null && datasetItems.length > 0;
 
   const outcome =
     datasetTotals && datasetTotals.mean_fitness != null
-      ? ` · ${datasetTotals.total_measurements} measurements · ${fmtPct0(datasetTotals.mean_fitness)} mean fitness`
+      ? ` · ${datasetTotals.total_measurements} measurements · ${fmtUnit("rate", datasetTotals.mean_fitness)} mean fitness`
       : "";
   const summary = `${datasetName ? `${datasetName} · ` : ""}${datasetItems.length} samples${outcome}`;
 
@@ -38,10 +31,8 @@ export function HardSamplesHeatmap() {
     <div className="hs-heat-wrap">
       {/* The row renders without a roster: `SampleTrajectoryMiniButton` reads `dash.rounds`. */}
       <div className="hs-controls-row">
-        {rosterNote ? (
-          <p className="hs-heat-empty" role="status">
-            {rosterNote}
-          </p>
+        {!rosterShown ? (
+          <RosterNote />
         ) : (
           <button
             type="button"
@@ -76,7 +67,7 @@ export function HardSamplesHeatmap() {
       {(bankExpanded || heatExpanded) && (
         <RotatePrompt surfaceName="The sample heat-map">
           {bankExpanded && <SampleTrajectory rounds={dash?.rounds ?? []} />}
-          {heatExpanded && !rosterNote && (
+          {heatExpanded && rosterShown && (
             <div className="hs-expand-wrap">
               <MeasurementsPane preset={{ groupBy: "sample" }} />
             </div>

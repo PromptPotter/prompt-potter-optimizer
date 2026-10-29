@@ -150,7 +150,7 @@ invariants:
 
 **Every surface that lists, switches, docks or heads a run renders ONE served entry shape** —
 `domain/hierarchy.py::HierarchyEntry`, minted by `application/hierarchy.py` alone and read by
-`GET /hierarchy` (the webapp's `lib/registry.tsx`, the `cycles` verb), discriminated on `level`.
+`GET /hierarchy` (the webapp's `lib/state/registry.tsx`, the `cycles` verb), discriminated on `level`.
 A level a row or a card renders — campaign, course, candidate — wears the envelope (`label`,
 `lede`, `caveat`, `tags`, `stats`); a round and a step are nodes (`address`, `parent`, `facts`),
 since an envelope nothing renders is an empty field on every poll and every generated type. A
@@ -183,7 +183,7 @@ deleted (`scripts/complexity_ledger.py::BASELINE` `p_served` is the ratchet). Th
 - **A campaign is always served**: one whose line course has no `CycleIndex` yet lists with its
   `caveat` saying so, never dropped.
 - **One poll**, over every lifecycle; the sidebar's filter is layout over `facts.lifecycle`.
-  <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/registry.tsx == 1 -->
+  <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/state/registry.tsx == 1 -->
 - **The genealogy is the same entry, read deep** — `GET /hierarchy/{address}?lens=&samples=&at=&at_cycle=`,
   bounded at `lineage_queries.py::MAX_COURSE_DEPTH`; no second genealogy route, no client fold. How a
   fork, a cut and a retained individual are drawn — owned by

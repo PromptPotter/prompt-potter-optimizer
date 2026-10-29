@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyView, pruneStore, viewMemoryCodec, type CampaignView } from "@/lib/view-memory";
+import { emptyView, pruneStore, viewMemoryCodec, type CampaignView } from "@/lib/state/view-memory";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_800_000_000_000;

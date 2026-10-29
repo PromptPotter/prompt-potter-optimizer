@@ -1,6 +1,9 @@
-import type { MeasuredUnit, MetricSpec } from "@/lib/api/types";
+import type { LiftEstimate, MeasuredUnit, MetricSpec } from "@/lib/api/types";
 import { RECENT_STEP_S, type LevelUnit } from "@/lib/api/types.generated";
-import type { LiftSide } from "@/lib/fitness";
+
+type LiftSide = LiftEstimate["side"];
+
+export const PLACEHOLDER = "—";
 
 export function unitPlural(unit: MeasuredUnit): string {
   return `${unit}s`;
@@ -11,22 +14,22 @@ export function unitCount(n: number, unit: MeasuredUnit): string {
 }
 
 export function fmtPct1(v: number | null | undefined): string {
-  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : "—";
+  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : PLACEHOLDER;
 }
 
-export function fmtPct0(v: number | null | undefined): string {
-  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(0)}%` : "—";
+export function cssPct(fraction: number): string {
+  return `${fraction * 100}%`;
 }
 
 export function fmtSecs(s: number | null | undefined): string {
-  if (typeof s !== "number" || !Number.isFinite(s)) return "—";
+  if (typeof s !== "number" || !Number.isFinite(s)) return PLACEHOLDER;
   if (s < 1) return `${(s * 1000).toFixed(0)}ms`;
   if (s < 60) return `${s.toFixed(2)}s`;
   return `${(s / 60).toFixed(1)}m`;
 }
 
-export function fmtDuration(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) return "—";
+export function fmtDuration(sec: number | null): string {
+  if (sec == null || !Number.isFinite(sec) || sec < 0) return PLACEHOLDER;
   if (sec < 90) return `${Math.round(sec)}s`;
   const m = Math.round(sec / 60);
   if (m < 90) return `${m}m`;
@@ -59,7 +62,7 @@ export function fmtCompact(v: number): string {
 }
 
 export function fmtBytes(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "—";
+  if (n == null || !Number.isFinite(n)) return PLACEHOLDER;
   if (n < 1024) return `${Math.max(0, Math.round(n))} B`;
   if (n < 1_048_576) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1_073_741_824) return `${(n / 1_048_576).toFixed(1)} MB`;
@@ -75,7 +78,7 @@ export function fmtTokens(n: number): string {
 
 // Mirrors `views/render/primitives.py::fmt_pvalue`; `null` means nothing was tested.
 export function fmtPValue(p: number | null): string {
-  if (p == null) return "—";
+  if (p == null) return PLACEHOLDER;
   if (p < 0.001) return "p<0.001 ***";
   if (p < 0.01) return `p=${p.toFixed(3)} **`;
   if (p < 0.05) return `p=${p.toFixed(2)} *`;
@@ -84,9 +87,15 @@ export function fmtPValue(p: number | null): string {
 
 export type MetricUnit = MetricSpec["unit"];
 
-const UNIT_FORMAT: Record<MetricUnit, (v: number) => string> = {
+type FormatUnit = MetricUnit | LevelUnit;
+
+// A score printed as a percent reads as a rate; θ is in logits, so it never renders as a percent.
+const UNIT_FORMAT: Record<FormatUnit, (v: number) => string> = {
+  rate: (v) => `${(v * 100).toFixed(0)}%`,
+  score: (v) => v.toFixed(2),
+  theta: (v) => `θ ${v.toFixed(2)}`,
   level: (v) => v.toFixed(3),
-  delta: (v) => fmtSigned(v),
+  delta: (v) => fmtSigned(v, 3),
   // Not fmtDuration: a sub-second reply would round to "1s" where the terminal prints 0.8.
   seconds: fmtSecs,
   usd: fmtUsd,
@@ -96,12 +105,18 @@ const UNIT_FORMAT: Record<MetricUnit, (v: number) => string> = {
   composed: (v) => v.toFixed(3),
 };
 
-export function fmtMetricValue(unit: MetricUnit, v: number | null): string {
-  return v == null ? "—" : UNIT_FORMAT[unit](v);
+export function fmtUnit(unit: FormatUnit, v: number | null | undefined): string {
+  return typeof v === "number" && Number.isFinite(v) ? UNIT_FORMAT[unit](v) : PLACEHOLDER;
 }
 
-export function fmtMetricInterval(unit: MetricUnit, lo: number | null, hi: number | null): string {
-  if (lo == null || hi == null) return "—";
+export function fmtInterval(
+  unit: FormatUnit,
+  lo: number | null | undefined,
+  hi: number | null | undefined,
+): string {
+  if (typeof lo !== "number" || !Number.isFinite(lo) || typeof hi !== "number" || !Number.isFinite(hi)) {
+    return PLACEHOLDER;
+  }
   return `[${UNIT_FORMAT[unit](lo)}, ${UNIT_FORMAT[unit](hi)}]`;
 }
 
@@ -111,19 +126,18 @@ export function shortId(campaignId: string): string {
   return cut === -1 ? campaignId : campaignId.slice(cut + 2);
 }
 
-export function fmtSigned(v: number | null | undefined, digits = 3): string {
-  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+export function fmtSigned(v: number | null | undefined, digits: number): string {
+  if (typeof v !== "number" || !Number.isFinite(v)) return PLACEHOLDER;
   return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
 }
 
-// θ is in logits, so it never renders as a percent.
-export function fmtTheta(v: number | null | undefined): string {
-  return typeof v === "number" && Number.isFinite(v) ? v.toFixed(2) : "—";
+export function fmtLogits(v: number): string {
+  return `${v.toFixed(2)} logits`;
 }
 
 export function fmtThetaSe(v: number | null | undefined, se: number | null | undefined): string {
-  const theta = fmtTheta(v);
-  return theta !== "—" && typeof se === "number" ? `${theta} ± ${se.toFixed(2)}` : theta;
+  const theta = fmtUnit("theta", v);
+  return theta !== PLACEHOLDER && typeof se === "number" ? `${theta} ± ${se.toFixed(2)}` : theta;
 }
 
 export function sideTone(side: LiftSide | null | undefined): string {
@@ -141,31 +155,8 @@ export function verdictTone(verdict: boolean | null): string {
   return verdict === true ? "note-info" : "note-warn";
 }
 
-export function fmtNum(v: unknown, digits = 3): string {
-  if (v == null) return "—";
-  if (typeof v === "number") return v.toFixed(digits);
-  return String(v);
-}
-
-export function fmtFitness(v: number | null): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return v.toFixed(2);
-}
-
-// A score printed as a percent reads as a rate.
-export function fmtLevel(unit: LevelUnit, v: number | null | undefined): string {
-  switch (unit) {
-    case "rate":
-      return fmtPct0(v);
-    case "score":
-      return fmtFitness(v ?? null);
-    case "theta":
-      return typeof v === "number" && Number.isFinite(v) ? `θ ${fmtTheta(v)}` : "—";
-  }
-}
-
 export function fmtClock(s: unknown): string {
-  if (!s) return "—";
+  if (!s) return PLACEHOLDER;
   try {
     return new Date(String(s)).toLocaleTimeString();
   } catch {
@@ -174,7 +165,7 @@ export function fmtClock(s: unknown): string {
 }
 
 export function fmtDateTime(s: unknown): string {
-  if (!s) return "—";
+  if (!s) return PLACEHOLDER;
   try {
     return new Date(String(s)).toLocaleString();
   } catch {
@@ -198,7 +189,7 @@ export function fmtAgo(s: unknown): string {
 }
 
 export function fmtText(v: unknown): string {
-  if (v == null || v === "") return "—";
+  if (v == null || v === "") return PLACEHOLDER;
   return String(v);
 }
 

@@ -2,6 +2,15 @@ import type { ServedRound } from "@/lib/api/types";
 
 export type SampleMovement = ServedRound["selection_movement"][number];
 
+// The ink class every trajectory view paints a movement with; a re-added sample reads as new.
+export const MOVEMENT_CLASS: Record<SampleMovement, string> = {
+  new: "new",
+  readded: "new",
+  gained: "gained",
+  lost: "lost",
+  kept: "kept",
+};
+
 // Position is 1-based; a sample absent from a round's map was not in that round.
 export interface SortedRounds {
   rounds: ServedRound[];

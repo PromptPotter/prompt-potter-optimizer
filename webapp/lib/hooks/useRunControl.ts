@@ -1,9 +1,9 @@
 "use client";
 import { useState } from "react";
 import { cycleAddress, postCommand } from "@/lib/api";
-import { useCommand } from "@/lib/hooks/useCommand";
+import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import type { RunAdmission } from "@/lib/api/types";
-import { phasePauseLabel, phaseWalks } from "@/lib/run-phase";
+import { phasePauseLabel, phaseWalks } from "@/lib/derivations";
 import { useCycleStream } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 
@@ -14,7 +14,7 @@ interface RunControl {
   // Pause clicked, `paused` not yet declared: the runner finishes the current sample first.
   pausing: boolean;
   pausingNote: string;
-  err: string | null;
+  failure: CommandFailure | null;
   label: string;
   noneReason: string | null;
   // served: `dash.pause`; null in every other phase.
@@ -59,7 +59,7 @@ export function useRunControl(): RunControl | null {
     // A refused pause retires the note, or it promises a wait that never ends.
     pausing: pausing && cmd.failure === null,
     pausingNote: `Finishing ${phasePauseLabel(dash?.state, dash?.optimizer_step)} — will pause after the current sample.`,
-    err: cmd.failure?.message ?? null,
+    failure: cmd.failure,
     label: action === "pause" ? "Pause run" : action === "resume" ? "Resume run" : "Start run",
     // No dashboard yet: a warming cycle's launch is already in flight.
     noneReason: admission === undefined ? "Starting up…" : admission.refusal || null,

@@ -9,9 +9,10 @@ import {
   type CladogramCtx,
 } from "@/components/candidates/Forest";
 import { DENSE, type RoundNodePos } from "@/components/candidates/forest-layout";
-import { useCompareSelection } from "@/lib/compare-selection";
+import { Empty, Loading } from "@/components/ui";
+import { useCompareSelection } from "@/lib/state/compare-selection";
 import { nodeOverlays } from "@/lib/derivations";
-import { fmtPct0 } from "@/lib/format";
+import { fmtUnit } from "@/lib/format";
 import { encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import type { ChannelModel } from "./useChannelModel";
 
@@ -79,11 +80,11 @@ export function ChannelMap({
   );
 
   if (rootPath.length === 0) {
-    return <p className="note-empty">This campaign has no branch in the registry to map.</p>;
+    return <Empty>This campaign has no branch in the registry to map.</Empty>;
   }
   if (failed) return <p className="note-warn">This campaign&rsquo;s lineage could not be read.</p>;
   if (!root) {
-    return <p className="note-empty">{loaded ? "No rounds on disk yet." : "Reading the lineage…"}</p>;
+    return loaded ? <Empty>No rounds on disk yet.</Empty> : <Loading>Reading the lineage…</Loading>;
   }
 
   return (
@@ -131,7 +132,7 @@ function ArmedActions({ armed, subject }: { armed: HierarchyCandidate; subject: 
       <strong>{armed.label}</strong>
       <span className="l4-dim">
         {" "}
-        R{reading.arm.round} · {accuracy === null ? "—" : fmtPct0(accuracy)}
+        R{reading.arm.round} · {fmtUnit("rate", accuracy)}
       </span>
       {accuracy === null && (
         <span className="l4-dim">nothing scored here yet — it reads as unmeasured</span>

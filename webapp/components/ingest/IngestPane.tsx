@@ -7,7 +7,7 @@ import { useThread } from "@/lib/chat/thread";
 import type { HierarchyCourse } from "@/lib/api";
 import { Thread } from "@/components/chat/Thread";
 import { RunSummaryItem } from "@/components/chat/RunCard";
-import { Button, Dialog, IconClose, SignInPrompt } from "@/components/ui";
+import { Button, Dialog, FailureLine, IconClose, Loading, SignInPrompt } from "@/components/ui";
 
 export function IngestPane() {
   const { flow, collection, closeComposer: onClose } = useIngest();
@@ -29,11 +29,11 @@ export function IngestPane() {
       </div>
     ) : collection.kind === "error" ? (
       <div className="new-campaign-body">
-        <p className="new-campaign-error">Couldn’t load your collection — retry shortly.</p>
+        <FailureLine failure={collection.failure} lead="Couldn’t load your collection." />
       </div>
     ) : (
       <div className="new-campaign-body">
-        <em>Loading your collection…</em>
+        <Loading>Loading your collection…</Loading>
       </div>
     );
 

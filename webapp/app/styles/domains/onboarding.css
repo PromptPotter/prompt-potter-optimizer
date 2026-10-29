@@ -5,7 +5,7 @@
 .new-campaign-modal .chat-input-row{padding:var(--space-14) var(--space-18) var(--space-18)}
 .new-campaign-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:var(--space-18) var(--space-18);display:flex;flex-direction:column;gap:var(--space-14)}
 .new-campaign-field{display:flex;flex-direction:column;gap:var(--space-4)}
-.new-campaign-error{color:var(--color-danger);margin:0}.ds-preview-scroll{overflow:auto;max-height:220px}
+.ds-preview-scroll{overflow:auto;max-height:220px}
 .ds-preview-table td{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .prompt-editor{display:flex;flex-direction:column;gap:var(--space-8)}
 .prompt-editor-title{font-size:var(--text-xs);font-weight:600;color:var(--color-text-secondary)}

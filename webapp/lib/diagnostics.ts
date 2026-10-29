@@ -2,8 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 import { ApiError, failureKind, type FailureKind } from "@/lib/api";
-
-const DIAGNOSTICS_KEY = "promptpotter.diagnostics.incidents";
+import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
+import { PLACEHOLDER } from "@/lib/format";
 
 // Bumping DROPS the stored ring; never migrate it.
 const RECORD_VERSION = 1;
@@ -44,7 +44,7 @@ function read(): Ring {
   if (cache) return cache;
   if (typeof window === "undefined") return EMPTY;
   try {
-    const raw = window.localStorage.getItem(DIAGNOSTICS_KEY);
+    const raw = window.localStorage.getItem(STORAGE_KEYS.diagnostics);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
     cache = Array.isArray(parsed) ? prune(parsed as (Incident | null)[], Date.now()) : EMPTY;
   } catch {
@@ -57,7 +57,7 @@ function write(ring: Ring): void {
   cache = ring;
   if (typeof window !== "undefined") {
     try {
-      window.localStorage.setItem(DIAGNOSTICS_KEY, JSON.stringify(ring));
+      window.localStorage.setItem(STORAGE_KEYS.diagnostics,JSON.stringify(ring));
     } catch {
       /* nothing persists; the in-memory ring still serves this session */
     }
@@ -167,8 +167,8 @@ export function formatDiagnostics(opts: { version: string | null }): string {
   for (const i of ring) {
     const when = new Date(i.at).toISOString() + (i.count > 1 ? ` (×${i.count})` : "");
     lines.push(
-      `| ${when} | ${i.surface} | ${i.kind} | ${i.code ?? "—"} | ${i.status ?? "—"} | ` +
-        `${i.errorId ?? "—"} | ${i.address ?? i.path ?? "—"} |`,
+      `| ${when} | ${i.surface} | ${i.kind} | ${i.code ?? PLACEHOLDER} | ${i.status ?? PLACEHOLDER} | ` +
+        `${i.errorId ?? PLACEHOLDER} | ${i.address ?? i.path ?? PLACEHOLDER} |`,
     );
   }
   lines.push(

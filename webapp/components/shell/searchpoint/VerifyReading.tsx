@@ -3,7 +3,7 @@
 import type { MeasuredUnit, VerifyReading as Reading } from "@/lib/api/types";
 import { VERIFY_STRATEGY_LABELS } from "@/lib/api/types.generated";
 import { cx } from "@/lib/cx";
-import { fmtFitness, fmtPct0, fmtSigned, unitCount } from "@/lib/format";
+import { fmtSigned, fmtUnit, unitCount } from "@/lib/format";
 import { Term } from "@/components/ui";
 import { PairedLift } from "@/components/shell/PairedLift";
 
@@ -31,8 +31,9 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
             </Term>
           </dt>
           <dd>
-            {fmtPct0(recorded.accuracy?.value)} → <strong>{fmtPct0(fresh.accuracy?.value)}</strong>
-            {band(fresh.accuracy, fmtPct0)} ({fmtSigned(reading.accuracy_increment, 2)})
+            {fmtUnit("rate", recorded.accuracy?.value)} →{" "}
+            <strong>{fmtUnit("rate", fresh.accuracy?.value)}</strong>
+            {band(fresh.accuracy, (n) => fmtUnit("rate", n))} ({fmtSigned(reading.accuracy_increment, 2)})
           </dd>
         </div>
         <div>
@@ -42,8 +43,8 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
             </Term>
           </dt>
           <dd>
-            {fmtFitness(recorded.composite?.value ?? null)} →{" "}
-            <strong>{fmtFitness(fresh.composite?.value ?? null)}</strong> (
+            {fmtUnit("score", recorded.composite?.value)} →{" "}
+            <strong>{fmtUnit("score", fresh.composite?.value)}</strong> (
             {fmtSigned(reading.composite_increment, 2)})
           </dd>
         </div>

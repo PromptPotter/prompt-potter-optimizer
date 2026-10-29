@@ -1,11 +1,11 @@
 "use client";
 
-import { CardFrame } from "@/components/ui";
+import { CardFrame, Empty } from "@/components/ui";
 import type { MetricReading, MetricSpec, PairwiseComparison } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { readPaired } from "@/lib/derivations";
 import { PairedLift } from "@/components/shell/PairedLift";
-import { fmtMetricInterval, fmtMetricValue, fmtPValue, shortId, sideTone } from "@/lib/format";
+import { fmtInterval, fmtPValue, fmtUnit, shortId, sideTone } from "@/lib/format";
 
 export function PairwisePanel({
   reading,
@@ -20,11 +20,11 @@ export function PairwisePanel({
   return (
     <CardFrame title="Pairwise comparisons">
       {rows.length === 0 ? (
-        <p className="note-empty">
+        <Empty>
           {nRead < 2
             ? "One subject read — a pairwise comparison needs two."
             : "Fewer than two subjects here carry a cell this metric scored, so there is no pair to list. A metric only some of them carry leaves the rest with none."}
-        </p>
+        </Empty>
       ) : (
         <>
           <div className="l4-table-wrap">
@@ -102,9 +102,9 @@ function Row({
     <tr className="l4-row">
       {pair}
       <td className={cx("l4-effect", sideTone(estimate.side))}>
-        <span className="l4-effect-mean">{fmtMetricValue(unit, estimate.value)}</span>
+        <span className="l4-effect-mean">{fmtUnit(unit, estimate.value)}</span>
         <span className="l4-effect-ci">
-          {fmtMetricInterval(unit, estimate.ci_lo, estimate.ci_hi)}
+          {fmtInterval(unit, estimate.ci_lo, estimate.ci_hi)}
         </span>
       </td>
       <td className="l4-num">{read.cells}</td>

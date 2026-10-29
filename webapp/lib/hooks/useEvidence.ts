@@ -2,12 +2,12 @@
 
 import { evidenceRead } from "@/lib/api/reads";
 import type { Evidence } from "@/lib/api/types";
-import { useRead } from "@/lib/hooks/useRead";
+import { useRead, type ReadFailure } from "@/lib/hooks/useRead";
 
 interface EvidenceRead {
   evidence: Evidence | null;
   loading: boolean;
-  error: string | null;
+  failure: ReadFailure | null;
   invalidMetric: string | null;
 }
 
@@ -24,13 +24,13 @@ export function useEvidence(
   });
 
   if (read.status === "ready") {
-    return { evidence: read.data, loading: false, error: null, invalidMetric: null };
+    return { evidence: read.data, loading: false, failure: null, invalidMetric: null };
   }
   if (read.status !== "failed") {
-    return { evidence: null, loading: read.status === "loading", error: null, invalidMetric: null };
+    return { evidence: null, loading: read.status === "loading", failure: null, invalidMetric: null };
   }
   if (read.failure.kind === "invalid" && read.kept !== null) {
-    return { evidence: read.kept, loading: false, error: null, invalidMetric: read.failure.message };
+    return { evidence: read.kept, loading: false, failure: null, invalidMetric: read.failure.message };
   }
-  return { evidence: null, loading: false, error: read.failure.message, invalidMetric: null };
+  return { evidence: null, loading: false, failure: read.failure, invalidMetric: null };
 }

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Term } from "@/components/ui";
+import { FailureLine, Term } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { TERMS } from "@/lib/terms";
 import { fmtSigned } from "@/lib/format";
@@ -92,11 +92,7 @@ export function RemoteControl() {
           </svg>
         </button>
       </div>
-      {m.failure ? (
-        <span className="remote-err" role="alert">
-          {m.failure.message}
-        </span>
-      ) : null}
+      <FailureLine failure={m.failure} className="remote-err" />
     </div>
   );
 }

@@ -22,6 +22,7 @@ import type {
 } from "@/lib/api";
 import { useLineageTree, type CampaignTree } from "@/lib/lineage";
 import { useWorkspace } from "@/lib/workspace";
+import { PLACEHOLDER } from "@/lib/format";
 import { CampaignMenu } from "./CampaignMenu";
 import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
@@ -277,7 +278,7 @@ function CourseRowLabel({ course }: { course: SubtreeCourse }) {
       <span className="unit-library-name">{course.label}</span>
       <span className="unit-library-meta unit-library-meta-marked">
         <PhaseMark status={course.state.status} />
-        <span title={lift?.value}>{lift ? lift.value : "—"}</span>
+        <span title={lift?.value}>{lift ? lift.value : PLACEHOLDER}</span>
       </span>
     </span>
   );

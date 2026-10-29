@@ -2,7 +2,7 @@
 
 import type { SubtreeCourse } from "@/lib/api";
 import type { CyclePath } from "@/lib/ids";
-import { phaseWalks } from "@/lib/run-phase";
+import { phaseWalks } from "./run-phase";
 import { candidatesAtPath, type LineageIndex } from "./lineage-candidates";
 
 export function innerPanelIndex(

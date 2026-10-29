@@ -1,6 +1,6 @@
 import { useCycleStream } from "@/lib/poll";
 import type { ServedDashboard } from "@/lib/api";
-import { fmtNum, fmtClock } from "@/lib/format";
+import { fmtClock, fmtText, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { useOrigin } from "@/lib/hooks/useOrigin";
 import { cx } from "@/lib/cx";
 import { CardFrame } from "@/components/ui";
@@ -32,7 +32,7 @@ const KNOWN_ORDER = [
 const WARN_IF_POSITIVE = new Set(["error_count", "degraded_count", "backend_retry_count"]);
 
 const FORMATTERS: Record<string, (v: unknown) => string> = {
-  origin_acc: (v) => fmtNum(v),
+  origin_acc: (v) => fmtUnit("level", typeof v === "number" ? v : null),
   state_since: fmtClock,
 };
 
@@ -77,10 +77,10 @@ export function LiveStateCard() {
       <Criterion mask={served.mask} anchors={served.anchors} formula={served.formula} />
       <div className="kv-grid">
         {items.map(([k, v]) => {
-          const fmt = FORMATTERS[k] ?? ((x: unknown) => (x == null ? "—" : String(x)));
+          const fmt = FORMATTERS[k] ?? fmtText;
           const display = fmt(v);
           let cls = "";
-          if (v == null || v === "" || display === "—") cls = "muted";
+          if (v == null || v === "" || display === PLACEHOLDER) cls = "muted";
           else if (WARN_IF_POSITIVE.has(k) && Number(v) > 0) cls = "warn";
           else if (k === "state" && v === "scoring") cls = "ok";
           else if (k === "state" && v === "stopped") cls = "warn";
@@ -155,7 +155,7 @@ function BackendWarnings({ dash }: { dash: ServedDashboard | null }) {
           const ts = fmtClock(w.ts);
           const code = w.status_code != null ? ` HTTP ${w.status_code}` : "";
           const err = w.error_class ? ` ${w.error_class}` : "";
-          const wait = w.wait_s != null ? ` · wait ${Number(w.wait_s).toFixed(1)}s` : "";
+          const wait = w.wait_s != null ? ` · wait ${fmtUnit("seconds", w.wait_s)}` : "";
           const final = w.final ? " · FINAL" : "";
           const attempts = w.attempt != null ? ` (attempt ${w.attempt}/${w.max_attempts ?? "?"})` : "";
           const q = w.query ? ` · q="${w.query.slice(0, 40)}${w.query.length > 40 ? "…" : ""}"` : "";

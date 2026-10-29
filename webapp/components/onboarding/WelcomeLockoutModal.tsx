@@ -1,7 +1,7 @@
 "use client";
 
 import { BRAND } from "@/lib/brand";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/state/auth";
 import { Button, Dialog, IconClose } from "@/components/ui";
 import { AuthCore } from "@/components/login/AuthCore";
 

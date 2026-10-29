@@ -36,8 +36,26 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
   color: var(--color-danger);
 }
 .note-empty {
+  margin: 0;
   color: var(--color-text-secondary);
   font-size:var(--text-base);
+  line-height: 1.5;
+}
+.note-empty-title {
+  display: block;
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.note-empty-link {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.note-failure {
+  display: block;
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  line-height: 1.5;
 }
 .note-empty code,
 .note-lede code {

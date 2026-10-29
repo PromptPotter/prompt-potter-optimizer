@@ -11,14 +11,14 @@ import {
   type DisplayMetric,
 } from "@/lib/derivations";
 import { pathOfAddress, rootCycleId, type CyclePath } from "@/lib/ids";
-import { useCommand } from "@/lib/hooks/useCommand";
+import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/lineage";
-import { useViewMemory } from "@/lib/view-memory";
-import { setCandidatesState, useCandidatesState } from "@/lib/candidates-store";
+import { useViewMemory } from "@/lib/state/view-memory";
+import { setCandidatesState, useCandidatesState } from "@/lib/state/candidates";
 
 interface LineageCleanup {
   open: boolean;
-  error: string | null;
+  failure: CommandFailure | null;
   cleaning: boolean;
   acked: boolean;
   // Null until the subtree is read: the listing does not count them.
@@ -131,7 +131,7 @@ export function useLineage({
 
   const cleanup: LineageCleanup = {
     open: cleanupOpen,
-    error: cmd.failure?.message ?? null,
+    failure: cmd.failure,
     cleaning: cmd.pending !== null,
     acked: cleanupAcked,
     stubCount: tree ? tree.facts.deletable_stubs : null,

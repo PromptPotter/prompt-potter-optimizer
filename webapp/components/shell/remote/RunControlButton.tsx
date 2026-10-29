@@ -1,4 +1,5 @@
 "use client";
+import { FailureLine } from "@/components/ui";
 import { useRunControl } from "@/lib/hooks/useRunControl";
 
 const PLAY_ICON = (
@@ -50,11 +51,7 @@ export function RunControlButton() {
           {run.pausingNote}
         </span>
       ) : null}
-      {run.err ? (
-        <span className="run-ctl-err" role="alert">
-          {run.err}
-        </span>
-      ) : null}
+      <FailureLine failure={run.failure} className="run-ctl-err" />
     </div>
   );
 }

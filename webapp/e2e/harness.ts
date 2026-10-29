@@ -10,9 +10,8 @@ import {
   type HierarchyResponse,
   type ServedRound,
 } from "@/lib/api/types.generated";
-import { tagValue } from "@/lib/derivations";
+import { isStopReason, tagValue } from "@/lib/derivations";
 import { decodeCyclePath } from "@/lib/ids";
-import { isStopReason } from "@/lib/run-phase";
 
 const API = "/api/v1";
 

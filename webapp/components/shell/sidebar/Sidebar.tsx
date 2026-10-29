@@ -1,11 +1,11 @@
 "use client";
 // The disabled footer search icon is an INTENTIONAL placeholder: never sweep it as non-functional.
 import { useWorkspace } from "@/lib/workspace";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/state/auth";
 import { postLogout } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useIngest } from "@/lib/ingest-flow";
-import { useSidebarCollapsed } from "@/lib/sidebar-prefs";
+import { useSidebarCollapsed } from "@/lib/prefs/sidebar";
 import { BRAND } from "@/lib/brand";
 import { TERMS } from "@/lib/terms";
 import { Term } from "@/components/ui";
