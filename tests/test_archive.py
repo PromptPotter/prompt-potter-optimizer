@@ -12,11 +12,11 @@ import contextvars
 import json
 import threading
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import httpx
 import pytest
 from factories import (
     LLM_ONLY,
@@ -25,6 +25,7 @@ from factories import (
     archive_row,
     arm_state,
     arm_walk,
+    backend_client,
     close_round,
     degradation_health,
     election,
@@ -92,9 +93,9 @@ from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
+from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import ArmSlot, PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank
-from promptpotter.domain.campaign import Arm, Compare
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -168,7 +169,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
-from promptpotter.shared.errors import LedgerUnreadableError, PayloadInvalidError
+from promptpotter.shared.errors import LedgerUnreadableError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -867,30 +868,24 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         return [reader.selection.label for reader in readers]  # type: ignore[union-attr]
 
     assert served() == [(i, True, True) for i in ids] and selected() == ["C2.1"] * 3, "guard"
-    # A `--from` retracts rounds only once preflight admits the launch: here an arm whose cap a
-    # cell of its models, as billed, cannot fund one round of.
-    priced = samples(10, "g")
-    refused = replace(
-        loop_session(stores, pipeline_schema([]), priced, hop=hop),
-        pipeline_params=dict(LLM_ONLY),
-        purpose=Compare(arm=Arm(head_to_head_id="h2h", arm_key="arm")),
-    )
-    billed = {"step_tokens": {"llm_only": {"input": 1, "output": 1, "cost_usd": 1.0}}}
-    filed(
-        stores.archive,
-        [archive_row(s.query, truth="g", pipeline_data=billed) for s in priced],
-        filed_under(LLM_ONLY, refused.bank.dataset_hash),
-    )
-    capped = CampaignConfig.model_validate(
-        {"optimization": {"degradation_threshold": 0.0, "budget": {"usd": 0.01}}}
+    # A `--from` retracts rounds only once INIT admits the launch: here a backend that refuses
+    # the run its session.
+    offline.backend.faults = {"/sessions": [httpx.Response(503)]}
+    refused = loop_session(
+        stores,
+        pipeline_schema([]),
+        samples(10, "g"),
+        hop=hop,
+        client=backend_client(stores.jobs_dir, session_factory=TermNormSession),
+        scorer=scorer_of(),
     )
     unread = ReadArm(ArmKey("origin"), arm_state("origin"), sheet([]))
-    with pytest.raises(PayloadInvalidError):
+    with pytest.raises(httpx.HTTPStatusError):
         asyncio.run(
             loop_start.init_optimization_loop(
                 CampaignOrigin(unread, TaskDecomposition()),
-                priced,
-                capped,
+                list(refused.bank.samples),
+                CampaignConfig.model_validate({"optimization": {"degradation_threshold": 0.0}}),
                 cb=RunCallbacks(CycleEventLog(stores.projects_root / "refused.jsonl")),
                 no_divergence_check=True,
                 fork_on_divergence=False,
@@ -898,7 +893,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
                 session=refused,
             )
         )
-    assert refused.state.resumed_from_round == 2, "a refused launch reported another next round"
     assert list(stores.campaigns.standing_rounds(hop, moment=None).rounds) == [0, 1, 2], (
         "a refused launch's `--from` retracted rounds on the ledger"
     )

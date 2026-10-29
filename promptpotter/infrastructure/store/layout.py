@@ -116,6 +116,10 @@ def head_to_head_path(tenant_root: WorkspaceDir, head_to_head_id: str) -> Path:
     return tenant_root / "head_to_heads" / f"{validate_path_component(head_to_head_id)}.json"
 
 
+def head_to_head_claim_path(tenant_root: WorkspaceDir, head_to_head_id: str) -> Path:
+    return tenant_root / "head_to_heads" / f".{validate_path_component(head_to_head_id)}.claim"
+
+
 def campaign_cycles_dir(campaign_root: Path) -> Path:
     return campaign_root / "cycles"
 

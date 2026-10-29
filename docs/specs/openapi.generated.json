@@ -1105,6 +1105,29 @@
         "title": "ArmReplicate",
         "type": "object"
       },
+      "ArmRequest": {
+        "additionalProperties": false,
+        "description": "One arm as asked: its key, and the optimizer it runs with that optimizer's knobs.",
+        "properties": {
+          "arm_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Arm Key",
+            "type": "string"
+          },
+          "optimization": {
+            "$ref": "#/components/schemas/OptimizationOverrides",
+            "description": "Laid over the dataset's own `optimization`: `optimizer` is required, and `budget` and `halt_at_accuracy` are refused, since every arm runs the head-to-head's budget to its end."
+          }
+        },
+        "required": [
+          "arm_key",
+          "optimization"
+        ],
+        "title": "ArmRequest",
+        "type": "object"
+      },
       "ArmSlot": {
         "additionalProperties": false,
         "description": "Where an individual was walked as an arm, its latest walk for a re-read: the ``idx``-th of its round's ``total``.",
@@ -1128,6 +1151,32 @@
           "total"
         ],
         "title": "ArmSlot",
+        "type": "object"
+      },
+      "ArmStarted": {
+        "additionalProperties": false,
+        "properties": {
+          "arm_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Arm Key",
+            "type": "string"
+          },
+          "hop": {
+            "$ref": "#/components/schemas/CycleHop"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "arm_key",
+          "job_id",
+          "hop"
+        ],
+        "title": "ArmStarted",
         "type": "object"
       },
       "BackendHealthResponse": {
@@ -7059,6 +7108,39 @@
         "title": "HeadToHead",
         "type": "object"
       },
+      "HeadToHeadRequest": {
+        "additionalProperties": false,
+        "description": "Arms of one head-to-head asked in one act: all minted and admitted, or none.",
+        "properties": {
+          "arms": {
+            "description": "An id already declared takes these as further arms, each held to its record.",
+            "items": {
+              "$ref": "#/components/schemas/ArmRequest"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Arms",
+            "type": "array"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "Every arm's own: each campaign spends up to it on its own book. An axis left out is the dataset's."
+          },
+          "head_to_head_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Head To Head Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "head_to_head_id",
+          "arms"
+        ],
+        "title": "HeadToHeadRequest",
+        "type": "object"
+      },
       "HeadToHeadRow": {
         "additionalProperties": false,
         "description": "One campaign's bench headline beside what it cost to reach.",
@@ -7262,6 +7344,32 @@
           "worked_ratio"
         ],
         "title": "HeadToHeadRow",
+        "type": "object"
+      },
+      "HeadToHeadStarted": {
+        "additionalProperties": false,
+        "description": "What a head-to-head's act answers, and its retry under the same key: each arm's job and\nthe root cycle it minted. Arms never queue, so every hop is resolved.",
+        "properties": {
+          "arms": {
+            "items": {
+              "$ref": "#/components/schemas/ArmStarted"
+            },
+            "title": "Arms",
+            "type": "array"
+          },
+          "head_to_head_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Head To Head Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "head_to_head_id",
+          "arms"
+        ],
+        "title": "HeadToHeadStarted",
         "type": "object"
       },
       "HealthResponse": {
@@ -9922,28 +10030,6 @@
             ],
             "description": "Laid over the dataset's own `optimization` before the mint freezes it; only the fields sent move anything"
           },
-          "purpose": {
-            "default": {
-              "kind": "optimize"
-            },
-            "description": "`compare` mints a controlled arm of its head-to-head, declared by its first arm; an arm off the declared instrument or budget is refused 409",
-            "discriminator": {
-              "mapping": {
-                "compare": "#/components/schemas/Compare",
-                "optimize": "#/components/schemas/Optimize"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Optimize"
-              },
-              {
-                "$ref": "#/components/schemas/Compare"
-              }
-            ],
-            "title": "Purpose"
-          },
           "task_text": {
             "anyOf": [
               {
@@ -9963,6 +10049,27 @@
           "dataset_name"
         ],
         "title": "MintCampaignPayload",
+        "type": "object"
+      },
+      "MintHeadToHeadPayload": {
+        "additionalProperties": false,
+        "description": "Mint arms of one head-to-head on a dataset in one act and launch each — every arm planned,\npriced and admitted before any is minted, so a refused arm leaves none behind.",
+        "properties": {
+          "dataset_name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Dataset Name",
+            "type": "string"
+          },
+          "head_to_head": {
+            "$ref": "#/components/schemas/HeadToHeadRequest"
+          }
+        },
+        "required": [
+          "dataset_name",
+          "head_to_head"
+        ],
+        "title": "MintHeadToHeadPayload",
         "type": "object"
       },
       "ModelCapability": {
@@ -15265,6 +15372,17 @@
             "pattern": "^[A-Za-z0-9_-]+$",
             "title": "Draft Id",
             "type": "string"
+          },
+          "head_to_head": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadToHeadRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start the draft as these arms of one head-to-head, its origin every arm's, in place of one campaign. Its own `budget` binds each arm, so `budget` and `diag` are refused beside it."
           }
         },
         "required": [
@@ -19340,6 +19458,66 @@
         ]
       }
     },
+    "/api/v1/commands/mint-head-to-head": {
+      "post": {
+        "description": "Mint and detach every arm, or none; a retry under the same key answers the same arms.",
+        "operationId": "mint_head_to_head_api_v1_commands_mint_head_to_head_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MintHeadToHeadPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeadToHeadStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Mint Head To Head",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/origin-gate-decision": {
       "post": {
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
@@ -19762,7 +19940,7 @@
     },
     "/api/v1/commands/start-checkin": {
       "post": {
-        "description": "Mint the draft's campaign and root cycle, close the draft and detach the loop.\n\nAn incomplete origin answers 422 and the draft stays open.",
+        "description": "Mint the draft's campaign and root cycle, close the draft and detach the loop; with\n`head_to_head`, one campaign per arm, each detached.\n\nAn incomplete origin answers 422 and the draft stays open.",
         "operationId": "start_checkin_api_v1_commands_start_checkin_post",
         "parameters": [
           {
@@ -19797,7 +19975,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/StartCheckinResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StartCheckinResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/HeadToHeadStarted"
+                    }
+                  ],
+                  "title": "Response Start Checkin Api V1 Commands Start Checkin Post"
                 }
               }
             },

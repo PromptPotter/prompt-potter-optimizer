@@ -33,7 +33,6 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
     worked_seconds,
 )
-from promptpotter.domain.campaign_config import over_the_default
 from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.paired_reading import PairedReading, ReadingState
 from promptpotter.domain.run_records import ComparisonExit
@@ -202,9 +201,7 @@ def pair_guard(
     bench_sets = [m.bench_set for m in members if m.bench_set is not None]
     budgets = [(m.budget, m.stopping, m.determinism) for m in members]
     # The mint refused an arm off its record's stopping or clamp; only its budget moves after it.
-    off_record = record is not None and any(
-        m.budget != over_the_default(record.shared.budget) for m in members
-    )
+    off_record = record is not None and any(m.budget != record.armed for m in members)
     differs_on = [
         GuardDifference(field)
         for field in BenchSet.model_fields

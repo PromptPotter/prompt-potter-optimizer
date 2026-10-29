@@ -74,7 +74,8 @@ acting.
   `selection.tsx`), `hooks/useConnector`'s provider; to `derivations/` — `cell-means`,
   `prompt-fields`, `origin-readiness`; to `prefs/` — `run-card-prefs`, once that unlanded file lands.
   Chrome still holding a surface: `shell/searchpoint/`, `shell/scoring/` (ingest imports it),
-  `shell/node-surface/`, root `PairedLift` / `SummaryBlock`. Hard samples and compare each spread over
+  `shell/node-surface/`, root `PairedLift` / `SummaryBlock`; a surface holding chrome:
+  `dashboard/pipeline/` (`git grep -n "dashboard/pipeline" -- webapp/components/ingest`). Hard samples and compare each spread over
   several folders (`git ls-files webapp/components | grep -i -E "hard-?sample|compare"`).
   **Re-test:** `git ls-files ':(glob)webapp/lib/*.tsx'` lists none.
 - **Adapters over a flat served shape**: `useCandidatesModel.ts` joins every source it imports;
@@ -224,15 +225,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `finish_reason=error` then pass one schema repair; unknown whether the row banks the answer or a
   miss. **Rides with:** the next head-to-head read. **Re-test:** per arm, the hit rate of error rows
   against the arm's other rows.
-- **An arm refused at run init keeps its key, and its config can no longer be changed.**
-  `preflight.py::refuse_arm_below_round` advises "size the round down with the optimizer's own
-  knobs", but a node knob is fixed at mint. `new --arm <h2h>:<key>` on that key is refused ("is
-  campaign … already"), so the operator mints under a second key and the head-to-head keeps a dead
-  arm that never searched. Seen on h2h-7: capo `__bca431` was refused at its $0.03 cap; `capo-b5`
-  `__530ab2` was minted with `max_blocks=5`. Also seen there: `set-limits --max-usd 0.20` on
-  `__bca431` did not arm before init read $0.03. Open: should an arm that never closed a round be
-  re-mintable under its own key, or should the refusal run before the mint so no key is taken?
-  **Re-test:** `promptpotter evidence` on h2h-7 lists `capo` beside `capo-b5`.
 - **INVESTIGATE — CAPO's survivors are ranked on another reading than the reference ranks them on.**
   `population` keeps μ best-first by mean objective on the cells all survivors measured; promptolution's
   CAPO sorts survivors on raw score over every cell each has been evaluated on, cached across rounds,
@@ -277,6 +269,32 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   pools commit did: `ManifestNode.makes` and the proposer labels changed no prompt, yet potter's key
   moved. Action: move what no prompt reads (labels, proposer rows, the setup projection) into a module
   outside the hash. **Re-test:** edit one proposer label; potter's treatment key stays.
+- **A detached arm's job is the spawner's until its process adopts it**
+  (`jobs/launcher/run_job.py::spawn_job`, `jobs/registry.py::_reap_if_orphaned`): a `head-to-head`
+  terminal killed between the spawn and the adoption leaves jobs a reconciling read releases, so the
+  child's `adopt` refuses and the arm's minted cycle never runs. Action: the child holds the producer
+  lock before the spawner returns. **Re-test:** kill the terminal right after its `arm …` lines; each
+  arm's cycle runs or reads released with its reason.
+- **Two acts on one fresh head-to-head id race its record**: `jobs/mint.py::arm_plans` reads the
+  standing record outside any lock, so two concurrent acts each declare their own `SharedPart`.
+  Action: declare the record under the workspace lock and plan the second off it. **Re-test:** two
+  `mint-head-to-head` on one fresh id at once — one is refused off the record.
+- **A refused launch still spends its rate tokens** (`jobs/quota.py::check_launch_quotas`): the
+  bucket is debited before the slot checks that can still refuse, so a head-to-head refused
+  `machine_busy` costs all its arms' tokens. Action: debit on admission. **Re-test:** refuse N
+  launches on a full box; the next is not `rate_limited`.
+- **Two launch doors**: `jobs/launcher/launch.py::launch` (one run, may queue) and
+  `jobs/launcher/head_to_head.py::admit_head_to_head` (N arms, never queued) each request slots and
+  admit. Action: one door admitting N, queueing only when N is 1. **Re-test:** `git grep -c
+  "check_launch_quotas(" -- promptpotter/application/jobs/launcher/*.py` is 1.
+- **The origin's `changes_description` embeds the checkout's absolute path** (`Origin from
+  /…/origin.yaml`): a served individual names the host's filesystem, and two checkouts of one commit
+  read `decisions MOVED` in `scripts/offline_run.py --against`. Action: name the dataset-relative
+  path. **Re-test:** `grep -c '"Origin from /' <home>/<optimizer>/decisions.json` is 0.
+- **The controlled offline leg's arm-memory count moves between identical runs** (`arm potter: memory
+  holds 380` then `375` own answers on one tree): a cell coalesced with a twin in flight is answered
+  from memory, not sent. A printed reading, not a decision. Action: count filed answers, not distinct
+  ones. **Re-test:** two `--controlled` runs of one tree print one count.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 

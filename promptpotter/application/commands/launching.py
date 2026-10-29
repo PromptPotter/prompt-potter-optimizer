@@ -14,6 +14,7 @@ from promptpotter.application.commands.dispatcher import (
     Dispatched,
     DispatchedToCycle,
     DispatchedToDraft,
+    DispatchedToMinted,
     refused_on_an_arm,
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
@@ -21,6 +22,14 @@ from promptpotter.application.datasets.origin_readiness import save_checkin_draf
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, start_ready_draft
+from promptpotter.application.jobs.launcher.head_to_head import (
+    AdmittedHeadToHead,
+    CheckinArms,
+    HeadToHeadLaunched,
+    admit_head_to_head,
+    dataset_arms,
+    replayed_head_to_head,
+)
 from promptpotter.application.jobs.launcher.launch import (
     Admitted,
     Inline,
@@ -33,6 +42,7 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     FreshMint,
     OriginIncompleteError,
 )
+from promptpotter.application.jobs.registry import CampaignLaunch
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
     resolve_campaign_config,
@@ -59,11 +69,14 @@ if TYPE_CHECKING:
     from promptpotter.domain.command_kinds import (
         ForkCyclePayload,
         ForkSeed,
+        HeadToHeadRequest,
         MintCampaignPayload,
+        MintHeadToHeadPayload,
         StartCheckinPayload,
         StartRunPayload,
         StepCyclePayload,
     )
+    from promptpotter.infrastructure.store.draft_store import DraftClaim
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -229,7 +242,6 @@ def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[object
             dataset=offered_dataset(dispatcher.stores, payload.dataset_name),
             budget=payload.budget,
             optimization=payload.optimization_sent,
-            purpose=payload.purpose,
             declared=payload.campaign_config,
             task_text=payload.task_text,
         )
@@ -246,9 +258,61 @@ def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[object
     return Applier.silent(_apply_mint)
 
 
-def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> Applier[Admitted]:
-    dispatcher, start, claim = dispatched.dispatcher, dispatched.payload, dispatched.claim
+def mint_head_to_head(dispatched: Dispatched[MintHeadToHeadPayload]) -> Applier[HeadToHeadLaunched]:
+    dispatcher, payload = dispatched.dispatcher, dispatched.payload
+    stores, request = dispatcher.stores, payload.head_to_head
+
+    async def _act() -> HeadToHeadLaunched:
+        source = await dataset_arms(stores, offered_dataset(stores, payload.dataset_name))
+        admitted = await admit_head_to_head(
+            source,
+            request,
+            stores=stores,
+            job_registry=dispatcher.job_registry,
+            holder=CampaignLaunch(payload.dataset_name),
+        )
+        return await admitted.launched()
+
+    # A retry under an applied act's key answers what it minted; a refused act's is a new act.
+    return Applier(
+        _act, replay=lambda: replayed_head_to_head(stores, dispatcher.job_registry, request)
+    )
+
+
+def _end_refused_start(stores: Stores, claim: DraftClaim, exc: BaseException) -> None:
+    if isinstance(exc, OriginIncompleteError):
+        # The draft stays, so the operator resolves the gaps and retries.
+        save_checkin_draft(stores, owned_draft(stores, claim.draft_id))
+    claim.release()
+
+
+type StartApplied = Admitted | AdmittedHeadToHead | Launched | HeadToHeadLaunched
+
+
+def _replayed_start(
+    stores: Stores, job_registry: JobRegistry, start: StartCheckinPayload
+) -> Launched | HeadToHeadLaunched:
+    """What a Start that minted answered, read back off its jobs: its draft is gone."""
+    if (request := start.head_to_head) is not None:
+        return replayed_head_to_head(stores, job_registry, request)
+    (job,) = job_registry.started_from_draft(
+        user_id=str(stores.identity.user_id), draft_id=start.draft_id
+    )
+    return Launched(job=job, held=None, hop=job.hop)
+
+
+def start_checkin(
+    dispatched: DispatchedToDraft[StartCheckinPayload] | DispatchedToMinted[StartCheckinPayload],
+) -> Applier[StartApplied]:
+    dispatcher, start = dispatched.dispatcher, dispatched.payload
     stores = dispatcher.stores
+    if isinstance(dispatched, DispatchedToMinted):
+
+        def _replay() -> StartApplied:
+            return _replayed_start(stores, dispatcher.job_registry, start)
+
+        return Applier[StartApplied](_replay, replay=_replay)
+    claim = dispatched.claim
 
     def _admit() -> Admitted:
         # The claim rides the admitted job to the end of its hold; a refusal before it ends it here.
@@ -262,14 +326,29 @@ def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> Applier
                 inline=dispatcher.inline,
             )
         except BaseException as exc:
-            if isinstance(exc, OriginIncompleteError):
-                # The draft stays, so the operator resolves the gaps and retries.
-                save_checkin_draft(stores, owned_draft(stores, claim.draft_id))
-            claim.release()
+            _end_refused_start(stores, claim, exc)
             raise
 
-    # A second Start on it refuses while this one holds it, and is not found once it minted.
-    return Applier[Admitted](_admit, replay=None, ack="accepted")
+    async def _admit_arms(request: HeadToHeadRequest) -> AdmittedHeadToHead:
+        # Its draft lands once every arm is admitted; the claim rides on to the mint.
+        try:
+            draft = start_ready_draft(stores, claim.draft_id)
+            return await admit_head_to_head(
+                CheckinArms(claim),
+                request,
+                stores=stores,
+                job_registry=dispatcher.job_registry,
+                holder=CampaignLaunch(draft.dataset_name, draft_id=claim.draft_id),
+            )
+        except BaseException as exc:
+            _end_refused_start(stores, claim, exc)
+            raise
+
+    # A second Start on it refuses while this one holds it; a refused one's retry is a new Start,
+    # and one that minted replays (`CommandDispatcher._replay_minted`).
+    if (request := start.head_to_head) is not None:
+        return Applier[StartApplied](lambda: _admit_arms(request), replay=None, ack="accepted")
+    return Applier[StartApplied](_admit, replay=None, ack="accepted")
 
 
 async def dispatch_start_checkin(
@@ -278,8 +357,11 @@ async def dispatch_start_checkin(
     *,
     job_registry: JobRegistry | None = None,
     inline: Inline | None = None,
-) -> Launched:
+) -> Launched | HeadToHeadLaunched:
     """Acked at admission, before the mint moves the draft's ledger into the root cycle."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry, inline=inline)
     outcome = await dispatcher.dispatch(call)
-    return await cast(Admitted, outcome.result).launched()
+    applied = cast(StartApplied, outcome.result)
+    if isinstance(applied, Launched | HeadToHeadLaunched):
+        return applied
+    return await applied.launched()

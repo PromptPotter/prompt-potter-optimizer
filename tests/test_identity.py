@@ -57,12 +57,16 @@ from promptpotter.application.datasets.origin_resolve import build_origin_consul
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
 from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
+from promptpotter.application.jobs import mint
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.launch import Inline
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
+    CyclePlan,
+    arm_plans,
+    claim_arms,
     declare,
-    mint_framed_cycle,
+    mint_arms,
     resolve_cycle_plan,
     resolve_resume,
 )
@@ -121,7 +125,7 @@ from promptpotter.connectors import CONNECTORS, DEFAULT_CONNECTOR
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank, restored_partition
-from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize, RunDeclaration
+from promptpotter.domain.campaign import Arm, Compare, DeterminismClamp, Optimize
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -130,12 +134,14 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.command_kinds import (
+    ArmRequest,
     ForkSeed,
+    HeadToHeadRequest,
     StartCheckinPayload,
     SubmittedArm,
 )
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
-from promptpotter.domain.draft_edit import EditDraftPatch
+from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.opt_search_point import (
     TEMPLATE_TOKEN_RE,
@@ -833,7 +839,7 @@ def test_a_measurement_is_filed_under_every_input_that_moves_its_number_and_no_o
 
 
 def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
-    tmp_path: Path, built_stores: Stores, offline: Router
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Router
 ) -> None:
     # The draft's CHAIN reaches the mint on a reused dataset.
     pinned = {"per_sample": "label_match(predicted, ground_truth)", "per_cell": "correct"}
@@ -1147,15 +1153,38 @@ def test_a_campaign_runs_the_config_its_check_in_froze_and_its_forks_narrowed(
     )
     arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
 
-    def minted(declaration: RunDeclaration, campaign_id: str) -> object:
-        return asyncio.run(
-            mint_framed_cycle(arming, declaration, rows_30, campaign_id=campaign_id, task_text=None)
+    def arm_of(key: str, budget: Budget) -> list[CyclePlan]:
+        claimed = claim_arms(
+            stores,
+            HeadToHeadRequest(
+                head_to_head_id="h",
+                arms=[
+                    ArmRequest(
+                        arm_key=key,
+                        optimization=OptimizationOverrides(optimizer=door.optimization.optimizer),
+                    )
+                ],
+                budget=budget,
+            ),
         )
+        try:
+            return asyncio.run(arm_plans(arming, door, claimed, rows_30))
+        finally:
+            claimed.release()
 
-    minted(armed, "decl__0000h1")
-    # An arm declared over other bench defaults never joins its head-to-head.
+    # No dollar cap: a backend holding its own sends prices no cell before a run.
+    mint_arms(arm_of("a", Budget(usd=None, rounds=2)), billed=None)
+    # An arm declared over another budget, or over other bench defaults, never joins its
+    # head-to-head, and takes no campaign.
+    standing = stores.campaigns.list_campaigns(lifecycle="all")
     with pytest.raises(ConflictError):
-        minted(twin.model_copy(update={"bench_defaults_pin": "moved"}), "decl__0000h2")
+        arm_of("b", Budget(usd=None, rounds=3))
+    with monkeypatch.context() as repinned, pytest.raises(ConflictError):
+        repinned.setattr(mint, "bench_defaults_pin", lambda: "moved")
+        arm_of("b", Budget(usd=None, rounds=2))
+    assert stores.campaigns.list_campaigns(lifecycle="all") == standing, (
+        "an arm refused off its head-to-head's record minted a campaign"
+    )
     # An L4 seat declares through the door every campaign takes, and an arm so declared runs what a
     # campaign minted on that declaration resolves to.
     panel = InnerTasks(

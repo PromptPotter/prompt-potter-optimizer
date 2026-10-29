@@ -178,7 +178,7 @@ from promptpotter.domain.bench import (
     partition_bank,
 )
 from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
-from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.campaign_config import CampaignConfig, effective_config
 from promptpotter.domain.cell_fold import is_floor_pinned, merge_known_outcomes, unscoreable_cells
 from promptpotter.domain.command_kinds import (
     OriginGateDecisionPayload,
@@ -3483,6 +3483,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
                 created_at="",
                 origin="origin",
                 shared=alike,
+                armed=effective_config(declared).optimization.budget,
                 ruler_version=0,
             )
         )

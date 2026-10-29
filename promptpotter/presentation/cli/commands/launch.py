@@ -7,7 +7,7 @@ import logging
 import signal
 import sys
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, get_args
 
 from promptpotter import connectors
@@ -106,25 +106,30 @@ def held_run(launched: object) -> HeldRun:
 
 @contextlib.contextmanager
 def ctrl_c_pauses(
-    stores: Stores, pause: PauseCyclePayload
+    stores: Stores, pauses: Sequence[PauseCyclePayload]
 ) -> Iterator[Callable[[CyclePayload], None]]:
-    """The first Ctrl+C sends *pause* as the browser's press does, then cancels this task; the second force-quits."""
+    """The first Ctrl+C sends *pauses* as the browser's press does, then cancels this task; the second force-quits."""
     loop, run = asyncio.get_running_loop(), asyncio.current_task()
     assert run is not None
     asked: set[asyncio.Task[None]] = set()
 
-    async def send(payload: CyclePayload, *, then_cancel: bool) -> None:
+    async def send(payloads: Sequence[CyclePayload], *, then_cancel: bool) -> None:
         try:
-            await CommandDispatcher(stores).dispatch(CommandCall(payload))
-        except PotterError as exc:
-            if not then_cancel:
-                print(f"  {exc}", flush=True)
+            for payload in payloads:
+                try:
+                    await CommandDispatcher(stores).dispatch(CommandCall(payload))
+                except PotterError as exc:
+                    if not then_cancel:
+                        print(f"  {exc}", flush=True)
         finally:
             if then_cancel:
                 run.cancel()
 
-    def dispatch(payload: CyclePayload, *, then_cancel: bool = False) -> None:
-        task = loop.create_task(send(payload, then_cancel=then_cancel))
+    def dispatch(payload: CyclePayload) -> None:
+        _send([payload], then_cancel=False)
+
+    def _send(payloads: Sequence[CyclePayload], *, then_cancel: bool) -> None:
+        task = loop.create_task(send(payloads, then_cancel=then_cancel))
         asked.add(task)
         task.add_done_callback(asked.discard)
 
@@ -135,7 +140,7 @@ def ctrl_c_pauses(
         if interrupted:
             raise KeyboardInterrupt
         interrupted = True
-        loop.call_soon_threadsafe(functools.partial(dispatch, pause, then_cancel=True))
+        loop.call_soon_threadsafe(functools.partial(_send, pauses, then_cancel=True))
 
     previous = signal.signal(signal.SIGINT, on_sigint)
     try:
@@ -148,7 +153,7 @@ def ctrl_c_pauses(
 def _terminal_inputs(session: Session) -> Iterator[None]:
     loop, hop = asyncio.get_running_loop(), session.hop
     pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
-    with ctrl_c_pauses(session.store, pause) as dispatch:
+    with ctrl_c_pauses(session.store, [pause]) as dispatch:
 
         def read_decisions() -> None:
             spelled: dict[str, GateDecision] = {

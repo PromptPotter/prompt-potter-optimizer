@@ -26,6 +26,7 @@ import type {
   MachineStatusResponse,
   LibraryResponse,
   OptimizerRoster,
+  OptimizerSetup,
   MeResponse,
   Evidence,
   OriginListResponse,
@@ -104,6 +105,14 @@ export function optimizerPipelineRead(optimizer: string): ReadDescriptor<Optimiz
 
 export function optimizerRosterRead(): ReadDescriptor<OptimizerRoster> {
   return once("optimizer-roster", `${API}/optimizers`);
+}
+
+// What *optimizer* runs as one head-to-head arm of the check-in: its knobs over the draft's config.
+export function draftArmSetupRead(draftId: string, optimizer: string): ReadDescriptor<OptimizerSetup> {
+  return once(
+    "draft-arm-setup",
+    `${API}/drafts/${enc(draftId)}/optimizer-setup?optimizer=${enc(optimizer)}`,
+  );
 }
 
 // `at` takes the `parse_subject` grammar (absent = campaign root); the server refuses a mask there.

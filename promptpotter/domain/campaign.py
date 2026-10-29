@@ -101,11 +101,17 @@ class DeterminismClamp(StrictModel):
     )
 
 
+# One path segment of the arms listing's `<head_to_head_id>:<arm_key>`.
+_SEGMENT = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+HeadToHeadId = Annotated[str, _SEGMENT]
+HeadToHeadArmKey = Annotated[str, _SEGMENT]
+
+
 class Arm(FrozenModel):
     """The head-to-head a campaign is an arm of, frozen at mint."""
 
-    head_to_head_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
-    arm_key: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    head_to_head_id: HeadToHeadId
+    arm_key: HeadToHeadArmKey
 
 
 class Optimize(FrozenModel):
@@ -237,10 +243,13 @@ class HeadToHeadRecord(FrozenModel):
     """``head_to_heads/{id}.json``: what its arms declare alike, and the origin each resolved to —
     an arm declaring another is refused at its mint."""
 
-    head_to_head_id: str
+    head_to_head_id: HeadToHeadId
     created_at: str
     origin: str
     shared: SharedPart
+    # The ceiling each arm was admitted under, as its next launch reads one: the guard holds every
+    # arm's live one to it, whichever layer named an axis.
+    armed: Budget
     # The tenant ruler's version at open: every arm reads it plus its own lines, never another arm's.
     ruler_version: int = Field(ge=0)
 

@@ -477,6 +477,17 @@ class JobRegistry:
             if j.created_at.startswith(today) and isinstance(j.holder, CampaignLaunch)
         ]
 
+    def started_from_draft(self, *, user_id: str, draft_id: str) -> list[Job]:
+        """The launches a Start landed on the cycles it minted out of *draft_id*: one, or a
+        head-to-head's arms."""
+        return [
+            j
+            for j in self.list_all(user_id=user_id)
+            if isinstance(j.holder, CampaignLaunch)
+            and j.holder.draft_id == draft_id
+            and j.hop != UNRESOLVED_HOP
+        ]
+
     def queued_drafts(self, *, user_id: str) -> frozenset[str]:
         """The check-ins a queued Start waits on: a reload serves each queued, never Start again."""
         return frozenset(

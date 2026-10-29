@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application import optimizers
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
-from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.search_point import TaskDecomposition
@@ -17,7 +16,7 @@ from promptpotter.infrastructure.llm.registry import model_profile
 from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
-    from promptpotter.domain.campaign import Purpose
+    from promptpotter.domain.campaign import Arm
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
 
@@ -122,6 +121,46 @@ def _check_task_context_present(
     )
 
 
+@dataclass(frozen=True)
+class _RoundShort:
+    """A USD cap under what one round can cost, priced on a billed cell where one is archived."""
+
+    cap: float
+    need: float
+    cells: int
+    search: int
+    price: float
+    billed: bool
+
+    def costing(self, optimizer: str) -> str:
+        priced = (
+            f"a cell of this dataset has billed ${self.price:.5f} on these models"
+            if self.billed
+            else f"the spend book admits a cell at up to ${self.price:.4f}"
+        )
+        return (
+            f"One round of {optimizer} can measure {self.cells} cells off the {self.search} "
+            f"search rows, and {priced}"
+        )
+
+
+def _round_short(
+    config: CampaignConfig,
+    selected: SelectedOptimizer,
+    search: int,
+    cell_usd: float | None,
+    measured_cell_usd: float | None,
+) -> _RoundShort | None:
+    cap = config.optimization.budget.usd
+    price = cell_usd if measured_cell_usd is None else measured_cell_usd
+    if cap is None or price is None:
+        return None
+    cells = selected.round_cells_ceiling(search)
+    if (need := cells * price) <= cap:
+        return None
+    return _RoundShort(cap, need, cells, search, price, billed=measured_cell_usd is not None)
+
+
 def _check_cap_funds_round(
     config: CampaignConfig,
     selected: SelectedOptimizer,
@@ -130,36 +169,28 @@ def _check_cap_funds_round(
     measured_cell_usd: float | None,
 ) -> PreflightWarning | None:
     """Priced at what a cell BILLED where the archive says; the ``cell_usd`` bound alone warns on every run."""
-    cap = config.optimization.budget.usd
-    price = cell_usd if measured_cell_usd is None else measured_cell_usd
-    if cap is None or price is None:
+    short = _round_short(config, selected, search, cell_usd, measured_cell_usd)
+    if short is None:
         return None
-    cells = selected.round_cells_ceiling(search)
-    need = cells * price
-    if need <= cap:
-        return None
-    if measured_cell_usd is not None:
+    advice = "Raise it with `set-limits --max-usd`, or narrow the round in `optimization.nodes`."
+    if short.billed:
         return PreflightWarning(
             code="spend_cap_below_round",
-            title=f"spend cap ${cap:.2f} is under one round's expected cost (${need:.2f})",
+            title=f"spend cap ${short.cap:.2f} is under one round's expected cost (${short.need:.2f})",
             detail=(
-                f"One round of {selected.name} can measure {cells} cells off the {search} "
-                f"search rows, and a cell of this dataset has billed ${measured_cell_usd:.5f} on "
-                f"these models, so a full round is expected to cost ${need:.2f} and this run to "
-                "stop on `spend_budget` inside round 1 unless an eliminator cuts arms short. Raise "
-                "it with `set-limits --max-usd`, or narrow the round in `optimization.nodes`."
+                f"{short.costing(selected.name)}, so a full round is expected to cost "
+                f"${short.need:.2f} and this run to stop on `spend_budget` inside round 1 unless an "
+                f"eliminator cuts arms short. {advice}"
             ),
         )
     return PreflightWarning(
         code="spend_cap_below_round",
-        title=f"spend cap ${cap:.2f} is under one round's ceiling (${need:.2f})",
+        title=f"spend cap ${short.cap:.2f} is under one round's ceiling (${short.need:.2f})",
         detail=(
-            f"One round of {selected.name} can measure {cells} cells off the {search} search "
-            f"rows, and the spend book admits a cell at up to ${cell_usd:.4f}, so only a cap of "
-            f"${need:.2f} is certain to close a round. A cell usually bills well under its bound "
-            "and an eliminator cuts arms short, so this run may still close rounds — or stop on "
-            "`spend_budget` inside round 1 with none closed. Raise it with `set-limits --max-usd`, "
-            "or narrow the round in `optimization.nodes`."
+            f"{short.costing(selected.name)}, so only a cap of ${short.need:.2f} is certain to "
+            "close a round. A cell usually bills well under its bound and an eliminator cuts arms "
+            "short, so this run may still close rounds — or stop on `spend_budget` inside round 1 "
+            f"with none closed. {advice}"
         ),
     )
 
@@ -242,20 +273,46 @@ def run_preflight_checks(
 
 
 def refuse_arm_below_round(
-    purpose: Purpose, warnings: Iterable[PreflightWarning], *, measured_cell_usd: float | None
+    arm: Arm,
+    config: CampaignConfig,
+    selected: SelectedOptimizer,
+    *,
+    search: int,
+    cell_usd: float | None,
+    unpriced: Sequence[str],
+    measured_cell_usd: float | None,
 ) -> None:
-    """An arm alone: stopped inside round 1 it is still graded beside the arms that searched."""
-    if not isinstance(purpose, Compare) or measured_cell_usd is None:
+    """Asked as the arm is planned, before its key is taken: stopped inside round 1 it is still
+    graded beside the arms that searched. A first run has no billed price, so the bound prices it,
+    and an arm neither prices is refused rather than let through. *unpriced* names the routes no
+    rate prices, where the backend bounds the cell."""
+    cap = config.optimization.budget.usd
+    if cap is None:
         return
-    arm = purpose.arm
-    for w in warnings:
-        if w.code == "spend_cap_below_round":
-            raise PayloadInvalidError(
-                f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id} cannot close one round: "
-                f"{w.title}. {w.detail} Raise this arm's cap with `set-limits --max-usd`, which "
-                "moves this arm alone, or size the round down with the optimizer's own knobs.",
-                code="spend_cap_below_round",
-            )
+    where = f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id}"
+    if cell_usd is None and measured_cell_usd is None:
+        bound = (
+            f"no rate on file prices {', '.join(unpriced)}"
+            if unpriced
+            else "the backend bounds no cell"
+        )
+        raise PayloadInvalidError(
+            f"{where} cannot be shown to close one round under its ${cap:.2f}: no archived run "
+            f"prices a cell on these models and {bound}. Nothing was minted. Measure the origin "
+            "once with a plain `new` on this dataset, or bound the arms by tokens or rounds with "
+            "no dollar cap.",
+            code="arm_unpriced",
+        )
+    short = _round_short(config, selected, search, cell_usd, measured_cell_usd)
+    if short is None:
+        return
+    raise PayloadInvalidError(
+        f"{where} cannot close one round: its ${cap:.2f} is under the ${short.need:.2f} "
+        f"{'one round is expected to cost' if short.billed else 'certain to close one'}. "
+        f"{short.costing(selected.name)}. Nothing was minted: raise the head-to-head's budget, "
+        "which every arm runs, or size this arm's round down with its own knobs.",
+        code="spend_cap_below_round",
+    )
 
 
 def refuse_unfit_pipeline(selected: SelectedOptimizer, schema: PipelineSchema) -> None:

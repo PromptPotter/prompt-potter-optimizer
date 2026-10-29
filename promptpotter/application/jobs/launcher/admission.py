@@ -5,20 +5,21 @@ import logging
 import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from typing import TYPE_CHECKING, NoReturn, assert_never
+from typing import TYPE_CHECKING, Protocol, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.account import account_of
 from promptpotter.application.initialization.loop_start import verb_ledger
 from promptpotter.application.jobs.quota import (
+    RateAsk,
     admit_launch,
     check_launch_quotas,
     declare_run_budget,
     hold_moved,
     move_campaign_money,
     next_launch_budget,
-    refuse_verb_rate,
     share_campaign_ceiling,
+    verb_rate,
 )
 from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
@@ -34,6 +35,7 @@ from promptpotter.application.jobs.registry import (
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.termination import run_stop_reason
+from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import (
@@ -68,12 +70,12 @@ from promptpotter.shared.errors import (
     CycleBusyError,
     MachineBusyError,
     NotFoundError,
+    PayloadInvalidError,
 )
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
 
 if TYPE_CHECKING:
-    from promptpotter.application.jobs.launcher.launch import LaunchRequest
     from promptpotter.domain.campaign_config import CampaignConfig
 
 logger = logging.getLogger(__name__)
@@ -149,32 +151,72 @@ def request_job(
     *,
     stores: Stores,
     job_registry: JobRegistry,
-    holder: SlotHolder,
+    holder: SlotHolder | EmbeddedRun,
     hop: CycleHop = UNRESOLVED_HOP,
-) -> Job:
+    launches: int = 1,
+    may_queue: bool = False,
+) -> list[Job]:
+    """THE door of every launch's and pass's jobs: *launches* of them asked together (a
+    head-to-head's arms) are all written or none. Only one launch whose caller can wait
+    (*may_queue*) queues, so no arm searches while a sibling waits. An embedded host holds no slot
+    and answers to no launch quota."""
+    assert launches == 1 or not may_queue, "arms asked together never queue"
+    if launches > settings.MACHINE_RUN_CAPACITY and not isinstance(holder, EmbeddedRun):
+        raise PayloadInvalidError(
+            f"This act starts {launches} runs at once, and this machine runs at most "
+            f"{settings.MACHINE_RUN_CAPACITY} (MACHINE_RUN_CAPACITY in .env): start at most that "
+            "many arms in one act, and the rest in a later act on the same head-to-head id.",
+            code="arms_above_machine",
+            details={"requested": launches, "machine_ceiling": settings.MACHINE_RUN_CAPACITY},
+        )
     user = account_of(stores)
     # ONE gate: the quota count and the slot count come off the same on-disk jobs.
     with job_registry.admission_gate():
+        rate: RateAsk | None
         match holder:
             case CampaignLaunch():
-                check_launch_quotas(user=user, stores=stores, job_registry=job_registry, hop=hop)
+                rate = check_launch_quotas(
+                    user=user, stores=stores, job_registry=job_registry, hop=hop, launches=launches
+                )
             case ScoringPass(verb=verb):
-                refuse_verb_rate(stores, user, verb)
+                rate = verb_rate(stores, user, verb)
+            case EmbeddedRun():
+                rate = None
             case _:
                 assert_never(holder)
         if hop != UNRESOLVED_HOP:
             _refuse_taken_cycle(stores, job_registry, hop)
-        job = job_registry.request_slot(
-            user_id=str(stores.identity.user_id),
-            principal_id=acting_principal(stores.identity).id,
-            workspace=stores.campaigns.workspace,
-            holder=holder,
-            hop=hop,
+        jobs: list[Job] = []
+        try:
+            for _ in range(launches):
+                jobs.append(_new_job(stores, job_registry, holder, hop))
+            if not may_queue and any(job.queued for job in jobs):
+                raise _machine_busy(job_registry)
+            # A pass takes no claim: it never queues, and holds the cycle itself once admitted (`paid_pass`).
+            if hop != UNRESOLVED_HOP and isinstance(holder, CampaignLaunch):
+                claim_cycle(stores, job_registry, jobs[0], hop)
+            if rate is not None:
+                rate.debit()
+        except BaseException as exc:
+            # Inside the gate, so no admission between reads the jobs a refusal takes back.
+            for job in jobs:
+                release_slot(job_registry, job.job_id, exc, stores=stores, hop=None)
+            raise
+        return jobs
+
+
+def _new_job(
+    stores: Stores, job_registry: JobRegistry, holder: SlotHolder | EmbeddedRun, hop: CycleHop
+) -> Job:
+    user_id, workspace = str(stores.identity.user_id), stores.campaigns.workspace
+    principal_id = acting_principal(stores.identity).id
+    if isinstance(holder, EmbeddedRun):
+        return job_registry.create(
+            user_id=user_id, principal_id=principal_id, workspace=workspace, hop=hop, holder=holder
         )
-        # A pass takes no claim: it never queues, and holds the cycle itself once admitted (`paid_pass`).
-        if hop != UNRESOLVED_HOP and isinstance(holder, CampaignLaunch):
-            claim_cycle(stores, job_registry, job, hop)
-        return job
+    return job_registry.request_slot(
+        user_id=user_id, principal_id=principal_id, workspace=workspace, holder=holder, hop=hop
+    )
 
 
 def _refuse_taken_cycle(stores: Stores, job_registry: JobRegistry, hop: CycleHop) -> None:
@@ -214,11 +256,9 @@ def claim_cycle(stores: Stores, job_registry: JobRegistry, job: Job, hop: CycleH
     )
 
 
-def refuse_as_busy(stores: Stores, job_registry: JobRegistry, job: Job) -> NoReturn:
-    # A REFUSAL takes its queue entry with it: one left behind starts the run later.
-    withdraw_queued(stores, job_registry, job.job_id, principal_id=job.principal_id)
+def _machine_busy(job_registry: JobRegistry) -> MachineBusyError:
     oldest = next(iter(job_registry.list_running()), None)
-    raise MachineBusyError(
+    return MachineBusyError(
         holding="" if oldest is None else oldest.what,
         holder_user="" if oldest is None else oldest.user_id,
         started_at=None if oldest is None else oldest.started_at,
@@ -236,8 +276,25 @@ def withdraw_queued(
     return True
 
 
+class AdmittedRequest(Protocol):
+    """What ``admit_and_hold`` reads of a launch: a ``LaunchRequest``, or one head-to-head arm."""
+
+    @property
+    def verb(self) -> str: ...
+    @property
+    def dataset_name(self) -> str: ...
+    @property
+    def hop(self) -> CycleHop: ...
+    @property
+    def budget(self) -> Budget: ...
+    @property
+    def step_rounds(self) -> int | None: ...
+    def backend_type(self, stores: Stores, /) -> str: ...
+    def campaign_config(self, stores: Stores, /) -> CampaignConfig: ...
+
+
 async def admit_and_hold(
-    request: LaunchRequest, *, stores: Stores, job_registry: JobRegistry, job: Job
+    request: AdmittedRequest, *, stores: Stores, job_registry: JobRegistry, job: Job
 ) -> HeldBudget:
     """The request's config is resolved IN here, after the queue wait, so the budget admitted is the one the run starts under."""
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
@@ -389,12 +446,11 @@ async def embedded_share(
 ) -> AsyncIterator[tuple[str, HeldBudget]]:
     """A launch's admission with no slot, entered BEFORE anything paid: the job, then its hold."""
     job_registry = JobRegistry.attach(stores.jobs_dir)
-    job = job_registry.create(
-        user_id=str(stores.identity.user_id),
-        principal_id=acting_principal(stores.identity).id,
-        workspace=stores.campaigns.workspace,
-        hop=UNRESOLVED_HOP if hop is None else hop,
+    (job,) = request_job(
+        stores=stores,
+        job_registry=job_registry,
         holder=EmbeddedRun(dataset_name),
+        hop=UNRESOLVED_HOP if hop is None else hop,
     )
     admitted = False
     try:
@@ -468,15 +524,13 @@ async def paid_pass(
 ) -> AsyncIterator[SpendBook]:
     """Never queues: its caller waits on the answer. On a cycle it holds it, so the one pause stops it."""
     job_registry = JobRegistry.attach(stores.jobs_dir)
-    job = await asyncio.to_thread(
+    (job,) = await asyncio.to_thread(
         request_job,
         stores=stores,
         job_registry=job_registry,
         holder=ScoringPass(verb),
         hop=UNRESOLVED_HOP if hop is None else hop,
     )
-    if job.queued:
-        refuse_as_busy(stores, job_registry, job)
     admitted = False
     holding: CycleHop | None = None
     try:

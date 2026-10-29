@@ -78,22 +78,47 @@ _READ_BURST = 300.0
 _READ_PER_S = 20.0
 
 
-def _consume_rate_token(bucket: str, *, burst: float, per_s: float) -> bool:
+def _consume_rate_token(
+    bucket: str, *, burst: float, per_s: float, tokens: int = 1, debit: bool = True
+) -> bool:
+    """All *tokens* or none: a refused ask takes nothing from the bucket, nor does one not *debit*ed."""
     now = time.monotonic()
     with _rate_lock:
-        tokens, last = _rate_buckets.get(bucket, (burst, now))
-        tokens = min(burst, tokens + (now - last) * per_s)
-        if tokens < 1.0:
-            _rate_buckets[bucket] = (tokens, now)
+        held, last = _rate_buckets.get(bucket, (burst, now))
+        held = min(burst, held + (now - last) * per_s)
+        if held < tokens:
+            _rate_buckets[bucket] = (held, now)
             return False
-        _rate_buckets[bucket] = (tokens - 1.0, now)
+        _rate_buckets[bucket] = (held - tokens if debit else held, now)
         return True
 
 
-def _consume_launch_token(bucket: str) -> bool:
-    return _consume_rate_token(
-        bucket, burst=settings.USER_RATE_BURST, per_s=settings.USER_RATE_PER_MIN / 60.0
-    )
+class RateAsk(NamedTuple):
+    """What an admission asks of a user's launch bucket: checked with its counts, debited only once
+    nothing after can refuse it, so a refused ask spends no token."""
+
+    bucket: str
+    tokens: int
+    what: str
+
+    def _held(self, *, debit: bool) -> None:
+        if not _consume_rate_token(
+            self.bucket,
+            burst=settings.USER_RATE_BURST,
+            per_s=settings.USER_RATE_PER_MIN / 60.0,
+            tokens=self.tokens,
+            debit=debit,
+        ):
+            raise QuotaExceededError(
+                code="rate_limited",
+                message=f"Too many {self.what}; slow down and retry shortly.",
+            )
+
+    def check(self) -> None:
+        self._held(debit=False)
+
+    def debit(self) -> None:
+        self._held(debit=True)
 
 
 def refuse_read_rate(principal_id: str) -> None:
@@ -106,41 +131,45 @@ def refuse_read_rate(principal_id: str) -> None:
 
 
 def check_launch_quotas(
-    *, user: User, stores: Stores, job_registry: JobRegistry, hop: CycleHop
-) -> None:
-    """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, not this one."""
+    *, user: User, stores: Stores, job_registry: JobRegistry, hop: CycleHop, launches: int
+) -> RateAsk | None:
+    """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, then the
+    *launches* asked together — a head-to-head's arms, all admitted or none. Answers the rate its
+    caller debits once the slots are written."""
     # A fresh mint, a check-in's Start included, names no cycle yet.
     rate_limited = not spends_the_hosts_own_key(stores) and hop == UNRESOLVED_HOP
-    if rate_limited and not _consume_launch_token(f"launch:{user.user_id}"):
-        raise QuotaExceededError(
-            code="rate_limited",
-            message="Too many campaign launches; slow down and retry shortly.",
-        )
+    rate = (
+        RateAsk(f"launch:{user.user_id}", launches, "campaign launches") if rate_limited else None
+    )
+    if rate is not None:
+        rate.check()
+    asking = "" if launches == 1 else f", and this head-to-head starts {launches} at once"
 
     # A queued launch counts, or an account queues without bound and the drain order can starve.
     # A scoring pass does not: the limit is on campaigns, and a pass that finds no slot is refused.
     in_flight = len(job_registry.list_launches(user_id=user.user_id))
-    if in_flight >= user.max_concurrent_cycles:
+    if in_flight + launches > user.max_concurrent_cycles:
         raise QuotaExceededError(
             code="quota_exceeded",
             message=(
                 f"Concurrent-cycles ceiling reached "
-                f"({in_flight}/{user.max_concurrent_cycles}); "
+                f"({in_flight}/{user.max_concurrent_cycles}{asking}); "
                 f"stop or cancel one before starting another."
             ),
         )
 
     if rate_limited:
         today = job_registry.list_launched_today(user_id=user.user_id)
-        if len(today) >= user.max_campaigns_per_day:
+        if len(today) + launches > user.max_campaigns_per_day:
             raise QuotaExceededError(
                 code="quota_exceeded",
                 message=(
                     f"Daily campaigns ceiling reached "
-                    f"({len(today)}/{user.max_campaigns_per_day} today); "
+                    f"({len(today)}/{user.max_campaigns_per_day} today{asking}); "
                     f"resets at UTC midnight."
                 ),
             )
+    return rate
 
 
 def overrun(ceilings: Budget, spent: UserSpend) -> Budget:
@@ -553,21 +582,20 @@ def launch_usd_bound(stores: Stores) -> float | None:
     return None if wallet.contended else wallet.headroom.usd
 
 
-def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
+def verb_rate(stores: Stores, user: User, bucket: str) -> RateAsk | None:
     # The host is exempt in the RATE arm too: the meter bounds a stranger on the host's key.
-    if not spends_the_hosts_own_key(stores) and not _consume_launch_token(
-        f"{bucket}:{user.user_id}"
-    ):
-        raise QuotaExceededError(
-            code="rate_limited",
-            message=f"Too many {bucket} requests; slow down and retry shortly.",
-        )
+    if spends_the_hosts_own_key(stores):
+        return None
+    rate = RateAsk(f"{bucket}:{user.user_id}", 1, f"{bucket} requests")
+    rate.check()
+    return rate
 
 
 def _admit_call(*, stores: Stores, bucket: str) -> SpendBook:
     # Nothing is reserved: the book itself refuses a call that would pass the headroom.
     user = account_of(stores)
-    refuse_verb_rate(stores, user, bucket)
+    if (rate := verb_rate(stores, user, bucket)) is not None:
+        rate.debit()
     ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
     if ceilings.usd is None and ceilings.tokens is None:
         return unbounded_spend_book()

@@ -6,7 +6,7 @@ from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any, assert_never
 
-from promptpotter.application.jobs.launcher.admission import refuse_as_busy, request_job
+from promptpotter.application.jobs.launcher.admission import request_job
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, hold_checkin_start
 from promptpotter.application.jobs.launcher.mint_and_start import (
     ExistingCycle,
@@ -99,15 +99,14 @@ def admit(
     inline: Inline | None,
 ) -> Admitted:
     """Call AFTER everything a person types: a slot held across an interactive check-in is lost."""
-    job = request_job(
+    (job,) = request_job(
         stores=stores,
         job_registry=job_registry,
         holder=CampaignLaunch(request.dataset_name, draft_id=request.draft_id),
         hop=request.hop,
+        may_queue=inline is None or not inline.no_wait,
     )
     if inline is not None and job.queued:
-        if inline.no_wait:
-            refuse_as_busy(stores, job_registry, job)
         oldest = next(iter(job_registry.list_running()), None)
         order = job_registry.queue_order()
         logger.warning(

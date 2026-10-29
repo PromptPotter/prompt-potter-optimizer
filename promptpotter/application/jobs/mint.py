@@ -12,9 +12,10 @@ from promptpotter.application.bench.task_context import (
     commit_task_framing,
     committed_task_context,
 )
+from promptpotter.application.datasets.authored import with_optimization
 from promptpotter.application.datasets.draft_campaign import mint_draft_id
 from promptpotter.application.free_tier import outside_free_tier, refuse_outside_free_tier
-from promptpotter.application.jobs.quota import on_free_tier, paid_call
+from promptpotter.application.jobs.quota import declare_run_budget, on_free_tier, paid_call
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
@@ -26,6 +27,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.application.preflight import (
     check_search_split_holds_round,
+    refuse_arm_below_round,
     refuse_below_reasoning_floor,
     refuse_unfit_pipeline,
     refuse_unpriced,
@@ -37,6 +39,7 @@ from promptpotter.application.runner.campaign_ids import (
     origin_content_hash,
     root_cycle_id_of,
 )
+from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_usd
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, PartitionRecord, partition_bank
 from promptpotter.domain.campaign import (
@@ -44,6 +47,7 @@ from promptpotter.domain.campaign import (
     Campaign,
     Compare,
     HeadToHeadRecord,
+    Optimize,
     Purpose,
     RunDeclaration,
     SharedPart,
@@ -57,6 +61,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
 from promptpotter.domain.run_records import CycleSeed, DefaultsDrift, OriginSource
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
 from promptpotter.infrastructure.store.dataset_access import (
@@ -74,12 +79,14 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import CapabilityMenu, PipelineSchema
     from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.domain.treatment import Treatment
+    from promptpotter.infrastructure.store.io import HeldLock
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -346,63 +353,149 @@ def _differs_line(name: str, declared: object, running: object) -> str:
     return name
 
 
-def _join_head_to_head(session: Session, plan: CyclePlan, request: Arm) -> None:
-    campaigns = session.store.campaigns
-    shared = plan.declaration.shared_part()
-    h2h_id = request.head_to_head_id
-    declared = campaigns.load_head_to_head(h2h_id)
-    arms = {
-        purpose.arm.arm_key: other.campaign_id
-        for other in campaigns.list_campaigns(lifecycle="all")
+def _arm_of(plan: CyclePlan) -> Arm:
+    purpose = plan.declaration.purpose
+    assert isinstance(purpose, Compare), "an arm's plan declares its head-to-head"
+    return purpose.arm
+
+
+def standing_arms(stores: Stores, h2h_id: str) -> dict[str, Campaign]:
+    """Arm key → campaign, for every campaign minted as an arm of *h2h_id*."""
+    return {
+        purpose.arm.arm_key: other
+        for other in stores.campaigns.list_campaigns(lifecycle="all")
         if isinstance(purpose := other.declaration.purpose, Compare)
         and purpose.arm.head_to_head_id == h2h_id
     }
-    if declared is None:
-        campaigns.declare_head_to_head(
-            HeadToHeadRecord(
-                head_to_head_id=h2h_id,
-                created_at=utcnow_iso(),
-                origin=plan.origin_hash,
-                shared=shared,
-                # Every arm reads this one version, so no arm's election moves another's scale.
-                ruler_version=session.store.ruler.version(),
-            )
-        )
-    else:
-        differs = [
-            name
-            for name in SharedPart.model_fields
-            if getattr(declared.shared, name) != getattr(shared, name)
-        ]
-        if declared.origin != plan.origin_hash:
-            differs.append("origin")
-        if differs:
-            running = {**shared.model_dump(mode="json"), "origin": plan.origin_hash}
-            stood = {**declared.shared.model_dump(mode="json"), "origin": declared.origin}
-            held = (
-                ", ".join(f"{key}={cid}" for key, cid in sorted(arms.items()))
-                if arms
-                else "no campaign left"
-            )
-            raise ConflictError(
-                f"head-to-head id {h2h_id} is taken: declared {declared.created_at} on origin "
-                f"{declared.origin} (arms: {held}). This arm differs on "
-                f"{'; '.join(_differs_line(n, stood[n], running[n]) for n in differs)}, so it "
-                "would not be graded on that bench set. Name a new head-to-head id "
-                "(`cycles` lists the taken ones), or declare this arm alike.",
-                code="arm_off_bench_set",
-                details={
-                    "differs_on": differs,
-                    "declared_at": declared.created_at,
-                    "declared_origin": declared.origin,
-                    "arms": arms,
-                },
-            )
-    if (taken := arms.get(request.arm_key)) is not None:
+
+
+def _record_of(plan: CyclePlan) -> HeadToHeadRecord:
+    stores = plan.session.store
+    return HeadToHeadRecord(
+        head_to_head_id=_arm_of(plan).head_to_head_id,
+        created_at=utcnow_iso(),
+        origin=plan.origin_hash,
+        shared=plan.declaration.shared_part(),
+        # As its admission declared it: an arm asks nothing past its declaration (`ArmAdmission`).
+        armed=declare_run_budget(
+            effective_config(plan.declaration), stores=stores, hop=None, requested=Budget()
+        )[0],
+        # Every arm reads this one version, so no arm's election moves another's scale.
+        ruler_version=stores.ruler.version(),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimedArms:
+    """A head-to-head's arms, its id held by this act alone from before any arm is admitted until
+    they are minted or refused, every arm key free when the claim was taken."""
+
+    request: HeadToHeadRequest
+    lock: HeldLock
+
+    def release(self) -> None:
+        self.lock.retire()
+
+
+def claim_arms(stores: Stores, request: HeadToHeadRequest) -> ClaimedArms:
+    lock = stores.campaigns.claim_head_to_head(request.head_to_head_id)
+    standing = standing_arms(stores, request.head_to_head_id)
+    if (arm := next((a for a in request.arms if a.arm_key in standing), None)) is not None:
+        lock.retire()
         raise ConflictError(
-            f"arm {request.arm_key} of {h2h_id} is campaign {taken} already",
+            f"arm {arm.arm_key} of {request.head_to_head_id} is campaign "
+            f"{standing[arm.arm_key].campaign_id} already; nothing was minted",
             code="arm_taken",
         )
+    return ClaimedArms(request, lock)
+
+
+def arm_config(
+    declared: CampaignConfig, request: HeadToHeadRequest, arm: ArmRequest
+) -> CampaignConfig:
+    """What *arm* runs: *declared* under its overlay and the head-to-head's budget."""
+    config = with_optimization(declared, request.declared_optimization(arm))
+    if config.optimization.halt_at_accuracy is not None:
+        raise ConflictError(
+            "an arm stops on its budget, never on an accuracy: drop the halt accuracy",
+            code="arm_halt_refused",
+        )
+    return config
+
+
+def _refuse_off_record(
+    record: HeadToHeadRecord, plan: CyclePlan, arms: Mapping[str, str], *, stood_by: str
+) -> None:
+    """*stood_by* names what *record* is: the stored declaration, or this act's first arm."""
+    arm = _arm_of(plan)
+    shared = plan.declaration.shared_part()
+    differs = [
+        name
+        for name in SharedPart.model_fields
+        if getattr(record.shared, name) != getattr(shared, name)
+    ]
+    if record.origin != plan.origin_hash:
+        differs.append("origin")
+    if differs:
+        running = {**shared.model_dump(mode="json"), "origin": plan.origin_hash}
+        stood = {**record.shared.model_dump(mode="json"), "origin": record.origin}
+        raise ConflictError(
+            f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id} differs from {stood_by} on "
+            f"{'; '.join(_differs_line(n, stood[n], running[n]) for n in differs)}, so it would "
+            "not be graded on that bench set. Nothing was minted: declare the arms alike, or name "
+            "a new head-to-head id (`cycles` lists the taken ones).",
+            code="arm_off_bench_set",
+            details={"differs_on": differs, "declared_origin": record.origin, "arms": dict(arms)},
+        )
+
+
+def _declared_by(record: HeadToHeadRecord, arms: Mapping[str, str]) -> str:
+    held = ", ".join(f"{key}={cid}" for key, cid in sorted(arms.items())) or "no campaign left"
+    return f"its record, declared {record.created_at} on origin {record.origin} (arms: {held})"
+
+
+async def arm_plans(
+    session: Session,
+    declared: CampaignConfig,
+    claimed: ClaimedArms,
+    dataset: Sequence[Sample],
+    *,
+    origin_override: dict[str, NodePrompt] | None = None,
+) -> list[CyclePlan]:
+    """THE one place an arm is planned, under its act's claim: every refusal it owes — held to its
+    head-to-head's record (the stored one, else this act's first arm) and priced on its own
+    budget — before anything is minted or paid."""
+    request = claimed.request
+    plans = [
+        resolve_cycle_plan(
+            session,
+            declare(session, arm_config(declared, request, arm), purpose=request.purpose(arm)),
+            dataset,
+            origin_override=origin_override,
+        )
+        for arm in request.arms
+    ]
+    arms = {
+        key: campaign.campaign_id
+        for key, campaign in standing_arms(session.store, request.head_to_head_id).items()
+    }
+    stored = session.store.campaigns.load_head_to_head(request.head_to_head_id)
+    record = _record_of(plans[0]) if stored is None else stored
+    stood_by = f"arm {request.arms[0].arm_key}" if stored is None else _declared_by(stored, arms)
+    for plan in plans:
+        _refuse_off_record(record, plan, arms, stood_by=stood_by)
+    for plan in plans:
+        bound = await cell_bound(plan.session, plan.pipeline_params)
+        refuse_arm_below_round(
+            _arm_of(plan),
+            effective_config(plan.declaration),
+            plan.optimizer,
+            search=len(plan.partition.search),
+            cell_usd=None if bound is None else bound.usd,
+            unpriced=() if bound is None else bound.unpriced,
+            measured_cell_usd=measured_cell_usd(plan.session, plan.pipeline_params),
+        )
+    return plans
 
 
 def _prompt_axes_only(
@@ -483,11 +576,74 @@ def mint(plan: CyclePlan, *, campaign_id: str, billed: Path | None) -> MintedCyc
     )
 
 
-def _mint_door(plan: CyclePlan, *, campaign_id: str, billed: Path | None) -> MintedCycle:
-    """On the plan it mints, framing committed: the origin it joins on is that plan's."""
-    if isinstance(purpose := plan.declaration.purpose, Compare):
-        _join_head_to_head(plan.session, plan, purpose.arm)
-    return mint(plan, campaign_id=campaign_id, billed=billed)
+def _mint_all(
+    plans: Sequence[CyclePlan], campaign_ids: Sequence[str], *, billed: Path | None
+) -> list[MintedCycle]:
+    """All or none. *billed* moves into the first cycle alone, minted last, so a refusal before it
+    leaves the ledger where it was. A record this act declares is its first arm's as minted, once
+    every arm stands."""
+    first = plans[0]
+    stores = first.session.store
+    minted: list[MintedCycle] = []
+    try:
+        for i in reversed(range(len(plans))):
+            billing = billed if i == 0 else None
+            minted.insert(0, mint(plans[i], campaign_id=campaign_ids[i], billed=billing))
+        compares = isinstance(first.declaration.purpose, Compare)
+        if compares and stores.campaigns.load_head_to_head(_arm_of(first).head_to_head_id) is None:
+            stores.campaigns.declare_head_to_head(_record_of(first))
+    except BaseException:
+        unmint(stores, [cycle.campaign_id for cycle in minted])
+        raise
+    return minted
+
+
+def unmint(stores: Stores, campaign_ids: Sequence[str]) -> None:
+    """Takes back campaigns an act minted and never started, what they billed banked first.
+    Best-effort: it must never mask the refusal its caller re-raises."""
+    for campaign_id in campaign_ids:
+        try:
+            stores.campaigns.delete_campaign(
+                campaign_id,
+                keep_results=False,
+                changed_at=utcnow_iso(),
+                reason="its act was refused before any arm started",
+            )
+        except Exception:
+            logger.exception(
+                "campaign %s: its act was refused and it could not be removed", campaign_id
+            )
+
+
+def mint_arms(plans: Sequence[CyclePlan], *, billed: Path | None) -> list[MintedCycle]:
+    """*plans* from ``arm_plans``, framed already: a check-in's arms frame nothing."""
+    minted = _mint_all(plans, [fresh_campaign_id(plan.session) for plan in plans], billed=billed)
+    relabel_minted(minted[0].session)
+    return minted
+
+
+async def mint_framed_arms(session: Session, plans: Sequence[CyclePlan]) -> list[MintedCycle]:
+    """*plans* from ``arm_plans``: a framing the dataset still owes is paid once and frames every arm."""
+    campaign_ids = [fresh_campaign_id(session) for _ in plans]
+    return await _mint_framed(session, plans, campaign_ids, task_text=None)
+
+
+async def _mint_framed(
+    session: Session,
+    plans: Sequence[CyclePlan],
+    campaign_ids: Sequence[str],
+    *,
+    task_text: str | None,
+) -> list[MintedCycle]:
+    description = _description_to_decompose(
+        session, effective_config(plans[0].declaration), task_text
+    )
+    if description is None:
+        minted = _mint_all(plans, campaign_ids, billed=None)
+    else:
+        minted = await _mint_after_framing(session, plans, description, campaign_ids=campaign_ids)
+    relabel_minted(minted[0].session)
+    return minted
 
 
 def _description_to_decompose(
@@ -512,32 +668,17 @@ async def mint_framed_cycle(
     origin_override: dict[str, NodePrompt] | None = None,
 ) -> MintedCycle:
     """An L4 inner cell mints through ``mint``, so cells never race to decompose."""
-    campaign_config = effective_config(declaration)
-    if isinstance(declaration.purpose, Compare):
-        if task_text or origin_override:
-            raise PayloadInvalidError(
-                "an arm runs the head-to-head's origin and framing: no task text, no origin override"
-            )
-        if campaign_config.optimization.halt_at_accuracy is not None:
-            raise ConflictError(
-                "an arm stops on its budget, never on an accuracy: drop the halt accuracy",
-                code="arm_halt_refused",
-            )
+    assert isinstance(declaration.purpose, Optimize), "an arm is planned with its head-to-head"
     # Every refusal the mint owes, before the check-in below bills.
     plan = resolve_cycle_plan(session, declaration, dataset, origin_override=origin_override)
-    description = _description_to_decompose(session, campaign_config, task_text)
-    if description is None:
-        minted = _mint_door(plan, campaign_id=campaign_id, billed=None)
-    else:
-        minted = await _mint_after_framing(session, plan, description, campaign_id=campaign_id)
-    relabel_minted(minted.session)
+    (minted,) = await _mint_framed(session, [plan], [campaign_id], task_text=task_text)
     return minted
 
 
 async def _mint_after_framing(
-    session: Session, plan: CyclePlan, description: str, *, campaign_id: str
-) -> MintedCycle:
-    """The cycle id hashes the framing, so its call bills a draft ledger the mint adopts or a refusal discards."""
+    session: Session, plans: Sequence[CyclePlan], description: str, *, campaign_ids: Sequence[str]
+) -> list[MintedCycle]:
+    """The cycle id hashes the framing, so its call bills a draft ledger the first mint adopts or a refusal discards."""
     assert session.dataset_name, "a framing commits to the dataset the session opened"
     drafts = session.store.drafts
     draft_id = mint_draft_id()
@@ -551,13 +692,16 @@ async def _mint_after_framing(
                 ledger=checkin_ledger,
             )
         logger.info("Committed task framing for %s from its check-in", session.dataset_name)
-        framed = replace(
-            plan,
-            framing=campaign_framing(
-                session.store, effective_config(plan.declaration), session.dataset
-            ),
-        )
-        minted = _mint_door(framed, campaign_id=campaign_id, billed=checkin_ledger.path)
+        framed = [
+            replace(
+                plan,
+                framing=campaign_framing(
+                    session.store, effective_config(plan.declaration), session.dataset
+                ),
+            )
+            for plan in plans
+        ]
+        minted = _mint_all(framed, campaign_ids, billed=checkin_ledger.path)
     except BaseException:
         drafts.discard(draft_id)
         raise

@@ -1209,6 +1209,14 @@ def resolve_pipeline_for_draft(stores: Stores, draft: DraftCampaign) -> Campaign
     )
 
 
+def draft_arm_setup(stores: Stores, draft: DraftCampaign, optimizer: str) -> OptimizerSetup:
+    """*optimizer* as a head-to-head arm of the draft runs it: the draft's config under it, as
+    ``mint.arm_config`` lays an arm's optimization."""
+    m = _draft_merge(stores, draft)
+    cfg = with_optimization(m.cfg, {"optimizer": optimizer})
+    return optimizer_setup(cfg, _draft_mint(stores, draft, m), m.filtered)
+
+
 def draft_pipeline(
     stores: Stores, draft: DraftCampaign
 ) -> tuple[dict[str, Any], dict[str, list[NodeConfigParam]], PipelineSchema]:

@@ -525,8 +525,12 @@ async def test_a_delegate_acts_only_within_what_its_owner_granted(
     )
     # A full box: every launch takes a place in line.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
-    owners = request_job(stores=owner, job_registry=registry, holder=CampaignLaunch("ds1"))
-    delegates = request_job(stores=delegate, job_registry=registry, holder=CampaignLaunch("ds1"))
+    (owners,) = request_job(
+        stores=owner, job_registry=registry, holder=CampaignLaunch("ds1"), may_queue=True
+    )
+    (delegates,) = request_job(
+        stores=delegate, job_registry=registry, holder=CampaignLaunch("ds1"), may_queue=True
+    )
     assert owners.queued and delegates.queued
     assert owners.user_id == delegates.user_id, "one account: the quota key cannot tell them apart"
 
@@ -747,8 +751,12 @@ async def test_nothing_is_deleted_while_its_owner_still_holds_it(
 
     # A launch holds its cycle from the moment it is accepted; a full box queues it.
     registry = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 0)
-    job = request_job(
-        stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
+    (job,) = request_job(
+        stores=built_stores,
+        job_registry=registry,
+        holder=CampaignLaunch("ds1"),
+        hop=hop,
+        may_queue=True,
     )
     assert job.queued
     claimed = derive_run_state(cycle_dir)

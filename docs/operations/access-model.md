@@ -108,7 +108,7 @@ CLI-minted campaign's owner differs from a browser session's `user_id` within on
 The genuinely-partial boundary.
 
 - **CLI and web-launched runs are separate OS processes** from the API
-  (`jobs/launcher/run_job.py::spawn_job` hands the identity and held ceiling over stdin), but a web
+  (`jobs/launcher/run_job.py::spawn_jobs` hands the identity and held ceiling over stdin), but a web
   run is a child of the API's unit: same OS user, `.env`, provider keys and hardening — a separate
   process, not a separate principal.
 - **Both hold the same machine slot** (`jobs/launcher/admission.py::admit_and_hold`). Admitting
@@ -129,7 +129,8 @@ EXECUTABLE** — a custom node, a plugin connector, arbitrary Python. Until then
 against a guess, and the guess decides its shape: every tenant-controlled path is audited inert (the
 scoring formula AST-allowlisted in `application/scoring/formula/compiler.py`, YAML `safe_load`ed,
 slugs regex-validated, the provider registry closed). Waiting is cheap **only while the launch seam
-stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_run.py`).
+stays single** (`jobs/launcher/admission.py::request_job`, which a launch, a head-to-head's arms and
+`application/embedded_run.py` all take their jobs from).
 
 ---
 

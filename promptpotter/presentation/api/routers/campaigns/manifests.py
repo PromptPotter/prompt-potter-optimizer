@@ -19,6 +19,8 @@ from promptpotter.application.pipeline_resolve import (
     CampaignPipelineResponse,
     ForkPreviewRequest,
     ForkPreviewResponse,
+    OptimizerSetup,
+    draft_arm_setup,
     fork_preview,
     resolve_pipeline_at,
 )
@@ -64,6 +66,16 @@ def get_draft(stores: StoresDep, draft_id: str) -> DraftReopenResponse:
         resolution_pending=draft.resolution_pending(),
         queued=draft_id in queued_drafts(stores),
     )
+
+
+@campaigns_router.get("/drafts/{draft_id}/optimizer-setup", response_model=OptimizerSetup)
+def get_draft_arm_setup(
+    stores: StoresDep,
+    draft_id: str,
+    optimizer: str = Query(description="The optimizer one head-to-head arm runs"),
+) -> OptimizerSetup:
+    """The knobs, pools and prompts *optimizer* runs as an arm of this check-in's head-to-head."""
+    return draft_arm_setup(stores, owned_draft(stores, draft_id), optimizer)
 
 
 @campaigns_router.get("/campaigns/{campaign_id}/pipeline", response_model=CampaignPipelineResponse)

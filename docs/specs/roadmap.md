@@ -79,9 +79,8 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
    `optimizer ∈ {potter, capo, levi, gepa}`, calls held equal, 3 seeds; paired per-cell differences,
    clustered SEs, Holm/BH across the matrix. The controlled reading (one declared head-to-head) and
    the uncontrolled one (each peer run its own way, the notebooks) are never substituted. Owed: `bbeh`
-   re-ingested with a bench partition wider than 100 rows; an N-arm mint verb over
-   `application/jobs/mint.py::_join_head_to_head`.
-   Price it in dollars and wall clock before asking.
+   re-ingested with a bench partition wider than 100 rows. Price it in dollars and wall clock
+   before asking.
 6. **The budget dimension** (PAID, after 5): the same arms at two or three budget points — the
    budget-matched Pareto comparison reviewers ask for first.
 7. **Third-party reachability**: a scratch-venv example package with one entry point and one

@@ -16,6 +16,7 @@ from promptpotter.domain.command_kinds import (
     CommandPayload,
     CyclePayload,
     DeleteCyclePayload,
+    DraftMintingPayload,
     DraftPayload,
     LinePayload,
     PauseCyclePayload,
@@ -169,6 +170,11 @@ class DispatchedToDraft[P: CommandPayload](Dispatched[P]):
 
 
 @dataclass(frozen=True, slots=True)
+class DispatchedToMinted[P: CommandPayload](Dispatched[P]):
+    """A Start retried under its key once it minted its draft: its handler only replays."""
+
+
+@dataclass(frozen=True, slots=True)
 class CommandOutcome[R]:
     accepted: CommandAcceptedBody
     result: R
@@ -264,6 +270,11 @@ class CommandDispatcher:
     async def _on_draft(self, call: CommandCall[DraftPayload]) -> CommandOutcome[Any]:
         # Under the draft's claim, which a Start holds until its mint closed: no command lands inside
         # a mint or writes a minted draft back. Owned first, so another user's held claim says nothing.
+        payload = call.payload
+        if isinstance(payload, DraftMintingPayload) and not self.stores.drafts.read_draft(
+            payload.draft_id
+        ):
+            return self._replay_minted(CommandCall(payload, call.idempotency_key))
         owned_draft_data(self.stores, call.payload.draft_id)
         claim = self.stores.drafts.claim(call.payload.draft_id)
         try:
@@ -279,6 +290,26 @@ class CommandDispatcher:
         finally:
             if applier.claim is not None:
                 applier.claim.release()
+
+    def _replay_minted(self, call: CommandCall[DraftMintingPayload]) -> CommandOutcome[Any]:
+        """A minted draft is gone, its ledger moved into a cycle its Start launched: a retry of that
+        Start under its key answers what it started; any other finds no draft."""
+        draft_id = call.payload.draft_id
+        launches = self.job_registry.started_from_draft(
+            user_id=str(self.stores.identity.user_id), draft_id=draft_id
+        )
+        for job in launches:
+            ledger = CycleEventLog.open(CycleDir(self.stores.campaigns.cycle_dir(job.hop)))
+            if (match := _find_idempotent_command(ledger, call.idempotency_key)) is None:
+                continue
+            applier = self._applier(DispatchedToMinted(self, call.payload))
+            assert applier.replay is not None, "a minting payload replays once it minted"
+            return CommandOutcome(
+                accepted=CommandAcceptedBody(command_id=match.command_id),
+                result=applier.replay(),
+                ack=match.ack,
+            )
+        raise NotFoundError(f"draft {draft_id!r} not found.", code="command_target_not_found")
 
     async def _record_and_apply[P: CommandPayload, R](
         self, ledger: CycleEventLog, call: CommandCall[P], applier: Applier[R]

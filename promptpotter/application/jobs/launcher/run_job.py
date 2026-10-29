@@ -41,7 +41,7 @@ from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.mint import MintedCycle
@@ -88,26 +88,55 @@ class JobSpec(StrictModel):
         return self
 
 
-def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> None:
-    log_path = spec.jobs_dir / "logs" / f"{spec.job_id}.log"
-    try:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "ab") as log:
-            child = subprocess.Popen(
-                [sys.executable, "-X", "utf8", "-m", __spec__.name],
-                stdin=subprocess.PIPE,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                **_DETACHED,
-            )
-        assert child.stdin is not None
-        child.stdin.write(spec.model_dump_json().encode())
-        child.stdin.close()
-    except BaseException as exc:
-        # No process took the job, so nothing else will ever hand its slot back or stamp its cycle.
-        release_slot(job_registry, spec.job_id, exc, stores=stores, hop=spec.hop)
-        raise
+def _log_path(spec: JobSpec) -> Path:
+    return spec.jobs_dir / "logs" / f"{spec.job_id}.log"
 
+
+def _start_child(spec: JobSpec) -> subprocess.Popen[bytes]:
+    log_path = _log_path(spec)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "ab") as log:
+        return subprocess.Popen(
+            [sys.executable, "-X", "utf8", "-m", __spec__.name],
+            stdin=subprocess.PIPE,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            **_DETACHED,
+        )
+
+
+def spawn_jobs(
+    job_registry: JobRegistry, specs: Sequence[JobSpec], *, stores: Stores
+) -> list[asyncio.Task[None]]:
+    """Answers the tasks that end as the runs' processes exit. Every process is started before any
+    is handed its spec, so one that fails to start starts none: a child whose stdin closes empty
+    exits unadopted, and an unadopted job released before its child adopts it is never run."""
+    children: list[subprocess.Popen[bytes]] = []
+    try:
+        for spec in specs:
+            children.append(_start_child(spec))
+        for child, spec in zip(children, specs, strict=True):
+            assert child.stdin is not None
+            child.stdin.write(spec.model_dump_json().encode())
+            child.stdin.close()
+    except BaseException as exc:
+        for child in children:
+            assert child.stdin is not None
+            with contextlib.suppress(OSError):
+                child.stdin.close()
+        # No process runs any of them, so nothing else will ever hand their slots back or stamp their cycles.
+        for spec in specs:
+            release_slot(job_registry, spec.job_id, exc, stores=stores, hop=spec.hop)
+        raise
+    return [
+        _watch_exit(job_registry, child, spec, stores=stores)
+        for child, spec in zip(children, specs, strict=True)
+    ]
+
+
+def _watch_exit(
+    job_registry: JobRegistry, child: subprocess.Popen[bytes], spec: JobSpec, *, stores: Stores
+) -> asyncio.Task[None]:
     loop, exited = asyncio.get_running_loop(), asyncio.Event()
 
     def _await_exit() -> None:
@@ -126,8 +155,10 @@ def spawn_job(job_registry: JobRegistry, spec: JobSpec, *, stores: Stores) -> No
             spec.hop, job_id=spec.job_id, detail="its process exited before the run began"
         )
 
-    job_registry.attach_task(spec.job_id, asyncio.create_task(watch(), name=f"job-{spec.job_id}"))
-    logger.info("job %s runs in process %s (log %s)", spec.job_id, child.pid, log_path)
+    exited_task = asyncio.create_task(watch(), name=f"job-{spec.job_id}")
+    job_registry.attach_task(spec.job_id, exited_task)
+    logger.info("job %s runs in process %s (log %s)", spec.job_id, child.pid, _log_path(spec))
+    return exited_task
 
 
 async def run_held_job(
@@ -225,8 +256,9 @@ class HeldRun:
             install_datasets_root=stores.install_datasets_root,
         )
 
-    def detach(self, *, mode: RunMode) -> None:
-        spawn_job(self.job_registry, self.job_spec(mode), stores=self.session.store)
+    def detach(self, *, mode: RunMode) -> asyncio.Task[None]:
+        (exited,) = detach_runs([self], mode=mode)
+        return exited
 
     async def run_inline(
         self, *, mode: RunMode, readout_sink: Callable[[str], None] | None
@@ -245,6 +277,14 @@ class HeldRun:
             optimizer=self.optimizer,
             readout_sink=readout_sink,
         )
+
+
+def detach_runs(held: Sequence[HeldRun], *, mode: RunMode) -> list[asyncio.Task[None]]:
+    """Each run in its own process, all started or none (``spawn_jobs``)."""
+    first = held[0]
+    return spawn_jobs(
+        first.job_registry, [run.job_spec(mode) for run in held], stores=first.session.store
+    )
 
 
 async def open_held_cycle(

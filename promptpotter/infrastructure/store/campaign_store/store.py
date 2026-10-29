@@ -84,10 +84,12 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.io import (
+    HeldLock,
     iter_files,
     read_json_optional,
     read_text_optional,
     rmtree_robust,
+    take_lock,
     unlink_robust,
     write_json,
     write_text,
@@ -100,6 +102,7 @@ from promptpotter.infrastructure.store.layout import (
     campaigns_root_dir_for,
     classify,
     cycle_dir_for,
+    head_to_head_claim_path,
     head_to_head_path,
     inner_sandbox_key,
     root_cycle_id,
@@ -304,6 +307,18 @@ class CampaignStore:
             head_to_head_path(self._base_dir, record.head_to_head_id),
             record.model_dump(mode="json"),
         )
+
+    def claim_head_to_head(self, head_to_head_id: str) -> HeldLock:
+        """An OS lock, held by one act from its arms' refusals through their mint: two acts on one
+        id would each find an arm key free and both mint it."""
+        lock = take_lock(head_to_head_claim_path(self._base_dir, head_to_head_id), wait_s=0)
+        if lock is None:
+            raise ConflictError(
+                f"head-to-head {head_to_head_id!r} is held by another act minting its arms; "
+                "retry once that ends.",
+                code="head_to_head_held",
+            )
+        return lock
 
     def update_campaign(self, campaign_id: str, **changes: Unpack[CampaignEdit]) -> None:
         manifest = self.load_campaign(campaign_id)
