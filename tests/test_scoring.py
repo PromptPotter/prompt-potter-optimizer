@@ -15,8 +15,9 @@ from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from itertools import count, product
+from math import sqrt
 from pathlib import Path
-from statistics import mean, stdev
+from statistics import fmean, mean, stdev
 from typing import Any, cast
 
 import pytest
@@ -66,7 +67,7 @@ from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.diagnostics.verify import verify_member, verify_reading
-from promptpotter.application.evidence.head_to_head import GuardDifference
+from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.session import LaunchClock, Session
@@ -168,7 +169,7 @@ from promptpotter.application.scoring.selection import (
     readable_lifts,
 )
 from promptpotter.config.paths import optimizers_root
-from promptpotter.domain.arm_reading import order_floor
+from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import ArmSlot, Cut, CutKind, Measured, is_leader_eligible
 from promptpotter.domain.bench import (
     BenchPass,
@@ -227,7 +228,7 @@ from promptpotter.domain.pipeline_schema import ManifestNodeOverlay, PipelineNod
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.results import InRunCells, RoundResult
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.ruler import CellScopes
+from promptpotter.domain.ruler import CellScopes, ThetaCaveat
 from promptpotter.domain.run_records import (
     CommandAckRecord,
     ComparisonExit,
@@ -2787,6 +2788,9 @@ def _evidence_campaign(
     proposer_model: str | None = None,
     graded: bool = True,
     steered: bool = False,
+    tilt: float = 0.0,
+    elects_on: DisplayMetric = "ability",
+    fit: ArmFit | None = None,
 ) -> SubjectSpec:
     if stores.campaigns.load_campaign(cid) is not None:
         return SubjectSpec("campaign", cid)
@@ -2843,7 +2847,13 @@ def _evidence_campaign(
             cell.filed(dataclasses.replace(cell.facts, answer=answer))
             for cell, (_, answer, _) in zip(panel, walked, strict=True)
         )
-        closed = round_result(1, arms={key: pick}, selected=key, cells={key: answered})
+        closed = round_result(
+            1,
+            arms={key: pick},
+            selected=key,
+            cells={key: answered},
+            voted={"elects_on": elects_on, "fit": {} if fit is None else {key: fit}},
+        )
         close_round(
             ledgers[hop],
             [round_result(0, cells={}), closed],
@@ -2861,7 +2871,11 @@ def _evidence_campaign(
                 None,
                 query=s.query,
                 sample_key=s.key,
-                pipeline_data={"env_reward": level + 0.1 * (s.id % 2)},
+                pipeline_data={
+                    "env_reward": level
+                    + 0.1 * (s.id % 2)
+                    + (role == "selected") * tilt * (s.id % 3)
+                },
             )
             for s in partition.bench
         ]
@@ -3487,32 +3501,37 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             )
         )
     h2h_cases: tuple[
-        tuple[tuple[SubjectSpec, ...], dict[str, Any] | None, bool | None, list[str], int], ...
+        tuple[tuple[SubjectSpec, ...], dict[str, Any] | None, bool | None, list[str], int, int],
+        ...,
     ] = (
-        ((potter_a, capo_b), None, True, [], 1),
-        ((potter_course, capo_b), None, True, [], 1),
-        ((potter_course, potter_a, capo_b), None, True, [], 1),
+        ((potter_a, capo_b), None, True, [], 1, 1),
+        ((potter_course, capo_b), None, True, [], 1, 1),
+        ((potter_course, potter_a, capo_b), None, True, [], 1, 1),
         (
             (potter_a, capo_b),
             {"cid": "gepa_c", "n": 3, "seed": 1},
             False,
             ["bench_rows"],
             1,
+            1,
         ),
+        # A replicate read apart from its arm's origin puts the whole arm outside the family.
         (
             (potter_a, capo_b),
             {"cid": "capo_d", "n": 4, "origin": 0.6},
             False,
             ["origin_reading"],
-            1,
+            0,
+            2,
         ),
-        # capo_b and capo_f run one treatment, so they contrast nothing and never pair.
-        ((potter_a, capo_b), {"cid": "capo_f", "n": 6, "at": 1}, True, [], 2),
+        # capo_b and capo_f run one treatment: one arm, its two replicates.
+        ((potter_a, capo_b), {"cid": "capo_f", "n": 6, "at": 1}, True, [], 1, 2),
         (
             (potter_a, capo_b),
             {"cid": "potter_g", "n": 7, "proposer_model": "other/model"},
             False,
             ["optimizer_models"],
+            1,
             1,
         ),
         (
@@ -3520,10 +3539,11 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             {"cid": "capo_s", "n": 9, "steered": True},
             False,
             ["human_intervened"],
-            1,
+            0,
+            2,
         ),
     )
-    for subjects, third, verdict, differs_on, family in h2h_cases:
+    for subjects, third, verdict, differs_on, family, replicates in h2h_cases:
         case = f"{subjects} beside {third}"
         roster = [*subjects]
         if third is not None:
@@ -3534,17 +3554,23 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
         assert h2h is not None and (h2h.verdict, h2h.guard.differs_on) == (verdict, differs_on), (
             case
         )
-        tested = [
-            p.reading
-            for p in h2h.pairs
-            if p.reading.headline is not None and p.reading.headline.family is not None
-        ]
+        tested = [c for c in h2h.contrasts if c.lift is not None and c.lift.family is not None]
         assert len(tested) == family, f"{case}: the tests one correction was taken across"
-        first_a, first_b = (m.address.path[-1].campaign_id for m in (tested[0].a, tested[0].b) if m)
-        lift, coverage = tested[0].headline, tested[0].coverage
-        assert lift is not None and coverage is not None and coverage.scored == 6, case
-        assert lift.estimate.value == pytest.approx({"potter_a": 0.2, "capo_b": -0.2}[first_a])
-        assert {first_a, first_b} == {"potter_a", "capo_b"} and lift.estimate.side != "spans", case
+        contrast = next(
+            c for c in h2h.contrasts if {c.a.optimizer, c.b.optimizer} == {"potter", "capo"}
+        )
+        potter_arm, capo_arm = sorted(
+            (contrast.a, contrast.b), key=lambda arm: arm.optimizer != "potter"
+        )
+        lift = contrast.lift
+        assert lift is not None and len(contrast.differences) == 6, case
+        assert lift.estimate.value == pytest.approx(0.2 if contrast.a is potter_arm else -0.2)
+        assert lift.estimate.side != "spans", case
+        assert potter_arm.replicates == ["potter_a"], case
+        assert len(capo_arm.replicates) == replicates, f"{case}: one treatment is one arm"
+        assert (lift.family is None) is (contrast.guard.state is GuardState.DIFFERS), (
+            f"{case}: a contrast that differs is read, labelled, and outside the correction"
+        )
         differs = "differs" if differs_on else "uncontrolled"
         assert [r.guard.state.value for r in h2h.rows] == ["uncontrolled"] * 2 + [differs] * bool(
             third
@@ -3615,16 +3641,108 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored_or_says_why_i
             f"{case}: {[r.guard.differs_on for r in h2h.rows]}"
         )
         assert h2h.verdict is verdict, case
-        tested_by_state = Counter(
-            p.guard.state for p in h2h.pairs if p.reading.headline is not None
-        )
-        for pair in h2h.pairs:
-            if pair.reading.headline is not None and pair.reading.headline.family is not None:
-                assert pair.reading.headline.family.n_tests == tested_by_state[pair.guard.state], (
-                    f"{case}: a controlled and an uncontrolled pair were corrected as one family"
+        tested_by_state = Counter(c.guard.state for c in h2h.contrasts if c.lift is not None)
+        for contrast in h2h.contrasts:
+            if contrast.lift is not None and contrast.lift.family is not None:
+                assert contrast.lift.family.n_tests == tested_by_state[contrast.guard.state], (
+                    f"{case}: a controlled and an uncontrolled contrast were corrected as one family"
                 )
         assert (GuardDifference.DEFAULTS in h2h.guard.differs_on) is (h2h_id == "real8"), (
             f"{case}: arms run under defaults their record was not declared over, unsaid"
         )
         if verdict is None:
             assert h2h.verdict_absent is ReadingState.PENDING, f"{case}: a waiting arm is pending"
+
+    # The matrix: an arm is a treatment over its replicates, each bench row's arm means differenced,
+    # the row the cluster; Holm gates and BH reads false discovery across the arm × arm family.
+    h2h_stores.campaigns.declare_head_to_head(
+        HeadToHeadRecord(
+            head_to_head_id="seeds",
+            created_at="",
+            origin="origin",
+            shared=declared.shared_part(),
+            ruler_version=0,
+        )
+    )
+    pinned = ArmFit(theta=0.31, theta_se=0.2, theta_caveat=ThetaCaveat.FLOOR_PINNED)
+    replicated: dict[str, tuple[float, float, DisplayMetric, ArmFit | None]] = {
+        "potter_s1": (0.1, 0.0, "ability", ArmFit(theta=0.42, theta_se=0.1)),
+        "potter_s2": (0.2, 0.0, "ability", pinned),
+        "capo_s1": (0.1, 0.4, "accuracy", None),
+        "capo_s2": (0.0, 0.4, "accuracy", None),
+        "gepa_s1": (0.2, 0.2, "composite", None),
+    }
+    replicate_arms = [
+        _evidence_campaign(
+            h2h_stores,
+            cid,
+            17 + i,
+            selected=selected,
+            tilt=tilt,
+            elects_on=elects_on,
+            fit=fit,
+            purpose=Compare(arm=Arm(head_to_head_id="seeds", arm_key=cid)),
+        )
+        for i, (cid, (selected, tilt, elects_on, fit)) in enumerate(replicated.items())
+    ]
+    matrix = subject_evidence(h2h_stores, replicate_arms).head_to_head
+    assert matrix is not None and matrix.verdict is True
+    held_out = partition_bank(_H2H_BANK, DatasetSplit(bench=6), seed=0).bench
+
+    def seeded(cid: str, row: Sample) -> float:
+        selected, tilt, _, _ = replicated[cid]
+        return selected + 0.1 * (row.id % 2) + tilt * (row.id % 3)
+
+    by_arm = {
+        "potter": ["potter_s1", "potter_s2"],
+        "capo": ["capo_s1", "capo_s2"],
+        "gepa": ["gepa_s1"],
+    }
+    assert [(c.a.optimizer, c.b.optimizer) for c in matrix.contrasts] == [
+        ("potter", "capo"),
+        ("potter", "gepa"),
+        ("capo", "gepa"),
+    ], "each treatment is one arm, the older arm `a`"
+    for contrast in matrix.contrasts:
+        older, newer = by_arm[contrast.a.optimizer], by_arm[contrast.b.optimizer]
+        assert (contrast.a.replicates, contrast.b.replicates) == (older, newer)
+        known = {
+            row.key: fmean(seeded(cid, row) for cid in newer)
+            - fmean(seeded(cid, row) for cid in older)
+            for row in held_out
+        }
+        assert contrast.differences == pytest.approx(known), "each row: b's mean less a's"
+        lift = contrast.lift
+        assert lift is not None and lift.family is not None
+        assert lift.estimate.value == pytest.approx(fmean(known.values()))
+        pairs = [seeded(y, row) - seeded(x, row) for row in held_out for x in older for y in newer]
+        clustered = stdev(known.values()) / sqrt(len(known))
+        naive = stdev(pairs) / sqrt(len(pairs))
+        assert (contrast.se_clustered, contrast.se_naive) == pytest.approx((clustered, naive)), (
+            "the row is the cluster: its replicate pairings are never independent rows"
+        )
+        assert contrast.design_effect == pytest.approx((clustered / naive) ** 2)
+        assert (lift.family.id, lift.family.n_tests) == ("seeds", 3)
+        assert contrast.q_value is not None and contrast.q_value <= lift.family.p_adjusted, (
+            "BH never gates harder than Holm"
+        )
+    ranked = sorted(
+        (c for c in matrix.contrasts if c.lift is not None and c.lift.family is not None),
+        key=lambda c: c.lift.estimate.p_value if c.lift is not None else 1.0,
+    )
+    p = [c.lift.estimate.p_value for c in ranked if c.lift is not None]
+    lowest = ranked[0].lift
+    assert lowest is not None and lowest.family is not None
+    assert lowest.family.p_adjusted == pytest.approx(min(1.0, 3 * p[0]))
+    assert ranked[-1].q_value == pytest.approx(p[-1])
+    elections = {r.campaign_id: r.election for r in matrix.rows}
+    assert {cid: e and (e.elects_on, e.reads_on) for cid, e in elections.items()} == {
+        "potter_s1": ("ability", "ability"),
+        "potter_s2": ("ability", "accuracy"),
+        "capo_s1": ("accuracy", "accuracy"),
+        "capo_s2": ("accuracy", "accuracy"),
+        "gepa_s1": ("composite", "composite"),
+    }, "an ability pick is quoted on θ unless a caveat is served on its θ"
+    quoted = elections["potter_s1"]
+    assert quoted is not None and quoted.ability is not None and quoted.ability.theta == 0.42
+    assert any(note.startswith("potter_s1, gepa_s1 elected") for note in matrix.notes)

@@ -703,6 +703,100 @@
         "title": "ArmAbility",
         "type": "object"
       },
+      "ArmContrast": {
+        "additionalProperties": false,
+        "description": "Arm `b` over arm `a` on the bench rows every replicate of both scored, in the headline\ncolumn: per row, b's replicate mean less a's, and the row is the cluster.",
+        "properties": {
+          "a": {
+            "$ref": "#/components/schemas/ContrastArm"
+          },
+          "b": {
+            "$ref": "#/components/schemas/ContrastArm"
+          },
+          "design_effect": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "(`se_clustered` / `se_naive`)²: how far a replicate-blind reading overstates the evidence.",
+            "title": "Design Effect"
+          },
+          "differences": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "The paired per-row differences, by `Sample.key`: every figure below is read off them.",
+            "title": "Differences",
+            "type": "object"
+          },
+          "guard": {
+            "$ref": "#/components/schemas/PairGuard"
+          },
+          "lift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredLift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Their mean, its Student-t interval and test over rows: an SE clustered by row, so one row's replicates never count as rows. `family.p_adjusted` is Holm's across the matrix. Null under two rows."
+          },
+          "q_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Benjamini-Hochberg's q over `lift.family`: the false-discovery reading, served beside Holm's and never gating. Null where the contrast is in no family.",
+            "title": "Q Value"
+          },
+          "se_clustered": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Se Clustered"
+          },
+          "se_naive": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The same mean's SE were every replicate pairing on every row independent: what clustering corrects. It equals `se_clustered` at one replicate a side.",
+            "title": "Se Naive"
+          }
+        },
+        "required": [
+          "a",
+          "b",
+          "guard",
+          "differences",
+          "lift",
+          "q_value",
+          "se_clustered",
+          "se_naive",
+          "design_effect"
+        ],
+        "title": "ArmContrast",
+        "type": "object"
+      },
       "ArmElection": {
         "additionalProperties": false,
         "description": "What one arm's round decided about it. Built by :meth:`of` alone.",
@@ -3799,6 +3893,35 @@
         "title": "ConnectedAccount",
         "type": "object"
       },
+      "ContrastArm": {
+        "additionalProperties": false,
+        "description": "One arm of the matrix: a treatment, and the campaigns that ran it — its replicates.",
+        "properties": {
+          "optimizer": {
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "replicates": {
+            "description": "The campaigns running this treatment whose selection the bench graded, oldest first: what each row's arm mean is taken over.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Replicates",
+            "type": "array"
+          },
+          "treatment_digest": {
+            "title": "Treatment Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "optimizer",
+          "treatment_digest",
+          "replicates"
+        ],
+        "title": "ContrastArm",
+        "type": "object"
+      },
       "CostAbsence": {
         "description": "Why a bench lift carries no price.",
         "enum": [
@@ -5757,6 +5880,49 @@
         "title": "Election",
         "type": "object"
       },
+      "ElectionColumn": {
+        "additionalProperties": false,
+        "description": "The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or\ncarries a caveat — there θ is not ability, and the election reads on accuracy.",
+        "properties": {
+          "ability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArmAbility"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The pick's θ on its electing round."
+          },
+          "elects_on": {
+            "description": "What the electing round's selector ranked on.",
+            "enum": [
+              "accuracy",
+              "composite",
+              "ability"
+            ],
+            "title": "Elects On",
+            "type": "string"
+          },
+          "reads_on": {
+            "enum": [
+              "accuracy",
+              "composite",
+              "ability"
+            ],
+            "title": "Reads On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "elects_on",
+          "ability",
+          "reads_on"
+        ],
+        "title": "ElectionColumn",
+        "type": "object"
+      },
       "Eliminated": {
         "additionalProperties": false,
         "properties": {
@@ -6962,6 +7128,14 @@
         "additionalProperties": false,
         "description": "The campaigns' bench headlines side by side, and whether one bench set graded them all.",
         "properties": {
+          "contrasts": {
+            "description": "The arm-by-arm matrix: every two treatments whose selections the bench graded, oldest arm as `a`.",
+            "items": {
+              "$ref": "#/components/schemas/ArmContrast"
+            },
+            "title": "Contrasts",
+            "type": "array"
+          },
           "covers_selection": {
             "title": "Covers Selection",
             "type": "boolean"
@@ -6982,13 +7156,6 @@
               "type": "string"
             },
             "title": "Notes",
-            "type": "array"
-          },
-          "pairs": {
-            "items": {
-              "$ref": "#/components/schemas/SelectionPair"
-            },
-            "title": "Pairs",
             "type": "array"
           },
           "ratio_reference": {
@@ -7051,7 +7218,7 @@
           "headline",
           "verdict",
           "verdict_absent",
-          "pairs",
+          "contrasts",
           "ratio_reference",
           "verdict_line",
           "notes"
@@ -7107,6 +7274,17 @@
                 "type": "null"
               }
             ]
+          },
+          "election": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ElectionColumn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The column the selection's electing round chose it on; null before a round selects. Quote an `ability` pick on θ unless its caveat is served."
           },
           "guard": {
             "$ref": "#/components/schemas/PairGuard"
@@ -7251,6 +7429,7 @@
           "spend_metered",
           "human_intervened",
           "status",
+          "election",
           "bench",
           "bench_set",
           "spend",
@@ -14087,24 +14266,6 @@
           "verb"
         ],
         "title": "ScoringPass",
-        "type": "object"
-      },
-      "SelectionPair": {
-        "additionalProperties": false,
-        "description": "Two campaigns' selections paired on the bench rows both scored.",
-        "properties": {
-          "guard": {
-            "$ref": "#/components/schemas/PairGuard"
-          },
-          "reading": {
-            "$ref": "#/components/schemas/PairedReading"
-          }
-        },
-        "required": [
-          "reading",
-          "guard"
-        ],
-        "title": "SelectionPair",
         "type": "object"
       },
       "SeriesReading": {

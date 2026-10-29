@@ -1573,7 +1573,9 @@ export interface HeadToHead {
   headline: 'accuracy' | 'composite';
   verdict: boolean | null;
   verdict_absent: 'read' | 'not_asked' | 'pending' | 'not_held' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
-  pairs: SelectionPair[];
+  /** The arm-by-arm matrix: every two treatments whose selections the bench graded,
+   * oldest arm as `a`. */
+  contrasts: ArmContrast[];
   ratio_reference: string | null;
   verdict_line: string;
   notes: string[];
@@ -1598,6 +1600,9 @@ export interface HeadToHeadRow {
   spend_metered: MeteredSpend | null;
   human_intervened: boolean;
   status: RunStatus;
+  /** The column the selection's electing round chose it on; null before a round
+   * selects. Quote an `ability` pick on θ unless its caveat is served. */
+  election: ElectionColumn | null;
   bench: BenchScore;
   bench_set: BenchSet | null;
   spend: SpendRollup | null;
@@ -1672,6 +1677,15 @@ export interface DeterminismClamp {
 export interface RunStatus {
   label: string;
   mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+}
+
+/** The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or */
+export interface ElectionColumn {
+  /** What the electing round's selector ranked on. */
+  elects_on: 'accuracy' | 'composite' | 'ability';
+  /** The pick's θ on its electing round. */
+  ability: ArmAbility | null;
+  reads_on: 'accuracy' | 'composite' | 'ability';
 }
 
 /** The headline: the selection and the origin, scored on a bench set no optimizer node read. */
@@ -1813,10 +1827,37 @@ export interface SpendBucket {
   incurred_unpriced_tokens: number;
 }
 
-/** Two campaigns' selections paired on the bench rows both scored. */
-export interface SelectionPair {
-  reading: PairedReading;
+/** Arm `b` over arm `a` on the bench rows every replicate of both scored, in the headline */
+export interface ArmContrast {
+  a: ContrastArm;
+  b: ContrastArm;
   guard: PairGuard;
+  /** The paired per-row differences, by `Sample.key`: every figure below is read
+   * off them. */
+  differences: Record<string, number>;
+  /** Their mean, its Student-t interval and test over rows: an SE clustered by row,
+   * so one row's replicates never count as rows. `family.p_adjusted` is
+   * Holm's across the matrix. Null under two rows. */
+  lift: MeasuredLift | null;
+  /** Benjamini-Hochberg's q over `lift.family`: the false-discovery reading, served
+   * beside Holm's and never gating. Null where the contrast is in no family. */
+  q_value: number | null;
+  se_clustered: number | null;
+  /** The same mean's SE were every replicate pairing on every row independent: what
+   * clustering corrects. It equals `se_clustered` at one replicate a side. */
+  se_naive: number | null;
+  /** (`se_clustered` / `se_naive`)²: how far a replicate-blind reading overstates
+   * the evidence. */
+  design_effect: number | null;
+}
+
+/** One arm of the matrix: a treatment, and the campaigns that ran it — its replicates. */
+export interface ContrastArm {
+  optimizer: string;
+  treatment_digest: string;
+  /** The campaigns running this treatment whose selection the bench graded, oldest
+   * first: what each row's arm mean is taken over. */
+  replicates: string[];
 }
 
 /** The selection read under ONE metric, echoed back with the vocabulary it was chosen from — a */
