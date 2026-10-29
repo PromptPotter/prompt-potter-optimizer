@@ -18,15 +18,10 @@ from promptpotter.domain.wounds import ValidationFailure
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import RoundContext
     from promptpotter.domain.arms import Proposal
-    from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.command_kinds import SubmittedArm
     from promptpotter.domain.opt_search_point import OptSearchPoint
 
 logger = logging.getLogger(__name__)
-
-
-def arm_gate_mode(ctx: RoundContext) -> ArmGateMode:
-    return ctx.cycle.config.optimization.arm_gate
 
 
 def author_arm(ctx: RoundContext, parent: OptSearchPoint, arm: SubmittedArm) -> Proposal:

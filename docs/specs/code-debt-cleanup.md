@@ -91,10 +91,15 @@ acting.
 
 ### The member backbone
 
-- **One walk model.** `optimizer_manifest.py::_walk` and `round.py::propose_population` each order
-  the round's members; `opening`, `round_packages` and `rederive` read state past `sees`. Action:
-  `RoundPlan.steps(gate)` the one order, every read through `sees`. **Re-test:** one of the two walks
-  deleted.
+- **A repair reads the cycle past `sees`.** `round_packages` and `rederive` are handed the `Cycle` and a
+  `CampaignStore`: `potter/resume.py::_seat_on` builds its own `RoundContext` off the session ledger, and
+  `rederive_critiques` restates the round itself. Action: the bench seats one `NodeContext` per repaired
+  round and restates onto the branch hop. It moves the repair path's package fingerprints, which decide
+  EQUIVALENT vs SUPERSEDE, a path the offline run does not walk, so its proof is a repair fork first.
+  **Re-test:** `git grep -c "RoundContext(" -- promptpotter/application/optimizers` is 0.
+- **A round role is ordered twice**: `optimizer_manifest.py::_walk` and `runner/round.py::execute_round`
+  each place the sampler, eliminator, selector, adapters and controller. **Re-test:** one of the two
+  orders deleted.
 
 - **A sampler's cells ceiling states other members' reads.** `Sampler.round_cells_ceiling` overrides
   in `Blocks`, `ProxyCss` and `AdaptiveQueue` hold facts the backbone should sum. The formula

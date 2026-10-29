@@ -19,6 +19,7 @@ from typing import (
     Literal,
     NamedTuple,
     Protocol,
+    assert_never,
     cast,
     runtime_checkable,
 )
@@ -31,7 +32,6 @@ from promptpotter.domain.optimizer_state import OptimizerState, StatePart, State
 from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.pool import DemoPool
-from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import CatchUps
@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
     from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
     from promptpotter.domain.arms import Concluded, Elimination, Proposal
+    from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.cell_fold import ScoreSummary
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
@@ -339,15 +340,35 @@ RUN_INIT = "run_init"
 
 @dataclass(frozen=True)
 class RoundWalk:
-    """``pipeline`` makes the round's arms; ``seeds`` walk ahead of it into the population it reads."""
+    """``pipeline`` makes the round's arms; ``seeds`` walk ahead of it into the population it reads; ``gate`` says what of it walks."""
 
     pipeline: str
     seeds: tuple[Proposer, ...]
     proposers: tuple[Proposer, ...]
+    gate: ArmGateMode
 
     @property
     def members(self) -> tuple[Proposer, ...]:
         return (*self.seeds, *self.proposers)
+
+    @property
+    def walked(self) -> tuple[tuple[Proposer, ...], tuple[Proposer, ...], bool]:
+        """The seeds and proposers that walk, and whether the operator's seat takes the arms after them: under ``author``, in their place."""
+        match self.gate:
+            case "off":
+                return self.seeds, self.proposers, False
+            case "review":
+                return self.seeds, self.proposers, True
+            case "author":
+                return (), (), True
+            case unreachable:
+                assert_never(unreachable)
+
+    @property
+    def steps(self) -> tuple[NodeMember, ...]:
+        """``walked`` in the order ``runner/round.py::propose_population`` walks it."""
+        seeds, proposers, seated = self.walked
+        return (*seeds, *proposers, *((OPERATOR_SEAT,) if seated else ()))
 
     @property
     def seeding(self) -> bool:
@@ -598,17 +619,9 @@ class Proposer(NodeMember, Protocol):
         """The arms it adds to its walk, whose arms are the sum and a round's the most of any walk it runs alone; an editor of arms another made adds none."""
         return 0
 
-    def opening(self, ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
-        """Asked of the walk's ``lead``."""
-        return RoundOpening(
-            standing=f"no advance {rounds_without_advance(ctx.cycle.rounds)}",
-            note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
-            arms=None
-            if walk.pipeline == INITIAL_POPULATION
-            else ctx.cycle.optimizer.arms_per_round,
-            proposer=walk.proposer,
-            replayed=False,
-        )
+    def opening(self, _ctx: NodeContext, bench: RoundOpening) -> RoundOpening:
+        """Asked of the walk's ``lead``: the bench's own, *bench*, unless it keeps a reading of its own."""
+        return bench
 
     async def propose(self, ctx: NodeContext, panel: Panel, proposals: Proposals) -> Proposals: ...
 

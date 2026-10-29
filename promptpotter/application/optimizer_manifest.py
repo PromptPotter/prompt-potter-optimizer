@@ -7,14 +7,13 @@ import json
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, assert_never, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pydantic import Field
 
 from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import (
     INITIAL_POPULATION,
-    OPERATOR_SEAT,
     RUN_INIT,
     CountKnob,
     Initializer,
@@ -68,7 +67,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.dashboard_rows import OptimizerLimit
-    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pool import Access
     from promptpotter.domain.results import OptimizerFact, RoundResult
     from promptpotter.domain.round_audit import RoundAudit
@@ -183,19 +181,20 @@ class RoundPlan:
     survivor: Survivor | None
     adapters: tuple[Adapter, ...]
     controller: Controller | None
+    gate: ArmGateMode
 
     @property
     def round_walks(self) -> tuple[tuple[Proposer, ...], ...]:
         """The proposers of each walk that is a round of its own: seeds heading round 1 are its."""
         return (self.proposers, *((self.initial_population,) if self.seeds_alone else ()))
 
-    def walk(self, population: Sequence[OptSearchPoint]) -> RoundWalk:
+    def walk(self, *, stands: bool) -> RoundWalk:
         """A round seeds only where no population stands: a resumed one restores its own."""
-        if not self.initial_population or population:
-            return RoundWalk("default", (), self.proposers)
+        if not self.initial_population or stands:
+            return RoundWalk("default", (), self.proposers, self.gate)
         if self.seeds_alone:
-            return RoundWalk(INITIAL_POPULATION, (), self.initial_population)
-        return RoundWalk("default", self.initial_population, self.proposers)
+            return RoundWalk(INITIAL_POPULATION, (), self.initial_population, self.gate)
+        return RoundWalk("default", self.initial_population, self.proposers, self.gate)
 
 
 def _walk_refused(name: str, why: str) -> PayloadInvalidError:
@@ -203,7 +202,10 @@ def _walk_refused(name: str, why: str) -> PayloadInvalidError:
 
 
 def _round_plan(
-    name: str, schema: PipelineSchema, seeds_walk: Literal["alone", "before_default"] | None
+    name: str,
+    schema: PipelineSchema,
+    seeds_walk: Literal["alone", "before_default"] | None,
+    gate: ArmGateMode,
 ) -> RoundPlan:
     walk = schema.pipelines["default"]
     declared = {n.name: n.kind for n in schema.declared_nodes}
@@ -297,6 +299,7 @@ def _round_plan(
         survivor=survivors[0] if survivors else None,
         adapters=tuple(adapters),
         controller=controllers[0] if controllers else None,
+        gate=gate,
     )
 
 
@@ -761,11 +764,11 @@ def _select(
         overlay=overlay,
         schema=schema,
         resolved_schemas=schemas,
-        plan=_round_plan(name, schema, manifest.initial_population_walks),
+        plan=_round_plan(name, schema, manifest.initial_population_walks, gate),
         member_nodes=_roster(schema),
     )
     # At load, never mid-round: an edge no roster member closes would raise inside round 1.
-    if open_ := _open_edges(selected, gate):
+    if open_ := _open_edges(selected):
         raise PayloadInvalidError(
             f"optimizer {name!r} names a roster whose edges do not close: " + "; ".join(open_),
             code="optimizer_roster_open",
@@ -806,32 +809,29 @@ def _roster(schema: PipelineSchema) -> tuple[str, ...]:
     return tuple(n for n in declared if n in reached)
 
 
-def _walk(selected: SelectedOptimizer, gate: ArmGateMode) -> tuple[NodeMember, ...]:
-    """Every member in first-round order under *gate*, the bench's seat among them, then the members only a walked one reaches."""
+def _walk(selected: SelectedOptimizer) -> tuple[NodeMember, ...]:
+    """Every member in the order ``runner/round.py::execute_round`` walks the first rounds, then the members only a walked one reaches."""
     plan = selected.plan
-    pipelines = selected.schema.pipelines
-    default = [
-        optimizers.NODE_MEMBERS.get(n) for n in pipelines["default"] if n != plan.measurement
-    ]
-    seeds: list[NodeMember] = list(plan.initial_population)
-    match gate:
-        case "off":
-            pass
-        case "review":
-            default.insert(default.index(plan.proposers[-1]) + 1, OPERATOR_SEAT)
-        case "author":
-            opens = default.index(plan.proposers[0])
-            default = [m for m in default if m not in plan.proposers]
-            default.insert(opens, OPERATOR_SEAT)
-            seeds = [OPERATOR_SEAT] if seeds else []
-        case unreachable:
-            assert_never(unreachable)
-    named = {n for walk in _WALKS for n in pipelines.get(walk, ())}
+    first = plan.walk(stands=False)
+    # Seeds alone walk a round of their own; the arms' proposers after it close as if it wrote nothing.
+    after = plan.walk(stands=True).steps if first.pipeline == INITIAL_POPULATION else ()
+    named = {n for walk in _WALKS for n in selected.schema.pipelines.get(walk, ())}
     reached = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes if n not in named]
-    return (*plan.initializers, *seeds, *default, *reached)
+    return (
+        *plan.initializers,
+        plan.sampler,
+        *first.steps,
+        *after,
+        *(() if plan.eliminator is None else (plan.eliminator,)),
+        plan.selector,
+        *(() if plan.survivor is None else (plan.survivor,)),
+        *plan.adapters,
+        *(() if plan.controller is None else (plan.controller,)),
+        *reached,
+    )
 
 
-def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
+def _open_edges(selected: SelectedOptimizer) -> list[str]:
     members = {node: optimizers.NODE_MEMBERS.get(node) for node in selected.member_nodes}
     table = optimizers.NODE_MEMBERS.table
     open_ = [
@@ -856,7 +856,8 @@ def _open_edges(selected: SelectedOptimizer, gate: ArmGateMode) -> list[str]:
     # One closure: a part that holds no value until written is written earlier in the walk than
     # any member reading or drawing it, unless that member writes it itself.
     written: set[type[StatePart]] = set()
-    for member in _walk(selected, gate):
+    gate = selected.plan.gate
+    for member in _walk(selected):
         early = sorted(
             kind.kind
             for kind in {*member.reads, *selected.draws(member)}

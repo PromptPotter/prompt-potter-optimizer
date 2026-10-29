@@ -1696,8 +1696,10 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             ], "round 0's critique composed before the block pool was seeded"
             l1 = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("l1_generate"))
             seed = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("mating"))
-            seeded = node_contract.RoundWalk("default", (seed,), (l1,))
-            assert announce_opening(at_origin, seeded) == l1.opening(at_origin, seeded), (
+            seeded = node_contract.RoundWalk("default", (seed,), (l1,), "author")
+            blank = node_contract.RoundOpening("", "", None, "", replayed=False)
+            stated = l1.opening(NodeContext(at_origin, l1), blank)
+            assert announce_opening(at_origin, seeded) == stated != blank, (
                 "a seed walking ahead of L1 stated the round's standing and arms in L1's place"
             )
             measured.clear()

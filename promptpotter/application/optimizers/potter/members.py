@@ -250,16 +250,14 @@ class L1Generate(LayoutNode, nodes.Proposer):
         knobs = selected.knobs_of(self.name, L1GenerateKnobs)
         return knobs.n_variants + knobs.recombine
 
-    def opening(self, ctx: RoundContext, _walk: nodes.RoundWalk) -> nodes.RoundOpening:
-        cycle = ctx.cycle
-        selected = cycle.optimizer
-        knobs = selected.knobs_of(self.name, L1GenerateKnobs)
-        replayed = cycle.banked_proposals(ctx.round_num) is not None
+    def opening(self, ctx: NodeContext, _bench: nodes.RoundOpening) -> nodes.RoundOpening:
+        knobs = ctx.knobs(L1GenerateKnobs)
+        replayed = ctx.read(Replay).banked_proposals() is not None
         # At patience 0 L2 fires every round, which "stall 1/0" would state as a riddle.
-        patience = selected.reached_knobs(self, EscalationKnobs).l1_patience
-        stall = cycle.slices.get(Ladder).l1_stall_count
+        patience = ctx.knobs(EscalationKnobs).l1_patience
+        stall = ctx.slice(Ladder).l1_stall_count
         standing = "L2 every round" if patience == 0 else f"stall {stall}/{patience} → L2"
-        if ctx.round_num and cycle.output(Critique, ctx.round_num - 1).readout:
+        if ctx.round_num and ctx.recall(Critique, ctx.round_num - 1).readout:
             critique = f"from R{ctx.round_num - 1}"
         elif ctx.round_num <= 1:
             critique = "none yet (first round)"
@@ -268,8 +266,7 @@ class L1Generate(LayoutNode, nodes.Proposer):
         return nodes.RoundOpening(
             standing=standing,
             note=f"Prior critique: {critique}",
-            arms=variants_this_round(knobs.n_variants, cycle.slices.get(L2Memory))
-            + knobs.recombine,
+            arms=variants_this_round(knobs.n_variants, ctx.slice(L2Memory)) + knobs.recombine,
             proposer="L1",
             replayed=replayed,
         )

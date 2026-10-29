@@ -12,13 +12,14 @@ from promptpotter.application.bench.round_analysis import compute_round_diagnost
 from promptpotter.application.diagnostics.verify import verify_on_saturation
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizers.nodes import (
+    INITIAL_POPULATION,
     Proposals,
     RoundContext,
     RoundOpening,
     RoundWalk,
 )
 from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.runner.arm_gate import arm_gate_mode, operator_arms
+from promptpotter.application.runner.arm_gate import operator_arms
 from promptpotter.application.runner.bench import grade_round_selection, reserve_selection_pass
 from promptpotter.application.runner.inner.spawn_context import pin_inner_ruler
 from promptpotter.application.runner.measurement import measure_population
@@ -46,7 +47,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.results_health import assemble_prior_healths, compute_round_health
 from promptpotter.domain.run_records import BenchCheckpointKind
-from promptpotter.domain.run_standing import line_reference, stalls_left
+from promptpotter.domain.run_standing import line_reference, rounds_without_advance, stalls_left
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.wounds import collapse_counts
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
@@ -287,7 +288,14 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
 
 def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
     cycle = ctx.cycle
-    opening = walk.lead.opening(ctx, walk)
+    bench = RoundOpening(
+        standing=f"no advance {rounds_without_advance(cycle.rounds)}",
+        note=f"seeds the population ({INITIAL_POPULATION})" if walk.seeding else "",
+        arms=None if walk.pipeline == INITIAL_POPULATION else cycle.optimizer.arms_per_round,
+        proposer=walk.proposer,
+        replayed=False,
+    )
+    opening = walk.lead.opening(NodeContext(ctx, walk.lead), bench)
     fold = cycle.parent_fold
     node = walk.proposer
     cb = ctx.callbacks
@@ -372,21 +380,16 @@ def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
         bank_proposals(ctx, proposals, submitted=False)
 
 
-async def propose_population(ctx: RoundContext, plan: RoundPlan, panel: Panel) -> Proposals:
-    gate = arm_gate_mode(ctx)
-    walk = plan.walk(ctx.cycle.population)
-    if gate == "author":
-        population = Proposals([])
-    else:
-        if walk.seeds:
-            seeded = await _walk(ctx, walk.seeds, panel)
-            ctx.cycle.population = [p.individual for p in seeded.proposals if not p.refused]
-        population = await _walk(ctx, walk.proposers, panel)
-        bank_walk(ctx, population.proposals)
+async def propose_population(ctx: RoundContext, walk: RoundWalk, panel: Panel) -> Proposals:
+    seeds, proposers, seated = walk.walked
+    if seeds:
+        seeded = await _walk(ctx, seeds, panel)
+        ctx.cycle.population = [p.individual for p in seeded.proposals if not p.refused]
+    population = await _walk(ctx, proposers, panel)
+    bank_walk(ctx, population.proposals)
     arms = _one_arm_each(ctx, population.proposals)
-    if gate == "off":
-        return replace(population, proposals=arms)
-    arms = _one_arm_each(ctx, await operator_arms(ctx, arms))
+    if seated:
+        arms = _one_arm_each(ctx, await operator_arms(ctx, arms))
     return replace(population, proposals=arms)
 
 
@@ -420,8 +423,9 @@ async def execute_round(
     cycle.difficulty.open_round(cycle.rounds)
     pin_inner_ruler(cycle.difficulty.stamp.reach)
     panel = plan.sampler.draw(NodeContext(ctx, plan.sampler), pool)
-    opening = announce_opening(ctx, plan.walk(cycle.population))
-    population = await propose_population(ctx, plan, panel)
+    walk = plan.walk(stands=bool(cycle.population))
+    opening = announce_opening(ctx, walk)
+    population = await propose_population(ctx, walk, panel)
     announce_population(ctx, opening, population)
 
     callbacks.on_phase(
