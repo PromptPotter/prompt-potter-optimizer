@@ -14,6 +14,7 @@ import inspect
 import json
 import random
 import ssl
+import sys
 import threading
 import time
 import urllib.error
@@ -50,11 +51,11 @@ from factories import (
     spend_book,
     workspace,
 )
-from offline_world import Hang, Router, Said, completion
+from offline_world import NOT_A_KEY, PROVIDER_KEYS, Hang, Router, Said, completion
 from pydantic import BaseModel, Field, ValidationError
 
 from promptpotter.application import free_tier
-from promptpotter.application.account import account_of
+from promptpotter.application.account import account_of, local_stores
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.commands.dispatcher import (
     CommandCall,
@@ -68,13 +69,15 @@ from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.application.diagnostics.probe_reasoning import probe_reasoning
 from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
 from promptpotter.application.jobs import mint
+from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_share,
     embedded_share,
     open_spend_book,
     paid_pass,
 )
-from promptpotter.application.jobs.launcher.run_job import HeldRun
+from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadStarted
+from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
     QuotaExceededError,
@@ -98,6 +101,7 @@ from promptpotter.application.maintenance.archive_maintenance import purge_cold_
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers.potter.pobb.checks import PoBBCheck
 from promptpotter.application.optimizers.potter.race import CatchUpPool
+from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.grade_bench import grade_line_bench
@@ -131,14 +135,17 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.cells import PinnedCell
 from promptpotter.domain.command_kinds import (
+    ArmRequest,
     ChangeRunLimitsPayload,
     DiscardDraftPayload,
     EditDraftCampaignPayload,
+    HeadToHeadRequest,
+    MintHeadToHeadPayload,
     StartCheckinPayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.diagnostic_run import RescoreCount
-from promptpotter.domain.draft_edit import EditDraftPatch
+from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.proxies import inner_cell_facts
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE
@@ -176,7 +183,7 @@ from promptpotter.domain.run_records import (
     SpendTombstoneRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.sample import Sample
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import GradedCell, MeasuredCell, PipelineData, Scorer
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import (
@@ -245,6 +252,8 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
+from promptpotter.presentation.api.routers import commands as commands_api
+from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellInfrastructureError,
@@ -2516,7 +2525,10 @@ _UNPRICEABLE = {
 
 @pytest.mark.usefixtures("run_bound")
 def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
-    tmp_path: Path, offline: Router
+    tmp_path: Path,
+    offline: Router,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """TWO units, because a price needs a rate on file and a token count never does (decisions.md § 0003)."""
     offline.rates = {
@@ -2895,6 +2907,125 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         "already counts that $0.50 — not $1.10 off a fork prefix counted twice"
     )
     assert reserve.usd == pytest.approx(1.0), "the reservation moved off the ceiling it backs"
+
+    # A head-to-head is one door: every arm planned, priced and admitted before any takes a key,
+    # so a refused act leaves no arm behind; each arm runs the budget it declared, and a retry
+    # under the act's key answers the arms it minted.
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "duel"))
+    monkeypatch.setenv(PROVIDER_KEYS[0], NOT_A_KEY)
+    stores = local_stores(tenant=None)
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("duel") / DEFINITION_FILE,
+        {
+            "pipeline": {
+                "backend_type": "termnorm",
+                "nodes": {
+                    "llm_only": {"config": {"provider": "groq", "model": "openai/gpt-oss-120b"}}
+                },
+            },
+            "campaign": {"optimization": {"degradation_threshold": 0.4}},
+        },
+    )
+    rows = Bank.of(samples(60, "TRUE"))
+    stores.tenant_datasets.put_bank(rows)
+    stores.tenant_datasets.relabel("duel", rows.dataset_hash)
+    detached: list[JobSpec] = []
+
+    def ran_elsewhere(registry: JobRegistry, spec: JobSpec, **_: Stores) -> asyncio.Task[None]:
+        """The arm's own process, run and exited: its slot handed back, nothing spent."""
+        detached.append(spec)
+        registry.release(spec.job_id)
+        return asyncio.create_task(asyncio.sleep(0))
+
+    monkeypatch.setattr(run_job_mod, "spawn_job", ran_elsewhere)
+
+    def campaigns() -> list[str]:
+        return sorted(c.campaign_id for c in stores.campaigns.list_campaigns(lifecycle="all"))
+
+    def asked(h2h: str, arms: dict[str, str], budget: Budget) -> MintHeadToHeadPayload:
+        return MintHeadToHeadPayload(
+            dataset_name="duel",
+            head_to_head=HeadToHeadRequest(
+                head_to_head_id=h2h,
+                arms=[
+                    ArmRequest(arm_key=key, optimization=OptimizationOverrides(optimizer=opt))
+                    for key, opt in arms.items()
+                ],
+                budget=budget,
+            ),
+        )
+
+    # A dollar cap is priced before any arm takes a key, on the cell's bound where no run has
+    # billed one yet: a cap one round outspends mints nothing.
+    pair = {"a": "capo", "b": "potter"}
+    with pytest.raises(PayloadInvalidError) as short:
+        cheap = asked("duel-2", pair, Budget(usd=0.0001, rounds=1))
+        asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(cheap)))
+    assert short.value.code == "spend_cap_below_round", "guard: refused for its round"
+    assert not campaigns(), "an arm whose round outspends its cap took a key"
+
+    # The terminal's verb: one optimizer twice, apart by a knob, each arm bound by the one budget.
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "promptpotter",
+            "--json",
+            "head-to-head",
+            "duel",
+            "--head-to-head",
+            "duel-1",
+            "--arm",
+            "capo=capo",
+            "--arm",
+            "capo-b3=capo,nodes.blocks.max_blocks=3",
+            "--max-usd",
+            "50",
+            "--max-rounds",
+            "1",
+        ],
+    )
+    campaign_runner.main()
+    started = HeadToHeadStarted.model_validate_json(capsys.readouterr().out)
+    arms = mint.standing_arms(stores, "duel-1")
+    assert {a.arm_key: a.hop for a in started.arms} == {k: c.root_hop for k, c in arms.items()}, (
+        "the terminal answered other arms than the head-to-head records"
+    )
+    assert [spec.hop for spec in detached] == [a.hop for a in started.arms], (
+        "an arm ran in no process of its own, or in another arm's cycle"
+    )
+    assert len({c.root_content_hash for c in arms.values()}) == 1, (
+        "two arms of one head-to-head searched from different origins"
+    )
+    ran = {k: resolve_campaign_config(stores, c, c.root_hop).optimization for k, c in arms.items()}
+    assert {k: (o.budget.usd, o.budget.rounds) for k, o in ran.items()} == {
+        "capo": (50.0, 1),
+        "capo-b3": (50.0, 1),
+    }, "an arm ran another budget than the one every arm declared"
+    blocks = {k: o.nodes["blocks"].config for k, o in ran.items() if "blocks" in o.nodes}
+    assert blocks == {"capo-b3": {"max_blocks": 3}}, (
+        "an arm's knob reached its sibling, or never its own arm"
+    )
+
+    # Past the account's concurrent ceiling, no arm is minted or keeps a slot: none or all.
+    minted = campaigns()
+    trio = asked("duel-3", {"a": "capo", "b": "capo", "c": "capo"}, Budget(usd=50.0, rounds=1))
+    with pytest.raises(QuotaExceededError):
+        asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(trio)))
+    assert campaigns() == minted, "an arm past the account's ceiling minted a campaign"
+    assert not JobRegistry.attach(stores.jobs_dir).list_running(), "a refused arm kept its slot"
+
+    # A retry under the act's key, at the REST door, answers the arms its act minted.
+    registry = JobRegistry.attach(stores.jobs_dir)
+    funded = asked("duel-2", pair, Budget(usd=50.0, rounds=1))
+    answers = [
+        asyncio.run(commands_api.mint_head_to_head(registry, stores, funded, "duel-2-once"))
+        for _ in range(2)
+    ]
+    assert answers[0] == answers[1], "a retry under the act's key answered other arms"
+    assert len(campaigns()) == len(minted) + 2 and len(detached) == 4, (
+        "a retry under the act's key minted or launched its arms again"
+    )
 
 
 # 6. Spend outlives what spent it

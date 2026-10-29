@@ -93,7 +93,7 @@ rules these runs rest on are [`../docs/research/benchmarks.md`](../docs/research
 | # | Run | Who it convinces, and why |
 |---|---|---|
 | 1 | `justlogic/d234-held`, potter alone: `noise-floor --k 3` on the origin, one full campaign, then `bench`. | **The sceptic.** Synthetic, so no contamination; balanced labels, so no shortcut; scored on rows the search never saw, the noise floor beside the gain; the cheapest model, so anyone can repeat it. |
-| 2 | The same dataset as a head-to-head: `new --arm` for potter and capo, then gepa and levi. | **The researcher comparing optimizers.** The first table where only the optimizer differs. |
+| 2 | The same dataset as a head-to-head: one `head-to-head` minting potter, capo, gepa and levi. | **The researcher comparing optimizers.** The first table where only the optimizer differs. |
 | 3 | `gsm8k`: one measured origin pass at the pinned model, then a campaign scored on 200 or more test rows. | **The researcher and the buyer.** CAPO's published 78.1 → 93.7 is the number ours is held against. The solver is `benchmarks.md` § Order of use's GSM8K row. |
 | 4 | `sealqa/longseal-12`, all 254 tasks, skill opened, judge-graded. | **The agent builder.** The paper gives a no-skill figure and a ceiling, so the result lands between two numbers we did not choose. |
 | 5 | `lca-termnorm`, one campaign on the multi-step pipeline. | **The practitioner with a real pipeline.** The only run where settings move beside wording. Publish only if the rows may be shown. |

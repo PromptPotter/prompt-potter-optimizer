@@ -10,7 +10,13 @@ from promptpotter.application.account import local_stores
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import complete_registries, init_services
-from promptpotter.application.jobs.launcher.admission import embedded_share, probe_backend
+from promptpotter.application.jobs.launcher.admission import (
+    embedded_share,
+    probe_backend,
+    release_slot,
+)
+from promptpotter.application.jobs.launcher.head_to_head import DatasetArms, admit_head_to_head
+from promptpotter.application.jobs.launcher.run_job import run_held_job
 from promptpotter.application.jobs.mint import (
     declare,
     fresh_campaign_id,
@@ -18,7 +24,7 @@ from promptpotter.application.jobs.mint import (
     resolve_resume,
 )
 from promptpotter.application.jobs.quota import land_job
-from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.jobs.registry import EmbeddedRun, JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.pipeline_resolve import (
     configure_and_apply_pipeline,
@@ -28,7 +34,7 @@ from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.campaign import Compare, Optimize, Purpose
+from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import effective_config
 from promptpotter.domain.command_kinds import (
     CompactArchivePayload,
@@ -49,6 +55,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.bench import BenchScore
     from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.command_kinds import HeadToHeadRequest
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.phases import GateDecision
     from promptpotter.domain.run_mode import RunMode
@@ -63,6 +70,7 @@ __all__ = [
     "open_session",
     "reindex_measurement_archive",
     "run_campaign",
+    "run_head_to_head",
     "submit_arms",
     "submit_gate_decision",
 ]
@@ -156,17 +164,16 @@ async def run_campaign(
     budget: Budget,
     step_rounds: int | None = None,
     mode: RunMode,
-    purpose: Purpose = Optimize(),  # noqa: B008 — frozen
 ) -> tuple[Session, CycleResult]:
     """Answers the session bound to the cycle the run ended on. Blocks under ``origin_gate: strict``
     until ``submit_gate_decision`` answers, and under an ``arm_gate`` until ``submit_arms`` does."""
     declaration = None
     resumed: SelectedOptimizer | None = None
     if session.campaign_id:
-        if campaign_config is not None or isinstance(purpose, Compare):
+        if campaign_config is not None:
             raise PayloadInvalidError(
                 f"{session.hop.cycle_id} resumes under its campaign's declaration: pass no "
-                "config and no arm to resume it",
+                "config to resume it",
                 code="resume_declared",
             )
         campaign = session.store.campaigns.load_campaign(session.campaign_id)
@@ -180,7 +187,7 @@ async def run_campaign(
             raise PayloadInvalidError(
                 "a mint declares its campaign: pass the config to run", code="mint_undeclared"
             )
-        declaration = declare(session, campaign_config, purpose=purpose)
+        declaration = declare(session, campaign_config, purpose=Optimize())
         campaign_config = effective_config(declaration)
     # Admitted BEFORE the mint, whose framing call is paid: a refusal leaves nothing written.
     async with embedded_share(
@@ -224,3 +231,56 @@ async def run_campaign(
             mode=mode,
             optimizer=optimizer,
         )
+
+
+async def run_head_to_head(
+    session: Session,
+    campaign_config: CampaignConfig,
+    request: HeadToHeadRequest,
+    *,
+    mode: RunMode,
+    readout_sink: StatusFn | None = None,
+) -> list[tuple[str, Session, CycleResult]]:
+    """Arms of one head-to-head on the session's dataset, each answered by its key: every arm
+    planned and admitted before any is minted, then run one after another in the host's loop.
+
+    Raises what ``mint-head-to-head`` refuses the browser's and the terminal's act on.
+    """
+    if session.campaign_id:
+        raise PayloadInvalidError(
+            f"a head-to-head mints its arms, and this session is bound to {session.campaign_id}: "
+            "open it on the dataset",
+            code="arms_unbound",
+        )
+    stores = session.store
+    job_registry = JobRegistry.attach(stores.jobs_dir)
+    admitted = await admit_head_to_head(
+        DatasetArms(session, campaign_config),
+        request,
+        job_registry=job_registry,
+        holder=EmbeddedRun(session.measured_dataset),
+    )
+    arms = await admitted.minted()
+    ran: list[tuple[str, Session, CycleResult]] = []
+    for i, arm in enumerate(arms):
+        held = arm.held
+        try:
+            result, _observers = await run_held_job(
+                job_registry,
+                held.job_id,
+                held.session,
+                held.campaign_config,
+                mode=mode,
+                budget=held.budget,
+                optimizer=held.optimizer,
+                readout_sink=readout_sink,
+            )
+        except BaseException as exc:
+            # The arms not yet run hold their shares, and no other process would hand them back.
+            for rest in arms[i + 1 :]:
+                release_slot(
+                    job_registry, rest.held.job_id, exc, stores=stores, hop=rest.held.session.hop
+                )
+            raise
+        ran.append((arm.arm_key, held.session, result))
+    return ran

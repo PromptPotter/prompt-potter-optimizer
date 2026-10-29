@@ -430,8 +430,18 @@ export function useIngestFlow({
       setMinting(false);
       return;
     }
+    const started = r.value;
+    // A head-to-head never queues: each arm holds its own cycle, and the view opens on the first.
+    if ("arms" in started) {
+      const [first] = started.arms;
+      setMinting(false);
+      setPhase({ stage: "idle" });
+      setDraftId(null);
+      if (first) onMint({ campaignId: first.hop.campaign_id, cycleId: first.hop.cycle_id });
+      return;
+    }
     // No hop while queued: the draft stays the subject, landed on what its reopen serves.
-    if (r.value.hop === null) {
+    if (started.hop === null) {
       say(QUEUED_LINE);
       const res = await readDraft(id, alive);
       setMinting(false);
@@ -441,7 +451,7 @@ export function useIngestFlow({
     setMinting(false);
     setPhase({ stage: "idle" });
     setDraftId(null);
-    onMint({ campaignId: r.value.hop.campaign_id, cycleId: r.value.hop.cycle_id });
+    onMint({ campaignId: started.hop.campaign_id, cycleId: started.hop.cycle_id });
   };
 
   const discarded = (id: string) => {

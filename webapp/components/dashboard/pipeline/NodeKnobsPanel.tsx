@@ -201,7 +201,8 @@ function KnobGroups({
   );
 }
 
-function KnobItem({
+// `declared` is what "Changed from" and Reset name: the manifest's here, the setup's on a head-to-head arm.
+export function KnobItem({
   node,
   knob: k,
   declaredLabel,

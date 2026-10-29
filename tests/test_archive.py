@@ -12,7 +12,6 @@ import contextvars
 import json
 import threading
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -66,7 +65,6 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_course,
     subtree_version,
 )
-from promptpotter.application.initialization import loop_start
 from promptpotter.application.maintenance import restamp
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
@@ -79,11 +77,9 @@ from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.pobb.checks import EliminationGate
 from promptpotter.application.optimizers.potter.race import PoBBRace
 from promptpotter.application.origin import (
-    CampaignOrigin,
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
 )
-from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.runner.inner.spawn_context import publish_inner_spawn_context
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.scoring import query_loop, search_point_scorer
@@ -94,7 +90,6 @@ from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.arms import ArmSlot, PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank
-from promptpotter.domain.campaign import Arm, Compare
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
     OptimizationConfig,
@@ -168,7 +163,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
-from promptpotter.shared.errors import LedgerUnreadableError, PayloadInvalidError
+from promptpotter.shared.errors import LedgerUnreadableError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
@@ -867,41 +862,6 @@ def test_a_closed_round_replays_its_decisions_a_rewind_retracts_them_and_a_fork_
         return [reader.selection.label for reader in readers]  # type: ignore[union-attr]
 
     assert served() == [(i, True, True) for i in ids] and selected() == ["C2.1"] * 3, "guard"
-    # A `--from` retracts rounds only once preflight admits the launch: here an arm whose cap a
-    # cell of its models, as billed, cannot fund one round of.
-    priced = samples(10, "g")
-    refused = replace(
-        loop_session(stores, pipeline_schema([]), priced, hop=hop),
-        pipeline_params=dict(LLM_ONLY),
-        purpose=Compare(arm=Arm(head_to_head_id="h2h", arm_key="arm")),
-    )
-    billed = {"step_tokens": {"llm_only": {"input": 1, "output": 1, "cost_usd": 1.0}}}
-    filed(
-        stores.archive,
-        [archive_row(s.query, truth="g", pipeline_data=billed) for s in priced],
-        filed_under(LLM_ONLY, refused.bank.dataset_hash),
-    )
-    capped = CampaignConfig.model_validate(
-        {"optimization": {"degradation_threshold": 0.0, "budget": {"usd": 0.01}}}
-    )
-    unread = ReadArm(ArmKey("origin"), arm_state("origin"), sheet([]))
-    with pytest.raises(PayloadInvalidError):
-        asyncio.run(
-            loop_start.init_optimization_loop(
-                CampaignOrigin(unread, TaskDecomposition()),
-                priced,
-                capped,
-                cb=RunCallbacks(CycleEventLog(stores.projects_root / "refused.jsonl")),
-                no_divergence_check=True,
-                fork_on_divergence=False,
-                resume_from_round_override=1,
-                session=refused,
-            )
-        )
-    assert refused.state.resumed_from_round == 2, "a refused launch reported another next round"
-    assert list(stores.campaigns.standing_rounds(hop, moment=None).rounds) == [0, 1, 2], (
-        "a refused launch's `--from` retracted rounds on the ledger"
-    )
     stores.campaigns.rewind_to_round(hop, 1)
     assert selected() == ["C1.1"] * 3, (
         "the ledger, the subtree and the index disagree on the selection"

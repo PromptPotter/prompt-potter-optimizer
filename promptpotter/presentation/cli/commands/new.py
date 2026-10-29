@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -23,10 +24,11 @@ from promptpotter.application.datasets.origin_readiness import origin_readiness
 from promptpotter.application.datasets.origin_resolve import FINDING_PATCH_KEYS
 from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.campaign import Arm, Compare, Optimize, Purpose
 from promptpotter.domain.command_kinds import (
     EditDraftCampaignPayload,
     MintCampaignPayload,
+    MintHeadToHeadPayload,
+    PauseCyclePayload,
     ResolveOriginPayload,
     StartCheckinPayload,
 )
@@ -36,6 +38,7 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
     backend_unreachable_result,
+    ctrl_c_pauses,
     cycle_result_command,
     held_run,
     inline_launch,
@@ -52,6 +55,7 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine, Sequence
 
     from promptpotter.application.datasets.origin_readiness import FieldGap, OriginLastResolution
+    from promptpotter.application.jobs.launcher.head_to_head import HeadToHeadLaunched
     from promptpotter.application.jobs.launcher.launch import Inline
     from promptpotter.application.jobs.launcher.run_job import HeldRun
     from promptpotter.infrastructure.store.stores import Stores
@@ -66,6 +70,7 @@ _SET_KNOBS: frozenset[str] = frozenset(OptimizationOverrides.model_fields) - {_N
 _SET_FIELDS: frozenset[str] = (SETTABLE_SCALARS - set(FINDING_PATCH_KEYS.values())) | set(
     FINDING_PATCH_KEYS
 )
+_KNOB_COMMA = re.compile(r",(?=[\w.]+=)")
 
 
 def _settable() -> str:
@@ -215,19 +220,6 @@ async def _hold_checkin(
     return held
 
 
-def _purpose_request(raw: str | None) -> Purpose:
-    if raw is None:
-        return Optimize()
-    head_to_head_id, sep, arm_key = raw.partition(":")
-    if not sep:
-        raise SystemExit(f"ERROR: --arm takes HEAD_TO_HEAD:KEY, got {raw!r}")
-    return Compare(
-        arm=PayloadInvalidError.validating(
-            Arm, {"head_to_head_id": head_to_head_id, "arm_key": arm_key}
-        )
-    )
-
-
 def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload:
     declared = None
     if args.config:
@@ -240,7 +232,6 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
             "(`new justlogic/d234`) or via `--dataset-name <name>`.\n\n" + no_dataset_hint(stores)
         )
     knobs = _set_knobs(_sets_of(args))
-    purpose = _purpose_request(args.arm)
     task_text = (
         Path(args.task_file).read_text(encoding="utf-8") if args.task_file else args.task_text
     )
@@ -250,7 +241,6 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
         {
             "dataset_name": dataset_name,
             "optimization": knobs or None,
-            "purpose": purpose,
             "diag": args.diag,
             "campaign_config": declared,
             "task_text": task_text,
@@ -269,8 +259,6 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     if not (args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)):
         stores = open_stores(args)
         return await mint_and_run(stores, _named_mint(args, stores), inline_launch(args))
-    if args.arm is not None:
-        raise SystemExit("ERROR: --arm mints a committed dataset's campaign, not a raw file")
     sets = _sets_of(args)
     patch = _sets_to_patch(sets) if sets else None
     stores = open_stores(args)
@@ -299,6 +287,76 @@ async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline
     held = held_run(outcome.result)
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held, diag=mint.diag)
+
+
+def _arm_request(raw: str) -> dict[str, Any]:
+    arm_key, sep, spec = raw.partition("=")
+    if not sep or not spec:
+        raise SystemExit(f"ERROR: --arm takes KEY=OPTIMIZER[,KNOB=VALUE…], got {raw!r}")
+    # A comma opens a knob only where `name=` follows it: a value may hold one.
+    optimizer, *knobs = _KNOB_COMMA.split(spec)
+    return {"arm_key": arm_key, "optimization": _set_knobs([f"optimizer={optimizer}", *knobs])}
+
+
+def cmd_head_to_head(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
+    prepare_launch()
+    return _head_to_head(args)
+
+
+async def _head_to_head(args: argparse.Namespace) -> CommandResult:
+    """Each arm runs in its own process, as a server launch does; this waits on them all."""
+    setup_logging(style="full" if args.verbose else "cli")
+    stores = open_stores(args)
+    payload = PayloadInvalidError.validating(
+        MintHeadToHeadPayload,
+        {
+            "dataset_name": args.dataset,
+            "head_to_head": {
+                "head_to_head_id": args.head_to_head,
+                "arms": [_arm_request(raw) for raw in args.arms],
+                "budget": budget_from_args(args),
+            },
+        },
+    )
+    dispatcher = CommandDispatcher(stores)
+    try:
+        outcome = await dispatcher.dispatch(CommandCall(payload))
+    except BackendUnreachableError as exc:
+        return backend_unreachable_result(exc)
+    except DatasetAccessError:
+        raise SystemExit(
+            f"ERROR: no dataset named {payload.dataset_name!r}.\n\n" + no_dataset_hint(stores)
+        ) from None
+    except PotterError as exc:
+        raise SystemExit(f"ERROR: {exc}") from None
+    launched: HeadToHeadLaunched = outcome.result
+    started = launched.started
+    for arm in started.arms:
+        cycle_dir = stores.campaigns.cycle_dir(arm.hop).absolute()
+        _checkin_line(f"arm {arm.arm_key}", f"{arm.hop.campaign_id} → {cycle_dir}")
+    logger.info("Each arm writes readout.log in its cycle; Ctrl+C pauses every arm.")
+    pauses = [
+        PauseCyclePayload(campaign_id=a.hop.campaign_id, cycle_id=a.hop.cycle_id, reason="Ctrl+C")
+        for a in started.arms
+    ]
+    with ctrl_c_pauses(stores, pauses):
+        await asyncio.gather(*launched.exits)
+    ended = [
+        f"  {arm.arm_key}: {arm.hop.campaign_id} — {dispatcher.run_state(arm.hop).run_phase.value}"
+        for arm in started.arms
+    ]
+    subjects = " ".join(f"--subject campaign:{arm.hop.campaign_id}" for arm in started.arms)
+    return CommandResult(
+        data=started.model_dump(mode="json"),
+        human="\n".join(
+            [
+                f"Head-to-head {started.head_to_head_id}:",
+                *ended,
+                "",
+                f"Read it: python -m promptpotter evidence {subjects}",
+            ]
+        ),
+    )
 
 
 async def _run_origin(held: HeldRun, *, diag: bool) -> CommandResult:
