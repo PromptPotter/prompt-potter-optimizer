@@ -2,10 +2,10 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -22,6 +22,7 @@ from promptpotter.application import health
 from promptpotter.application.account import record_refusal
 from promptpotter.application.datasets.startability import offer_faults
 from promptpotter.application.initialization.wiring import complete_registries
+from promptpotter.application.jobs.quota import RateLimitedError
 from promptpotter.application.jobs.reaper import periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.logging import setup_logging, silence_proactor_disconnect_noise
@@ -33,7 +34,7 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
 from promptpotter.domain.command_kinds import CommandKind
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
@@ -132,18 +133,24 @@ app = FastAPI(
     version=APP_VERSION,
     docs_url=None,
     redoc_url=None,
+    openapi_url=None,
     lifespan=lifespan,
     responses={"default": {"model": ErrorEnvelope}},
 )
 
+# The contract the repo already publishes as `openapi.generated.json`, served beside its reader.
+_contract = APIRouter(include_in_schema=False)
+_OPENAPI_PATH = "/openapi.json"
 
-# Public, beside `/openapi.json`: both serve the contract the repo publishes as `openapi.generated.json`.
-@app.get("/docs", include_in_schema=False)
+
+@_contract.get(_OPENAPI_PATH)
+async def openapi_document() -> JSONResponse:
+    return JSONResponse(app.openapi())
+
+
+@_contract.get("/docs")
 async def scalar_docs() -> Response:
-    doc: Response = get_scalar_api_reference(
-        openapi_url=app.openapi_url,
-        title=app.title,
-    )
+    doc: Response = get_scalar_api_reference(openapi_url=_OPENAPI_PATH, title=app.title)
     return doc
 
 
@@ -170,11 +177,13 @@ def _error_response(
     details: dict[str, object] | None = None,
     headers: Mapping[str, str] | None = None,
     exc_info: bool = False,
+    banked: bool = True,
 ) -> JSONResponse:
     error_id = uuid.uuid4().hex[:12]
     reason = f"/{details['reason']}" if details and "reason" in details else ""
+    # A refusal is the server doing its job, as loud as the access line it repeats; a 5xx is a failure.
     logger.log(
-        logging.ERROR if exc_info else logging.WARNING,
+        logging.ERROR if status >= 500 else logging.INFO,
         "api error [%s] %s %s -> %d %s%s",
         error_id,
         request.method,
@@ -189,11 +198,12 @@ def _error_response(
         for key, value in (details or {}).items()
         if key != "reason" and isinstance(value, (str, int))
     )
-    _bank_refusal(
-        request,
-        f"{request.method} {request.url.path} -> {status} {code}{reason} [{error_id}]{facts}: {message}",
-        status,
-    )
+    if banked:
+        _bank_refusal(
+            request,
+            f"{request.method} {request.url.path} -> {status} {code}{reason} [{error_id}]{facts}: {message}",
+            status,
+        )
     body = ErrorEnvelope(error=code, message=message, error_id=error_id, details=details or None)
     return JSONResponse(status_code=status, content=body.model_dump(mode="json"), headers=headers)
 
@@ -206,6 +216,7 @@ async def potter_error_handler(request: Request, exc: PotterError) -> JSONRespon
         code=exc.code,
         message=exc.message,
         details=exc.details,
+        banked=not isinstance(exc, RateLimitedError),
     )
 
 
@@ -219,7 +230,8 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
     return await potter_error_handler(request, PayloadInvalidError.refusing(located))
 
 
-_COMMANDS = f"/api/v1{commands_router.prefix}/"
+_API = "/api/v1"
+_COMMANDS = f"{_API}{commands_router.prefix}/"
 
 
 @app.exception_handler(HTTPException)
@@ -253,25 +265,6 @@ async def unhandled_exception_handler(request: Request, _exc: Exception) -> JSON
     )
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Tokens never appear past this boundary (decisions.md § 0002): downstream code sees only IdentityContext.
-install_oidc_middleware(app)
-
-
-WEBAPP_DIR = webapp_static_root()
-
-# Inside the header seam; GZip passes ``text/event-stream`` through, so SSE is never buffered.
-app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
-app.add_middleware(ResponseHeadersMiddleware, webapp_dir=WEBAPP_DIR)
-
-
 _health = APIRouter(tags=["Health"])
 
 
@@ -292,47 +285,87 @@ async def health_check() -> HealthResponse:
     )
 
 
-# Each router's gate is applied at its mount, so no route under it can forget one; `None` is public.
-API_ROUTERS: tuple[tuple[APIRouter, Callable[..., object] | None], ...] = (
-    (_health, None),
-    (backends_router, admit_session),
-    (campaigns_router, admit_session),
-    (active_router, admit_session),
-    (hierarchy_router, admit_session),
-    (datasets_router, admit_session),
-    (origins_router, admit_session),
-    (commands_router, admit_session),
-    (auth_flow_router, None),
-    (auth_router, admit_session),
-    (site_records_router, require_site_records_token),
+class RouterMount(NamedTuple):
+    router: APIRouter
+    prefix: str
+    # Applied at the mount, so no route under it can forget it; `None` is public by declaration.
+    gate: Callable[..., object] | None
+
+
+API_ROUTERS: tuple[RouterMount, ...] = (
+    RouterMount(_contract, "", None),
+    RouterMount(_health, _API, None),
+    RouterMount(backends_router, _API, admit_session),
+    RouterMount(campaigns_router, _API, admit_session),
+    RouterMount(active_router, _API, admit_session),
+    RouterMount(hierarchy_router, _API, admit_session),
+    RouterMount(datasets_router, _API, admit_session),
+    RouterMount(origins_router, _API, admit_session),
+    RouterMount(commands_router, _API, admit_session),
+    RouterMount(auth_flow_router, _API, None),
+    RouterMount(auth_router, _API, admit_session),
+    RouterMount(site_records_router, _API, require_site_records_token),
 )
-for _router, _gate in API_ROUTERS:
+for _mount in API_ROUTERS:
     app.include_router(
-        _router, prefix="/api/v1", dependencies=[] if _gate is None else [Depends(_gate)]
+        _mount.router,
+        prefix=_mount.prefix,
+        dependencies=[] if _mount.gate is None else [Depends(_mount.gate)],
     )
+
+_ROUTES = [
+    route for mount in API_ROUTERS for route in mount.router.routes if isinstance(route, APIRoute)
+]
+
+
+def _request_bodies() -> Iterator[type[BaseModel]]:
+    for route in _ROUTES:
+        # FastAPI sets `dependant` on the instance outside `APIRoute`'s declared attributes.
+        for param in vars(route)["dependant"].body_params:
+            body = param.field_info.annotation
+            if isinstance(body, type) and issubclass(body, BaseModel):
+                yield body
 
 
 def _open_request_objects() -> set[str]:
     opened: set[str] = set()
-    for router, _gate in API_ROUTERS:
-        for route in router.routes:
-            # FastAPI sets `dependant` on the instance outside `APIRoute`'s declared attributes.
-            for param in (
-                vars(route)["dependant"].body_params if isinstance(route, APIRoute) else ()
-            ):
-                body = param.field_info.annotation
-                if isinstance(body, type) and issubclass(body, BaseModel):
-                    schema = body.model_json_schema()
-                    opened |= {
-                        node["title"]
-                        for node in (schema, *schema.get("$defs", {}).values())
-                        if "properties" in node and node.get("additionalProperties") is not False
-                    }
+    for body in _request_bodies():
+        schema = body.model_json_schema()
+        opened |= {
+            node["title"]
+            for node in (schema, *schema.get("$defs", {}).values())
+            if "properties" in node and node.get("additionalProperties") is not False
+        }
     return opened
 
 
 # A request object refuses an unknown key (`StrictModel`), or a misspelled knob runs as its default.
 assert not (_open := _open_request_objects()), f"request bodies keep unknown keys: {sorted(_open)}"
+_deferred = sorted(
+    {body.__name__ for body in _request_bodies() if not issubclass(body, RequestBody)}
+)
+assert not _deferred, f"request bodies that are no `RequestBody`: {_deferred}"
+
+# Credentialed, so never `*`: the methods the routes serve, and the headers a client sends beyond
+# the CORS-safelisted ones (the command key, and the validators a conditional read revalidates with).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins_list,
+    allow_credentials=True,
+    # Starlette types `methods` optional; an `APIRoute` always sets it.
+    allow_methods=sorted({method for route in _ROUTES for method in route.methods or ()}),
+    allow_headers=["Idempotency-Key", "If-Modified-Since", "If-None-Match"],
+)
+
+# Tokens never appear past this boundary (decisions.md § 0002): downstream code sees only IdentityContext.
+install_oidc_middleware(app)
+
+
+WEBAPP_DIR = webapp_static_root()
+
+# Inside the header seam; GZip passes ``text/event-stream`` through, so SSE is never buffered.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
+app.add_middleware(ResponseHeadersMiddleware, webapp_dir=WEBAPP_DIR)
 
 # A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
 if WEBAPP_DIR.exists():

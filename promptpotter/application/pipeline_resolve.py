@@ -98,7 +98,7 @@ from promptpotter.domain.search_point import (
     missing_template_vars,
     strip_rendered_prompt,
 )
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.pricing import route_priced
 from promptpotter.infrastructure.llm.registry import default_routes
@@ -1303,7 +1303,7 @@ def resolve_pipeline_at(stores: Stores, campaign_id: str, at: str) -> CampaignPi
     return resolve_pipeline_for_campaign(leaf, owned_campaign(leaf, campaign_id), at=spec)
 
 
-class ForkPreviewRequest(StrictModel):
+class ForkPreviewRequest(RequestBody):
     pipeline_overlay: dict[str, Any] = Field(
         description="The `nodes.*.config` overlay the fork would carry, as its `CycleSeed` sends it"
     )

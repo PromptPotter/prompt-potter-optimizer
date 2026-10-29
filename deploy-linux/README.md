@@ -207,7 +207,8 @@ knowing:
 [`docs/operations/access-model.md`](../docs/operations/access-model.md)'s. On the box:
 
 - **Signing up IS the grant.** OIDC provider config at `.promptpotter/identity/oidc.json`; what
-  bounds a stranger is the host coupon `HOST_COUPON`, not an approval queue.
+  bounds a stranger is the host coupon `HOST_COUPON`, and how many there may be `MAX_ACCOUNTS`, not an
+  approval queue.
 - **`blocklist.json` is the revoke**, re-read on every request — edits are instant, no restart.
 - **Set `HOST_ADMIN_EMAIL` and `HOST_ADMIN_ISSUER`** or nothing ever claims this box; the issuer
   pins the claim to one provider. Unset, the terminal stays on the `default` tenant and the app logs
@@ -267,8 +268,8 @@ HOST_ADMIN_ISSUER=https://accounts.google.com    # ...and via which provider
 
 - **`ADMIN_BOT_PASSPHRASE` belongs in the BOT's file** once `BOT_ENV_FILE` is split: a copy in the
   API's environment turns a read of that process into command authority.
-- **Token and chat id stay in BOTH files** — the API sends on the same bot (new sign-ins, health
-  changes), and without them `notify_operator` fails silently. `install-admin-bot.sh` warns.
+- **Token and chat id stay in BOTH files** — the API sends on the same bot (new sign-ins, sign-ups
+  refused at `MAX_ACCOUNTS`, health changes), and without them `notify_operator` fails silently. `install-admin-bot.sh` warns.
 
 | You send | Effect |
 |---|---|

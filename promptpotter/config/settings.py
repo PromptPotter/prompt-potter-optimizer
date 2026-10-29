@@ -120,6 +120,10 @@ class Settings(BaseSettings):
     # Empty accepts any issuer: with two providers wired, the weakest one's email handling then grants the box.
     HOST_ADMIN_ISSUER: str = ""
 
+    # Accounts on disk, the host's included, past which no new sign-in opens one; 0 closes sign-up.
+    # The host's worst-case exposure to strangers is this times the coupon's face.
+    MAX_ACCOUNTS: int = 100
+
     # Declared here, never read from `os.environ`: a bare environ read ignores `env_file_path()`.
     ADMIN_BOT_TELEGRAM_TOKEN: SecretStr = SecretStr("")
     ADMIN_BOT_CHAT_ID: str = ""

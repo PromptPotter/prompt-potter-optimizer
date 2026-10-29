@@ -16,6 +16,13 @@ class FrozenModel(StrictModel):
     model_config = ConfigDict(frozen=True)
 
 
+class RequestBody(StrictModel):
+    """A route's body (`main.py::_request_bodies`)."""
+
+    # Built at once: FastAPI builds a body's validator under a warning filter that a deferred build escapes.
+    model_config = ConfigDict(defer_build=False)
+
+
 def _reject_bool(v: object) -> object:
     """Pydantic coerces a wire ``true`` to 1, which reads as "disarm" on a count and a $1 ceiling on a budget."""
     if isinstance(v, bool):

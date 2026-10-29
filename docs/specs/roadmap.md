@@ -47,7 +47,7 @@ the rest of Lane C.
 - **C3** L4 closure — [`l4-outer-loop.md`](l4-outer-loop.md) § Open.
 - **C4** Cross-user measurement panel, after P3.
 - **C5** MCP server mode (§ Agent-tool parity) · the editable `dataset.yaml` `pipeline` write side · the connector as a unit (§ The connector as a unit).
-- **C6** Public-service hardening: Docker, metrics, a rate on unpaid writes (reads are metered), billing; a bound on the NUMBER of accounts.
+- **C6** Public-service hardening: Docker, metrics, billing.
 - **C7** Non-prompt targets · agent harnesses (§ Evolving agent harnesses) · multimodal; all but harnesses after v1.
 - **C8** Mask abstraction — the sample-set half (§ Lineage mask).
 - **C9** Variation and pools (§ Variation and pools).
