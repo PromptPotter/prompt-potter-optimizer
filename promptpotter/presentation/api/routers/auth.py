@@ -1,4 +1,4 @@
-"""Login / callback / logout run pre-auth and deliberately take no `IdentityDep`."""
+"""Login / callback / logout run before any session exists, so they are `auth_flow_router`'s, mounted public."""
 
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ from promptpotter.shared.identity import AccessState, IdentityContext, display_n
 
 logger = logging.getLogger(__name__)
 
+auth_flow_router = APIRouter(prefix="/auth", tags=["Auth"])
 auth_router = APIRouter(prefix="/auth", tags=["Auth"])
 
 # `provider.state.nonce` of the sign-in this browser started; the callback honours no other.
@@ -165,7 +166,7 @@ def _redirect_with_error(code: str) -> RedirectResponse:
     return response
 
 
-@auth_router.get("/login/{provider}")
+@auth_flow_router.get("/login/{provider}")
 async def login(
     request: Request,
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
@@ -188,7 +189,7 @@ async def login(
     return response
 
 
-@auth_router.get("/callback/{provider}")
+@auth_flow_router.get("/callback/{provider}")
 async def callback(
     request: Request,
     background: BackgroundTasks,
@@ -280,7 +281,7 @@ async def callback(
     return response
 
 
-@auth_router.post("/logout")
+@auth_flow_router.post("/logout")
 async def logout(request: Request) -> JSONResponse:
     bundle = _require_bundle(request)
     session_id = request.cookies.get(SESSION_COOKIE_NAME)

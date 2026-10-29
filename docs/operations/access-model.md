@@ -141,6 +141,10 @@ stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_ru
   issuer vouched for it (`identity/verifier.py` requires `email_verified`; `identity/github.py` reads
   the verified list only). Missing session → 401 at `deps.py::resolve_identity`. The session cookie
   is httponly / secure / samesite=lax, opaque — no JWT past the middleware.
+- **Every router is mounted behind its gate** (`main.py::API_ROUTERS`), so a route added under one
+  inherits it. **Public is declared there, by `None`:** `/health` and the sign-in flow
+  (`auth.py::auth_flow_router`). Outside `/api/v1` only the static webapp and `/docs` +
+  `/openapi.json` answer a stranger, the latter the contract the repo already publishes.
 - **Sign-up is open AND signing up is the grant.** What bounds a stranger is money, not approval:
   the lifetime ceilings `Settings.FREE_TIER_SPEND_CAP_USD` and `FREE_TIER_TOKEN_CAP`, composed at
   `quota.py::admit_launch`. **Both units, because the USD one can go blind** on an unpriced call

@@ -13,6 +13,7 @@ import asyncio
 import dataclasses
 import logging
 import os
+import re
 import sys
 import types
 from datetime import date
@@ -29,6 +30,8 @@ from factories import (
     workspace,
 )
 from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
 from offline_world import Router
 from pydantic import SecretStr
 
@@ -110,6 +113,7 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.site_records import SiteRecord, SiteRecordStore
 from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.main import API_ROUTERS, app
 from promptpotter.presentation.api.deps import require_site_records_token
 from promptpotter.presentation.api.middleware.oidc import (
     SESSION_COOKIE_NAME,
@@ -418,6 +422,24 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
     assert eve.block_packs.missing([ACCOUNT_PACK]) == [ACCOUNT_PACK], (
         "a run naming its account's pack drew another account's"
     )
+
+    # A stranger reaches only the routers mounted public; a route added under a gated one inherits its gate.
+    monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "on")
+    public = {
+        f"/api/v1{route.path}"
+        for router, gate in API_ROUTERS
+        if gate is None
+        for route in router.routes
+        if isinstance(route, APIRoute)
+    }
+    anonymous = TestClient(app)
+    assert anonymous.get("/api/v1/health").status_code == 200, (
+        "the health probe asked for a session"
+    )
+    for path, operations in app.openapi()["paths"].items():
+        for method in operations if path not in public else ():
+            answer = anonymous.request(method, re.sub(r"\{[^}]+\}", "x", path))
+            assert answer.status_code == 401, f"{method.upper()} {path} answered a stranger"
 
 
 # 2. Delegation

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from promptpotter.application.site_records import (
     SiteRecordBody,
@@ -11,13 +11,8 @@ from promptpotter.application.site_records import (
     keep_site_record,
     kept_site_records,
 )
-from promptpotter.presentation.api.deps import require_site_records_token
 
-site_records_router = APIRouter(
-    prefix="/site-records",
-    tags=["Site records"],
-    dependencies=[Depends(require_site_records_token)],
-)
+site_records_router = APIRouter(prefix="/site-records", tags=["Site records"])
 
 
 @site_records_router.post("/{table}", response_model=SiteRecordWire)
@@ -36,6 +31,3 @@ def get_site_records(table: str, since: str = "") -> SiteRecordsResponse:
 def delete_site_records(table: str, before: str) -> SiteRecordsDropped:
     """Retention: drop the added rows kept before ``before``. A keyed row stays."""
     return drop_site_records_before(table, before)
-
-
-assert any(dep.dependency is require_site_records_token for dep in site_records_router.dependencies)

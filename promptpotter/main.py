@@ -2,12 +2,12 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -39,12 +39,13 @@ from promptpotter.presentation.admin_bot import check_health_and_tell, notify_op
 from promptpotter.presentation.api.deps import (
     auth_is_open,
     build_stores_from_identity,
+    require_site_records_token,
     resolve_identity,
 )
 from promptpotter.presentation.api.middleware.headers import ResponseHeadersMiddleware
 from promptpotter.presentation.api.middleware.oidc import install_oidc_middleware
 from promptpotter.presentation.api.routers.active import active_router
-from promptpotter.presentation.api.routers.auth import auth_router
+from promptpotter.presentation.api.routers.auth import auth_flow_router, auth_router
 from promptpotter.presentation.api.routers.backends import backends_router
 from promptpotter.presentation.api.routers.campaigns import campaigns_router
 from promptpotter.presentation.api.routers.commands import commands_router
@@ -134,6 +135,7 @@ app = FastAPI(
 )
 
 
+# Public, beside `/openapi.json`: both serve the contract the repo publishes as `openapi.generated.json`.
 @app.get("/docs", include_in_schema=False)
 async def scalar_docs() -> Response:
     doc: Response = get_scalar_api_reference(
@@ -288,20 +290,24 @@ async def health_check() -> HealthResponse:
     )
 
 
-API_ROUTERS: tuple[APIRouter, ...] = (
-    _health,
-    backends_router,
-    campaigns_router,
-    active_router,
-    hierarchy_router,
-    datasets_router,
-    origins_router,
-    commands_router,
-    auth_router,
-    site_records_router,
+# Each router's gate is applied at its mount, so no route under it can forget one; `None` is public.
+API_ROUTERS: tuple[tuple[APIRouter, Callable[..., object] | None], ...] = (
+    (_health, None),
+    (backends_router, resolve_identity),
+    (campaigns_router, resolve_identity),
+    (active_router, resolve_identity),
+    (hierarchy_router, resolve_identity),
+    (datasets_router, resolve_identity),
+    (origins_router, resolve_identity),
+    (commands_router, resolve_identity),
+    (auth_flow_router, None),
+    (auth_router, resolve_identity),
+    (site_records_router, require_site_records_token),
 )
-for _router in API_ROUTERS:
-    app.include_router(_router, prefix="/api/v1")
+for _router, _gate in API_ROUTERS:
+    app.include_router(
+        _router, prefix="/api/v1", dependencies=[] if _gate is None else [Depends(_gate)]
+    )
 
 # A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
 if WEBAPP_DIR.exists():

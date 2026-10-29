@@ -5,7 +5,8 @@
 - **`cli/`** — each verb once in `commands/verbs.py`, whose docstring holds the launch-as-data rule.
 - **`terminal/`** prints only what a terminal alone prints; the readout and every renderer are
   `application/views/`'s, imported upward.
-- **`api/`** — dataset reads go through `infrastructure/store/dataset_access.py::resolve_dataset` (a
+- **`api/`** — **a router's gate is its mount's** (`main.py::API_ROUTERS`; `None` is public by
+  declaration), never a dependency each route remembers. Dataset reads go through `infrastructure/store/dataset_access.py::resolve_dataset` (a
   resolver, not a gate); what a campaign RUNS goes through
   `application/pipeline_resolve.py::resolve_pipeline_for_campaign`, ownership-gated (`owned_campaign`,
   404 cross-user). **Authorization denies via `shared/identity.py::require_capability`** at host
