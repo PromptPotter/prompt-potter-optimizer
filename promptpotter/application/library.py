@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import datetime
+from typing import TYPE_CHECKING
+
 from pydantic import Field
 
-from promptpotter.config.prompt_blocks import installed_packs, read_pack
-from promptpotter.domain.prompt_block import AUTHORED_SOURCE, Cited, PromptPart, snippet_id
+from promptpotter.domain.prompt_block import (
+    AUTHORED_SOURCE,
+    Authored,
+    Cited,
+    PromptPart,
+    Snippet,
+    snippet_id,
+)
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.account_packs import bank_into_account_pack
+from promptpotter.infrastructure.store.stores import own_campaign, owned_draft_data
+from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
+from promptpotter.shared.identity import acting_principal
+
+if TYPE_CHECKING:
+    from promptpotter.config.prompt_blocks import PackShelf
+    from promptpotter.infrastructure.store.stores import Stores
 
 
 class LibrarySource(StrictModel):
@@ -18,7 +35,7 @@ class LibrarySource(StrictModel):
 
 
 class LibrarySnippet(StrictModel):
-    """One snippet of one installed pack, as a library surface lists it."""
+    """One snippet of one pack the account reads, as a library surface lists it."""
 
     id: str = Field(
         description="Its content id, the suffix of each pool entry `{part}.{id}` it expands into; "
@@ -34,11 +51,19 @@ class LibrarySnippet(StrictModel):
     method: str | None = Field(
         description="The cited technique's family as its pack records it; absent for an authored snippet"
     )
-    pack: str = Field(description="The installed pack holding it, as a `packs` knob names it")
+    pack: str = Field(description="The pack holding it, as a `packs` knob names it")
+    version: int = Field(
+        description="0 for a cited snippet; an authored one's is one past the snippet it supersedes"
+    )
+    supersedes: str | None = Field(
+        description="The `id` of the snippet it was edited from; absent for a cited snippet and "
+        "one written from nothing"
+    )
+    author: str | None = Field(description="Who wrote an authored snippet; absent for a cited one")
 
 
 class LibraryResponse(StrictModel):
-    """Every snippet the installed block packs hold, one library for target and optimizer prompts alike."""
+    """Every snippet the account reads: the install's packs beside its own, for target and optimizer prompts alike."""
 
     parts: list[PromptPart] = Field(
         description="The closed set `suits` draws from, in `PROMPT_FIELDS` order"
@@ -49,13 +74,14 @@ class LibraryResponse(StrictModel):
     snippets: list[LibrarySnippet] = Field(description="By pack name, then each pack's own order")
 
 
-def library() -> LibraryResponse:
+def library(shelf: PackShelf) -> LibraryResponse:
     snippets: list[LibrarySnippet] = []
     sources: dict[str, LibrarySource] = {}
-    for name in installed_packs():
-        pack = read_pack(name)
+    for name in shelf.names():
+        pack = shelf.read(name)
         for s in pack.snippets:
             cited = s.provenance if isinstance(s.provenance, Cited) else None
+            authored = s.provenance if isinstance(s.provenance, Authored) else None
             if s.source not in sources:
                 work = pack.works[cited.work] if cited else None
                 title = work.title if work else AUTHORED_SOURCE
@@ -75,8 +101,54 @@ def library() -> LibraryResponse:
                     source=s.source,
                     method=cited.technique_family if cited else None,
                     pack=name,
+                    version=s.version,
+                    supersedes=authored.supersedes if authored else None,
+                    author=authored.author if authored else None,
                 )
             )
     return LibraryResponse(
         parts=list(PromptPart), sources=list(sources.values()), snippets=snippets
+    )
+
+
+def _written_in(stores: Stores, experiment: str) -> None:
+    """A provenance names a campaign or a draft of the caller's own, never another account's."""
+    if stores.campaigns.campaign_owner(experiment) is not None:
+        own_campaign(stores, experiment)
+    else:
+        owned_draft_data(stores, experiment)
+
+
+def bank_snippet(stores: Stores, *, supersedes: str, text: str, experiment: str) -> None:
+    """An edit of a library snippet banked into the account's own pack as its next version; a text the library already holds is that snippet."""
+    if snippet_id(text) == supersedes:
+        raise PayloadInvalidError(
+            "the text is the snippet's own: an unchanged edit is no new version",
+            code="snippet_unchanged",
+        )
+    shelf = stores.block_packs
+    held = {snippet_id(s.text): s for name in shelf.names() for s in shelf.read(name).snippets}
+    parent = held.get(supersedes)
+    if parent is None:
+        raise NotFoundError(f"no snippet {supersedes!r} in this library", code="snippet_not_found")
+    _written_in(stores, experiment)
+    if snippet_id(text) in held:
+        return
+    bank_into_account_pack(
+        shelf,
+        Snippet(
+            text=text,
+            suits=parent.suits,
+            tags=parent.tags,
+            presumes=parent.presumes,
+            provenance=Authored(
+                kind="authored",
+                author=acting_principal(stores.identity).display,
+                date=datetime.datetime.now(datetime.UTC).date(),
+                experiment=experiment,
+                version=parent.version + 1,
+                supersedes=supersedes,
+                notes=None,
+            ),
+        ),
     )

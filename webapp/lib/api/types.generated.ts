@@ -2807,7 +2807,7 @@ export interface OptimizerEntry {
   origin: string | null;
 }
 
-/** Every snippet the installed block packs hold, one library for target and optimizer prompts alike. */
+/** Every snippet the account reads: the install's packs beside its own, for target and optimizer prompts alike. */
 export interface LibraryResponse {
   /** The closed set `suits` draws from, in `PROMPT_FIELDS` order */
   parts: ('persona' | 'task_intent' | 'problem_description' | 'instruction' | 'thinking_style' | 'answer_format')[];
@@ -2831,7 +2831,7 @@ export interface LibrarySource {
   year: number | null;
 }
 
-/** One snippet of one installed pack, as a library surface lists it. */
+/** One snippet of one pack the account reads, as a library surface lists it. */
 export interface LibrarySnippet {
   /** Its content id, the suffix of each pool entry `{part}.{id}` it expands into;
    * one text in two packs is two rows under one id */
@@ -2847,8 +2847,15 @@ export interface LibrarySnippet {
   /** The cited technique's family as its pack records it; absent for an authored
    * snippet */
   method: string | null;
-  /** The installed pack holding it, as a `packs` knob names it */
+  /** The pack holding it, as a `packs` knob names it */
   pack: string;
+  /** 0 for a cited snippet; an authored one's is one past the snippet it supersedes */
+  version: number;
+  /** The `id` of the snippet it was edited from; absent for a cited snippet and one
+   * written from nothing */
+  supersedes: string | null;
+  /** Who wrote an authored snippet; absent for a cited one */
+  author: string | null;
 }
 
 /** Every campaign in one store: the unstarted first, then root-major and newest first. */
@@ -3886,6 +3893,16 @@ export interface ArchiveCampaignPayload {
   reason: string;
 }
 
+/** Bank an edited library snippet into this account's own block pack as the next version of */
+export interface BankSnippetPayload {
+  /** The id of the snippet the text was edited from. */
+  supersedes: string;
+  /** The edited text. */
+  text: string;
+  /** The campaign or check-in draft it was written in. */
+  experiment: string;
+}
+
 /** Withdraw a launch waiting for a machine slot; nothing ran and nothing was spent. */
 export interface CancelQueuedRunPayload {
   /** The queued job id, as `machine-status` lists it. */
@@ -4423,7 +4440,7 @@ export type DashboardState = 'init' | 'origin' | 'proposing' | 'scoring' | 'betw
 export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 
 // Every kind `POST /commands/{kind}` dispatches (domain/command_kinds.py).
-export type CommandKind = "archive-campaign" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type CommandKind = "archive-campaign" | "bank-snippet" | "cancel-queued-run" | "change-run-limits" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "mint-campaign" | "origin-gate-decision" | "pause-cycle" | "resolve-origin" | "set-campaign-label" | "set-concurrent-cycles" | "set-sample-lookahead" | "skip-searchpoint" | "start-checkin" | "start-run" | "step-cycle" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -4434,6 +4451,7 @@ export type CommandSent<T, K extends keyof T> = { [P in K]: DeepPartial<T[P]> } 
 // Each kind's body IS its payload model (domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND).
 export interface CommandPayloads {
   "archive-campaign": CommandSent<ArchiveCampaignPayload, "campaign_id">;
+  "bank-snippet": CommandSent<BankSnippetPayload, "supersedes" | "text" | "experiment">;
   "cancel-queued-run": CommandSent<CancelQueuedRunPayload, "job_id">;
   "change-run-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id" | "budget">;
   "cleanup-empty-cycles": CommandSent<CleanupEmptyCyclesPayload, "campaign_id" | "cycle_id">;
@@ -4463,6 +4481,7 @@ export interface CommandPayloads {
 // What each kind answers: its route's `response_model` (presentation/api/routers/commands.py).
 export interface CommandResponses {
   "archive-campaign": CommandAcceptedBody;
+  "bank-snippet": CommandAcceptedBody;
   "cancel-queued-run": CommandAcceptedBody;
   "change-run-limits": CommandAcceptedBody;
   "cleanup-empty-cycles": CommandAcceptedBody;

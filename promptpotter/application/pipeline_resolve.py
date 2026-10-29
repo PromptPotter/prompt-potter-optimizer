@@ -123,6 +123,7 @@ from promptpotter.shared.plugin_registry import BUILT_IN
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.judges import JudgeSpec
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -931,8 +932,10 @@ def campaign_admits(cfg: CampaignConfig, schema: PipelineSchema) -> frozenset[Pr
     return admits(schema, matcher_of(per_sample))
 
 
-def mint_facts(cfg: CampaignConfig, demo: Sequence[Sample], schema: PipelineSchema) -> MintFacts:
-    return MintFacts(demo, campaign_admits(cfg, schema))
+def mint_facts(
+    cfg: CampaignConfig, demo: Sequence[Sample], schema: PipelineSchema, shelf: PackShelf
+) -> MintFacts:
+    return MintFacts(demo, campaign_admits(cfg, schema), shelf)
 
 
 def _draft_mint(stores: Stores, draft: DraftCampaign, m: _Merge) -> MintFacts | None:
@@ -941,7 +944,7 @@ def _draft_mint(stores: Stores, draft: DraftCampaign, m: _Merge) -> MintFacts | 
     if samples is None:
         return None
     demo = partition_bank(samples, m.cfg.dataset_split, seed=m.cfg.run_seed).demo
-    return mint_facts(m.cfg, demo, m.filtered)
+    return mint_facts(m.cfg, demo, m.filtered, stores.block_packs)
 
 
 def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
@@ -949,7 +952,9 @@ def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
     bank = None if drawn is None else stores.tenant_datasets.bank(drawn.dataset_hash)
     if drawn is None or bank is None:
         return None
-    return mint_facts(m.cfg, restored_partition(bank.samples, drawn).demo, m.filtered)
+    return mint_facts(
+        m.cfg, restored_partition(bank.samples, drawn).demo, m.filtered, stores.block_packs
+    )
 
 
 def _pool_draws(selected: SelectedOptimizer, pool: type[Pool]) -> list[PoolDraw]:

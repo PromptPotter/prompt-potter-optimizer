@@ -18,6 +18,9 @@ PackName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9._-]*$")]
 # The source an authored block is grouped under, which a pool's `active` path may name.
 AUTHORED_SOURCE = "authored"
 
+# The pack an account's own edits bank into, named alike in every account: a `packs` knob reads its run's.
+ACCOUNT_PACK = "account"
+
 
 class Presumption(StrEnum):
     """What a block's text takes for granted of the run it lands in; a run lacking one makes it noise."""
@@ -65,8 +68,12 @@ class Authored(FrozenModel):
     kind: Literal["authored"]
     author: str
     date: datetime.date
+    # The draft or campaign it was written in.
     experiment: str
-    version: str
+    # One past the version of the snippet it supersedes, a cited one counting 0.
+    version: Annotated[int, Field(ge=1)]
+    # The content id of the snippet it was edited from; None for one written from nothing.
+    supersedes: str | None
     notes: str | None
 
 
@@ -106,6 +113,10 @@ class Snippet(FrozenModel):
     @property
     def parts(self) -> tuple[PromptPart, ...]:
         return tuple(part for part in PromptPart if part in self.suits)
+
+    @property
+    def version(self) -> int:
+        return self.provenance.version if isinstance(self.provenance, Authored) else 0
 
 
 class BlockPack(FrozenModel):

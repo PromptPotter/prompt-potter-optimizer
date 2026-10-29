@@ -1,15 +1,18 @@
 "use client";
 
-import { useImperativeHandle, useMemo, useState, type DragEvent, type Ref } from "react";
-import { libraryRead, type DraftPatch, type NodePrompt } from "@/lib/api";
+import { useImperativeHandle, useMemo, useRef, useState, type DragEvent, type Ref } from "react";
+import { libraryRead, postCommand, type DraftPatch, type NodePrompt } from "@/lib/api";
 import { cx } from "@/lib/cx";
-import type { KnownSnippet } from "@/lib/derivations";
+import { segmentPrompt, type KnownSnippet } from "@/lib/derivations";
+import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
+import { invalidateReads } from "@/lib/read-cache";
+import { useWorkspace } from "@/lib/workspace";
 import { PromptSegments } from "./PromptSegments";
 import { promptField, promptFieldsPatch, withSnippet } from "@/lib/prompt-fields";
 import type { NodeScope } from "@/lib/SelectionContext";
 import { endSnippetDrag, useDraggedSnippet } from "@/lib/state/snippet-drag";
-import { Term } from "@/components/ui";
+import { FailureLine, Term } from "@/components/ui";
 import { LockButton } from "./NodeConfigEditor";
 
 function asStrings(keys: readonly string[], value: Record<string, string>): Record<string, string> {
@@ -73,34 +76,61 @@ export function PromptFieldsEditor({
     setSentFp(fingerprint);
     setDraft(asStrings(keys, value));
   }
-  // Every library snippet, and each one the operator edited here, is read back out of the text.
+  // Every library snippet, the account's banked edits among them, is read back out of the text.
   const libraryState = useRead(libraryRead());
   const library = libraryState.status === "ready" ? libraryState.data : null;
-  // By field: an edit framed in one field never frames the same words in another.
-  const [edits, setEdits] = useState<Record<string, readonly KnownSnippet[]>>({});
-  const banked = useMemo<KnownSnippet[]>(
+  const served = useMemo<KnownSnippet[]>(
     () =>
       library === null
         ? []
-        : library.snippets.map((s) => ({ text: s.text, from: s.id, edited: false })),
+        : library.snippets.map((s) => ({ text: s.text, id: s.id, supersedes: s.supersedes })),
     [library],
   );
-  const knownIn = (key: string): KnownSnippet[] => {
-    const own = edits[key];
-    return own === undefined ? banked : [...banked, ...own];
-  };
+  // An edit is banked as a version of its snippet in the campaign or check-in it is written in.
+  const { campaignId, checkin } = useWorkspace();
+  const experiment = campaignId ?? checkin?.draftId ?? null;
+  const bank = useCommand<"bank-snippet">("prompt-snippets", { revalidate: false, scope: experiment });
+  const sent = useRef(new Set<string>());
+  // Typed since the last bank, by field: framed until the served library holds it, and never in
+  // another field.
+  const [typed, setTyped] = useState<Record<string, readonly KnownSnippet[]>>({});
+  const unbanked = (key: string): KnownSnippet[] =>
+    (typed[key] ?? []).filter((e) => !served.some((s) => s.text === e.text));
+  const knownIn = (key: string): KnownSnippet[] => [...served, ...unbanked(key)];
   const onEdit = (key: string, was: KnownSnippet, text: string) =>
-    setEdits((prev) => {
-      // Local state, not served data: a field with no edit yet holds none.
-      const own = prev[key] ?? [];
-      return {
-        ...prev,
-        [key]: [
-          ...own.filter((e) => !(was.edited && e.text === was.text)),
-          { text, from: was.from, edited: true },
-        ],
-      };
-    });
+    setTyped((prev) => ({
+      ...prev,
+      [key]: [
+        ...(prev[key] ?? []).filter((e) => e.text !== was.text),
+        { text, id: null, supersedes: was.id ?? was.supersedes },
+      ],
+    }));
+  // Each distinct text once: a refused one stays framed for the session, its failure shown.
+  const bankEdits = (next: Record<string, string>) => {
+    if (experiment === null) return;
+    const owed = keys.flatMap((key) =>
+      unbanked(key).flatMap((e) =>
+        e.supersedes !== null &&
+        !sent.current.has(e.text) &&
+        segmentPrompt(next[key] ?? "", knownIn(key)).some(
+          (s) => s.kind === "snippet" && s.text === e.text,
+        )
+          ? [{ supersedes: e.supersedes, text: e.text }]
+          : [],
+      ),
+    );
+    if (owed.length === 0) return;
+    void bank.run(
+      "bank-snippet",
+      async () => {
+        for (const edit of owed) {
+          sent.current.add(edit.text);
+          await postCommand("bank-snippet", { ...edit, experiment });
+        }
+      },
+      () => invalidateReads("library"),
+    );
+  };
   const dragged = useDraggedSnippet();
   const droppable = !readOnly && onApply != null && dragged !== null;
 
@@ -109,6 +139,7 @@ export function PromptFieldsEditor({
   // Never re-sends a sent value: each patch is a CommandRecord on the draft's ledger.
   const commit = (next: Record<string, string>) => {
     if (readOnly || !onApply) return;
+    bankEdits(next);
     const nextFp = JSON.stringify(asStrings(keys, next));
     if (nextFp === sentFp) return;
     setSentFp(nextFp);
@@ -225,6 +256,7 @@ export function PromptFieldsEditor({
           );
         })}
       </div>
+      <FailureLine failure={bank.failure} lead="Banking the edit:" />
       {fewShot > 0 ? (
         <p className="prompt-editor-fewshot">
           + {fewShot} shot{fewShot === 1 ? "" : "s"} (kept as-is)

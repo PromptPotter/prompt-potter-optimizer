@@ -170,7 +170,7 @@ class InnerTasks(FrozenModel):
                     n_samples=cfg.n_samples_per_inner_round,
                 ),
                 # Keyed before the cell's chain resolves: every admission, so no drawable edit hides.
-                treatment=identity.treatment(frozenset(Presumption)).digest,
+                treatment=identity.treatment(frozenset(Presumption), stores.block_packs).digest,
             )
         return InnerCells(
             cells=tuple(self.tasks),

@@ -330,10 +330,6 @@ word's `git grep -c` for that sense is 0.
   going — the armed ceiling and the served one are two states. **Re-test:** raise mid-run; the served
   budget moves with the runner's.
 - **Seen framing snippets in a prompt**:
-  - An edited snippet keeps its frame only for the session: `PromptFieldsEditor`'s `edits` live in
-    component state, since no library write exists. The root is a write that banks the edit as a new
-    `Authored` snippet naming the one it supersedes; it waits on packs becoming per-account
-    (`config/paths.py::block_packs_root` is install-wide, and tier 3 signs anyone up).
   - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
   - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module);
     `examples/optimizer-plugin/README.md` names `nodes.Measured` for `MeasuredRound`.

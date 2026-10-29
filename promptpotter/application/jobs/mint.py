@@ -72,6 +72,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from promptpotter.application.initialization.session import Session
+    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import CapabilityMenu, PipelineSchema
@@ -92,6 +93,7 @@ def refuse_unrunnable(
     schema: PipelineSchema,
     *,
     free: bool,
+    shelf: PackShelf,
 ) -> BankPartition:
     """Every refusal a run owes, before anything is paid or written; an upload's Start asks it of the draft."""
     refuse_unfit_pipeline(campaign_config, schema)
@@ -101,7 +103,7 @@ def refuse_unrunnable(
     refusal = check_search_split_holds_round(campaign_config, len(partition.search))
     if refusal is not None:
         raise PayloadInvalidError(refusal, code="search_split_below_round")
-    mint = mint_facts(campaign_config, partition.demo, schema)
+    mint = mint_facts(campaign_config, partition.demo, schema, shelf)
     if pools := select_optimizer(campaign_config.optimization).pool_refusals(mint=mint):
         raise PayloadInvalidError("; ".join(pools), code="optimizer_overlay")
     refuse_below_reasoning_floor(campaign_config, pipeline_params)
@@ -150,7 +152,7 @@ class CyclePlan:
 
     @property
     def treatment(self) -> Treatment:
-        return self.optimizer.treatment(self.admits)
+        return self.optimizer.treatment(self.admits, self.session.store.block_packs)
 
 
 @dataclass(frozen=True)
@@ -215,6 +217,7 @@ def resolve_cycle_plan(
         pipeline_params,
         configured.pipeline_schema,
         free=on_free_tier(session.store),
+        shelf=session.store.block_packs,
     )
     seed = (
         CycleSeed(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)

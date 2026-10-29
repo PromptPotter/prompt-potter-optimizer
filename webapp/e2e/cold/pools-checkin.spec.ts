@@ -42,7 +42,7 @@ test.describe("the check-in's pools and recombination host", () => {
     request,
   }) => {
     test.setTimeout(300_000);
-    // None ships, so the walk installs one where `config/paths.py::block_pack_path` resolves it.
+    // None ships, so the walk installs one under `config/paths.py::block_packs_root`.
     const dir = path.join(COLD_HOME, "block_packs", PACK);
     fs.mkdirSync(dir, { recursive: true });
     const snippet = (text: string) => ({
@@ -54,7 +54,8 @@ test.describe("the check-in's pools and recombination host", () => {
         author: "e2e",
         date: "2026-10-29",
         experiment: "checkin-pools",
-        version: "1",
+        version: 1,
+        supersedes: null,
         notes: null,
       },
     });

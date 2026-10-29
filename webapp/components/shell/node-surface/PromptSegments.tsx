@@ -5,6 +5,7 @@ import { cx } from "@/lib/cx";
 import {
   freeText,
   joinSegments,
+  lineageRoot,
   segmentPrompt,
   withFreeText,
   withSnippetText,
@@ -12,17 +13,18 @@ import {
   type Segment,
 } from "@/lib/derivations";
 
-// The source a block names: its library snippet's work, or none for a text the library does not hold.
-function sourceOf(library: LibraryResponse | null, id: string): string | null {
-  const snippet = library?.snippets.find((s) => s.id === id);
-  if (snippet === undefined) return null;
-  const source = library?.sources.find((x) => x.id === snippet.source);
-  if (source === undefined) return snippet.source;
+// The source a block names: its lineage's first snippet's work, or none for a text the library lacks.
+function sourceOf(library: LibraryResponse | null, known: KnownSnippet): string | null {
+  const id = known.id ?? known.supersedes;
+  const root = library === null || id === null ? undefined : lineageRoot(library.snippets, id);
+  if (root === undefined) return null;
+  const source = library?.sources.find((x) => x.id === root.source);
+  if (source === undefined) return root.source;
   return source.short_title;
 }
 
 // One prompt field: each snippet a framed block naming its source, a box to write in before, between
-// and after them. Writing in a block keeps its frame, marked as an edit of what it came from.
+// and after them. Writing in a block keeps its frame, marked as a version of what it was edited from.
 export function PromptSegments({
   label,
   text,
@@ -81,12 +83,13 @@ export function PromptSegments({
             />
           );
         }
-        const source = sourceOf(library, s.snippet.from);
+        const source = sourceOf(library, s.snippet);
+        const edited = s.snippet.supersedes !== null;
         return (
-          <div key={`s${i}`} className={cx("prompt-snippet", s.snippet.edited && "is-edited")}>
+          <div key={`s${i}`} className={cx("prompt-snippet", edited && "is-edited")}>
             <span className="prompt-snippet-tag">
+              {edited ? <span className="prompt-snippet-edited">✎ from</span> : null}
               {source === null ? null : <span className="prompt-snippet-source">{source}</span>}
-              {s.snippet.edited ? <span className="prompt-snippet-edited">✎</span> : null}
               {readOnly ? null : (
                 <button
                   type="button"

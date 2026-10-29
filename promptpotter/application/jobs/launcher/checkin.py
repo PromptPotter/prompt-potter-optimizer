@@ -105,6 +105,7 @@ def _refuse_unrunnable_upload(stores: Stores, draft: DraftCampaign, source: dict
         params,
         schema,
         free=on_free_tier(stores),
+        shelf=stores.block_packs,
     )
 
 

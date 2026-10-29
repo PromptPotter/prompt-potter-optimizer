@@ -60,7 +60,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes.
     "p_member": 12,
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
-    "p_reads": 323,
+    "p_reads": 324,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 6,
     # Test functions across them: one journey per `# N.` section, plus the forks a section names.

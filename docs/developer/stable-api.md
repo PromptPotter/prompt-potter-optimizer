@@ -91,7 +91,9 @@ seam is a file, never a directory.
 
 **`$PROMPTPOTTER_HOME/block_packs/{name}/pack.json` is stable** (`config/paths.py::block_packs_root`):
 a block pack the `block_pool` node's `packs` knob may name, shaped `domain/prompt_block.py::BlockPack`. None ships; a pack is installed by
-placing or linking its directory there, so where its content is kept is the operator's.
+placing or linking its directory there, so where its content is kept is the operator's. It is
+read-only to every account, whose own packs sit at `projects/{tenant_id}/block_packs/{name}/pack.json`
+(`config/prompt_blocks.py::PackShelf`); one name held by both is refused.
 
 The derived `assets/webapp/` tree is staged by
 `scripts/build_release.py`, the supported way to build a wheel — a bare `uv build` produces

@@ -8,8 +8,8 @@ import {
   type Segment,
 } from "../prompt-segments";
 
-const S1: KnownSnippet = { text: "Think step by step.", from: "a", edited: false };
-const S2: KnownSnippet = { text: "Answer in one word.", from: "b", edited: false };
+const S1: KnownSnippet = { text: "Think step by step.", id: "a", supersedes: null };
+const S2: KnownSnippet = { text: "Answer in one word.", id: "b", supersedes: null };
 const KNOWN = [S1, S2];
 type Free = Extract<Segment, { kind: "free" }>;
 

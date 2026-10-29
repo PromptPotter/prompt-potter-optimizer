@@ -79,6 +79,6 @@ def get_optimizers() -> OptimizerRoster:
 
 
 @active_router.get("/library", tags=["Optimizer"], response_model=LibraryResponse)
-def get_library() -> LibraryResponse:
-    """Every snippet the installed block packs hold, for a target or an optimizer prompt alike."""
-    return library()
+def get_library(stores: StoresDep) -> LibraryResponse:
+    """Every snippet the caller's library holds, the install's packs beside its own, for a target or an optimizer prompt alike."""
+    return library(stores.block_packs)

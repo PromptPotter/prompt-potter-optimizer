@@ -37,6 +37,7 @@ from promptpotter.application.runner.inner.tasks import (
 )
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.paired import MemberRows
+from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector, cell_envelope_of
 from promptpotter.connectors.termnorm import termnorm_wire_adapter
 from promptpotter.domain.arms import (
@@ -550,7 +551,9 @@ def minted_campaign(
         created_at=fields.pop("created_at", ""),
         root_cycle_id=hop.cycle_id,
         root_content_hash=fields.pop("root_content_hash", "origin"),
-        treatment=select_optimizer(config.optimization).treatment(frozenset(Presumption)),
+        treatment=select_optimizer(config.optimization).treatment(
+            frozenset(Presumption), PackShelf(account=None)
+        ),
         declaration=declare_run(
             config,
             purpose=purpose,
@@ -657,7 +660,7 @@ def inner_cells(*optimizers: str) -> InnerCells:
     specs: dict[str, InnerTaskSpec] = {}
     for name in optimizers:
         selected = resolve_optimizer(name, {}, gate="off")
-        treatment = selected.treatment(frozenset(Presumption)).digest
+        treatment = selected.treatment(frozenset(Presumption), PackShelf(account=None)).digest
         by_dataset[f"{name}ds"] = InnerCell({}, None, selected, treatment)
         specs[name] = InnerTaskSpec(
             inner_dataset=f"{name}ds",

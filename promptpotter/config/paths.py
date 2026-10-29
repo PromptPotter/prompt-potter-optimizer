@@ -91,13 +91,12 @@ def optimizer_manifest_path(shipped: Path) -> Path:
     return _shadowed(Path("optimizers") / shipped.name / "pipeline.yaml", shipped / "pipeline.yaml")
 
 
+BLOCK_PACKS_DIR = "block_packs"
+
+
 def block_packs_root() -> Path:
-    """The one place a pack resolves: a directory placed or linked here, since none ships."""
-    return user_data_root() / "block_packs"
-
-
-def block_pack_path(name: str) -> Path:
-    return block_packs_root() / name / "pack.json"
+    """The install's packs, read-only to every account: a directory placed or linked here, since none ships."""
+    return user_data_root() / BLOCK_PACKS_DIR
 
 
 def checkin_manifest_path() -> Path:

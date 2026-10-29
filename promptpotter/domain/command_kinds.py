@@ -163,6 +163,13 @@ class CommandKind(StrEnum):
         "new",
     )
     RESOLVE_ORIGIN = "resolve-origin", "origin_resolving:resolve_origin", CAMPAIGN_CREATE_CAP, "new"
+    # It writes what a later campaign's `packs` may draw, so it sits with the verbs that make one.
+    BANK_SNIPPET = (
+        "bank-snippet",
+        "workspace_edits:bank_snippet",
+        CAMPAIGN_CREATE_CAP,
+        "bank-snippet",
+    )
     # Its apply removes the draft's ledger, so it is recorded on the workspace's.
     DISCARD_DRAFT = (
         "discard-draft",
@@ -530,6 +537,22 @@ class SetConcurrentCyclesPayload(CommandPayload, kind=CommandKind.SET_CONCURRENT
     machine's capacity, and an account on the host's key cannot move its own."""
 
     max_concurrent_cycles: WireInt = Field(ge=1, description="The new limit.")
+
+
+class BankSnippetPayload(CommandPayload, kind=CommandKind.BANK_SNIPPET):
+    """Bank an edited library snippet into this account's own block pack as the next version of
+    the one it was edited from; a text the library already holds is that snippet."""
+
+    supersedes: str = Field(
+        min_length=1, max_length=64, description="The id of the snippet the text was edited from."
+    )
+    text: str = Field(min_length=1, max_length=16384, description="The edited text.")
+    experiment: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="The campaign or check-in draft it was written in.",
+    )
 
 
 class CompactArchivePayload(CommandPayload, kind=CommandKind.COMPACT_ARCHIVE):

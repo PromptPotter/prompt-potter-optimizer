@@ -3,11 +3,31 @@
 // The shape is always free, (snippet, free)*: a box to write in before, between and after every
 // snippet, so what is rendered never changes with what is typed.
 
+import type { LibrarySnippet } from "@/lib/api";
+
 export interface KnownSnippet {
   text: string;
-  // The library snippet's id; for an operator's edit, the id it was edited from.
-  from: string;
-  edited: boolean;
+  // The library snippet it is; null for an edit typed here that the library does not hold yet.
+  id: string | null;
+  // The snippet it was edited from; null for one nobody edited.
+  supersedes: string | null;
+}
+
+// The first snippet of a lineage: an edit names the source of what it was edited from.
+export function lineageRoot(
+  snippets: readonly LibrarySnippet[],
+  id: string,
+): LibrarySnippet | undefined {
+  const seen = new Set<string>();
+  let at = snippets.find((s) => s.id === id);
+  while (at !== undefined && at.supersedes !== null && !seen.has(at.id)) {
+    seen.add(at.id);
+    const parent: string = at.supersedes;
+    const next = snippets.find((s) => s.id === parent);
+    if (next === undefined) return at;
+    at = next;
+  }
+  return at;
 }
 
 // `raw` is the exact text between its neighbours, the newline joining each snippet included.

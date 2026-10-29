@@ -42,7 +42,7 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
 
 ```
 .promptpotter/
-  block_packs/{name}/pack.json          # installed block packs (`config/paths.py::block_packs_root`)
+  block_packs/{name}/pack.json          # the install's block packs, read-only to every account
   jobs/{job_id}.json                    # machine-global admission records
   projects/{tenant_id}/
     .workspace/
@@ -67,6 +67,7 @@ inside   := course ("~" course)*                     the L4 sandbox chain, the `
     optimizer_reuse/  judge_reuse/      # PAID; a grader never reads the loop's answers
     diagnostics/                        # scoring verbs that mint no cycle
     datasets/  materialized/  task-context/
+    block_packs/account/pack.json       # the account's own snippets, `bank-snippet`'s alone to write
     uploads/{sha256[:16]}.{ext}         # every ingested file, kept before parsing; never served
 ```
 

@@ -59,6 +59,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.runner.inner.connector import measurement_modules
 from promptpotter.config.paths import default_projects_root, install_datasets_root
+from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import Arm, Compare, Optimize, Purpose
@@ -1061,7 +1062,9 @@ def digests() -> dict[str, str]:
     out = {"estimator": module_source_digest(*measurement_modules())}
     for name in sorted(optimizers.MANIFESTS.table):
         selected = resolve_optimizer(name, {}, gate="off")
-        out[f"treatment:{name}"] = selected.treatment(frozenset(Presumption)).digest
+        out[f"treatment:{name}"] = selected.treatment(
+            frozenset(Presumption), PackShelf(account=None)
+        ).digest
     return out
 
 

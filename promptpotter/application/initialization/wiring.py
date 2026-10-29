@@ -28,6 +28,7 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.run_observers import check_every_record_reported
 from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root
+from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -222,7 +223,9 @@ def complete_registries(*, every_treatment: bool = True) -> None:
         member.complete()
     # Its source digest raises on a prompt-shaping helper nothing hashes, stopping the boot.
     for name in optimizers.MANIFESTS.table if every_treatment else ():
-        resolve_optimizer(name, {}, gate="off").treatment(frozenset(Presumption))
+        resolve_optimizer(name, {}, gate="off").treatment(
+            frozenset(Presumption), PackShelf(account=None)
+        )
     replayers()
     check_every_record_reported()
     for connector in connectors.CONNECTORS.table.values():

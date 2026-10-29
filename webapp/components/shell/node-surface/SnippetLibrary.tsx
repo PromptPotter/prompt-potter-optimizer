@@ -232,6 +232,11 @@ export function SnippetLibrary({
                     <SnippetRow
                       key={`${s.pack}/${s.id}`}
                       snippet={s}
+                      parent={
+                        s.supersedes === null
+                          ? null
+                          : (library.snippets.find((p) => p.id === s.supersedes) ?? null)
+                      }
                       field={field}
                       source={sourceTitle(s.source)}
                       onPick={onPick}
@@ -311,13 +316,27 @@ function SourceLabel({
   );
 }
 
+// A version names what it was edited from: the parent's opening words, or its id where the library lacks it.
+function lineage(s: LibrarySnippet, parent: LibrarySnippet | null): string | null {
+  if (s.supersedes === null) return null;
+  const from =
+    parent === null
+      ? s.supersedes
+      : `“${parent.text.length > PARENT_CHARS ? `${parent.text.slice(0, PARENT_CHARS)}…` : parent.text}”`;
+  return `v${s.version}${s.author === null ? "" : ` by ${s.author}`}, from ${from}`;
+}
+
+const PARENT_CHARS = 40;
+
 function SnippetRow({
   snippet: s,
+  parent,
   field,
   source,
   onPick,
 }: {
   snippet: LibrarySnippet;
+  parent: LibrarySnippet | null;
   field: string;
   source: string;
   onPick: ((snippet: LibrarySnippet) => void) | undefined;
@@ -369,6 +388,9 @@ function SnippetRow({
           {source}
           {s.method ? ` · ${s.method}` : ""} · {s.pack}
         </span>
+        {s.supersedes === null ? null : (
+          <span className="snippet-source">{lineage(s, parent)}</span>
+        )}
         {long ? (
           <Button
             variant="ghost"

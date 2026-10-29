@@ -1342,6 +1342,41 @@
         "title": "BandedValue",
         "type": "object"
       },
+      "BankSnippetPayload": {
+        "additionalProperties": false,
+        "description": "Bank an edited library snippet into this account's own block pack as the next version of\nthe one it was edited from; a text the library already holds is that snippet.",
+        "properties": {
+          "experiment": {
+            "description": "The campaign or check-in draft it was written in.",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "title": "Experiment",
+            "type": "string"
+          },
+          "supersedes": {
+            "description": "The id of the snippet the text was edited from.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Supersedes",
+            "type": "string"
+          },
+          "text": {
+            "description": "The edited text.",
+            "maxLength": 16384,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "supersedes",
+          "text",
+          "experiment"
+        ],
+        "title": "BankSnippetPayload",
+        "type": "object"
+      },
       "BenchReading": {
         "additionalProperties": false,
         "description": "One individual's bench pass, read under a named scorer.",
@@ -8230,7 +8265,7 @@
       },
       "LibraryResponse": {
         "additionalProperties": false,
-        "description": "Every snippet the installed block packs hold, one library for target and optimizer prompts alike.",
+        "description": "Every snippet the account reads: the install's packs beside its own, for target and optimizer prompts alike.",
         "properties": {
           "parts": {
             "description": "The closed set `suits` draws from, in `PROMPT_FIELDS` order",
@@ -8267,8 +8302,20 @@
       },
       "LibrarySnippet": {
         "additionalProperties": false,
-        "description": "One snippet of one installed pack, as a library surface lists it.",
+        "description": "One snippet of one pack the account reads, as a library surface lists it.",
         "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who wrote an authored snippet; absent for a cited one",
+            "title": "Author"
+          },
           "id": {
             "description": "Its content id, the suffix of each pool entry `{part}.{id}` it expands into; one text in two packs is two rows under one id",
             "title": "Id",
@@ -8287,7 +8334,7 @@
             "title": "Method"
           },
           "pack": {
-            "description": "The installed pack holding it, as a `packs` knob names it",
+            "description": "The pack holding it, as a `packs` knob names it",
             "title": "Pack",
             "type": "string"
           },
@@ -8304,6 +8351,18 @@
             "title": "Suits",
             "type": "array"
           },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `id` of the snippet it was edited from; absent for a cited snippet and one written from nothing",
+            "title": "Supersedes"
+          },
           "tags": {
             "description": "Free labels for search alone; nothing else reads them",
             "items": {
@@ -8315,6 +8374,11 @@
           "text": {
             "title": "Text",
             "type": "string"
+          },
+          "version": {
+            "description": "0 for a cited snippet; an authored one's is one past the snippet it supersedes",
+            "title": "Version",
+            "type": "integer"
           }
         },
         "required": [
@@ -8324,7 +8388,10 @@
           "tags",
           "source",
           "method",
-          "pack"
+          "pack",
+          "version",
+          "supersedes",
+          "author"
         ],
         "title": "LibrarySnippet",
         "type": "object"
@@ -18449,6 +18516,66 @@
         ]
       }
     },
+    "/api/v1/commands/bank-snippet": {
+      "post": {
+        "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
+        "operationId": "bank_snippet_api_v1_commands_bank_snippet_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BankSnippetPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Bank Snippet",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/cancel-queued-run": {
       "post": {
         "description": "A kind whose applied form answers nothing: its route's body is the kind's payload model.",
@@ -20992,7 +21119,7 @@
     },
     "/api/v1/library": {
       "get": {
-        "description": "Every snippet the installed block packs hold, for a target or an optimizer prompt alike.",
+        "description": "Every snippet the caller's library holds, the install's packs beside its own, for a target or an optimizer prompt alike.",
         "operationId": "get_library_api_v1_library_get",
         "responses": {
           "200": {

@@ -119,7 +119,9 @@ derived in the browser ([`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.m
   each round, so a large selection costs no context. Every control writes
   `optimization_overrides.nodes.{node}.config.{knob}` through `edit-draft-campaign`
   ([`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § No ad-hoc mutating routes).
-  The installed snippets, by part and tag, are `GET /library` (`application/library.py`).
+  The caller's snippets, the install's packs beside its account's, are `GET /library`
+  (`application/library.py`); an edited snippet is banked into the account's own pack as its next
+  version by `bank-snippet`.
 - **Live**: each arm shows its variation node, parents and entries; each pool its size, draw and additions.
   **The lineage is one main descent, a declared donor, then gene links**: an arm hangs from its main as last
   measured before it (`CandidateFacts.descends_from`); its donor links from wherever in time it was
@@ -166,4 +168,4 @@ seed is never a lever.
 - **Authoring pool content at check-in** — the check-in picks; writing is the pool-write command or `candidate_library`'s upload.
 - **Param recombination in a controlled comparison.**
 - **A shipped block library** — a block pool's material is the packs its `packs` knob names, installed by the
-  operator, each cited work carrying its licence.
+  operator, each cited work carrying its licence, or written by the run's account.

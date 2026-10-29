@@ -22,7 +22,7 @@ from promptpotter.application.intelligence.earned_blocks import (
 from promptpotter.application.mask.backprop import select_rewind_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
-from promptpotter.application.optimizers.nodes import CycleRead, ReadArm
+from promptpotter.application.optimizers.nodes import CycleRead, ReadArm, admits
 from promptpotter.application.runner.inner.spawn_context import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.evaluators import resolve_cell_formula
@@ -348,6 +348,11 @@ class Target(CycleRead):
     def inner_cells(self) -> InnerCells | None:
         """The cells an L4 outer's arms are measured on; ``None`` off the recursion."""
         return inner_cells()
+
+    def pack_entries(self, names: Sequence[str]) -> dict[str, PoolEntry]:
+        """The entries of packs *names* in the run's account that the run admits, by content id."""
+        admitted = admits(self.schema, self.matcher)
+        return self._cycle.session.store.block_packs.entries(names, admits=admitted)
 
     def runtime_failures(self) -> list[RuntimeFailure]:
         return self._cycle.runtime_failures()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, assert_never
 
+from promptpotter.application import library
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.domain.command_kinds import (
     ArchiveCampaignPayload,
@@ -13,7 +14,11 @@ from promptpotter.shared.clock import utcnow_iso
 
 if TYPE_CHECKING:
     from promptpotter.application.commands.dispatcher import Dispatched
-    from promptpotter.domain.command_kinds import LifecyclePayload, SetCampaignLabelPayload
+    from promptpotter.domain.command_kinds import (
+        BankSnippetPayload,
+        LifecyclePayload,
+        SetCampaignLabelPayload,
+    )
 
 
 def campaign_lifecycle(dispatched: Dispatched[LifecyclePayload]) -> Applier[object]:
@@ -50,3 +55,15 @@ def set_campaign_label(dispatched: Dispatched[SetCampaignLabelPayload]) -> Appli
         campaigns.update_campaign(campaign_id, label=label)
 
     return Applier.silent(_apply)
+
+
+def bank_snippet(dispatched: Dispatched[BankSnippetPayload]) -> Applier[object]:
+    stores, payload = dispatched.dispatcher.stores, dispatched.payload
+    return Applier.silent(
+        lambda: library.bank_snippet(
+            stores,
+            supersedes=payload.supersedes,
+            text=payload.text,
+            experiment=payload.experiment,
+        )
+    )

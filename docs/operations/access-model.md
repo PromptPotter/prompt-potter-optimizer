@@ -86,6 +86,13 @@ second `build_stores` under another identity crosses freely — the two delibera
 shell. **Through the served API the isolation holds absolutely** (`deps.py::resolve_identity` builds
 only from the session); the shell is the boundary § loop ↔ everything concedes.
 
+**A block pack is the install's or one account's, and only an account's is written.** The install's
+(`config/paths.py::block_packs_root`) is read-only to every account, beside which each reads its own
+under its tenant (`Stores.block_packs`, a `config/prompt_blocks.py::PackShelf`); a name both hold is
+refused, never shadowed. `bank-snippet` writes the account's own pack alone, at the
+`campaign.create` rung, so an anonymous caller (401) and a blocked one (404) write nothing, and a
+`packs` knob resolves in its run's account, so naming `account` draws the run's own.
+
 **Ownership within a tenant is one rule:** `stores.py::owned_campaign` returns the campaign iff it
 exists and is the caller's, else `NotFoundError` — missing and cross-owner collapse to one 404.
 **One deliberate exception:** `routers/origins.py` is tenant-scoped, not owner-scoped, because a

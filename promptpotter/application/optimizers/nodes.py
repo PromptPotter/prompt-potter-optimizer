@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.application.scoring.query_loop import BlockRace, Walk
+    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
     from promptpotter.domain.arms import Concluded, Elimination, Proposal
     from promptpotter.domain.campaign_config import ArmGateMode
@@ -738,6 +739,7 @@ class MintFacts(NamedTuple):
 
     demo: Sequence[Sample]
     admits: frozenset[Presumption]
+    shelf: PackShelf
 
 
 @runtime_checkable
@@ -748,9 +750,9 @@ class Initializer(NodeMember, Protocol):
     def pool(self) -> type[Pool]: ...
 
     def starting_content(
-        self, selected: SelectedOptimizer, admits: frozenset[Presumption]
+        self, selected: SelectedOptimizer, admits: frozenset[Presumption], shelf: PackShelf
     ) -> object:
-        """What it can seed from beside the run's own data, which ``Treatment.source`` hashes: only what ``active`` keeps of what *admits* lets in."""
+        """What it can seed from beside the run's own data, which ``Treatment.source`` hashes: only what ``active`` keeps of what *admits* lets in off *shelf*."""
         ...
 
     def active(self, selected: SelectedOptimizer) -> list[str]: ...

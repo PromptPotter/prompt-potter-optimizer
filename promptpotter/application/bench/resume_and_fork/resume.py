@@ -150,7 +150,9 @@ async def _replay_line(
         stale = _stale_generation(campaign_store, hop, prior, resumed_from_round)
         campaign = campaign_store.load_campaign(hop.campaign_id)
         # The declaration never moves; the defaults it is a delta over can, under the same name.
-        running = cycle.optimizer.treatment(campaign_admits(cycle.config, session.pipeline_schema))
+        running = cycle.optimizer.treatment(
+            campaign_admits(cycle.config, session.pipeline_schema), session.store.block_packs
+        )
         drifted = campaign is not None and defaults_drift(campaign, running=running) is not None
         if not optimizer_mismatches and stale is None and not drifted:
             return None

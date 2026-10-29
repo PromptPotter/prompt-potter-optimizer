@@ -63,6 +63,7 @@ if TYPE_CHECKING:
         Selector,
         Survivor,
     )
+    from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.arm_reading import DisplayMetric
     from promptpotter.domain.campaign_config import ArmGateMode
     from promptpotter.domain.cycle_paths import CycleHop
@@ -577,8 +578,8 @@ class SelectedOptimizer:
             ]
         )
 
-    def treatment(self, admits: frozenset[Presumption]) -> Treatment:
-        """Under the bound L4 edit too: two inner cells under two arms are two treatments; *admits* is the run's admission (`nodes.py::admits`)."""
+    def treatment(self, admits: frozenset[Presumption], shelf: PackShelf) -> Treatment:
+        """Under the bound L4 edit too: two inner cells under two arms are two treatments; *admits* is the run's admission (`nodes.py::admits`), *shelf* its account's packs."""
         return Treatment(
             optimizer=self.name,
             version=self.version,
@@ -603,7 +604,10 @@ class SelectedOptimizer:
             source=stable_hash(
                 [
                     source_digest(self.members, proxies),
-                    {i.name: i.starting_content(self, admits) for i in self.plan.initializers},
+                    {
+                        i.name: i.starting_content(self, admits, shelf)
+                        for i in self.plan.initializers
+                    },
                 ]
             ),
         )
