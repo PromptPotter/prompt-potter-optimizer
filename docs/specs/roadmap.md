@@ -11,7 +11,7 @@ Any new endpoint is multi-tenant by default.
 1. **Recombination at $0** (C9, § Variation and pools): the member backbone
    ([`code-debt-cleanup.md`](code-debt-cleanup.md) § The member backbone).
 2. **The optimizer climbs** (§ Optimizer tuning — the standing board):
-   - L1 quality: answer_format is never edited; a held leader is never re-scored; whole-reply counting.
+   - L1 quality: answer_format is never edited; a held leader is never re-scored.
    - L4 validation (~$1).
    - Early stop when C1.1 clearly beats C0.
    - Δ per time, per candidate and per $, served in chat.

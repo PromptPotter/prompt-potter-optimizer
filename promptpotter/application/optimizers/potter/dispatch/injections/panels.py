@@ -67,6 +67,7 @@ from promptpotter.domain.scoring import (
     GradedCell,
     all_verifier_graded,
     enumerable_truth_labels,
+    graded_answer,
     is_hit,
 )
 from promptpotter.domain.search_point import SHOTS_KEY
@@ -637,9 +638,8 @@ def _errored(b: InjectionBundle) -> list[GradedCell]:
 
 
 def _predicted_counts(cells: Sequence[GradedCell]) -> Counter[str]:
-    # A formula reading no answer text compares the reply itself.
-    said = (c.facts.predicted if c.grade.span is None else c.grade.span for c in cells)
-    return Counter(answer for answer in said if answer)
+    said = (graded_answer(c.facts, c.grade) for c in cells)
+    return Counter(answer for answer in said if answer is not None)
 
 
 def _tally(counts: Counter[str], total: int, *, rows: int | None = None) -> str:

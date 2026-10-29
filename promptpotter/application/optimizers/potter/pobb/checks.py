@@ -16,7 +16,7 @@ from promptpotter.application.scoring.selection import (
     paired_grades,
     paired_p_best,
 )
-from promptpotter.domain.scoring import NO_RESULT, is_answer_collapsed
+from promptpotter.domain.scoring import graded_answer, is_answer_collapsed
 from promptpotter.domain.validators import StopSignal
 
 if TYPE_CHECKING:
@@ -222,7 +222,7 @@ class PoBBCheck:
         measured = [cell for cell in results if cell.scored]
         grades = paired_grades(measured)
         cells = list(grades)
-        said = {cell.facts.predicted for cell in measured}
+        said = {graded_answer(cell.facts, cell.grade) for cell in measured}
         # A prior's absent cells are read worst-case by the bounds, as `check` reads it on shared ones.
         priors = dict(self.priors_by_sample)
         pending = {
@@ -236,11 +236,11 @@ class PoBBCheck:
                 cells.append(sample.key)
             if row is not None and row.scored:
                 grades.update(paired_grades([row]))
-                said.add(row.facts.predicted)
+                said.add(graded_answer(row.facts, row.grade))
             if m < self.n_min:
                 continue
-            # Collapse needs one answer everywhere; a second, or an empty one, rules it out for good.
-            if len(said) <= 1 and not said & {"", NO_RESULT}:
+            # Collapse needs one answer everywhere; a second, or no answer, rules it out for good.
+            if len(said) <= 1 and None not in said:
                 return m
             # Cold, a catch-up may yet give the parent any cell, and a depth below what `check` will
             # read lands the horizon past its stop: so it counts the most it could read.

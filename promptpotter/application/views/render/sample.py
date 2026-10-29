@@ -11,7 +11,7 @@ from promptpotter.application.views.render.primitives import (
 )
 from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.results_health import is_deprecated, terminal_node
-from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.scoring import graded_answer, is_hit
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import Grade, MeasuredCell
@@ -43,7 +43,7 @@ def fmt_query_result(
 ) -> str:
     cached = facts.cached
     # One line is the CONTRACT: a multi-line answer splits the row of every one-line readout.
-    pred = _ellide(_one_line(facts.predicted if grade.span is None else grade.span), 30)
+    pred = _ellide(_one_line(graded_answer(facts, grade) or ""), 30)
     gt = _ellide(facts.ground_truth.strip(), 30)
     q = _ellide(facts.query.replace("\n", " ").strip(), 15)
     err = facts.error or ("pipeline error" if facts.errored else None)

@@ -177,9 +177,6 @@ acting.
 - **A held leader's evidence is discarded**: an arm that leads but misses the bar is never re-scored
   (`optimizers/potter/members.py::AdaptiveQueue.draw`). Action: carry it into the next round's draw.
   **Re-test:** the round after a leader missed the bar re-scores that arm.
-- **Whole-reply answer counting survives `Grade.span`**: `domain/scoring.py::modal_answer_share` and
-  `::is_answer_collapsed`, `potter/pobb/checks.py`, `live_dashboard/blocks.py`, `bench/round_analysis.py`.
-  Action: each counts the graded span. **Re-test:** `modal_answer_share` reads `Grade.span`.
 - **`l1_generate` edits `answer_format`.** Action: the parsed directive stays locked, the rest free; the
   operator sees the diff first. **Re-test:** a round file whose `l1_generate` arm's `answer_format`
   differs from its parent's.

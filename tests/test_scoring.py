@@ -1885,6 +1885,21 @@ def test_an_arm_is_cut_only_on_evidence_that_it_trails(built_stores: Stores) -> 
     ]
     signal = collapse(labelled)
     assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED
+    reasoned = [
+        GradedCell.from_wire(
+            {**cell.wire(), "predicted": f"step {i}: **Uncertain**", "span": "Uncertain"}
+        )
+        for i, cell in enumerate(labelled)
+    ]
+    signal = collapse(reasoned)
+    assert signal is not None and signal.check_result["gate"] == EliminationGate.COLLAPSED, (
+        "two replies reasoning apart to one graded answer were counted as two answers"
+    )
+    spanless = [
+        GradedCell.from_wire({**cell.wire(), "span": "" if i == 5 else "Uncertain"})
+        for i, cell in enumerate(labelled)
+    ]
+    assert collapse(spanless) is None, "a reply with no graded span was counted as the answer"
 
     # On a graded backend p_best discriminates; concordant cells move θ and must not reach ε.
     def uncharged(*values: float) -> list[PairedGrade]:
