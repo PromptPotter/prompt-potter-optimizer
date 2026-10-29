@@ -31,7 +31,7 @@ from promptpotter.application.jobs.mint import (
     relabel_minted,
     resolve_cycle_plan,
 )
-from promptpotter.application.jobs.quota import on_free_tier
+from promptpotter.application.jobs.quota import land_job, on_free_tier
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
@@ -170,7 +170,7 @@ async def hold_checkin_start(
         held = await admit_and_hold(request, stores=stores, job_registry=job_registry, job=job)
         minted = await _commit_checkin(stores, request.claim.draft_id)
         hop = CycleHop(campaign_id=minted.campaign_id, cycle_id=minted.cycle_id)
-        job_registry.update_target(job.job_id, hop=hop)
+        land_job(stores, job_registry, job.job_id, hop, held.share)
         claim_cycle(stores, job_registry, job, hop)
     except BaseException as exc:
         if isinstance(exc, BackendUnreachableError):

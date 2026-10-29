@@ -75,6 +75,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ResolvedRun,
     StandingRounds,
     scan_cycle_facts,
+    scan_cycle_share,
     scan_last,
     scan_launch_claim,
     scan_ledger_metered,
@@ -743,13 +744,13 @@ class CampaignStore:
     def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
         return standing_budget(self.cycle_dir(hop))
 
-    def write_cycle_share(self, hop: CycleHop, *, allotment: Budget, reserve: Budget) -> None:
+    def write_cycle_share(self, hop: CycleHop, allotment: Budget) -> None:
         CycleEventLog.open(CycleDir(self.cycle_dir(hop))).append(
-            CycleShareRecord(allotment=allotment, reserve=reserve)
+            CycleShareRecord(allotment=allotment)
         )
 
     def read_cycle_share(self, hop: CycleHop) -> CycleShareRecord | None:
-        return self.last(hop, CycleShareRecord)
+        return scan_cycle_share(self.ledger(hop))
 
     def _chain(self, hop: CycleHop) -> list[LedgerSpan]:
         return ledger_chain(CycleDir(self.cycle_dir(hop)), moment=None)

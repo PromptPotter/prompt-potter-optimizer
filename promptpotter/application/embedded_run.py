@@ -17,6 +17,7 @@ from promptpotter.application.jobs.mint import (
     mint_framed_cycle,
     resolve_resume,
 )
+from promptpotter.application.jobs.quota import land_job
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.pipeline_resolve import (
@@ -202,7 +203,13 @@ async def run_campaign(
                 task_text=None,
             )
             session, optimizer = minted.session, minted.optimizer
-            JobRegistry.attach(session.store.jobs_dir).update_target(job_id, hop=session.hop)
+            land_job(
+                session.store,
+                JobRegistry.attach(session.store.jobs_dir),
+                job_id,
+                session.hop,
+                held.share,
+            )
         return await run_optimization(
             list(session.bank.samples),
             campaign_config,

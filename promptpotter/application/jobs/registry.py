@@ -119,10 +119,9 @@ class Job:
     started_at: str | None
     # A release is its own act, never a fourth stage: `stage` stays where the launch got to.
     released_at: str | None
-    # Its hold's ONE store, which its run's book reads live: what the account holds back for it,
+    # What the account holds back for it, which its run's book reads live; its cycle's share of the
+    # campaign's ceiling is the cycle's (`CycleShareRecord`).
     reserve: Budget = field(default_factory=Budget)
-    # and the most its cycle may have metered of the campaign's ceiling, in all.
-    allotment: Budget = field(default_factory=Budget)
     # Unset = never granted a run, so its failure is a refusal.
     admitted_at: str | None = None
     producer_id: str = ""
@@ -304,21 +303,19 @@ class JobRegistry:
             self.release(job_id)
             return True
 
-    def mark_admitted(self, job_id: str, reserve: Budget, allotment: Budget) -> None:
+    def mark_admitted(self, job_id: str, reserve: Budget) -> None:
         job = self.get(job_id)
         if job is None:
             return
         job.admitted_at = utcnow_iso()
         job.reserve = reserve
-        job.allotment = allotment
         self._persist(job)
 
-    def set_held(self, job_id: str, reserve: Budget, allotment: Budget) -> None:
+    def set_reserve(self, job_id: str, reserve: Budget) -> None:
         job = self.get(job_id)
         if job is None:
             return
         job.reserve = reserve
-        job.allotment = allotment
         self._persist(job)
 
     def update_target(self, job_id: str, *, hop: CycleHop) -> None:
@@ -334,7 +331,7 @@ class JobRegistry:
         return self._dir
 
     def job_file(self, job_id: str) -> Path:
-        """What a live spend book reads its hold off: the job is the hold's one store."""
+        """What a live spend book reads its reserve off: the job is the reserve's one store."""
         return self._path(job_id)
 
     def claimant_lock(self) -> Path:

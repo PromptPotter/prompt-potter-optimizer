@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from promptpotter.application.initialization.loop_start import populate_session_scoring
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.admission import open_spend_book
-from promptpotter.application.jobs.quota import move_campaign_money
+from promptpotter.application.jobs.quota import cycle_share, land_job, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.origin import (
@@ -155,13 +155,12 @@ def rebase_held(session: Session, parent: CycleHop) -> None:
         job = job_registry.get(held.job_id)
         if job is None:
             raise RuntimeError(f"a run rebases only on its own job, and {held.job_id} is gone")
-        live = job.allotment
+        live = cycle_share(session.store, job)
         allotment = Budget(
             usd=None if live.usd is None else max(0.0, live.usd - spent.usd_amount),
             tokens=None if live.tokens is None else max(0, live.tokens - spent.token_amount),
         )
-        job_registry.update_target(job.job_id, hop=session.hop)
-        job_registry.set_held(job.job_id, job.reserve, allotment)
+        land_job(session.store, job_registry, job.job_id, session.hop, allotment)
     stand_held_budget(session.store, session.hop, held)
 
 

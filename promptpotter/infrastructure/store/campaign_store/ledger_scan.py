@@ -932,6 +932,11 @@ def scan_ledger_controls(ledger_path: Path) -> Controls:
     return _view(ledger_path, _Controls)
 
 
+def scan_cycle_share(ledger_path: Path) -> CycleShareRecord | None:
+    """The cycle's own share, never inherited: a fork's ledger alone."""
+    return scan_last([LedgerSpan(ledger_path)], CycleShareRecord)
+
+
 def scan_launch_claim(ledger_path: Path) -> LaunchClaimRecord | None:
     return _view(ledger_path, _LaunchClaim)
 

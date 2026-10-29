@@ -408,9 +408,17 @@ def _allotment(left: Budget, *, own: Budget) -> Budget:
     )
 
 
-def _held(job: Job, own: Budget) -> Budget:
+def cycle_share(stores: Stores, job: Job) -> Budget:
+    """A live job's share, off its cycle: admission lands it there before the job is on the campaign."""
+    record = stores.campaigns.read_cycle_share(job.hop)
+    if record is None:
+        raise RuntimeError(f"job {job.job_id} holds spend on {job.hop} with no share landed there")
+    return record.allotment
+
+
+def _held(share: Budget, own: Budget) -> Budget:
     """A sibling's share less what its cycle has metered, which the campaign's spend counts."""
-    usd, tokens = job.allotment.usd, job.allotment.tokens
+    usd, tokens = share.usd, share.tokens
     return Budget.amount(
         0.0 if usd is None else max(0.0, usd - own.usd_amount),
         0 if tokens is None else max(0, tokens - own.token_amount),
@@ -423,7 +431,8 @@ def _held_by_siblings(
     held = NOTHING_METERED
     for job in _live_on(stores, job_registry, hop.campaign_id):
         if job.hop != hop:
-            held = held.plus(_held(job, stores.campaigns.cycle_metered(job.hop, meter)))
+            own = stores.campaigns.cycle_metered(job.hop, meter)
+            held = held.plus(_held(cycle_share(stores, job), own))
     return held
 
 
@@ -452,8 +461,9 @@ def _refuse_unshared(
             if (other.created_at, other.job_id) < mine:
                 raise _contended("this campaign's ceiling")
             continue
+        held = cycle_share(stores, other)
         for axis in sorted(MONEY_AXES):
-            ours, theirs = getattr(money, axis), getattr(other.allotment, axis)
+            ours, theirs = getattr(money, axis), getattr(held, axis)
             if (ours is None) != (theirs is None):
                 unbounded = f"cycle {other.cycle_id}" if theirs is None else "this launch"
                 raise QuotaExceededError(
@@ -477,30 +487,32 @@ def _reshare_campaign_ceiling(
     meter = stores.campaigns.ceiling_meter_of(campaign_id)
     spent = stores.campaigns.metered_spend(campaign_id, meter)
     own = {job.job_id: stores.campaigns.cycle_metered(job.hop, meter) for job in jobs}
+    # Read before any moves: each cycle is re-shared from what the rest held going in.
+    held = {job.job_id: cycle_share(stores, job) for job in jobs}
     for job in jobs:
         beside = NOTHING_METERED
         for other in jobs:
             if other.job_id != job.job_id:
-                beside = beside.plus(_held(other, own[other.job_id]))
+                beside = beside.plus(_held(held[other.job_id], own[other.job_id]))
         share = _allotment(_left(moved, spent=spent, beside=beside), own=own[job.job_id])
-        hold_moved(
-            stores,
-            job_registry,
-            job,
-            reserve=job.reserve,
-            allotment=job.allotment.over(share.only(moved.named)),
-        )
+        hold_moved(stores, job.hop, held[job.job_id].over(share.only(moved.named)))
 
 
-def hold_moved(
-    stores: Stores, job_registry: JobRegistry, job: Job, *, reserve: Budget, allotment: Budget
-) -> None:
-    """A running book reads its hold off the job file, live; the cycle's ledger records each move."""
-    if (job.reserve, job.allotment) == (reserve, allotment):
+def hold_moved(stores: Stores, hop: CycleHop, allotment: Budget) -> None:
+    """THE move of a cycle's share: its record is the one store, which its running book reads live."""
+    held = stores.campaigns.read_cycle_share(hop)
+    if held is not None and held.allotment == allotment:
         return
-    job.reserve, job.allotment = reserve, allotment
-    job_registry.set_held(job.job_id, reserve, allotment)
-    stores.campaigns.write_cycle_share(job.hop, allotment=allotment, reserve=reserve)
+    stores.campaigns.write_cycle_share(hop, allotment)
+
+
+def land_job(
+    stores: Stores, job_registry: JobRegistry, job_id: str, hop: CycleHop, allotment: Budget
+) -> None:
+    """A job onto the cycle it now spends on, its share with it, together under the gate."""
+    with job_registry.admission_gate():
+        hold_moved(stores, hop, allotment)
+        job_registry.update_target(job_id, hop=hop)
 
 
 def move_campaign_money(
@@ -689,13 +701,7 @@ def hold_budget_change(
     with job_registry.admission_gate():
         job = job_registry.running_job_for(stores.campaigns.workspace, hop)
         if job is not None:
-            hold_moved(
-                stores,
-                job_registry,
-                job,
-                reserve=job.reserve.over(reserve),
-                allotment=job.allotment,
-            )
+            job_registry.set_reserve(job.job_id, job.reserve.over(reserve))
         move_campaign_money(
             change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
         )

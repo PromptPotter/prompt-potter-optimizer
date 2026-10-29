@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import pathlib
 import types
@@ -443,7 +444,8 @@ def prune_finished_jobs(*, apply: bool) -> dict[str, int]:
     """A job released before today has no reader (the quota and the refusals count today's only),
     and the registry validates every file it lists, so one left in an old shape 500s admission."""
     today = utcnow_iso()[:10]
-    finished = invalid = 0
+    declared = {field.name for field in dataclasses.fields(Job)}
+    finished = pruned = invalid = 0
     for path in sorted(jobs_dir(default_projects_root()).glob("*.json")):
         raw = read_json_optional(path)
         if raw and raw.get("released_at") and str(raw.get("created_at", ""))[:10] < today:
@@ -451,14 +453,24 @@ def prune_finished_jobs(*, apply: bool) -> dict[str, int]:
             if apply:
                 path.unlink()
             continue
+        # A key the job no longer declares is dropped: its fact moved to a store of its own.
+        kept = raw if not isinstance(raw, dict) else {k: v for k, v in raw.items() if k in declared}
         try:
-            TypeAdapter(Job).validate_python(raw)
+            TypeAdapter(Job).validate_python(kept)
         except ValidationError as exc:
             invalid += 1
             print(f"  FAIL  {path}: {exc.error_count()} error(s) — this job blocks every admission")
+            continue
+        if kept != raw:
+            pruned += 1
+            if apply:
+                write_json(path, kept)
     verb = "deleted" if apply else "would delete"
-    print(f"\nJob records — {verb} {finished} released before today; {invalid} still invalid")
-    return {"jobs_finished": finished, "jobs_invalid": invalid}
+    print(
+        f"\nJob records — {verb} {finished} released before today; "
+        f"{'pruned' if apply else 'would prune'} {pruned} to the job's keys; {invalid} still invalid"
+    )
+    return {"jobs_finished": finished, "jobs_pruned": pruned, "jobs_invalid": invalid}
 
 
 class _Pruned(NamedTuple):
