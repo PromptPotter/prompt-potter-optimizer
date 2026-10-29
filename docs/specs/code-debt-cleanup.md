@@ -351,6 +351,15 @@ word's `git grep -c` for that sense is 0.
 - **The installed webapp packages drift from `package.json`**: `npm ls` reports `next@16.3.8` against
   `16.4.1` and `vitest@4.1.11` against `^4.1.12`, so the gate builds with versions the lock does not
   name. **Re-test:** `npm ls --depth=0` clean.
+- **`scripts/offline_run.py` imports the gate for `RamBudget`**: the script the gate runs loads
+  `gate.py` (and through it `tests_owning`, `yaml`) in every child, while `OFFLINE_RUN_READS` names
+  neither file. Fan-out sizing sits beside `processes.py::free_mb`. **Re-test:**
+  `git grep -n "from gate import" -- scripts`.
+- **The pre-push hook refuses a tree another session dirtied**: `gate.py::_unheld_tips` proves a tip
+  only on a working tree holding its engine sources, so a shared desk's dirty engine file blocks every
+  push from it. Proving the tip in a clean checkout needs the offline home, the green store and
+  `webapp/node_modules` keyed apart from the tree. **Re-test:** dirty `promptpotter/` beside a pushed
+  tip; `git push` is refused.
 - **The offline legs rest on fake-data draws keyed by the whole node config**
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.

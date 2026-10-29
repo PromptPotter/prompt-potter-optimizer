@@ -22,6 +22,8 @@ OFFLINE_RUN_READS = (
     "scripts/offline_world.py",
     "scripts/last_green.py",
     "scripts/processes.py",
+    # Its import graph is what scopes each optimizer's stamp.
+    "scripts/tests_owning.py",
 )
 # Stamped by size and mtime, so a late reader is keyed on the file as it is when IT asks.
 _DIGESTS: dict[Path, tuple[tuple[int, int], bytes]] = {}
@@ -75,7 +77,9 @@ class LastGreen:
         code, listed = git("ls-files", "-co", "--exclude-standard", "-z")
         return None if code else cls(listed)
 
-    def key(self, prefixes: Sequence[str], products: Sequence[str] = ()) -> str:
+    def key(
+        self, prefixes: Sequence[str], products: Sequence[str] = (), without: Sequence[str] = ()
+    ) -> str:
         # git ignores a built product, so it is walked.
         built = sorted(
             Path(root, name).relative_to(REPO).as_posix()
@@ -83,7 +87,10 @@ class LastGreen:
             for root, _, names in os.walk(REPO / product)
             for name in names
         )
-        sources = (rel for rel in self._files if reads(rel, prefixes))
+        skipped = tuple(without)
+        sources = (
+            rel for rel in self._files if reads(rel, prefixes) and not rel.startswith(skipped)
+        )
         return digest(
             self._tools,
             *(

@@ -727,13 +727,18 @@ def _located(name: str) -> tuple[Path, PipelineManifest | ManifestSwitch]:
     return shipped, authored_manifest(optimizer_manifest_path(shipped))
 
 
-def _stamps(name: str) -> tuple[tuple[Path, int], ...]:
-    """Of every file *name* resolves from, so an edit to what a switch extends re-resolves the switch."""
+def manifest_directories(name: str) -> tuple[Path, ...]:
+    """Every manifest directory *name* resolves from: its own, then what a switch extends and swaps from."""
     _, authored = _located(name)
     read = [name]
     if isinstance(authored, ManifestSwitch):
         read += [authored.extends, *(swap.of for swap in authored.swap.values())]
-    paths = [optimizer_manifest_path(_located(n)[0]) for n in read]
+    return tuple(_located(n)[0] for n in read)
+
+
+def _stamps(name: str) -> tuple[tuple[Path, int], ...]:
+    # Every file *name* resolves from, so an edit to what a switch extends re-resolves the switch.
+    paths = [optimizer_manifest_path(directory) for directory in manifest_directories(name)]
     return tuple((path, _stamp(path)) for path in paths)
 
 

@@ -9,8 +9,10 @@ it: ``docs/developer/offline-run.md``.
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import contextvars
+import inspect
 import json
 import os
 import random
@@ -24,6 +26,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
+import tests_owning
 import yaml
 from gate import RamBudget
 from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
@@ -39,7 +42,7 @@ from offline_world import (
     draw,
     install_network,
 )
-from processes import end_children_with_this_process, queue_behind_siblings
+from processes import REPO, end_children_with_this_process, queue_behind_siblings
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import mint_operator_fork
@@ -53,6 +56,7 @@ from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.optimizer_manifest import (
     binding_prompt_overrides,
+    manifest_directories,
     resolve_optimizer,
     running_prompt,
     select_optimizer,
@@ -96,7 +100,7 @@ from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable, Sequence
 
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.paired_reading import PairedReading
@@ -1075,10 +1079,58 @@ def named_home() -> Path:
     return Path(named.removeprefix("\\\\?\\")).expanduser().resolve()
 
 
-def stands_green(home: Path, run: str, kept: LastGreen | None, key: str | None) -> bool:
-    """Green in the gate's store under these flags, and this home still holds that run."""
-    if kept is None or key is None or not kept.holds(run, key):
-        return False
+def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
+    """Per optimizer, the member packages and manifest directories it neither imports nor resolves."""
+
+    def owned(directory: Path) -> str | None:
+        full = directory.resolve()
+        return f"{full.relative_to(REPO).as_posix()}/" if full.is_relative_to(REPO) else None
+
+    packages = {
+        node: owned(Path(inspect.getfile(type(member))).parent)
+        for node, member in optimizers.NODE_MEMBERS.table.items()
+    }
+    owners = {d for d in packages.values() if d} | {
+        d for n in optimizers.MANIFESTS.table if (d := owned(optimizers.MANIFESTS.get(n).directory))
+    }
+
+    def imports(files: Iterable[Path]) -> set[str]:
+        hit: set[str] = set()
+        for path in files:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            rel = path.relative_to(REPO).as_posix()
+            package = path.name == "__init__.py"
+            for target in tests_owning.imported(tree, tests_owning.module_name(rel), package):
+                hit.update(d for d in owners if target.startswith(d))
+        return hit
+
+    # Only the optimizers package imports a member package (`gate.py::_IMPORTS_OPTIMIZER`).
+    shared = imports(Path(optimizers.__file__).parent.glob("*.py"))
+    out = {}
+    for name in names:
+        roster = resolve_optimizer(name, {}, gate="off").member_nodes
+        named = [packages[n] for n in roster] + [owned(d) for d in manifest_directories(name)]
+        reached = shared | {d for d in named if d}
+        todo = list(reached)
+        while todo:
+            fresh = imports((REPO / todo.pop()).rglob("*.py")) - reached
+            reached |= fresh
+            todo.extend(fresh)
+        out[name] = tuple(sorted(owners - reached))
+    return out
+
+
+def optimizer_keys(kept: LastGreen, names: Sequence[str], *, controlled: bool) -> dict[str, str]:
+    # A controlled workspace runs several optimizers, so it reads every one.
+    skipped = {} if controlled else unreached(names)
+    return {name: kept.key(OFFLINE_RUN_READS, without=skipped.get(name, ())) for name in names}
+
+
+def still_green(home: Path, run: str, kept: LastGreen, keys: dict[str, str]) -> set[str]:
+    return {n for n, k in keys.items() if kept.holds(f"{run} {n}", k) and (home / n).is_dir()}
+
+
+def holds_run(home: Path, run: str) -> bool:
     try:
         return bool(json.loads((home / STAMP).read_text(encoding="utf-8")).get("run") == run)
     except (OSError, ValueError):
@@ -1141,11 +1193,9 @@ def recombined(workspace: Path, host: str) -> int:
 
 
 def crossed_legs(
-    potter: Path, legs: tuple[Future[int], Future[int], Future[int]] | None, pause_after: int
+    potter: Path, legs: tuple[Future[int], Future[int], Future[int]], pause_after: int
 ) -> bool:
-    """Prints the crossover legs' reading; True where they ran green or were not run."""
-    if legs is None:
-        return True
+    """Prints the crossover legs' reading; True where they ran green."""
     straight, paused, by_l2 = (
         potter / leg for leg in (CROSSED, f"{CROSSED}-{RESUMED}", f"{CROSSED}-l2")
     )
@@ -1175,6 +1225,77 @@ def moved_against(workspace: Path, earlier: Path) -> str:
 
     now, then = held(workspace), held(earlier)
     return ", ".join(f"{part} {'UNMOVED' if now[part] == then[part] else 'MOVED'}" for part in now)
+
+
+def read_straight_and_resumed(
+    name: str, workspace: Path, resumed: Future[int], pause_after: int, against: Path | None
+) -> int:
+    ran = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
+    (cycle,) = (workspace / "projects").glob("*/campaigns/*/cycles/*")
+    bench = ran["bench"]
+    failed = int(not _graded(bench))
+    lift = None if bench is None else bench["vs_origin"]["headline"]
+    headline = (
+        f"{lift['estimate']['value']:+.3f}"
+        if lift is not None
+        else "NO BENCH HEADLINE"
+        if bench is None
+        else f"none ({bench['vs_origin']['state']})"
+    )
+    print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
+    if against is not None:
+        print(f"{name}: against {against}: {moved_against(workspace, against / name)}")
+    if rc := resumed.result():
+        print(f"{name}: RESUME FAILED (exit {rc}) -- {workspace / RESUMED / 'run.log'}")
+        return failed + 1
+    again = decided(workspace / RESUMED, after=pause_after)
+    same = decided(workspace, after=pause_after) == again
+    # A pause at the origin's boundary replays round 0 on resume, which re-records it.
+    failed += not _graded(again["run"]["bench"]) or (pause_after > 0 and not same)
+    print(
+        f"{name}: paused after round {pause_after} and resumed, decisions "
+        f"{'UNMOVED' if same else 'MOVED'}"
+    )
+    return failed
+
+
+def run_child_leg(args: argparse.Namespace) -> None:
+    if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
+        raise SystemExit("offline run: --child runs only under the env its parent builds")
+    workspace = Path(os.environ["PROMPTPOTTER_HOME"])
+    if args.child in CONTROLLED:
+        asyncio.run(
+            run_controlled(
+                workspace,
+                args.optimizer,
+                rounds=args.rounds,
+                rows=args.rows,
+                foreign=args.child == CONTROLLED[0],
+            )
+        )
+    elif args.terminal:
+        run_terminal(
+            args.child,
+            workspace,
+            args.terminal,
+            rounds=args.rounds,
+            rows=args.rows,
+            interrupts=args.interrupts,
+        )
+    elif args.rebase:
+        asyncio.run(run_rebasing(workspace, rounds=args.rounds, rows=args.rows))
+    else:
+        one = run_one(
+            args.child,
+            workspace,
+            rounds=args.rounds,
+            rows=args.rows,
+            pause_after=args.pause_after,
+            bench_trigger=args.bench_trigger,
+            diverge=args.diverge,
+            crossover=args.crossover,
+        )
+        print(asyncio.run(one)[0])
 
 
 def main() -> int:
@@ -1221,58 +1342,12 @@ def main() -> int:
         print(json.dumps(digests(), indent=1))
         return 0
     if args.child:
-        if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
-            raise SystemExit("offline run: --child runs only under the env its parent builds")
-        workspace = Path(os.environ["PROMPTPOTTER_HOME"])
-        if args.child in CONTROLLED:
-            asyncio.run(
-                run_controlled(
-                    workspace,
-                    args.optimizer,
-                    rounds=args.rounds,
-                    rows=args.rows,
-                    foreign=args.child == CONTROLLED[0],
-                )
-            )
-            return 0
-        if args.terminal:
-            run_terminal(
-                args.child,
-                workspace,
-                args.terminal,
-                rounds=args.rounds,
-                rows=args.rows,
-                interrupts=args.interrupts,
-            )
-            return 0
-        if args.rebase:
-            asyncio.run(run_rebasing(workspace, rounds=args.rounds, rows=args.rows))
-            return 0
-        one = run_one(
-            args.child,
-            workspace,
-            rounds=args.rounds,
-            rows=args.rows,
-            pause_after=args.pause_after,
-            bench_trigger=args.bench_trigger,
-            diverge=args.diverge,
-            crossover=args.crossover,
-        )
-        print(asyncio.run(one)[0])
+        run_child_leg(args)
         return 0
 
     asked = [f"--{k}={v}" for k, v in sorted(vars(args).items()) if v != ap.get_default(k)]
     run = " ".join([OFFLINE_RUN, *(a for a in asked if not a.startswith("--against="))])
-    kept = LastGreen.open()
-    key = None if kept is None else kept.key(OFFLINE_RUN_READS)
     home = named_home()
-    if args.against is None and stands_green(home, run, kept, key):
-        print(f"offline run: unchanged since green -- {home}")
-        return 0
-    stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run}
-    queue_behind_siblings("offline_run")
-    claim_home(home, stamp)
-    end_children_with_this_process()
     complete_registries()
     arm_names = args.optimizer or ["potter", "capo"]
     names = (
@@ -1280,15 +1355,44 @@ def main() -> int:
         if args.controlled
         else args.optimizer or sorted(optimizers.MANIFESTS.table)
     )
-    stamp["workspaces"] = names
-    (home / STAMP).write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
+    kept = LastGreen.open()
+    keys = {} if kept is None else optimizer_keys(kept, names, controlled=args.controlled)
+    held = args.against is None and holds_run(home, run)
+    green = still_green(home, run, kept, keys) if held and kept is not None else set()
+    for name in sorted(green):
+        print(f"{name}: unchanged since green -- {home / name}")
+    due = [name for name in names if name not in green]
+    if not due:
+        return 0
+    stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run, "workspaces": names}
+    queue_behind_siblings("offline_run")
+    if kept is not None:
+        # Unfiled first, so a run killed while it rewrites a workspace leaves no green behind.
+        kept.record(dict.fromkeys((f"{run} {name}" for name in due), None))
+    if held:
+        for name in due:
+            if (home / name).exists():
+                rmtree_robust(home / name)
+    else:
+        claim_home(home, stamp)
+    end_children_with_this_process()
     # One workspace each: a shared archive and δ ruler let one optimizer's run move another's.
     child_args = ["--rows", str(args.rows), "--bench-trigger", args.bench_trigger]
     if args.controlled:
         child_args += [f"--optimizer={name}" for name in arm_names]
     t0 = time.monotonic()
 
-    tasks = len(names) if args.controlled else 2 * len(names) + len(INTERRUPTED) + 5
+    # The first optimizer's workspace holds the CLI's legs, and potter's its own: they run with it.
+    first = names[0]
+    firsts = not args.controlled and first in due
+    pause_after = min(1, args.rounds - 1)
+    # Potter's own legs need rounds past the one they pause at.
+    potter_legs = not args.controlled and "potter" in due and pause_after > 0
+    tasks = (
+        len(due)
+        if args.controlled
+        else 2 * len(due) + (len(INTERRUPTED) + 1) * firsts + 4 * potter_legs
+    )
     pool = ThreadPoolExecutor(RamBudget.read().offline_run_children(tasks))
 
     def run_child(name: str, workspace: Path, log: str, rounds: int, *extra: str) -> int:
@@ -1308,28 +1412,23 @@ def main() -> int:
 
     def terminal(workspace: Path, verb: str, interrupts: int) -> int:
         flags = (f"--terminal={verb}", f"--interrupts={interrupts}")
-        return run_child(names[0], workspace, f"{verb}.log", TERMINAL_ROUNDS, *flags)
+        return run_child(first, workspace, f"{verb}.log", TERMINAL_ROUNDS, *flags)
 
-    children = {name: spawn(name, home / name) for name in names}
+    children = {name: spawn(name, home / name) for name in due}
     stopped = (
-        {}
-        if args.controlled
-        else {
-            count: pool.submit(interrupted, terminal, home / names[0] / leg, count)
+        {
+            count: pool.submit(interrupted, terminal, home / first / leg, count)
             for count, leg in INTERRUPTED.items()
         }
+        if firsts
+        else {}
     )
-    pause_after = min(1, args.rounds - 1)
     # A resume checks divergence only once a round past the origin closed; one leg stands for all.
     diverged = (
-        None
-        if args.controlled or not pause_after
-        else spawn(
-            names[0], home / names[0] / DIVERGED, f"--pause-after={pause_after}", "--diverge"
-        )
+        spawn(first, home / first / DIVERGED, f"--pause-after={pause_after}", "--diverge")
+        if firsts and pause_after
+        else None
     )
-    # Potter's own legs need rounds past the one they pause at.
-    potter_legs = not args.controlled and "potter" in names and pause_after
     # Only potter's L2 proposes a fork.
     rebasing = spawn("potter", home / "potter" / REBASED, "--rebase") if potter_legs else None
     # Its pool is read off the closed rounds, so a resume must hand it the pool a straight run had.
@@ -1352,70 +1451,43 @@ def main() -> int:
         {}
         if args.controlled
         else {
-            name: spawn(name, home / name / RESUMED, f"--pause-after={pause_after}")
-            for name in names
+            name: spawn(name, home / name / RESUMED, f"--pause-after={pause_after}") for name in due
         }
     )
-    failed = 0
+    failed = dict.fromkeys(due, 0)
     for name, child in children.items():
         workspace = home / name
         if rc := child.result():
-            failed += 1
+            failed[name] += 1
             print(f"{name}: FAILED (exit {rc}) -- {workspace / 'run.log'}")
             continue
-        if args.controlled:
-            continue
-        ran = json.loads((workspace / "decisions.json").read_text(encoding="utf-8"))["run"]
-        (cycle,) = (workspace / "projects").glob("*/campaigns/*/cycles/*")
-        bench = ran["bench"]
-        failed += not _graded(bench)
-        lift = None if bench is None else bench["vs_origin"]["headline"]
-        headline = (
-            f"{lift['estimate']['value']:+.3f}"
-            if lift is not None
-            else "NO BENCH HEADLINE"
-            if bench is None
-            else f"none ({bench['vs_origin']['state']})"
-        )
-        print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
-        if args.against is not None:
-            print(
-                f"{name}: against {args.against}: {moved_against(workspace, args.against / name)}"
+        if not args.controlled:
+            failed[name] += read_straight_and_resumed(
+                name, workspace, resumed[name], pause_after, args.against
             )
-        if rc := resumed[name].result():
-            failed += 1
-            print(f"{name}: RESUME FAILED (exit {rc}) -- {workspace / RESUMED / 'run.log'}")
-            continue
-        again = decided(workspace / RESUMED, after=pause_after)
-        same = decided(workspace, after=pause_after) == again
-        # A pause at the origin's boundary replays round 0 on resume, which re-records it.
-        failed += not _graded(again["run"]["bench"]) or (pause_after > 0 and not same)
-        print(
-            f"{name}: paused after round {pause_after} and resumed, decisions "
-            f"{'UNMOVED' if same else 'MOVED'}"
-        )
     for count, leg in stopped.items():
         ok, said = leg.result()
-        failed += not ok
-        print(f"{names[0]}: `new` under {count} SIGINT: {said if ok else 'FAILED -- ' + said}")
+        failed[first] += not ok
+        print(f"{first}: `new` under {count} SIGINT: {said if ok else 'FAILED -- ' + said}")
     if diverged is not None:
         rc = diverged.result()
-        failed += bool(rc)
-        log = home / names[0] / DIVERGED / "run.log"
+        failed[first] += bool(rc)
+        log = home / first / DIVERGED / "run.log"
         print(
-            f"{names[0]}: a resume diverged at run init "
+            f"{first}: a resume diverged at run init "
             f"{f'FAILED (exit {rc}) -- {log}' if rc else 'forked, its parent REBASED'}"
         )
     if rebasing is not None:
         rc = rebasing.result()
-        failed += bool(rc)
+        failed["potter"] += bool(rc)
         log = home / "potter" / REBASED / "run.log"
         lines = log.read_text(encoding="utf-8").splitlines()
         ended = f"FAILED (exit {rc}) -- {log}" if rc else ""
         ended = ended or next(ln for ln in reversed(lines) if ln.startswith("rebased "))
         print(f"potter: a line proposing a fork at every L2 fire {ended}")
-    failed += not crossed_legs(home / "potter", crossing, pause_after)
-    if args.controlled and not failed:
+    if crossing is not None:
+        failed["potter"] += not crossed_legs(home / "potter", crossing, pause_after)
+    if args.controlled and not any(failed.values()):
         beside, bare = (home / name for name in CONTROLLED)
         for arm in (f"arm-{name}" for name in arm_names):
             # A reading: the foreign campaign's rows are in the version the head-to-head froze.
@@ -1426,11 +1498,11 @@ def main() -> int:
         lines = (beside / "run.log").read_text(encoding="utf-8").splitlines()
         print("\n".join(line for line in lines if line.startswith(("skip on", "arm ", "head-to-"))))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
-    # Filed only where the sources read the same after the run as before it.
-    # Filed under the flags it ran with: bare, that is the gate's check of the same name.
-    if not failed and kept is not None and key == kept.key(OFFLINE_RUN_READS):
-        kept.record({run: key})
-    return 1 if failed else 0
+    # Filed under the flags it ran with, and only where the sources read the same as before it.
+    if kept is not None:
+        now = optimizer_keys(kept, due, controlled=args.controlled)
+        kept.record({f"{run} {n}": keys[n] for n in due if not failed[n] and keys[n] == now[n]})
+    return 1 if any(failed.values()) else 0
 
 
 if __name__ == "__main__":

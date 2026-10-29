@@ -27,16 +27,18 @@ tree's interpreter answers for that other tree.
 **The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments, in a
 home of its own — whenever a file the engine runs from has changed since it was last green, so an
 engine change has every optimizer run end to end and its resume proven without anyone asking; a
-docs or webapp edit reruns nothing. A failed leg fails it; a `MOVED` never does. **The pre-commit
-hook runs it too** whenever a staged path is one it reads: a commit whose tree already ran green
-pays only the stamp read, so a broken leg cannot land. It runs the working tree, not the index —
-another session's dirty engine file is in its verdict. `--changed` leaves it out: it proves a
-landing, not an edit.
+docs or webapp edit reruns nothing. A failed leg fails it; a `MOVED` never does. **The pre-push
+hook runs it on each pushed tip** (`gate.py --push`): it refuses unless the working tree holds the
+tip's sources, so its verdict is the tip's and no broken leg reaches CI unproven. The pre-commit
+hook and `--changed` leave it out: it proves a landing, not an edit. CI runs it on every push.
 
-**A green run is not taken twice.** A home holding the green run of the same arguments over the
-same sources (`scripts/last_green.py::OFFLINE_RUN_READS`, by content) prints `unchanged since green`
-and exits 0; name another home or pass `--against` to rerun. A default-argument green by hand is
-the gate's green too.
+**A green optimizer is not run twice.** Each optimizer's workspace, with every leg nested in it, is
+kept green on its own, keyed by content on what that optimizer reaches:
+`scripts/last_green.py::OFFLINE_RUN_READS` less the member packages and manifest directories of
+other optimizers it neither imports nor resolves (`scripts/offline_run.py::unreached`). A shared
+engine file reruns every optimizer; one optimizer's own file reruns that one. A home holding a
+green optimizer under the same arguments prints `unchanged since green` for it; name another home
+or pass `--against` to rerun all. A default-argument green by hand is the gate's green too.
 
 `--controlled` proves the controlled comparison instead ([`../architecture.md`](../architecture.md)
 § The controlled comparison): two workspaces, each running one head-to-head's arms (`--optimizer`,
@@ -49,7 +51,8 @@ foreign campaign moved the decisions is printed as a reading. `head_to_head.json
 ## Why it cannot be mistaken for a real run
 
 - **`PROMPTPOTTER_HOME` must be set.** The default workspace is never written. A home that holds
-  files but no `offline-run.json` stamp is refused; a stamped one is wiped and rewritten whole.
+  files but no `offline-run.json` stamp is refused; a stamped one keeps each workspace still green
+  under the same arguments and rewrites the rest.
 - **It never bills.** Every `*_KEY` / `*_TOKEN` is blanked for the child processes, the provider keys
   carry a sentinel no provider accepts, every `httpx` transport and `urllib.request.urlopen` is
   answered locally, and name resolution raises — so a client the fakes miss fails instead of

@@ -1013,7 +1013,8 @@ class Check:
     # CI's `check` job, its `webapp` job, publish.yml, the commit-msg hook.
     kind: Literal["py", "web", "release", "commit"]
     run: Callable[[Selection], Outcome]
-    staged: bool = False  # in the pre-commit set
+    # The git hook whose set carries it: `--staged` runs pre-commit's, `--push` pre-push's.
+    hook: Literal["pre-commit", "pre-push"] | None = None
     landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
     # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
     # or its peak (next-build's) is more than any lane beside it leaves free.
@@ -1196,22 +1197,22 @@ def _ledger_fields(sel: Selection) -> Outcome:
 
 
 CHECKS: tuple[Check, ...] = (
-    Check("ruff-format", "py", _ruff("format", "--check"), staged=True, reads=_RUFF_READS),
-    Check("ruff-check", "py", _ruff("check"), staged=True, reads=_RUFF_READS),
+    Check("ruff-format", "py", _ruff("format", "--check"), hook="pre-commit", reads=_RUFF_READS),
+    Check("ruff-check", "py", _ruff("check"), hook="pre-commit", reads=_RUFF_READS),
     Check("deptry", "py", lambda _: run(_py("deptry", "."), REPO)),
     Check("mypy", "py", _mypy),
     Check(
         "extras",
         "py",
         _extras,
-        staged=True,
+        hook="pre-commit",
         reads=("pyproject.toml", ".github/workflows/", "deploy-linux/", *_GATE),
     ),
     Check(
         "layering",
         "py",
         _layering,
-        staged=True,
+        hook="pre-commit",
         reads=("promptpotter/", "scripts/tests_owning.py", *_GATE),
     ),
     Check(
@@ -1226,13 +1227,13 @@ CHECKS: tuple[Check, ...] = (
         _Probe(_HANDLER_PROBE, judge=_dangling_handlers),
         reads=_ENGINE_RUNTIME,
     ),
-    Check("instruction-files", "py", _instruction_files, staged=True, reads=_TREE),
-    Check("doc-claims", "py", _doc_claims, staged=True, reads=_TREE),
+    Check("instruction-files", "py", _instruction_files, hook="pre-commit", reads=_TREE),
+    Check("doc-claims", "py", _doc_claims, hook="pre-commit", reads=_TREE),
     Check(
         "surface-ledger",
         "py",
         lambda _: run([sys.executable, "scripts/complexity_ledger.py", "--check"], REPO),
-        staged=True,
+        hook="pre-commit",
         reads=(
             "promptpotter/",
             "tests/",
@@ -1243,12 +1244,12 @@ CHECKS: tuple[Check, ...] = (
         ),
     ),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent.
-    Check("undiffable", "py", _undiffable, staged=True, reads=_TREE),
+    Check("undiffable", "py", _undiffable, hook="pre-commit", reads=_TREE),
     Check(
         "ts-types",
         "py",
         _Probe("scripts/build_ts_types.py", ("webapp/lib/api/types.generated.ts",)),
-        staged=True,
+        hook="pre-commit",
         reads=(*_ENGINE, "webapp/lib/api/types.generated.ts"),
     ),
     # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
@@ -1258,7 +1259,7 @@ CHECKS: tuple[Check, ...] = (
         _Probe(
             "scripts/build_vendor_marks.py", ("webapp/components/ui/vendor-marks.generated.ts",)
         ),
-        staged=True,
+        hook="pre-commit",
         reads=(
             "scripts/build_vendor_marks.py",
             "webapp/assets/vendor-marks/",
@@ -1277,7 +1278,7 @@ CHECKS: tuple[Check, ...] = (
                 "promptpotter/assets/checkin/resolved_schemas.json",
             ),
         ),
-        staged=True,
+        hook="pre-commit",
     ),
     Check(
         "specs",
@@ -1286,7 +1287,7 @@ CHECKS: tuple[Check, ...] = (
             "scripts/build_specs.py",
             ("docs/specs/openapi.generated.json", "docs/specs/events-asyncapi.generated.json"),
         ),
-        staged=True,
+        hook="pre-commit",
     ),
     # Last in the host: it imports every module, which no regenerator before it may see.
     Check(
@@ -1302,9 +1303,8 @@ CHECKS: tuple[Check, ...] = (
         reads=_suite_reads,
         narrow=_owning_tests,
     ),
-    # The script keeps its own green under this name and these inputs, so a run by hand answers for
-    # it — and so the pre-commit set carries it: a commit whose engine tree already ran green pays a
-    # stamp read, one that never ran pays the run, and no broken leg lands.
+    # The script keeps a green per optimizer, keyed on the sources that optimizer reaches, so a run
+    # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved.
     Check(
         OFFLINE_RUN,
         "py",
@@ -1313,12 +1313,12 @@ CHECKS: tuple[Check, ...] = (
             REPO,
             PROMPTPOTTER_HOME=str(REPO / ".gate_cache" / OFFLINE_RUN),
         ),
-        staged=True,
+        hook="pre-push",
         landing=True,
         reads=OFFLINE_RUN_READS,
     ),
-    Check("lockfile", "web", _lockfile, staged=True),
-    Check("eslint", "web", _eslint, staged=True, narrow=_web_modules),
+    Check("lockfile", "web", _lockfile, hook="pre-commit"),
+    Check("eslint", "web", _eslint, hook="pre-commit", narrow=_web_modules),
     Check("vitest", "web", _vitest, alone=True, narrow=_web_modules),
     Check(
         "next-build",
@@ -1333,7 +1333,7 @@ CHECKS: tuple[Check, ...] = (
     ),
     # `npm run typecheck` runs `next typegen` first, rewriting `.next/types` and the gitignored
     # `next-env.d.ts` that imports them; the exclude in `tsconfig.json` keeps out `.next/dev`.
-    Check("tsc", "web", _tsc, staged=True),
+    Check("tsc", "web", _tsc, hook="pre-commit"),
     Check(
         "playwright",
         "web",
@@ -1417,6 +1417,30 @@ def _lanes(
         thread.join()
     ran.append([_execute(check, sel, store) for check in checks if check.alone])
     return sorted((r for results in ran for r in results), key=lambda r: checks.index(r.check))
+
+
+def _unheld_tips(refs: str, checks: Sequence[Check]) -> str:
+    # *refs* is git's pre-push stdin: `<local ref> <local sha> <remote ref> <remote sha>` a line.
+    prefixes = sorted({p for c in checks for p in c.inputs() or ()})
+    assert not any(p.startswith("!") for p in prefixes), "a pushed check's reads are pathspecs"
+    # An all-zero local sha is a branch deletion: no tip to prove.
+    tips = sorted({sha for line in refs.splitlines() if set(sha := line.split()[1]) != {"0"}})
+    code, untracked = git("ls-files", "-o", "--exclude-standard", "--", *prefixes)
+    if code:
+        return untracked
+    moved = []
+    for tip in tips:
+        code, out = git("diff", "--name-only", tip, "--", *prefixes)
+        if code:
+            return out
+        if differs := sorted({*out.splitlines(), *untracked.splitlines()}):
+            moved.append(f"  {tip[:12]}: {', '.join(differs)}")
+    if not moved:
+        return ""
+    return (
+        "gate: the working tree is not the pushed tip in what the pre-push set reads, so its "
+        "verdict would be another tree's. Push from a tree holding the tip:\n" + "\n".join(moved)
+    )
 
 
 # `api`: mypy resolves fastapi. `harbor`, `dspy`: a test skipped for a missing extra never ran.
@@ -1513,6 +1537,11 @@ def main() -> int:
         "--staged", action="store_true", help="the pre-commit fast set, scoped to staged files"
     )
     scope.add_argument(
+        "--push",
+        action="store_true",
+        help="the pre-push hook: its set, on a working tree holding each tip git names on stdin",
+    )
+    scope.add_argument(
         "--changed",
         action="store_true",
         help="while iterating: the checks that read a file changed since HEAD, and inside "
@@ -1549,7 +1578,8 @@ def main() -> int:
 
     selected = (("py", args.py), ("web", args.web), ("release", args.release))
     kinds = {k for k, on in selected if on} or {"py", "web"}
-    checks = [c for c in CHECKS if c.kind in kinds and (c.staged or not args.staged)]
+    hook = "pre-commit" if args.staged else "pre-push" if args.push else None
+    checks = [c for c in CHECKS if c.kind in kinds and hook in (None, c.hook)]
     if args.only:
         asked = {name for value in args.only for name in value.split(",") if name}
         if unknown := sorted(asked - {c.name for c in CHECKS}):
@@ -1578,7 +1608,17 @@ def main() -> int:
     checks.sort(key=CHECKS.index)
     if any(c.kind == "py" for c in checks):
         _reexec_pinned()
-    label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
+    # Read in the pinned interpreter: the re-exec hands it git's stdin.
+    if args.push and (unheld := _unheld_tips(sys.stdin.read(), checks)):
+        print(unheld)
+        return 1
+    label = (
+        "staged"
+        if args.staged
+        else "push"
+        if args.push
+        else "+".join(sorted(kinds)) + ("/changed" * args.changed)
+    )
     # The pre-commit set is light and holds a commit open, so it never waits; one CI runner, one gate.
     queue_behind_siblings(f"gate[{label}]", exempt=bool(args.staged or os.environ.get("CI")))
     budget = RamBudget.read()
