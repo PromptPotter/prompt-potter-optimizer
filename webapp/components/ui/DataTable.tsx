@@ -10,12 +10,16 @@ export interface Column<T> {
   width: string;
   cell: (row: T) => ReactNode;
   align?: "start" | "end";
+  // A cell that wraps grows its row instead of truncating; never on a virtualized table.
+  wrap?: boolean;
 }
 
 export interface RowGroup<T> {
   key: string;
   header: ReactNode;
   rows: T[];
+  // Overrides the table's `expandedByDefault` for this group.
+  open?: boolean;
 }
 
 type Item<T> = { kind: "group"; group: RowGroup<T> } | { kind: "row"; row: T };
@@ -23,6 +27,9 @@ type Item<T> = { kind: "group"; group: RowGroup<T> } | { kind: "row"; row: T };
 const ROW_PX = 30;
 const GROUP_PX = 34;
 const VIRTUAL_FROM = 150;
+
+const isOpen = <T,>(g: RowGroup<T>, flipped: ReadonlySet<string>, byDefault: boolean) =>
+  flipped.has(g.key) !== (g.open ?? byDefault);
 
 export function DataTable<T>({
   columns,
@@ -51,7 +58,6 @@ export function DataTable<T>({
   className?: string;
 }) {
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(() => new Set());
-  const isOpen = (key: string) => flipped.has(key) !== expandedByDefault;
   const toggle = (key: string) =>
     setFlipped((prev) => {
       const next = new Set(prev);
@@ -65,7 +71,7 @@ export function DataTable<T>({
     const out: Item<T>[] = [];
     for (const g of groups) {
       out.push({ kind: "group", group: g });
-      if (flipped.has(g.key) !== expandedByDefault) for (const row of g.rows) out.push({ kind: "row", row });
+      if (isOpen(g, flipped, expandedByDefault)) for (const row of g.rows) out.push({ kind: "row", row });
     }
     return out;
   }, [rows, groups, flipped, expandedByDefault]);
@@ -93,7 +99,7 @@ export function DataTable<T>({
       }))
     : items.map((it, index) => ({
         index,
-        pos: { height: it.kind === "group" ? GROUP_PX : ROW_PX },
+        pos: { minHeight: it.kind === "group" ? GROUP_PX : ROW_PX },
       }));
 
   const template: CSSProperties = {
@@ -121,7 +127,7 @@ export function DataTable<T>({
               const item = items[index];
               if (!item) return null;
               if (item.kind === "group") {
-                const open = isOpen(item.group.key);
+                const open = isOpen(item.group, flipped, expandedByDefault);
                 return (
                   <button
                     key={`g:${item.group.key}`}
@@ -159,7 +165,11 @@ export function DataTable<T>({
                   }
                 >
                   {columns.map((c) => (
-                    <span key={c.id} role="cell" className={cx(s.td, c.align === "end" && s.end)}>
+                    <span
+                      key={c.id}
+                      role="cell"
+                      className={cx(s.td, c.align === "end" && s.end, c.wrap && s.wrap)}
+                    >
                       {c.cell(item.row)}
                     </span>
                   ))}

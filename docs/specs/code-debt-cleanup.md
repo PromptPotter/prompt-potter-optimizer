@@ -25,11 +25,10 @@ acting.
     (`initialization/wiring.py::_verify_connector_revision`); only a resume whose origin moved names it.
   **Re-test:** each input either hashed into the declaration or written as a record.
 
-- **Three probed invariants the tree breaks** (`gate.py::_KNOWN_FALSE`): θ differenced without
-  `comparable_to` (`escalation/state.py::_improved`, `views/render/phase.py`); hand-rolled `<table>`
-  beside `ui/DataTable` in `components/compare/`, `shell/SpendBuckets`, `ingest/DatasetPreview`; a
-  hand-rolled dialog in `shell/sidebar/SidebarFilterPopover`. Action: route each through its owner.
-  **Re-test:** `gate.py --only doc-claims`.
+- **The per-principal read rate limit 429s the e2e `cold` tier** (`first-run.spec.ts` account modal,
+  `pools-checkin.spec.ts` draft): one browser's boot polls trip it, so the walk reads 429 on
+  `/hierarchy`, `/auth/*`, `/datasets`. Action: the limit admits one tab's own polling cadence.
+  **Re-test:** `npx playwright test --project=cold` logs no 429.
 - **Left by the check-in address (unstarted campaigns)**:
   - `components/chat/README.md` still describes one global `ThreadProvider` (another session's file).
   - **A promoted Start is unserved**: `application/hierarchy.py::queued_drafts` serves a draft `queued` only while
@@ -76,8 +75,7 @@ acting.
   `prompt-fields`, `origin-readiness`; to `prefs/` — `run-card-prefs`, once that unlanded file lands.
   Chrome still holding a surface: `shell/searchpoint/`, `shell/scoring/` (ingest imports it),
   `shell/node-surface/`, root `PairedLift` / `SummaryBlock`. Hard samples and compare each spread over
-  several folders (`git ls-files webapp/components | grep -i -E "hard-?sample|compare"`); hand
-  `<table>`s at `git grep -l "<table" -- webapp/components` (tracked `_KNOWN_FALSE`).
+  several folders (`git ls-files webapp/components | grep -i -E "hard-?sample|compare"`).
   **Re-test:** `git ls-files ':(glob)webapp/lib/*.tsx'` lists none.
 - **Adapters over a flat served shape**: `useCandidatesModel.ts` joins every source it imports;
   `.facts.` opened at `git grep -c "\.facts\." -- webapp/components webapp/lib`; liveness

@@ -36,7 +36,7 @@ test.describe("app shell", () => {
     await open(page);
     await page.getByRole("button", { name: "Filter campaigns" }).click();
     // The surface, not the member list: the lifecycle set is owned server-side.
-    await expect(page.getByRole("menu").or(page.getByRole("dialog")).first()).toBeVisible();
+    await expect(page.getByRole("group", { name: "Filter campaigns" })).toBeVisible();
   });
 
   test("the sidebar collapses and expands", async ({ page }) => {

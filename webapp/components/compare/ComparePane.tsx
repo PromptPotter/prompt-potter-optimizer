@@ -2,14 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { Evidence, HierarchyCourse, SubjectReading } from "@/lib/api";
+import type { LiftEstimate } from "@/lib/api/types";
 import {
   CardFrame,
+  DataTable,
   Empty,
   FailureLine,
   Loading,
   SegmentedControl,
   Toolbar,
   ToolbarSep,
+  type Column,
 } from "@/components/ui";
 import { LIVE_EVIDENCE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
@@ -525,54 +528,88 @@ function Ranking({ evidence, nSubjects }: { evidence: Evidence; nSubjects: numbe
       </Empty>
     );
   }
+  // Keyed on both halves: two campaigns can share one `sp_hash`.
+  const rows: RankedEdit[] = evidence.edits.map((row, i) => {
+    const pair = readPaired(row.reading);
+    return pair.read
+      ? { row, rank: i + 1, lift: pair.lift.estimate, cells: pair.cells }
+      : { row, rank: null, lift: null, cells: null };
+  });
   return (
-    <div className="l4-table-wrap">
-      <table className="l4-table">
-        <thead>
-          <tr>
-            <th scope="col">#</th>
-            <th scope="col">edit</th>
-            <th scope="col">{m.spec.label} over its origin · 95% CI</th>
-            <th scope="col">cells</th>
-            <th scope="col">seen</th>
-          </tr>
-        </thead>
-        <tbody>
-          {/* Keyed on both halves: two campaigns can share one `sp_hash`. */}
-          {evidence.edits.map((row, i) => {
-            const pair = readPaired(row.reading);
-            const lift = pair.read ? pair.lift.estimate : null;
-            return (
-              <tr className="l4-row" key={`${row.campaign_id}/${row.sp_hash}`}>
-                <td className="l4-rank">{lift === null ? PLACEHOLDER : i + 1}</td>
-                <td className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
-                  <code>{row.sp_hash}</code> {row.label}
-                  <span className="l4-dim"> {shortId(row.campaign_id)}</span>
-                </td>
-                {lift === null ? (
-                  <td className="l4-dim">
-                    <PairedLift reading={row.reading} unread="sentence" />
-                  </td>
-                ) : (
-                  <td className={cx("l4-effect", sideTone(lift.side))}>
-                    <span className="l4-effect-mean">{fmtUnit(m.spec.unit, lift.value)}</span>
-                    <span className="l4-effect-ci">
-                      {fmtInterval(m.spec.unit, lift.ci_lo, lift.ci_hi)}
-                    </span>
-                  </td>
-                )}
-                <td className="l4-num">{pair.read ? pair.cells : PLACEHOLDER}</td>
-                <td className="l4-num">{row.provenance.length}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <>
+      <DataTable
+        ariaLabel="Edits ranked over their origin"
+        columns={rankColumns(m.spec.label, m.spec.unit)}
+        rows={rows}
+        getRowId={({ row }) => `${row.campaign_id}/${row.sp_hash}`}
+      />
       <p className="note-lede">
         An interval spanning zero is the ordinary outcome on a small panel — the ranking orders
         these, it does not endorse them. To settle one, deepen it with <code>verify</code> rather
         than repeating it.
       </p>
-    </div>
+    </>
   );
+}
+
+interface RankedEdit {
+  row: Evidence["edits"][number];
+  // Null where the pair was not read: an unread edit holds no rank.
+  rank: number | null;
+  lift: LiftEstimate | null;
+  cells: number | null;
+}
+
+function rankColumns(label: string, unit: Evidence["metric"]["spec"]["unit"]): Column<RankedEdit>[] {
+  return [
+    {
+      id: "rank",
+      label: "#",
+      width: "4ch",
+      align: "end",
+      cell: ({ rank }) => <span className="l4-rank">{rank ?? PLACEHOLDER}</span>,
+    },
+    {
+      id: "edit",
+      label: "edit",
+      width: "minmax(20ch, 2fr)",
+      cell: ({ row }) => (
+        <span className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
+          <code>{row.sp_hash}</code> {row.label}
+          <span className="l4-dim"> {shortId(row.campaign_id)}</span>
+        </span>
+      ),
+    },
+    {
+      id: "lift",
+      label: `${label} over its origin · 95% CI`,
+      width: "minmax(20ch, 1.5fr)",
+      wrap: true,
+      cell: ({ row, lift }) =>
+        lift === null ? (
+          <span className="l4-dim">
+            <PairedLift reading={row.reading} unread="sentence" />
+          </span>
+        ) : (
+          <span className={cx("l4-effect", sideTone(lift.side))}>
+            <span className="l4-effect-mean">{fmtUnit(unit, lift.value)}</span>
+            <span className="l4-effect-ci">{fmtInterval(unit, lift.ci_lo, lift.ci_hi)}</span>
+          </span>
+        ),
+    },
+    {
+      id: "cells",
+      label: "cells",
+      width: "7ch",
+      align: "end",
+      cell: ({ cells }) => <span className="l4-num">{cells ?? PLACEHOLDER}</span>,
+    },
+    {
+      id: "seen",
+      label: "seen",
+      width: "6ch",
+      align: "end",
+      cell: ({ row }) => <span className="l4-num">{row.provenance.length}</span>,
+    },
+  ];
 }

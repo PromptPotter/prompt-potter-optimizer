@@ -505,11 +505,7 @@ _TRACKER = "docs/specs/code-debt-cleanup.md"
 _PROBE_WIDTH = 4
 # An invariant a doc states as the target while its sentence says what holds today, keyed to the
 # phrase the tracker's URGENT section files it under; once true, the sentence is the invariant.
-_KNOWN_FALSE: dict[str, str] = {
-    'git grep -cE "\\.theta - " -- promptpotter/*.py == 0': "θ differenced without `comparable_to`",
-    'git grep -cE "<table" -- webapp/components/*.tsx == 0': "hand-rolled `<table>`",
-    'git grep -cE "role=.dialog." -- webapp/components/*.tsx <= 1': "a hand-rolled dialog",
-}
+_KNOWN_FALSE: dict[str, str] = {}
 
 
 @cache
