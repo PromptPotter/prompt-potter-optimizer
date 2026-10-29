@@ -28,9 +28,9 @@ function runs(project: string) {
   return ASKED.length === 0 || ASKED.some(matches);
 }
 
-function server(port: string, env: Record<string, string>, reusable: boolean) {
+function server(port: string, env: Record<string, string>, reusable: boolean, args = "") {
   return {
-    command: "node e2e/serve.mjs --auth=off",
+    command: `node e2e/serve.mjs --auth=off${args}`,
     url: `http://127.0.0.1:${port}/api/v1/health`,
     // The COLD server is never reused: `serve.mjs` resets the workspace at startup, and adopting a running one silently skips it.
     reuseExistingServer: reusable && !process.env.CI,
@@ -76,8 +76,16 @@ export default defineConfig({
   ],
   webServer: [
     ...(runs("walk") && !process.env.PP_E2E_BASE_URL ? [server(WALK_PORT, {}, true)] : []),
+    // The throwaway world answers TermNorm itself, unless the armed spend tier needs the real one.
     ...(runs("cold") || runs("spend")
-      ? [server(COLD_PORT, { PROMPTPOTTER_HOME: COLD_HOME, PP_E2E_RESET: "1" }, false)]
+      ? [
+          server(
+            COLD_PORT,
+            { PROMPTPOTTER_HOME: COLD_HOME, PP_E2E_RESET: "1" },
+            false,
+            process.env.PP_E2E_SPEND ? "" : " --backend=offline",
+          ),
+        ]
       : []),
   ],
 });

@@ -23,7 +23,7 @@ both stay desk tiers run by hand.
 | Project | Workspace | Covers |
 |---|---|---|
 | `walk` | the checkout's `.promptpotter/`, **read-only** | every view against real campaigns and rounds — the only world where Dashboard, Compare, Verify and Files have anything to draw. Issues no write. |
-| `cold` | a throwaway `PROMPTPOTTER_HOME` | the zero-campaign path a new account meets: consent gate, empty reads, dataset picker. |
+| `cold` | a throwaway `PROMPTPOTTER_HOME` | the zero-campaign path a new account meets: consent gate, empty reads, dataset picker, a check-in's pools. TermNorm's wire is answered in-world (`fake_backend.py`, the offline world's `FakeBackend`), so no backend need be up. |
 | `spend` | the same throwaway world | two campaigns taken to a measured round, each under `PP_E2E_BUDGET_USD`. **Real money** — `PP_E2E_SPEND=1`, and the dataset's backend must be up. `run.spec.ts` is the browser ingest path, `l4.spec.ts` the recursion; each spec's header states why it is minted the way it is. |
 
 Two servers rather than one, because `PROMPTPOTTER_HOME` is bound at import and one process
@@ -46,6 +46,7 @@ without it rather than inherit one.
 | `PP_E2E_PORT` | `8123` | the walk server, started only when `walk` is among the projects run |
 | `PP_E2E_COLD_PORT` | `8124` | the throwaway server |
 | `PP_E2E_FAKEAUTH_PORT` | `8125` | the auth-CLOSED server `onboarding-signed-in.spec.ts` raises for itself |
+| `PP_E2E_BACKEND_PORT` | `8126` | where the throwaway world answers TermNorm's wire; unused once `PP_E2E_SPEND` arms the real backend |
 | `PP_E2E_COLD_HOME` | `<tmp>/promptpotter-e2e` | where the throwaway world lives; it must sit under the system temp dir or `reset_world.py` refuses to wipe it |
 | `PP_E2E_BASE_URL` | — | walk a server already up (your `:8001`, a deployed box); the walk server then never starts |
 | `PP_E2E_SPEND` | — | `1` arms the spend tier |

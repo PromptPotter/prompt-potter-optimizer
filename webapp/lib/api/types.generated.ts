@@ -2277,6 +2277,9 @@ export interface PoolRow {
    * order; none for a pool no pack feeds or no member draws, and none before
    * the facts a Start mints against are known */
   packs: PackOffer[];
+  /** The packs it would offer but refuses, each with why, served beside `packs`:
+   * one bad pack never hides the rest */
+  refused: PackRefusal[];
 }
 
 /** One path an initializer's `active` knob may name, with what it keeps. */
@@ -2325,6 +2328,17 @@ export interface PackOffer {
   entries: number;
   /** Whether `packs` names it under this config */
   on: boolean;
+}
+
+/** A pack the shelf holds but serves none of: the rest of the library serves on without it. */
+export interface PackRefusal {
+  /** Its directory name, as a `packs` knob names it */
+  name: string;
+  /** `block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the
+   * install and this account both hold the name */
+  code: 'block_pack_invalid' | 'block_pack_collision';
+  /** What to fix, in a sentence */
+  reason: string;
 }
 
 /** The graph projection derived from a manifest's nodes and pipelines; no manifest declares one. */
@@ -2853,6 +2867,8 @@ export interface LibraryResponse {
   sources: LibrarySource[];
   /** By pack name, then each pack's own order */
   snippets: LibrarySnippet[];
+  /** Each pack held but served none of, by name, and why: the rest serve on */
+  refused: PackRefusal[];
 }
 
 /** One source a snippet names: a cited work as its pack declares it, or the authored one. */

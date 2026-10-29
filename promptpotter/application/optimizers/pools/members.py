@@ -86,7 +86,10 @@ class BlockPoolInitializer(_PoolInitializer):
         # At load no account is known, so no pack entry is.
         if mint is None:
             return []
-        return list(mint.shelf.entries(packs, admits=mint.admits).values())
+        # A pack named but refused or gone holds nothing; `refusal` names it.
+        serving = set(mint.shelf.names())
+        served = [name for name in packs if name in serving]
+        return list(mint.shelf.entries(served, admits=mint.admits).values())
 
     def refusal(
         self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None
@@ -97,6 +100,9 @@ class BlockPoolInitializer(_PoolInitializer):
             return None
         if mint is not None and (absent := mint.shelf.missing(packs)):
             return f"{self.name}.packs names {absent}, which neither the install nor this account holds"
+        if mint is not None and (refused := [r for r in mint.shelf.refusals() if r.name in packs]):
+            why = "; ".join(f"{r.name}: {r.reason}" for r in refused)
+            return f"{self.name}.packs names a refused pack ({why})"
         paths = self.active(selected)
         held = [(e.id, e.group) for e in self.held(selected, mint)]
         named = [p for p in paths if p.partition("/")[2] != EARNED_SOURCE]

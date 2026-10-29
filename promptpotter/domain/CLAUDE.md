@@ -53,5 +53,6 @@ migration**, fatal one way or the other; which way is correct depends on the pay
   a retired key is pruned by `application/maintenance/restamp.py::_prune_record`.
 
 A renamed or newly required field cannot be pruned: `application/maintenance/restamp.py::check_readable`
-names each refused cycle's campaign `delete`. **A commit moving a ledger key names `restamp` in its
-body** — the commit-msg hook's `scripts/gate.py::_ledger_fields` refuses it otherwise.
+names each refused cycle's campaign `delete`. **A commit moving a ledger or block-pack key names
+`restamp` in its body** — the commit-msg hook's `scripts/gate.py::_stored_shapes` refuses it otherwise;
+`scripts/build_specs.py::_STORED_ROOTS` names what it watches.

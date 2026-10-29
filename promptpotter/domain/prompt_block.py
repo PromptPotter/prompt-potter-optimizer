@@ -119,6 +119,17 @@ class Snippet(FrozenModel):
         return self.provenance.version if isinstance(self.provenance, Authored) else 0
 
 
+class PackRefusal(FrozenModel):
+    """A pack the shelf holds but serves none of: the rest of the library serves on without it."""
+
+    name: str = Field(description="Its directory name, as a `packs` knob names it")
+    code: Literal["block_pack_invalid", "block_pack_collision"] = Field(
+        description="`block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: "
+        "the install and this account both hold the name"
+    )
+    reason: str = Field(description="What to fix, in a sentence")
+
+
 class BlockPack(FrozenModel):
     works: dict[str, Work]
     snippets: tuple[Snippet, ...]

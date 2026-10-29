@@ -23,6 +23,11 @@ if (AUTH !== "on" && AUTH !== "off") {
   process.exit(2);
 }
 
+// `--backend=offline`: TermNorm's wire is answered in this world (`fake_backend.py`), so a machine with no TermNorm walks it.
+const BACKEND_PORT = process.argv.includes("--backend=offline")
+  ? process.env.PP_E2E_BACKEND_PORT || "8126"
+  : null;
+
 for (const [what, where, remedy] of [
   ["venv interpreter", PYTHON, "python scripts/gate.py"],
   ["static export", path.join(WEBAPP, "out", "index.html"), "npm run build"],
@@ -74,7 +79,18 @@ function tee(stream, out) {
   });
 }
 
-console.log(`[e2e] :${PORT} serving ${home ?? "<checkout workspace>"}`);
+const backend =
+  BACKEND_PORT === null
+    ? null
+    : spawn(PYTHON, [path.join(WEBAPP, "e2e", "fake_backend.py"), BACKEND_PORT], {
+        cwd: REPO,
+        stdio: "inherit",
+      });
+
+console.log(
+  `[e2e] :${PORT} serving ${home ?? "<checkout workspace>"}` +
+    (BACKEND_PORT === null ? "" : `, TermNorm answered offline on :${BACKEND_PORT}`),
+);
 const server = spawn(
   PYTHON,
   ["-m", "uvicorn", "promptpotter.main:app", "--host", "127.0.0.1", "--port", PORT],
@@ -83,6 +99,7 @@ const server = spawn(
     stdio: ["inherit", "pipe", "pipe"],
     env: {
       ...process.env,
+      ...(BACKEND_PORT === null ? {} : { TERMNORM_URL: `http://127.0.0.1:${BACKEND_PORT}` }),
       PROMPTPOTTER_AUTH: AUTH,
       // This interpreter is cp1252; the live display writes box-drawing characters.
       PYTHONUTF8: "1",
@@ -94,8 +111,12 @@ tee(server.stderr, process.stderr);
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
+    backend?.kill(signal);
     server.kill(signal);
     process.exit(0);
   });
 }
-server.on("exit", (code) => process.exit(code ?? 0));
+server.on("exit", (code) => {
+  backend?.kill();
+  process.exit(code ?? 0);
+});

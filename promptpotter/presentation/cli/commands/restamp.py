@@ -34,6 +34,7 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
         f"Cycles: {read['ledgers_checked'] - read['ledgers_refused']}"
         f"/{read['ledgers_checked']} read. "
         f"Campaigns unreadable: {read['campaigns_unreadable']}. "
+        f"Block packs refused: {read['packs_refused']}. "
         f"Cycle indexes: {indexes['cycle_indexes_reprojected']}"
         f"/{indexes['cycle_indexes']} re-derived from their ledgers. "
         f"Archive: {archive['archive_records_removed']} record(s) "
