@@ -232,15 +232,6 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `candidate-elimination.md` § CAPO's race) the two can crown differently. Open: which reading the
   bench compares. **Rides with:** any change to `capo/members.py::_rank_survivors`. **Re-test:** on a CAPO
   run with offspring < μ, rank one round's survivors both ways.
-- **One bad pack fails the whole library.** `config/prompt_blocks.py::PackShelf.read` raises on a
-  malformed `pack.json`, and a name both roots hold raises `block_pack_collision`. Either one is a 500
-  or 409 for every `GET /library` and every draft edit, not just for that pack. Seen: the e2e fixture
-  kept the old `Authored` shape. Action: refuse the pack, serve the rest.
-- **A pack's on-disk shape moved with nothing to migrate it.** `Authored.version: int` and a required
-  `supersedes` landed with the packs commit. The account's `starter` pack still held git-sha versions,
-  so `GET /library` returned 500 until it was migrated by hand (2026-10-29). `gate.py`'s `restamp` check
-  guards ledger records only. Action: packs ride the same shape-moved check, or `restamp` migrates them.
-  The live box holds packs too. **Re-test:** change a field of `Authored` and see the gate name the packs.
 - **A selection is still made in three places outside a launch.** `config_map`, `draft_patch` and
   `checkin` each call `select_optimizer` themselves. The launch path now resolves one selection and
   hands it down.
@@ -267,8 +258,19 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
 - **`optimizer_manifest.py` is hashed whole into every optimizer's `treatment.source`**
   (`shapes_optimizer_prompt(__name__)`), so a presentation-only edit re-keys every optimizer. The
   pools commit did: `ManifestNode.makes` and the proposer labels changed no prompt, yet potter's key
-  moved. Action: move what no prompt reads (labels, proposer rows, the setup projection) into a module
-  outside the hash. **Re-test:** edit one proposer label; potter's treatment key stays.
+  moved. `config/prompt_blocks.py` is the same shape: the per-pack refusal (a shelf read, no prompt
+  text) re-keyed every treatment. Action: move what no prompt reads (labels, proposer rows, the setup
+  projection, the shelf's listing) into a module outside the hash. **Re-test:** edit one proposer
+  label; potter's treatment key stays.
+- **The gate's `stored-shapes` check watches only some of what `restamp` prunes**
+  (`scripts/build_specs.py::_STORED_ROOTS` beside `application/maintenance/restamp.py::_SURFACES`). A
+  dropped `Campaign`, `User`, `DiagnosticRunRecord` or job key refuses every file written before it,
+  and no commit is told to name `restamp`. Action: one root per `_SURFACES` entry, read off that tuple.
+  **Re-test:** drop a `Campaign` field; the commit-msg hook names it.
+- **Two packs holding one snippet text raise a bare `ValueError`** (`config/prompt_blocks.py::PackShelf._held`)
+  where every other shelf failure is a `PackRefusal` or a typed refusal of the knob: a `packs` knob
+  naming both reaches the operator as an error, not a sentence. Action: `BlockPoolInitializer.refusal`
+  names the repeated entry. **Re-test:** two account packs with one text, both named; the draft serves.
 - **A detached arm's job is the spawner's until its process adopts it**
   (`jobs/launcher/run_job.py::spawn_job`, `jobs/registry.py::_reap_if_orphaned`): a `head-to-head`
   terminal killed between the spawn and the adoption leaves jobs a reconciling read releases, so the

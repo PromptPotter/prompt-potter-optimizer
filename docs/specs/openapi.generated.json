@@ -8383,6 +8383,14 @@
             "title": "Parts",
             "type": "array"
           },
+          "refused": {
+            "description": "Each pack held but served none of, by name, and why: the rest serve on",
+            "items": {
+              "$ref": "#/components/schemas/PackRefusal"
+            },
+            "title": "Refused",
+            "type": "array"
+          },
           "snippets": {
             "description": "By pack name, then each pack's own order",
             "items": {
@@ -8403,7 +8411,8 @@
         "required": [
           "parts",
           "sources",
-          "snippets"
+          "snippets",
+          "refused"
         ],
         "title": "LibraryResponse",
         "type": "object"
@@ -11765,6 +11774,38 @@
         "title": "PackOffer",
         "type": "object"
       },
+      "PackRefusal": {
+        "additionalProperties": false,
+        "description": "A pack the shelf holds but serves none of: the rest of the library serves on without it.",
+        "properties": {
+          "code": {
+            "description": "`block_pack_invalid`: its `pack.json` is no pack; `block_pack_collision`: the install and this account both hold the name",
+            "enum": [
+              "block_pack_invalid",
+              "block_pack_collision"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its directory name, as a `packs` knob names it",
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "description": "What to fix, in a sentence",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "code",
+          "reason"
+        ],
+        "title": "PackRefusal",
+        "type": "object"
+      },
       "PairGuard": {
         "additionalProperties": false,
         "description": "The comparability guard: whether the bench headlines it is taken over — a pair's, a row's\nagainst the table's standard, the whole table's — are one quantity. It LABELS a comparison\nand refuses none: a pair that differs is still read, and says on what.",
@@ -12442,6 +12483,14 @@
             "title": "Pool",
             "type": "string"
           },
+          "refused": {
+            "description": "The packs it would offer but refuses, each with why, served beside `packs`: one bad pack never hides the rest",
+            "items": {
+              "$ref": "#/components/schemas/PackRefusal"
+            },
+            "title": "Refused",
+            "type": "array"
+          },
           "source": {
             "$ref": "#/components/schemas/PoolSource",
             "description": "Where its entries come from"
@@ -12455,7 +12504,8 @@
           "offered",
           "drawn_by",
           "fills",
-          "packs"
+          "packs",
+          "refused"
         ],
         "title": "PoolRow",
         "type": "object"

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Refuse a subject opening on a BOM or any non-ASCII byte, and run the gate's `commit`
-# checks against the message (`ledger-fields`). Enabled with pre-commit, by
+# checks against the message (`stored-shapes`). Enabled with pre-commit, by
 # `git config core.hooksPath .githooks`.
 
 exec python scripts/gate.py --commit-msg "$1"

@@ -19,13 +19,15 @@ from promptpotter.application.maintenance.archive_maintenance import (
     iter_cycle_ledgers,
     workspace_trees,
 )
-from promptpotter.config.paths import default_projects_root, jobs_dir
+from promptpotter.config.paths import BLOCK_PACKS_DIR, default_projects_root, jobs_dir
+from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
+from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.run_records import CycleRecord
 from promptpotter.domain.sample import ArchiveConfig, FiledAnswer
 from promptpotter.domain.scoring import GradedCell
@@ -117,6 +119,13 @@ _SURFACES: tuple[_Surface, ...] = (
         key_path=(),
         model_cls=DiagnosticRunRecord,
     ),
+    _Surface(
+        # The account tier only: the install's packs are placed by hand, so fixed by hand.
+        title=f"Your block packs ({BLOCK_PACKS_DIR}/*/pack.json)",
+        workspace_globs=(f"*/{BLOCK_PACKS_DIR}/*/pack.json",),
+        key_path=(),
+        model_cls=BlockPack,
+    ),
 )
 
 
@@ -167,6 +176,38 @@ def _prune_parts(
     return pruned, dropped
 
 
+def _member(ann: object) -> object | None:
+    """What a list's item or a mapping's value is declared as, through `Annotated` and `| None`."""
+    origin = get_origin(ann)
+    if origin is Annotated:
+        return _member(get_args(ann)[0])
+    if origin in (Union, types.UnionType):
+        return next((m for arg in get_args(ann) if (m := _member(arg)) is not None), None)
+    args: tuple[object, ...] = get_args(ann)
+    if origin in (list, frozenset, set) or (origin is tuple and args[1:] == (...,)):
+        return args[0]
+    return args[1] if origin is dict else None
+
+
+def _prune_value(
+    ann: object, value: Any, path: tuple[str, ...]
+) -> tuple[Any, list[tuple[str, Any]]]:
+    """A model's undeclared keys go; a list's or a mapping's members are each pruned at their holder's path."""
+    if isinstance(value, dict) and _holds_parts(ann):
+        return _prune_parts(value, path)
+    if isinstance(value, dict) and (nested := _nested_model(ann, value)) is not None:
+        return _prune_to_schema(value, nested, path)
+    member = _member(ann)
+    if member is None or not isinstance(value, list | dict):
+        return value, []
+    keyed = value.items() if isinstance(value, dict) else enumerate(value)
+    held = {k: _prune_value(member, v, path) for k, v in keyed}
+    gone = [d for _, sub in held.values() for d in sub]
+    if isinstance(value, dict):
+        return {k: v for k, (v, _) in held.items()}, gone
+    return [v for v, _ in held.values()], gone
+
+
 def _prune_to_schema(
     raw: dict[str, Any], model_cls: type[BaseModel], prefix: tuple[str, ...] = ()
 ) -> tuple[dict[str, Any], list[tuple[str, Any]]]:
@@ -178,16 +219,8 @@ def _prune_to_schema(
         if field is None:
             dropped.append((".".join(path), value))
             continue
-        nested = _nested_model(field.annotation, value) if isinstance(value, dict) else None
-        if _holds_parts(field.annotation) and isinstance(value, dict):
-            pruned[key], gone = _prune_parts(value, path)
-            dropped.extend(gone)
-        elif nested is not None and isinstance(value, dict):
-            sub, sub_dropped = _prune_to_schema(value, nested, path)
-            pruned[key] = sub
-            dropped.extend(sub_dropped)
-        else:
-            pruned[key] = value
+        pruned[key], gone = _prune_value(field.annotation, value, path)
+        dropped.extend(gone)
     return pruned, dropped
 
 
@@ -825,6 +858,16 @@ def check_readable() -> dict[str, int]:
     archive_refused = [
         cause for home in homes for cause in _archive_refusals(MeasurementArchive.at(home))
     ]
+    # An account's shelf holds the install's packs too: each install refusal is named once.
+    install = PackShelf(account=None).refusals()
+    root = default_projects_root()
+    accounts = sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+    packs_refused = [f"{r.name} (install) — {r.reason}" for r in install] + [
+        f"{r.name} (account {account.name}) — {r.reason}"
+        for account in accounts
+        for r in PackShelf(account=account / BLOCK_PACKS_DIR).refusals()
+        if r not in install
+    ]
 
     print(f"\nCycle ledgers — {checked} checked, {checked - len(ledgers)} read")
     for cause in (*ledgers, *manifests):
@@ -840,10 +883,14 @@ def check_readable() -> dict[str, int]:
     print(f"\nMeasurement archives — {len(homes)} home(s), {len(archive_refused)} file(s) refused")
     for cause in archive_refused:
         print(f"  UNREADABLE archive {cause}")
+    print(f"\nBlock packs — {len(packs_refused)} refused, each serving nothing until fixed")
+    for cause in packs_refused:
+        print(f"  REFUSED pack {cause}")
     return {
         "ledgers_checked": checked,
         "ledgers_refused": len(ledgers),
         "manifests_refused": len(manifests),
         "campaigns_unreadable": len(refused),
         "archive_refused": len(archive_refused),
+        "packs_refused": len(packs_refused),
     }

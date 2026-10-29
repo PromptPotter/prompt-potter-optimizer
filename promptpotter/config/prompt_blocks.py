@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from promptpotter.config.paths import block_packs_root
 from promptpotter.domain.pool import PoolEntry, entry_id
-from promptpotter.domain.prompt_block import BlockPack, Presumption
+from promptpotter.domain.prompt_block import BlockPack, PackRefusal, Presumption
 from promptpotter.shared.errors import ConflictError, NotFoundError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -18,9 +20,25 @@ shapes_optimizer_prompt(__name__)
 _PACK_FILE = "pack.json"
 
 
+def _parsed(name: str, file: Path) -> BlockPack | PackRefusal:
+    """Each failing field by its path and rule alone: a value or a server path never leaves."""
+    try:
+        return BlockPack.model_validate_json(file.read_bytes())
+    except ValidationError as exc:
+        fields = "; ".join(
+            f"{'.'.join(map(str, e['loc'])) or 'the file'}: {e['msg']}" for e in exc.errors()[:3]
+        )
+        return PackRefusal(
+            name=name,
+            code="block_pack_invalid",
+            reason=f"its pack.json is no pack ({fields}); fix or remove it",
+        )
+
+
 @dataclass(frozen=True)
 class PackShelf:
-    """The packs one account reads: the install's, read-only to it, beside its own, one name one pack."""
+    """The packs one account reads: the install's, read-only to it, beside its own, one name one
+    pack. A pack that cannot serve is refused alone; the rest serve on."""
 
     # None: no account is in scope (the boot check), so the install's packs alone.
     account: Path | None
@@ -29,26 +47,21 @@ class PackShelf:
         install = block_packs_root()
         return (install,) if self.account is None else (install, self.account)
 
-    def file(self, name: str) -> Path | None:
-        held = [f for root in self._roots() if (f := root / name / _PACK_FILE).is_file()]
+    def _files(self, name: str) -> list[Path]:
+        return [f for root in self._roots() if (f := root / name / _PACK_FILE).is_file()]
+
+    def _opened(self, name: str) -> BlockPack | PackRefusal | None:
+        held = self._files(name)
         if len(held) > 1:
-            raise ConflictError(
-                f"block pack {name!r} is both the install's and this account's; one must be renamed",
+            return PackRefusal(
+                name=name,
                 code="block_pack_collision",
+                reason="the install and this account both hold a pack of this name; rename one",
             )
-        return held[0] if held else None
+        return _parsed(name, held[0]) if held else None
 
-    def missing(self, names: Sequence[str]) -> list[str]:
-        return [name for name in names if self.file(name) is None]
-
-    def read(self, name: str) -> BlockPack:
-        file = self.file(name)
-        if file is None:
-            raise NotFoundError(f"no block pack {name!r}", code="block_pack_not_found")
-        return BlockPack.model_validate_json(file.read_text(encoding="utf-8"))
-
-    def names(self) -> list[str]:
-        """Every directory under either root holding a `pack.json`, by name."""
+    def shelved(self) -> dict[str, BlockPack | PackRefusal]:
+        """Every directory under either root holding a `pack.json`, by name: its pack, or why not."""
         found = {
             p.name
             for root in self._roots()
@@ -56,7 +69,28 @@ class PackShelf:
             for p in root.iterdir()
             if (p / _PACK_FILE).is_file()
         }
-        return sorted(name for name in found if self.file(name) is not None)
+        return {
+            name: opened for name in sorted(found) if (opened := self._opened(name)) is not None
+        }
+
+    def names(self) -> list[str]:
+        return [name for name, pack in self.shelved().items() if isinstance(pack, BlockPack)]
+
+    def refusals(self) -> list[PackRefusal]:
+        return [pack for pack in self.shelved().values() if isinstance(pack, PackRefusal)]
+
+    def missing(self, names: Sequence[str]) -> list[str]:
+        return [name for name in names if not self._files(name)]
+
+    def read(self, name: str) -> BlockPack:
+        opened = self._opened(name)
+        if opened is None:
+            raise NotFoundError(f"no block pack {name!r}", code="block_pack_not_found")
+        if isinstance(opened, PackRefusal):
+            raise ConflictError(
+                f"block pack {name!r} is refused: {opened.reason}", code=opened.code
+            )
+        return opened
 
     def account_file(self, name: str) -> Path:
         """Where the account's own pack *name* is written, refused while the install holds that name."""
