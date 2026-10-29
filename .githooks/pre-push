@@ -1,7 +1,7 @@
 #!/bin/sh
 # Block a push whose tip fails the offline run: `scripts/gate.py --push` reads the refs git
-# hands on stdin, refuses unless the working tree holds each pushed tip's engine sources, then
-# runs the gate's pre-push set there — free for every optimizer whose sources already ran green.
+# hands on stdin and runs the gate's pre-push set in a clean checkout of each pushed tip, whatever
+# the working tree holds — free for every optimizer whose sources already ran green.
 #
 # Enabled with pre-commit, by `git config core.hooksPath .githooks`.
 

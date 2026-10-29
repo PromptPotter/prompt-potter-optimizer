@@ -7,6 +7,7 @@ import importlib.metadata
 import json
 import os
 import sys
+import sysconfig
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from stat import S_ISDIR, S_ISREG
@@ -65,7 +66,9 @@ class LastGreen:
 
     def __init__(self, listed: str) -> None:
         self._files = sorted(filter(None, listed.split("\0")))
-        tools = sorted(f"{d.name}={d.version}" for d in importlib.metadata.distributions())
+        # The interpreter's own site dirs: a build product in the tree is on `sys.path`, never a tool.
+        site = sorted({sysconfig.get_path("purelib"), sysconfig.get_path("platlib")})
+        tools = sorted(f"{d.name}={d.version}" for d in importlib.metadata.distributions(path=site))
         tools.append(sys.version)  # the interpreter is a tool no distribution names
         self._tools = digest(*(tool.encode() for tool in tools))
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import dataclasses
 import fnmatch
 import json
@@ -15,7 +16,7 @@ import tempfile
 import threading
 import time
 import tomllib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import cache
@@ -1419,28 +1420,57 @@ def _lanes(
     return sorted((r for results in ran for r in results), key=lambda r: checks.index(r.check))
 
 
-def _unheld_tips(refs: str, checks: Sequence[Check]) -> str:
+# What a pushed tip's checkout borrows from the pushing tree: its env, and the store its greens key in.
+_BORROWED = (".venv", "webapp/node_modules", ".gate_cache")
+
+
+def _link(link: Path, target: Path) -> None:
+    if sys.platform == "win32":  # a junction: a directory symlink needs a privilege
+        code, out = run(["cmd", "/c", "mklink", "/J", str(link), str(target)], REPO)
+        if code:
+            raise RuntimeError(f"mklink /J {link}: {out}")
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+@contextlib.contextmanager
+def _tip_checkout(tip: str) -> Iterator[Path]:
+    tree = Path(tempfile.gettempdir()) / f"pp-push-{tip[:12]}-{os.getpid()}"
+    code, out = git("worktree", "add", "--detach", str(tree), tip)
+    if code:
+        raise RuntimeError(f"git worktree add {tip}: {out}")
+    (REPO / ".gate_cache").mkdir(exist_ok=True)
+    links = [tree / rel for rel in _BORROWED if (REPO / rel).is_dir()]
+    try:
+        for link in links:
+            _link(link, (REPO / link.relative_to(tree)).resolve())
+        yield tree
+    finally:
+        # Each link goes before the tree, so no delete walks into what it points at.
+        for link in links:
+            if link.is_symlink() or link.is_junction():
+                os.unlink(link)
+        code, out = git("worktree", "remove", "-f", "-f", str(tree))
+        if code:
+            raise RuntimeError(f"git worktree remove {tree}: {out}")
+
+
+def _prove_tips(refs: str, names: Sequence[str]) -> int:
     # *refs* is git's pre-push stdin: `<local ref> <local sha> <remote ref> <remote sha>` a line.
-    prefixes = sorted({p for c in checks for p in c.inputs() or ()})
-    assert not any(p.startswith("!") for p in prefixes), "a pushed check's reads are pathspecs"
     # An all-zero local sha is a branch deletion: no tip to prove.
     tips = sorted({sha for line in refs.splitlines() if set(sha := line.split()[1]) != {"0"}})
-    code, untracked = git("ls-files", "-o", "--exclude-standard", "--", *prefixes)
-    if code:
-        return untracked
-    moved = []
+    failed = 0
     for tip in tips:
-        code, out = git("diff", "--name-only", tip, "--", *prefixes)
-        if code:
-            return out
-        if differs := sorted({*out.splitlines(), *untracked.splitlines()}):
-            moved.append(f"  {tip[:12]}: {', '.join(differs)}")
-    if not moved:
-        return ""
-    return (
-        "gate: the working tree is not the pushed tip in what the pre-push set reads, so its "
-        "verdict would be another tree's. Push from a tree holding the tip:\n" + "\n".join(moved)
-    )
+        began = time.monotonic()
+        with _tip_checkout(tip) as tree:
+            argv = [sys.executable, "scripts/gate.py", "--only", ",".join(names)]
+            rc = subprocess.run(argv, cwd=tree, stdin=subprocess.DEVNULL).returncode
+        verdict = "FAIL" if rc else "green"
+        print(
+            f"gate[push]: {tip[:12]} {verdict} in its own checkout, {time.monotonic() - began:.1f}s"
+        )
+        failed += bool(rc)
+    return 1 if failed else 0
 
 
 # `api`: mypy resolves fastapi. `harbor`, `dspy`: a test skipped for a missing extra never ran.
@@ -1539,7 +1569,7 @@ def main() -> int:
     scope.add_argument(
         "--push",
         action="store_true",
-        help="the pre-push hook: its set, on a working tree holding each tip git names on stdin",
+        help="the pre-push hook: its set, in a clean checkout of each tip git names on stdin",
     )
     scope.add_argument(
         "--changed",
@@ -1606,19 +1636,12 @@ def main() -> int:
                 check = named[check.after]
                 checks.append(check)
     checks.sort(key=CHECKS.index)
+    if args.push:
+        # Before any re-exec: each checkout pins its own, and a path pinned here would name this tree.
+        return _prove_tips(sys.stdin.read(), [c.name for c in checks])
     if any(c.kind == "py" for c in checks):
         _reexec_pinned()
-    # Read in the pinned interpreter: the re-exec hands it git's stdin.
-    if args.push and (unheld := _unheld_tips(sys.stdin.read(), checks)):
-        print(unheld)
-        return 1
-    label = (
-        "staged"
-        if args.staged
-        else "push"
-        if args.push
-        else "+".join(sorted(kinds)) + ("/changed" * args.changed)
-    )
+    label = "staged" if args.staged else "+".join(sorted(kinds)) + ("/changed" * args.changed)
     # The pre-commit set is light and holds a commit open, so it never waits; one CI runner, one gate.
     queue_behind_siblings(f"gate[{label}]", exempt=bool(args.staged or os.environ.get("CI")))
     budget = RamBudget.read()

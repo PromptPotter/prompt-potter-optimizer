@@ -28,9 +28,11 @@ tree's interpreter answers for that other tree.
 home of its own — whenever a file the engine runs from has changed since it was last green, so an
 engine change has every optimizer run end to end and its resume proven without anyone asking; a
 docs or webapp edit reruns nothing. A failed leg fails it; a `MOVED` never does. **The pre-push
-hook runs it on each pushed tip** (`gate.py --push`): it refuses unless the working tree holds the
-tip's sources, so its verdict is the tip's and no broken leg reaches CI unproven. The pre-commit
-hook and `--changed` leave it out: it proves a landing, not an edit. CI runs it on every push.
+hook runs it on each pushed tip** (`gate.py --push`), in a throwaway `git worktree` of that tip
+borrowing the pushing tree's `.venv`, `webapp/node_modules` and `.gate_cache` as links
+(`gate.py::_tip_checkout`), so its verdict is the tip's whatever the working tree holds, and a tip
+already green is a stamp read. The pre-commit hook and `--changed` leave it out: it proves a
+landing, not an edit. CI runs it on every push.
 
 **A green optimizer is not run twice.** Each optimizer's workspace, with every leg nested in it, is
 kept green on its own, keyed by content on what that optimizer reaches:
