@@ -57,39 +57,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def _verify_connector_revision(
-    client: BackendClient,
-    connector: Connector,
-) -> str | None:
-    """The revision the backend reported, which each launch records (`ResolvedRunRecord`)."""
+async def _checked_revision(
+    client: BackendClient, connector: Connector
+) -> tuple[str | None, str | None]:
+    """(reported, expected), which each launch records as one pair (`ResolvedRunRecord`): a drift is
+    the record's to say, read where a resume is refused (`mint.py::_revision_moved`)."""
     expected = connector.expected_revision
     check = connector.version_check
     if not expected or check is None:
-        return None
+        return None, None
     try:
-        actual = await check(client.http, client.base_url)
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning(
-            "connector[%s]: could not verify backend revision (%s) — expected %s",
-            connector.name,
-            exc,
-            expected,
-        )
-        return None
-    if actual is None:
-        logger.warning(
-            "connector[%s]: backend did not report a revision — expected %s",
-            connector.name,
-            expected,
-        )
-    elif actual != expected:
-        logger.warning(
-            "connector[%s]: backend revision drift — expected %s, got %s",
-            connector.name,
-            expected,
-            actual,
-        )
-    return actual
+        return await check(client.http, client.base_url), expected
+    except (httpx.HTTPError, ValueError):
+        # Unconfirmed: the record reads it as reporting none.
+        return None, expected
 
 
 def _warn_if_labels_have_no_ranker(
@@ -273,7 +254,7 @@ async def init_services(
         experiment=experiment,
     )
     _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
-    backend_revision = await _verify_connector_revision(client, connector)
+    backend_revision, expected_revision = await _checked_revision(client, connector)
     bank, candidate_library = _session_bank(
         stores, dataset, connector=connector, experiment=experiment
     )
@@ -289,6 +270,7 @@ async def init_services(
         pipeline_schema=pipeline_schema,
         pipeline_declaration=pipeline_declaration,
         backend_revision=backend_revision,
+        expected_revision=expected_revision,
         bank=bank,
         candidate_library=candidate_library,
         dataset_name=dataset_name,

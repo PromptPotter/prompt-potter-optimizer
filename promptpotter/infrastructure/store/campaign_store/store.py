@@ -763,6 +763,7 @@ class CampaignStore:
         experiment: Mapping[str, Any] | None,
         model_capabilities: CapabilityMenu,
         backend_revision: str | None,
+        expected_revision: str | None,
     ) -> None:
         """Appended whenever this launch resolves other than the chain holds, a moved panel included."""
         doc = None if experiment is None else dict(experiment)
@@ -781,6 +782,7 @@ class CampaignStore:
             doc,
             model_capabilities=model_capabilities,
             backend_revision=backend_revision,
+            expected_revision=expected_revision,
         )
         landed = held.then(resolved)
         if panel_moved or landed != held:
@@ -791,6 +793,7 @@ class CampaignStore:
                     experiment=doc,
                     model_capabilities=model_capabilities,
                     backend_revision=backend_revision,
+                    expected_revision=expected_revision,
                 ),
             )
 

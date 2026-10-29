@@ -80,6 +80,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.domain.treatment import Treatment
+    from promptpotter.infrastructure.store.campaign_store.ledger_scan import ResolvedRun
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -308,11 +309,22 @@ def _capabilities_moved(recorded: CapabilityMenu, running: CapabilityMenu) -> li
     )
 
 
-def _revision_moved(recorded: str | None, running: str | None) -> str | None:
-    """``None`` where nothing recorded one: an unknown revision names no move."""
-    if recorded is None or recorded == running:
-        return None
-    return f"the backend reports revision {running or 'none'}, not the {recorded} it ran under"
+def _revision_moved(recorded: ResolvedRun, running: str | None) -> str | None:
+    """Since the mint, or already at it against the connector's expected; ``None`` where nothing
+    recorded one: an unknown revision names no move."""
+    causes: list[str] = []
+    ran = recorded.backend_revision
+    if ran is not None and ran != running:
+        causes.append(
+            f"the backend reports revision {running or 'none'}, not the {ran} it ran under"
+        )
+    expected = recorded.expected_revision
+    if expected is not None and ran != expected:
+        causes.append(
+            f"the origin ran on backend revision {ran or 'unreported'}, not the {expected} its "
+            "connector expects"
+        )
+    return "; ".join(causes) or None
 
 
 def resolve_resume(
@@ -335,7 +347,7 @@ def resolve_resume(
         capabilities_moved=_capabilities_moved(
             recorded.model_capabilities, checked.session.pipeline_schema.model_capabilities
         ),
-        revision_moved=_revision_moved(recorded.backend_revision, checked.session.backend_revision),
+        revision_moved=_revision_moved(recorded, checked.session.backend_revision),
     )
 
 

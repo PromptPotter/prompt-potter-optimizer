@@ -119,15 +119,19 @@ class ResolvedRun:
     experiment_cycle_id: str | None = None
     model_capabilities: CapabilityMenu = field(default_factory=dict)
     backend_revision: str | None = None
+    expected_revision: str | None = None
 
     def then(self, later: ResolvedRun) -> ResolvedRun:
         first = self if self.experiment else later
+        # The revision pair moves together: a later check stands whole, whatever it reported.
+        checked = later if later.expected_revision is not None else self
         return ResolvedRun(
             declaration=later.declaration or self.declaration,
             experiment=first.experiment,
             experiment_cycle_id=first.experiment_cycle_id,
             model_capabilities=later.model_capabilities or self.model_capabilities,
-            backend_revision=later.backend_revision or self.backend_revision,
+            backend_revision=checked.backend_revision,
+            expected_revision=checked.expected_revision,
         )
 
 
@@ -144,6 +148,7 @@ class _ResolvedRun:
                 record.experiment,
                 model_capabilities=record.model_capabilities,
                 backend_revision=record.backend_revision,
+                expected_revision=record.expected_revision,
             )
         )
 

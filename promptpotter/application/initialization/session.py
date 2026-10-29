@@ -103,8 +103,9 @@ class Session:
     pipeline_schema: PipelineSchema
     # The only copy of the live backend's declaration; `init_cycle` records it. Empty offline.
     pipeline_declaration: dict[str, Any] = field(default_factory=dict)
-    # What the backend reported at init; `None` where its connector checks none or it answered none.
+    # What the backend reported at init, and what its connector expected; recorded as one pair.
     backend_revision: str | None = None
+    expected_revision: str | None = None
     # The label's bank at init; a bound cycle's is the one it drew, never re-cut.
     bank: Bank = field(default_factory=lambda: Bank.of(()))
     # Ranked beside the bank's ground truths; empty where a connector owns the panel.
@@ -137,6 +138,7 @@ class Session:
             experiment=self.backend_client.workload.experiment,
             model_capabilities=self.pipeline_schema.model_capabilities,
             backend_revision=self.backend_revision,
+            expected_revision=self.expected_revision,
         )
 
     def leave_comparison(self, act: ComparisonExit, *, on: CycleHop) -> None:

@@ -19,10 +19,10 @@ acting.
     fields default, and `CommandEffect`'s arms are told apart by their fields, not a tag. Make the
     fields required and tag the union with the wipe.
   - **`campaign.standing_budget`'s money lives in `campaign.json`**, beside the ledger.
-  - **A cycle's share has two stores**: the job file arbitrates siblings and feeds the book live, and
-    `CycleShareRecord` records each move. Action: the book and the sibling sums read the record.
-  - **A backend revision unlike the connector's expected one is a log warning**
-    (`initialization/wiring.py::_verify_connector_revision`); only a resume whose origin moved names it.
+  - **A revision drift is on record but read only by a refused resume**
+    (`jobs/mint.py::_revision_moved`): a run whose backend reports another revision than its
+    connector pins starts and measures. Open: whether a drift refuses the launch (Harbor's series pins
+    the layout `_digest` reads) or is served on the run.
   **Re-test:** each input either hashed into the declaration or written as a record.
 
 - **Three probed invariants the tree breaks** (`gate.py::_KNOWN_FALSE`): θ differenced without
@@ -399,6 +399,21 @@ word's `git grep -c` for that sense is 0.
     `type: ignore[union-attr]`: string-keyed call dispatch.
   - `app.openapi()` warns `UnsupportedFieldAttributeWarning` (alias `body` / `payload` on a union-typed
     body param): a request alias that has no effect.
+- **Seen moving the cycle share onto its record** (2026-10-29):
+  - `jobs/registry.py`'s setters (`mark_admitted`, `set_reserve`, `update_target`) return silently
+    when the job is gone, so a hold moved on a released job lands nowhere and says nothing.
+  - `HeldBudget.share` is a copy of the share for the stretch before a fresh mint lands it on its
+    cycle (`quota.py::land_job`); past that the record is the store and the copy goes stale. Two doors
+    into one state until a mint knows its cycle at admission.
+  - `initialization/wiring.py::_checked_revision` reads a failed version check as "reported none":
+    an unreachable `/status` and a backend that names no revision are one value on the record.
+  - `maintenance/restamp.py::prune_finished_jobs` prunes a retired job key by the dataclass's fields,
+    beside `_prune_to_schema`, which reaches only `BaseModel`s: two prunes for one rule.
+  - `scripts/tests_owning.py --run` peaks at 203 MB over its 197 MB linux ceiling, on this branch's
+    base as on its tip: red on this box before any change.
+  - `offline_run.py`'s `decisions.json` drops paths but keeps the origin's in a candidate's
+    `changes_description` ("Origin from <checkout>/…/origin.yaml"), so a base run from another
+    worktree reads `decisions MOVED` (gepa, levi) with no decision moved.
 - **The offline legs rest on fake-data draws keyed by the whole node config**
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.

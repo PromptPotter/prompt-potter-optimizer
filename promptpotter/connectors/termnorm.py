@@ -124,7 +124,7 @@ async def _termnorm_version_check(
     return None
 
 
-# `None` opts out of the drift WARN until TermNorm's `GET /status` reports a stable revision.
+# `None` checks no revision until TermNorm's `GET /status` reports a stable one.
 _EXPECTED_REVISION: str | None = None
 
 

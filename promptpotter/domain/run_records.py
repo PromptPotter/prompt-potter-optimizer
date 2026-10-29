@@ -1049,8 +1049,10 @@ class ResolvedRunRecord(FrozenModel):
     experiment: dict[str, Any] | None
     # The menu the run's schema answered with, its reasoning floors included; empty is UNKNOWN.
     model_capabilities: CapabilityMenu = Field(default_factory=dict)
-    # `None` where the connector checks no revision or the backend reported none.
+    # What the backend reported; `None` where the connector checks none, or the check found none.
     backend_revision: str | None = None
+    # What the connector expected it to report; `None` where it checks none. The two differ: a drift.
+    expected_revision: str | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

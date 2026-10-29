@@ -6459,6 +6459,18 @@
             "title": "Declaration",
             "type": "object"
           },
+          "expected_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Revision"
+          },
           "experiment": {
             "anyOf": [
               {
