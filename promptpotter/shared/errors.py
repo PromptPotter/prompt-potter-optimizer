@@ -201,6 +201,18 @@ class CycleBusyError(PotterError):
         )
 
 
+class ProviderUnkeyedError(SendRefusedError, PotterError):
+    """Refused before the wire, so nothing is billed: the install's to fix, never a retry's."""
+
+    http_status = 409
+    code = "provider_unkeyed"
+
+    def __init__(self, *, provider: str, key: str) -> None:
+        message = f"No {provider} key is set, so nothing was sent. Set {key} and restart the app."
+        SendRefusedError.__init__(self, message, category=ErrorCategory.CLIENT)
+        self.details = {"provider": provider, "key": key}
+
+
 class ContentTooLargeError(PotterError):
     http_status = 413
     code = "too_large"
