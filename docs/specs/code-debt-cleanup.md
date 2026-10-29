@@ -240,6 +240,49 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `candidate-elimination.md` § CAPO's race) the two can crown differently. Open: which reading the
   bench compares. **Rides with:** any change to `capo/members.py::_rank_survivors`. **Re-test:** on a CAPO
   run with offspring < μ, rank one round's survivors both ways.
+- **"Calls held equal" has no axis to hold.** `domain/spend.py::Budget` meters usd, tokens, rounds and
+  wall clock; the roadmap and `external-constraints.md` § 4 hold calls equal, `paper/README.md` holds
+  spent tokens, and `paper/plans/` holds USD under the arm's `search_incurred` meter, so two arms of one
+  point make the same calls only at one cell price and one optimizer cost. Action: one matched axis,
+  decided; if calls, a cells axis on `Budget` the search meter binds. **Rides with:** the N-arm mint
+  verb. **Re-test:** `price-head-to-head paper/plans/comparability.yaml` — do one point's
+  `search_cells` differ by arm?
+- **A pinned `determinism.seed` makes every replicate one draw.** `PINNED_LOOP_KEYS` pins
+  `optimization.determinism` across a head-to-head, and `bench/node_context.py::_rng` seeds every
+  member off the pin instead of the campaign id, so N replicates of an arm on a pinning dataset make
+  the same draws and read as a tight interval. Action: a replicate's identity enters the seed under a
+  pin. **Rides with:** any change to `_rng` or `PINNED_LOOP_KEYS`. **Re-test:** two replicates under a
+  pinned seed send the same first `l1_generate` request.
+- **The $0 price opens a backend session** (`application/head_to_head_price.py::price_head_to_head`
+  through `initialization/wiring.py::init_services`) only to resolve the node models and the
+  partition, so a stopped backend refuses a read that makes no call. **Rides with:** any change to
+  `init_services`. **Re-test:** price a plan with the backend down.
+- **An optimizer's round price is its name's, not its treatment's**
+  (`application/head_to_head_price.py::optimizer_round_price`): the three `escalation_ladder` arms read one potter
+  price, though an `l1` round sends fewer optimizer calls than a `full` one. Action: key it on the
+  treatment once enough campaigns of each have run. **Re-test:** the ablation's optimizer line names
+  one price for three ladders.
+- **INVESTIGATE — a CAPO arm is admitted on its round CEILING** (`preflight.py::check_cap_funds_round`
+  over `round_cells_ceiling`: 4,230 cells on 310 search rows), which its race rarely spends, so a
+  budget point must fund the worst case to mint CAPO at all. **Re-test:** a finished CAPO round's
+  cells against its ceiling.
+- **`notebooks/bbeh_potter.ipynb` states another protocol than `shared_config.py`**: its Methodology
+  cell and Cell 2 say the test set is the ~4,060 non-mini rows and the default target mistral-small;
+  `load_and_split` tests on the second 10 mini rows per task. Action: the notebook states what
+  `shared_config.py` runs. **Re-test:** `grep -n "non-mini" notebooks/bbeh_potter.ipynb`.
+- **The origin's `changes_description` names the host's checkout**
+  (`application/origin.py::resolve_origin_opt_search_point`: `Origin from {dataset_dir}/origin.yaml`),
+  so a ledger carries an absolute machine path and the offline run reads two trees' gepa and levi
+  legs as MOVED on that line alone. Action: name the definition, never its directory. **Re-test:**
+  `offline_run.py --against` a home written from another checkout.
+- **An unread backend schema serves "lands nowhere"**: with `schema_source: unreachable` no prompt
+  node declares a part, so `application/pipeline_resolve.py::_pool_fills` serves `PoolRow.fills` empty, the state
+  its description reserves for "nothing in play", and the check-in draws the pool nowhere. The cold
+  e2e world has no backend, so `pools-checkin.spec.ts` skips the `fills` reading there and CI never
+  walks it; `scripts/offline_world.py::FakeBackend` already answers `/pipeline`. Also
+  `application/datasets/ingest.py::fetch_backend_nodes` returns `{}` for an `in_process` connector, never its
+  `pipeline_declaration`. Action: an unknown fill is served unknown; the cold world gets a backend.
+  **Re-test:** the cold tier walks `pools-checkin.spec.ts` with no skip.
 - **One bad pack fails the whole library.** `config/prompt_blocks.py::PackShelf.read` raises on a
   malformed `pack.json`, and a name both roots hold raises `block_pack_collision`. Either one is a 500
   or 409 for every `GET /library` and every draft edit, not just for that pack. Seen: the e2e fixture
