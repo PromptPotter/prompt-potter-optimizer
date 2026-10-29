@@ -134,4 +134,6 @@ only the bank and the call-identity policy below.
   unseeded, draws follow the freshly minted campaign id and two runs of one tree would differ.
 
 **Adding an optimizer** needs nothing here: it runs as its manifest declares, one installed through
-its entry points alone included — `examples/optimizer-plugin/` is that case.
+its entry points alone included. `examples/optimizer-plugin/` is that case, and the gate proves it
+(`gate.py --only optimizer-plugin`): installed into a scratch venv layered on the tree's, run
+`--optimizer example`, red unless an arm carries `source="example:propose"`.

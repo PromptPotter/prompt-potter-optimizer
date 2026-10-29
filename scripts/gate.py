@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import threading
 import time
@@ -1107,6 +1108,64 @@ def _mypy(_sel: Selection) -> Outcome:
     return 0, ""
 
 
+# What the plug point must stamp on an arm the example's proposing node made.
+_PLUGIN_SOURCE = "example:propose"
+
+
+# Each proposed arm's source, over every round the run closed, read off its ledger.
+_PLUGIN_SOURCES_PROBE = """
+from promptpotter.config.paths import default_projects_root
+from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.shared.identity import default_identity
+campaigns = build_stores(default_identity(), projects_root=default_projects_root()).campaigns
+for campaign_id in campaigns.list_campaign_ids():
+    hop = campaigns.load_campaign(campaign_id).root_hop
+    for stood in campaigns.standing_rounds(hop, moment=None).rounds.values():
+        for arm in stood.close.panel.values():
+            print(arm.individual.lineage.source)
+"""
+
+
+def _optimizer_plugin(_: Selection) -> Outcome:
+    """The example installed as a distribution of its own, into a scratch venv layered on this
+    one, then run offline: the plug point holds only if its arms carry the example's source."""
+    uv = shutil.which("uv")
+    if not uv:
+        return 1, "`uv` is not on PATH, so the example plugin cannot be installed"
+    with tempfile.TemporaryDirectory(prefix="pp-plugin-") as scratch:
+        venv = Path(scratch) / "venv"
+        code, out = run([sys.executable, "-m", "venv", "--without-pip", str(venv)], REPO)
+        if code:
+            return code, out
+        where = {"base": str(venv), "platbase": str(venv)}
+        site = Path(sysconfig.get_path("purelib", "venv", where))
+        layered = f"import site; site.addsitedir({sysconfig.get_path('purelib')!r})\n"
+        (site / "_layered.pth").write_text(layered, encoding="utf-8")
+        python = Path(sysconfig.get_path("scripts", "venv", where)) / Path(sys.executable).name
+        # A copy: setuptools builds inside the directory it installs from.
+        plugin = shutil.copytree(REPO / _EXAMPLE_PLUGIN_DIR, Path(scratch) / "plugin")
+        install = [uv, "pip", "install", "--python", str(python), "--no-deps", str(plugin)]
+        code, out = run(install, REPO)
+        if code:
+            return code, out
+        home = Path(scratch) / "home"
+        argv = [str(python), "scripts/offline_run.py", "--optimizer", "example"]
+        code, out = run(argv, REPO, PROMPTPOTTER_HOME=str(home))
+        if code:
+            return code, out
+        # `offline_run.py` homes each optimizer's run under its own name.
+        probe = [str(python), "-c", _PLUGIN_SOURCES_PROBE]
+        code, read = run(probe, REPO, PROMPTPOTTER_HOME=str(home / "example"))
+        if code:
+            return code, read
+        if _PLUGIN_SOURCE not in (sources := set(read.split())):
+            return (
+                1,
+                f"no arm carries source {_PLUGIN_SOURCE!r}; arms carry {sorted(sources)}\n{out}",
+            )
+    return 0, out
+
+
 _EXTRA_ARG = re.compile(r"--extra[ =]([\w-]+)")
 
 
@@ -1313,6 +1372,13 @@ CHECKS: tuple[Check, ...] = (
         landing=True,
         reads=OFFLINE_RUN_READS,
     ),
+    Check(
+        "optimizer-plugin",
+        "py",
+        _optimizer_plugin,
+        landing=True,
+        reads=(*OFFLINE_RUN_READS, f"{_EXAMPLE_PLUGIN_DIR}/", *_GATE),
+    ),
     Check("lockfile", "web", _lockfile, on_commit=True),
     Check("eslint", "web", _eslint, on_commit=True, narrow=_web_modules),
     Check("vitest", "web", _vitest, alone=True, narrow=_web_modules),
@@ -1338,7 +1404,8 @@ CHECKS: tuple[Check, ...] = (
         alone=True,
         after="next-build",
         product=("webapp/out",),
-        reads=(*_WEBAPP_READS, *_ENGINE_RUNTIME),
+        # The cold server's backend is the offline world's (`e2e/serve_app.py`).
+        reads=(*_WEBAPP_READS, *_ENGINE_RUNTIME, "scripts/offline_world.py"),
     ),
     Check("npm-audit", "release", _npm_audit),
     Check("pip-audit", "release", _pip_audit),

@@ -376,8 +376,7 @@ word's `git grep -c` for that sense is 0.
   - `ui/MenuCheck` takes a `title=` prop; filter buttons are ~28px, under the 44px touch target.
 - **Seen framing snippets in a prompt**:
   - `.prompt-snippet-input` re-declares the field skin's border and background inside the frame.
-  - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module);
-    `examples/optimizer-plugin/README.md` names `nodes.Measured` for `MeasuredRound`.
+  - `config/prompt_blocks.py` says "render order" for `PROMPT_FIELDS` order (a hashed module).
   - `vitest.config.ts` loads as CommonJS (Vite warns on every run).
 - **A worktree that ran the offline gate cannot be removed by git**: `.gate_cache/offline-run` nests
   campaign paths past Windows' 260-char limit (`git worktree remove` fails "Filename too long"), and a

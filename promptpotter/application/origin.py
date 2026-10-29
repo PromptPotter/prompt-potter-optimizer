@@ -175,7 +175,7 @@ def resolve_origin_opt_search_point(
         authored := declared_origin_prompts(dataset_dir, schema.prompt_nodes())
     ):
         origin = OptSearchPoint(prompts=authored).as_origin(
-            changes_description=f"Origin from {dataset_dir}/{ORIGIN_FILE} ({', '.join(authored)})"
+            changes_description=f"Origin from the dataset's {ORIGIN_FILE} ({', '.join(authored)})"
         )
     if origin is None:
         origin = OptSearchPoint().as_origin(
