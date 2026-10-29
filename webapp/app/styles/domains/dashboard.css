@@ -116,9 +116,16 @@
 /* Phone first: one column, a row is name + control over one served line; wider widths only add air. */
 .mech-code{font-family:var(--font-mono);font-size:var(--text-sm);overflow-wrap:anywhere}
 .mech-num{font-variant-numeric:tabular-nums;font-weight:600;color:var(--color-text-primary)}
-.mech-pools{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr);gap:var(--space-10)}
-.mech-pool{display:flex;flex-direction:column;gap:var(--space-8);min-width:0;padding:var(--space-10) var(--space-12);border-radius:var(--border-radius-sm);border:0.5px solid var(--color-border)}
-.mech-pool [role=group]{flex-wrap:wrap;max-width:100%}
+/* A pool sits under the arms it feeds, one line per candidate part it fills. */
+.mech-borrow{display:flex;flex-direction:column;gap:var(--space-10);margin-top:var(--space-10)}
+.mech-borrow-lead{margin:0;font-size:var(--text-sm);color:var(--color-text-secondary)}
+.mech-borrow-pool{display:flex;flex-direction:column;gap:var(--space-6);min-width:0}
+.mech-borrow-pool [role=group]{flex-wrap:wrap;max-width:100%}
+.mech-borrow-packs{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-6) var(--space-8);font-size:var(--text-sm);color:var(--color-text-secondary)}
+.mech-fills{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.mech-fill{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-8);min-height:32px;padding:var(--space-4) 0;border-top:0.5px solid var(--color-border);font-size:var(--text-sm)}
+.mech-fill-part{font-weight:600;color:var(--color-text-primary)}
+.mech-fill-count{color:var(--color-text-secondary);font-variant-numeric:tabular-nums;text-align:right}
 .mech-pool-readers{list-style:none;margin:var(--space-6) 0 0;padding:0;display:flex;flex-direction:column;gap:var(--space-6);font-size:var(--text-sm);color:var(--color-text-secondary)}
 .mech-pool-readers li{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-4) var(--space-8)}
 .mech-pool-access{font-weight:600;color:var(--color-text-primary)}
@@ -169,7 +176,6 @@
   /* Wide, a row keeps its control within reach of its name: the list flows into columns. */
   .mech-group > .mech-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,22rem),1fr));gap:var(--space-10) var(--space-16)}
   .mech-group > .mech-list > .mech-row{border-top:0.5px solid var(--color-border);padding-top:var(--space-10)}
-  .mech-pools{grid-template-columns:repeat(auto-fit,minmax(min(100%,calc(var(--box-min) / 2)),1fr))}
 }
 
 .cmap{display:flex;flex-direction:column;gap:var(--space-12)}

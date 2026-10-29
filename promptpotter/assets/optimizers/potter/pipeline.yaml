@@ -47,6 +47,7 @@ nodes:
       strata: none
   l1_generate:
     type: llm
+    makes: rewrites
     # Menus the operator picks from; they open no search axis (`param_keys` stays empty, and
     # L2's reach is its own member's `steers`). `model` falls back to `available_models`.
     optimizer: &node_menus
@@ -82,12 +83,14 @@ nodes:
   # given a minority of its differing loci by a donor drawn alike from every round's measured.
   mating:
     type: algorithm
+    makes: crossovers
     config:
       offspring: 0
       donor_from: measured
       tournament: 2
   locus_crossover:
     type: algorithm
+    makes: donor sections
     config: {}
   # Runs the campaign pipeline against the panel; it makes no optimizer call, so no config.
   l1_score:

@@ -41,6 +41,7 @@ nodes:
   # node's call config does not carry.
   gepa_reflect:
     type: llm
+    makes: reflective rewrites
     config:
       prompt_family: gepa_reflect
       prompt_version: 1

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, get_args
@@ -59,7 +60,7 @@ from promptpotter.domain.campaign_config import (
     effective_config,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.opt_search_point import render_prompt
+from promptpotter.domain.opt_search_point import PROMPT_FIELDS, render_prompt
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import (
     apply_node_overlay,
@@ -90,9 +91,13 @@ from promptpotter.domain.pipeline_schema import (
     PipelineView,
     reach_map,
 )
-from promptpotter.domain.pool import Access, PoolOffer, PoolSource, offers
+from promptpotter.domain.pool import Access, PoolOffer, PoolSource, kept, offers
 from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin, ScoringLockedRecord
-from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
+from promptpotter.domain.search_point import (
+    SHOTS_KEY,
+    missing_template_vars,
+    strip_rendered_prompt,
+)
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.pricing import route_priced
@@ -123,11 +128,12 @@ from promptpotter.shared.plugin_registry import BUILT_IN
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from promptpotter.application.optimizers.nodes import Initializer
     from promptpotter.config.prompt_blocks import PackShelf
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.judges import JudgeSpec
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.pool import Pool
+    from promptpotter.domain.pool import Pool, PoolEntry
     from promptpotter.domain.prompt_block import Presumption
     from promptpotter.domain.run_records import CycleSeed
     from promptpotter.domain.sample import Sample
@@ -561,6 +567,27 @@ class PoolDraw(StrictModel):
     )
 
 
+class PoolFill(StrictModel):
+    """One part of a candidate a pool's entries in play reach: the place a surface draws the pool."""
+
+    part: str = Field(description="A prompt field a target prompt node opens to search, or `shots`")
+    entries: int = Field(description="How many entries in play land there")
+    most: int | None = Field(
+        description="The most one candidate carries there: the shots any member writing them may "
+        "attach; null for a field, whose text a candidate takes or adapts"
+    )
+
+
+class PackOffer(StrictModel):
+    """One block pack this account reads, as a pool's `packs` knob names it."""
+
+    name: str = Field(description="The value `packs` holds for it")
+    entries: int = Field(
+        description="The pool entries it holds that this run admits, one per part a snippet suits"
+    )
+    on: bool = Field(description="Whether `packs` names it under this config")
+
+
 class PoolRow(StrictModel):
     pool: str = Field(description="The pool's state kind, e.g. `block_pool`")
     source: PoolSource = Field(description="Where its entries come from")
@@ -572,6 +599,16 @@ class PoolRow(StrictModel):
         "keeps; a demo pool's are the split its Start draws, none before that split is known"
     )
     drawn_by: list[PoolDraw]
+    fills: list[PoolFill] = Field(
+        description="The candidate parts its entries in play reach under this config, in render "
+        "order, shots last: empty where no member draws it or nothing is in play, and then a "
+        "surface draws the pool nowhere"
+    )
+    packs: list[PackOffer] = Field(
+        description="The block packs it may draw from, the install's and the account's, in name "
+        "order; none for a pool no pack feeds or no member draws, and none before the facts a "
+        "Start mints against are known"
+    )
 
 
 class OptimizerNodePrompt(StrictModel):
@@ -589,17 +626,25 @@ class OptimizerNodePrompt(StrictModel):
     )
 
 
+class ProposerRow(StrictModel):
+    node: str = Field(description="The manifest node making the arms")
+    makes: str = Field(description="What its arms are, in plain words: the manifest node's `makes`")
+
+
 class OptimizerSetup(StrictModel):
     """What the selected optimizer runs under a config, derived once for check-in and campaign."""
 
     main: list[KnobRef] = Field(description="The knobs a setup surface leads with, in order")
-    knobs: list[NodeKnobs] = Field(description="Every member taking a knob, in declared order")
+    knobs: list[NodeKnobs] = Field(
+        description="Every member taking a knob, in declared order, but a pool initializer: its "
+        "knobs are its `pools` row"
+    )
     prompts: dict[str, OptimizerNodePrompt] = Field(
         description="By node, each node running a prompt; a node naming no `prompt_family` has "
         "no entry"
     )
     arms_per_round: int = Field(description="Arms each round tests")
-    proposers: list[str] = Field(
+    proposers: list[ProposerRow] = Field(
         description="The nodes making each round's arms under this config, in walk order: one "
         "that opens or adds arms and adds none here is off, and absent"
     )
@@ -971,10 +1016,52 @@ def _pool_draws(selected: SelectedOptimizer, pool: type[Pool]) -> list[PoolDraw]
     return list(grouped.values())
 
 
+def _pool_fills(
+    selected: SelectedOptimizer, initializer: Initializer, held: list[PoolEntry], opened: set[str]
+) -> list[PoolFill]:
+    in_play = set(kept(initializer.active(selected), ((e.id, e.group) for e in held)))
+    landed = Counter(initializer.pool.part(e) for e in held if e.id in in_play)
+    return [
+        PoolFill(
+            part=part,
+            entries=landed[part],
+            most=selected.shot_cap if part == SHOTS_KEY else None,
+        )
+        for part in (*PROMPT_FIELDS, SHOTS_KEY)
+        if landed[part] and part in opened
+    ]
+
+
+def _pack_offers(
+    selected: SelectedOptimizer, initializer: Initializer, mint: MintFacts | None
+) -> list[PackOffer]:
+    if initializer.pool.source is not PoolSource.LIBRARY or mint is None:
+        return []
+    named: list[str] = selected.knobs(initializer.name).model_dump(mode="json")["packs"]
+    return [
+        PackOffer(
+            name=name,
+            entries=len(mint.shelf.entries([name], admits=mint.admits)),
+            on=name in named,
+        )
+        for name in mint.shelf.names()
+    ]
+
+
+def _opened_parts(target: PipelineSchema) -> set[str]:
+    nodes = target.prompt_nodes()
+    return {f for node in nodes for f in node.open_prompt_fields} | (
+        {SHOTS_KEY} if nodes else set()
+    )
+
+
 def _node_knobs(selected: SelectedOptimizer) -> list[NodeKnobs]:
     nodes: list[NodeKnobs] = []
     params = _param_rows(selected)
+    initializers = {initializer.name for initializer in selected.plan.initializers}
     for node in selected.member_nodes:
+        if node in initializers:
+            continue
         schema = optimizers.NODE_MEMBERS.get(node).knobs.model_json_schema()
         declared = selected.declared_knobs(node).model_dump(mode="json")
         value = selected.knobs(node).model_dump(mode="json")
@@ -1005,8 +1092,31 @@ def _node_prompts(selected: SelectedOptimizer) -> dict[str, OptimizerNodePrompt]
     return out
 
 
-def optimizer_setup(cfg: CampaignConfig, mint: MintFacts | None) -> OptimizerSetup:
+def _pool_row(
+    selected: SelectedOptimizer,
+    initializer: Initializer,
+    mint: MintFacts | None,
+    opened: set[str],
+) -> PoolRow:
+    held = initializer.held(selected, mint)
+    drawn = any(initializer.pool in selected.draws(member) for member in selected.members)
+    return PoolRow(
+        pool=initializer.pool.kind,
+        source=initializer.pool.source,
+        initializer=initializer.name,
+        active=initializer.active(selected),
+        offered=offers(held),
+        drawn_by=_pool_draws(selected, initializer.pool),
+        fills=_pool_fills(selected, initializer, held, opened) if drawn else [],
+        packs=_pack_offers(selected, initializer, mint) if drawn else [],
+    )
+
+
+def optimizer_setup(
+    cfg: CampaignConfig, mint: MintFacts | None, target: PipelineSchema
+) -> OptimizerSetup:
     selected = select_optimizer(cfg.optimization)
+    opened = _opened_parts(target)
     return OptimizerSetup(
         main=[
             KnobRef(node=node, knob=knob)
@@ -1016,19 +1126,11 @@ def optimizer_setup(cfg: CampaignConfig, mint: MintFacts | None) -> OptimizerSet
         prompts=_node_prompts(selected),
         arms_per_round=selected.arms_per_round,
         proposers=[
-            p.name for p in selected.plan.proposers if p.proposes == "edits" or p.arms(selected) > 0
+            ProposerRow(node=p.name, makes=selected.makes(p))
+            for p in selected.plan.proposers
+            if p.proposes == "edits" or p.arms(selected) > 0
         ],
-        pools=[
-            PoolRow(
-                pool=initializer.pool.kind,
-                source=initializer.pool.source,
-                initializer=initializer.name,
-                active=initializer.active(selected),
-                offered=offers(initializer.held(selected, mint)),
-                drawn_by=_pool_draws(selected, initializer.pool),
-            )
-            for initializer in selected.plan.initializers
-        ],
+        pools=[_pool_row(selected, i, mint, opened) for i in selected.plan.initializers],
     )
 
 
@@ -1077,7 +1179,7 @@ def _response(
         backend_type=backend_type,
         self_optimization=is_self_optimization(backend_type),
         optimizer=m.cfg.optimization.optimizer,
-        optimizer_setup=optimizer_setup(m.cfg, mint),
+        optimizer_setup=optimizer_setup(m.cfg, mint, m.filtered),
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,

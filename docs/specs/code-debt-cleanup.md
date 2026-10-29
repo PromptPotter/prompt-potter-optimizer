@@ -319,8 +319,6 @@ word's `git grep -c` for that sense is 0.
   `datasets/startability.py::offered`.
 - **`Scope` says nothing on members**: every member knob is `Scope.POLICY`, and `KnobRow` serves neither
   scope nor estimand.
-- **The check-in lists a demo pool as raw sample-key hashes** (chips like `a9123c5c…· 1`): an id with
-  no content preview gives the operator nothing to pick by.
 - **Seen building the setup screen**:
   - One app-wide `SelectionContext.node` serves the target and the optimizer graphs, and
     `PipelineSetupInner`'s auto-select races the optimizer graph for it: a global standing in for a keyed
@@ -340,11 +338,16 @@ word's `git grep -c` for that sense is 0.
   - `locus_crossover` is listed as a maker with nothing upstream making two-parent children; an
     arm-editing maker's on/off belongs on `nodes.Proposer` as a member-declared rule.
   - The "adds no arms ⇒ off" rule sits in `pipeline_resolve.py`, not on `SelectedOptimizer`.
-  - A pool's `active` is served twice (a `KnobRow` and `PoolRow.active`); the client drops the knob by
-    the literal key `"active"`.
   - `HoverCard` opens on tap only through focus (fragile on iOS); the check-in picklist button's
     accessible name runs slug and meta together; two open check-ins share one slug.
-  - `packs` is a raw JSON textarea where a picker of installed packs belongs.
+- **Seen drawing the pools in place**:
+  - `pipeline_resolve.py::_pack_offers` reads the block pool's `packs` by its key off a dumped knob
+    model: the initializer should serve its packs as it serves `active`, but `optimizers/pools/members.py`
+    is hashed whole, so the method rides the next accepted treatment re-key.
+  - `potter/dispatch/facade.py::_by_field` spells a block's field as `entry.group[0]` beside
+    `domain/pool.py::BlockPool.part`; the facade is hashed whole, so it rides the same re-key.
+  - A named pack that leaves the shelf makes `BlockPoolInitializer.held` raise `block_pack_not_found`,
+    so the draft read itself fails instead of offering the pack to unname.
 - **Seen building the prompt workspace**:
   - An override cannot be removed, only overwritten: knob Reset writes the declared value and a cleared
     prompt field writes `""`, so the draft stays "edited". The overlay merge needs a delete.

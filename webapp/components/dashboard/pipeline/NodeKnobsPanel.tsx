@@ -8,10 +8,12 @@ import {
   type ManifestNodeOverlay,
   type OptimizerRoster,
   type OptimizerSetup,
+  type PoolFill,
   type PoolOffer,
   type PoolRow,
 } from "@/lib/api";
 import { knobRange, knobText, parseKnob } from "@/lib/derivations";
+import { promptField, promptFieldLabel } from "@/lib/prompt-fields";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
 import {
@@ -110,15 +112,12 @@ function KnobGroups({
   const declared = declaredLabel(entry);
   const isMain = (node: string, key: string) =>
     setup.main.some((ref) => ref.node === node && ref.knob === key);
-  // A pool initializer's knobs are its pool's card, never a loose group.
-  const initializers = new Set(setup.pools.map((p) => p.initializer));
   // Served in `main`'s order; the server refuses a manifest whose `main` names no member's knob.
   const main = setup.main.flatMap((ref) => {
     const row = setup.knobs.find((g) => g.node === ref.node)?.knobs.find((k) => k.key === ref.knob);
     return row ? [{ node: ref.node, knob: row }] : [];
   });
   const rest = setup.knobs
-    .filter((g) => !initializers.has(g.node))
     .map((g) => ({ ...g, knobs: g.knobs.filter((k) => !isMain(g.node, k.key)) }))
     .filter((g) => g.knobs.length > 0);
 
@@ -154,32 +153,23 @@ function KnobGroups({
         <h3 className="mech-card-title">Tested each round</h3>
         <p className="mech-group-desc">
           <span className="mech-num">{setup.arms_per_round}</span> arm
-          {setup.arms_per_round === 1 ? "" : "s"}, made by{" "}
-          {setup.proposers.map((node, i) => (
-            <span key={node}>
+          {setup.arms_per_round === 1 ? "" : "s"}:{" "}
+          {setup.proposers.map((p, i) => (
+            <span key={p.node}>
               {i > 0 ? " · " : null}
-              <code className="mech-code">{node}</code>
+              <Term
+                content={
+                  <p className="mech-card-text">
+                    Made by the <code className="mech-code">{p.node}</code> node.
+                  </p>
+                }
+              >
+                {p.makes}
+              </Term>
             </span>
           ))}
         </p>
-      </section>
-      <section className="mech-group">
-        <h3 className="mech-card-title">Draws from</h3>
-        {setup.pools.length === 0 ? (
-          <p className="mech-group-desc">No pool: every arm is written fresh.</p>
-        ) : (
-          <ul className="mech-pools">
-            {setup.pools.map((pool) => (
-              <PoolCard
-                key={pool.pool}
-                pool={pool}
-                knobs={setup.knobs.find((g) => g.node === pool.initializer)?.knobs}
-                declaredLabel={declared}
-                onChange={onChange}
-              />
-            ))}
-          </ul>
-        )}
+        <CandidateBorrows pools={setup.pools} onChange={onChange} />
       </section>
       {rest.length > 0 ? (
         <details className="mech-all">
@@ -273,73 +263,125 @@ function KnobItem({
   );
 }
 
-function PoolCard({
-  pool,
-  knobs,
-  declaredLabel,
-  onChange,
-}: {
-  pool: PoolRow;
-  // Its initializer's knobs; `active` is the chips, the rest (a block pool's `packs`) sit inline.
-  // Absent where its initializer declares none.
-  knobs: KnobRow[] | undefined;
-  declaredLabel: string;
-  onChange: OnChange;
-}) {
-  const own = knobs === undefined ? [] : knobs.filter((k) => k.key !== "active");
-  const readers = pool.drawn_by.reduce((n, d) => n + d.nodes.length, 0);
+// What a pool's entries are called, by where they come from.
+const POOL_NOUN: Record<PoolRow["source"], { one: string; many: string; inPlay: string }> = {
+  library: { one: "snippet", many: "snippets", inPlay: "Snippets in play" },
+  partition: { one: "row", many: "rows", inPlay: "Rows in play" },
+};
+
+function counted(n: number, noun: { one: string; many: string }): string {
+  return `${n} ${n === 1 ? noun.one : noun.many}`;
+}
+
+// Each pool is drawn at the arm's prompt parts it fills; one serving neither a fill nor a pack renders nothing.
+function CandidateBorrows({ pools, onChange }: { pools: PoolRow[]; onChange: OnChange }) {
+  const shown = pools.filter((p) => p.fills.length > 0 || p.packs.length > 0);
+  if (shown.length === 0) return null;
   return (
-    <li className="mech-pool">
-      <div className="mech-row-head">
-        <code className="mech-row-label mech-code">{pool.pool}</code>
-        <Badge>{pool.source}</Badge>
-      </div>
-      <details className="mech-fold">
-        <summary>
-          Read by {readers} node{readers === 1 ? "" : "s"} ·{" "}
-          {[...new Set(pool.drawn_by.map((d) => d.access))].join(" / ")}
-        </summary>
-        <ul className="mech-pool-readers">
-          {pool.drawn_by.map((d) => (
-            <li key={`${d.switch.node}.${d.switch.knob}`}>
-              <span className="mech-pool-access">{d.access}</span>
-              <span>{d.nodes.join(", ")}</span>
-              <small className="mech-row-node">
-                set by {d.switch.node}.{d.switch.knob}
-              </small>
-            </li>
-          ))}
-        </ul>
-      </details>
-      {pool.offered.length === 0 ? (
-        <p className="mech-row-desc">
-          {own.length > 0
-            ? "Nothing to draw under this config."
-            : "Its entries are drawn when the run starts."}
-        </p>
-      ) : (
-        <PoolPicker
-          pool={pool}
-          onActive={
-            onChange ? (active) => onChange({ [pool.initializer]: { config: { active } } }) : undefined
-          }
-        />
-      )}
-      {own.length > 0 ? (
-        <ul className="mech-list">
-          {own.map((k) => (
-            <KnobItem
-              key={k.key}
-              node={pool.initializer}
-              knob={k}
-              declaredLabel={declaredLabel}
-              onChange={onChange}
-            />
-          ))}
+    <div className="mech-borrow">
+      <p className="mech-borrow-lead">Each arm&apos;s prompt may borrow</p>
+      {shown.map((pool) => (
+        <PoolInPlace key={pool.pool} pool={pool} onChange={onChange} />
+      ))}
+    </div>
+  );
+}
+
+function PoolInPlace({ pool, onChange }: { pool: PoolRow; onChange: OnChange }) {
+  const noun = POOL_NOUN[pool.source];
+  const named = pool.packs.filter((p) => p.on).map((p) => p.name);
+  const setPacks = onChange
+    ? (packs: string[]) => onChange({ [pool.initializer]: { config: { packs } } })
+    : undefined;
+  const closed = pool.drawn_by.some((d) => d.access === "closed");
+  return (
+    <div className="mech-borrow-pool">
+      {pool.packs.length > 0 ? (
+        <div className="mech-borrow-packs">
+          <Term
+            content={
+              <p className="mech-card-text">
+                Libraries of prompt phrasings, installed here or banked from your own edits. The
+                optimizer is shown what a pack holds for each section below; phrasings earlier runs
+                on this kind of answer earned join them when the run starts.
+              </p>
+            }
+          >
+            {named.length === 0 ? "Add phrasings from a pack" : "Phrasings from"}
+          </Term>
+          <ChipGroup label="Snippet packs">
+            {pool.packs.map((p) => (
+              <Chip
+                key={p.name}
+                on={p.on}
+                disabled={!setPacks}
+                onClick={() =>
+                  setPacks?.(p.on ? named.filter((n) => n !== p.name) : [...named, p.name])
+                }
+              >
+                <span className="mech-offer">
+                  {p.name} <small>{p.entries}</small>
+                </span>
+              </Chip>
+            ))}
+          </ChipGroup>
+        </div>
+      ) : null}
+      {pool.fills.length > 0 ? (
+        <ul className="mech-fills" aria-label={`Where ${noun.many} land`}>
+          {pool.fills.map((f) => {
+            const { label: part, hint } = promptField(f.part);
+            return (
+              <li key={f.part} className="mech-fill">
+                <span className="mech-fill-part">
+                  {hint ? <Term content={hint}>{part}</Term> : part}
+                </span>
+                <Term className="mech-fill-count" content={fillTeaching(pool, f, part, closed)}>
+                  {f.most === null
+                    ? counted(f.entries, noun)
+                    : `up to ${f.most} of ${counted(f.entries, noun)}`}
+                </Term>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
-    </li>
+      {pool.offered.length > 0 ? (
+        <details className="mech-fold">
+          <summary>Pick {noun.many}</summary>
+          <PoolPicker
+            pool={pool}
+            onActive={
+              onChange
+                ? (active) => onChange({ [pool.initializer]: { config: { active } } })
+                : undefined
+            }
+          />
+          <ul className="mech-pool-readers" aria-label="Read by">
+            {pool.drawn_by.map((d) => (
+              <li key={`${d.switch.node}.${d.switch.knob}`}>
+                <span className="mech-pool-access">{d.access}</span>
+                <span>{d.nodes.join(", ")}</span>
+                <small className="mech-row-node">
+                  set by {d.switch.node}.{d.switch.knob}
+                </small>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
   );
+}
+
+function fillTeaching(pool: PoolRow, f: PoolFill, part: string, closed: boolean): string {
+  if (pool.source === "partition") {
+    const cap = f.most === null ? "some" : `up to ${f.most}`;
+    return `Rows of your data held out of scoring. The optimizer may attach ${cap} to an arm's prompt as worked examples, each with its answer.`;
+  }
+  return closed
+    ? `An arm's ${part.toLowerCase()} is one of these phrasings, word for word: the optimizer picks one and never writes its own.`
+    : `When the optimizer rewrites an arm's ${part.toLowerCase()}, it may reuse one of these phrasings as is, adapt one, or write its own.`;
 }
 
 // A lit chip is a path in play, lit from the served `active`; the last one stays lit, since a pool keeps at least one.
@@ -350,6 +392,7 @@ function PoolPicker({
   pool: PoolRow;
   onActive: ((active: string[]) => void) | undefined;
 }) {
+  const noun = POOL_NOUN[pool.source];
   const [all, setAll] = useState(false);
   const toggle = (path: string) =>
     onActive?.(
@@ -364,8 +407,14 @@ function PoolPicker({
         disabled={!onActive || (on && pool.active.length === 1)}
         onClick={() => toggle(o.path)}
       >
-        <span className={cx("mech-offer", o.kind === "group" && "is-group", o.kind === "entry" && "is-entry")}>
-          {o.label}
+        <span
+          className={cx(
+            "mech-offer",
+            (o.kind === "part" || o.kind === "source") && "is-group",
+            o.kind === "entry" && "is-entry",
+          )}
+        >
+          {o.kind === "part" ? promptFieldLabel(o.label) : o.label}
           {o.kind === "entry" ? null : <> <small>{o.entries}</small></>}
         </span>
       </Chip>
@@ -373,23 +422,22 @@ function PoolPicker({
   };
   const groups = pool.offered.filter((o) => o.kind !== "entry");
   const entries = pool.offered.filter((o) => o.kind === "entry");
+  const { inPlay } = noun;
   if (entries.length <= ENTRIES_INLINE) {
-    return (
-      <ChipGroup label={`${pool.pool} entries in play`}>{pool.offered.map(chip)}</ChipGroup>
-    );
+    return <ChipGroup label={inPlay}>{pool.offered.map(chip)}</ChipGroup>;
   }
   const shown = all ? entries : entries.slice(0, ENTRIES_FIRST);
   return (
     <>
-      <ChipGroup label={`${pool.pool} entries in play`}>{groups.map(chip)}</ChipGroup>
+      <ChipGroup label={inPlay}>{groups.map(chip)}</ChipGroup>
       <details className="mech-fold">
         <summary>
-          {entries.length} entries, one by one
+          {counted(entries.length, noun)}, one by one
           {entries.some((o) => pool.active.includes(o.path))
             ? ` · ${entries.filter((o) => pool.active.includes(o.path)).length} picked`
             : ""}
         </summary>
-        <ChipGroup label={`${pool.pool} entries`}>{shown.map(chip)}</ChipGroup>
+        <ChipGroup label={`${inPlay}, one by one`}>{shown.map(chip)}</ChipGroup>
         {entries.length > shown.length ? (
           <Button variant="ghost" onClick={() => setAll(true)}>
             Show all {entries.length}

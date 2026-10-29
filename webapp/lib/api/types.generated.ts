@@ -2167,7 +2167,8 @@ export interface ManifestNodeOverlay {
 export interface OptimizerSetup {
   /** The knobs a setup surface leads with, in order */
   main: KnobRef[];
-  /** Every member taking a knob, in declared order */
+  /** Every member taking a knob, in declared order, but a pool initializer: its
+   * knobs are its `pools` row */
   knobs: NodeKnobs[];
   /** By node, each node running a prompt; a node naming no `prompt_family` has no
    * entry */
@@ -2176,7 +2177,7 @@ export interface OptimizerSetup {
   arms_per_round: number;
   /** The nodes making each round's arms under this config, in walk order: one that
    * opens or adds arms and adds none here is off, and absent */
-  proposers: string[];
+  proposers: ProposerRow[];
   /** What the members draw from */
   pools: PoolRow[];
 }
@@ -2246,6 +2247,13 @@ export interface OptimizerNodePrompt {
   versions_declared: number;
 }
 
+export interface ProposerRow {
+  /** The manifest node making the arms */
+  node: string;
+  /** What its arms are, in plain words: the manifest node's `makes` */
+  makes: string;
+}
+
 export interface PoolRow {
   /** The pool's state kind, e.g. `block_pool` */
   pool: string;
@@ -2261,16 +2269,25 @@ export interface PoolRow {
    * before that split is known */
   offered: PoolOffer[];
   drawn_by: PoolDraw[];
+  /** The candidate parts its entries in play reach under this config, in render
+   * order, shots last: empty where no member draws it or nothing is in play,
+   * and then a surface draws the pool nowhere */
+  fills: PoolFill[];
+  /** The block packs it may draw from, the install's and the account's, in name
+   * order; none for a pool no pack feeds or no member draws, and none before
+   * the facts a Start mints against are known */
+  packs: PackOffer[];
 }
 
 /** One path an initializer's `active` knob may name, with what it keeps. */
 export interface PoolOffer {
   /** The value to write into `active` */
   path: string;
-  /** `all` is `*`, `group` a leading run of an entry's group, `entry` one entry by
-   * id */
-  kind: 'all' | 'group' | 'entry';
-  /** What the path reads as: a group's last segment, an entry's text cut short */
+  /** `all` is `*`, `part` a block's field, `source` the run of that field from one
+   * source, `entry` one entry by id */
+  kind: 'all' | 'part' | 'source' | 'entry';
+  /** What the path reads as: a part's field key, labelled as a fill's part is; a
+   * source in plain words; an entry's text cut short */
   label: string;
   /** How many entries the path keeps */
   entries: number;
@@ -2287,6 +2304,27 @@ export interface PoolDraw {
    * critique, L2 and L3 read it as `l1_generate` is shown it, to lay out what
    * L1 sees */
   nodes: string[];
+}
+
+/** One part of a candidate a pool's entries in play reach: the place a surface draws the pool. */
+export interface PoolFill {
+  /** A prompt field a target prompt node opens to search, or `shots` */
+  part: string;
+  /** How many entries in play land there */
+  entries: number;
+  /** The most one candidate carries there: the shots any member writing them may
+   * attach; null for a field, whose text a candidate takes or adapts */
+  most: number | null;
+}
+
+/** One block pack this account reads, as a pool's `packs` knob names it. */
+export interface PackOffer {
+  /** The value `packs` holds for it */
+  name: string;
+  /** The pool entries it holds that this run admits, one per part a snippet suits */
+  entries: number;
+  /** Whether `packs` names it under this config */
+  on: boolean;
 }
 
 /** The graph projection derived from a manifest's nodes and pipelines; no manifest declares one. */

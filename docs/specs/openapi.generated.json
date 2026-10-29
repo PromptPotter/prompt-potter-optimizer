@@ -11136,7 +11136,7 @@
             "type": "integer"
           },
           "knobs": {
-            "description": "Every member taking a knob, in declared order",
+            "description": "Every member taking a knob, in declared order, but a pool initializer: its knobs are its `pools` row",
             "items": {
               "$ref": "#/components/schemas/NodeKnobs"
             },
@@ -11170,7 +11170,7 @@
           "proposers": {
             "description": "The nodes making each round's arms under this config, in walk order: one that opens or adds arms and adds none here is off, and absent",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ProposerRow"
             },
             "title": "Proposers",
             "type": "array"
@@ -11628,6 +11628,34 @@
           "n"
         ],
         "title": "OwnLevel",
+        "type": "object"
+      },
+      "PackOffer": {
+        "additionalProperties": false,
+        "description": "One block pack this account reads, as a pool's `packs` knob names it.",
+        "properties": {
+          "entries": {
+            "description": "The pool entries it holds that this run admits, one per part a snippet suits",
+            "title": "Entries",
+            "type": "integer"
+          },
+          "name": {
+            "description": "The value `packs` holds for it",
+            "title": "Name",
+            "type": "string"
+          },
+          "on": {
+            "description": "Whether `packs` names it under this config",
+            "title": "On",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "entries",
+          "on"
+        ],
+        "title": "PackOffer",
         "type": "object"
       },
       "PairGuard": {
@@ -12180,6 +12208,41 @@
         "title": "PoolDraw",
         "type": "object"
       },
+      "PoolFill": {
+        "additionalProperties": false,
+        "description": "One part of a candidate a pool's entries in play reach: the place a surface draws the pool.",
+        "properties": {
+          "entries": {
+            "description": "How many entries in play land there",
+            "title": "Entries",
+            "type": "integer"
+          },
+          "most": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most one candidate carries there: the shots any member writing them may attach; null for a field, whose text a candidate takes or adapts",
+            "title": "Most"
+          },
+          "part": {
+            "description": "A prompt field a target prompt node opens to search, or `shots`",
+            "title": "Part",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part",
+          "entries",
+          "most"
+        ],
+        "title": "PoolFill",
+        "type": "object"
+      },
       "PoolOffer": {
         "additionalProperties": false,
         "description": "One path an initializer's `active` knob may name, with what it keeps.",
@@ -12190,17 +12253,18 @@
             "type": "integer"
           },
           "kind": {
-            "description": "`all` is `*`, `group` a leading run of an entry's group, `entry` one entry by id",
+            "description": "`all` is `*`, `part` a block's field, `source` the run of that field from one source, `entry` one entry by id",
             "enum": [
               "all",
-              "group",
+              "part",
+              "source",
               "entry"
             ],
             "title": "Kind",
             "type": "string"
           },
           "label": {
-            "description": "What the path reads as: a group's last segment, an entry's text cut short",
+            "description": "What the path reads as: a part's field key, labelled as a fill's part is; a source in plain words; an entry's text cut short",
             "title": "Label",
             "type": "string"
           },
@@ -12237,6 +12301,14 @@
             "title": "Drawn By",
             "type": "array"
           },
+          "fills": {
+            "description": "The candidate parts its entries in play reach under this config, in render order, shots last: empty where no member draws it or nothing is in play, and then a surface draws the pool nowhere",
+            "items": {
+              "$ref": "#/components/schemas/PoolFill"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
           "initializer": {
             "description": "The run-init node writing it once, before round 0",
             "title": "Initializer",
@@ -12248,6 +12320,14 @@
               "$ref": "#/components/schemas/PoolOffer"
             },
             "title": "Offered",
+            "type": "array"
+          },
+          "packs": {
+            "description": "The block packs it may draw from, the install's and the account's, in name order; none for a pool no pack feeds or no member draws, and none before the facts a Start mints against are known",
+            "items": {
+              "$ref": "#/components/schemas/PackOffer"
+            },
+            "title": "Packs",
             "type": "array"
           },
           "pool": {
@@ -12266,7 +12346,9 @@
           "initializer",
           "active",
           "offered",
-          "drawn_by"
+          "drawn_by",
+          "fills",
+          "packs"
         ],
         "title": "PoolRow",
         "type": "object"
@@ -12604,6 +12686,27 @@
           "individual"
         ],
         "title": "Proposed",
+        "type": "object"
+      },
+      "ProposerRow": {
+        "additionalProperties": false,
+        "properties": {
+          "makes": {
+            "description": "What its arms are, in plain words: the manifest node's `makes`",
+            "title": "Makes",
+            "type": "string"
+          },
+          "node": {
+            "description": "The manifest node making the arms",
+            "title": "Node",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "makes"
+        ],
+        "title": "ProposerRow",
         "type": "object"
       },
       "Provenance": {

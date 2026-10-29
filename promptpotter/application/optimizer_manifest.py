@@ -90,6 +90,8 @@ def _stamp(path: Path) -> int:
 class ManifestNode(FrozenModel):
     type: NodeKind
     description: str | None = None
+    # What a proposer's arms are, in plain words, as a setup surface names them; prose, so no treatment reads it.
+    makes: str | None = None
     # The backend-shaped menu of the node's searchable params (`pipeline_parsing.py`).
     optimizer: dict[str, Any] | None = None
     config: dict[str, Any] = Field(default_factory=dict)
@@ -474,6 +476,15 @@ class SelectedOptimizer:
     def declared_knobs(self, name: str) -> StrictModel:
         return _knobs(name, self.node(name).kind, self.file_config(name))
 
+    def makes(self, proposer: Proposer) -> str:
+        """What *proposer*'s arms are, in plain words; the load refuses a `default` proposer declaring none."""
+        if (makes := self.manifest.nodes[proposer.name].makes) is None:
+            raise ValueError(
+                f"optimizer {self.name!r} walks proposer {proposer.name!r} in `default`, which "
+                "declares no `makes`."
+            )
+        return makes
+
     @property
     def members(self) -> tuple[NodeMember, ...]:
         return tuple(map(optimizers.NODE_MEMBERS.get, self.member_nodes))
@@ -606,7 +617,7 @@ class SelectedOptimizer:
                             "version": True,
                             "paper": True,
                             "main": True,
-                            "nodes": {"__all__": {"description"}},
+                            "nodes": {"__all__": {"description", "makes"}},
                         },
                     ),
                     {n: self.knobs(n).model_dump(mode="json") for n in self.member_nodes},
@@ -677,17 +688,33 @@ _CALL_CONFIG_KEYS: frozenset[str] = (
 
 
 def _refuse_unknown_main(selected: SelectedOptimizer) -> None:
+    initializers = {initializer.name for initializer in selected.plan.initializers}
     for ref in selected.manifest.main:
         node, _, knob = ref.partition(".")
         held = (
             node in selected.member_nodes
+            and node not in initializers
             and knob in optimizers.NODE_MEMBERS.get(node).knobs.model_fields
         )
         if not held:
             raise ValueError(
                 f"optimizer {selected.name!r} leads with {ref!r} in `main`, which is no "
-                "`node.knob` of a member it walks."
+                "`node.knob` of a member it walks, a pool initializer's aside: those are its pool's."
             )
+
+
+def _refuse_unnamed_arms(selected: SelectedOptimizer) -> None:
+    # At load, so a setup surface never meets a proposer it cannot name.
+    for proposer in selected.plan.proposers:
+        selected.makes(proposer)
+    proposers = {proposer.name for proposer in selected.plan.proposers}
+    if strays := sorted(
+        n for n, node in selected.manifest.nodes.items() if node.makes and n not in proposers
+    ):
+        raise ValueError(
+            f"optimizer {selected.name!r} declares `makes` on {strays}, which `default` walks as "
+            "no proposer."
+        )
 
 
 def _refuse_unknown_llm_keys(selected: SelectedOptimizer) -> None:
@@ -833,6 +860,7 @@ def _select(
         ):
             selected.knobs(declared_node.name)
     _refuse_unknown_main(selected)
+    _refuse_unnamed_arms(selected)
     _refuse_unknown_llm_keys(selected)
     if refused := selected.pool_refusals(mint=None):
         raise ValueError("; ".join(refused))

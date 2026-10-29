@@ -36,6 +36,7 @@ nodes:
   # every optimizer on one model, both routes included.
   levi_refine:
     type: llm
+    makes: refinements
     config:
       prompt_family: levi_refine
       prompt_version: 1
@@ -59,6 +60,7 @@ nodes:
   # the paper's: the model — its Gemini 3 Flash (App. A) costs over 20x the bench's one model.
   levi_paradigm_shift:
     type: llm
+    makes: paradigm shifts
     config:
       prompt_family: levi_paradigm_shift
       prompt_version: 1

@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Annotated, ClassVar, Literal
 from pydantic import Field
 
 from promptpotter.domain.optimizer_state import StateSlice
-from promptpotter.domain.prompt_block import snippet_id
+from promptpotter.domain.prompt_block import AUTHORED_SOURCE, snippet_id
+from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
@@ -50,7 +51,7 @@ class PoolEntry(FrozenModel):
     text: str
 
 
-OfferKind = Literal["all", "group", "entry"]
+OfferKind = Literal["all", "part", "source", "entry"]
 
 _LABEL_CHARS = 72
 
@@ -60,12 +61,23 @@ class PoolOffer(FrozenModel):
 
     path: str = Field(description="The value to write into `active`")
     kind: OfferKind = Field(
-        description="`all` is `*`, `group` a leading run of an entry's group, `entry` one entry by id"
+        description="`all` is `*`, `part` a block's field, `source` the run of that field from one "
+        "source, `entry` one entry by id"
     )
     label: str = Field(
-        description="What the path reads as: a group's last segment, an entry's text cut short"
+        description="What the path reads as: a part's field key, labelled as a fill's part is; a "
+        "source in plain words; an entry's text cut short"
     )
     entries: int = Field(description="How many entries the path keeps")
+
+
+def _source_words(source: str) -> str:
+    """A block's source in plain words: a cited work's source is its arXiv id."""
+    if source == AUTHORED_SOURCE:
+        return "Written by hand"
+    if source == EARNED_SOURCE:
+        return "Earned in past runs"
+    return f"arXiv {source}"
 
 
 def offers(entries: Sequence[PoolEntry]) -> list[PoolOffer]:
@@ -83,9 +95,13 @@ def offers(entries: Sequence[PoolEntry]) -> list[PoolOffer]:
             run = entry.group[:depth]
             if run not in placed:
                 placed.add(run)
+                part = depth == 1
                 out.append(
                     PoolOffer(
-                        path="/".join(run), kind="group", label=run[-1], entries=len(runs[run])
+                        path="/".join(run),
+                        kind="part" if part else "source",
+                        label=run[0] if part else _source_words(run[-1]),
+                        entries=len(runs[run]),
                     )
                 )
         text = " ".join(entry.text.split())
@@ -122,6 +138,11 @@ class Pool(StateSlice, kind=None):
     def drawn(self, demo: Mapping[str, Sample], /) -> tuple[object, ...]:
         """Its entries in draw order, read off this slice and the cycle's demo split alone."""
 
+    @classmethod
+    @abstractmethod
+    def part(cls, entry: PoolEntry) -> str:
+        """The part of a candidate the entry lands in: a prompt field, or the shots."""
+
 
 class BlockPool(Pool, kind="block_pool"):
     source: ClassVar[PoolSource] = PoolSource.LIBRARY
@@ -131,6 +152,10 @@ class BlockPool(Pool, kind="block_pool"):
     def drawn(self, _demo: Mapping[str, Sample]) -> tuple[PoolEntry, ...]:
         return self.entries
 
+    @classmethod
+    def part(cls, entry: PoolEntry) -> str:
+        return entry.group[0]
+
 
 class DemoPool(Pool, kind="demo_pool"):
     source: ClassVar[PoolSource] = PoolSource.PARTITION
@@ -138,3 +163,7 @@ class DemoPool(Pool, kind="demo_pool"):
 
     def drawn(self, demo: Mapping[str, Sample]) -> tuple[Sample, ...]:
         return tuple(demo[key] for key in self.keys)
+
+    @classmethod
+    def part(cls, _entry: PoolEntry) -> str:
+        return SHOTS_KEY

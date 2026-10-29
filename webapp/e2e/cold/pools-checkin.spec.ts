@@ -105,6 +105,11 @@ test.describe("the check-in's pools and recombination host", () => {
     const pool = (await served(request)).optimizer_setup.pools.find((p) => p.pool === "block_pool");
     const authored = pool?.offered.find((o) => o.path === "instruction/authored");
     expect(authored?.entries, "the pack's two snippets are not offered").toBe(2);
+    expect(pool?.packs.find((p) => p.name === PACK)?.on, "the named pack is not served on").toBe(true);
+    expect(
+      pool?.fills.find((f) => f.part === "instruction")?.entries,
+      "the pack's snippets do not reach the candidate's instruction",
+    ).toBe(2);
   });
 
   test("the browser switches the host and narrows the pool, and the draft reads both back", async ({
@@ -119,8 +124,16 @@ test.describe("the check-in's pools and recombination host", () => {
     const all = { name: /^All entries / };
 
     await optimizerStep(page);
+    // The pool is drawn where it lands: its pack lit, and the candidate part it fills.
+    await expect(
+      page.getByRole("group", { name: "Snippet packs" }).getByRole("button", { name: new RegExp(`^${PACK}\\b`) }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.getByRole("list", { name: "Where snippets land" }).getByRole("listitem").filter({ hasText: "Instructions" }),
+    ).toContainText("2 snippets");
     await page.getByRole("combobox", { name: "recombination_host" }).selectOption("l2_context");
-    const pool = page.getByRole("group", { name: "block_pool entries in play" });
+    await page.locator("summary", { hasText: "Pick snippets" }).click();
+    const pool = page.getByRole("group", { name: "Snippets in play" });
     await pool.getByRole("button", chip).click();
     // Lit from the served draft, so this waits on the write landing before `*` comes off.
     await expect(pool.getByRole("button", chip)).toHaveAttribute("aria-pressed", "true");
@@ -136,8 +149,9 @@ test.describe("the check-in's pools and recombination host", () => {
 
     await optimizerStep(page);
     await expect(page.getByRole("combobox", { name: "recombination_host" })).toHaveValue("l2_context");
+    await page.locator("summary", { hasText: "Pick snippets" }).click();
     await expect(
-      page.getByRole("group", { name: "block_pool entries in play" }).getByRole("button", chip),
+      page.getByRole("group", { name: "Snippets in play" }).getByRole("button", chip),
     ).toHaveAttribute("aria-pressed", "true");
   });
 });

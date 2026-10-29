@@ -41,6 +41,7 @@ nodes:
   # is main is only the order `capo_crossover` names them in.
   mating:
     type: algorithm
+    makes: crossovers
     config:
       offspring: 4
       donor_from: population
@@ -50,6 +51,7 @@ nodes:
   # under (App. C.1).
   capo_crossover:
     type: llm
+    makes: merged prompts
     config:
       prompt_family: capo_crossover
       prompt_version: 1
@@ -64,9 +66,11 @@ nodes:
   # A child's shots are a sample of its parents' union, as many as their mean count (§4).
   shot_crossover:
     type: algorithm
+    makes: mixed examples
     config: {}
   capo_mutate:
     type: llm
+    makes: mutations
     config:
       prompt_family: capo_mutate
       prompt_version: 1
@@ -80,11 +84,13 @@ nodes:
   # k_max = 5 (App. C.4); the shot mutation adds, drops or keeps one shot, then shuffles (§4).
   few_shot:
     type: algorithm
+    makes: example tweaks
     config:
       k_max: 5
   # The race runs over the population and its offspring together (Alg. 1 line 12).
   population_rejoin:
     type: algorithm
+    makes: the standing population
     config: {}
   # α = 0.2 (App. C.4); a paired t-test, uncorrected (§4).
   paired_t:

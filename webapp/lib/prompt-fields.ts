@@ -15,7 +15,7 @@ const PROMPT_FIELD: Record<string, PromptFieldMeta> = {
   thinking_style: { label: "Thinking style", hint: "How to reason before answering", rows: 2 },
   answer_format: { label: "Answer format", hint: "Exact shape of the output", rows: 2 },
   // Not decomposition fields, but they ride the same dict.
-  shots: { label: "Shots" },
+  shots: { label: "Worked examples", hint: "Rows of your data shown with their answers" },
   plan: { label: "Plan" },
 };
 

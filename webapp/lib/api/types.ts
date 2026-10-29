@@ -106,6 +106,8 @@ export type {
   NodeKnobs,
   OptimizerRoster,
   OptimizerSetup,
+  PackOffer,
+  PoolFill,
   PoolOffer,
   PoolRow,
   MeResponse,
