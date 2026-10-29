@@ -376,6 +376,12 @@ word's `git grep -c` for that sense is 0.
   `gate.py` (and through it `tests_owning`, `yaml`) in every child, while `OFFLINE_RUN_READS` names
   neither file. Fan-out sizing sits beside `processes.py::free_mb`. **Re-test:**
   `git grep -n "from gate import" -- scripts`.
+- **A killed push leaves live links into the main tree.** `gate.py::_tip_checkout` links `.venv`,
+  `webapp/node_modules` and `.gate_cache` into `%TEMP%\pp-push-*`. A hard kill skips the unlink, so the
+  temp dir keeps junctions that a later recursive temp delete could follow. Action: the next `--push`
+  sweeps stale `pp-push-*` (unlink, then `git worktree prune`). Also: the green store keeps one key per
+  check name, so a tip's offline-run green overwrites the working tree's own, and the two take turns
+  rerunning. **Re-test:** kill a push mid-run, then run `--push` again and list `%TEMP%\pp-push-*`.
 - **The offline legs rest on fake-data draws keyed by the whole node config**
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.
