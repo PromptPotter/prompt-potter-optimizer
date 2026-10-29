@@ -58,8 +58,8 @@ logger = logging.getLogger(__name__)
 
 
 class QuotaExceededError(PotterError):
-    """A user-scoped abuse limit blocked a launch — 429, as against ``LaunchError``'s 422 for a malformed
-    or unowned request. Both map to one HTTP response through the ``PotterError`` seam."""
+    """A user-scoped abuse limit refused a request — 429, as against ``LaunchError``'s 422 for a malformed
+    or unowned one. Both map to one HTTP response through the ``PotterError`` seam."""
 
     http_status = 429
 
@@ -72,19 +72,36 @@ class QuotaExceededError(PotterError):
 _rate_buckets: dict[str, tuple[float, float]] = {}  # bucket key → (tokens, last_refill_ts)
 _rate_lock = threading.Lock()
 
+# Sized above two tabs of `webapp/lib/cadence.ts`'s polls; re-derive when a poll is added.
+_READ_BURST = 60.0
+_READ_PER_S = 6.0
 
-def _consume_rate_token(bucket: str) -> bool:
+
+def _consume_rate_token(bucket: str, *, burst: float, per_s: float) -> bool:
     now = time.monotonic()
-    burst = float(settings.USER_RATE_BURST)
-    refill_per_sec = settings.USER_RATE_PER_MIN / 60.0
     with _rate_lock:
         tokens, last = _rate_buckets.get(bucket, (burst, now))
-        tokens = min(burst, tokens + (now - last) * refill_per_sec)
+        tokens = min(burst, tokens + (now - last) * per_s)
         if tokens < 1.0:
             _rate_buckets[bucket] = (tokens, now)
             return False
         _rate_buckets[bucket] = (tokens - 1.0, now)
         return True
+
+
+def _consume_launch_token(bucket: str) -> bool:
+    return _consume_rate_token(
+        bucket, burst=settings.USER_RATE_BURST, per_s=settings.USER_RATE_PER_MIN / 60.0
+    )
+
+
+def refuse_read_rate(principal_id: str) -> None:
+    """Only a read is metered here: it is what a poll repeats."""
+    if not _consume_rate_token(f"read:{principal_id}", burst=_READ_BURST, per_s=_READ_PER_S):
+        raise QuotaExceededError(
+            code="rate_limited",
+            message="Too many reads, faster than the dashboard polls; slow down and retry shortly.",
+        )
 
 
 def check_launch_quotas(
@@ -93,7 +110,7 @@ def check_launch_quotas(
     """Runs BEFORE ``JobRegistry.request_slot``, same gate: it counts prior launches, not this one."""
     # A fresh mint, a check-in's Start included, names no cycle yet.
     rate_limited = not spends_the_hosts_own_key(stores) and hop == UNRESOLVED_HOP
-    if rate_limited and not _consume_rate_token(user.user_id):
+    if rate_limited and not _consume_launch_token(f"launch:{user.user_id}"):
         raise QuotaExceededError(
             code="rate_limited",
             message="Too many campaign launches; slow down and retry shortly.",
@@ -525,7 +542,9 @@ def launch_usd_bound(stores: Stores) -> float | None:
 
 def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
     # The host is exempt in the RATE arm too: the meter bounds a stranger on the host's key.
-    if not spends_the_hosts_own_key(stores) and not _consume_rate_token(f"{bucket}:{user.user_id}"):
+    if not spends_the_hosts_own_key(stores) and not _consume_launch_token(
+        f"{bucket}:{user.user_id}"
+    ):
         raise QuotaExceededError(
             code="rate_limited",
             message=f"Too many {bucket} requests; slow down and retry shortly.",

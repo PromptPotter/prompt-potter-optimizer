@@ -38,6 +38,7 @@ from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.presentation.admin_bot import check_health_and_tell, notify_operator
 from promptpotter.presentation.api.deps import (
+    admit_session,
     auth_is_open,
     build_stores_from_identity,
     require_site_records_token,
@@ -294,15 +295,15 @@ async def health_check() -> HealthResponse:
 # Each router's gate is applied at its mount, so no route under it can forget one; `None` is public.
 API_ROUTERS: tuple[tuple[APIRouter, Callable[..., object] | None], ...] = (
     (_health, None),
-    (backends_router, resolve_identity),
-    (campaigns_router, resolve_identity),
-    (active_router, resolve_identity),
-    (hierarchy_router, resolve_identity),
-    (datasets_router, resolve_identity),
-    (origins_router, resolve_identity),
-    (commands_router, resolve_identity),
+    (backends_router, admit_session),
+    (campaigns_router, admit_session),
+    (active_router, admit_session),
+    (hierarchy_router, admit_session),
+    (datasets_router, admit_session),
+    (origins_router, admit_session),
+    (commands_router, admit_session),
     (auth_flow_router, None),
-    (auth_router, resolve_identity),
+    (auth_router, admit_session),
     (site_records_router, require_site_records_token),
 )
 for _router, _gate in API_ROUTERS:

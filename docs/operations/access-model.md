@@ -186,6 +186,7 @@ rate limit and the host's wallet — are external and singular, so cost is bound
 | Share of the provider's 60 s window | derived per call (`infrastructure/llm/send_pacing.py`) | Yes — least-served tenant next |
 | Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | No |
 | What an account may ever spend | the free-tier ceilings, both units | No |
+| Reads one principal may poll | `quota.py::refuse_read_rate`, a token bucket sized above the webapp's polls, at `deps.py::admit_session` (429 `rate_limited`) | No |
 
 **The first gate WAITS; the third refuses.** A full machine queues the launch
 (`JobRegistry.request_slot`), drained least-served-first — the provider window's rule, so one idea —
