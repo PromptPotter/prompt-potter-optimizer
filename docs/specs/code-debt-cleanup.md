@@ -231,6 +231,27 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   malformed `pack.json`, and a name both roots hold raises `block_pack_collision`. Either one is a 500
   or 409 for every `GET /library` and every draft edit, not just for that pack. Seen: the e2e fixture
   kept the old `Authored` shape. Action: refuse the pack, serve the rest.
+- **A pack's on-disk shape moved with nothing to migrate it.** `Authored.version: int` and a required
+  `supersedes` landed with the packs commit. The account's `starter` pack still held git-sha versions,
+  so `GET /library` returned 500 until it was migrated by hand (2026-10-29). `gate.py`'s `restamp` check
+  guards ledger records only. Action: packs ride the same shape-moved check, or `restamp` migrates them.
+  The live box holds packs too. **Re-test:** change a field of `Authored` and see the gate name the packs.
+- **A selection is still made in three places outside a launch.** `config_map`, `draft_patch` and
+  `checkin` each call `select_optimizer` themselves. The launch path now resolves one selection and
+  hands it down.
+- **`CommandAckRecord.effect` is typed, but nothing reads it.** A writer with no reader is not a state:
+  serve it or delete it.
+- **`embedded_run.run_campaign` steers one branch with two flags:** a `None` `declaration` plus
+  `assert resumed is not None`.
+- **A moved capability or backend revision alone passes a resume.** It is named as a drift cause only
+  when the origin hash also mismatches.
+- **`round_cells` has two meanings for one draw:** potter's unclamped value, read by L4, verify and the
+  overlap, and the backbone's ceiling panel, clamped to the search split. Also, `RoundPlan.walk` and
+  `round_walks` each decide which walk counts as a round of its own.
+- **`gate.py --only` queues behind other worktrees' gates** (`queue_behind_siblings`), so one
+  regeneration waits minutes. `scripts/build_ts_types.py` cannot run under `-m`, because it imports
+  `processes` from `scripts/`. A bare `mypy` run shows errors in `evidence/subjects.py` and
+  `tests/test_scoring.py` that the gate's mypy passes.
 - **The library's duplicate-text check is written twice**: `application/library.py::bank_snippet` (a
   no-op) and `infrastructure/store/account_packs.py::bank_into_account_pack` (under the lock).
   `SnippetLibrary`'s empty copy still says "installed".
