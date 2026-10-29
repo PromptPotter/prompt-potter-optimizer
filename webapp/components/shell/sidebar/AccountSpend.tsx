@@ -1,25 +1,25 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { Term } from "@/components/ui";
-import { quotaRead } from "@/lib/api";
-import { QUOTA_POLL_MS } from "@/lib/cadence";
+import { couponRead } from "@/lib/api";
+import { COUPON_POLL_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
-import { allowanceCaveats, billText } from "@/lib/derivations";
-import { cssPct, fmtUsd } from "@/lib/format";
+import { allowanceCaveats, billText, couponFaceText, couponLeftText } from "@/lib/derivations";
+import { cssPct } from "@/lib/format";
 import { shownData, useRead } from "@/lib/hooks/useRead";
 import { invalidateReads } from "@/lib/read-cache";
 import { useRegistry } from "@/lib/state/registry";
 
 export function AccountSpend() {
   const { entries } = useRegistry();
-  const read = useRead(quotaRead(), { auth: true, intervalMs: QUOTA_POLL_MS });
+  const read = useRead(couponRead(), { auth: true, intervalMs: COUPON_POLL_MS });
 
   const signature = entries.map((c) => c.facts.spend_lifetime.billed_usd).join(",");
   const asked = useRef(signature);
   useEffect(() => {
     if (asked.current === signature) return;
     asked.current = signature;
-    invalidateReads("quota");
+    invalidateReads("coupon");
   }, [signature]);
 
   if (read.status === "idle") return null;
@@ -35,25 +35,25 @@ export function AccountSpend() {
     );
   }
 
-  const cap = data.spend_budget_usd_total;
-  const lifetime = data.spend_lifetime;
-  const floor = lifetime.bill_is_floor;
-  const billed = fmtUsd(lifetime.billed_usd);
-  const exhausted = data.allowance_exhausted;
-  const fill = data.spend_budget_used_share;
+  const host = data.host_key_spend;
+  const own = data.own_key_spend;
+  // A retired coupon serves `exhausted` too, but nothing is wrong: the account sends on its own keys.
+  const exhausted = !data.host && !data.void && data.exhausted;
+  const fill = data.used_share;
 
   const explain = (
     <div className="account-spend-explain">
       <p>
-        <strong>{floor ? `At least ${billed}` : billed}</strong> billed by providers across every
-        campaign this account has run, deleted ones included.
+        <strong>{billText(host.billed_usd, host.bill_is_floor)}</strong> billed on the host&rsquo;s
+        keys and <strong>{billText(own.billed_usd, own.bill_is_floor)}</strong> on your own, across
+        every campaign this account has run, deleted ones included.
       </p>
       <p>
-        {cap === null
-          ? "No allowance applies: this account runs on the box's own provider key."
-          : `The allowance is ${fmtUsd(cap)} for the life of the account${exhausted ? ", and it is used up — every result stays readable." : "."}`}
+        {data.host
+          ? "No allowance applies: this account runs the box, on its own provider keys."
+          : `The host's allowance for the life of the account: ${couponLeftText(data)} (${couponFaceText(data)}). Your own keys never draw it — add one under Account → API keys.`}
       </p>
-      {allowanceCaveats(lifetime).map((line) => (
+      {allowanceCaveats(host).map((line) => (
         <p key={line}>{line}</p>
       ))}
     </div>
@@ -61,14 +61,18 @@ export function AccountSpend() {
 
   return (
     <div className={cx("account-spend", exhausted && "account-spend-exhausted")}>
-      <span className="account-spend-label">{exhausted ? "Allowance used up" : "Spend"}</span>
-      <span className="account-spend-cap">
-        {cap === null ? "no allowance" : `of ${fmtUsd(cap)}`}
+      <span className="account-spend-label">
+        {data.host
+          ? "Spend"
+          : data.void
+            ? "Allowance retired"
+            : exhausted
+              ? "Allowance used up"
+              : "Allowance"}
       </span>
+      <span className="account-spend-cap">{couponFaceText(data)}</span>
       <Term className="account-spend-reading" content={explain}>
-        <span className="account-spend-value">
-          {billText(lifetime.billed_usd, floor)}
-        </span>
+        <span className="account-spend-value">{billText(host.billed_usd, host.bill_is_floor)}</span>
       </Term>
       {fill !== null ? (
         <span className="account-spend-bar" aria-hidden="true">

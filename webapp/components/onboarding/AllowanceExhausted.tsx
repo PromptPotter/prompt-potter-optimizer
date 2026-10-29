@@ -4,14 +4,16 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/state/auth";
 import { Dialog } from "@/components/ui";
-import { quotaRead } from "@/lib/api";
+import { couponRead } from "@/lib/api";
 import { fmtUsd } from "@/lib/format";
 import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
 import { readyData, useRead } from "@/lib/hooks/useRead";
+import { useWorkspace } from "@/lib/workspace";
 
 export function AllowanceExhausted() {
   const { status, me } = useAuth();
-  const quota = readyData(useRead(quotaRead(), { auth: true }));
+  const { openAccount } = useWorkspace();
+  const coupon = readyData(useRead(couponRead(), { auth: true }));
   const [dismissed, setDismissed] = useState(() => {
     try {
       return window.localStorage.getItem(STORAGE_KEYS.allowanceExhaustedDismissed) === "1";
@@ -20,7 +22,13 @@ export function AllowanceExhausted() {
     }
   });
 
-  const open = status === "authed" && !!me && quota?.allowance_exhausted === true && !dismissed;
+  // An account holding a key of its own still sends on it, so the coupon running out stops nothing it asked for.
+  const open =
+    status === "authed" &&
+    !!me &&
+    coupon?.exhausted === true &&
+    coupon.keys.length === 0 &&
+    !dismissed;
 
   if (!open) return null;
 
@@ -33,6 +41,11 @@ export function AllowanceExhausted() {
     setDismissed(true);
   };
 
+  const onAddKey = () => {
+    onDismiss();
+    openAccount("keys");
+  };
+
   return (
     <Dialog open onClose={onDismiss} labelledBy="allowance-exhausted-title" bare>
       <div className="account-modal consent-modal">
@@ -43,16 +56,19 @@ export function AllowanceExhausted() {
         <div className="account-pane-body">
           <p className="auth-note">
             You ran PromptPotter to the end of what I set aside for it &mdash;{" "}
-            <strong>{fmtUsd(quota.spend_lifetime.billed_usd)}</strong> of real model spend, on my key.
-            Nothing here is taken away: every campaign you ran, every round it scored and every
+            <strong>{fmtUsd(coupon.host_key_spend.billed_usd)}</strong> of real model spend, on my
+            key. Nothing here is taken away: every campaign you ran, every round it scored and every
             prompt it wrote stays yours to read and export.
           </p>
           <p className="auth-note">
-            To keep going you&rsquo;ll need your own provider key. That is being wired up now, and
-            it is the next thing to land.
+            To keep going, add a provider key of your own under Account &rarr; API keys. Your runs
+            then send on it, billed to you by that provider.
           </p>
 
           <div className="consent-actions">
+            <button type="button" className="login-button" onClick={onAddKey}>
+              Add my own key
+            </button>
             <button type="button" className="login-button" onClick={onDismiss}>
               Back to my results
             </button>

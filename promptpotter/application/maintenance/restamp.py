@@ -20,15 +20,17 @@ from promptpotter.application.maintenance.archive_maintenance import (
     workspace_trees,
 )
 from promptpotter.config.paths import default_projects_root, jobs_dir
+from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.campaign_config import CampaignConfig, merge_config_layers
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.diagnostic_run import DiagnosticRunRecord
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.phases import RunPhase
-from promptpotter.domain.run_records import CycleRecord
+from promptpotter.domain.run_records import BankedSpend, CycleRecord
 from promptpotter.domain.sample import ArchiveConfig, FiledAnswer
 from promptpotter.domain.scoring import GradedCell
+from promptpotter.domain.spend import ZERO_SPEND, Budget, KeySource, UserSpend
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.cycle_index import (
     read_cycle_index,
@@ -65,6 +67,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import iter_jsonl
 from promptpotter.infrastructure.store.user_store import User
+from promptpotter.infrastructure.store.wallet_store import CouponGrant, GrantStore
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import LedgerUnreadableError, ManifestUnreadableError
 
@@ -79,6 +82,36 @@ def _definition_ancestors(path: pathlib.Path) -> dict[str, Any]:
     return reduce(merge_config_layers, (campaign_file_block(p) for p in above), {})
 
 
+class _Carried(NamedTuple):
+    """A retired key's value the engine now keeps in a file of its own, written before the prune."""
+
+    what: str
+    write: Callable[[], None]
+
+
+def _nothing_carried(_path: pathlib.Path, _raw: dict[str, Any]) -> _Carried | None:
+    return None
+
+
+def _regranted(path: pathlib.Path, raw: dict[str, Any]) -> _Carried | None:
+    """A hand-raised account's lifetime ceilings (`user.json`, retired) become its coupon's face;
+    a grant already standing is a later, or a crashed re-stamp's identical, decision."""
+    usd, tokens = raw.get("spend_budget_usd_total"), raw.get("token_budget_total")
+    grants = GrantStore(path.parent)
+    if (usd is None and tokens is None) or grants.path.exists():
+        return None
+    # An axis the account left unset ran on the box's default, never unbounded.
+    default = settings.HOST_COUPON
+    face = Budget(
+        usd=default.usd if usd is None else usd,
+        tokens=default.tokens if tokens is None else tokens,
+    )
+    return _Carried(
+        f"{grants.path}: usd={face.usd} tokens={face.tokens}",
+        partial(grants.save, CouponGrant(face=face)),
+    )
+
+
 class _Surface(NamedTuple):
     title: str
     workspace_globs: tuple[str, ...]
@@ -87,6 +120,7 @@ class _Surface(NamedTuple):
     model_cls: type[BaseModel]
     # What the pruned record is laid over before it validates.
     laid_over: Callable[[pathlib.Path], dict[str, Any]] = _whole
+    carried: Callable[[pathlib.Path, dict[str, Any]], _Carried | None] = _nothing_carried
 
 
 # No round close: pruning cannot restore a rename.
@@ -110,6 +144,7 @@ _SURFACES: tuple[_Surface, ...] = (
         workspace_globs=("*/user.json",),
         key_path=(),
         model_cls=User,
+        carried=_regranted,
     ),
     _Surface(
         title="Diagnostic runs (diagnostics/runs/*.json)",
@@ -196,6 +231,7 @@ class _Tally:
         self.rewritten = self.unchanged = self.empty = self.skipped = self.failed = 0
         self.removed = 0
         self.gone: Counter[str] = Counter()
+        self.carried: list[str] = []
 
     def report(self, title: str, *, apply: bool) -> None:
         print(f"\n{title}")
@@ -209,6 +245,8 @@ class _Tally:
         ):
             if n:
                 print(f"  {label:>18}: {n}")
+        for what in self.carried:
+            print(f"  {'carried' if apply else 'would carry':>18}: {what}")
 
 
 def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tally) -> None:
@@ -249,7 +287,12 @@ def _process(path: pathlib.Path, surface: _Surface, *, apply: bool, tally: _Tall
     for dotted, value in dropped:
         tally.gone[f"{dotted} = {value!r}"] += 1
     tally.rewritten += 1
+    carried = surface.carried(path, raw)
+    if carried is not None:
+        tally.carried.append(carried.what)
     if apply:
+        if carried is not None:
+            carried.write()
         if surface.key_path:
             holder[surface.key_path[-1]] = pruned
         else:
@@ -317,6 +360,42 @@ def _prune_record(rec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return pruned, [dotted for dotted, _ in dropped]
 
 
+# Before an account could hold a key of its own, every send went out on the box's.
+_THE_BOX: KeySource = "host"
+_BANKED_BY_PAYER = dict[KeySource, BankedSpend]
+
+
+def _banked_by_the_box(rec: dict[str, Any], field: str) -> dict[str, Any] | None:
+    flat = {key: rec[key] for key in UserSpend._fields if key in rec}
+    try:
+        part = BankedSpend.of(UserSpend(**flat))
+    except (TypeError, ValidationError):
+        return None
+    rest = {key: value for key, value in rec.items() if key not in flat}
+    # As `account_spend.py::bank_spend` writes one: a wallet that paid nothing names no part.
+    return rest | {field: {} if part.spend == ZERO_SPEND else {_THE_BOX: part.model_dump()}}
+
+
+def _paid_by_the_box(arm: type[BaseModel], rec: dict[str, Any]) -> dict[str, Any] | None:
+    """A record that came to name its payer reads its former shape as the box's keys having paid;
+    by the field, never the arm, so every record carrying a payer is read alike."""
+    fields = arm.model_fields
+    if "key_source" in fields and "key_source" not in rec:
+        # A replay is the one call no wallet paid.
+        return rec | {"key_source": None if rec.get("cached") else _THE_BOX}
+    for name, field in fields.items():
+        if field.annotation == _BANKED_BY_PAYER and name not in rec:
+            return _banked_by_the_box(rec, name)
+    return None
+
+
+def _restamp_record(rec: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    """A newly required key cannot be pruned onto a line: its former shape is read into it."""
+    arm = _LEDGER_ARMS.get(str(rec.get("record_type")))
+    current = _paid_by_the_box(arm, rec) if arm is not None else None
+    return (rec, None) if current is None else (current, str(rec["record_type"]))
+
+
 def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     kind = rec.get("record_type")
     if kind == "sample_scored" and isinstance(result := rec.get("result"), dict):
@@ -329,12 +408,20 @@ def _compact_record(rec: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _compacted(
-    held: list[str], *, apply: bool
-) -> tuple[list[str] | None, tuple[int, int, int, Counter[str]]]:
+class _LedgerPass(NamedTuple):
+    before: int
+    after: int
+    rewritten: int
+    # Keys pruned off, by dotted name; records read out of a former shape, by record type.
+    gone: Counter[str]
+    stamped: Counter[str]
+
+
+def _compacted(held: list[str], *, apply: bool) -> tuple[list[str] | None, _LedgerPass]:
     before = after = rewritten = 0
     lines: list[str] = []
     gone: Counter[str] = Counter()
+    stamped: Counter[str] = Counter()
     for line in held:
         before += len(line)
         try:
@@ -344,11 +431,14 @@ def _compacted(
             lines.append(line)
             after += len(line)
             continue
+        rec, restamped = _restamp_record(rec)
+        if restamped is not None:
+            stamped[restamped] += 1
         # Prune BEFORE projecting: a stale key on the record refuses the line to its reader.
         rec, dropped = _prune_record(rec)
         gone.update(dropped)
         out = _compact_record(rec)
-        if out is None and not dropped:
+        if out is None and not dropped and restamped is None:
             lines.append(line)
             after += len(line)
             continue
@@ -357,39 +447,53 @@ def _compacted(
         new_line = json.dumps(out, separators=(",", ":"), default=str) + "\n"
         lines.append(new_line)
         after += len(new_line)
-    return (lines if apply and rewritten else None), (before, after, rewritten, gone)
+    walked = _LedgerPass(before, after, rewritten, gone, stamped)
+    return (lines if apply and rewritten else None), walked
 
 
-def _compact_one(path: pathlib.Path, *, apply: bool, gone: Counter[str]) -> tuple[int, int, int]:
-    before, after, rewritten, dropped = rewrite_lines(
-        path, lambda held: _compacted(held, apply=apply)
-    )
-    gone.update(dropped)
-    return before, after, rewritten
+def _workspace_ledgers(root: pathlib.Path) -> list[pathlib.Path]:
+    """Each account's own ledger (its spend tombstones among them), which no producer holds."""
+    return [
+        ledger
+        for tree in workspace_trees(root)
+        for workspace in sorted(p for p in tree.iterdir() if p.is_dir())
+        if (ledger := CycleEventLog.workspace_path(WorkspaceDir(workspace))).is_file()
+    ]
 
 
-def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
+def restamp_ledgers(*, apply: bool) -> dict[str, int]:
     total_before = total_after = touched = 0
     skipped: Counter[RunPhase] = Counter()
     gone: Counter[str] = Counter()
+    stamped: Counter[str] = Counter()
     rows: list[tuple[int, str]] = []
-    for ledger_path in iter_cycle_ledgers(default_projects_root()):
+    walked: list[tuple[pathlib.Path, str]] = []
+    root = default_projects_root()
+    for ledger_path in iter_cycle_ledgers(root):
         cycle_dir = ledger_path.parent.parent
         run = derive_run_state(cycle_dir)
         # A live producer holds `_next_offset`; a paused cycle MUST be taken — resume skips stale lines.
         if not run.resumable:
             skipped[run.run_phase] += 1
             continue
-        before, after, rewritten = _compact_one(ledger_path, apply=apply, gone=gone)
-        total_before += before
-        total_after += after
-        if rewritten:
+        walked.append((ledger_path, cycle_dir.name))
+    # Every line is kept, so an appender's offsets hold; the swap carries what it appends meanwhile.
+    walked += [
+        (ledger, f"{ledger.parent.parent.name} (account)") for ledger in _workspace_ledgers(root)
+    ]
+    for ledger_path, name in walked:
+        one = rewrite_lines(ledger_path, partial(_compacted, apply=apply))
+        gone.update(one.gone)
+        stamped.update(one.stamped)
+        total_before += one.before
+        total_after += one.after
+        if one.rewritten:
             touched += 1
-            rows.append((before - after, cycle_dir.name))
+            rows.append((one.before - one.after, name))
 
     mb = 1024 * 1024
     verb = "compacted" if apply else "would compact"
-    print(f"\nLedger compaction — {verb} {touched} cycle ledger(s)")
+    print(f"\nLedger compaction — {verb} {touched} ledger(s)")
     for phase, n in sorted(skipped.items()):
         print(f"  {n:>6} skipped — {phase}")
     print(f"  {'before':>12}: {total_before / mb:8.2f} MB")
@@ -404,13 +508,19 @@ def compact_cycle_ledgers(*, apply: bool) -> dict[str, int]:
         print("its cycle to every reader:")
         for key, n in gone.most_common():
             print(f"  {n:4d}x  {key}")
+    if stamped:
+        print("\nRe-stamped — records in a former shape, each of which refused its ledger to")
+        print("every reader, read into the current one:")
+        for kind, n in stamped.most_common():
+            print(f"  {n:4d}x  {kind}")
     if not apply and touched:
         print("\nDry run. Re-run with --apply to rewrite.")
     return {
-        "cycles": touched,
+        "ledgers_rewritten": touched,
         "skipped_producing": sum(skipped.values()),
         "bytes_saved": total_before - total_after,
         "record_keys_dropped": sum(gone.values()),
+        "records_restamped": sum(stamped.values()),
     }
 
 
@@ -795,20 +905,33 @@ def _campaign_of(tree: pathlib.Path, path: pathlib.Path) -> _CampaignOf | None:
     return _CampaignOf(parts[0], parts[2]) if len(parts) > 2 and parts[1] == "campaigns" else None
 
 
+def _ledger_refusal(ledger: pathlib.Path) -> str | None:
+    try:
+        for _ in CycleEventLog(ledger).iter():
+            pass
+    except LedgerUnreadableError as refusal:
+        return str(refusal)
+    return None
+
+
 def check_readable() -> dict[str, int]:
     """Read-only, after every rewrite: a campaign or archive file still refusing its reader is named."""
     refused: dict[_CampaignOf, None] = {}
     ledgers: list[str] = []
+    # An account's own ledger: every send it makes folds it, so no delete can remedy one.
+    accounts: list[str] = []
     manifests: list[str] = []
     checked = 0
+    for ledger in _workspace_ledgers(default_projects_root()):
+        checked += 1
+        if (cause := _ledger_refusal(ledger)) is not None:
+            ledgers.append(cause)
+            accounts.append(str(ledger))
     for tree in workspace_trees(default_projects_root()):
         for ledger in sorted(tree.glob("**/.runtime/ledger.jsonl")):
             checked += 1
-            try:
-                for _ in CycleEventLog(ledger).iter():
-                    pass
-            except LedgerUnreadableError as refusal:
-                ledgers.append(str(refusal))
+            if (cause := _ledger_refusal(ledger)) is not None:
+                ledgers.append(cause)
                 if (campaign := _campaign_of(tree, ledger)) is not None:
                     refused[campaign] = None
         for workspace in sorted(p for p in tree.iterdir() if p.is_dir()):
@@ -826,12 +949,14 @@ def check_readable() -> dict[str, int]:
         cause for home in homes for cause in _archive_refusals(MeasurementArchive.at(home))
     ]
 
-    print(f"\nCycle ledgers — {checked} checked, {checked - len(ledgers)} read")
+    print(f"\nLedgers — {checked} checked, {checked - len(ledgers)} read")
     for cause in (*ledgers, *manifests):
         print(f"  {cause}")
+    # `deploy-linux/update.sh` lifts these lines into its health verdict by their prefix.
+    for account in accounts:
+        print(f"  UNREADABLE account ledger {account} — its account's every spend read refuses")
     if refused:
         print(f"\nUnreadable campaigns — {len(refused)}; deleting each is the remedy:")
-    # `deploy-linux/update.sh` lifts these lines into its health verdict by their prefix.
     for tenant_id, campaign_id in refused:
         print(
             f"  UNREADABLE campaign {campaign_id} (tenant {tenant_id}) — "
@@ -845,5 +970,6 @@ def check_readable() -> dict[str, int]:
         "ledgers_refused": len(ledgers),
         "manifests_refused": len(manifests),
         "campaigns_unreadable": len(refused),
+        "accounts_unreadable": len(accounts),
         "archive_refused": len(archive_refused),
     }

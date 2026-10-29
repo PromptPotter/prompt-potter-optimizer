@@ -4,9 +4,12 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, TypeVar
+
+from pydantic import SecretStr
 
 from promptpotter.domain.pipeline_schema import token_bound_of_bytes
+from promptpotter.domain.spend import KeySource
 from promptpotter.infrastructure.llm.pricing import (
     PriceListUnreachableError,
     RateCeiling,
@@ -101,14 +104,34 @@ async def hold_ceiling(
         return None
 
 
+class ProviderKey(NamedTuple):
+    """The key a client sends on, never empty, and whose wallet each of its sends draws."""
+
+    secret: SecretStr
+    # The account whose own key it is; ``None`` is the box's.
+    holder: str | None
+
+    @property
+    def paid_by(self) -> KeySource:
+        return "host" if self.holder is None else "user"
+
+
 class LLMClientBase(ABC):
     SENDS: ClassVar[frozenset[str]]
     CREDIT_REFUSAL_STATUSES: ClassVar[frozenset[int]]
     RATE_CAP_HEADERS: ClassVar[tuple[str, str]]
 
-    def __init__(self, *, provider: str, display_name: str, rate_limiter: RateLimiter | None):
+    def __init__(
+        self,
+        *,
+        provider: str,
+        display_name: str,
+        key: ProviderKey,
+        rate_limiter: RateLimiter | None,
+    ):
         self._provider = provider
         self._provider_name = display_name
+        self._key = key
         self._rate_limiter = rate_limiter
         # Per MODEL: a gateway throttles one model's upstream while the rest answer.
         self._backpressure: dict[str, Backpressure] = {}
@@ -156,7 +179,9 @@ class LLMClientBase(ABC):
                     self._rate_limiter, messages, max_tokens, provider_name=self._provider_name
                 ) as slot,
             ):
-                with admitted(label, bound, model=model, provider=self._provider) as admission:
+                with admitted(
+                    label, bound, model=model, provider=self._provider, paid_by=self._key.paid_by
+                ) as admission:
                     slot.leaves()
                     try:
                         headers, reply = await send()

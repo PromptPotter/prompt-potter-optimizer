@@ -28,8 +28,9 @@ from promptpotter.infrastructure.docker_host import (
     machine_step,
     run_cell_container,
 )
+from promptpotter.infrastructure.llm.account_key import account_key
 from promptpotter.infrastructure.llm.openai_compat import cell_gateway_body, sent_effort
-from promptpotter.infrastructure.llm.registry import openai_compat_spec
+from promptpotter.infrastructure.llm.registry import host_key_attr, openai_compat_spec
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.shared.errors import (
     CellInfrastructureError,
@@ -162,21 +163,21 @@ def _model_entry(cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]
     reply = int(cfg.get("max_tokens") or 8192)
     effort = sent_effort(cfg.get("reasoning_effort"))
     spec = openai_compat_spec(provider)
-    body = cell_gateway_body(
-        spec, provider, route_order=cfg.get("route_order"), reasoning_effort=effort
-    )
-    if provider == _ANTHROPIC:
-        claude: dict[str, Any] = {"model": model, "max_tokens": reply}
-        if effort is not None:
-            claude["effort"] = effort
-        return {"claude": claude}, {
-            "ANTHROPIC_API_KEY": settings.ANTHROPIC_API_KEY.get_secret_value()
-        }
-    if spec is None:
+    if provider != _ANTHROPIC and spec is None:
         raise RuntimeError(
             f"dbllmbench connector: provider {provider!r} is neither {_ANTHROPIC!r} nor an "
             "OpenAI-compatible gateway this install knows."
         )
+    # The bound account's key, chosen where a node's is: the container holds none of its own.
+    key = account_key(provider).secret.get_secret_value()
+    body = cell_gateway_body(
+        spec, provider, route_order=cfg.get("route_order"), reasoning_effort=effort
+    )
+    if spec is None:
+        claude: dict[str, Any] = {"model": model, "max_tokens": reply}
+        if effort is not None:
+            claude["effort"] = effort
+        return {"claude": claude}, {host_key_attr(provider): key}
     extra: dict[str, Any] = {}
     if (temperature := cfg.get("temperature")) is not None:
         extra["temperature"] = temperature
@@ -192,9 +193,7 @@ def _model_entry(cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]
     }
     if extra:
         entry["extra_body"] = extra
-    return {"openai-compatible": entry}, {
-        _KEY_ENV: getattr(settings, spec.api_key_attr).get_secret_value()
-    }
+    return {"openai-compatible": entry}, {_KEY_ENV: key}
 
 
 def _asset(cfg: Mapping[str, Any], key: str) -> str:

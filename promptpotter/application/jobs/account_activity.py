@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from promptpotter.domain.spend import bill_is_floor, calls_rate_priced
+from promptpotter.domain.spend import KeySource, bill_is_floor, calls_rate_priced
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import (
     UsageRow,
@@ -48,8 +48,9 @@ class ActivityResponse(StrictModel):
 
     window: ActivityWindow
     group_by: ActivityGroupBy = Field(
-        description="The colour axis: `model` is the exact model id, `api_key` is who billed the "
-        "call (`TokenUsageRecord.provider`)."
+        description="The colour axis: `model` is the exact model id, `api_key` the key that "
+        "paid: the provider that billed the call, and whether the host's key under the coupon "
+        "or the account's own sent it (`TokenUsageRecord.key_source`)."
     )
     buckets: list[ActivityBucket]
     series_labels: list[str] = Field(
@@ -81,8 +82,14 @@ class ActivityResponse(StrictModel):
     )
 
 
+_KEY_LABELS: dict[KeySource | None, str] = {"host": "host key", "user": "own key", None: "replay"}
+
+
 def _series_label(row: UsageRow, group_by: ActivityGroupBy) -> str:
-    base = (row.model if group_by == "model" else row.provider) or "unknown"
+    if group_by == "model":
+        base = row.model or "unknown"
+    else:
+        base = f"{row.provider or 'unknown'} · {_KEY_LABELS[row.key_source]}"
     # A judge or backend usually shares model and biller with the optimizer: untagged, it sums into that series.
     return base if row.kind == "optimizer" else f"{base} ({row.kind})"
 

@@ -207,7 +207,7 @@ knowing:
 [`docs/operations/access-model.md`](../docs/operations/access-model.md)'s. On the box:
 
 - **Signing up IS the grant.** OIDC provider config at `.promptpotter/identity/oidc.json`; what
-  bounds a stranger is `FREE_TIER_SPEND_CAP_USD`, not an approval queue.
+  bounds a stranger is the host coupon `HOST_COUPON`, not an approval queue.
 - **`blocklist.json` is the revoke**, re-read on every request — edits are instant, no restart.
 - **Set `HOST_ADMIN_EMAIL` and `HOST_ADMIN_ISSUER`** or nothing ever claims this box; the issuer
   pins the claim to one provider. Unset, the terminal stays on the `default` tenant and the app logs

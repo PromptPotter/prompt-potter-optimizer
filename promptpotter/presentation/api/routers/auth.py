@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import SecretStr
 
 from promptpotter.application import account, health
 from promptpotter.application.jobs.account_activity import (
@@ -16,6 +17,13 @@ from promptpotter.application.jobs.account_activity import (
     ActivityResponse,
     ActivityWindow,
     account_activity,
+)
+from promptpotter.application.jobs.coupon import (
+    AccountKey,
+    CouponStatus,
+    coupon_status,
+    put_account_key,
+    remove_account_key,
 )
 from promptpotter.application.jobs.quota import QuotaStatus, quota_status
 from promptpotter.config.paths import default_projects_root
@@ -49,7 +57,13 @@ from promptpotter.shared.errors import (
     NotFoundError,
     ServiceUnavailableError,
 )
-from promptpotter.shared.identity import AccessState, IdentityContext, display_name
+from promptpotter.shared.identity import (
+    CAMPAIGN_BUDGET_CAP,
+    AccessState,
+    IdentityContext,
+    display_name,
+    require_capability,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -426,6 +440,45 @@ def activity(
 ) -> ActivityResponse:
     """Time-bucketed spend, requests and tokens over the window, each billed call at the price it was stamped with.
 
-    ``group_by`` is ``model`` (the exact model string) or ``api_key`` (who billed the call).
+    ``group_by`` is ``model`` (the exact model string) or ``api_key`` (the provider that billed
+    the call, and whether the host's key or the caller's own sent it).
     """
     return account_activity(stores, window=window, group_by=group_by)
+
+
+@auth_router.get("/coupon", response_model=CouponStatus)
+def get_coupon(stores: StoresDep) -> CouponStatus:
+    """The host's allowance for the caller on the box's keys: its face, what is left, and the keys
+    the caller sends on past it. What is left is derived from the ledgers, never a counter."""
+    return coupon_status(stores)
+
+
+class ApiKeyBody(StrictModel):
+    """One provider key, never served back: a read names its last four characters alone."""
+
+    secret: SecretStr
+
+
+@auth_router.put("/api-keys/{provider}", response_model=AccountKey)
+def put_api_key(
+    provider: Annotated[str, Path(max_length=64)],
+    body: ApiKeyBody,
+    identity: IdentityDep,
+    stores: StoresDep,
+) -> AccountKey:
+    """Hold the caller's own key for *provider*: its sends there go out on it, past the coupon.
+
+    An unknown provider answers 422 ``unknown_provider``; a key that is not one unbroken string 422
+    ``api_key_malformed``. The provider judges the key itself, at its first send."""
+    require_capability(identity, CAMPAIGN_BUDGET_CAP, subject="put api key")
+    return put_account_key(stores, provider, body.secret)
+
+
+@auth_router.delete("/api-keys/{provider}", status_code=204)
+def delete_api_key(
+    provider: Annotated[str, Path(max_length=64)], identity: IdentityDep, stores: StoresDep
+) -> Response:
+    """Drop the caller's key for *provider*; its next send there draws the coupon again."""
+    require_capability(identity, CAMPAIGN_BUDGET_CAP, subject="delete api key")
+    remove_account_key(stores, provider)
+    return Response(status_code=204)

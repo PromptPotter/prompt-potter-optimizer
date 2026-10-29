@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from promptpotter.application.account import account_of
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
-from promptpotter.application.jobs.launcher.admission import withdraw_queued
+from promptpotter.application.jobs.launcher.admission import campaign_run, withdraw_queued
 from promptpotter.domain.run_records import ArmedCeilingEffect
 from promptpotter.domain.spend import CYCLE_AXES, MONEY_AXES, Budget
 from promptpotter.shared.errors import NotFoundError
@@ -54,6 +54,7 @@ def _clamp_to_account_ceilings(
         stores=stores,
         job_registry=dispatcher.job_registry,
         hop=hop,
+        named=campaign_run(stores, hop)[1],
     )
 
 

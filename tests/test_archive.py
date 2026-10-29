@@ -92,6 +92,7 @@ from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
+from promptpotter.config.settings import settings
 from promptpotter.domain.arms import ArmSlot, PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.campaign import Arm, Compare
@@ -135,13 +136,17 @@ from promptpotter.domain.run_records import (
     RoundProposedRecord,
     RunPhaseRecord,
     SpawnedBy,
+    SpendHoldRecord,
+    TokenUsageRecord,
 )
 from promptpotter.domain.run_standing import line_reference, walked_slot
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.domain.spend import Budget, UserSpend
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.account_key import account_spend, face_of
 from promptpotter.infrastructure.llm.spend_book import spending_under
 from promptpotter.infrastructure.llm.telemetry import reset_cycle_ledger, set_cycle_ledger
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
@@ -168,6 +173,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import append_row
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
+from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import LedgerUnreadableError, PayloadInvalidError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
@@ -592,7 +598,7 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert restamp.check_readable()["ledgers_refused"] == 1, (
         "guard: a retired key refuses its cycle"
     )
-    restamp.compact_cycle_ledgers(apply=True)
+    restamp.restamp_ledgers(apply=True)
     assert restamp.check_readable()["ledgers_refused"] == 0, "the re-stamp left a refused cycle"
     assert [r for _, r in CycleEventLog(arm_ledger).iter() if isinstance(r, ArmRecord)][
         :1
@@ -627,6 +633,56 @@ def test_the_archive_on_disk_keeps_every_paid_answer(
     assert refused_key not in {e.config_key for e in archive.list_all()}
     assert restamp.check_readable()["archive_refused"] == 0, "the re-stamp left a refused file"
     assert {ref: archive.answer(ref) for ref in refs} == paid, "a re-stamp lost a paid answer"
+
+    # Spend written before an account could hold a key was the box's: until the re-stamp reads it
+    # so, each such line refuses its ledger, and the account's every spend fold with it.
+    owner = str(built_stores.identity.user_id)
+    campaigns.create_campaign(minted_campaign(arm_root, owner_user_id=owner))
+    spent_before = account_spend(built_stores)
+
+    def former(record: TokenUsageRecord | SpendHoldRecord) -> str:
+        return json.dumps(record.model_dump(mode="json", exclude={"key_source"})) + "\n"
+
+    sent = TokenUsageRecord(
+        kind="optimizer", node="n", input_tokens=7, output_tokens=3, key_source="host"
+    )
+    unclosed = SpendHoldRecord(
+        hold_id="open", kind="judge", node="n", input_tokens=7, output_tokens=3, key_source="host"
+    )
+    with arm_ledger.open("a", encoding="utf-8") as fh:
+        fh.write(former(sent.model_copy(update={"cost_usd": 0.25})))
+        fh.write(former(sent.model_copy(update={"cached": True, "key_source": None})))
+        fh.write(former(unclosed.model_copy(update={"cost_usd": 0.125})))
+    account_ledger = CycleEventLog.workspace_path(campaigns.workspace)
+    account_ledger.parent.mkdir(parents=True, exist_ok=True)
+    banked = {"used_usd": 1.5, "rate_priced_usd": 0.5, "used_tokens": 100, "unpriced_tokens": 20}
+    account_ledger.write_text(
+        json.dumps(
+            {"record_type": "spend_tombstone", "campaign_id": "gone", "metered": {}} | banked
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    # A hand-raised account's lifetime ceiling, from before the coupon replaced it.
+    user_json = built_stores.grant.path.with_name("user.json")
+    user = User(user_id="u", tenant_id=str(built_stores.identity.tenant_id), created_at="2026")
+    raised = {"spend_budget_usd_total": 5.0, "token_budget_total": None}
+    user_json.write_text(json.dumps(user.model_dump() | raised), encoding="utf-8")
+    assert restamp.check_readable()["ledgers_refused"] == 2, "guard: a former shape refuses"
+    for _ in range(2):
+        restamp.prune_stored_documents(apply=True)
+        restamp.restamp_ledgers(apply=True)
+    assert restamp.check_readable()["ledgers_refused"] == 0, "the re-stamp left a refused ledger"
+    spent = account_spend(built_stores)
+    by_the_box = UserSpend(1.75, 110, 20, 0.125, 10, rate_priced_usd=0.5)
+    assert tuple(spent.host) == pytest.approx(tuple(spent_before.host.plus(by_the_box))), (
+        "a re-stamp lost, or banked twice, what the box's keys paid; or billed a replay"
+    )
+    assert spent.user == spent_before.user, "a re-stamp billed the account's own key"
+    assert built_stores.users.load() == user
+    assert face_of(built_stores.grant.load(), host=False) == Budget(
+        usd=5.0, tokens=settings.HOST_COUPON.tokens
+    ), "a hand-raised account lost its raise, or an axis it never raised became unbounded"
 
 
 # 3. Replayed decisions, and forks

@@ -13,10 +13,9 @@ from promptpotter.application.optimizer_manifest import binding_optimizer, selec
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import OptimizationConfig
 from promptpotter.infrastructure.llm import pricing
-from promptpotter.infrastructure.llm.registry import get_llm_client
-from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
+from promptpotter.infrastructure.llm.account_key import bind_account
+from promptpotter.infrastructure.llm.registry import forget_clients
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.identity import default_identity
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -43,7 +42,7 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
     """The offline run's world; a journey sets what its edges answer (`llm.says`, `backend.faults`,
     `rates` — then `pricing.refresh_rates(force=True)` fetches them).
 
-    Its provider caps no rate and rates one account, as a sending entry binds it."""
+    Its provider caps no rate and binds one account, the terminal's, as a sending entry does."""
     for key in PROVIDER_KEYS:
         monkeypatch.setattr(settings, key, SecretStr(NOT_A_KEY))
     monkeypatch.setattr(settings, "RATE_LIMITS", {})
@@ -52,12 +51,12 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
     pricing.load_rates.cache_clear()
     world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
     restore = install_network(world)
-    get_llm_client.cache_clear()
-    tenant = set_rate_tenant(str(default_identity().tenant_id))
+    forget_clients()
+    unbind = bind_account(workspace(tmp_path / "account"))
     yield world
-    tenant.var.reset(tenant)
+    unbind()
     restore()
-    get_llm_client.cache_clear()
+    forget_clients()
     pricing.load_rates.cache_clear()
     # A refused request reads as a provider error, which a journey can assert past unseen.
     assert not world.unrouted, f"a journey sent what the world does not answer: {world.unrouted}"

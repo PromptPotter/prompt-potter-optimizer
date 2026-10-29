@@ -12,8 +12,9 @@ from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_
 from promptpotter.domain.opt_search_point import PROMPT_FIELDS
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.pipeline_schema import LLMSpendBound
-from promptpotter.domain.spend import StepUsage, TokenAccount
-from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
+from promptpotter.domain.spend import KeySource, StepUsage, TokenAccount
+from promptpotter.infrastructure.llm.account_key import cell_key, payer
+from promptpotter.infrastructure.llm.base import ProviderKey, hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.pricing import inline_route
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import drawn_budget, held_wait
@@ -111,11 +112,16 @@ class _CellSends:
     """A forward-only student calls from a worker thread; the spend book is the event loop's."""
 
     def __init__(
-        self, sample_id: int, max_calls: int | None, priced_as: tuple[str | None, str | None]
+        self,
+        sample_id: int,
+        max_calls: int | None,
+        priced_as: tuple[str | None, str | None],
+        key: ProviderKey | None,
     ) -> None:
         self.what = f"dspy example {sample_id}"
         self.calls_left = max_calls
         self.model, self.provider = priced_as
+        self.key = key
         self.loop = asyncio.get_running_loop()
         self.budget = drawn_budget()
         self.used = TokenAccount()
@@ -168,7 +174,9 @@ class _CellSends:
                 sent=sent,
                 max_tokens=max_tokens,
             )
-            admission = hold.enter_context(admitted(_SEND, bound, model=model, provider=provider))
+            admission = hold.enter_context(
+                admitted(_SEND, bound, model=model, provider=provider, paid_by=lm.paid_by)
+            )
         except SendRefusedError as refused:
             raise self.end(refused) from None
         return hold, admission
@@ -280,6 +288,7 @@ class _CellSends:
 
 class _Metered:
     cell_sends: _CellSends
+    paid_by: KeySource
     model: str
     kwargs: dict[str, Any]
 
@@ -296,6 +305,10 @@ _METERED: dict[type[Any], type[Any]] = {}
 
 
 def _metered(lm: Any, sends: _CellSends, changed: dict[str, Any]) -> Any:
+    # The bound account's key rides only a connection DSPy owns; a custom engine sends on its own.
+    key = sends.key if isinstance(lm.engine, str) else None
+    if key is not None:
+        changed = {**changed, "api_key": key.secret.get_secret_value()}
     # `copy`, not `dspy.LM(...)`: reconstructing swaps the caller's LM subclass for a generic one.
     own = lm.copy(**changed)
     lm_class = type(own)
@@ -303,6 +316,7 @@ def _metered(lm: Any, sends: _CellSends, changed: dict[str, Any]) -> Any:
         _METERED[lm_class] = type(lm_class.__name__, (_Metered, lm_class), {})
     own.__class__ = _METERED[lm_class]
     own.cell_sends = sends
+    own.paid_by = payer(key)
     # Off: a resend is admitted anew from the cell's budget, and a cached reply reports no usage.
     if hasattr(own, "num_retries"):
         own.num_retries = 0
@@ -353,10 +367,9 @@ async def _in_process_run(
     calls = params.get("max_calls")
     lm_kwargs = {k: v for k, v in params.items() if k in _LM_KEYS}
     model = lm_kwargs.get("model")
+    priced_as = inline_route(model) if isinstance(model, str) else (None, None)
     sends = _CellSends(
-        sample.id,
-        None if calls is None else int(calls),
-        inline_route(model) if isinstance(model, str) else (None, None),
+        sample.id, None if calls is None else int(calls), priced_as, cell_key(priced_as[1])
     )
     student = _configured(program.student, payload.get("prompt"), lm_kwargs, sends)
     # Metered too, so a call naming no LM runs the model the cell is priced as.

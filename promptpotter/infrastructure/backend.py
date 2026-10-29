@@ -14,6 +14,7 @@ import httpx
 
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
+from promptpotter.infrastructure.llm.account_key import cell_payer
 from promptpotter.infrastructure.llm.pricing import inline_route
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -64,6 +65,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
     from promptpotter.domain.sample import Sample
+    from promptpotter.domain.spend import KeySource
     from promptpotter.domain.value_tree import Delivery
 
 logger = logging.getLogger(__name__)
@@ -311,7 +313,7 @@ class BackendClient:
 
         if self._connector.execution != "remote_http":
             return await self._in_process_until_admitted(
-                sample, payload, bound=bound, billed=billed
+                sample, payload, bound=bound, billed=billed, paid_by=cell_payer(pipeline_params)
             )
         if bound is None:
             raise RuntimeError("a remote cell is held whole, so it needs the bound its nodes serve")
@@ -330,6 +332,7 @@ class BackendClient:
         *,
         bound: SendBound | None,
         billed: CellBilling[S],
+        paid_by: KeySource,
     ) -> tuple[dict[str, Any], S]:
         run = self._connector.in_process_run
         if run is None:
@@ -346,7 +349,7 @@ class BackendClient:
             async with self.backpressure.send() as ticket, machine:
                 try:
                     result = await self._in_process_cell(
-                        run, sample, payload, bound=bound, billed=billed
+                        run, sample, payload, bound=bound, billed=billed, paid_by=paid_by
                     )
                 except CellThrottledError as exc:
                     self.backpressure.throttled(ticket, headers=None, body=str(exc))
@@ -368,7 +371,9 @@ class BackendClient:
             wait: float | None = None
             unreachable: httpx.TransportError | None = None
             async with self.backpressure.send() as ticket:
-                with admitted(CELL, bound, model=None, provider=None) as admission:
+                # A remote backend sends on keys of its own, which are the box's: no account's
+                # key reaches it over the wire.
+                with admitted(CELL, bound, model=None, provider=None, paid_by="host") as admission:
                     try:
                         # The cell's envelope and the run's wall clock end the wait, as a HALTED cut.
                         resp = await client.post(
@@ -468,13 +473,16 @@ class BackendClient:
         *,
         bound: SendBound | None,
         billed: CellBilling[S],
+        paid_by: KeySource,
     ) -> tuple[dict[str, Any], S]:
         with contextlib.ExitStack() as hold:
             admission: Admission | None = None
             if bound is not None and self._connector.holds_own_sends:
-                hold.enter_context(reserved(CELL, bound))
+                hold.enter_context(reserved(CELL, bound, paid_by=paid_by))
             elif bound is not None:
-                admission = hold.enter_context(admitted(CELL, bound, model=None, provider=None))
+                admission = hold.enter_context(
+                    admitted(CELL, bound, model=None, provider=None, paid_by=paid_by)
+                )
             started = time.monotonic()
             try:
                 result = await run(self.workload, sample, payload)

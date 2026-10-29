@@ -33,9 +33,7 @@ from promptpotter.application.datasets.prompts import (
 )
 from promptpotter.application.datasets.startability import draft_samples
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
-from promptpotter.application.free_tier import free_task_models, with_free_tier_layer
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.jobs.quota import on_free_tier
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -788,23 +786,7 @@ def _criterion_locked[S](stores: Stores, hop: CycleHop, scoring: S) -> S | dict[
 def draft_config(
     stores: Stores, draft: DraftCampaign, *, session_chain: Sequence[str] | None = None
 ) -> CampaignConfig:
-    """What Start declares and every read before it shows; only Start holds a ``session_chain``.
-    A free account's takes the tier's layer last, bound to each node's model."""
-    config = _draft_declared(stores, draft, session_chain)
-    if not on_free_tier(stores):
-        return config
-    schema = parse_pipeline_response(rendered_pipeline_json(draft))
-    nodes = {
-        n.name: {**n.current_config, **config.pipeline_overlay.get(n.name, {})}
-        for n in schema.declared_nodes
-        if n.is_llm
-    }
-    return with_free_tier_layer(config, nodes)
-
-
-def _draft_declared(
-    stores: Stores, draft: DraftCampaign, session_chain: Sequence[str] | None
-) -> CampaignConfig:
+    """What Start declares and every read before it shows; only Start holds a ``session_chain``."""
     canonical = draft.source_dataset
     if canonical is None:
         # A fresh upload commits its overlay and chain into its own `dataset.yaml::pipeline`.
@@ -869,8 +851,6 @@ class _Merge:
     cfg: CampaignConfig
     params: dict[str, Any]
     provenance: dict[str, dict[str, ParamSource]]
-    # The reading account is free: it is offered only the tier's task models.
-    free: bool
 
 
 @dataclass(frozen=True)
@@ -922,7 +902,6 @@ def _draft_merge(stores: Stores, draft: DraftCampaign) -> _Merge:
         cfg=cfg,
         params=params,
         provenance=provenance,
-        free=on_free_tier(stores),
     )
 
 
@@ -959,7 +938,6 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: SubjectSpec) -> _Cam
         cfg=cfg,
         params=params,
         provenance=provenance,
-        free=on_free_tier(stores),
         dataset=dataset,
         hop=hop,
         raw=raw,
@@ -1144,11 +1122,8 @@ def _rows(m: _Merge, params: dict[str, Any]) -> dict[str, list[NodeConfigParam]]
 
 
 def _admitted_menu(m: _Merge) -> list[str]:
-    """Never offers a model the Start would refuse: one no rate prices under a dollar ceiling,
-    or one the free tier does not list for a free account."""
+    """Never offers a model the Start would refuse: one no rate prices under a dollar ceiling."""
     models = m.filtered.selectable_models()
-    if m.free:
-        models = [model for model in models if model in free_task_models()]
     providers = {n.provider for n in m.filtered.declared_nodes if n.provider}
     if not providers or m.cfg.optimization.budget.usd is None:
         return models

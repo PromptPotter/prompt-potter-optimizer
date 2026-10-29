@@ -23,8 +23,8 @@ neither waits on the other. A wave's paid runs need only what an earlier wave la
 4. **The preprint's evidence (M14).** Code: the N-arm mint verb; `bbeh` re-ingested with a wider bench
    partition; third-party reachability (§ Order, item 7). Paid, priced in dollars and wall clock first:
    the comparability run, then the budget dimension (§ Order, items 5 and 6); the ablation rows.
-5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A2 host
-   coupon + BYO keys; A3 anonymous preview.
+5. **The hosted beta (Lane A):** A1 first-run exhibit, built on a wave-3 campaign that climbed; A3
+   anonymous preview.
 6. **Capability (Lane C), by dependency:** C2 composite fitness → C4 cross-user panel; C2b judged
    scoring; C3 L4 closure; SIFT S1; the PUCT selector (§ Selector members — parent choice as one acquisition); C5, C6, C8, C10; C7 after v1.
 
@@ -34,10 +34,9 @@ session's files land; the operator's picked renames.
 Lanes by dependency. Front priority: Lane A and the bench lane (M13), concurrently; C9 ahead of
 the rest of Lane C.
 
-### Lane A — the hosted beta, usable by a free-tier account end to end
+### Lane A — the hosted beta, usable by a coupon account end to end
 
 - **A1** First-run exhibit — a finished campaign a new account reads before supplying anything (§ First-run exhibit).
-- **A2** Host coupon + BYO per-user API keys (§ Host coupon + BYO keys).
 - **A3** Anonymous preview tier — the public site's chat before sign-in (§ Anonymous preview tier).
 
 ### Lane C — differentiator and capability
@@ -263,9 +262,8 @@ maintained and measured separately; measured lift is the only admission ticket.
 - **Exit gate** — `rounds_to_separable ≤ 5` on `llm_only` AND TermNorm under one `l1_generate_hash`;
   `behavior_pass_rate = 1.0` seeded; `proxy_lift_corr ≥ 0.6` over ≥4 paired branches. The clock is
   separability, never an absolute accuracy.
-- **Run admission** — full speed for two busy users needs more provider quota (A2; an `api_key`
-  dimension on `get_llm_client`'s cache key); look-ahead's ceiling is a hand-set constant per
-  connector, not measured RSS headroom; a horizon priced in expected waste would launch deeper.
+- **Run admission** — look-ahead's ceiling is a hand-set constant per connector, not measured RSS
+  headroom; a horizon priced in expected waste would launch deeper.
 - **Cheap top-up** — a second `PanelTrigger`, blocked on the rule that prices a missing row against
   the round's marginal draw cell.
 - **CPU-hours** metered per phase beside `SpendRollup`, for every connector.
@@ -291,23 +289,6 @@ the prompt. Bars: most people do it; platform-independent; no private data; a ri
 first cut's origin read below it. **MovieLens cannot ship** (no commercial use or redistribution):
 collect our own rows, cut under a name nothing has run before. Served from an install-tier campaign
 root behind a `demo_mode_enabled` reader.
-
-## Host coupon + BYO keys
-
-The host runs a user on its own keys up to a per-user coupon; past it the user uploads their own key
-and continues on their own money. The coupon protects the host wallet, `jobs/quota.py` the machine.
-- **The coupon remainder is derived from the host-key ledger, never a counter** (`grant.json`); keys
-  sit in `TenantApiKeyStore` (`api_keys.json`), both on `read_json_optional` / `write_json`.
-- **`resolve_api_key(identity, provider, stores)` wraps `get_llm_client` as the one choke point**:
-  the user's own key for the provider wins with no coupon check; else a live coupon uses the host
-  key; else 422 `host_allowance_exhausted`, distinct from 422 `no_api_key`. Per provider, unless
-  `settings.coupon_void_on_byo` retires the coupon.
-- **The coupon replaces the free-tier path** (`application/jobs/quota.py::admit_launch` + the `User`
-  lifetime ceilings) in the same change, keeping both units (USD and tokens) and the per-run
-  reservation; the `SpendBook` caps live at the remainder, stopping on a new `StopReason.HOST_ALLOWANCE`.
-- **`TokenUsageRecord.key_source: host|user`** — the one exception to identity-from-path, since it
-  records which wallet paid; `/auth/activity` `group_by=api_key` then groups by whose key.
-- `/auth/api-keys` and `/auth/coupon` ride the auth router, not `/commands/*`.
 
 ## Anonymous preview tier
 

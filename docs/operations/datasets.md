@@ -92,7 +92,7 @@ On Harbor the candidate prompt reaches the agent only as an injected `SKILL.md`.
 
 **Accuracy room decides direction:** a search needs a model that misses a fair share; an ablation needs one that gets most right, so a removal shows as a miss; a reported comparison runs on the published rows' model or the operator's pick.
 
-**What the role may cost (operator, 2026-10-24)** — list OUTPUT price per M tokens: a **prompt** target below $0.10 (the free tier admits only what `promptpotter/assets/free_tier.yaml` lists), an **agent** target below $0.30, the **optimizer** below $0.60. Read prices off `https://openrouter.ai/api/v1/models`.
+**What the role may cost (operator, 2026-10-24)** — list OUTPUT price per M tokens: a **prompt** target below $0.10, an **agent** target below $0.30, the **optimizer** below $0.60. Read prices off `https://openrouter.ai/api/v1/models`.
 
 ## Adding a dataset
 

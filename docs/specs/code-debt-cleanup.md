@@ -143,11 +143,6 @@ acting.
   separability on a run that used the tenant ruler, then choose a bar — never tighten one before. **Rides
   with:** [`../../paper/README.md`](../../paper/README.md) § The sequence, stage 3. **Re-test:** a
   tenant-ruler run's `index.json::final.rounds_to_separable` beside its `rounds_to_improved`.
-- **The free tier offers what it refuses.** `application/free_tier.py::with_free_tier_layer` narrows each
-  model's params but never the model axis, so a free check-in offers models Start refuses. Action: the
-  per-value lists name only values known to fail; the spend ceiling bounds the rest. **Rides with:** the
-  host coupon ([`roadmap.md`](roadmap.md) § Host coupon + BYO keys). **Re-test:** a free account's model
-  menu equals `free_tier.yaml::task_models`.
 - **`application/optimizers/paper_templates.py::marked` refuses a `<prompt>` block with no closing tag**
   (`gpt-oss-20b`, ~1 in 6 LEVI replies), and the INVALID card names potter's `l1_generate`. Action: an
   unclosed block reads to the reply's end; the card names the node that proposed. **Rides with:** the
@@ -416,6 +411,58 @@ word's `git grep -c` for that sense is 0.
     `type: ignore[union-attr]`: string-keyed call dispatch.
   - `app.openapi()` warns `UnsupportedFieldAttributeWarning` (alias `body` / `payload` on a union-typed
     body param): a request alias that has no effect.
+- **Seen building the host coupon** (2026-10-29):
+  - A remote backend's cell always draws the box's coupon (`infrastructure/backend.py::_post_until_answered`,
+    `paid_by="host"`): no account key crosses the wire, so an own-key account past its coupon stops at
+    its first TermNorm cell. Action: the wire carries the bound account's key, or the connector declares
+    a cell free of the coupon. **Re-test:** an own-key account at a used-up coupon runs one TermNorm cell.
+  - A DSPy cell's reservation is payer-stamped from the config (`account_key.py::cell_payer`), its sends
+    from the LM (`dspy_module.py::_metered`): a student whose LM carries a custom engine sends as the
+    box's while its cell reserved as the account's. **Re-test:** an own-key embedded run with an
+    `engine=` LM; read the book's `paid_by` per hold.
+  - `api_keys.json` holds account keys in plaintext at rest, beside `user.json`. Action: encrypt under a
+    box secret, or name the file in access-model's at-rest table. **Re-test:** `cat` one.
+  - A slotless paid call (`quota.py::_admit_call`) reserves the account's whole headroom, so a launch
+    beside one reads `exhausted`, not "contended", and a second call reserves 0. Action: a call
+    reserves its declared send bound. **Re-test:** a chat turn in flight, then launch.
+  - Every paid call writes a `PaidCall` job file and nothing prunes job files. **Re-test:**
+    `ls .promptpotter/jobs | wc -l` before and after ten chat turns.
+  - A pass on no cycle (`probe-reasoning`, `seed-screen`) is asked of the coupon whole
+    (`admission.py::paid_pass`, named `{None}`), never its pipeline's providers. **Re-test:**
+    `git grep -n "frozenset({None})" -- promptpotter/application`.
+  - Two `iter_cycle_ledgers` walk different sets: `CampaignStore`'s through campaign manifests,
+    `archive_maintenance.py`'s by globbing every workspace tree. `account_spend.py::account_ledgers`
+    takes the first, so a cycle under a campaign dir with no `campaign.json` is spend no coupon counts.
+    Action: one walker. **Re-test:** `git grep -n "def iter_cycle_ledgers" -- promptpotter`.
+  - `config/paths.py::_shadowed` has one caller (`optimizer_manifest_path`). **Re-test:**
+    `git grep -n "_shadowed(" -- promptpotter`.
+  - `admission.py::inner_share` passes `named=frozenset()`, which `admit_and_share` never reads on a
+    share that is enclosed. Action: the enclosed share takes no `named`. **Re-test:**
+    `git grep -n "named=frozenset()" -- promptpotter`.
+  - A resumed cycle's prior metering counts as the box's in its book's coupon reserve
+    (`SpendBook.take_up` reads only unreported own-key holds), so a resumed own-key run reserves more of
+    the coupon than it draws. Conservative, not a leak. **Re-test:** resume an own-key cycle and read its
+    `off_coupon_usd`.
+  - `TokenUsageRecord.cached` and `key_source is None` are two spellings of one fact (a replay no
+    wallet paid). Action: one field. **Re-test:** `git grep -n "key_source=None" -- promptpotter`.
+  - `account_key.py::resolve_api_key` folds every account ledger on each send of a non-host account (it reads
+    the remainder fresh). Action: the run's book carries the remainder it was admitted against.
+    **Re-test:** time one send on an account with 100 cycles.
+  - Restamp drops `User.spend_budget_usd_total` / `token_budget_total`: a hand-raised account must be
+    re-granted as `grant.json`. **Re-test:** `ls .promptpotter/projects/*/grant.json` after a restamp.
+  - `CouponStatus.exhausted` is true both used up and `void`, so each reader guards `void` first (three
+    webapp sites). **Re-test:** `git grep -n "\.void" -- webapp/components`.
+  - The refusals in `coupon.py` / `errors.py` name a webapp pane ("Account → API keys"): renaming the
+    pane means editing Python strings. **Re-test:** `git grep -n "API keys" -- promptpotter`.
+  - `LifetimeSpend` carries no token count, so the coupon's token side shows left / face, never used.
+    **Re-test:** the Host allowance section with a token-bound grant.
+  - `CommitInput` forces `autoComplete="off"` and, after a failed commit, will not resend the same value
+    on Enter. **Re-test:** fail a key PUT, press Enter again.
+  - `AccountSpend` refreshes the coupon both on its poll and from an effect watching the sidebar's
+    `billed_usd`. **Re-test:** `git grep -n "couponRead" -- webapp/components`.
+  - The onboarding dialogs use raw `<button className="login-button">`, not `ui/Button`; and
+    `AccountUsageTab::LimitControl`'s note ("runs on their provider key") predates own keys.
+    **Re-test:** `git grep -n "login-button" -- webapp/components/onboarding`.
 - **The offline legs rest on fake-data draws keyed by the whole node config**
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
   leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.

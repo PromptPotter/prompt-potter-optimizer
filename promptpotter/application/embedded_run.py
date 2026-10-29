@@ -190,6 +190,7 @@ async def run_campaign(
         hop=session.hop if session.cycle_id else None,
         requested=budget,
         step_rounds=step_rounds,
+        execution=session.backend_client.execution,
     ) as (job_id, held):
         if declaration is None:
             assert resumed is not None, "a session bound to a campaign resumes it"

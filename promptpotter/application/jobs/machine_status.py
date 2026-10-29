@@ -4,9 +4,8 @@ from pydantic import Field
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity, throttle_hold
 from promptpotter.application.jobs.registry import (
+    SLOTLESS,
     UNRESOLVED_HOP,
-    EmbeddedRun,
-    InnerRun,
     Job,
     JobRegistry,
     SlotHolder,
@@ -49,7 +48,7 @@ class MachineSlot(StrictModel):
     @classmethod
     def of(cls, job: Job, *, account: str) -> MachineSlot:
         holder = job.holder
-        assert not isinstance(holder, EmbeddedRun | InnerRun), "holds no slot"
+        assert not isinstance(holder, SLOTLESS), "holds no slot"
         return cls(
             job_id=job.job_id,
             what=job.what,

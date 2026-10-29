@@ -25,6 +25,7 @@ from promptpotter.infrastructure.store.measurement_archive import MeasurementArc
 from promptpotter.infrastructure.store.ruler_store import RulerStore
 from promptpotter.infrastructure.store.tenant_dataset_store import TenantDatasetStore
 from promptpotter.infrastructure.store.user_store import UserStore
+from promptpotter.infrastructure.store.wallet_store import GrantStore, TenantApiKeyStore
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.identity import IdentityContext, TenantId
 
@@ -47,6 +48,8 @@ class Stores:
     judge_reuse: LLMReuseCache
     diagnostic_runs: DiagnosticRunStore
     users: UserStore
+    grant: GrantStore
+    api_keys: TenantApiKeyStore
 
     @property
     def tenant_id(self) -> TenantId:
@@ -119,6 +122,9 @@ def build_stores(
         judge_reuse=LLMReuseCache(home.root, paths.JUDGE_REUSE_DIR),
         diagnostic_runs=DiagnosticRunStore(tenant_dir),
         users=UserStore(tenant_dir),
+        # The account's, never a sandbox's: an L4 inner run spends from the wallet of its owner.
+        grant=GrantStore(account),
+        api_keys=TenantApiKeyStore(account),
     )
 
 

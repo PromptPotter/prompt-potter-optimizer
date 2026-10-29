@@ -218,7 +218,6 @@ promptpotter = [
     "assets/optimizers/*/*.json",   # + each one's generated schema registry
     "assets/checkin/*.yaml",        # the bench's check-in node
     "assets/checkin/*.json",        # + its generated schema registry
-    "assets/free_tier.yaml",        # what a free account may run
     "assets/datasets/**/*.yaml",    # dataset definitions, family and install defaults
     "assets/datasets/**/*.md",      # + task framing and READMEs
     # A BUILD ARTIFACT — a Next.js export — so it cannot sit in the source tree the way

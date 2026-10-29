@@ -15,40 +15,50 @@ from promptpotter.application.jobs.registry import (
     UNRESOLVED_HOP,
     Job,
     JobRegistry,
+    PaidCall,
 )
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.connector import ConnectorExecution
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.spend import (
     CEILING_METER_LABELS,
     CYCLE_AXES,
     MONEY_AXES,
     NOTHING_METERED,
-    RATE_PRICED_LABEL,
     ZERO_SPEND,
     Budget,
     CeilingMeter,
-    LifetimeSpend,
     UserSpend,
     bill_is_floor,
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.migration import is_host
-from promptpotter.infrastructure.llm.send_pacing import set_rate_tenant
+from promptpotter.infrastructure.llm.account_key import (
+    Coupon,
+    account_spend,
+    bind_account,
+    named_providers,
+    payers_of,
+    read_coupon,
+)
+from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.spend_book import (
     Hold,
     SpendBook,
     spending_under,
     unbounded_spend_book,
 )
-from promptpotter.infrastructure.store.account_spend import (
-    account_ledgers,
-    campaign_spend,
-    sum_user_spend,
-)
+from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.infrastructure.store.user_store import User
-from promptpotter.shared.errors import NotFoundError, PayloadInvalidError, PotterError
+from promptpotter.shared.errors import (
+    HostAllowanceExhaustedError,
+    NotFoundError,
+    PayloadInvalidError,
+    PotterError,
+)
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
     has_capability,
@@ -144,7 +154,7 @@ def check_launch_quotas(
 
 
 def overrun(ceilings: Budget, spent: UserSpend) -> Budget:
-    """The OPERATOR's number: ``/quota-status`` never serves it."""
+    """The OPERATOR's number: ``/auth/coupon`` never serves it."""
     return Budget.amount(
         0.0 if ceilings.usd is None else max(0.0, spent.sent_usd - ceilings.usd),
         0 if ceilings.tokens is None else max(0, spent.used_tokens - ceilings.tokens),
@@ -152,11 +162,10 @@ def overrun(ceilings: Budget, spent: UserSpend) -> Budget:
 
 
 class AccountWallet(NamedTuple):
-    """One read of an account's position: what it has spent, what it answers to, and what a launch
-    may still declare once in-flight reservations are held back."""
+    """One read of an account's coupon: what the box's keys paid for it, its face, and what a launch
+    may still hold of it once in-flight reservations are held back."""
 
-    spent: UserSpend
-    ceilings: Budget
+    coupon: Coupon
     headroom: Budget
     # Headroom is quoted at zero, not twice: a contended account has money and needs a retry.
     contended: bool = False
@@ -164,14 +173,34 @@ class AccountWallet(NamedTuple):
     history: UserSpend = ZERO_SPEND
 
     @property
+    def spent(self) -> UserSpend:
+        return self.coupon.spent
+
+    @property
+    def ceilings(self) -> Budget:
+        return self.coupon.face
+
+    @property
     def exhausted(self) -> bool:
         """A contended wallet quotes zero and is not exhausted: a launch still being admitted holds it."""
         return not self.contended and (
-            (self.headroom.usd is not None and self.headroom.usd <= self.history.at_most_usd)
+            self.coupon.void
+            or (self.headroom.usd is not None and self.headroom.usd <= self.history.at_most_usd)
             or (
                 self.headroom.tokens is not None
                 and self.headroom.tokens <= self.history.at_most_tokens
             )
+        )
+
+    def refused(self, reason: str, refusing: Job | None) -> HostAllowanceExhaustedError:
+        """Names what it refuses off *refusing*'s holder — a campaign, or a paid verb's scoring pass."""
+        over = overrun(self.ceilings, self.spent)
+        if over != NOTHING_METERED:
+            reason += f" It is already {_amounts(over)} past it."
+        what = "this launch" if refusing is None else refusing.what
+        return HostAllowanceExhaustedError(
+            f"{reason} Refused whole, never clamped: {what}. Lower its ceiling, or add your own "
+            "key under Account → API keys to run past the host's allowance on your own money."
         )
 
 
@@ -184,22 +213,21 @@ def read_account_wallet(
     excluding_campaign: str | None = None,
 ) -> AccountWallet:
     """A running cycle's spend-so-far is counted twice (ledger + reserve): it errs toward refusing."""
-    ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
-    spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
+    coupon = read_coupon(stores, account_spend(stores))
+    ceilings, spent = coupon.face, coupon.spent
     if ceilings.usd is None and ceilings.tokens is None:
-        return AccountWallet(spent, ceilings, ceilings)
+        return AccountWallet(coupon, ceilings)
     history = (
         ZERO_SPEND
         if excluding_campaign is None
-        else campaign_spend(stores.campaigns, excluding_campaign)
+        else campaign_spend(stores.campaigns, excluding_campaign).host
     )
     held = _outstanding_reservations(
         job_registry, user_id=user.user_id, excluding_job_id=excluding_job_id
     )
     if held is None:
         return AccountWallet(
-            spent,
-            ceilings,
+            coupon,
             Budget(
                 usd=None if ceilings.usd is None else 0.0,
                 tokens=None if ceilings.tokens is None else 0,
@@ -216,29 +244,12 @@ def read_account_wallet(
         else max(0, ceilings.tokens - spent.at_most_tokens - held.token_amount)
         + history.at_most_tokens,
     )
-    return AccountWallet(spent, ceilings, headroom, history=history)
+    return AccountWallet(coupon, headroom, history=history)
 
 
 class QuotaStatus(StrictModel):
-    """Usage against the next launch's gates: spend and tokens LIFETIME, campaigns per day."""
+    """Usage against the next launch's machine gates; the money is `/auth/coupon`'s."""
 
-    spend_lifetime: LifetimeSpend
-    spend_budget_usd_total: float | None
-    spend_budget_used_share: float | None = Field(
-        description="How full the USD meter draws: `spend_lifetime.billed_usd` plus its "
-        "`rate_priced_usd`, over `spend_budget_usd_total`, at most 1. `None` where no ceiling "
-        "bounds the account."
-    )
-    allowance_exhausted: bool = Field(
-        description="The allowance is SPENT in either unit, unreported sends counted. What a "
-        "running launch holds is not spent: a run declaring no cap holds the whole headroom. "
-        "False on an account no ceiling bounds."
-    )
-    tokens_used_total: int
-    token_budget_total: int | None
-    token_budget_used_share: float | None = Field(
-        description="The token meter's twin of `spend_budget_used_share`."
-    )
     concurrent_running: int
     concurrent_queued: int = Field(
         description="This account's launches waiting for a machine slot. They count against "
@@ -257,13 +268,6 @@ class QuotaStatus(StrictModel):
     max_campaigns_per_day: int
 
 
-def _used_share(used: float, ceiling: float | None) -> float | None:
-    """A ceiling of nothing is full: there is no room under it to draw."""
-    if ceiling is None:
-        return None
-    return min(1.0, used / ceiling) if ceiling > 0 else 1.0
-
-
 def _machine_binds(limit: int) -> str | None:
     ceiling = settings.MACHINE_RUN_CAPACITY
     if limit <= ceiling:
@@ -275,22 +279,10 @@ def _machine_binds(limit: int) -> str | None:
 
 
 def quota_status(*, stores: Stores, job_registry: JobRegistry) -> QuotaStatus:
-    """Usage is uncapped, so an account past its ceiling reads its overage."""
     user = account_of(stores)
-    # No reservation is read: this reports what was spent, and admission alone weighs what is held.
-    ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
-    spent = sum_user_spend(ledgers=account_ledgers(stores.campaigns))
     # The launches `max_concurrent_cycles` binds: a scoring pass is not among them.
     launches = job_registry.list_launches(user_id=user.user_id)
     return QuotaStatus(
-        spend_lifetime=LifetimeSpend.of(spent),
-        spend_budget_usd_total=ceilings.usd,
-        spend_budget_used_share=_used_share(spent.sent_usd, ceilings.usd),
-        allowance_exhausted=(ceilings.usd is not None and spent.at_most_usd >= ceilings.usd)
-        or (ceilings.tokens is not None and spent.at_most_tokens >= ceilings.tokens),
-        tokens_used_total=spent.used_tokens,
-        token_budget_total=ceilings.tokens,
-        token_budget_used_share=_used_share(spent.used_tokens, ceilings.tokens),
         concurrent_running=sum(j.holds_slot for j in launches),
         concurrent_queued=sum(j.queued for j in launches),
         max_concurrent_cycles=user.max_concurrent_cycles,
@@ -309,8 +301,14 @@ def admit_launch(
     job_registry: JobRegistry,
     job_id: str,
     hop: CycleHop | None,
+    named: frozenset[str | None],
 ) -> tuple[Budget, Budget]:
-    """Refused WHOLE, never clamped. The admitted budget, then what the account reserves for it."""
+    """Refused WHOLE, never clamped. The admitted budget, then what the coupon reserves for it.
+
+    Asked of the providers the run *named*: a run all on the account's own keys draws no coupon;
+    one sending anything on the box's keys is refused by an empty one; and only one wholly on them
+    is bounded by its room up front — a mixed run's sends on the box's key meet the reserve where
+    each is held."""
     wallet = read_account_wallet(
         user=user,
         stores=stores,
@@ -321,40 +319,42 @@ def admit_launch(
     if wallet.contended:
         raise _contended("what this account has left")
 
-    def _refused(reason: str) -> QuotaExceededError:
-        return _refusal(wallet, reason, job_registry.get(job_id))
+    def _refused(reason: str) -> HostAllowanceExhaustedError:
+        return wallet.refused(reason, job_registry.get(job_id))
 
     if bill_is_floor(wallet.spent.unpriced_tokens) and wallet.headroom.usd is not None:
         logger.warning(
             "spend: account %s has %d unpriced tokens, so its USD total is a floor; admitting "
-            "against the $%.2f grace and leaning on the token ceiling",
+            "against the $%.2f grace and leaning on the token coupon",
             user.user_id,
             wallet.spent.unpriced_tokens,
             settings.UNPRICED_GRACE_USD,
         )
-    if wallet.exhausted:
-        raise _refused("This account has nothing left to spend.")
-    delegated = _delegated_spend_ceiling(stores)
     room = wallet.headroom
-    tokens = declared.tokens
-    if declared.usd is None:
-        # Declaring nothing declares the headroom under the grant, never the grant itself.
-        usd = _lowest(room.usd, delegated)
-    else:
-        usd = _lowest(declared.usd, delegated)
-        if room.usd is not None and usd is not None and usd > room.usd:
+    # A delegate's claim bounds what its launch holds, whatever its campaign declares. Declaring
+    # nothing declares no ceiling of the run's own: the coupon's reserve still binds the box's key.
+    delegated = _delegated_spend_ceiling(stores)
+    admitted = declared.over(Budget(usd=_lowest(declared.usd, delegated), tokens=declared.tokens))
+    paying = payers_of(named, stores)
+    if "host" in paying and wallet.exhausted:
+        raise _refused(wallet.coupon.refusal(None))
+    if paying == {"host"}:
+        # What the run itself declares: a delegate's cap past the coupon is held by the reserve.
+        asked = None if declared.usd is None else admitted.usd
+        if room.usd is not None and asked is not None and asked > room.usd:
             raise _refused(
-                f"This account funds a ceiling of ${room.usd:.2f} for this campaign and the run "
-                f"declares ${usd:.2f}.",
+                f"The host's allowance funds ${room.usd:.2f} for this campaign and the run "
+                f"declares ${asked:.2f}.",
             )
-    if room.tokens is not None:
-        tokens = room.tokens if tokens is None else tokens
-        if tokens > room.tokens:
+        if (
+            room.tokens is not None
+            and admitted.tokens is not None
+            and admitted.tokens > room.tokens
+        ):
             raise _refused(
-                f"This account funds a ceiling of {room.tokens:,} tokens for this campaign and "
-                f"the run declares {tokens:,}.",
+                f"The host's allowance funds {room.tokens:,} tokens for this campaign and the "
+                f"run declares {admitted.tokens:,}.",
             )
-    admitted = declared.over(Budget(usd=usd, tokens=tokens))
     return admitted, _reserve(admitted, room, delegated)
 
 
@@ -542,15 +542,26 @@ def _amounts(budget: Budget) -> str:
     return f"{usd} / {tokens}"
 
 
-def launch_usd_bound(stores: Stores) -> float | None:
-    """The most a launch may declare before ``admit_launch`` refuses it whole: what a check-in offers."""
-    user = account_of(stores)
-    if lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores)).usd is None:
+def launch_usd_bound(stores: Stores, named: frozenset[str | None]) -> float | None:
+    """The most a launch sending on *named* may declare before ``admit_launch`` refuses it whole:
+    what a check-in offers."""
+    if payers_of(named, stores) != {"host"}:
         return None
     wallet = read_account_wallet(
-        user=user, stores=stores, job_registry=JobRegistry.attach(stores.jobs_dir)
+        user=account_of(stores), stores=stores, job_registry=JobRegistry.attach(stores.jobs_dir)
     )
     return None if wallet.contended else wallet.headroom.usd
+
+
+def run_providers(config: CampaignConfig, execution: ConnectorExecution) -> frozenset[str | None]:
+    """What a run sends on: its optimizer's nodes, and its cells — ``None`` for the box's keys,
+    which a remote backend sends on, and an in-process one whose overlay names no provider."""
+    optimizer = select_optimizer(config.optimization).schema.declared_nodes
+    nodes = frozenset(
+        n.provider if n.provider in providers() else None for n in optimizer if n.provider
+    )
+    cells = named_providers(config.pipeline_overlay) if execution == "in_process" else frozenset()
+    return nodes | (cells or frozenset({None}))
 
 
 def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
@@ -564,52 +575,53 @@ def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
         )
 
 
-def _admit_call(*, stores: Stores, bucket: str) -> SpendBook:
-    # Nothing is reserved: the book itself refuses a call that would pass the headroom.
+def _admit_call(
+    *, stores: Stores, job_registry: JobRegistry, bucket: str
+) -> tuple[SpendBook, Job | None]:
+    """Refused nothing up front: whose key the call goes out on decides
+    (`account_key.py::resolve_api_key`), and the book refuses a send past what it holds. What it
+    holds is registered as its job's reservation, so a launch or call beside it holds it back."""
     user = account_of(stores)
     refuse_verb_rate(stores, user, bucket)
-    ceilings = lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores))
-    if ceilings.usd is None and ceilings.tokens is None:
-        return unbounded_spend_book()
-    wallet = read_account_wallet(
-        user=user,
-        stores=stores,
-        job_registry=JobRegistry.attach(stores.jobs_dir),
-    )
-    if wallet.contended:
-        raise _contended("what this account has left")
-    headroom = wallet.headroom
-    if wallet.exhausted:
-        unreported = (
-            f", up to ${wallet.spent.unreported_usd:.2f} more in sends whose bill never came"
-            if wallet.spent.sends_unreported
-            else ""
+    with job_registry.admission_gate():
+        wallet = read_account_wallet(user=user, stores=stores, job_registry=job_registry)
+        if wallet.ceilings.usd is None and wallet.ceilings.tokens is None:
+            return unbounded_spend_book(), None
+        if wallet.contended:
+            raise _contended("what this account has left")
+        job = job_registry.create(
+            user_id=user.user_id,
+            principal_id=acting_principal(stores.identity).id,
+            workspace=stores.campaigns.workspace,
+            hop=UNRESOLVED_HOP,
+            holder=PaidCall(bucket),
         )
-        raise QuotaExceededError(
-            code="spend_ceiling_reached",
-            message=(
-                f"This account has used its allowance (${wallet.spent.used_usd:.2f} billed, "
-                f"${wallet.spent.rate_priced_usd:.2f} {RATE_PRICED_LABEL}, "
-                f"{wallet.spent.used_tokens:,} tokens{unreported}), so nothing further "
-                "runs on the host's key."
-            ),
-        )
-    return SpendBook(
+        job_registry.mark_admitted(job.job_id, wallet.headroom)
+    book = SpendBook(
         declared=Budget(),
-        hold=Hold(headroom, headroom),
+        hold=Hold(Budget(), wallet.headroom),
         meters="bill",
         opened=time.monotonic(),
     )
+    return book, job
 
 
 @asynccontextmanager
 async def paid_call(*, stores: Stores, bucket: str) -> AsyncIterator[SpendBook]:
     """ONE LLM call on no cycle, slotless so a chat turn never queues behind campaigns."""
+    job_registry = JobRegistry.attach(stores.jobs_dir)
     # Offloaded: admission globs every cycle ledger.
-    book = await asyncio.to_thread(_admit_call, stores=stores, bucket=bucket)
-    set_rate_tenant(str(stores.identity.tenant_id))
-    with spending_under(book):
-        yield book
+    book, job = await asyncio.to_thread(
+        _admit_call, stores=stores, job_registry=job_registry, bucket=bucket
+    )
+    unbind = bind_account(stores)
+    try:
+        with spending_under(book):
+            yield book
+    finally:
+        unbind()
+        if job is not None:
+            job_registry.release(job.job_id)
 
 
 def declare_run_budget(
@@ -645,6 +657,7 @@ def clamp_budget_change(
     stores: Stores,
     job_registry: JobRegistry,
     hop: CycleHop,
+    named: frozenset[str | None],
 ) -> tuple[Budget, Budget]:
     """Clamps only a NAMED, bounded money axis: a lift stays a lift, which the reservation binds."""
     held = job_registry.running_job_for(stores.campaigns.workspace, hop)
@@ -660,33 +673,34 @@ def clamp_budget_change(
         raise _contended("this campaign's ceiling")
     delegated = _delegated_spend_ceiling(stores)
     room = wallet.headroom
-    # Per named axis: the clamped ceiling, and the bound the account reserves against.
-    bounds: dict[str, tuple[float | int | None, float | int | None]] = {}
-    if "usd" in requested.named:
-        room_usd = _lowest(room.usd, delegated)
-        usd = None if requested.usd is None else _lowest(requested.usd, room_usd)
-        bounds["usd"] = (usd, room_usd if usd is None else usd)
-    if "tokens" in requested.named:
-        tokens = None if requested.tokens is None else _lowest(requested.tokens, room.tokens)
-        bounds["tokens"] = (tokens, room.tokens if tokens is None else tokens)
-    change = requested.over(Budget.model_validate({k: v for k, (v, _) in bounds.items()}))
-    bound = Budget.model_validate({k: b for k, (_, b) in bounds.items()})
-    return change, _reserve(bound, room, delegated)
+    # A campaign ceiling is the operator's: past the coupon only where the account's own keys pay.
+    clamp = (
+        room.over(Budget(usd=_lowest(room.usd, delegated)))
+        if payers_of(named, stores) == {"host"}
+        else Budget(usd=delegated)
+    )
+    change = requested.over(
+        Budget.model_validate(
+            {
+                axis: None
+                if (v := getattr(requested, axis)) is None
+                else _lowest(v, getattr(clamp, axis))
+                for axis in requested.named & MONEY_AXES
+            }
+        )
+    )
+    return change, _reserve(change.only(requested.named & MONEY_AXES), room, delegated)
 
 
 def _reserve(budget: Budget, headroom: Budget, delegated: float | None) -> Budget:
-    """On the money axes *budget* names alone; ``None`` where no account bounds it or *budget* lifts."""
-    usd = _lowest(headroom.usd, delegated)
-    tokens = headroom.tokens
-    held: dict[str, float | int | None] = {
-        "usd": None if usd is None or budget.usd is None else min(usd, 2 * budget.usd),
-        "tokens": None
-        if tokens is None or budget.tokens is None
-        else min(tokens, 2 * budget.tokens),
-    }
-    return Budget.model_validate(
-        {axis: value for axis, value in held.items() if axis in budget.named}
-    )
+    """What the coupon holds for a run, on the money axes *budget* names: twice its ceiling, at
+    most the headroom; the whole headroom where it names none. ``None`` where no coupon bounds it."""
+    under = headroom.over(Budget(usd=_lowest(headroom.usd, delegated)))
+    held: dict[str, float | int | None] = {}
+    for axis in budget.named & MONEY_AXES:
+        room, ceiling = getattr(under, axis), getattr(budget, axis)
+        held[axis] = None if room is None else room if ceiling is None else min(room, 2 * ceiling)
+    return Budget.model_validate(held)
 
 
 def hold_budget_change(
@@ -725,21 +739,6 @@ def _contended(subject: str) -> QuotaExceededError:
     )
 
 
-def _refusal(wallet: AccountWallet, reason: str, refusing: Job | None) -> QuotaExceededError:
-    """Names what it refuses off *refusing*'s holder — a campaign, or a paid verb's scoring pass."""
-    over = overrun(wallet.ceilings, wallet.spent)
-    if over != NOTHING_METERED:
-        reason += f" It is already {_amounts(over)} past its ceiling."
-    what = "this launch" if refusing is None else refusing.what
-    return QuotaExceededError(
-        code="spend_ceiling_reached",
-        message=(
-            f"{reason} Refused whole, never clamped: {what}. Lower its ceiling or raise the "
-            f"account's."
-        ),
-    )
-
-
 def _outstanding_reservations(
     job_registry: JobRegistry, *, user_id: str, excluding_job_id: str | None
 ) -> Budget | None:
@@ -774,18 +773,6 @@ def _lowest(*values: float | None) -> float | None:
     return min(present) if present else None
 
 
-def lifetime_ceilings(*, user: User, spends_own_key: bool) -> Budget:
-    """The host is exempt in both axes: metering bounds a STRANGER on the host's key."""
-    if spends_own_key:
-        return Budget()
-    usd = user.spend_budget_usd_total
-    tokens = user.token_budget_total
-    return Budget(
-        usd=usd if usd is not None else settings.FREE_TIER_SPEND_CAP_USD,
-        tokens=tokens if tokens is not None else settings.FREE_TIER_TOKEN_CAP,
-    )
-
-
 def spends_the_hosts_own_key(stores: Stores) -> bool:
     return is_host(stores.identity)
 
@@ -813,17 +800,6 @@ def set_concurrent_cycles(*, stores: Stores, limit: int) -> User:
     updated = account_of(stores).model_copy(update={"max_concurrent_cycles": limit})
     stores.users.save(updated)
     return updated
-
-
-def on_free_tier(stores: Stores) -> bool:
-    """The ANONYMOUS grant: the host, a delegate and a hand-raised account are outside it."""
-    user = account_of(stores)
-    return (
-        lifetime_ceilings(user=user, spends_own_key=spends_the_hosts_own_key(stores)).usd
-        is not None
-        and user.spend_budget_usd_total is None
-        and _delegated_spend_ceiling(stores) is None
-    )
 
 
 def _delegated_spend_ceiling(stores: Stores) -> float | None:

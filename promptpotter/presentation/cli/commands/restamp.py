@@ -4,10 +4,10 @@ import argparse
 
 from promptpotter.application.maintenance.restamp import (
     check_readable,
-    compact_cycle_ledgers,
     prune_finished_jobs,
     prune_stored_documents,
     reproject_cycle_indexes,
+    restamp_ledgers,
     restamp_measurement_archives,
 )
 from promptpotter.presentation.cli.commands.result import CommandResult
@@ -16,7 +16,7 @@ from promptpotter.presentation.cli.commands.result import CommandResult
 async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     apply: bool = args.apply
     counts = prune_stored_documents(apply=apply)
-    ledgers = compact_cycle_ledgers(apply=apply)
+    ledgers = restamp_ledgers(apply=apply)
     indexes = reproject_cycle_indexes(apply=apply)
     archive = restamp_measurement_archives(apply=apply)
     jobs = prune_finished_jobs(apply=apply)
@@ -26,14 +26,16 @@ async def cmd_restamp(args: argparse.Namespace) -> CommandResult:
     human = (
         f"restamp: {verb} {counts['rewritten']} file(s); "
         f"{counts['failed']} still invalid, {counts['skipped']} unreadable. "
-        f"Ledgers: {ledgers['cycles']} cycle(s), "
+        f"Ledgers: {ledgers['ledgers_rewritten']} rewritten, "
         f"{ledgers['bytes_saved'] / (1024 * 1024):.1f} MB reclaimed, "
+        f"{ledgers['records_restamped']} record(s) read out of a former shape and "
         f"{ledgers['record_keys_dropped']} record key(s) the engine no longer declares pruned "
-        f"off — every line carrying one refused its cycle "
+        f"off — every line carrying either refused its ledger "
         f"({ledgers['skipped_producing']} producing, left alone). "
-        f"Cycles: {read['ledgers_checked'] - read['ledgers_refused']}"
-        f"/{read['ledgers_checked']} read. "
-        f"Campaigns unreadable: {read['campaigns_unreadable']}. "
+        f"Ledgers read: {read['ledgers_checked'] - read['ledgers_refused']}"
+        f"/{read['ledgers_checked']}. "
+        f"Campaigns unreadable: {read['campaigns_unreadable']}; "
+        f"accounts unreadable: {read['accounts_unreadable']}. "
         f"Cycle indexes: {indexes['cycle_indexes_reprojected']}"
         f"/{indexes['cycle_indexes']} re-derived from their ledgers. "
         f"Archive: {archive['archive_records_removed']} record(s) "

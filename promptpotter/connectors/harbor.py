@@ -55,13 +55,14 @@ from promptpotter.infrastructure.docker_host import (
     forget_package_cache,
     machine_step,
 )
-from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
+from promptpotter.infrastructure.llm.account_key import cell_key, payer
+from promptpotter.infrastructure.llm.base import ProviderKey, hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.openai_compat import (
     ReplyBilling,
     cell_gateway_body,
     sent_effort,
 )
-from promptpotter.infrastructure.llm.registry import openai_compat_spec
+from promptpotter.infrastructure.llm.registry import host_key_attr, openai_compat_spec
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, drawn_budget
 from promptpotter.infrastructure.llm.spend_book import (
@@ -978,6 +979,8 @@ class _Episode:
     agent_kwargs: dict[str, Any]
     model: str | None
     provider: str | None
+    # The bound account's, chosen where a node's is; ``None`` sends on the agent's own environment.
+    key: ProviderKey | None
     environment: str
     cached: bool
     prompt: str | None
@@ -1020,6 +1023,7 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         # From the node config, never the panel's agent block (`datasets/CLAUDE.md`).
         model=payload.get("model"),
         provider=payload.get("provider"),
+        key=cell_key(payload.get("provider")),
         environment=agent_cfg.get("environment") or "docker",
         cached=panel.get(PACKAGE_CACHE_KEY) in PACKAGE_CACHE_SCOPES,
         prompt=payload.get("prompt"),
@@ -1031,6 +1035,13 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
             if tool != "asciinema" or agent_kwargs.get("record_terminal_session") is not False
         ),
     )
+
+
+def _agent_key_env(episode: _Episode) -> dict[str, str]:
+    """An installed agent reads its provider's key off its environment, under the box's name for it."""
+    if episode.key is None or episode.provider is None:
+        return {}
+    return {host_key_attr(episode.provider): episode.key.secret.get_secret_value()}
 
 
 def _trial_config(episode: _Episode, skills: list[str]) -> Any:
@@ -1045,6 +1056,7 @@ def _trial_config(episode: _Episode, skills: list[str]) -> Any:
             model_name=episode.harbor_model_name,
             skills=skills,
             kwargs=episode.agent_kwargs,
+            env=_agent_key_env(episode),
         ),
         environment=harbor_config.EnvironmentConfig(
             type=episode.environment,
@@ -1145,7 +1157,9 @@ async def _billed_acompletion(*args: Any, **kwargs: Any) -> Any:
         sent=messages,
         max_tokens=kwargs.get("max_tokens"),
     )
-    with admitted(label, bound, model=model, provider=provider) as admission:
+    if (key := cell_key(provider)) is not None:
+        kwargs["api_key"] = key.secret.get_secret_value()
+    with admitted(label, bound, model=model, provider=provider, paid_by=payer(key)) as admission:
         try:
             reply = await send(*args, **kwargs)
         except BaseException as exc:
@@ -1177,7 +1191,13 @@ async def _billed_run(trial: Trial, episode: _Episode) -> tuple[TrialResult, flo
             result = await trial.run()
         return result, reported.usd
     # An installed agent sends from its container: one send here, settled on Harbor's token read.
-    with admitted(_AGENT_SEND, reservation_left(), model=model, provider=provider) as admission:
+    with admitted(
+        _AGENT_SEND,
+        reservation_left(),
+        model=model,
+        provider=provider,
+        paid_by=payer(episode.key),
+    ) as admission:
         try:
             result = await trial.run()
         except Exception as exc:

@@ -24,6 +24,8 @@ class ErrorCategory(enum.StrEnum):
     PROVIDER_THROTTLED = "PROVIDER_THROTTLED"
     SPEND_CEILING = "SPEND_CEILING"
     TOKEN_CEILING = "TOKEN_CEILING"
+    # Not SPEND_CEILING: the campaign's ceiling is the operator's; this is the host's coupon.
+    HOST_ALLOWANCE = "HOST_ALLOWANCE"
     WALL_CLOCK = "WALL_CLOCK"
     # Never sent, so not CONNECTION: the backend the cell would have reached is untouched.
     PRICE_LIST_UNREACHABLE = "PRICE_LIST_UNREACHABLE"
@@ -201,16 +203,32 @@ class CycleBusyError(PotterError):
         )
 
 
-class ProviderUnkeyedError(SendRefusedError, PotterError):
-    """Refused before the wire, so nothing is billed: the install's to fix, never a retry's."""
+class NoApiKeyError(SendRefusedError, PotterError):
+    """Refused before the wire, so nothing is billed: neither the account nor the box holds a key."""
 
-    http_status = 409
-    code = "provider_unkeyed"
+    http_status = 422
+    code = "no_api_key"
 
     def __init__(self, *, provider: str, key: str) -> None:
-        message = f"No {provider} key is set, so nothing was sent. Set {key} and restart the app."
+        message = (
+            f"No {provider} key is held by this account or this box, so nothing was sent. Add "
+            f"your own {provider} key under Account → API keys, or the box's operator sets {key} "
+            "and restarts the app."
+        )
         SendRefusedError.__init__(self, message, category=ErrorCategory.CLIENT)
         self.details = {"provider": provider, "key": key}
+
+
+class HostAllowanceExhaustedError(SendRefusedError, PotterError):
+    """The host's coupon has nothing left for this account: refused at admission, or at a send in
+    flight, where it ends the run ``host_allowance``."""
+
+    http_status = 422
+    code = "host_allowance_exhausted"
+
+    def __init__(self, message: str, *, provider: str | None = None) -> None:
+        SendRefusedError.__init__(self, message, category=ErrorCategory.HOST_ALLOWANCE)
+        self.details = {} if provider is None else {"provider": provider}
 
 
 class ContentTooLargeError(PotterError):
@@ -398,6 +416,7 @@ ERROR_IS_CHARGED: Annotated[dict[ErrorCategory, bool], shapes_optimizer_prompt] 
     ErrorCategory.PROVIDER_THROTTLED: False,
     ErrorCategory.SPEND_CEILING: False,
     ErrorCategory.TOKEN_CEILING: False,
+    ErrorCategory.HOST_ALLOWANCE: False,
     ErrorCategory.WALL_CLOCK: False,
     ErrorCategory.PRICE_LIST_UNREACHABLE: False,
     ErrorCategory.NO_RATE: False,

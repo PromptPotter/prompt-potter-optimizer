@@ -573,18 +573,19 @@ class HeldSends:
 
     def __init__(self) -> None:
         self.open: dict[str, SpendHoldRecord] = {}
-        self.unpriced: dict[str, float | None] = {}
-        self._bounds: dict[str, float | None] = {}
+        # The holds closed unpriced, whose `cost_usd` stays held.
+        self.unpriced: dict[str, SpendHoldRecord] = {}
+        self._holds: dict[str, SpendHoldRecord] = {}
 
     def track(self, record: HoldTrailRecord) -> None:
         if isinstance(record, SpendHoldRecord):
             self.open[record.hold_id] = record
-            self._bounds[record.hold_id] = record.cost_usd
+            self._holds[record.hold_id] = record
         elif (hold_id := record.hold_id) is not None:
             self.open.pop(hold_id, None)
             # A bill names a hold of another trail where a nested run's copy is carried onto its root.
-            if hold_id in self._bounds and record.bill_or_rate_usd is None:
-                self.unpriced[hold_id] = self._bounds[hold_id]
+            if hold_id in self._holds and record.bill_or_rate_usd is None:
+                self.unpriced[hold_id] = self._holds[hold_id]
 
 
 def held_tokens(hold: SpendHoldRecord) -> int:

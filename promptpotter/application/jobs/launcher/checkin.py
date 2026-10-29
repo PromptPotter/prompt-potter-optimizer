@@ -31,7 +31,7 @@ from promptpotter.application.jobs.mint import (
     relabel_minted,
     resolve_cycle_plan,
 )
-from promptpotter.application.jobs.quota import land_job, on_free_tier
+from promptpotter.application.jobs.quota import land_job
 from promptpotter.application.jobs.registry import UNRESOLVED_HOP
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import draft_config, draft_pipeline
@@ -107,7 +107,6 @@ def _refuse_unrunnable_upload(stores: Stores, draft: DraftCampaign, source: dict
         cut_bank(stores, source),
         params,
         schema,
-        free=on_free_tier(stores),
         shelf=stores.block_packs,
     )
 

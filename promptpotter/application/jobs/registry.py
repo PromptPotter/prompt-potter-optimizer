@@ -92,10 +92,20 @@ class InnerRun:
     kind: Literal["inner_run"] = "inner_run"
 
 
+@dataclass(frozen=True)
+class PaidCall:
+    """One LLM call on no cycle (`quota.py::paid_call`): its reservation, so the account's other
+    admissions hold it back, and never a slot, so a chat turn never queues behind campaigns."""
+
+    __pydantic_config__: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+
+    bucket: str
+    kind: Literal["paid_call"] = "paid_call"
+
+
 SlotHolder = Annotated[CampaignLaunch | ScoringPass, Field(discriminator="kind")]
-JobHolder = Annotated[
-    CampaignLaunch | ScoringPass | EmbeddedRun | InnerRun, Field(discriminator="kind")
-]
+SLOTLESS = EmbeddedRun | InnerRun | PaidCall
+JobHolder = Annotated[CampaignLaunch | ScoringPass | SLOTLESS, Field(discriminator="kind")]
 
 
 @dataclass(frozen=False)
@@ -142,6 +152,8 @@ class Job:
                 return f"an embedded run on {where if resolved else dataset}"
             case InnerRun(dataset_name=dataset):
                 return f"an inner run on {where if resolved else dataset}"
+            case PaidCall(bucket=bucket):
+                return f"a {bucket} call"
             case _:
                 assert_never(self.holder)
 
@@ -175,7 +187,7 @@ class Job:
 
     @property
     def holds_slot(self) -> bool:
-        return self.holds_spend and not isinstance(self.holder, EmbeddedRun | InnerRun)
+        return self.holds_spend and not isinstance(self.holder, SLOTLESS)
 
 
 _JOB = TypeAdapter(Job)

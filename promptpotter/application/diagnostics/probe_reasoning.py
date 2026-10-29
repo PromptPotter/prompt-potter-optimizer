@@ -1,4 +1,4 @@
-"""Through ``get_llm_client().chat``, never a raw request: that would measure a wire nothing uses."""
+"""Through ``keyed_client().chat``, never a raw request: that would measure a wire nothing uses."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from promptpotter.application.initialization.loop_start import diagnostic_trace
 from promptpotter.application.jobs.launcher.admission import paid_pass
 from promptpotter.domain.pipeline_overlay import normalize_model_id
 from promptpotter.domain.spend import Budget
+from promptpotter.infrastructure.llm.account_key import keyed_client
 from promptpotter.infrastructure.llm.capabilities import STANDARD_EFFORT_LADDER
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_DEFAULT_EFFORT
-from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, under_budget
@@ -76,12 +76,12 @@ async def probe_reasoning(
     rungs: tuple[str, ...] = STANDARD_EFFORT_LADDER,
 ) -> list[RungReading]:
     """Serial on purpose: concurrent probes share one rate limit, and a 429 reads as a refusal."""
-    client = get_llm_client(provider)
     # Every send at its cap, every attempt: the prompt's length in chars bounds its tokens from above.
     bound = (len(rungs) + 1) * SEND_ATTEMPTS * (_MAX_TOKENS + len(_PROMPT))
     declared = Budget(tokens=bound)
     async with paid_pass(stores=stores, verb="probe-reasoning", hop=None, declared=declared):
         with diagnostic_trace(stores, None):
+            client = keyed_client(provider)
             readings = [await _one(client, model, None)]
             for rung in rungs:
                 readings.append(await _one(client, model, rung))

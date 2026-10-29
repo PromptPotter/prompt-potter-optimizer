@@ -51,9 +51,8 @@ from factories import (
     workspace,
 )
 from offline_world import Hang, Router, Said, completion
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError
 
-from promptpotter.application import free_tier
 from promptpotter.application.account import account_of
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.commands.dispatcher import (
@@ -68,6 +67,7 @@ from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.application.diagnostics.probe_reasoning import probe_reasoning
 from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
 from promptpotter.application.jobs import mint
+from promptpotter.application.jobs.coupon import coupon_status
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_share,
     embedded_share,
@@ -83,7 +83,6 @@ from promptpotter.application.jobs.quota import (
     cycle_share,
     hold_budget_change,
     hold_moved,
-    on_free_tier,
     paid_call,
     spends_the_hosts_own_key,
 )
@@ -124,11 +123,7 @@ from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import CutKind
 from promptpotter.domain.campaign import Optimize
-from promptpotter.domain.campaign_config import (
-    CampaignConfig,
-    OptimizationConfig,
-    merge_config_layers,
-)
+from promptpotter.domain.campaign_config import CampaignConfig, OptimizationConfig
 from promptpotter.domain.cells import PinnedCell
 from promptpotter.domain.command_kinds import (
     ChangeRunLimitsPayload,
@@ -151,7 +146,6 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     WebSpendBound,
@@ -193,13 +187,13 @@ from promptpotter.domain.validators import StopSignal
 from promptpotter.infrastructure.backend import CELL, BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, pricing, telemetry
+from promptpotter.infrastructure.llm.account_key import keyed_client, resolve_api_key
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
 from promptpotter.infrastructure.llm.pricing import (
     PriceTier,
     Rate,
     RateCeiling,
 )
-from promptpotter.infrastructure.llm.registry import get_llm_client
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.send_pacing import (
     SEND_ATTEMPTS,
@@ -245,6 +239,7 @@ from promptpotter.infrastructure.store.read_model import LedgerSpan, iter_jsonl
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
+from promptpotter.infrastructure.store.wallet_store import CouponGrant
 from promptpotter.shared.errors import (
     CellHaltedError,
     CellInfrastructureError,
@@ -253,6 +248,8 @@ from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
     ErrorCategory,
+    HostAllowanceExhaustedError,
+    NoApiKeyError,
     NotFoundError,
     PayloadInvalidError,
     SendRefusedError,
@@ -382,6 +379,8 @@ class _Reply(BaseModel):
 
 
 _MESSAGES = [{"role": "user", "content": "q"}]
+# A run naming the box's keys alone: what every TermNorm cell sends on.
+_ON_THE_BOX: frozenset[str | None] = frozenset({None})
 _MAX_PRICE = {"max_price": {"prompt": 500000.0, "completion": 250000.0}}
 _EVERY_FIELD: dict[str, Any] = {
     "temperature": 0.3,
@@ -525,7 +524,7 @@ async def test_a_call_is_priced_on_its_route_sent_as_asked_and_billed_once(
             ("openrouter", _EVERY_FIELD, True),
         ):
             offline.llm.sent.clear()
-            sending = asyncio.create_task(send(get_llm_client(host), asked))
+            sending = asyncio.create_task(send(keyed_client(host), asked))
             if sent:
                 await sending
             else:
@@ -715,7 +714,9 @@ async def _walk(
     dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
 
     async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
-        with admitted(CallLabel("cell", "backend"), dollar, model=None, provider=None) as bill:
+        with admitted(
+            CallLabel("cell", "backend"), dollar, model=None, provider=None, paid_by="host"
+        ) as bill:
             if sample.id == stall:
                 await asyncio.sleep(0.3)
             row = await backend.measure(sample)
@@ -1421,7 +1422,7 @@ def _priced_wire(offline: Router) -> _Provider:
 async def _owned_chat(node: str, content: str = "x", *, max_tokens: int = 10) -> Any:
     """One optimizer send through the registry's client, owned as an entry owns it."""
     with under_budget(SendBudget(None, attempts=SEND_ATTEMPTS)):
-        return await get_llm_client("openai").chat(
+        return await keyed_client("openai").chat(
             ChatRequest([{"role": "user", "content": content}], "gpt-x", max_tokens=max_tokens),
             label=CallLabel(node, "optimizer"),
         )
@@ -1602,6 +1603,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
                 job=job,
                 hop=fork,
                 step_rounds=None,
+                named=_ON_THE_BOX,
             )
         except QuotaExceededError as exc:
             shared.release(job.job_id, refusal=str(exc))
@@ -1644,6 +1646,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
             hop=fork_c,
             requested=Budget(),
             step_rounds=None,
+            execution="remote_http",
         ) as (_, held):
             assert held.admitted.usd == pytest.approx(1.0)
             run = shared.running_job_for(built_stores.campaigns.workspace, fork_c)
@@ -1766,11 +1769,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
             capabilities=frozenset({"campaign.run"}),
         ),
     )
-    delegate.users.save(
-        account_of(delegate).model_copy(
-            update={"spend_budget_usd_total": 50.0, "token_budget_total": 50_000}
-        )
-    )
+    delegate.grant.save(CouponGrant(face=Budget(usd=50.0, tokens=50_000)))
     spender, claimed = (
         CycleHop(campaign_id="camp-9", cycle_id=f"cycle_claim000{n}") for n in (1, 2)
     )
@@ -1793,6 +1792,7 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
         job=claim,
         hop=claimed,
         step_rounds=None,
+        named=_ON_THE_BOX,
     )
     claim_held = shared.get(claim.job_id)
     assert claim_held is not None and cycle_share(delegate, claim_held).usd == pytest.approx(7.0), (
@@ -1859,12 +1859,12 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
             "walks one cell at a time"
         )
         for _ in range(depth):
-            own.hold(held, worst, "backend", what="cell", reservation=None)
+            own.hold(held, worst, "backend", what="cell", reservation=None, paid_by="host")
         with pytest.raises(SendRefusedError):
-            own.hold(held, worst, "backend", what="cell", reservation=None)
+            own.hold(held, worst, "backend", what="cell", reservation=None, paid_by="host")
         billed = 0
         while own.exhausted() is None:
-            own.release(held, worst, "backend")
+            own.release(held, worst, "backend", "host")
             own.usd_metered += worst.usd or 0.0
             billed += 1
         assert billed == 4, f"reserve {reserve}: the run stops on reaching its ceiling"
@@ -1925,20 +1925,20 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     fresh = spend_book(0.10, meters="search_incurred")
     fresh.count(replay(0.09))
     pass_bound = SendBound(input_tokens=100, output_tokens=100, usd=5.0)
-    fresh.hold(pass_bound, pass_bound, "bench", what="bench pass", reservation=None)
-    fresh.release(pass_bound, pass_bound, "bench")
+    fresh.hold(pass_bound, pass_bound, "bench", what="bench pass", reservation=None, paid_by="host")
+    fresh.release(pass_bound, pass_bound, "bench", "host")
     fresh.count(billed_call(5.0, kind="bench", node="b", output_tokens=1))
     assert fresh.exhausted() is None, "the bench pass ate into the arm's search budget"
     # The pass's cells are backend cells filed as bench: admitted in the bucket they bill to.
     with (
         spending_under(fresh),
         telemetry.filed_as("bench"),
-        reserved(CallLabel("cell", "backend"), pass_bound),
+        reserved(CallLabel("cell", "backend"), pass_bound, paid_by="host"),
     ):
         pass
     small = SendBound(input_tokens=1, output_tokens=1, usd=0.02)
     with pytest.raises(SendRefusedError):
-        fresh.hold(small, small, "optimizer", what="o", reservation=None)
+        fresh.hold(small, small, "optimizer", what="o", reservation=None, paid_by="host")
 
     # No burst of sends records spend past its ceiling.
     wire = _priced_wire(offline)
@@ -1991,9 +1991,10 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         input_tokens=600,
         output_tokens=1500,
         cost_usd=hold_usd,
+        key_source="host",
     )
     burst_ledger.append(killed)
-    account = billed_spend([burst_ledger.path])
+    account = billed_spend([burst_ledger.path]).host
     assert account.used_usd == 0.0, "a price off our rate table was read as spent"
     assert account.rate_priced_usd == pytest.approx(recorded), "the rate-priced sum moved"
     assert account.unreported_usd == pytest.approx(left_out.usd + hold_usd), (
@@ -2005,7 +2006,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     bare.append(killed.model_copy(update={"hold_id": "bare", "node": "bare"}))
     bare.append(billed_call(node="bare", input_tokens=40, output_tokens=9, hold_id="bare"))
     assert unreported_on(bare).usd == pytest.approx(hold_usd), "a priceless bill freed its hold"
-    assert billed_spend([bare.path]).unreported_usd == pytest.approx(hold_usd), (
+    assert billed_spend([bare.path]).host.unreported_usd == pytest.approx(hold_usd), (
         "the account read a priceless bill as settling its hold"
     )
 
@@ -2026,8 +2027,8 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
     assert [r.mirrored for r in _token_bills(nested)] == [True], "the nested copy bills twice"
     assert unreported_on(root).sends == 0, "a billed nested send stayed held"
-    assert billed_spend([nested.path]).sent_usd == 0.0, "the nested ledger billed its mirror"
-    assert 0.0 < book.usd_metered == pytest.approx(billed_spend([root.path]).sent_usd), (
+    assert billed_spend([nested.path]).total.sent_usd == 0.0, "the nested ledger billed its mirror"
+    assert 0.0 < book.usd_metered == pytest.approx(billed_spend([root.path]).total.sent_usd), (
         "the root's book read another bill than its ledger holds"
     )
     assert inner.usd_metered == pytest.approx(book.usd_metered), (
@@ -2036,7 +2037,14 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     room = (inner.money_left(), book.money_left())
     past_root = SendBound(input_tokens=0, output_tokens=0, usd=0.06)
     with pytest.raises(SendRefusedError):
-        inner.hold(past_root, past_root, "optimizer", what="past the root", reservation=None)
+        inner.hold(
+            past_root,
+            past_root,
+            "optimizer",
+            what="past the root",
+            reservation=None,
+            paid_by="host",
+        )
     assert (inner.money_left(), book.money_left()) == room, (
         "a nested send past its ROOT's ceiling was admitted on its own book's room, or held "
         "half-way"
@@ -2044,7 +2052,13 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     cut = SendBound(input_tokens=600, output_tokens=1500, usd=hold_usd)
     with _billing_on(nested, inner):
         Admission(
-            inner, CallLabel("cut", "optimizer"), cut, cut, model="gpt-x", provider="openai"
+            inner,
+            CallLabel("cut", "optimizer"),
+            cut,
+            cut,
+            model="gpt-x",
+            provider="openai",
+            paid_by="host",
         ).unreported()
     assert unreported_on(root).sends == 1, "a nested send cut short was held nowhere"
     assert book.usd_unreported == pytest.approx(hold_usd), (
@@ -2088,9 +2102,9 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     nitro = CallLabel("nitro", "optimizer")
     before, held_usd, spent_usd = unreported_on(held_ledger), book.usd_unreported, book.usd_metered
     with _billing_on(held_ledger, book):
-        Admission(book, nitro, cut, cut, model="m:nitro", provider="openrouter").settle(
-            Billed(TokenAccount(input=600, output=100), None)
-        )
+        Admission(
+            book, nitro, cut, cut, model="m:nitro", provider="openrouter", paid_by="host"
+        ).settle(Billed(TokenAccount(input=600, output=100), None))
     assert book.usd_metered == spent_usd, "a bill naming tokens and no price read as free"
     assert book.usd_unreported == pytest.approx(held_usd + hold_usd), "it was not held at its bound"
     assert book.held_at(nitro, cut) == cut, "a priceless bill taught the book a price"
@@ -2105,7 +2119,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         with under_budget(SendBudget(None, attempts=SEND_ATTEMPTS)):
             for _rung in range(2):
                 with pytest.raises(httpx.HTTPStatusError):
-                    await get_llm_client("openai").chat(
+                    await keyed_client("openai").chat(
                         ChatRequest([{"role": "user", "content": "x"}], "gpt-x", max_tokens=10),
                         label=CallLabel("down", "optimizer"),
                     )
@@ -2357,7 +2371,7 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
         for n in range(4):
             wire.hang = cut_short[0] and n == 3
             turns.append(
-                await get_llm_client("openai").chat(
+                await keyed_client("openai").chat(
                     ChatRequest(
                         [{"role": "user", "content": f"turn {n}"}], "gpt-x", max_tokens=100
                     ),
@@ -2423,13 +2437,11 @@ def test_a_send_is_held_at_its_bound_until_its_bill_lands(
     )
 
 
-# 5. An account's ceiling
+# 5. The host coupon
 
 
 _WEB = "https://accounts.google.com"
-_GRANT_USD = settings.FREE_TIER_SPEND_CAP_USD
-_TOKENS = settings.FREE_TIER_TOKEN_CAP
-_GENEROUS = {"spend_budget_usd_total": 50.0, "token_budget_total": 50_000}
+_FACE = Budget.amount(settings.HOST_COUPON.usd or 0.0, settings.HOST_COUPON.tokens or 0)
 _HELD_HOP = CycleHop(campaign_id="camp", cycle_id="cycle_x")
 
 
@@ -2439,10 +2451,12 @@ def _account_stores(
     issuer: str | None,
     user: User,
     spent: dict[str, Any] | None,
-    grant: float | None = None,
+    face: Budget | None = None,
+    own_key: str | None = None,
+    delegated: float | None = None,
 ) -> Stores:
     """`issuer` set makes this a WEB identity; the box operator has none and is unmetered. Its one
-    campaign's cycle is `_HELD_HOP`, which holds what the account *spent*."""
+    campaign's cycle is `_HELD_HOP`, which holds what the box's keys *spent* for it."""
     stores = workspace(
         tmp_path,
         IdentityContext(
@@ -2450,10 +2464,14 @@ def _account_stores(
             tenant_id=TenantId(user.tenant_id),
             issuer=None if issuer is None else Issuer(issuer),
             email="",
-            claims={} if grant is None else {"spend_ceiling_usd": grant},
+            claims={} if delegated is None else {"spend_ceiling_usd": delegated},
         ),
     )
     stores.users.save(user)
+    if face is not None:
+        stores.grant.save(CouponGrant(face=face))
+    if own_key is not None:
+        stores.api_keys.put(own_key, SecretStr("sk-own"))
     stores.campaigns.create_campaign(minted_campaign(_HELD_HOP, config=_budgeted(Budget())))
     stores.campaigns.mint_cycle(_HELD_HOP)
     if spent is not None:
@@ -2488,7 +2506,7 @@ async def _paid_door(door: str, stores: Any) -> None:
     match door:
         case "turn":
             async with paid_call(stores=stores, bucket="turn"):
-                pass
+                keyed_client("openrouter")
         case "bench":
             await grade_line_bench(stores=stores, hop=_HELD_HOP)
         case "noise-floor":
@@ -2501,24 +2519,26 @@ async def _paid_door(door: str, stores: Any) -> None:
             await probe_reasoning("openai/gpt-4o", stores=stores)
 
 
-_SPENT_THE_CAP = {
+_SPENT_THE_COUPON = {
     "model": "openai/gpt-4o",
     "input_tokens": 1_000,
     "output_tokens": 500,
-    "cost_usd": settings.FREE_TIER_SPEND_CAP_USD,
+    "cost_usd": _FACE.usd_amount,
 }
 _UNPRICEABLE = {
     "model": "openai/gpt-oss-20b:nitro",
     "input_tokens": 400_000,
     "output_tokens": 100_000,
 }
+_UNBOUNDED = (None, None)
 
 
 @pytest.mark.usefixtures("run_bound")
-def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
-    tmp_path: Path, offline: Router
+def test_the_host_coupon_binds_the_box_keys_at_every_paid_door_in_both_units(
+    tmp_path: Path, offline: Router, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """TWO units, because a price needs a rate on file and a token count never does (decisions.md § 0003)."""
+    """TWO units, because a price needs a rate on file and a token count never does (decisions.md § 0003).
+    The coupon bounds only what the box's keys pay: an account's own key spends past it."""
     offline.rates = {
         "openrouter/openai/gpt-4o": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}
     }
@@ -2530,8 +2550,9 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         duration_s=0.0,
         model="openai/gpt-4o",
         provider="openrouter",
+        key_source="host",
     )
-    priced = sum_user_spend(ledgers=[tmp_path / "bound.jsonl"])
+    priced = sum_user_spend(ledgers=[tmp_path / "bound.jsonl"]).host
     assert (priced.used_usd, priced.unpriced_tokens) == (0.0, 0), (
         "a price off our rate table was recorded as spend, or its tokens as unpriced"
     )
@@ -2539,153 +2560,255 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         "a price off our rate table was not recorded beside spend"
     )
 
-    for n, (door, issuer, budget, declared, grant, running, spent, admitted_caps) in enumerate(
+    full = Budget(usd=_FACE.usd, tokens=_FACE.tokens)
+    hand_set = Budget(usd=50.0, tokens=50_000)
+    rows: tuple[tuple[Any, ...], ...] = (
+        # door, issuer, face, own key, declared, delegated, running, spent, admitted, reserve
+        ("launch", _WEB, None, None, None, None, None, None, _UNBOUNDED, (0.30, _FACE.tokens)),
+        ("launch", _WEB, None, None, 0.15, None, None, None, (0.15, None), (0.30, _FACE.tokens)),
+        ("launch", _WEB, None, None, 10.0, None, None, None, HostAllowanceExhaustedError, None),
         (
-            ("launch", _WEB, {}, None, None, None, None, Budget(usd=_GRANT_USD, tokens=_TOKENS)),
-            # A free-tier run is admitted whole at its campaign's own ceiling, never a ration under it.
-            ("launch", _WEB, {}, 0.15, None, None, None, Budget(usd=0.15, tokens=_TOKENS)),
-            ("launch", _WEB, {}, 10.0, None, None, None, None),
+            "launch",
+            _WEB,
+            None,
+            "openrouter",
+            10.0,
+            None,
+            None,
+            None,
+            (10.0, None),
+            (0.30, _FACE.tokens),
+        ),
+        (
+            "launch",
+            _WEB,
+            None,
+            None,
+            None,
+            None,
+            {"admitted": True, "reserve": full},
+            None,
+            HostAllowanceExhaustedError,
+            None,
+        ),
+        (
+            "launch",
+            _WEB,
+            None,
+            None,
+            None,
+            None,
+            {"admitted": False, "reserve": Budget()},
+            None,
+            QuotaExceededError,
+            None,
+        ),
+        (
+            "launch",
+            _WEB,
+            None,
+            None,
+            None,
+            None,
+            None,
+            _UNPRICEABLE,
+            _UNBOUNDED,
+            (settings.UNPRICED_GRACE_USD, _FACE.token_amount - 500_000),
+        ),
+        ("launch", None, None, None, None, None, None, None, _UNBOUNDED, _UNBOUNDED),
+        ("launch", _WEB, hand_set, None, 10.0, 2.0, None, None, (2.0, None), (2.0, 50_000)),
+        ("launch", _WEB, hand_set, None, 10.0, None, None, None, (10.0, None), (20.0, 50_000)),
+        (
+            "launch",
+            _WEB,
+            Budget(usd=1.0, tokens=50_000),
+            None,
+            None,
+            2.0,
+            None,
+            None,
+            (2.0, None),
+            (1.0, 50_000),
+        ),
+        (
+            "launch",
+            _WEB,
+            None,
+            None,
+            None,
+            None,
+            None,
+            _SPENT_THE_COUPON,
+            HostAllowanceExhaustedError,
+            None,
+        ),
+        (
+            "launch",
+            _WEB,
+            None,
+            "openai",
+            None,
+            None,
+            None,
+            _SPENT_THE_COUPON,
+            _UNBOUNDED,
+            (0.0, _FACE.token_amount - 1_500),
+        ),
+        *(
             (
-                "launch",
+                door,
                 _WEB,
-                {},
-                None,
-                None,
-                {
-                    "admitted": True,
-                    "reserve": Budget(usd=settings.FREE_TIER_SPEND_CAP_USD, tokens=_TOKENS),
-                },
-                None,
-                None,
-            ),
-            (
-                "launch",
-                _WEB,
-                {},
-                None,
-                None,
-                {"admitted": False, "reserve": Budget()},
-                None,
-                None,
-            ),
-            (
-                "launch",
-                _WEB,
-                {},
                 None,
                 None,
                 None,
-                _UNPRICEABLE,
-                Budget(usd=settings.UNPRICED_GRACE_USD, tokens=_TOKENS - 500_000),
-            ),
-            ("launch", None, {}, None, None, None, None, Budget(usd=None, tokens=None)),
-            ("launch", _WEB, _GENEROUS, 10.0, 2.0, None, None, Budget(usd=2.0, tokens=50_000)),
-            ("launch", _WEB, _GENEROUS, 10.0, None, None, None, Budget(usd=10.0, tokens=50_000)),
-            (
-                "launch",
-                _WEB,
-                {**_GENEROUS, "spend_budget_usd_total": 1.0},
-                None,
-                2.0,
                 None,
                 None,
-                Budget(usd=1.0, tokens=50_000),
-            ),
-            ("turn", None, {}, None, None, None, _SPENT_THE_CAP, Budget(usd=None, tokens=None)),
-            *(
-                (door, _WEB, {}, None, None, None, _SPENT_THE_CAP, None)
-                for door in ("turn", "bench", "noise-floor", "seed-screen", "probe-reasoning")
-            ),
-        )
-    ):
+                _SPENT_THE_COUPON,
+                HostAllowanceExhaustedError,
+                None,
+            )
+            for door in ("turn", "bench", "noise-floor", "seed-screen", "probe-reasoning")
+        ),
+    )
+    for n, (
+        door,
+        issuer,
+        face,
+        own_key,
+        declared,
+        delegated,
+        running,
+        spent,
+        admits,
+        reserves,
+    ) in enumerate(rows):
         at = tmp_path / f"door-{n}"
         at.mkdir()
-        user = User.model_validate(
-            {"user_id": "sub-9", "tenant_id": "sub-9", "created_at": "2026-01-01", **budget}
+        user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
+        stores = _account_stores(
+            at,
+            issuer=issuer,
+            user=user,
+            spent=spent,
+            face=face,
+            own_key=own_key,
+            delegated=delegated,
         )
-        stores = _account_stores(at, issuer=issuer, user=user, spent=spent, grant=grant)
         registry = JobRegistry(stores.jobs_dir, capacity=lambda _live: 1)
         if running is not None:
             _running(registry, **cast("dict[str, Any]", running))
-        refused = pytest.raises(QuotaExceededError)
-        with refused if admitted_caps is None else contextlib.nullcontext():
-            knocked = Budget(usd=None, tokens=None)
-            if door == "launch":
-                knocked = admit_launch(
-                    declared=Budget() if declared is None else Budget(usd=declared),
-                    user=user,
-                    stores=stores,
-                    job_registry=registry,
-                    job_id="job-a",
-                    hop=None,
-                )[0]
-            else:
-                asyncio.run(_paid_door(door, stores))
-            assert admitted_caps is not None
-            assert knocked == admitted_caps, (
-                f"door {n} ({door}): an account was admitted under another ceiling than it holds"
-            )
-
-    # The free tier bounds what a run may ask for, off one table; paid and host accounts are not on it.
-    for n, (issuer, budget, on_tier) in enumerate(
-        ((_WEB, {}, True), (None, {}, False), (_WEB, _GENEROUS, False))
-    ):
-        at = tmp_path / f"tier-{n}"
-        at.mkdir()
-        user = User.model_validate(
-            {"user_id": "sub-9", "tenant_id": "sub-9", "created_at": "2026-01-01", **budget}
+        # A run on the provider its own key is for; else on the box's keys.
+        named = _ON_THE_BOX if own_key is None else frozenset({own_key})
+        if isinstance(admits, type):
+            with pytest.raises(admits):
+                if door == "launch":
+                    admit_launch(
+                        declared=Budget() if declared is None else Budget(usd=declared),
+                        user=user,
+                        stores=stores,
+                        job_registry=registry,
+                        job_id="job-a",
+                        hop=None,
+                        named=named,
+                    )
+                else:
+                    asyncio.run(_paid_door(door, stores))
+            continue
+        knocked, reserve = admit_launch(
+            declared=Budget() if declared is None else Budget(usd=declared),
+            user=user,
+            stores=stores,
+            job_registry=registry,
+            job_id="job-a",
+            hop=None,
+            named=named,
         )
-        stores = _account_stores(at, issuer=issuer, user=user, spent=None)
-        assert on_free_tier(stores) is on_tier, f"account {n} sits on the wrong side of the tier"
+        assert (knocked.usd, knocked.tokens) == admits, (
+            f"door {n}: a launch was admitted under another ceiling than its campaign declared"
+        )
+        assert (reserve.usd, reserve.tokens) == pytest.approx(reserves), (
+            f"door {n}: the coupon held back another amount than it has left for the run"
+        )
+
+    # The choke point: the account's own key wins unasked, per provider; the box's key only on a live coupon.
+    user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
+    spent_out = _account_stores(
+        tmp_path / "keys", issuer=_WEB, user=user, spent=_SPENT_THE_COUPON, own_key="openrouter"
+    )
+    # Admission asks of the providers the run names, never of whether a key is held at all.
+    for named, refused in (
+        (frozenset({"openrouter"}), False),
+        (frozenset({"openrouter", "openai"}), True),
+        (frozenset({"openrouter", None}), True),
+    ):
+        try:
+            admit_launch(
+                declared=Budget(usd=10.0),
+                user=user,
+                stores=spent_out,
+                job_registry=JobRegistry(tmp_path / "jobs-k", capacity=lambda _live: 1),
+                job_id="job-k",
+                hop=None,
+                named=named,
+            )
+        except HostAllowanceExhaustedError:
+            assert refused, f"a run all on the account's own key ({named}) met the spent coupon"
+        else:
+            assert not refused, f"a run sending on the box's keys ({named}) passed a spent coupon"
+    own = resolve_api_key(spent_out.identity, "openrouter", spent_out)
+    assert (own.paid_by, own.secret.get_secret_value()) == ("user", "sk-own"), (
+        "an account's own key lost to the box's"
+    )
+    with pytest.raises(HostAllowanceExhaustedError):
+        resolve_api_key(spent_out.identity, "openai", spent_out)
+    own_hop = CycleHop(campaign_id="own", cycle_id="cycle_own0")
+    spent_out.campaigns.create_campaign(minted_campaign(own_hop))
+    spent_out.campaigns.mint_cycle(own_hop)
+    CycleEventLog.open(CycleDir(spent_out.campaigns.cycle_dir(own_hop))).append(
+        billed_call(5.0, key_source="user", input_tokens=9_000_000)
+    )
+    status = coupon_status(spent_out)
+    assert (status.left_usd, status.exhausted) == (0.0, True), (
+        "the coupon read another remainder than the box's keys left it"
+    )
+    assert status.own_key_spend.billed_usd == pytest.approx(5.0), "the own key's spend went unread"
+    fresh = _account_stores(tmp_path / "fresh", issuer=_WEB, user=user, spent=None)
+    assert resolve_api_key(fresh.identity, "openai", fresh).paid_by == "host", (
+        "a live coupon refused the box's key"
+    )
+    with monkeypatch.context() as patched:
+        patched.setattr(settings, "GROQ_API_KEY", SecretStr(""))
+        with pytest.raises(NoApiKeyError):
+            resolve_api_key(fresh.identity, "groq", fresh)
+        patched.setattr(
+            settings, "HOST_COUPON", settings.HOST_COUPON.model_copy(update={"void_on_byo": True})
+        )
+        fresh.api_keys.put("openrouter", SecretStr("sk-own"))
+        with pytest.raises(HostAllowanceExhaustedError):
+            resolve_api_key(fresh.identity, "openai", fresh)
+    assert resolve_api_key(fresh.identity, "openai", fresh).paid_by == "host", (
+        "a coupon was retired by a key the box does not say retires it"
+    )
+
+    # In flight, the reserve binds only a send on the box's key; one on the account's own goes on.
+    book = spend_book(None, usd_reserve=0.05)
+    send = SendBound(input_tokens=1, output_tokens=1, usd=0.04)
+    book.count(billed_call(1.0, key_source="user"))
+    assert book.exhausted() is None, "a run spending its own key stopped at the host's coupon"
+    book.hold(send, send, "optimizer", what="o", reservation=None, paid_by="host")
+    with pytest.raises(HostAllowanceExhaustedError) as past:
+        book.hold(send, send, "optimizer", what="o", reservation=None, paid_by="host")
+    assert run_stop_reason(past.value) is StopReason.HOST_ALLOWANCE, (
+        "a run stopped past the coupon read as another stop"
+    )
+    book.hold(send, send, "optimizer", what="o", reservation=None, paid_by="user")
+
     offline.rates = {"openai/dear": {"input_cost_per_token": 5e-8, "output_cost_per_token": 6e-7}}
     assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
     assert (pricing.route_priced("x", "openai"), pricing.route_priced("dear", "openai")) == (
         False,
         True,
     ), "a dollar ceiling would admit a route no rate prices"
-    oss = "openai/gpt-oss-20b:nitro"
-    config = _budgeted(Budget(usd=None))
-    layered = free_tier.with_free_tier_layer(config, {"llm_only": {"model": oss}})
-    assert (
-        layered.sp_budget_origin,
-        layered.optimization.nodes["adaptive_queue"].config["sp_budget_round"],
-        layered.pipeline_overlay,
-    ) == (20, 20, {"llm_only": {"reasoning_effort": "low"}}), (
-        "a free check-in measured on more cells, or launched above its model's lowest rung"
-    )
-    schema = parse_pipeline_response(
-        {
-            "nodes": {
-                "llm_only": {
-                    "config": {"model": oss},
-                    "optimizer": {"param_keys": ["reasoning_effort"]},
-                }
-            },
-            "pipelines": {"default": ["llm_only"]},
-        }
-    )
-
-    def optimizer_on(effort: str) -> CampaignConfig:
-        luna = {"model": "openai/gpt-6-luna", "reasoning_effort": effort}
-        overlay = {"optimization": {"nodes": {"l1_generate": {"config": luna}}}}
-        return CampaignConfig.model_validate(
-            merge_config_layers(layered.model_dump(mode="json", exclude_unset=True), overlay)
-        )
-
-    for run, effort, steps, outside in (
-        (layered, "low", ["llm_only"], 0),
-        (layered, "none", ["llm_only"], 1),
-        # The axis left open: the optimizer could search any rung, so Start refuses it.
-        (config, "low", ["llm_only"], 1),
-        (layered, "low", ["web_search", "llm_only"], 1),
-        (optimizer_on("medium"), "low", ["llm_only"], 0),
-        (optimizer_on("high"), "low", ["llm_only"], 1),
-    ):
-        params = {"steps": steps, "llm_only": {"model": oss, "reasoning_effort": effort}}
-        off = free_tier.outside_free_tier(run, select_optimizer(run.optimization), params, schema)
-        assert len(off) == outside, f"Start ran {off or params} on the free tier, or refused it"
-    with pytest.raises(PayloadInvalidError):
-        free_tier.refuse_outside_free_tier(off)
 
     # A paid verb never bills a cycle its producer still holds.
     operator = User(user_id="op", tenant_id="op", created_at="")
@@ -2719,8 +2842,8 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
             capabilities=frozenset(),
         ),
     )
-    payer = account_of(passing).model_copy(update={"spend_budget_usd_total": 1.0})
-    passing.users.save(payer)
+    passing.grant.save(CouponGrant(face=Budget(usd=1.0)))
+    payer = account_of(passing)
     slots = JobRegistry.attach(passing.jobs_dir)
 
     def launch_beside() -> Budget:
@@ -2738,7 +2861,8 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
                 job_registry=slots,
                 job_id=launch.job_id,
                 hop=None,
-            )[0]
+                named=_ON_THE_BOX,
+            )[1]
         finally:
             slots.release(launch.job_id)
 
@@ -2746,13 +2870,14 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         async with paid_pass(
             stores=passing, verb="verify", hop=None, declared=Budget()
         ) as pass_book:
-            assert pass_book.reserve.usd == pass_book.allotment.usd == pytest.approx(1.0), (
-                "a pass declared nothing and did not hold the account's headroom, or ran unshared"
+            assert pass_book.reserve.usd == pytest.approx(1.0), (
+                "a pass declared nothing and did not hold the coupon's headroom"
             )
+            assert pass_book.allotment.usd is None, "a pass that declared nothing took a ceiling"
             assert len(machine_status(slots, identity=passing.identity).running) == 1, (
                 "a paid pass ran beside the machine's slot count"
             )
-            with pytest.raises(QuotaExceededError):
+            with pytest.raises(HostAllowanceExhaustedError):
                 launch_beside()
 
     asyncio.run(pass_beside())
@@ -2760,6 +2885,23 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         "a pass kept its slot past its exit"
     )
     assert launch_beside().usd == pytest.approx(1.0), "the pass kept its reservation past its exit"
+
+    # A slotless call holds what it may spend where every admission beside it reads that.
+    async def calls_at_once() -> None:
+        async with paid_call(stores=passing, bucket="turn") as first:
+            assert first.reserve.usd == pytest.approx(1.0), "a call held none of the headroom"
+            async with paid_call(stores=passing, bucket="turn") as second:
+                assert second.reserve.usd == pytest.approx(0.0), (
+                    "two calls at once were each handed the whole headroom"
+                )
+            with pytest.raises(HostAllowanceExhaustedError):
+                launch_beside()
+            assert not machine_status(slots, identity=passing.identity).running, (
+                "a call took a machine slot"
+            )
+
+    asyncio.run(calls_at_once())
+    assert launch_beside().usd == pytest.approx(1.0), "a call kept its reservation past its exit"
 
     # A budget change leaves the arm it did not touch alone.
     def web_account(sub: str) -> Stores:
@@ -2826,10 +2968,11 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
         requested=Budget(tokens=1_000),
         user=granted,
         stores=_account_stores(
-            tmp_path / "delegated", issuer=_WEB, user=granted, spent=None, grant=2.0
+            tmp_path / "delegated", issuer=_WEB, user=granted, spent=None, delegated=2.0
         ),
         job_registry=JobRegistry(tmp_path / "jobs-d", capacity=lambda _live: 1),
         hop=_HELD_HOP,
+        named=_ON_THE_BOX,
     )
     assert caps == Budget(tokens=1_000), "a grant became a ceiling on an axis the caller left alone"
 
@@ -2872,23 +3015,24 @@ def test_an_accounts_ceiling_holds_at_every_paid_door_in_both_units(
     )
     registry.mark_admitted(job.job_id, Budget(usd=0.8))
     hold_moved(forker, fork, Budget(usd=0.8))
-    allowance = User(
-        user_id="sub-7", tenant_id="sub-7", created_at="2026-01-01", spend_budget_usd_total=1.0
-    )
+    forker.grant.save(CouponGrant(face=Budget(usd=1.0)))
+    allowance = account_of(forker)
     caps, reserve = clamp_budget_change(
         requested=Budget(usd=5.0),
         user=allowance,
         stores=forker,
         job_registry=registry,
         hop=fork,
+        named=_ON_THE_BOX,
     )
-    relaunched, _ = admit_launch(
+    _, relaunched = admit_launch(
         declared=Budget(),
         user=allowance,
         stores=forker,
         job_registry=registry,
         job_id=job.job_id,
         hop=fork,
+        named=_ON_THE_BOX,
     )
     assert caps.usd == relaunched.usd == pytest.approx(1.0), (
         "$1.00 allowance, $0.50 of it the campaign's own: its ceiling is the whole $1.00, which "
@@ -2931,7 +3075,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     retried_ledger = spent_cycle(retried, cost_usd=0.05)
 
     def account_usd() -> float:
-        return sum_user_spend(ledgers=account_ledgers(stores.campaigns)).used_usd
+        return sum_user_spend(ledgers=account_ledgers(stores.campaigns)).host.used_usd
 
     def cleanup(cycle_id: str) -> bool:
         return cleanup_stub_fork_if_empty(
@@ -3017,8 +3161,8 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
     )
     assert not sandbox.exists(), "a reclaimed sandbox survived"
     banked = tombstones()[banked_before:]
-    assert [b.used_tokens for b in banked] == [600 + 100] and [
-        b.used_usd for b in banked
+    assert [b.spent["host"].used_tokens for b in banked] == [600 + 100] and [
+        b.spent["host"].used_usd for b in banked
     ] == pytest.approx([0.15]), (
         "a forwarded inner cycle was banked twice, or its own spend not at all"
     )
@@ -3089,9 +3233,9 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         command(edit)
     assert not draft_dir.exists(), "an edit on a closed draft wrote its dir back"
     (draft_bank,) = [t for t in tombstones() if t.draft_id == draft.draft_id]
-    assert not draft_bank.campaign_id and draft_bank.used_usd == pytest.approx(0.04), (
-        "a discarded draft banked under a campaign's id, or not its own spend"
-    )
+    assert not draft_bank.campaign_id and draft_bank.spent["host"].used_usd == pytest.approx(
+        0.04
+    ), "a discarded draft banked under a campaign's id, or not its own spend"
     assert account_usd() == pytest.approx(with_draft), "discarding a spent draft un-spent it"
     with pytest.raises(NotFoundError):
         command(StartCheckinPayload(draft_id=draft.draft_id))
@@ -3136,7 +3280,7 @@ def test_spend_outlives_the_fork_the_campaign_and_the_sandbox_that_spent_it(
         )
     assert not draft_dirs(stores.campaigns.workspace), "an unminted framing left its ledger"
     (framing_bank,) = [t for t in tombstones() if t.draft_id not in ("", draft.draft_id)]
-    assert not framing_bank.campaign_id and framing_bank.used_usd == pytest.approx(0.03), (
-        "a refused mint's framing went unbanked, or banked under the campaign it never minted"
-    )
+    assert not framing_bank.campaign_id and framing_bank.spent["host"].used_usd == pytest.approx(
+        0.03
+    ), "a refused mint's framing went unbanked, or banked under the campaign it never minted"
     assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"

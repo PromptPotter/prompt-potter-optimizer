@@ -11,9 +11,10 @@ from promptpotter.application.datasets.draft_campaign import (
     default_campaign_config,
 )
 from promptpotter.application.datasets.origin_readiness import OriginReadiness, origin_readiness
-from promptpotter.application.jobs.quota import launch_usd_bound
+from promptpotter.application.jobs.quota import launch_usd_bound, run_providers
 from promptpotter.application.pipeline_resolve import (
     OptimizerSetup,
+    draft_config,
     resolve_pipeline_for_draft,
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
@@ -250,8 +251,15 @@ def draft_wire(stores: Stores, draft: DraftCampaign) -> DraftCampaignWire:
         ],
         readiness=origin_readiness(draft),
         recap=_recap(draft),
-        setup_schema=setup_schema(draft, launch_usd=launch_usd_bound(stores)),
+        setup_schema=setup_schema(
+            draft, launch_usd=launch_usd_bound(stores, _sends_on(stores, draft))
+        ),
     )
+
+
+def _sends_on(stores: Stores, draft: DraftCampaign) -> frozenset[str | None]:
+    execution = connectors.CONNECTORS.get(draft.connector).execution
+    return run_providers(draft_config(stores, draft), execution)
 
 
 def _field(schema: dict[str, Any], name: str, title: str) -> dict[str, Any]:

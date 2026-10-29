@@ -18,6 +18,7 @@ from promptpotter.application.jobs.quota import (
     move_campaign_money,
     next_launch_budget,
     refuse_verb_rate,
+    run_providers,
     share_campaign_ceiling,
 )
 from promptpotter.application.jobs.registry import (
@@ -52,7 +53,8 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     HeldBudget,
 )
-from promptpotter.infrastructure.llm.send_pacing import set_abort_check, set_rate_tenant
+from promptpotter.infrastructure.llm.account_key import bind_account
+from promptpotter.infrastructure.llm.send_pacing import set_abort_check
 from promptpotter.infrastructure.llm.spend_book import (
     Hold,
     LiveHold,
@@ -75,6 +77,7 @@ from promptpotter.shared.identity import acting_principal
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
     from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.connector import ConnectorExecution
 
 logger = logging.getLogger(__name__)
 
@@ -252,9 +255,9 @@ async def admit_and_hold(
     if (down := await probe_backend(request.backend_type(stores))) is not None:
         raise down
     t_probe = time.perf_counter()
-    declared, asked = declare_run_budget(
-        request.campaign_config(stores), stores=stores, hop=hop, requested=request.budget
-    )
+    config = request.campaign_config(stores)
+    declared, asked = declare_run_budget(config, stores=stores, hop=hop, requested=request.budget)
+    execution = connectors.CONNECTORS.get(request.backend_type(stores)).execution
     # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
     held = await asyncio.to_thread(
         admit_and_share,
@@ -265,6 +268,7 @@ async def admit_and_hold(
         job=job,
         hop=hop,
         step_rounds=request.step_rounds,
+        named=run_providers(config, execution),
     )
     t_caps = time.perf_counter()
 
@@ -288,9 +292,11 @@ def admit_and_share(
     job: Job,
     hop: CycleHop | None,
     step_rounds: int | None,
+    named: frozenset[str | None],
     enclosing: Budget | None = None,
 ) -> HeldBudget:
-    """THE admission of every run and pass; an inner run is admitted against its *enclosing* book."""
+    """THE admission of every run and pass; an inner run is admitted against its *enclosing* book.
+    *named* is what the run sends on (`quota.py::run_providers`), which only the account asks."""
     meter: CeilingMeter = (
         "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
     )
@@ -303,12 +309,12 @@ def admit_and_share(
                 job_registry=job_registry,
                 job_id=job.job_id,
                 hop=hop,
+                named=named,
             )
-            # The campaign's ceiling as composed, never as the account clamped it: the account
-            # binds through the reservation. An axis it leaves open is the headroom admitted on it.
-            ceiling = Budget(
-                usd=admitted.usd if declared.usd is None else declared.usd,
-                tokens=admitted.tokens if declared.tokens is None else declared.tokens,
+            # The campaign's ceiling as composed, never as a delegate's claim clamped it: the
+            # account binds through the reservation.
+            ceiling = admitted.over(
+                Budget(usd=admitted.usd if declared.usd is None else declared.usd)
             )
         else:
             # The enclosing book's room is spendable from NOW, on top of what the campaign spent.
@@ -386,6 +392,7 @@ async def embedded_share(
     hop: CycleHop | None,
     requested: Budget,
     step_rounds: int | None,
+    execution: ConnectorExecution,
 ) -> AsyncIterator[tuple[str, HeldBudget]]:
     """A launch's admission with no slot, entered BEFORE anything paid: the job, then its hold."""
     job_registry = JobRegistry.attach(stores.jobs_dir)
@@ -408,6 +415,7 @@ async def embedded_share(
             job=job,
             hop=hop,
             step_rounds=step_rounds,
+            named=run_providers(config, execution),
         )
         admitted = True
         job_registry.mark_started(job.job_id)
@@ -445,6 +453,8 @@ def inner_share(
             job=job,
             hop=hop,
             step_rounds=None,
+            # Its enclosing run's book binds it, where each send on the box's key meets the reserve.
+            named=frozenset(),
             enclosing=enclosing.money_left(),
         )
         admitted = True
@@ -483,14 +493,17 @@ async def paid_pass(
         meters: CeilingMeter = (
             "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
         )
+        # A pass on no cycle names no pipeline: the coupon is asked of it whole.
+        named: frozenset[str | None] = frozenset({None})
         if hop is not None:
             cycle_dir = stores.campaigns.cycle_dir(hop)
             hold_pass(cycle_dir)
             holding = hop
             # The rate-limit and slot waits poll it too, as a loop's do.
             set_abort_check(RunControl(cycle_dir=cycle_dir).pause_requested)
-            ceiling = await asyncio.to_thread(_campaign_ceiling, stores, hop)
-            declared = ceiling.over(declared)
+            config, named = await asyncio.to_thread(campaign_run, stores, hop)
+            ceiling = await asyncio.to_thread(next_launch_budget, config, stores=stores, hop=hop)
+            declared = ceiling.only(MONEY_AXES).over(declared)
         held = await asyncio.to_thread(
             admit_and_share,
             declared,
@@ -500,6 +513,7 @@ async def paid_pass(
             job=job,
             hop=hop,
             step_rounds=None,
+            named=named,
         )
         book = open_spend_book(
             held,
@@ -512,9 +526,12 @@ async def paid_pass(
         )
         admitted = True
         job_registry.mark_started(job.job_id)
-        set_rate_tenant(str(stores.identity.tenant_id))
-        with spending_under(book):
-            yield book
+        unbind = bind_account(stores)
+        try:
+            with spending_under(book):
+                yield book
+        finally:
+            unbind()
     except BaseException as exc:
         job_registry.release(job.job_id, refusal="" if admitted else str(exc))
         stopped_by = _let_go(stores, holding)
@@ -544,9 +561,10 @@ def _let_go(stores: Stores, holding: CycleHop | None) -> str | None:
         release_pass(cycle_dir)
 
 
-def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:
+def campaign_run(stores: Stores, hop: CycleHop) -> tuple[CampaignConfig, frozenset[str | None]]:
+    """The config a run on *hop* starts under, and what it sends on."""
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     if campaign is None:
         raise NotFoundError(f"campaign not found: {hop.campaign_id}")
     config = resolve_campaign_config(stores, campaign, hop)
-    return next_launch_budget(config, stores=stores, hop=hop).only(MONEY_AXES)
+    return config, run_providers(config, connectors.CONNECTORS.get(campaign.connector).execution)
