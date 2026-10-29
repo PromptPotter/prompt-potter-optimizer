@@ -99,10 +99,39 @@ acting.
   resume-divergence fork and a diag sibling, where the origin is the only candidate to hang on.
 - **The dev loop serializes where it need not:** sibling gates queue whole runs, `next-build` peaks
   near 4 GB, builders spend most tokens on whole-file reads, Vitest's worker start timeout fails a
-  green suite on a loaded host. Action: attribute each, then cut what our code wastes. **Re-test:**
-  five builders plus one full gate with no reap and no gate waiting longer than its own run.
+  green suite on a loaded host. Action: attribute each, then cut what our code wastes. On a linux
+  cloud container the suite peaks at 210 MB at base, over `tests_owning.py::CEILING_MB`'s 197: red
+  only on that desk. **Re-test:** five builders plus one full gate with no reap and no gate waiting
+  longer than its own run.
 - **Ledger shapes left standing:** `round_restated` carries the whole round. **Re-test:** the
   symbol deleted, read, or tested.
+- **A restatement has two writers** (backbone arc, 2026-10-29): `node_context.py::NodeContext._bank`
+  appends a `RoundRestatedRecord` to the run's own `CycleEventLog` on `session.hop`, while
+  `resume_and_fork/repair.py` writes one through `CampaignStore.restate_round` onto the branch. And
+  `NodeContext.bank_proposals` returns silently on an unbound ledger where `_bank` asserts one.
+  Action: one restatement seam taking the hop; one posture on a missing ledger. **Re-test:**
+  `git grep -n "restated_state(" -- promptpotter` names one caller.
+- **Fingerprinting a repair moves the live `Cycle`**: `repair.py::round_packages` and `_rederive`
+  seat the run's own cycle round by round (`Cycle.replay_priors`, which reseats `rounds`,
+  `population`, `slices` and the ruler) and reseat it after; `round_packages` holds no `finally`, so a
+  raising member leaves the cycle on a past round. Each seat also re-copies every round
+  (`Lineage.rounds`), and `_package_drift` / `restated_state` re-fold the ledger chain per round.
+  Action: a round's seat is a view, not the cycle. **Re-test:** `round_packages` leaves `Cycle` as
+  handed in.
+- **A repair takes `session` beside `cycle`** (`apply_correction`, `repair_incomplete_rounds`):
+  `cycle.session` is that session, two doors into one state. The re-bank warning also fires on zero
+  retired candidates. **Re-test:** neither takes a `Session`.
+- **`RoundPlan` holds each role in its own field beside the `RoundRole` that orders them**:
+  `RoundPlan.first_walk` maps a role to its field by `match`, and `runner/round.py::_Walking` carries
+  each role's output in an optional slot narrowed by asserts. Action: the plan keyed by role, each
+  role's output typed for the role that reads it. **Re-test:** `git grep -c "assert self\." --
+  promptpotter/application/runner/round.py` is 0.
+- **`default` names two walks**: the optimizer manifest's round walk (a bare `"default"` at each
+  `optimizer_manifest.py` site, beside the `INITIAL_POPULATION` / `RUN_INIT` constants) and the
+  backend's pipeline (`domain/pipeline_schema.py`). **Re-test:** the round walk read through one
+  constant.
+- **`Escalation.observe` writes the `Ladder`** (`ctx.put`): a controller's observation mutates state
+  under a read's name. **Re-test:** the write named for what it does, or moved to `act`.
 
 ## Open — multi-arc
 
