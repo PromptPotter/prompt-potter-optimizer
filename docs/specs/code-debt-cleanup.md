@@ -221,12 +221,13 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   `__bca431` did not arm before init read $0.03. Open: should an arm that never closed a round be
   re-mintable under its own key, or should the refusal run before the mint so no key is taken?
   **Re-test:** `promptpotter evidence` on h2h-7 lists `capo` beside `capo-b5`.
-- **CAPO's race ends after its first block whenever offspring equal the cut.** The fixed blocks follow
-  the paper (App. C.4), but with 4 offspring and μ 10 every h2h-7 round cut 4 on block 1 and stopped.
-  The population was then judged only on those 30 cells: the crown held C1.7 (36.7% there, 27.5% on
-  the origin panel), and the selection benched 0.110 against the origin's 0.140. `max_blocks` was inert.
-  Open: is this the paper's behaviour at these sizes, or does our eliminator stop where the paper races
-  on? **Re-test:** the per-round "Blocks raced" fact on a CAPO run with offspring < μ.
+- **INVESTIGATE — CAPO's survivors are ranked on another reading than the reference ranks them on.**
+  `population` keeps μ best-first by mean objective on the cells all survivors measured; promptolution's
+  CAPO sorts survivors on raw score over every cell each has been evaluated on, cached across rounds,
+  so an incumbent's deeper blocks from earlier races count. After a one-block race (the paper's rule,
+  `candidate-elimination.md` § CAPO's race) the two can crown differently. Open: which reading the
+  bench compares. **Rides with:** any change to `capo/members.py::_rank_survivors`. **Re-test:** on a CAPO
+  run with offspring < μ, rank one round's survivors both ways.
 - **One bad pack fails the whole library.** `config/prompt_blocks.py::PackShelf.read` raises on a
   malformed `pack.json`, and a name both roots hold raises `block_pack_collision`. Either one is a 500
   or 409 for every `GET /library` and every draft edit, not just for that pack. Seen: the e2e fixture

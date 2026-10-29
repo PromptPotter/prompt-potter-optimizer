@@ -1171,6 +1171,56 @@ def test_a_round_elects_on_ability_and_the_bench_grades_the_pick_it_declared(
         for panel_gate in ("strict", "off"):
             cut_by_budget(cut_round, budget, replayed, parent_cells, panel_gate)
 
+    # CAPO races block after block while more than μ arms stand (App. B), and stops at μ.
+    def raced(failing: str) -> RoundResult:
+        minted: list[str] = []
+
+        def capo_says(body: dict[str, Any]) -> str:
+            if "Create overall 15 prompts" in _asked(body):
+                return json.dumps(
+                    ["Solve the task, A.", "Solve the task, B.", "Solve the task, C."]
+                )
+            minted.append(f"Go {len(minted)}.")
+            return f"<prompt>{minted[-1]}</prompt>"
+
+        def misses_after_block_one(prompt: str, sample: Sample) -> bool:
+            block = _PEER_READ_ORDER[sample.id] // 4
+            return block == 0 or not any(f"task, {arm}." in prompt for arm in failing)
+
+        with _peer_cycle(
+            workspace(tmp_path / f"race-{failing}"),
+            _PEER_HOP,
+            monkeypatch,
+            "capo",
+            capo_nodes,
+            misses_after_block_one,
+        ) as (cycle, callbacks):
+            offline.llm.says = capo_says
+            return asyncio.run(execute_round(cycle, 1, callbacks))[0]
+
+    def fates(closed: RoundResult) -> dict[str, list[int]]:
+        out: dict[str, list[int]] = {}
+        for key in closed.panel:
+            arm = closed.arms[key]
+            state = (
+                arm.kind
+                if isinstance(arm, Cut)
+                else "locked_in"
+                if isinstance(arm, Measured) and arm.locked_in is not None
+                else "measured"
+            )
+            out.setdefault(state, []).append(len(closed.rows(key)))
+        return out
+
+    # Five arms, μ 3: nobody falls on block 1; C falls on block 2, and four still race block 3.
+    assert fates(raced("C")) == {"eliminated": [8], "measured": [12] * 4}, (
+        "a survivor set above μ stopped racing before max_blocks"
+    )
+    # B and C fall together on block 2, which leaves μ: the race is settled there.
+    assert fates(raced("BC")) == {"eliminated": [8, 8], "locked_in": [8] * 3}, (
+        "a race at μ survivors walked on, or settled before its cut"
+    )
+
     # A survey round's K starts and its reference are arms, and its banked matrix is their cells.
     starts = {ArmKey(f"c{i}"): sheet(measurements([1.0, 0.0, float(i % 2)])) for i in range(3)} | {
         PARENT: sheet(measurements([0.0] * 3))
