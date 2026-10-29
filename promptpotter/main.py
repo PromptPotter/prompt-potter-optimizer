@@ -11,8 +11,9 @@ from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
-from pydantic import Field
+from pydantic import BaseModel, Field
 from scalar_fastapi import get_scalar_api_reference
 from starlette.exceptions import HTTPException
 from starlette.middleware.gzip import GZipMiddleware
@@ -308,6 +309,29 @@ for _router, _gate in API_ROUTERS:
     app.include_router(
         _router, prefix="/api/v1", dependencies=[] if _gate is None else [Depends(_gate)]
     )
+
+
+def _open_request_objects() -> set[str]:
+    opened: set[str] = set()
+    for router, _gate in API_ROUTERS:
+        for route in router.routes:
+            # FastAPI sets `dependant` on the instance outside `APIRoute`'s declared attributes.
+            for param in (
+                vars(route)["dependant"].body_params if isinstance(route, APIRoute) else ()
+            ):
+                body = param.field_info.annotation
+                if isinstance(body, type) and issubclass(body, BaseModel):
+                    schema = body.model_json_schema()
+                    opened |= {
+                        node["title"]
+                        for node in (schema, *schema.get("$defs", {}).values())
+                        if "properties" in node and node.get("additionalProperties") is not False
+                    }
+    return opened
+
+
+# A request object refuses an unknown key (`StrictModel`), or a misspelled knob runs as its default.
+assert not (_open := _open_request_objects()), f"request bodies keep unknown keys: {sorted(_open)}"
 
 # A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
 if WEBAPP_DIR.exists():
