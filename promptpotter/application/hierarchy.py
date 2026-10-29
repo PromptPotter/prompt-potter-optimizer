@@ -407,7 +407,7 @@ def campaign_entry(
         if line is None
         else line.state
     )
-    spend_lifetime = LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id))
+    spend_lifetime = LifetimeSpend.of(campaign_spend(stores.campaigns, campaign.campaign_id).total)
     return HierarchyCampaign(
         address=hierarchy_address(inside, campaign.campaign_id),
         parent=encode_cycle_path(inside) if inside else None,
@@ -446,7 +446,7 @@ def unstarted_entry(stores: Stores, draft: DraftCampaign, *, queued: bool) -> Un
     """An open check-in as a campaign: its spend is what the check-in cost, its lifecycle word
     `queued` while a Start waits on a slot for it."""
     ledger = stores.drafts.ledger(draft.draft_id)
-    spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []))
+    spend_lifetime = LifetimeSpend.of(billed_spend([ledger] if ledger.is_file() else []).total)
     dataset = draft.dataset_name
     lifecycle = "queued" if queued else "unstarted"
     return UnstartedCampaign(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import time
 import uuid
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from promptpotter.application.jobs.coupon import keyed_client
 from promptpotter.application.optimizer_manifest import (
     get_optimizer_config_overrides,
     llm_node_manifest,
@@ -28,7 +30,7 @@ from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     extract_parsed_json,
 )
-from promptpotter.infrastructure.llm.registry import default_routes, get_llm_client
+from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import (
@@ -135,7 +137,6 @@ def _ledger_response_payload(response: LLMResponse) -> Any:
 class _Call:
     label: str
     merged: dict[str, Any]
-    client: LLMClientBase
     messages: list[dict[str, str]]
     response_model: type[BaseModel] | None
     response_schema: dict[str, Any] | None
@@ -145,6 +146,11 @@ class _Call:
 
     def elapsed_s(self) -> float:
         return round(time.monotonic() - self.started, 2)
+
+    @functools.cached_property
+    def client(self) -> LLMClientBase:
+        """Resolved only for a send: a replay goes out on no key, so no coupon refuses it."""
+        return keyed_client(self.merged["provider"])
 
 
 def _merged_config(
@@ -336,7 +342,6 @@ async def llm_call(
         context = LLMCallContext()
     label = node or "llm_call"
     merged = _merged_config(node, config, overrides)
-    llm_client = get_llm_client(merged["provider"])
 
     cache_key: str | None = None
     replayed: LLMResponse | None = None
@@ -347,7 +352,6 @@ async def llm_call(
     call = _Call(
         label=label,
         merged=merged,
-        client=llm_client,
         messages=messages,
         response_model=response_model,
         response_schema=response_schema,
@@ -379,6 +383,7 @@ async def llm_call(
             duration_s=duration_s,
             model=response.model,
             cost_usd=response.cost_usd,
+            key_source=None,
             cached=True,
         )
 

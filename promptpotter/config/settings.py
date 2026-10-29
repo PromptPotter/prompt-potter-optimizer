@@ -5,10 +5,24 @@ import tomllib
 from importlib.metadata import version
 from typing import Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
 from pydantic_settings import BaseSettings
 
 from promptpotter.config.paths import env_file_path, source_checkout_root
+
+
+class HostCoupon(BaseModel):
+    """What each account may send on THIS box's keys over its whole life, never per day; the box's
+    operator is exempt, and an account's `grant.json` replaces the face."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    # `null` leaves a unit unbounded.
+    usd: float | None = 0.30
+    # Sized ABOVE what the USD face buys on the cheapest model: re-derive it whenever that moves.
+    tokens: int | None = 5_000_000
+    # Set: an account holding ANY key of its own has no coupon left on any provider.
+    void_on_byo: bool = False
 
 
 def _app_version() -> str:
@@ -118,11 +132,8 @@ class Settings(BaseSettings):
     # Unset: `/site-records` does not exist. Set: whoever bears it reads and writes those rows.
     SITE_RECORDS_TOKEN: SecretStr = SecretStr("")
 
-    # LIFETIME total over the account's whole ledger, not per day; the box's operator is exempt.
-    FREE_TIER_SPEND_CAP_USD: float = 0.30
-
-    # Sized ABOVE what the USD cap buys on the cheapest model: re-derive it whenever that cap moves.
-    FREE_TIER_TOKEN_CAP: int = 5_000_000
+    # A JSON object, like RATE_LIMITS; a unit left out keeps its default.
+    HOST_COUPON: HostCoupon = HostCoupon()
 
     # A ceiling on the remainder once the USD total is understated, never a bonus added to it.
     UNPRICED_GRACE_USD: float = 0.10

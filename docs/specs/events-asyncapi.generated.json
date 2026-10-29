@@ -1126,6 +1126,46 @@
         "title": "BankedCommand",
         "type": "object"
       },
+      "BankedSpend": {
+        "additionalProperties": false,
+        "description": "One wallet's `UserSpend`, as a tombstone banks it.",
+        "properties": {
+          "rate_priced_usd": {
+            "title": "Rate Priced Usd",
+            "type": "number"
+          },
+          "unpriced_tokens": {
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          },
+          "unreported_tokens": {
+            "title": "Unreported Tokens",
+            "type": "integer"
+          },
+          "unreported_usd": {
+            "title": "Unreported Usd",
+            "type": "number"
+          },
+          "used_tokens": {
+            "title": "Used Tokens",
+            "type": "integer"
+          },
+          "used_usd": {
+            "title": "Used Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "used_usd",
+          "rate_priced_usd",
+          "used_tokens",
+          "unpriced_tokens",
+          "unreported_usd",
+          "unreported_tokens"
+        ],
+        "title": "BankedSpend",
+        "type": "object"
+      },
       "BenchEnterView": {
         "additionalProperties": false,
         "description": "Every ``sample_scored`` up to the matching ``exit`` is one of its rows; round 0 is the origin.",
@@ -8456,6 +8496,14 @@
             "title": "Input Tokens",
             "type": "integer"
           },
+          "key_source": {
+            "enum": [
+              "host",
+              "user"
+            ],
+            "title": "Key Source",
+            "type": "string"
+          },
           "kind": {
             "enum": [
               "optimizer",
@@ -8534,7 +8582,8 @@
           "kind",
           "node",
           "input_tokens",
-          "output_tokens"
+          "output_tokens",
+          "key_source"
         ],
         "title": "SpendHoldRecord",
         "type": "object"
@@ -8571,48 +8620,32 @@
             "title": "Metered",
             "type": "object"
           },
-          "rate_priced_usd": {
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
           "record_type": {
             "const": "spend_tombstone",
             "default": "spend_tombstone",
             "title": "Record Type",
             "type": "string"
           },
+          "spent": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BankedSpend"
+            },
+            "propertyNames": {
+              "enum": [
+                "host",
+                "user"
+              ]
+            },
+            "title": "Spent",
+            "type": "object"
+          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
-          },
-          "unpriced_tokens": {
-            "title": "Unpriced Tokens",
-            "type": "integer"
-          },
-          "unreported_tokens": {
-            "default": 0,
-            "title": "Unreported Tokens",
-            "type": "integer"
-          },
-          "unreported_usd": {
-            "default": 0.0,
-            "title": "Unreported Usd",
-            "type": "number"
-          },
-          "used_tokens": {
-            "title": "Used Tokens",
-            "type": "integer"
-          },
-          "used_usd": {
-            "title": "Used Usd",
-            "type": "number"
           }
         },
         "required": [
-          "used_usd",
-          "rate_priced_usd",
-          "used_tokens",
-          "unpriced_tokens",
+          "spent",
           "metered"
         ],
         "title": "SpendTombstoneRecord",
@@ -8677,6 +8710,7 @@
           "target_hit",
           "spend_budget",
           "token_budget",
+          "host_allowance",
           "wall_clock",
           "origin_gate",
           "backend_unreachable",
@@ -8831,6 +8865,21 @@
             "title": "Input Tokens",
             "type": "integer"
           },
+          "key_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "host",
+                  "user"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Source"
+          },
           "kind": {
             "enum": [
               "optimizer",
@@ -8946,7 +8995,8 @@
           "kind",
           "node",
           "input_tokens",
-          "output_tokens"
+          "output_tokens",
+          "key_source"
         ],
         "title": "TokenUsageRecord",
         "type": "object"

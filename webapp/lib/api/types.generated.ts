@@ -48,7 +48,7 @@ export interface ServedDashboard {
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
   optimizer_step: string | null;
   state_since: string;
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
   measuring_arm: ArmName | null;
   rounds: ServedRound[];
@@ -918,7 +918,7 @@ export interface RacingBlock {
 export interface DashboardError {
   kind: string;
   message: string;
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
   label: string;
   next_step: string;
 }
@@ -978,7 +978,7 @@ export interface RunAdmission {
 
 /** Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach. */
 export interface PauseReading {
-  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound';
   /** Who or what asked, in the declarer's own words. */
   detail: string;
@@ -1735,7 +1735,7 @@ export interface BenchStatus {
 export interface PassStop {
   /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
    * spent budget before it was sent. */
-  cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
+  cause: 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'pipeline_error' | 'consecutive_errors';
   /** The backend's dominant warning, where errors ended the pass. */
   warning: string | null;
 }
@@ -3819,22 +3819,8 @@ export interface ConnectedAccount {
   email: string | null;
 }
 
-/** Usage against the next launch's gates: spend and tokens LIFETIME, campaigns per day. */
+/** Usage against the next launch's machine gates; the money is `/auth/coupon`'s. */
 export interface QuotaStatus {
-  spend_lifetime: LifetimeSpend;
-  spend_budget_usd_total: number | null;
-  /** How full the USD meter draws: `spend_lifetime.billed_usd` plus its
-   * `rate_priced_usd`, over `spend_budget_usd_total`, at most 1. `None` where
-   * no ceiling bounds the account. */
-  spend_budget_used_share: number | null;
-  /** The allowance is SPENT in either unit, unreported sends counted. What a
-   * running launch holds is not spent: a run declaring no cap holds the whole
-   * headroom. False on an account no ceiling bounds. */
-  allowance_exhausted: boolean;
-  tokens_used_total: number;
-  token_budget_total: number | null;
-  /** The token meter's twin of `spend_budget_used_share`. */
-  token_budget_used_share: number | null;
   concurrent_running: number;
   /** This account's launches waiting for a machine slot. They count against
    * `max_concurrent_cycles` exactly as running ones do. */
@@ -3864,8 +3850,9 @@ export interface TermsConsent {
 /** Time-bucketed spend / requests / tokens over the requested window. */
 export interface ActivityResponse {
   window: '15m' | '30m' | '1h' | '3h' | '1d' | '2d' | '1w' | '1mo' | '1y';
-  /** The colour axis: `model` is the exact model id, `api_key` is who billed the
-   * call (`TokenUsageRecord.provider`). */
+  /** The colour axis: `model` is the exact model id, `api_key` the key that paid:
+   * the provider that billed the call, and whether the host's key under the
+   * coupon or the account's own sent it (`TokenUsageRecord.key_source`). */
   group_by: 'model' | 'api_key';
   buckets: ActivityBucket[];
   /** Every series in the window, in first-seen order — one colour per label, stable
@@ -3901,6 +3888,42 @@ export interface ActivityBucket {
   series_spend: Record<string, number>;
   series_tokens: Record<string, number>;
   series_requests: Record<string, number>;
+}
+
+/** The host's allowance for this account, and the keys it sends on past it. */
+export interface CouponStatus {
+  /** This account is the box's operator: its sends on the box's keys are unmetered. */
+  host: boolean;
+  /** What the box's keys may pay for this account over its life; null is unbounded. */
+  face_usd: number | null;
+  face_tokens: number | null;
+  /** The face less what the box's keys paid, unreported sends counted; null where
+   * the face is unbounded. */
+  left_usd: number | null;
+  left_tokens: number | null;
+  /** How full the allowance draws in the unit nearest its face, at most 1; null
+   * where no unit is bounded. */
+  used_share: number | null;
+  /** Nothing more is sent on the box's keys; a provider this account holds a key
+   * for still sends on it. */
+  exhausted: boolean;
+  /** Retired because this account holds a key of its own
+   * (`HOST_COUPON.void_on_byo`). */
+  void: boolean;
+  /** What the box's keys paid for this account. */
+  host_key_spend: LifetimeSpend;
+  /** What this account's own keys paid. */
+  own_key_spend: LifetimeSpend;
+  keys: AccountKey[];
+  /** Every provider a key may be held for. */
+  providers: string[];
+}
+
+export interface AccountKey {
+  provider: string;
+  /** The key's last four characters: all that is ever served back. */
+  last4: string;
+  added_at: string;
 }
 
 export interface SiteRecordWire {
@@ -4547,7 +4570,7 @@ export interface CommandResponses {
 }
 
 // Why a cycle ended (domain/phases.py::StopReason).
-export type StopReason = 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+export type StopReason = 'perfect_score' | 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'crashed' | 'diverged' | 'optimizer_abort' | 'converged' | 'optimizer_exhausted' | 'hard_cap_reached' | 'diag_complete' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 
 // Whether a stop SUCCEEDED, and the only half of the table that decides anything —
 // `StopOutcome`, where `paused` is the one non-terminal member. Ask it rather than
@@ -4568,6 +4591,7 @@ export const STOP_REASON_OUTCOMES: Record<StopReason, StopOutcome> = {
   'optimizer_abort': 'halted',
   'spend_budget': 'halted',
   'token_budget': 'halted',
+  'host_allowance': 'halted',
   'wall_clock': 'halted',
   'origin_gate': 'halted',
   'backend_unreachable': 'halted',
@@ -4602,6 +4626,7 @@ export const STOP_REASON_CATEGORIES: Record<StopReason, StopCategory> = {
   'optimizer_abort': 'search',
   'spend_budget': 'budget',
   'token_budget': 'budget',
+  'host_allowance': 'budget',
   'wall_clock': 'budget',
   'origin_gate': 'operator',
   'backend_unreachable': 'external',

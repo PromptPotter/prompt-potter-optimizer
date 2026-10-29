@@ -25,9 +25,9 @@ test("a blocked account sees AccessGate, not the app", async ({ page, context })
   await expect(page.getByRole("button", { name: "Sign out" })).toBeEnabled();
 });
 
-test("an account at its free-tier ceiling sees AllowanceExhausted", async ({ page, context, request }) => {
+test("an account whose coupon is used up sees AllowanceExhausted", async ({ page, context, request }) => {
   const tenantId = "e2e-fake-allowance";
-  fake.seedSpendCeiling(tenantId, 0);
+  fake.seedCouponFace(tenantId, 0);
   const sessionId = fake.mintSession({ tenantId, email: "allowance@example.com" });
   await context.addCookies([{ name: "promptpotter_session", value: sessionId, url: fake.baseURL }]);
 
@@ -44,7 +44,13 @@ test("an account at its free-tier ceiling sees AllowanceExhausted", async ({ pag
   await page.goto(fake.baseURL);
   await ready(page);
   // The apostrophe is U+2019 (`&rsquo;` in the source) — a straight `'` will not match.
+  const notice = page.getByRole("dialog", { name: "That’s the last of your free runs" });
+  await expect(notice).toBeVisible();
+
+  // The remedy the server's `host_allowance_exhausted` names is one click away.
+  await notice.getByRole("button", { name: "Add my own key" }).click();
+  await expect.poll(() => new URL(page.url()).hash).toContain("/account/keys");
   await expect(
-    page.getByRole("dialog", { name: "That’s the last of your free runs" }),
+    page.getByRole("dialog", { name: "Account" }).getByRole("heading", { name: "API keys" }),
   ).toBeVisible();
 });

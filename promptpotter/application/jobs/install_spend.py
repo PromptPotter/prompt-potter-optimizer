@@ -5,20 +5,22 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.application.jobs.quota import lifetime_ceilings
+from promptpotter.application.jobs.coupon import face_of
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.spend import Budget, UserSpend
+from promptpotter.domain.spend import NOTHING_PAID, Budget, PaidSpend
 from promptpotter.infrastructure.identity.migration import is_host_tenant_dir
 from promptpotter.infrastructure.store.account_spend import account_ledgers, sum_user_spend
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.user_store import Torn, User, read_accounts
+from promptpotter.infrastructure.store.wallet_store import GrantStore
 from promptpotter.shared.errors import LedgerUnreadableError
 
 
 class AccountUsage(NamedTuple):
     user_id: str
     email: str | None
-    spent: UserSpend
+    spent: PaidSpend
+    # The account's coupon face.
     ceilings: Budget
     campaigns: int
     cycles: int
@@ -37,7 +39,7 @@ def read_install_spend(projects_root: Path) -> list[AccountUsage]:
         except (OSError, LedgerUnreadableError) as exc:
             # A ledger that will not scan is the same row as a `user.json` that will not load.
             rows.append(_unreadable_row(account.workspace, f"{type(exc).__name__}: {exc}"))
-    rows.sort(key=lambda r: (r.spent.sent_usd, r.spent.used_tokens), reverse=True)
+    rows.sort(key=lambda r: (r.spent.total.sent_usd, r.spent.total.used_tokens), reverse=True)
     return rows
 
 
@@ -46,7 +48,7 @@ def _unreadable_row(tenant_dir: WorkspaceDir, why: str) -> AccountUsage:
     return AccountUsage(
         user_id=tenant_dir.name,
         email=None,
-        spent=UserSpend(0.0, 0, 0),
+        spent=NOTHING_PAID,
         ceilings=Budget(),
         campaigns=0,
         cycles=0,
@@ -60,7 +62,10 @@ def _account_row(user: User, tenant_dir: WorkspaceDir) -> AccountUsage:
         user_id=user.user_id,
         email=user.email,
         spent=sum_user_spend(ledgers=account_ledgers(campaigns)),
-        ceilings=lifetime_ceilings(user=user, spends_own_key=is_host_tenant_dir(user.user_id)),
+        ceilings=face_of(
+            GrantStore(tenant_dir).load(),
+            host=is_host_tenant_dir(user.user_id),
+        ),
         campaigns=len(campaigns.iter_campaign_dirs()),
         cycles=len(campaigns.iter_cycle_ledgers()),
     )

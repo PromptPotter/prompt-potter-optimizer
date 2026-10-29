@@ -121,6 +121,31 @@
         "title": "AcceptTermsBody",
         "type": "object"
       },
+      "AccountKey": {
+        "additionalProperties": false,
+        "properties": {
+          "added_at": {
+            "title": "Added At",
+            "type": "string"
+          },
+          "last4": {
+            "description": "The key's last four characters: all that is ever served back.",
+            "title": "Last4",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "last4",
+          "added_at"
+        ],
+        "title": "AccountKey",
+        "type": "object"
+      },
       "ActiveSessionResponse": {
         "additionalProperties": false,
         "description": "The tenant's latest launch — not the set of live runs, which is `state.attached` on `/hierarchy`.",
@@ -355,7 +380,7 @@
             "type": "boolean"
           },
           "group_by": {
-            "description": "The colour axis: `model` is the exact model id, `api_key` is who billed the call (`TokenUsageRecord.provider`).",
+            "description": "The colour axis: `model` is the exact model id, `api_key` the key that paid: the provider that billed the call, and whether the host's key under the coupon or the account's own sent it (`TokenUsageRecord.key_source`).",
             "enum": [
               "model",
               "api_key"
@@ -500,6 +525,23 @@
           "decision"
         ],
         "title": "ActivityState",
+        "type": "object"
+      },
+      "ApiKeyBody": {
+        "additionalProperties": false,
+        "description": "One provider key, never served back: a read names its last four characters alone.",
+        "properties": {
+          "secret": {
+            "format": "password",
+            "title": "Secret",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "secret"
+        ],
+        "title": "ApiKeyBody",
         "type": "object"
       },
       "ArchiveCampaignPayload": {
@@ -3808,6 +3850,124 @@
         ],
         "title": "CostAbsence",
         "type": "string"
+      },
+      "CouponStatus": {
+        "additionalProperties": false,
+        "description": "The host's allowance for this account, and the keys it sends on past it.",
+        "properties": {
+          "exhausted": {
+            "description": "Nothing more is sent on the box's keys; a provider this account holds a key for still sends on it.",
+            "title": "Exhausted",
+            "type": "boolean"
+          },
+          "face_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Face Tokens"
+          },
+          "face_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the box's keys may pay for this account over its life; null is unbounded.",
+            "title": "Face Usd"
+          },
+          "host": {
+            "description": "This account is the box's operator: its sends on the box's keys are unmetered.",
+            "title": "Host",
+            "type": "boolean"
+          },
+          "host_key_spend": {
+            "$ref": "#/components/schemas/LifetimeSpend",
+            "description": "What the box's keys paid for this account."
+          },
+          "keys": {
+            "items": {
+              "$ref": "#/components/schemas/AccountKey"
+            },
+            "title": "Keys",
+            "type": "array"
+          },
+          "left_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Left Tokens"
+          },
+          "left_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The face less what the box's keys paid, unreported sends counted; null where the face is unbounded.",
+            "title": "Left Usd"
+          },
+          "own_key_spend": {
+            "$ref": "#/components/schemas/LifetimeSpend",
+            "description": "What this account's own keys paid."
+          },
+          "providers": {
+            "description": "Every provider a key may be held for.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "used_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How full the allowance draws in the unit nearest its face, at most 1; null where no unit is bounded.",
+            "title": "Used Share"
+          },
+          "void": {
+            "description": "Retired because this account holds a key of its own (`HOST_COUPON.void_on_byo`).",
+            "title": "Void",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "host",
+          "face_usd",
+          "face_tokens",
+          "left_usd",
+          "left_tokens",
+          "used_share",
+          "exhausted",
+          "void",
+          "host_key_spend",
+          "own_key_spend",
+          "keys",
+          "providers"
+        ],
+        "title": "CouponStatus",
+        "type": "object"
       },
       "CourseFacts": {
         "additionalProperties": false,
@@ -12720,13 +12880,8 @@
       },
       "QuotaStatus": {
         "additionalProperties": false,
-        "description": "Usage against the next launch's gates: spend and tokens LIFETIME, campaigns per day.",
+        "description": "Usage against the next launch's machine gates; the money is `/auth/coupon`'s.",
         "properties": {
-          "allowance_exhausted": {
-            "description": "The allowance is SPENT in either unit, unreported sends counted. What a running launch holds is not spent: a run declaring no cap holds the whole headroom. False on an account no ceiling bounds.",
-            "title": "Allowance Exhausted",
-            "type": "boolean"
-          },
           "campaigns_today": {
             "title": "Campaigns Today",
             "type": "integer"
@@ -12764,69 +12919,9 @@
             "description": "Whether this caller may move `max_concurrent_cycles` through `set-concurrent-cycles`. False on the host's key, where the host sets it.",
             "title": "Max Concurrent Cycles Writable",
             "type": "boolean"
-          },
-          "spend_budget_usd_total": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Spend Budget Usd Total"
-          },
-          "spend_budget_used_share": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How full the USD meter draws: `spend_lifetime.billed_usd` plus its `rate_priced_usd`, over `spend_budget_usd_total`, at most 1. `None` where no ceiling bounds the account.",
-            "title": "Spend Budget Used Share"
-          },
-          "spend_lifetime": {
-            "$ref": "#/components/schemas/LifetimeSpend"
-          },
-          "token_budget_total": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Token Budget Total"
-          },
-          "token_budget_used_share": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The token meter's twin of `spend_budget_used_share`.",
-            "title": "Token Budget Used Share"
-          },
-          "tokens_used_total": {
-            "title": "Tokens Used Total",
-            "type": "integer"
           }
         },
         "required": [
-          "spend_lifetime",
-          "spend_budget_usd_total",
-          "spend_budget_used_share",
-          "allowance_exhausted",
-          "tokens_used_total",
-          "token_budget_total",
-          "token_budget_used_share",
           "concurrent_running",
           "concurrent_queued",
           "max_concurrent_cycles",
@@ -15476,6 +15571,7 @@
           "target_hit",
           "spend_budget",
           "token_budget",
+          "host_allowance",
           "wall_clock",
           "origin_gate",
           "backend_unreachable",
@@ -17393,7 +17489,7 @@
     },
     "/api/v1/auth/activity": {
       "get": {
-        "description": "Time-bucketed spend, requests and tokens over the window, each billed call at the price it was stamped with.\n\n``group_by`` is ``model`` (the exact model string) or ``api_key`` (who billed the call).",
+        "description": "Time-bucketed spend, requests and tokens over the window, each billed call at the price it was stamped with.\n\n``group_by`` is ``model`` (the exact model string) or ``api_key`` (the provider that billed\nthe call, and whether the host's key or the caller's own sent it).",
         "operationId": "activity_api_v1_auth_activity_get",
         "parameters": [
           {
@@ -17460,6 +17556,95 @@
         ]
       }
     },
+    "/api/v1/auth/api-keys/{provider}": {
+      "delete": {
+        "description": "Drop the caller's key for *provider*; its next send there draws the coupon again.",
+        "operationId": "delete_api_key_api_v1_auth_api_keys__provider__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Delete Api Key",
+        "tags": [
+          "Auth"
+        ]
+      },
+      "put": {
+        "description": "Hold the caller's own key for *provider*: its sends there go out on it, past the coupon.\n\nAn unknown provider answers 422 ``unknown_provider``; a key that is not one unbroken string 422\n``api_key_malformed``. The provider judges the key itself, at its first send.",
+        "operationId": "put_api_key_api_v1_auth_api_keys__provider__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountKey"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Put Api Key",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
     "/api/v1/auth/callback/{provider}": {
       "get": {
         "operationId": "callback_api_v1_auth_callback__provider__get",
@@ -17497,6 +17682,38 @@
           }
         },
         "summary": "Callback",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/coupon": {
+      "get": {
+        "description": "The host's allowance for the caller on the box's keys: its face, what is left, and the keys\nthe caller sends on past it. What is left is derived from the ledgers, never a counter.",
+        "operationId": "get_coupon_api_v1_auth_coupon_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CouponStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Get Coupon",
         "tags": [
           "Auth"
         ]

@@ -146,15 +146,17 @@ stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_ru
   (`auth.py::auth_flow_router`). Outside `/api/v1` only the static webapp and `/docs` +
   `/openapi.json` answer a stranger, the latter the contract the repo already publishes.
 - **Sign-up is open AND signing up is the grant.** What bounds a stranger is money, not approval:
-  the lifetime ceilings `Settings.FREE_TIER_SPEND_CAP_USD` and `FREE_TIER_TOKEN_CAP`, composed at
-  `quota.py::admit_launch`. **Both units, because the USD one can go blind** on an unpriced call
+  the host coupon, what the box's keys may pay for an account over its life (`Settings.HOST_COUPON`,
+  or the account's `grant.json`), composed at `quota.py::admit_launch` and at every send's key
+  (`coupon.py::resolve_api_key`, [decisions.md § 0003](../decisions.md#0003-spend-and-tenancy)).
+  Past it the account sends on a key of its own (`/auth/api-keys`) and the box pays nothing.
+  **Both units, because the USD one can go blind** on an unpriced call
   (`Settings.UNPRICED_GRACE_USD`). A launch is admitted at its campaign's declared ceiling or
-  refused, never clamped, and holds it as a reservation
-  ([decisions.md § 0003](../decisions.md#0003-spend-and-tenancy)); a delegate's grant is the one
-  read-down. **Every path that sets a ceiling composes there**, `change-run-limits` included, or it
+  refused, never clamped, and the coupon holds a reservation for it; a send on the box's key past
+  that reservation stops the run `host_allowance`. A delegate's grant is the one read-down. **Every path that sets a ceiling composes there**, `change-run-limits` included, or it
   is the way around this section. `oidc.py::resolve_access_state` (served as
   `MeResponse.access_state`) answers `blocked` only for a revoked email.
-- **Who is exempt from free-tier metering is one definition with two readings** —
+- **Who is exempt from the coupon is one definition with two readings** —
   `identity/migration.py::_is_host`, read off a live identity (`quota.py::spends_the_hosts_own_key`)
   or a directory walk (`migration.py::is_host_tenant_dir`). Merging the two detectors would let an
   identity that omits an issuer resolve as the operator.
@@ -185,7 +187,7 @@ rate limit and the host's wallet — are external and singular, so cost is bound
 | Campaigns admitted at once | `Settings.MACHINE_RUN_CAPACITY` | Yes — lowered under provider back-pressure, never raised past the ceiling |
 | Share of the provider's 60 s window | derived per call (`infrastructure/llm/send_pacing.py`) | Yes — least-served tenant next |
 | Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | No |
-| What an account may ever spend | the free-tier ceilings, both units | No |
+| What the box's keys may ever pay for an account | the host coupon (`Settings.HOST_COUPON`, or its `grant.json`), both units; its own keys are not metered | No |
 | Reads one principal may poll | `quota.py::refuse_read_rate`, a token bucket sized above the webapp's polls, at `deps.py::admit_session` (429 `rate_limited`) | No |
 
 **The first gate WAITS; the third refuses.** A full machine queues the launch

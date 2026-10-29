@@ -120,9 +120,9 @@ def _render_install_spend() -> str:
     torn = sum(1 for r in rows if r.unreadable)
     lines = [
         f"{len(rows)} account{'' if len(rows) == 1 else 's'}, "
-        f"${sum(r.spent.used_usd for r in rows):.4f} billed + "
-        f"${sum(r.spent.rate_priced_usd for r in rows):.4f} {RATE_PRICED_LABEL} / "
-        f"{sum(r.spent.used_tokens for r in rows):,} tokens"
+        f"${sum(r.spent.total.used_usd for r in rows):.4f} billed + "
+        f"${sum(r.spent.total.rate_priced_usd for r in rows):.4f} {RATE_PRICED_LABEL} / "
+        f"{sum(r.spent.total.used_tokens for r in rows):,} tokens"
         + (f" (excludes {torn} unreadable)" if torn else "")
     ]
     for r in rows:
@@ -130,17 +130,20 @@ def _render_install_spend() -> str:
         if r.unreadable:
             lines.append(f"{who}: unreadable — {r.unreadable}")
             continue
-        over = overrun(r.ceilings, r.spent)
+        over = overrun(r.ceilings, r.spent.host)
+        spent = r.spent.total
         flags = []
         if r.ceilings.usd is None:
             flags.append("host, unmetered")
-        if r.spent.unpriced_tokens:
-            flags.append(f"{r.spent.unpriced_tokens:,} unpriced")
+        if spent.unpriced_tokens:
+            flags.append(f"{spent.unpriced_tokens:,} unpriced")
+        if r.spent.user.used_tokens:
+            flags.append(f"${r.spent.user.sent_usd:.4f} on its own keys")
         if over.usd_amount or over.token_amount:
-            flags.append(f"⚠ ${over.usd_amount:.4f}/{over.token_amount:,} past ceiling")
+            flags.append(f"⚠ ${over.usd_amount:.4f}/{over.token_amount:,} past its coupon")
         lines.append(
-            f"{who}: ${r.spent.used_usd:.4f} billed + ${r.spent.rate_priced_usd:.4f} "
-            f"{RATE_PRICED_LABEL} / {r.spent.used_tokens:,} tok · "
+            f"{who}: ${spent.used_usd:.4f} billed + ${spent.rate_priced_usd:.4f} "
+            f"{RATE_PRICED_LABEL} / {spent.used_tokens:,} tok · "
             f"{r.campaigns} campaigns / {r.cycles} cycles"
             + (f" · {'; '.join(flags)}" if flags else "")
         )
