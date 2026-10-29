@@ -19,6 +19,7 @@ from promptpotter.application.datasets.draft_campaign import (
     committed_pipeline_json,
 )
 from promptpotter.application.datasets.origin_readiness import FieldGap, origin_readiness
+from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
@@ -36,6 +37,7 @@ from promptpotter.application.jobs.registry import UNRESOLVED_HOP, Job, JobRegis
 from promptpotter.application.pipeline_resolve import resolve_campaign_config
 from promptpotter.domain.campaign import Campaign, Purpose
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.command_kinds import MintCampaignPayload
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import (
@@ -82,6 +84,17 @@ class FreshMint:
     purpose: Purpose
     declared: CampaignConfig | None
     task_text: str | None
+
+    @classmethod
+    def of(cls, stores: Stores, payload: MintCampaignPayload) -> FreshMint:
+        return cls(
+            dataset=offered_dataset(stores, payload.dataset_name),
+            budget=payload.budget,
+            optimization=payload.optimization_sent,
+            purpose=payload.purpose,
+            declared=payload.campaign_config,
+            task_text=payload.task_text,
+        )
 
     @property
     def hop(self) -> CycleHop:

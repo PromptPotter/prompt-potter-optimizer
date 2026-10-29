@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -33,6 +35,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.draft_edit import SETTABLE_SCALARS, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.spend import Budget
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,
     backend_unreachable_result,
@@ -128,6 +131,42 @@ def _set_knobs(sets: list[str]) -> dict[str, Any]:
     knobs = patch.optimization_overrides
     assert knobs is not None
     return knobs
+
+
+def _spelled(value: object) -> str:
+    return value if isinstance(value, str) and yaml.safe_load(value) == value else json.dumps(value)
+
+
+def mint_command(mint: MintCampaignPayload) -> str:
+    """The `new` that dispatches *mint*, its `--set`s read back through `_set_knobs` before printing."""
+    knobs = mint.optimization or OptimizationOverrides()
+    named = knobs.model_fields_set
+    budget = knobs.budget if _BUDGET in named else Budget()
+    sets = [
+        *(f"{field}={getattr(knobs, field)}" for field in sorted(_SET_KNOBS & named)),
+        *(f"{_BUDGET}.{axis}={_spelled(getattr(budget, axis))}" for axis in sorted(budget.named)),
+        *(
+            f"{_NODES}.{node}.{knob}={_spelled(value)}"
+            for node, overlay in knobs.nodes.items()
+            for knob, value in overlay.config.items()
+        ),
+    ]
+    read_back = OptimizationOverrides.model_validate(_set_knobs(sets))
+    unspelled = (mint.budget, mint.diag, mint.campaign_config, mint.task_text) != (
+        Budget(),
+        False,
+        None,
+        None,
+    )
+    if unspelled or read_back.model_dump(mode="json", exclude_unset=True) != mint.optimization_sent:
+        raise SystemExit(f"ERROR: no `new` command line spells this mint: {mint.model_dump()}")
+    arm = (
+        []
+        if isinstance(mint.purpose, Optimize)
+        else ["--arm", f"{mint.purpose.arm.head_to_head_id}:{mint.purpose.arm.arm_key}"]
+    )
+    words = ["python", "-m", "promptpotter", "new", mint.dataset_name, *arm]
+    return shlex.join([*words, *(word for s in sets for word in ("--set", s))])
 
 
 def _draft_kept(draft_id: str) -> str:

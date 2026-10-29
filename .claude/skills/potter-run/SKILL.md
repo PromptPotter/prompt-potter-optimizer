@@ -72,7 +72,8 @@ Who launches is the autonomy mode's call. Never block a foreground shell on a ca
 `promptpotter-self` is the exception, owned by `/potter-self` § Live-run supervision.
 
 Verbs and flags: [`persistence-and-state.md`](../../../docs/operations/persistence-and-state.md) and
-`--help`. Here: `new <name>` (`--set optimizer=<name>`; `--arm <h2h>:<key>` mints a head-to-head arm),
+`--help`. Here: `new <name>` (`--set optimizer=<name>`; `--arm <h2h>:<key>` mints a head-to-head arm;
+`price-head-to-head <plan>` prices a planned one at $0 and ends on the command minting it),
 `new <file>` (raw ingest), `resume` (the happy path, no flags), `pause` (the HALT; a queued launch
 takes `cancel-queued <job_id>`), `set-limits`, `submit-arms`, `bench`, `verify`, `evidence`.
 `compact-archive purge-cold --apply` destroys paid spend — always asked for. A dataset's defaults are

@@ -296,6 +296,20 @@ class Budget(FrozenModel):
 
 NOTHING_METERED = Budget.amount(0.0, 0)
 
+
+class CellPrice(FrozenModel):
+    """What one cell of a bank cost on its models, as the archive measured it."""
+
+    usd: float = Field(
+        description="Mean USD over the archive's newest rows of this bank and models."
+    )
+    seconds: float | None = Field(
+        description="Mean seconds producing one took (`MeasuredCell.cost_s`, which a replay "
+        "keeps); null where no priced row carried a timing."
+    )
+    cells: int = Field(description="Archive rows the means are over.")
+
+
 # The campaign's: one book its live cycles share. The rest bind one cycle (`rounds`) or launch.
 MONEY_AXES = frozenset({"usd", "tokens"})
 CYCLE_AXES = frozenset({"rounds", "wall_clock_s"})

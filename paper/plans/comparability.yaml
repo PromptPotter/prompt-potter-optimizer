@@ -1,0 +1,14 @@
+# The comparability run (docs/specs/roadmap.md § The bench (M13), Order item 5): one target model,
+# grader and bench set; only the optimizer differs. Calls are held equal as USD under the arm's
+# `search_incurred` meter at one cell price; `price-head-to-head` reports each arm's calls.
+head_to_head_id: bbeh-cmp
+dataset_name: bbeh
+arms:
+  potter: {optimizer: potter}
+  capo: {optimizer: capo}
+  levi: {optimizer: levi}
+  gepa: {optimizer: gepa}
+replicates: 3
+budgets:
+  # `rounds: null` lifts the dataset's round cap, so the money alone binds.
+  usd4: {usd: 4.0, rounds: null}

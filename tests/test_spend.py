@@ -29,6 +29,7 @@ import pytest
 from factories import (
     PROMPT_INFO,
     SANDBOX_CAMPAIGN,
+    archive_row,
     arm_state,
     arm_walk,
     backend_client,
@@ -67,6 +68,11 @@ from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.diagnostics.noise_floor import measure_noise_floor
 from promptpotter.application.diagnostics.probe_reasoning import probe_reasoning
 from promptpotter.application.diagnostics.seed_screen import screen_inner_seeds
+from promptpotter.application.head_to_head_price import (
+    optimizer_round_price,
+    priced_head_to_head,
+)
+from promptpotter.application.initialization.loop_start import measured_cell_price
 from promptpotter.application.jobs import mint
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_share,
@@ -74,6 +80,7 @@ from promptpotter.application.jobs.launcher.admission import (
     open_spend_book,
     paid_pass,
 )
+from promptpotter.application.jobs.launcher.mint_and_start import FreshMint
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
@@ -139,6 +146,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.diagnostic_run import RescoreCount
 from promptpotter.domain.draft_edit import EditDraftPatch
+from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.proxies import inner_cell_facts
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE
@@ -1800,6 +1808,99 @@ def test_a_campaigns_ceiling_binds_every_run_it_is_shared_over(
     )
     assert claim_held.reserve.usd == pytest.approx(2.0), "the delegate's claim did not bind it"
     shared.release(claim.job_id)
+
+    # A planned head-to-head is priced before it is minted, at what the archive measured a cell of
+    # its models costing and what an optimizer's own rounds cost here.
+    bank = loop_session(built_stores, pipeline_schema([]), samples(6, "g"))
+    on = [("llm_only", {"model": "X"})]
+    for model, usd, seconds, rows in (
+        ("X", 0.001, 1.0, slice(0, 3)),
+        ("X", 0.003, 3.0, slice(3, 6)),
+        ("Y", 1.0, 99.0, slice(0, 3)),
+    ):
+        steps = {"step_tokens": {"llm_only": {"input": 1, "output": 1, "cost_usd": usd}}}
+        filed(
+            built_stores.archive,
+            [
+                archive_row(s.query, pipeline_data={**steps, "step_timings": {"llm_only": seconds}})
+                for s in bank.bank.samples[rows]
+            ],
+            filed_under([("llm_only", {"model": model})], bank.bank.dataset_hash),
+        )
+    cell = measured_cell_price(bank, on)
+    assert cell is not None and (cell.usd, cell.seconds, cell.cells) == pytest.approx(
+        (0.002, 2.0, 6)
+    ), "a cell was priced off another model's rows, or off fewer than the archive holds"
+    priced = CycleHop(campaign_id="camp-10", cycle_id="cycle_priced0001")
+    built_stores.campaigns.create_campaign(minted_campaign(priced))
+    built_stores.campaigns.mint_cycle(priced)
+    for usd, at in ((0.5, None), (0.02, 1), (0.04, 2), (0.0, 3)):
+        CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(priced))).append(
+            billed_call(usd, round=at)
+        )
+    held = optimizer_round_price(built_stores, "potter")
+    assert held is not None and (held.usd, held.rounds) == pytest.approx((0.03, 2)), (
+        "a round's optimizer price counted the origin's init, or a round that called it for free"
+    )
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("ds1") / DEFINITION_FILE,
+        {
+            "pipeline": {"backend_type": "termnorm"},
+            "campaign": {"sp_budget_origin": 20, "optimization": {"degradation_threshold": 0.4}},
+        },
+    )
+    plan = HeadToHeadPlan.model_validate(
+        {
+            "head_to_head_id": "plan",
+            "dataset_name": "ds1",
+            "arms": {"potter": {}, "capo": {"optimizer": "capo"}},
+            "replicates": 2,
+            "budgets": {"under": {"usd": 0.05}, "over": {"usd": 1.2, "rounds": 2}},
+        }
+    )
+    mints = plan.mints()
+    configs = [FreshMint.of(built_stores, m).campaign_config(built_stores) for m in mints]
+    points = [point for point in plan.budgets.values() for _ in range(4)]
+    assert all(
+        c.optimization.budget.only(point.named) == point
+        for c, point in zip(configs, points, strict=True)
+    ), "an arm was minted on another budget than its point's"
+    price = priced_head_to_head(
+        mints,
+        configs,
+        dataset_hash=bank.bank.dataset_hash,
+        search=30,
+        bench=10,
+        cell=cell,
+        optimizers={"potter": held, "capo": None},
+        cells_in_flight=4,
+    )
+    for arm, config in zip(price.arms, configs, strict=True):
+        point = config.optimization.budget
+        assert point.usd is not None
+        per_round = select_optimizer(config.optimization).round_cells_ceiling(30)
+        searched = arm.usd - arm.bench_cells * cell.usd
+        if point.rounds is not None and arm.rounds == point.rounds:
+            assert arm.search_cells == 20 + point.rounds * per_round, "a round cap bought another"
+        else:
+            # Within one send of the ceiling: a cell, or the optimizer call opening a round.
+            send = max(cell.usd, (price.optimizers[arm.optimizer] or cell).usd)
+            assert point.usd - send - 1e-9 <= searched <= point.usd + 1e-9, (
+                f"{arm.optimizer} at ${point.usd}: priced ${searched} of search, where its meter "
+                "stops the arm within a send of its ceiling"
+            )
+        assert (arm.refused is None) == (point.usd >= per_round * cell.usd), (
+            f"{arm.optimizer} at ${point.usd}: priced as if its mint ran, or refused one it runs"
+        )
+        assert arm.serial_s is not None and arm.wall_clock_s is not None and cell.seconds
+        assert arm.serial_s - arm.wall_clock_s == pytest.approx(
+            (arm.search_cells + arm.bench_cells) * cell.seconds * (1 - 1 / 4)
+        ), "the wall clock read the cells at another concurrency than the connector's"
+    assert price.usd == pytest.approx(sum(arm.usd for arm in price.arms)), "an arm went unpriced"
+    potter_over, capo_over = price.arms[4], price.arms[6]
+    assert (potter_over.rounds, capo_over.rounds) == (2, 1), (
+        "$1.20 buys potter its two capped rounds and capo one 450-cell round, cut where it ends"
+    )
 
 
 # 4. What a send is held at

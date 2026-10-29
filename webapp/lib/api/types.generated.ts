@@ -2052,6 +2052,381 @@ export interface EditSpread {
   n_edits: number;
 }
 
+/** Every arm of every budget point, priced at what the archive says a cell of this bank costs. */
+export interface HeadToHeadPrice {
+  dataset_hash: string;
+  search_rows: number;
+  bench_rows: number;
+  cell: CellPrice;
+  /** Null where no campaign here called it in a round: its arms' figures leave its
+   * own calls out. */
+  optimizers: Record<string, OptimizerRoundPrice | null>;
+  /** The connector's ceiling (`Connector.max_cells_in_flight`) `wall_clock_s` is
+   * read at. */
+  cells_in_flight: number;
+  arms: ArmPrice[];
+  usd: number;
+  /** Every arm minted after the last, in turn. */
+  wall_clock_s: number | null;
+  serial_s: number | null;
+}
+
+/** What one cell of a bank cost on its models, as the archive measured it. */
+export interface CellPrice {
+  /** Mean USD over the archive's newest rows of this bank and models. */
+  usd: number;
+  /** Mean seconds producing one took (`MeasuredCell.cost_s`, which a replay keeps);
+   * null where no priced row carried a timing. */
+  seconds: number | null;
+  /** Archive rows the means are over. */
+  cells: number;
+}
+
+/** What one round of an optimizer's own calls cost, over its newest campaigns here, any */
+export interface OptimizerRoundPrice {
+  /** Mean optimizer USD incurred per round that called it. */
+  usd: number;
+  /** Mean optimizer call seconds per such round; calls sent together each count. */
+  seconds: number;
+  /** Rounds the means are over. */
+  rounds: number;
+  /** Campaigns those rounds ran in. */
+  campaigns: number;
+}
+
+export interface ArmPrice {
+  /** The mint this arm IS: dispatched as `mint-campaign`, it mints the arm priced. */
+  mint: MintCampaignPayload;
+  optimizer: string;
+  /** Rounds closed after the origin: the point's `rounds`, or what its `usd` buys
+   * first. */
+  rounds: number;
+  /** Cells the search measures, the origin's included: the calls a budget-matched
+   * head-to-head holds equal, so arms of one point are compared on it. */
+  search_cells: number;
+  /** The origin's and the selection's held-out passes. */
+  bench_cells: number;
+  /** Search and bench at the measured cell price, plus the optimizer's measured
+   * round price for every round it opens. */
+  usd: number;
+  /** At `cells_in_flight`; null where no priced cell carried a timing. */
+  wall_clock_s: number | null;
+  /** One cell at a time, the look-ahead's default. */
+  serial_s: number | null;
+  /** What this arm's mint refuses (`spend_cap_below_round`): its budget closes no
+   * round. */
+  refused: string | null;
+}
+
+export interface MintCampaignPayload {
+  dataset_name: string;
+  budget: Budget;
+  /** Laid over the dataset's own `optimization` before the mint freezes it; only
+   * the fields sent move anything */
+  optimization: OptimizationOverrides | null;
+  /** `compare` mints a controlled arm of its head-to-head, declared by its first
+   * arm; an arm off the declared instrument or budget is refused 409 */
+  purpose: Optimize | Compare;
+  /** Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so
+   * the other run-mode fields are `start-run`'s alone. */
+  diag: boolean;
+  /** A campaign declaration standing in for the dataset's own
+   * `dataset.yaml::campaign`; `optimization` still lays over it */
+  campaign_config: CampaignConfig | null;
+  /** The task description to frame from, in place of the dataset's own */
+  task_text: string | null;
+}
+
+/** The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal */
+export interface OptimizationOverrides {
+  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
+   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
+   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
+   * closed rounds after the origin (0 measures the origin and stops; null
+   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
+   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
+   * account admits the result whole or refuses the launch. A null axis is
+   * unbounded. ``tokens`` is unset by default: a token is worth a different
+   * amount on every route, so set it only where a backend bills but reports
+   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+  budget: Budget;
+  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
+   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
+   * only on its record's rule. */
+  halt_at_accuracy: number | null;
+  /** The optimizer manifest this campaign runs — a directory under
+   * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
+   * nothing selects it install-wide. */
+  optimizer: string;
+  /** This campaign's overlay on the selected manifest, keyed by node name —
+   * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
+   * An optimizer's knobs, a paper's configuration and each llm node's
+   * ``config.model`` all ride here; each node validates its own knobs when
+   * the optimizer is selected. */
+  nodes: Record<string, ManifestNodeOverlay>;
+  /** Hold every round, before any arm is measured, until the operator answers with
+   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
+   * ``review``: the proposers run, their proposals are drafts, and the
+   * operator keeps any of them by index, adds arms of their own, or both.
+   * ``author``: no proposer runs and every arm is the operator's. An arm of
+   * theirs is an edit of the round's parent — prompt fields, a pipeline
+   * overlay — and is measured and elected like any other. The hold has no
+   * deadline; a pause ends it resumably, and a resume holds again unless an
+   * answer was already banked. */
+  arm_gate: 'off' | 'review' | 'author';
+}
+
+/** One optimizer node's delta over its manifest's ``config``. */
+export interface ManifestNodeOverlay {
+  config: Record<string, unknown>;
+}
+
+export interface CampaignConfig {
+  /** Origin eval budget — how many bank samples the origin (C0) is scored on at
+   * check-in. The bench's, whatever the optimizer: a round's own panel is its
+   * sampler's knob. Wide because origin breadth is the one breadth that is
+   * nearly free: θ_origin is the term EVERY delta subtracts, and its rows are
+   * content-addressed cache replayed into every candidate arm, fork and
+   * resume — paid once per config. Candidate breadth is paid per candidate,
+   * per round. Every comparison downstream is matched by sample key or
+   * θ-space, so an origin scored on a superset stays like-for-like. A bank
+   * smaller than this scores on the whole bank (`sample_dataset` is a prefix
+   * slice) — not an error. */
+  sp_budget_origin: number;
+  exclude_nodes: string[];
+  /** Which task framing every target render splices in. `committed` (default) runs
+   * under the front matter of the dataset's `task.md`, which the first mint
+   * decomposes from its body when none is committed yet. `off` runs UNFRAMED
+   * on purpose — the ablation arm — even where framing exists, and the
+   * campaign manifest keeps the delta, so the result never reads as a framed
+   * one. */
+  task_framing: 'committed' | 'off';
+  pipeline_overlay: Record<string, unknown>;
+  /** Per-node declaration over the dataset's optimizer search space — the per-
+   * campaign param-lock + value-space lever beside `exclude_nodes` (whole
+   * node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS
+   * the config axes, `prompt_fields_held` holds the prompt fields it names,
+   * and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied
+   * at pipeline setup): a campaign may only close axes the dataset opened,
+   * but the value space is its own statement — which is what lets an operator
+   * ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk
+   * carries. `param_allowed_values['model']` is also the ONE permitted model
+   * set: what the optimizer may pick, and what a human fork may steer to
+   * without tainting the branch. A steer outside it is a `campaign.babysit`
+   * act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing
+   * declared for a node = nothing sanctioned there, the restrictive default. */
+  optimizer_narrowing: Record<string, NodeSearchNarrowing>;
+  scoring: string | Record<string, string> | null;
+  /** LLM-as-judge graders for datasets whose answer is free text, where no
+   * deterministic matcher can grade a cell. Each value names a registered
+   * judge (`promptpotter.judges`) and the models to run it on; its verdict is
+   * banked as a per-sample observation the `scoring` formula reads. **The KEY
+   * is the term that formula reads, not the judge's name** — so one cell can
+   * carry several graded terms, which is what a multi-step schema (retrieve
+   * -> ground -> answer) is, and two terms may run the same rubric on
+   * different models without one verdict landing on top of the other.
+   * Declaration order is the step order. `Scope.DATA` because swapping a
+   * judge invalidates every verdict taken under the old one, so a resume must
+   * run divergence detection rather than carry them forward. **Their models
+   * are declared here and inherited from nowhere** — not from the permitted
+   * model set, not from the pipeline's node config, not from the optimizer's
+   * own LLMs. A judge is a ruler, and a ruler that moved with whatever the
+   * search was last steered to would not be one. */
+  judges: Record<string, JudgeSpec>;
+  /** Which fitness number the operator's round and candidate views display first
+   * (lineage node value, Best tile, sidebar). DISPLAY config, not search
+   * state — the optimizer's selector decides on its own objective, and the
+   * campaign's headline is the bench score; this only picks the number the
+   * human READS, client-overridable per session. `ability` shows θ (a logit,
+   * jargon) where the selector stamps one — defaults to `accuracy` so θ is
+   * never forced on an operator who didn't ask for it. Rides the
+   * `composite_fitness_formula` serve path to
+   * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
+  display_metric: 'accuracy' | 'composite' | 'ability';
+  /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
+   * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
+   * the queue mechanism's acquisition score (`pick_value`: decision-
+   * information gain + δ learning gain) read on the cycle's ruler at the
+   * frontier's stamped ability, contested-at-the-frontier samples first;
+   * `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a
+   * scope with no stamped ability (dataset scope) is served whatever this
+   * says. DISPLAY config: it picks the order the human READS and never what
+   * the engine scores, which is `build_round_order` and reaches no knob.
+   * Client-overridable per session, like `display_metric`. */
+  hard_sample_order: 'info_gain' | 'difficulty';
+  /** The accuracy a best-reachable prompt would score on this dataset at this
+   * campaign's model. `index.json::final.rounds_to_ceiling` counts rounds
+   * against `CEILING_FRACTION` of it, and the value is banked beside that
+   * count so a reader never has to guess the denominator. `None` (default) →
+   * the clock reports nothing, which is the honest reading: a ceiling is a
+   * joint claim about the dataset AND the model, so only the dataset owner
+   * can declare one (`dataset.yaml::campaign`) and a guessed value makes
+   * every campaign on it publish a round count nobody can defend. DISPLAY
+   * config — it moves no gate, no selection and no stop. */
+  accuracy_ceiling: number | null;
+  /** How run init partitions the bank into the search split every optimizer draw
+   * reads, the held-out bench set the headline is scored on, and a demo pool.
+   * `None` holds nothing out: the whole bank is the search split and there is
+   * no bench score. */
+  dataset_split: DatasetSplit | null;
+  /** The run's one seed. It seeds which rows fall where and the order the search
+   * pool reads in: each row ranks by this and its content (`Sample.key`),
+   * never its slot, so a reordered bank holds out the same rows and reads
+   * them in the same order. An L4 seat seeds its determinism clamp and its
+   * solver node from it too. */
+  run_seed: number;
+  /** When the line's bench passes are sent — each a cell per bench row, the ranked
+   * `dataset_split.bench` and every bench-only row the bank declares.
+   * `manual` (default): a launch sends none and sets nothing aside for one;
+   * the operator asks for the headline (CLI `bench`, command `grade-bench`),
+   * which grades the origin and the selection as they then stand. `at_end`:
+   * the origin's pass at launch, its price set aside under the ceiling, and
+   * the selection's once the run ends. `each_round`: that, and every round
+   * that selects a new individual is graded too, so the trend carries a held-
+   * out series beside the round composite. An arm of a head-to-head is minted
+   * `at_end` where this says `manual`: its comparison is the bench score. */
+  bench_trigger: 'manual' | 'at_end' | 'each_round';
+  optimization: OptimizationConfig;
+}
+
+/** A campaign's own declaration over the dataset's, whose three parts compose differently. */
+export interface NodeSearchNarrowing {
+  param_keys: string[] | null;
+  prompt_fields_held: string[];
+  param_allowed_values: Record<string, string[]>;
+}
+
+/** What a campaign declares to put a judge in its scoring: which judge, on which models. */
+export interface JudgeSpec {
+  name: string;
+  stages: JudgeStage[];
+}
+
+/** One model call in a judge's composition, on a model declared here and never inherited. */
+export interface JudgeStage {
+  role: string;
+  model: string;
+  provider: string;
+  temperature: number;
+  max_tokens: number | null;
+}
+
+/** The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs */
+export interface OptimizationConfig {
+  /** The optimizer manifest this campaign runs — a directory under
+   * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
+   * nothing selects it install-wide. */
+  optimizer: string;
+  /** This campaign's overlay on the selected manifest, keyed by node name —
+   * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
+   * An optimizer's knobs, a paper's configuration and each llm node's
+   * ``config.model`` all ride here; each node validates its own knobs when
+   * the optimizer is selected. */
+  nodes: Record<string, ManifestNodeOverlay>;
+  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
+   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
+   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
+   * closed rounds after the origin (0 measures the origin and stops; null
+   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
+   * cutting a remote cell still open at its edge. A fork seed, a standing
+   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
+   * account admits the result whole or refuses the launch. A null axis is
+   * unbounded. ``tokens`` is unset by default: a token is worth a different
+   * amount on every route, so set it only where a backend bills but reports
+   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+  budget: Budget;
+  /** Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1
+   * life per round that promotes an arm, -1 per round that does not, banked
+   * up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm
+   * of which reached the election banks nothing. ``None`` → ``budget.rounds``
+   * governs. It still caps from above, so a lives run wanting the full bank
+   * sets ``budget: {rounds: null}``. */
+  lives: LivesConfig | null;
+  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
+   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
+   * only on its record's rule. */
+  halt_at_accuracy: number | null;
+  /** Consecutive closed rounds without an advance of the best-so-far line on the
+   * origin panel (``RunStanding.rounds_without_advance``) after which the run
+   * stops ``converged``, under any optimizer. A promotion that has not
+   * separated from the origin counts toward it; a round whose origin-panel
+   * reading was not taken counts neither way. ``None`` → no such stop. */
+  convergence_patience: number | null;
+  degradation_threshold: number;
+  /** End a candidate at the first FATAL sample (empty response, content-filtered,
+   * structurally broken) without spending the rest of its budget. Active
+   * while the degradation check runs (`degradation_threshold` > 0); the rate-
+   * based check stays governed by that threshold. The bench's, run on every
+   * optimizer's arms. */
+  degradation_fatal_fastpath: boolean;
+  /** Minimum distinct samples before θ is read as ability: the δ ruler stays flat
+   * below it, and no eliminator cuts an arm (nor a selector crowns one) on
+   * fewer — the floor on n for a posterior to be meaningful. */
+  elimination_n_min: number;
+  /** Halt at the end of a round whose electable candidates carry HOLES — cells the
+   * loop attempted and got no measurement back from, or a spend or token
+   * ceiling left unbought — instead of electing a winner from a comparison
+   * whose arms ran different cell sets. ``strict`` (default) halts on any
+   * hole; ``off`` disarms, and a selector that can elect on a cut panel then
+   * does. The halt is resumable and the round is not persisted, so a
+   * ``resume`` re-runs it once the bound that cut the cells has room: the
+   * cached candidates replay, the missing cells are re-measured, and the
+   * round decides on a complete panel. A PoBB elimination is NOT a hole (a
+   * rule stopped that arm on evidence) and neither is a classifier-deprecated
+   * sample. */
+  panel_gate: 'strict' | 'off';
+  /** What each arm's lift is read against — member `a` of its `vs_reference`
+   * reading. ``best_so_far`` (default): the round's selected best-so-far
+   * individual, re-scored on the round's panel and paired with the arm on the
+   * cells both measured. ``parents``: the arm's own `parent_ids`, each re-
+   * measured on exactly the cells the arm measured; a crossover child is read
+   * against the better of its parents there, the bar it must clear to have
+   * added anything over what it recombined. An arm with no parent has no
+   * reference. */
+  lift_reference: 'best_so_far' | 'parents';
+  /** Halt after round 0 when the origin's degradation verdict is non-healthy,
+   * instead of optimizing against a broken floor — the common failure while
+   * bringing up a new connector. ``strict`` (default) halts on ``critical``
+   * or ``degraded``; ``critical_only`` halts only on a structurally-broken
+   * origin; ``off`` disarms the gate. The operator overrides knowingly with a
+   * plain ``resume`` — round 0 is already on disk, so the loop skips the gate
+   * and goes straight to L1. */
+  origin_gate: 'strict' | 'critical_only' | 'off';
+  /** Hold every round, before any arm is measured, until the operator answers with
+   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
+   * ``review``: the proposers run, their proposals are drafts, and the
+   * operator keeps any of them by index, adds arms of their own, or both.
+   * ``author``: no proposer runs and every arm is the operator's. An arm of
+   * theirs is an edit of the round's parent — prompt fields, a pipeline
+   * overlay — and is measured and elected like any other. The hold has no
+   * deadline; a pause ends it resumably, and a resume holds again unless an
+   * answer was already banked. */
+  arm_gate: 'off' | 'review' | 'author';
+  /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
+   * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
+   * discriminating dataset wins held-out cross-validation. The switch is
+   * gated — cold/non-discriminating datasets stay 1PL — so this only ever
+   * changes the ruler where 2PL provably fits better out-of-sample; it can
+   * never regress a dataset. Off → always 1PL (the slice-2 behaviour). */
+  enable_2pl_graduation: boolean;
+  /** Pin the optimizer's decoding and its route so a re-run reproduces this
+   * campaign's trajectory and can name the host that produced each number.
+   * `None` (default) → every node runs at its own file settings and the
+   * gateway routes per call. An L4 inner cell is one caller among the rest:
+   * its panel's `inner_optimizer_temperature` and its cell seed arrive here. */
+  determinism: DeterminismClamp | null;
+}
+
+/** Improvement-banked round budget: banks a life each round that promotes an arm, loses one */
+export interface LivesConfig {
+  /** Lives a run starts with (a fully-stalling run does exactly this many rounds). */
+  start: number;
+  /** Bank ceiling — lives never exceed this no matter how long the improving streak
+   * runs. */
+  cap: number;
+}
+
 export interface FilesResponse {
   campaign_id: string;
   cycle_id: string;
@@ -2157,51 +2532,6 @@ export interface DraftCampaignWire {
    * wire's own field of that path. A `writeOnly` subtree is
    * `StartCheckinPayload`'s, sent with Start and stored nowhere. */
   setup_schema: Record<string, unknown>;
-}
-
-/** The ``budget.rounds`` bound gates the operator EDIT path only; the trusted internal */
-export interface OptimizationOverrides {
-  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
-   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
-   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
-   * closed rounds after the origin (0 measures the origin and stops; null
-   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
-   * cutting a remote cell still open at its edge. A fork seed, a standing
-   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
-   * account admits the result whole or refuses the launch. A null axis is
-   * unbounded. ``tokens`` is unset by default: a token is worth a different
-   * amount on every route, so set it only where a backend bills but reports
-   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
-  budget: Budget;
-  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
-   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
-   * only on its record's rule. */
-  halt_at_accuracy: number | null;
-  /** The optimizer manifest this campaign runs — a directory under
-   * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
-   * nothing selects it install-wide. */
-  optimizer: string;
-  /** This campaign's overlay on the selected manifest, keyed by node name —
-   * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
-   * An optimizer's knobs, a paper's configuration and each llm node's
-   * ``config.model`` all ride here; each node validates its own knobs when
-   * the optimizer is selected. */
-  nodes: Record<string, ManifestNodeOverlay>;
-  /** Hold every round, before any arm is measured, until the operator answers with
-   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
-   * ``review``: the proposers run, their proposals are drafts, and the
-   * operator keeps any of them by index, adds arms of their own, or both.
-   * ``author``: no proposer runs and every arm is the operator's. An arm of
-   * theirs is an edit of the round's parent — prompt fields, a pipeline
-   * overlay — and is measured and elected like any other. The hold has no
-   * deadline; a pause ends it resumably, and a resume holds again unless an
-   * answer was already banked. */
-  arm_gate: 'off' | 'review' | 'author';
-}
-
-/** One optimizer node's delta over its manifest's ``config``. */
-export interface ManifestNodeOverlay {
-  config: Record<string, unknown>;
 }
 
 /** What the selected optimizer runs under a config, derived once for check-in and campaign. */
@@ -4096,270 +4426,6 @@ export interface GradeBenchPayload {
   /** The full id: a prefix is the terminal's to resolve, before it builds a
    * payload. */
   campaign_id: string;
-}
-
-export interface MintCampaignPayload {
-  dataset_name: string;
-  budget: Budget;
-  /** Laid over the dataset's own `optimization` before the mint freezes it; only
-   * the fields sent move anything */
-  optimization: OptimizationOverrides | null;
-  /** `compare` mints a controlled arm of its head-to-head, declared by its first
-   * arm; an arm off the declared instrument or budget is refused 409 */
-  purpose: Optimize | Compare;
-  /** Run the diagnostic shape. A fresh mint has no ledger to rewind or replay, so
-   * the other run-mode fields are `start-run`'s alone. */
-  diag: boolean;
-  /** A campaign declaration standing in for the dataset's own
-   * `dataset.yaml::campaign`; `optimization` still lays over it */
-  campaign_config: CampaignConfig | null;
-  /** The task description to frame from, in place of the dataset's own */
-  task_text: string | null;
-}
-
-export interface CampaignConfig {
-  /** Origin eval budget — how many bank samples the origin (C0) is scored on at
-   * check-in. The bench's, whatever the optimizer: a round's own panel is its
-   * sampler's knob. Wide because origin breadth is the one breadth that is
-   * nearly free: θ_origin is the term EVERY delta subtracts, and its rows are
-   * content-addressed cache replayed into every candidate arm, fork and
-   * resume — paid once per config. Candidate breadth is paid per candidate,
-   * per round. Every comparison downstream is matched by sample key or
-   * θ-space, so an origin scored on a superset stays like-for-like. A bank
-   * smaller than this scores on the whole bank (`sample_dataset` is a prefix
-   * slice) — not an error. */
-  sp_budget_origin: number;
-  exclude_nodes: string[];
-  /** Which task framing every target render splices in. `committed` (default) runs
-   * under the front matter of the dataset's `task.md`, which the first mint
-   * decomposes from its body when none is committed yet. `off` runs UNFRAMED
-   * on purpose — the ablation arm — even where framing exists, and the
-   * campaign manifest keeps the delta, so the result never reads as a framed
-   * one. */
-  task_framing: 'committed' | 'off';
-  pipeline_overlay: Record<string, unknown>;
-  /** Per-node declaration over the dataset's optimizer search space — the per-
-   * campaign param-lock + value-space lever beside `exclude_nodes` (whole
-   * node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS
-   * the config axes, `prompt_fields_held` holds the prompt fields it names,
-   * and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied
-   * at pipeline setup): a campaign may only close axes the dataset opened,
-   * but the value space is its own statement — which is what lets an operator
-   * ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk
-   * carries. `param_allowed_values['model']` is also the ONE permitted model
-   * set: what the optimizer may pick, and what a human fork may steer to
-   * without tainting the branch. A steer outside it is a `campaign.babysit`
-   * act — warned + graded C (`overlay_sets_model_outside_allowed`). Nothing
-   * declared for a node = nothing sanctioned there, the restrictive default. */
-  optimizer_narrowing: Record<string, NodeSearchNarrowing>;
-  scoring: string | Record<string, string> | null;
-  /** LLM-as-judge graders for datasets whose answer is free text, where no
-   * deterministic matcher can grade a cell. Each value names a registered
-   * judge (`promptpotter.judges`) and the models to run it on; its verdict is
-   * banked as a per-sample observation the `scoring` formula reads. **The KEY
-   * is the term that formula reads, not the judge's name** — so one cell can
-   * carry several graded terms, which is what a multi-step schema (retrieve
-   * -> ground -> answer) is, and two terms may run the same rubric on
-   * different models without one verdict landing on top of the other.
-   * Declaration order is the step order. `Scope.DATA` because swapping a
-   * judge invalidates every verdict taken under the old one, so a resume must
-   * run divergence detection rather than carry them forward. **Their models
-   * are declared here and inherited from nowhere** — not from the permitted
-   * model set, not from the pipeline's node config, not from the optimizer's
-   * own LLMs. A judge is a ruler, and a ruler that moved with whatever the
-   * search was last steered to would not be one. */
-  judges: Record<string, JudgeSpec>;
-  /** Which fitness number the operator's round and candidate views display first
-   * (lineage node value, Best tile, sidebar). DISPLAY config, not search
-   * state — the optimizer's selector decides on its own objective, and the
-   * campaign's headline is the bench score; this only picks the number the
-   * human READS, client-overridable per session. `ability` shows θ (a logit,
-   * jargon) where the selector stamps one — defaults to `accuracy` so θ is
-   * never forced on an operator who didn't ask for it. Rides the
-   * `composite_fitness_formula` serve path to
-   * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
-  display_metric: 'accuracy' | 'composite' | 'ability';
-  /** Which key ranks the hard-sample leaderboard — the heatmap, the table and the
-   * `log.md` heatmap, which all read ONE served rank. `info_gain` sorts by
-   * the queue mechanism's acquisition score (`pick_value`: decision-
-   * information gain + δ learning gain) read on the cycle's ruler at the
-   * frontier's stamped ability, contested-at-the-frontier samples first;
-   * `difficulty` sorts by the ruler's δ_s alone, hardest first, and is what a
-   * scope with no stamped ability (dataset scope) is served whatever this
-   * says. DISPLAY config: it picks the order the human READS and never what
-   * the engine scores, which is `build_round_order` and reaches no knob.
-   * Client-overridable per session, like `display_metric`. */
-  hard_sample_order: 'info_gain' | 'difficulty';
-  /** The accuracy a best-reachable prompt would score on this dataset at this
-   * campaign's model. `index.json::final.rounds_to_ceiling` counts rounds
-   * against `CEILING_FRACTION` of it, and the value is banked beside that
-   * count so a reader never has to guess the denominator. `None` (default) →
-   * the clock reports nothing, which is the honest reading: a ceiling is a
-   * joint claim about the dataset AND the model, so only the dataset owner
-   * can declare one (`dataset.yaml::campaign`) and a guessed value makes
-   * every campaign on it publish a round count nobody can defend. DISPLAY
-   * config — it moves no gate, no selection and no stop. */
-  accuracy_ceiling: number | null;
-  /** How run init partitions the bank into the search split every optimizer draw
-   * reads, the held-out bench set the headline is scored on, and a demo pool.
-   * `None` holds nothing out: the whole bank is the search split and there is
-   * no bench score. */
-  dataset_split: DatasetSplit | null;
-  /** The run's one seed. It seeds which rows fall where and the order the search
-   * pool reads in: each row ranks by this and its content (`Sample.key`),
-   * never its slot, so a reordered bank holds out the same rows and reads
-   * them in the same order. An L4 seat seeds its determinism clamp and its
-   * solver node from it too. */
-  run_seed: number;
-  /** When the line's bench passes are sent — each a cell per bench row, the ranked
-   * `dataset_split.bench` and every bench-only row the bank declares.
-   * `manual` (default): a launch sends none and sets nothing aside for one;
-   * the operator asks for the headline (CLI `bench`, command `grade-bench`),
-   * which grades the origin and the selection as they then stand. `at_end`:
-   * the origin's pass at launch, its price set aside under the ceiling, and
-   * the selection's once the run ends. `each_round`: that, and every round
-   * that selects a new individual is graded too, so the trend carries a held-
-   * out series beside the round composite. An arm of a head-to-head is minted
-   * `at_end` where this says `manual`: its comparison is the bench score. */
-  bench_trigger: 'manual' | 'at_end' | 'each_round';
-  optimization: OptimizationConfig;
-}
-
-/** A campaign's own declaration over the dataset's, whose three parts compose differently. */
-export interface NodeSearchNarrowing {
-  param_keys: string[] | null;
-  prompt_fields_held: string[];
-  param_allowed_values: Record<string, string[]>;
-}
-
-/** What a campaign declares to put a judge in its scoring: which judge, on which models. */
-export interface JudgeSpec {
-  name: string;
-  stages: JudgeStage[];
-}
-
-/** One model call in a judge's composition, on a model declared here and never inherited. */
-export interface JudgeStage {
-  role: string;
-  model: string;
-  provider: string;
-  temperature: number;
-  max_tokens: number | null;
-}
-
-/** The bench's own loop config, plus which optimizer runs and its overlay. An optimizer's knobs */
-export interface OptimizationConfig {
-  /** The optimizer manifest this campaign runs — a directory under
-   * ``promptpotter/assets/optimizers/``. Every entry point selects it here;
-   * nothing selects it install-wide. */
-  optimizer: string;
-  /** This campaign's overlay on the selected manifest, keyed by node name —
-   * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
-   * An optimizer's knobs, a paper's configuration and each llm node's
-   * ``config.model`` all ride here; each node validates its own knobs when
-   * the optimizer is selected. */
-  nodes: Record<string, ManifestNodeOverlay>;
-  /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
-   * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
-   * cycles and checked at the next boundary; ``rounds`` caps one cycle's
-   * closed rounds after the origin (0 measures the origin and stops; null
-   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
-   * cutting a remote cell still open at its edge. A fork seed, a standing
-   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
-   * account admits the result whole or refuses the launch. A null axis is
-   * unbounded. ``tokens`` is unset by default: a token is worth a different
-   * amount on every route, so set it only where a backend bills but reports
-   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
-  budget: Budget;
-  /** Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1
-   * life per round that promotes an arm, -1 per round that does not, banked
-   * up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm
-   * of which reached the election banks nothing. ``None`` → ``budget.rounds``
-   * governs. It still caps from above, so a lives run wanting the full bank
-   * sets ``budget: {rounds: null}``. */
-  lives: LivesConfig | null;
-  /** Stop ``target_hit`` once the declared pick's own accuracy reaches this.
-   * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
-   * only on its record's rule. */
-  halt_at_accuracy: number | null;
-  /** Consecutive closed rounds without an advance of the best-so-far line on the
-   * origin panel (``RunStanding.rounds_without_advance``) after which the run
-   * stops ``converged``, under any optimizer. A promotion that has not
-   * separated from the origin counts toward it; a round whose origin-panel
-   * reading was not taken counts neither way. ``None`` → no such stop. */
-  convergence_patience: number | null;
-  degradation_threshold: number;
-  /** End a candidate at the first FATAL sample (empty response, content-filtered,
-   * structurally broken) without spending the rest of its budget. Active
-   * while the degradation check runs (`degradation_threshold` > 0); the rate-
-   * based check stays governed by that threshold. The bench's, run on every
-   * optimizer's arms. */
-  degradation_fatal_fastpath: boolean;
-  /** Minimum distinct samples before θ is read as ability: the δ ruler stays flat
-   * below it, and no eliminator cuts an arm (nor a selector crowns one) on
-   * fewer — the floor on n for a posterior to be meaningful. */
-  elimination_n_min: number;
-  /** Halt at the end of a round whose electable candidates carry HOLES — cells the
-   * loop attempted and got no measurement back from, or a spend or token
-   * ceiling left unbought — instead of electing a winner from a comparison
-   * whose arms ran different cell sets. ``strict`` (default) halts on any
-   * hole; ``off`` disarms, and a selector that can elect on a cut panel then
-   * does. The halt is resumable and the round is not persisted, so a
-   * ``resume`` re-runs it once the bound that cut the cells has room: the
-   * cached candidates replay, the missing cells are re-measured, and the
-   * round decides on a complete panel. A PoBB elimination is NOT a hole (a
-   * rule stopped that arm on evidence) and neither is a classifier-deprecated
-   * sample. */
-  panel_gate: 'strict' | 'off';
-  /** What each arm's lift is read against — member `a` of its `vs_reference`
-   * reading. ``best_so_far`` (default): the round's selected best-so-far
-   * individual, re-scored on the round's panel and paired with the arm on the
-   * cells both measured. ``parents``: the arm's own `parent_ids`, each re-
-   * measured on exactly the cells the arm measured; a crossover child is read
-   * against the better of its parents there, the bar it must clear to have
-   * added anything over what it recombined. An arm with no parent has no
-   * reference. */
-  lift_reference: 'best_so_far' | 'parents';
-  /** Halt after round 0 when the origin's degradation verdict is non-healthy,
-   * instead of optimizing against a broken floor — the common failure while
-   * bringing up a new connector. ``strict`` (default) halts on ``critical``
-   * or ``degraded``; ``critical_only`` halts only on a structurally-broken
-   * origin; ``off`` disarms the gate. The operator overrides knowingly with a
-   * plain ``resume`` — round 0 is already on disk, so the loop skips the gate
-   * and goes straight to L1. */
-  origin_gate: 'strict' | 'critical_only' | 'off';
-  /** Hold every round, before any arm is measured, until the operator answers with
-   * the arms it measures (`submit-arms`). ``off`` (default) never holds.
-   * ``review``: the proposers run, their proposals are drafts, and the
-   * operator keeps any of them by index, adds arms of their own, or both.
-   * ``author``: no proposer runs and every arm is the operator's. An arm of
-   * theirs is an edit of the round's parent — prompt fields, a pipeline
-   * overlay — and is measured and elected like any other. The hold has no
-   * deadline; a pause ends it resumably, and a resume holds again unless an
-   * answer was already banked. */
-  arm_gate: 'off' | 'review' | 'author';
-  /** Allow the per-cycle difficulty ruler to graduate from 1PL (difficulty δ only)
-   * to 2PL (per-sample discrimination aₛ too) when a data-rich, genuinely-
-   * discriminating dataset wins held-out cross-validation. The switch is
-   * gated — cold/non-discriminating datasets stay 1PL — so this only ever
-   * changes the ruler where 2PL provably fits better out-of-sample; it can
-   * never regress a dataset. Off → always 1PL (the slice-2 behaviour). */
-  enable_2pl_graduation: boolean;
-  /** Pin the optimizer's decoding and its route so a re-run reproduces this
-   * campaign's trajectory and can name the host that produced each number.
-   * `None` (default) → every node runs at its own file settings and the
-   * gateway routes per call. An L4 inner cell is one caller among the rest:
-   * its panel's `inner_optimizer_temperature` and its cell seed arrive here. */
-  determinism: DeterminismClamp | null;
-}
-
-/** Improvement-banked round budget: banks a life each round that promotes an arm, loses one */
-export interface LivesConfig {
-  /** Lives a run starts with (a fully-stalling run does exactly this many rounds). */
-  start: number;
-  /** Bank ceiling — lives never exceed this no matter how long the improving streak
-   * runs. */
-  cap: number;
 }
 
 /** Answer a cycle holding at the round-0 origin gate; one not holding clears it on arrival. */

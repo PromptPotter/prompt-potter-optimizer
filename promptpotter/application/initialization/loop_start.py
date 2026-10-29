@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from statistics import fmean
 from typing import TYPE_CHECKING, Any, assert_never
 
 from promptpotter.application.bench.cycle import Cycle
@@ -41,6 +42,7 @@ from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopLoop
 from promptpotter.domain.pipeline_overlay import node_config_items
 from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.domain.spend import CellPrice
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
     bind_spend_book,
@@ -243,20 +245,27 @@ def diagnostic_trace(stores: Stores, hop: CycleHop | None) -> Iterator[None]:
 _PRICED_RUNS = 32
 
 
-def measured_cell_usd(
+def measured_cell_price(
     session: Session, node_configs: list[tuple[str, dict[str, Any]]]
-) -> float | None:
+) -> CellPrice | None:
     on_models = {name: {"model": cfg["model"]} for name, cfg in node_configs if cfg.get("model")}
-    total, cells = 0.0, 0
+    costs: list[float] = []
+    seconds: list[float] = []
     for m in session.store.archive.measurements_for_config(
         on_models, dataset_hash=session.bank.dataset_hash, newest=_PRICED_RUNS
     ):
         # An archive row carries no grade, and the price is no formula's reading.
-        cost = cell_channels_of(m.cell, None).get("cost")
-        if cost is not None:
-            total += cost
-            cells += 1
-    return total / cells if cells else None
+        channels = cell_channels_of(m.cell, None)
+        if (cost := channels.get("cost")) is None:
+            continue
+        costs.append(cost)
+        if (spent := channels.get("latency")) is not None:
+            seconds.append(spent)
+    if not costs:
+        return None
+    return CellPrice(
+        usd=fmean(costs), seconds=fmean(seconds) if seconds else None, cells=len(costs)
+    )
 
 
 def _campaigns_on_origin(session: Session) -> list[str]:
@@ -300,7 +309,8 @@ async def _emit_preflight_and_init_session(
     target_models = tuple(str(v["model"]) for _, v in target_node_configs if v.get("model"))
 
     bound = await cell_bound(session, session.pipeline_params or {})
-    measured_usd = measured_cell_usd(session, target_node_configs)
+    measured = measured_cell_price(session, target_node_configs)
+    measured_usd = None if measured is None else measured.usd
     instrument = inner_origin_of(session.pipeline_params)
     preflight_warnings = run_preflight_checks(
         config,

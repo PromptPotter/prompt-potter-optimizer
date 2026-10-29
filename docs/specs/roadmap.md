@@ -54,7 +54,7 @@ the rest of Lane C.
 - **C9** Variation and pools (§ Variation and pools).
 - **C10** Operator-authored prompt-field order (§ Prompt-field order).
 
-**M14 (publication)** needs: ablation rows L1 / L1+L2 / full · scan · cross-run archive · critique ·
+**M14 (publication)** needs: ablation rows L1 / L1+L2 / full (`paper/plans/ablation.yaml`) · scan · cross-run archive · critique ·
 zero-signal-filter; competitor and L4 numbers after C3. Admission bar and roster: [`../research/benchmarks.md`](../research/benchmarks.md).
 
 ## The bench (M13)
@@ -80,10 +80,10 @@ admitted before they leave** (`infrastructure/llm/spend_book.py::admitted`).
    clustered SEs, Holm/BH across the matrix. The controlled reading (one declared head-to-head) and
    the uncontrolled one (each peer run its own way, the notebooks) are never substituted. Owed: `bbeh`
    re-ingested with a bench partition wider than 100 rows; an N-arm mint verb over
-   `application/jobs/mint.py::_join_head_to_head`.
-   Price it in dollars and wall clock before asking.
+   `application/jobs/mint.py::_join_head_to_head`. Declared as `paper/plans/comparability.yaml`;
+   price it with `price-head-to-head` before asking.
 6. **The budget dimension** (PAID, after 5): the same arms at two or three budget points — the
-   budget-matched Pareto comparison reviewers ask for first.
+   budget-matched Pareto comparison reviewers ask for first (`paper/plans/budget-dimension.yaml`).
 7. **Third-party reachability**: a scratch-venv example package with one entry point and one
    proposing node. *Closes when* `optimizer: example` runs a round whose arms carry
    `source="example:propose"` with zero edits inside this tree.

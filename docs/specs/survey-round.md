@@ -112,7 +112,7 @@ knob**, read `controlled` by `evidence`'s head-to-head.
   so an admitted seat's later round continues the same inner campaign.
 - **`share` bounds every survey in a cycle on both axes** (`<one-budget>`): `share × budget.usd` and the same
   fraction of `budget.wall_clock_s`, priced before the first send from
-  `application/initialization/loop_start.py::measured_cell_usd` × rows × (K + 1), and refused when it exceeds what
+  `application/initialization/loop_start.py::measured_cell_price` (its `usd` and `seconds`) × rows × (K + 1), and refused when it exceeds what
   is left (the shape of `application/preflight.py::refuse_arm_below_round`).
 
 ## What it absorbs

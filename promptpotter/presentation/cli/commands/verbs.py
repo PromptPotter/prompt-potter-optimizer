@@ -536,6 +536,21 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         ),
     ),
     Verb(
+        "price-head-to-head",
+        "head_to_head_price:cmd_price_head_to_head",
+        help="Price a planned head-to-head before it is minted: every budget point, arm and "
+        "replicate a plan file declares, in dollars, calls and wall clock, at the cell price the "
+        "archive measured on this bank and its models and each optimizer's measured rounds, then "
+        "print the one command that mints them. No LLM call, zero spend.",
+        args=(
+            Arg(
+                "plan",
+                help="A head-to-head plan (YAML, `HeadToHeadPlan`), e.g. "
+                "paper/plans/comparability.yaml.",
+            ),
+        ),
+    ),
+    Verb(
         "noise-floor",
         "noise_floor:cmd_noise_floor",
         help="Debug diagnostic (NOT a loop feature): re-score a campaign's cached "

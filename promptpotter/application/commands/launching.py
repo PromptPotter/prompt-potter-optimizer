@@ -18,7 +18,6 @@ from promptpotter.application.commands.dispatcher import (
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.origin_readiness import save_checkin_draft
-from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.evidence.subjects import SubjectSpec
 from promptpotter.application.jobs.launcher.checkin import CheckinStart, start_ready_draft
 from promptpotter.application.jobs.launcher.launch import (
@@ -225,14 +224,7 @@ def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[object
     dispatcher, payload = dispatched.dispatcher, dispatched.payload
 
     async def _apply_mint() -> Launched:
-        request = FreshMint(
-            dataset=offered_dataset(dispatcher.stores, payload.dataset_name),
-            budget=payload.budget,
-            optimization=payload.optimization_sent,
-            purpose=payload.purpose,
-            declared=payload.campaign_config,
-            task_text=payload.task_text,
-        )
+        request = FreshMint.of(dispatcher.stores, payload)
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.
         request.campaign_config(dispatcher.stores)
         return await launch(
