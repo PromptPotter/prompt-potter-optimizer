@@ -27,7 +27,11 @@ tree's interpreter answers for that other tree.
 **The gate runs it** — `scripts/gate.py --only offline-run`, under the default arguments, in a
 home of its own — whenever a file the engine runs from has changed since it was last green, so an
 engine change has every optimizer run end to end and its resume proven without anyone asking; a
-docs or webapp edit reruns nothing. `--changed` leaves it out: it proves a landing, not an edit.
+docs or webapp edit reruns nothing. A failed leg fails it; a `MOVED` never does. **The pre-commit
+hook runs it too** whenever a staged path is one it reads: a commit whose tree already ran green
+pays only the stamp read, so a broken leg cannot land. It runs the working tree, not the index —
+another session's dirty engine file is in its verdict. `--changed` leaves it out: it proves a
+landing, not an edit.
 
 **A green run is not taken twice.** A home holding the green run of the same arguments over the
 same sources (`scripts/last_green.py::OFFLINE_RUN_READS`, by content) prints `unchanged since green`

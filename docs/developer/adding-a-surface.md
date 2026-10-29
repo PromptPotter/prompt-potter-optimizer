@@ -67,7 +67,7 @@ A `{{slot}}` the optimizer LLM sees. The registry is `injection_table()`
 registered renderer, and `validate_template()` (at `load_optimizer_prompt`) raises on any
 `{{slot}}` not in the registry.
 
-Contract: [`dispatch-hub.md`](dispatch-hub.md) § L1 layout.
+Contract: [`dispatch-hub.md`](dispatch-hub.md) § L1 layout — L2's structural edit surface.
 
 ---
 

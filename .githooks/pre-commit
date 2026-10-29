@@ -1,8 +1,9 @@
 #!/bin/sh
 # Block a commit that would fail CI. The check list lives in ONE place —
-# `scripts/gate.py` — and `--staged` is its fast subset: the checks whose answer a
-# commit can change in seconds, scoped to what is actually staged. The slow half
-# (mypy, pytest, the webapp build) is CI's, and yours before you push.
+# `scripts/gate.py` — and `--staged` is its pre-commit subset: the checks whose answer a
+# commit can change in seconds, scoped to what is actually staged, plus the offline run
+# when an engine file is staged (free when that tree already ran green, ~2 min when not).
+# The slow half (mypy, pytest, the webapp build) is CI's, and yours before you push.
 #
 # Enable per-clone with: git config core.hooksPath .githooks
 

@@ -127,10 +127,6 @@ acting.
   content-addressed, the row is per pack, so a drop keyed by id cannot say which pack's provenance it
   carries. Action: a snippet's identity is (pack, id), or packs dedupe on install. **Re-test:** two
   packs sharing a text serve distinct row keys.
-- **No check holds `§ Name` to a heading.** `docs/CLAUDE.md` requires each `§` reference to match
-  exactly one heading in the linked file; `variation-and-pools.md` pointed at a section of
-  `domain/CLAUDE.md` that never existed, and every gate was green. Action: a `doc-claims` pass
-  resolving each `[...](path) § X`. **Re-test:** a dangling `§` fails the gate.
 
 - **The crowning bar tests nothing a result can quote.** `application/scoring/selection.py::elect_round_winner`
   admits with no interval and no multiplicity correction, and `RoundResult.improved` reads any selection
@@ -260,11 +256,6 @@ word's `git grep -c` for that sense is 0.
   rule; `lib/theme.ts` mixes chart setup with the theme preference; `RemotePanel` keeps a "not available
   now" fallback beside the served `lookahead.auto_refusal`.
 
-- **A ledger field removal broke the operator's campaigns silently**: 5b023674e dropped
-  `llm_call_start.injection_silent`, leaving 6 of 8 local campaigns unreadable until `restamp --apply`
-  (2026-10-29). Nothing runs `restamp`'s report after a record-shape change. **Re-test:** a gate or
-  commit check that a removed ledger field is prunable, or a removing commit's body naming the restamp.
-
 - **Two "waiting" predicates** — `useRemoteModel.ts::waitNote` and `lib/derivations/time-ray.ts`.
   **Decided:** a call is open AND its wait target is known; serve `dash.wait_line` once.
 - **Four seams owed a re-read:** `webapp/lib/poll.tsx::CycleStreamState` fields nothing reads;
@@ -303,11 +294,9 @@ word's `git grep -c` for that sense is 0.
   - Smaller: `title=` used as teaching prose in `NodeDetail` and `OptimizerCard`;
     `CheckinLoadingWindow` keeps its own `setInterval` outside `lib/cadence`; `.setup-step` is styled in
     `chat.css`.
-- **No gate check runs `scripts/offline_run.py`**, so a commit that breaks every offline leg passes
-  the gate (3e3b1bb62 did). Its legs also rest on fake-data draws keyed by the whole node config
+- **The offline legs rest on fake-data draws keyed by the whole node config**
   (`offline_world.py::FakeBackend`): an unrelated config value reshuffles which rows saturate, so a
-  leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited. **Re-test:** a gate
-  check that names `offline_run`.
+  leg's premise must be pinned (`EVERY_L2`, `REBASE_HARDNESS`), never inherited.
 
 ## Bypasses — held for one holistic pass
 
