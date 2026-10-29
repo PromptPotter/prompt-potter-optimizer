@@ -1014,8 +1014,8 @@ class Check:
     # CI's `check` job, its `webapp` job, publish.yml, the commit-msg hook.
     kind: Literal["py", "web", "release", "commit"]
     run: Callable[[Selection], Outcome]
-    # The git hook whose set carries it: `--staged` runs pre-commit's, `--push` pre-push's.
-    hook: Literal["pre-commit", "pre-push"] | None = None
+    # The pre-commit hook's fast set (`--staged`). The pre-push hook runs every check CI runs.
+    on_commit: bool = False
     landing: bool = False  # proves a landing rather than an edit, so `--changed` leaves it out
     # Runs after both lanes, by itself: its tool hard-codes a worker timeout a busy machine trips,
     # or its peak (next-build's) is more than any lane beside it leaves free.
@@ -1198,22 +1198,22 @@ def _ledger_fields(sel: Selection) -> Outcome:
 
 
 CHECKS: tuple[Check, ...] = (
-    Check("ruff-format", "py", _ruff("format", "--check"), hook="pre-commit", reads=_RUFF_READS),
-    Check("ruff-check", "py", _ruff("check"), hook="pre-commit", reads=_RUFF_READS),
+    Check("ruff-format", "py", _ruff("format", "--check"), on_commit=True, reads=_RUFF_READS),
+    Check("ruff-check", "py", _ruff("check"), on_commit=True, reads=_RUFF_READS),
     Check("deptry", "py", lambda _: run(_py("deptry", "."), REPO)),
     Check("mypy", "py", _mypy),
     Check(
         "extras",
         "py",
         _extras,
-        hook="pre-commit",
+        on_commit=True,
         reads=("pyproject.toml", ".github/workflows/", "deploy-linux/", *_GATE),
     ),
     Check(
         "layering",
         "py",
         _layering,
-        hook="pre-commit",
+        on_commit=True,
         reads=("promptpotter/", "scripts/tests_owning.py", *_GATE),
     ),
     Check(
@@ -1228,13 +1228,13 @@ CHECKS: tuple[Check, ...] = (
         _Probe(_HANDLER_PROBE, judge=_dangling_handlers),
         reads=_ENGINE_RUNTIME,
     ),
-    Check("instruction-files", "py", _instruction_files, hook="pre-commit", reads=_TREE),
-    Check("doc-claims", "py", _doc_claims, hook="pre-commit", reads=_TREE),
+    Check("instruction-files", "py", _instruction_files, on_commit=True, reads=_TREE),
+    Check("doc-claims", "py", _doc_claims, on_commit=True, reads=_TREE),
     Check(
         "surface-ledger",
         "py",
         lambda _: run([sys.executable, "scripts/complexity_ledger.py", "--check"], REPO),
-        hook="pre-commit",
+        on_commit=True,
         reads=(
             "promptpotter/",
             "tests/",
@@ -1245,12 +1245,12 @@ CHECKS: tuple[Check, ...] = (
         ),
     ),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent.
-    Check("undiffable", "py", _undiffable, hook="pre-commit", reads=_TREE),
+    Check("undiffable", "py", _undiffable, on_commit=True, reads=_TREE),
     Check(
         "ts-types",
         "py",
         _Probe("scripts/build_ts_types.py", ("webapp/lib/api/types.generated.ts",)),
-        hook="pre-commit",
+        on_commit=True,
         reads=(*_ENGINE, "webapp/lib/api/types.generated.ts"),
     ),
     # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
@@ -1260,7 +1260,7 @@ CHECKS: tuple[Check, ...] = (
         _Probe(
             "scripts/build_vendor_marks.py", ("webapp/components/ui/vendor-marks.generated.ts",)
         ),
-        hook="pre-commit",
+        on_commit=True,
         reads=(
             "scripts/build_vendor_marks.py",
             "webapp/assets/vendor-marks/",
@@ -1279,7 +1279,7 @@ CHECKS: tuple[Check, ...] = (
                 "promptpotter/assets/checkin/resolved_schemas.json",
             ),
         ),
-        hook="pre-commit",
+        on_commit=True,
     ),
     Check(
         "specs",
@@ -1288,7 +1288,7 @@ CHECKS: tuple[Check, ...] = (
             "scripts/build_specs.py",
             ("docs/specs/openapi.generated.json", "docs/specs/events-asyncapi.generated.json"),
         ),
-        hook="pre-commit",
+        on_commit=True,
     ),
     # Last in the host: it imports every module, which no regenerator before it may see.
     Check(
@@ -1314,12 +1314,11 @@ CHECKS: tuple[Check, ...] = (
             REPO,
             PROMPTPOTTER_HOME=str(REPO / ".gate_cache" / OFFLINE_RUN),
         ),
-        hook="pre-push",
         landing=True,
         reads=OFFLINE_RUN_READS,
     ),
-    Check("lockfile", "web", _lockfile, hook="pre-commit"),
-    Check("eslint", "web", _eslint, hook="pre-commit", narrow=_web_modules),
+    Check("lockfile", "web", _lockfile, on_commit=True),
+    Check("eslint", "web", _eslint, on_commit=True, narrow=_web_modules),
     Check("vitest", "web", _vitest, alone=True, narrow=_web_modules),
     Check(
         "next-build",
@@ -1334,7 +1333,7 @@ CHECKS: tuple[Check, ...] = (
     ),
     # `npm run typecheck` runs `next typegen` first, rewriting `.next/types` and the gitignored
     # `next-env.d.ts` that imports them; the exclude in `tsconfig.json` keeps out `.next/dev`.
-    Check("tsc", "web", _tsc, hook="pre-commit"),
+    Check("tsc", "web", _tsc, on_commit=True),
     Check(
         "playwright",
         "web",
@@ -1569,7 +1568,7 @@ def main() -> int:
     scope.add_argument(
         "--push",
         action="store_true",
-        help="the pre-push hook: its set, in a clean checkout of each tip git names on stdin",
+        help="the pre-push hook: every CI check, in a clean checkout of each tip git names on stdin",
     )
     scope.add_argument(
         "--changed",
@@ -1608,8 +1607,7 @@ def main() -> int:
 
     selected = (("py", args.py), ("web", args.web), ("release", args.release))
     kinds = {k for k, on in selected if on} or {"py", "web"}
-    hook = "pre-commit" if args.staged else "pre-push" if args.push else None
-    checks = [c for c in CHECKS if c.kind in kinds and hook in (None, c.hook)]
+    checks = [c for c in CHECKS if c.kind in kinds and (c.on_commit or not args.staged)]
     if args.only:
         asked = {name for value in args.only for name in value.split(",") if name}
         if unknown := sorted(asked - {c.name for c in CHECKS}):

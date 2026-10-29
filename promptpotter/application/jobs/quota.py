@@ -72,9 +72,10 @@ class QuotaExceededError(PotterError):
 _rate_buckets: dict[str, tuple[float, float]] = {}  # bucket key → (tokens, last_refill_ts)
 _rate_lock = threading.Lock()
 
-# Sized above two tabs of `webapp/lib/cadence.ts`'s polls; re-derive when a poll is added.
-_READ_BURST = 60.0
-_READ_PER_S = 6.0
+# Sized above a person opening every tab in a row, each mount firing its reads at once
+# (`e2e/cold/first-run.spec.ts`'s tab sweep is the probe), then two tabs of `webapp/lib/cadence.ts`'s polls.
+_READ_BURST = 300.0
+_READ_PER_S = 20.0
 
 
 def _consume_rate_token(bucket: str, *, burst: float, per_s: float) -> bool:

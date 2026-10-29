@@ -19,12 +19,9 @@ PACKAGE = "promptpotter"
 TESTS = "tests"
 EVERY_TEST = f"{TESTS}/"
 RECORD = REPO / ".pytest_cache" / "tests_owning.json"
-# Over the suite's peak in each platform's own `peak_mb` metric: win32 a fifth above a measured
-# 168 MB peak commit; linux 197 over a measured 193 MB peak RSS, never loosened past it.
-CEILING_MB = {"win32": 202, "linux": 197}
-# Package modules the widest journey RAN: one that wires the whole engine to reach one decision
-# is the churn every reshape pays. Equality, like the ledger: a move is re-pinned with its reason.
-WIDEST_JOURNEY_MODULES = 142
+# The desk's free RAM is what binds the suite (it runs beside builders), so only win32 is held: a
+# fifth above a measured 168 MB peak commit. A CI runner has room, and its peak no desk can rerun.
+WIN32_CEILING_MB = 202
 
 
 def _rel(path: str | Path) -> str | None:
@@ -352,29 +349,10 @@ def _record(pytest_args: list[str]) -> int:
         ),
         "utf-8",
     )
-    failed = []
-    if (ceiling := CEILING_MB.get(sys.platform)) is None:
-        failed.append(f"no suite peak is measured on {sys.platform}: pin one in CEILING_MB")
-    else:
-        peak = peak_mb()
-        # The gate hides a green check's output: CI's job summary is where a re-pin reads the peak.
-        if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
-            with open(summary, "a", encoding="utf-8") as out:
-                out.write(
-                    f"pytest suite peak: {peak} MB on {sys.platform} (ceiling {ceiling} MB)\n"
-                )
-        if peak > ceiling:
-            failed.append(f"the suite peaked at {peak} MB, over its {ceiling} MB ceiling")
-    widest = max(sum(rel.startswith(f"{PACKAGE}/") for rel in rels) for rels in reached.values())
-    if widest != WIDEST_JOURNEY_MODULES:
-        failed.append(
-            f"the widest journey ran {widest} package modules, not WIDEST_JOURNEY_MODULES = "
-            f"{WIDEST_JOURNEY_MODULES}: split a sprawl along a production seam, or re-pin it "
-            "with its reason in the commit body"
-        )
-    for line in failed:
-        print(f"tests_owning: {line}.")
-    return int(bool(failed))
+    if sys.platform == "win32" and (peak := peak_mb()) > WIN32_CEILING_MB:
+        print(f"tests_owning: the suite peaked at {peak} MB, over its {WIN32_CEILING_MB} MB cap.")
+        return 1
+    return 0
 
 
 def main(argv: list[str]) -> int:

@@ -259,6 +259,11 @@ A leading **INVESTIGATE** means nobody has shown the item is real; answer that f
   derived by verbatim equality with the donor, not recorded on the lineage, so an LLM edit that lands on
   the donor's value reads as donated. The capo offline bench turns on one seed: lift +0.700 or none
   after a draw-order change, so the fixture cannot tell a mating-law change from a reshuffle.
+- **`optimizer_manifest.py` is hashed whole into every optimizer's `treatment.source`**
+  (`shapes_optimizer_prompt(__name__)`), so a presentation-only edit re-keys every optimizer. The
+  pools commit did: `ManifestNode.makes` and the proposer labels changed no prompt, yet potter's key
+  moved. Action: move what no prompt reads (labels, proposer rows, the setup projection) into a module
+  outside the hash. **Re-test:** edit one proposer label; potter's treatment key stays.
 
 ## Open — renames the operator picked (2026-10-29, low priority)
 
