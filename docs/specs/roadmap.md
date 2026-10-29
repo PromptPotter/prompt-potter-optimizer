@@ -8,7 +8,8 @@ Any new endpoint is multi-tenant by default.
 
 **Arc order, auto-dev runs it top to bottom** (each arc closes on the operator's word):
 
-1. **Recombination at $0** (C9, § Variation and pools): the three surfaces.
+1. **Recombination at $0** (C9, § Variation and pools): the member backbone
+   ([`code-debt-cleanup.md`](code-debt-cleanup.md) § The member backbone).
 2. **The optimizer climbs** (§ Optimizer tuning — the standing board):
    - L1 quality: answer_format is never edited; a held leader is never re-scored; whole-reply counting.
    - L4 validation (~$1).
@@ -152,15 +153,13 @@ The contract is [`variation-and-pools.md`](variation-and-pools.md); why is
 `optimization.nodes`, a pool written by a file edit, or a credit model steering before a reading
 shows it informative.
 
-5. **The three surfaces**, the terminal's `--set` writing the same draft. *Closes when* the cold
-   browser walk switches a host, narrows a pool and reads both back, equal to the terminal's draft.
 6. **The mode head-to-head** (PAID), the host the only difference, matched on USD and cells.
 7. **L4 reach** — the mix as an outer-arm lever, on the inner cell's overlay and identity.
 8. **A pool fed while a campaign runs** — refused by a controlled arm, applied at the next round
    boundary, replayed on resume.
 9. **Paper compositions** — EvoPrompt GA/DE, PhaseEvo, GEPA's merge, each stating its departures.
 
-Stages 5, 7, 8 and 9 share no seam.
+Stages 7, 8 and 9 share no seam.
 
 ## Probe rounds
 

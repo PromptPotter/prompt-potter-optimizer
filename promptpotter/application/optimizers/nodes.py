@@ -734,6 +734,12 @@ class Initializer(NodeMember, Protocol):
 
     def active(self, selected: SelectedOptimizer) -> list[str]: ...
 
+    def held(
+        self, selected: SelectedOptimizer, mint: MintFacts | None
+    ) -> list[tuple[str, tuple[str, ...]]]:
+        """The ``(id, group)`` entries an ``active`` path may name: at load with no *mint*, every one any run admits."""
+        ...
+
     def refusal(
         self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None
     ) -> str | None:

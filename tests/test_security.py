@@ -243,6 +243,7 @@ def test_no_path_secret_or_dataset_text_leaves_its_fence(
         schema_field_rename=False,
         shot_k_max=0,
         slot_of={},
+        pool_window=8,
         runtime_failures=(runtime_failure,),
         measured_rounds=[
             round_result(

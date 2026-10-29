@@ -6,11 +6,12 @@ import {
   optimizerRosterRead,
   type KnobRow,
   type ManifestNodeOverlay,
+  type PoolRow,
 } from "@/lib/api";
 import { knobRange, knobText, parseKnob } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { useWorkspace } from "@/lib/workspace";
-import { Badge, Button, CommitInput, Switch } from "@/components/ui";
+import { Badge, Button, Chip, ChipGroup, CommitInput, Switch } from "@/components/ui";
 import { fmtValue } from "@/lib/format";
 
 export function NodeKnobsPanel({
@@ -78,6 +79,12 @@ export function NodeKnobsPanel({
                     <span className="mech-row-label">{pool.pool}</span>
                     <Badge>{fmtValue(pool.active)}</Badge>
                   </div>
+                  {onChange ? (
+                    <PoolPicker
+                      pool={pool}
+                      onActive={(active) => onChange({ [pool.initializer]: { config: { active } } })}
+                    />
+                  ) : null}
                   <ul className="mech-pool-readers">
                     {pool.drawn_by.map((d) => (
                       <li key={d.node} className="mech-row-head">
@@ -131,6 +138,35 @@ export function NodeKnobsPanel({
         </section>
       ))}
     </div>
+  );
+}
+
+// A lit chip is a path in play; the last one stays lit, since a pool keeps at least one.
+function PoolPicker({ pool, onActive }: { pool: PoolRow; onActive: (active: string[]) => void }) {
+  const offered = Object.entries(pool.offered);
+  if (offered.length === 0) {
+    return <p className="mech-row-desc">Its entries are drawn when the run starts.</p>;
+  }
+  const toggle = (path: string) =>
+    onActive(
+      pool.active.includes(path) ? pool.active.filter((p) => p !== path) : [...pool.active, path],
+    );
+  return (
+    <ChipGroup label={`${pool.pool} entries in play`}>
+      {offered.map(([path, entries]) => {
+        const on = pool.active.includes(path);
+        return (
+          <Chip
+            key={path}
+            on={on}
+            disabled={on && pool.active.length === 1}
+            onClick={() => toggle(path)}
+          >
+            {path} · {entries}
+          </Chip>
+        );
+      })}
+    </ChipGroup>
   );
 }
 

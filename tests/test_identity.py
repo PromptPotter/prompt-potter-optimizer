@@ -1756,6 +1756,7 @@ def test_no_held_out_row_or_foreign_text_reaches_a_scored_prompt(
         schema_field_rename=False,
         shot_k_max=0,
         slot_of={},
+        pool_window=8,
     )
     rendered = "\n\n".join(i.text for i in DispatchHub.render_items("rendered_prompt", bundle))
     shown = {

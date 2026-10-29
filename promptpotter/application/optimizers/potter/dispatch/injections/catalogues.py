@@ -5,7 +5,6 @@ from typing import Any
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ANSWER_LABEL_STEM,
     AXES_ENUM_PREVIEW,
-    DEMO_POOL_RENDER_CAP,
     DEMO_QUERY_STEM,
     RECOMBINATION_VALUE_STEM,
     InjectionBundle,
@@ -151,7 +150,7 @@ def _r_demo_pool(b: InjectionBundle) -> list[Item]:
     }
     current = list({s.id: s for rows in held.values() for s in rows}.values())
     others = [s for s in b.demo_pool if s not in current]
-    k = min(DEMO_POOL_RENDER_CAP, len(others))
+    k = min(b.pool_window, len(others))
     start = (b.cycle_slice.round_num - 1) * k % len(others) if others else 0
     window = (others[start:] + others[:start])[:k]
     shown = "; ".join(

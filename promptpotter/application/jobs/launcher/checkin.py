@@ -8,6 +8,7 @@ from pydantic import Field
 
 from promptpotter.application.datasets.draft_campaign import DraftCampaign, owned_draft
 from promptpotter.application.datasets.loaders import cut_bank
+from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_and_hold,
@@ -19,7 +20,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     assert_origin_ready,
     commit_upload_definition,
     persist_origin_candidate_library,
-    upload_source,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import (

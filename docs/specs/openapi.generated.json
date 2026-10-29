@@ -11903,6 +11903,14 @@
             "title": "Initializer",
             "type": "string"
           },
+          "offered": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Every path `active` may name — `*`, each leading run of an entry's group, each entry id — with the entries it keeps; a demo pool's are the split its Start draws",
+            "title": "Offered",
+            "type": "object"
+          },
           "pool": {
             "description": "The pool's state kind, e.g. `block_pool`",
             "title": "Pool",
@@ -11918,6 +11926,7 @@
           "source",
           "initializer",
           "active",
+          "offered",
           "drawn_by"
         ],
         "title": "PoolRow",

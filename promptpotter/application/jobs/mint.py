@@ -17,9 +17,12 @@ from promptpotter.application.free_tier import outside_free_tier, refuse_outside
 from promptpotter.application.jobs.quota import on_free_tier, paid_call
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import select_optimizer
-from promptpotter.application.optimizers.nodes import MintFacts
 from promptpotter.application.origin import resolve_origin_opt_search_point
-from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline, defaults_drift
+from promptpotter.application.pipeline_resolve import (
+    configure_and_apply_pipeline,
+    defaults_drift,
+    mint_facts,
+)
 from promptpotter.application.preflight import (
     check_search_split_holds_round,
     refuse_below_reasoning_floor,
@@ -33,8 +36,6 @@ from promptpotter.application.runner.campaign_ids import (
     origin_content_hash,
     root_cycle_id_of,
 )
-from promptpotter.application.scoring.formula.compiler import split_scoring_block
-from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, PartitionRecord, partition_bank
 from promptpotter.domain.campaign import (
@@ -98,8 +99,7 @@ def refuse_unrunnable(
     refusal = check_search_split_holds_round(campaign_config, len(partition.search))
     if refusal is not None:
         raise PayloadInvalidError(refusal, code="search_split_below_round")
-    per_sample = split_scoring_block(campaign_config.scoring, judge_instrument=None).per_sample
-    mint = MintFacts(partition.demo, schema, matcher_of(per_sample))
+    mint = mint_facts(campaign_config, partition.demo, schema)
     if pools := select_optimizer(campaign_config.optimization).pool_refusals(mint=mint):
         raise PayloadInvalidError("; ".join(pools), code="optimizer_overlay")
     refuse_below_reasoning_floor(campaign_config, pipeline_params)

@@ -169,16 +169,6 @@ async def hold_fresh_mint(
     return HeldRun.of(job_registry, job.job_id, minted.session, held)
 
 
-def upload_source(draft: DraftCampaign, upload: str) -> dict[str, Any]:
-    """The definition names the kept upload and the cut; the rows stay in the upload alone."""
-    return {
-        "recipe": "table",
-        "upload": upload,
-        "query": draft.column_query,
-        "truth": draft.column_ground_truth,
-    }
-
-
 def commit_upload_definition(
     stores: Stores, draft: DraftCampaign, *, source: dict[str, Any]
 ) -> None:

@@ -103,6 +103,7 @@ export type {
   OptimizerKnobsResponse,
   OptimizerRoster,
   OptimizerSetup,
+  PoolRow,
   MeResponse,
   OriginEntry,
   OriginListResponse,

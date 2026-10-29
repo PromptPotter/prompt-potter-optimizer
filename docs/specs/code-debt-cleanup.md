@@ -20,6 +20,21 @@ acting.
 
 **Rides with:** the next arc's first builder wave.
 
+### The member backbone
+
+In this order; each cuts the sites the next adding a member touches.
+
+- **One pool kind.** `domain/pool.py::BlockPool` and `DemoPool` hold entries two ways, so every
+  reader branches on the kind. Action: one `Pool` of `PoolEntry`, `Pool.drawn(demo)` for the split.
+  **Re-test:** `git grep -c "isinstance(.*DemoPool" -- promptpotter` is 0.
+- **A consult is bound to its knob kind.** Each member reads `selected.knobs_of(self.name, K)`
+  beside its own `knobs: ClassVar[K]`, so the call restates both. Action: `selected.knobs(member)`
+  typed by the member's class var. **Re-test:** `git grep -c "knobs_of(self.name" -- promptpotter` is 0.
+- **One walk model.** `optimizer_manifest.py::_walk` and `round.py::propose_population` each order
+  the round's members; `opening`, `round_packages` and `rederive` read state past `sees`. Action:
+  `RoundPlan.steps(gate)` the one order, every read through `sees`. **Re-test:** one of the two walks
+  deleted.
+
 - **A sampler's cells ceiling states other members' reads.** `Sampler.round_cells_ceiling` overrides
   in `Blocks`, `ProxyCss` and `AdaptiveQueue` hold facts the backbone should sum. The formula
   `arms × round_cells + parent_cells` misses gepa's proposer parent read (`Frontier.measure_parent`)

@@ -79,6 +79,14 @@ class BlockPoolInitializer(_PoolInitializer):
     def starting_content(self, selected: SelectedOptimizer) -> object:
         return pack_identity(selected.knobs_of(self.name, BlockPoolKnobs).packs)
 
+    def held(
+        self, selected: SelectedOptimizer, mint: MintFacts | None
+    ) -> list[tuple[str, tuple[str, ...]]]:
+        packs = selected.knobs_of(self.name, BlockPoolKnobs).packs
+        # At load no chain is known, so a path is checked against every entry any chain admits.
+        admits = frozenset(Presumption) if mint is None else _admits(mint.schema, mint.matcher)
+        return [(e.id, e.group) for e in pack_entries(packs, admits=admits).values()]
+
     def refusal(
         self, selected: SelectedOptimizer, closed: bool, mint: MintFacts | None
     ) -> str | None:
@@ -86,9 +94,7 @@ class BlockPoolInitializer(_PoolInitializer):
         if absent := missing_packs(packs):
             return f"{self.name}.packs names {absent}, which {block_packs_root()} does not hold"
         paths = self.active(selected)
-        # At load no chain is known, so a path is checked against every entry any chain admits.
-        admits = frozenset(Presumption) if mint is None else _admits(mint.schema, mint.matcher)
-        held = [(e.id, e.group) for e in pack_entries(packs, admits=admits).values()]
+        held = self.held(selected, mint)
         named = [p for p in paths if p.partition("/")[2] != EARNED_SOURCE]
         if bad := unnamed(named, held):
             return (
@@ -124,12 +130,18 @@ class DemoPoolInitializer(_PoolInitializer):
     def starting_content(self, _selected: SelectedOptimizer) -> object:
         return None
 
+    def held(
+        self, _selected: SelectedOptimizer, mint: MintFacts | None
+    ) -> list[tuple[str, tuple[str, ...]]]:
+        # The split is drawn at mint, so at load no key is known.
+        return [] if mint is None else [(s.key, ()) for s in mint.demo]
+
     def refusal(
         self, selected: SelectedOptimizer, _closed: bool, mint: MintFacts | None
     ) -> str | None:
         # A partition's size is its split's declaration, so only its names are refused.
         paths = self.active(selected)
-        if mint is not None and (bad := unnamed(paths, [(s.key, ()) for s in mint.demo])):
+        if mint is not None and (bad := unnamed(paths, self.held(selected, mint))):
             return f"{self.name}.active names {bad}, which the demo partition lacks"
         return None
 

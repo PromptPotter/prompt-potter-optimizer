@@ -25,6 +25,8 @@ const EXPECTED_4XX: [RegExp, number][] = [
   [/\/evidence\b/, 400],
   // A campaign with no completed round 404s round 0; its audit twin answers `200 null`, so a 4xx on `/audit` is reported.
   [/\/rounds\/\d+(\?|$)/, 404],
+  // The throwaway world holds no provider key, so a check-in's resolver turn is refused `provider_unkeyed`.
+  [/\/commands\/resolve-origin\b/, 409],
 ];
 
 type Problem = { kind: string; text: string };

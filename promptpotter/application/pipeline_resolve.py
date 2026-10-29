@@ -29,6 +29,7 @@ from promptpotter.application.datasets.prompts import (
     has_dataset_prompts,
     load_dataset_node_overlay,
 )
+from promptpotter.application.datasets.startability import draft_samples
 from promptpotter.application.evidence.subjects import SubjectSpec, parse_subject
 from promptpotter.application.free_tier import free_task_models, with_free_tier_layer
 from promptpotter.application.initialization.session import Session
@@ -40,10 +41,13 @@ from promptpotter.application.optimizer_manifest import (
     resolve_optimizer,
     select_optimizer,
 )
-from promptpotter.application.optimizers.nodes import KnobDraw
+from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts
 from promptpotter.application.runner.inner.tasks import is_self_optimization, parse_resolved
+from promptpotter.application.scoring.formula.compiler import split_scoring_block
+from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.domain.arms import Concluded
+from promptpotter.domain.bench import partition_bank, restored_partition
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.campaign_config import (
     CampaignConfig,
@@ -82,7 +86,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineView,
     reach_map,
 )
-from promptpotter.domain.pool import Access, PoolSource
+from promptpotter.domain.pool import Access, PoolSource, offered
 from promptpotter.domain.run_records import DefaultsDrift, DefaultsPin, ScoringLockedRecord
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
 from promptpotter.domain.strict_model import StrictModel
@@ -119,6 +123,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.judges import JudgeSpec
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.run_records import CycleSeed
+    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
@@ -500,6 +505,10 @@ class PoolRow(StrictModel):
     source: PoolSource = Field(description="Where its entries come from")
     initializer: str = Field(description="The run-init node writing it once, before round 0")
     active: list[str] = Field(description="The initializer's `active` paths: the entries in play")
+    offered: dict[str, int] = Field(
+        description="Every path `active` may name — `*`, each leading run of an entry's group, "
+        "each entry id — with the entries it keeps; a demo pool's are the split its Start draws"
+    )
     drawn_by: list[PoolDraw]
 
 
@@ -837,7 +846,29 @@ def _served_menu(m: _Merge, params: dict[str, Any], workspace: Path | None) -> C
     return resolve_schema_menu(_routed_as_run(m.filtered, params, m.active), workspace=workspace)
 
 
-def optimizer_setup(cfg: CampaignConfig) -> OptimizerSetup:
+def mint_facts(cfg: CampaignConfig, demo: Sequence[Sample], schema: PipelineSchema) -> MintFacts:
+    per_sample = split_scoring_block(cfg.scoring, judge_instrument=None).per_sample
+    return MintFacts(demo, schema, matcher_of(per_sample))
+
+
+def _draft_mint(stores: Stores, draft: DraftCampaign, m: _Merge) -> MintFacts | None:
+    """The demo split the draft's Start will draw, so its pool offers the keys before Start."""
+    samples = draft_samples(stores, draft)
+    if samples is None:
+        return None
+    demo = partition_bank(samples, m.cfg.dataset_split, seed=m.cfg.run_seed).demo
+    return mint_facts(m.cfg, demo, m.filtered)
+
+
+def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
+    drawn = stores.campaigns.read_bank_partition(m.hop)
+    bank = None if drawn is None else stores.tenant_datasets.bank(drawn.dataset_hash)
+    if drawn is None or bank is None:
+        return None
+    return mint_facts(m.cfg, restored_partition(bank.samples, drawn).demo, m.filtered)
+
+
+def optimizer_setup(cfg: CampaignConfig, mint: MintFacts | None) -> OptimizerSetup:
     selected = select_optimizer(cfg.optimization)
     members = [optimizers.NODE_MEMBERS.get(n) for n in selected.member_nodes]
     return OptimizerSetup(
@@ -850,6 +881,7 @@ def optimizer_setup(cfg: CampaignConfig) -> OptimizerSetup:
                 source=initializer.pool.source,
                 initializer=initializer.name,
                 active=initializer.active(selected),
+                offered=offered(initializer.held(selected, mint)),
                 drawn_by=[
                     PoolDraw(
                         node=m.name,
@@ -899,6 +931,7 @@ def _response(
     connector: str,
     backend_type: str,
     nests: list[NestedPipelineRef],
+    mint: MintFacts | None,
 ) -> CampaignPipelineResponse:
     rows = _rows(m, params)
     return CampaignPipelineResponse(
@@ -909,7 +942,7 @@ def _response(
         backend_type=backend_type,
         self_optimization=is_self_optimization(backend_type),
         optimizer=m.cfg.optimization.optimizer,
-        optimizer_setup=optimizer_setup(m.cfg),
+        optimizer_setup=optimizer_setup(m.cfg, mint),
         params=params,
         node_config_schema=rows,
         view=m.filtered.view,
@@ -935,6 +968,7 @@ def resolve_pipeline_for_draft(stores: Stores, draft: DraftCampaign) -> Campaign
         backend_type=draft.connector,
         # A dataset dir is what declares inner cells, and a check-in has none yet.
         nests=[],
+        mint=_draft_mint(stores, draft, m),
     )
 
 
@@ -1004,6 +1038,7 @@ def resolve_pipeline_for_campaign(
         nests=[]
         if m.dataset is None
         else nested_pipeline_refs(m.dataset, experiment, m.filtered.view),
+        mint=_cycle_mint(stores, m),
     )
 
 

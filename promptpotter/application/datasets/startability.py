@@ -14,10 +14,11 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter import connectors
 from promptpotter.application.datasets.loaders import (
+    cut_bank,
     fetch_bank,
     has_source,
     held_bank,
@@ -173,6 +174,27 @@ def checkin_bank(stores: Stores, name: str) -> Bank:
     if (block := rows_block(fetched.samples)) is not None:
         raise DatasetUnstartableError(name, block)
     return fetched
+
+
+def upload_source(draft: DraftCampaign, upload: str) -> dict[str, Any]:
+    """The definition names the kept upload and the cut; the rows stay in the upload alone."""
+    return {
+        "recipe": "table",
+        "upload": upload,
+        "query": draft.column_query,
+        "truth": draft.column_ground_truth,
+    }
+
+
+def draft_samples(stores: Stores, draft: DraftCampaign) -> Sequence[Sample] | None:
+    """What the draft's Start partitions; ``None`` while its dataset's bank is not held, since a read never fetches."""
+    upload = stores.drafts.upload_of(draft.draft_id)
+    if upload is not None:
+        return cut_bank(stores, upload_source(draft, upload))
+    if draft.source_dataset is None:
+        return None
+    held = held_bank(stores, resolve_dataset(stores, draft.source_dataset))
+    return None if held is None else held.samples
 
 
 def checkin_rows(stores: Stores, draft: DraftCampaign) -> list[dict[str, str]]:

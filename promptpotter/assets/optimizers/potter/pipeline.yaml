@@ -59,6 +59,7 @@ nodes:
       model: qwen/qwen3.7-flash
       n_variants: 5
       k_max: 5
+      pool_window: 8
       # Recombination by an LLM host, off at 0; `mating` + `locus_crossover` host it by a draw.
       recombine: 0
       recombination_host: l1_generate

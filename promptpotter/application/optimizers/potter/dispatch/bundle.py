@@ -97,11 +97,7 @@ RUNTIME_FAILURE_RECENCY_WINDOW = 6
 VALIDATION_RENDER_CAP = 8
 ANSWER_LABEL_STEM = 40
 ANSWER_TALLY_ROWS = 5
-DEMO_POOL_RENDER_CAP = 12
 DEMO_QUERY_STEM = 80
-# Per field under `open`, earned blocks included; the rest rotate in by round. `closed` shows its enum whole.
-BLOCK_POOL_RENDER_CAP = 8
-RECOMBINATION_POOL_RENDER_CAP = 4
 RECOMBINATION_VALUE_STEM = 160
 # An id is shown, and answered, by its head, resolved over every individual the cycle measured.
 RECOMBINATION_ID_CHARS = 8
@@ -211,6 +207,8 @@ class InjectionBundle:
     shot_k_max: int
     # Each sample's slot in the cycle's bank: the `[#id]` a panel marks a row by.
     slot_of: Mapping[str, int]
+    # The most entries one call shows of each pool it reads (`L1GenerateKnobs.pool_window`).
+    pool_window: int
     origin_per_sample: CellSheet = field(default_factory=lambda: CellSheet(""))
     # Hits included: a pipeline collapsed onto one label shows only against the labels it is NOT emitting.
     trajectory_results: Sequence[GradedCell] = ()
@@ -269,7 +267,7 @@ class InjectionBundle:
         for name, blocks in self.blocks.items():
             earned = [b for b in blocks if b.group[1] == EARNED_SOURCE]
             rest = [b for b in blocks if b.group[1] != EARNED_SOURCE]
-            k = min(max(BLOCK_POOL_RENDER_CAP - len(earned), 0), len(rest))
+            k = min(max(self.pool_window - len(earned), 0), len(rest))
             start = (self.cycle_slice.round_num - 1) * k % len(rest) if rest else 0
             if name in opened and (window := (*earned, *(rest[start:] + rest[:start])[:k])):
                 out[name] = window

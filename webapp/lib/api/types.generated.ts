@@ -2158,6 +2158,10 @@ export interface PoolRow {
   initializer: string;
   /** The initializer's `active` paths: the entries in play */
   active: string[];
+  /** Every path `active` may name — `*`, each leading run of an entry's group, each
+   * entry id — with the entries it keeps; a demo pool's are the split its
+   * Start draws */
+  offered: Record<string, number>;
   drawn_by: PoolDraw[];
 }
 

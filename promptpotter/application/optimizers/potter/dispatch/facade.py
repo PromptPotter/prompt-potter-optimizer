@@ -13,7 +13,6 @@ from promptpotter.application.bench.node_context import Bounds, Frontier, Lineag
 from promptpotter.application.optimizers.nodes import AccessKnob, CountKnob
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
-    RECOMBINATION_POOL_RENDER_CAP,
     CycleSlice,
     InjectionBundle,
     Item,
@@ -275,7 +274,7 @@ def _recombination(
     lineage: Lineage, schema: PipelineSchema, generate: L1GenerateKnobs
 ) -> dict[str, Any]:
     """The population's highest-θ individuals as mains and the campaign's other highest-θ measured
-    ones, each to `RECOMBINATION_POOL_RENDER_CAP`, an unread θ below every read one, and the loci a main can take
+    ones, each to `pool_window`, an unread θ below every read one, and the loci a main can take
     from another entry; none where no pair can trade."""
     if not generate.recombine:
         return {}
@@ -285,7 +284,7 @@ def _recombination(
         reverse=True,
     )
     population = {i.id for i in lineage.population}
-    window = RECOMBINATION_POOL_RENDER_CAP
+    window = generate.pool_window
     mains = [i.id for i, _ in ranked if i.id in population][:window]
     kept = {*mains, *[i.id for i, _ in ranked if i.id not in population][:window]}
     pool = tuple(PoolParent(i, t, main=i.id in population) for i, t in ranked if i.id in kept)
@@ -379,6 +378,7 @@ def build_bundle(ctx: NodeContext, ladder: Ladder) -> InjectionBundle:
         demo_split=target.demo_split,
         shot_k_max=generate.k_max,
         slot_of=ruler_read.slot_of,
+        pool_window=generate.pool_window,
         inner_cells=target.inner_cells,
         **_recombination(lineage, target.schema, generate),
     )

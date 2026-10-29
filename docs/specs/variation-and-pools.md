@@ -111,9 +111,12 @@ node and the selector.
 derived in the browser ([`../../webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § A wire shape is GENERATED).
 
 - **Check-in**: the mix (counts and total) and the pools, each with its active subset and its drawing nodes
-  grouped by class with their knobs and access. **A pool picks in two columns**, the store and the selected:
-  an entry moved across leaves the store and shows as selected, beside the nodes it feeds. **Selecting never
-  sizes a prompt**: each reader's per-call knob bounds how many selected entries one call shows, drawn afresh
+  grouped by class with their knobs and access. **A pool picks by path**: each path `PoolRow.offered` names
+  (`*`, a leading run of a group, an entry id, with the entries it keeps) is one chip, lit while `active`
+  holds it; the last lit chip stays lit. The offer is the initializer's `held`, the set its refusal checks,
+  over the split the Start will draw (`pipeline_resolve.py::_draft_mint`), so `demo_pool` offers its keys
+  once the draft's bank is held. **Selecting never
+  sizes a prompt**: each reader's per-call knob (`l1_generate`'s `pool_window`) bounds how many selected entries one call shows, drawn afresh
   each round, so a large selection costs no context. Every control writes
   `optimization_overrides.nodes.{node}.config.{knob}` through `edit-draft-campaign`
   ([`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § No ad-hoc mutating routes).

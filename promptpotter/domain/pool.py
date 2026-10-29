@@ -59,6 +59,15 @@ def kept(paths: Sequence[str], entries: Iterable[tuple[str, Sequence[str]]]) -> 
     return tuple(i for i, group in entries if any(_in_play(p, i, group) for p in paths))
 
 
+def offered(entries: Iterable[tuple[str, Sequence[str]]]) -> dict[str, int]:
+    """Every path an ``active`` list may name over *entries* — ``*``, each leading run of a group, each id — with the entries it keeps; none over none."""
+    counts: dict[str, int] = {}
+    for i, group in entries:
+        for path in ("*", *("/".join(group[:n]) for n in range(1, len(group) + 1)), i):
+            counts[path] = counts.get(path, 0) + 1
+    return counts
+
+
 def unnamed(paths: Sequence[str], entries: Iterable[tuple[str, Sequence[str]]]) -> list[str]:
     """The paths, ``*`` aside, that keep no entry: a typo, refused before any spend."""
     held = list(entries)
