@@ -31,7 +31,7 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
-from promptpotter.domain.strict_model import StrictModel, WireInt
+from promptpotter.domain.strict_model import RequestBody, StrictModel, WireInt
 from promptpotter.domain.verify_pass import VerifyStrategy
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
@@ -184,7 +184,7 @@ class CommandKind(StrEnum):
 PAYLOAD_MODEL_FOR_KIND: dict[str, type[CommandPayload]] = {}
 
 
-class CommandPayload(StrictModel):
+class CommandPayload(RequestBody):
     """Base of every payload on the generic ``POST /commands/{kind}`` route. ``StrictModel`` forbids
     extras, so THE MODEL IS the accepted-key set — there is no list to fall out of step with it.
     A payload's address base is its target ledger: ``CyclePayload`` the cycle's, ``LinePayload`` its

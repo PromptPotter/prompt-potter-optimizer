@@ -398,20 +398,28 @@ word's `git grep -c` for that sense is 0.
   sweeps stale `pp-push-*` (unlink, then `git worktree prune`). Also: the green store keeps one key per
   check name, so a tip's offline-run green overwrites the working tree's own, and the two take turns
   rerunning. **Re-test:** kill a push mid-run, then run `--push` again and list `%TEMP%\pp-push-*`.
-- **Seen hardening the endpoints** (P0, 2026-10-29):
-  - `main.py` CORS keeps `allow_methods=["*"]` / `allow_headers=["*"]` beside the pinned origins;
-    pin them to what the routes serve.
-  - Only launches and paid calls meter a write (`quota.py::refuse_verb_rate`, `paid_call`): a free
-    verb (`set-campaign-label`, `bank-snippet`) has no rate (C6).
-  - Every refusal logs one WARNING (`main.py::_error_response`), so a 429 flood is a log flood.
-  - `/docs` and `/openapi.json` sit outside `main.py::API_ROUTERS`, public by a comment, not by the
-    table; the leaks journey matches public routes by path, so a gated method sharing a public path is
-    skipped.
-  - `auth.py::_require_provider_client` and `callback` dispatch on the provider string with two
-    `type: ignore[union-attr]`: string-keyed call dispatch.
-  - `app.openapi()` warns `UnsupportedFieldAttributeWarning` (alias `body` / `payload` on a union-typed
-    body param): a request alias that has no effect.
+- **Seen bounding the perimeter** (2026-10-29):
+  - Two doors into account state: `PATCH /auth/user-settings` and `POST /auth/accept-terms` (also
+    `/datasets/ingest` and the check-in draft opens) write outside `CommandDispatcher`, against
+    access-model's "all writes flow through one dispatcher". **Re-test:**
+    `git grep -n "@router.\(post\|patch\|delete\)" -- promptpotter/presentation/api/routers`.
+  - `/docs` serves Scalar's HTML, which loads its script from a CDN, while `ResponseHeadersMiddleware`
+    gives every non-API path `_WEBAPP_CSP` (`script-src 'self'`): the page likely renders blank.
+    **Re-test:** open `/docs` in a browser and read the console.
+  - `auth.py::callback` warns "HOST_ADMIN_EMAIL is unset" also when it is set and that admin has not
+    signed in yet. **Re-test:** set it, sign in as someone else, read the log line.
+  - The sign-in redirect codes are a closed set declared only in TypeScript
+    (`AuthCore.tsx::AUTH_ERROR_COPY`); the server mints them as bare strings
+    (`auth.py::_redirect_with_error(code: str)`). **Re-test:** `git grep -n "_redirect_with_error(\"" -- promptpotter`.
+  - `POST /campaigns/{id}/fork-preview` is a read on a write verb, so it spends the write bucket
+    (`quota.py::refuse_write_rate`), not the read one. **Re-test:** `git grep -n "fork-preview" -- promptpotter/presentation`.
+  - `quota.py::refuse_read_rate` takes a principal id and meters the host, while the launch, verb and
+    write buckets take the identity and exempt it. **Re-test:** `git grep -n "def refuse_.*_rate" -- promptpotter`.
 - **Seen building the host coupon** (2026-10-29):
+  - `offline_run.py --against` reads `MOVED` for a base run from another checkout: the origin's
+    `changes_description` carries the absolute `origin.yaml` path and `decisions.json` keeps it. A
+    path is not a decision. Action: the origin names its dataset-relative path, or `canon` drops it.
+    **Re-test:** run the base from a second worktree; gepa and levi read `decisions MOVED`.
   - A remote backend's cell always draws the box's coupon (`infrastructure/backend.py::_post_until_answered`,
     `paid_by="host"`): no account key crosses the wire, so an own-key account past its coupon stops at
     its first TermNorm cell. Action: the wire carries the bound account's key, or the connector declares
@@ -434,6 +442,18 @@ word's `git grep -c` for that sense is 0.
     `archive_maintenance.py`'s by globbing every workspace tree. `account_spend.py::account_ledgers`
     takes the first, so a cycle under a campaign dir with no `campaign.json` is spend no coupon counts.
     Action: one walker. **Re-test:** `git grep -n "def iter_cycle_ledgers" -- promptpotter`.
+  - `main.py::_repeats_a_throttle` windows every throttle by the launch bucket's refill, since
+    `RateLimitedError` does not say which bucket raised it. Action: the error carries its bucket's
+    refill. **Re-test:** raise `USER_RATE_PER_MIN` past the write bucket's rate; a write throttle is
+    banked once per launch window.
+  - `config/first_run.py::_PROVIDER_KEYS` hand-copies the `*_API_KEY` names and reads `os.environ`,
+    skipping the `.env` `Settings` reads. **Re-test:** `git grep -n "_PROVIDER_KEYS" -- promptpotter`.
+  - A request's identity has three doors: `deps.py::resolve_identity` reads `request.state`, and
+    `main.py::_bank_refusal` / `_repeats_a_throttle` resolve it again. **Re-test:**
+    `git grep -n "identity_ctx" -- promptpotter`.
+  - A settings key in the process environment is never refused: under systemd the `/etc` env file
+    arrives as environment, so a retired key there is silently ignored (`settings.py::load_settings`
+    checks only the file). **Re-test:** add `FREE_TIER_SPEND_CAP_USD` to the unit's env file.
   - `config/paths.py::_shadowed` has one caller (`optimizer_manifest_path`). **Re-test:**
     `git grep -n "_shadowed(" -- promptpotter`.
   - `admission.py::inner_share` passes `named=frozenset()`, which `admit_and_share` never reads on a

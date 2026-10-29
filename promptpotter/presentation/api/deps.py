@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import Depends, Header, Request
 
 from promptpotter.application.account import registered_or_default_identity
-from promptpotter.application.jobs.quota import refuse_read_rate
+from promptpotter.application.jobs.quota import refuse_read_rate, refuse_write_rate
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
@@ -48,6 +48,8 @@ StoresDep = Annotated[Stores, Depends(build_stores_from_identity)]
 def admit_session(request: Request, identity: IdentityDep) -> None:
     if request.method in ("GET", "HEAD"):
         refuse_read_rate(acting_principal(identity).id)
+    else:
+        refuse_write_rate(identity)
 
 
 def require_site_records_token(request: Request) -> None:

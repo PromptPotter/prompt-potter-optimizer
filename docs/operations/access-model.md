@@ -141,10 +141,11 @@ stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_ru
   issuer vouched for it (`identity/verifier.py` requires `email_verified`; `identity/github.py` reads
   the verified list only). Missing session → 401 at `deps.py::resolve_identity`. The session cookie
   is httponly / secure / samesite=lax, opaque — no JWT past the middleware.
-- **Every router is mounted behind its gate** (`main.py::API_ROUTERS`), so a route added under one
-  inherits it. **Public is declared there, by `None`:** `/health` and the sign-in flow
-  (`auth.py::auth_flow_router`). Outside `/api/v1` only the static webapp and `/docs` +
-  `/openapi.json` answer a stranger, the latter the contract the repo already publishes.
+- **Every router is mounted behind its gate** (`main.py::API_ROUTERS`, which carries each mount's
+  prefix), so a route added under one inherits it. **Public is declared there, by `None`:**
+  `/health`, the sign-in flow (`auth.py::auth_flow_router`), and, outside `/api/v1`, `/docs` +
+  `/openapi.json` (`main.py::_contract`), the contract the repo already publishes. Beside them only
+  the static webapp answers a stranger.
 - **Sign-up is open AND signing up is the grant.** What bounds a stranger is money, not approval:
   the host coupon, what the box's keys may pay for an account over its life (`Settings.HOST_COUPON`,
   or the account's `grant.json`), composed at `quota.py::admit_launch` and at every send's key
@@ -156,6 +157,12 @@ stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_ru
   that reservation stops the run `host_allowance`. A delegate's grant is the one read-down. **Every path that sets a ceiling composes there**, `change-run-limits` included, or it
   is the way around this section. `oidc.py::resolve_access_state` (served as
   `MeResponse.access_state`) answers `blocked` only for a revoked email.
+- **How many strangers is bounded too: `Settings.MAX_ACCOUNTS`**, counted off disk
+  (`user_store.py::count_accounts`, the host's included) at the one place an account opens
+  (`account.py::arrive`), under one OS lock so two first sign-ins at the ceiling never both read
+  room. An existing account always signs in and the host always opens one; a refused sign-in keeps
+  no session, lands on `/?auth_error=accounts_full`, and is told to the operator-admin channel. With
+  the coupon above, it bounds what strangers together spend on the box's keys before any grant.
 - **Who is exempt from the coupon is one definition with two readings** —
   `identity/migration.py::_is_host`, read off a live identity (`quota.py::spends_the_hosts_own_key`)
   or a directory walk (`migration.py::is_host_tenant_dir`). Merging the two detectors would let an
@@ -170,7 +177,9 @@ stays single** (`jobs/launcher/launch.py::launch`, plus `application/embedded_ru
 - **Blocklist edits never have an inbound door** — the on-box, outbound-only bot
   ([decisions.md § 0004](../decisions.md#0004-operator-admin-channels)).
 - **CORS answers `Settings.ALLOWED_ORIGINS` alone**, exact origins; a `*`, path or pattern refuses
-  to load (`settings.py::Settings._exact_origins`), since the app serves credentialed requests.
+  to load (`settings.py::Settings._exact_origins`), since the app serves credentialed requests. For
+  the same reason it offers no `*` method or header: the methods are derived from the mounted
+  routes, the headers are the ones a client sends (`main.py`'s `CORSMiddleware`).
 - **Response headers** — one middleware, `presentation/api/middleware/headers.py::ResponseHeadersMiddleware`.
 - **PP↔TermNorm** — a shared bearer token plus TermNorm's IP allowlist
   ([`backend-integration.md`](backend-integration.md) § Connection security).
@@ -188,7 +197,16 @@ rate limit and the host's wallet — are external and singular, so cost is bound
 | Share of the provider's 60 s window | derived per call (`infrastructure/llm/send_pacing.py`) | Yes — least-served tenant next |
 | Campaigns ONE person may hold | `user.json::max_concurrent_cycles` (host, or `set-concurrent-cycles` on an account's own key) | No |
 | What the box's keys may ever pay for an account | the host coupon (`Settings.HOST_COUPON`, or its `grant.json`), both units; its own keys are not metered | No |
+| Accounts the box holds | `Settings.MAX_ACCOUNTS`, at `account.py::arrive` (`accounts_full`) | No |
 | Reads one principal may poll | `quota.py::refuse_read_rate`, a token bucket sized above the webapp's polls, at `deps.py::admit_session` (429 `rate_limited`) | No |
+| Writes one principal may send, a free verb's included | `quota.py::refuse_write_rate`, every non-read at the same seam, the host exempt (429 `rate_limited`) | No |
+
+**A throttle banks its episode's first refusal alone** (`quota.py::RateLimitedError`,
+`main.py::_repeats_a_throttle`): every refusal of a signed-in person's write lands on their trail, so
+each 429 banked would make a flood of 429s a flood of trail writes. The first per principal per episode
+(the launch bucket's refill from empty, process memory) is banked and logged at INFO; the rest log at
+DEBUG. A 401/403 logs at WARNING — the security signal an operator scans for — any other refusal at
+INFO under its `error_id`, a 5xx at ERROR (`main.py::_error_response`).
 
 **The first gate WAITS; the third refuses.** A full machine queues the launch
 (`JobRegistry.request_slot`), drained least-served-first — the provider window's rule, so one idea —

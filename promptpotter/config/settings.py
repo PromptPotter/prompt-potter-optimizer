@@ -3,9 +3,10 @@ import locale
 import re
 import tomllib
 from importlib.metadata import version
+from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings
 
 from promptpotter.config.paths import env_file_path, source_checkout_root
@@ -120,6 +121,10 @@ class Settings(BaseSettings):
     # Empty accepts any issuer: with two providers wired, the weakest one's email handling then grants the box.
     HOST_ADMIN_ISSUER: str = ""
 
+    # Accounts on disk, the host's included, past which no new sign-in opens one; 0 closes sign-up.
+    # The host's worst-case exposure to strangers is this times the coupon's face.
+    MAX_ACCOUNTS: int = 100
+
     # Declared here, never read from `os.environ`: a bare environ read ignores `env_file_path()`.
     ADMIN_BOT_TELEGRAM_TOKEN: SecretStr = SecretStr("")
     ADMIN_BOT_CHAT_ID: str = ""
@@ -152,10 +157,32 @@ class Settings(BaseSettings):
     # Unset: MLflow receives nothing. Set: that server takes each round as a run and each winner as a prompt version.
     MLFLOW_TRACKING_URI: str = ""
 
-    model_config = {"env_file": env_file_path(), "case_sensitive": True, "extra": "ignore"}
+    # `forbid` refuses a `.env` key no field declares (a retired or misspelled one would otherwise
+    # load its default in silence); the process environment carries unrelated names, so it is not checked.
+    model_config = {"case_sensitive": True, "extra": "forbid"}
 
 
-settings = Settings()
+def load_settings(env_file: Path) -> Settings:
+    """A refusal names each key and why, never a value: the value may be a key."""
+    try:
+        return Settings(_env_file=env_file)
+    except ValidationError as exc:
+        reasons = "\n".join(
+            f"  {'.'.join(map(str, error['loc']))}: "
+            + (
+                "nothing reads this key; delete it, or rename it to the one it meant "
+                "(`.env.example` describes every setting)"
+                if error["type"] == "extra_forbidden"
+                else error["msg"]
+            )
+            for error in exc.errors(include_url=False, include_input=False)
+        )
+        raise SystemExit(
+            f"The settings in {env_file} and the environment do not load:\n{reasons}"
+        ) from None
+
+
+settings = load_settings(env_file_path())
 
 
 def non_utf8_encoding() -> str | None:
@@ -168,6 +195,7 @@ __all__ = [
     "LOCK_TIMEOUT",
     "TERMS_VERSION",
     "Settings",
+    "load_settings",
     "non_utf8_encoding",
     "settings",
 ]

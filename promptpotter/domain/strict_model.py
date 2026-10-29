@@ -16,6 +16,14 @@ class FrozenModel(StrictModel):
     model_config = ConfigDict(frozen=True)
 
 
+class RequestBody(StrictModel):
+    """A route's body (`main.py::_request_bodies`)."""
+
+    # Built at once: FastAPI aliases a body to its parameter name and builds its adapter under a
+    # filter for pydantic's no-effect-alias warning, and a deferred model defers that build past it.
+    model_config = ConfigDict(defer_build=False)
+
+
 def _reject_bool(v: object) -> object:
     """Pydantic coerces a wire ``true`` to 1, which reads as "disarm" on a count and a $1 ceiling on a budget."""
     if isinstance(v, bool):

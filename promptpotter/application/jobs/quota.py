@@ -61,6 +61,8 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.identity import (
     CAMPAIGN_BUDGET_CAP,
+    IdentityContext,
+    acting_principal,
     has_capability,
 )
 
@@ -106,13 +108,33 @@ def _consume_launch_token(bucket: str) -> bool:
     )
 
 
+class RateLimitedError(QuotaExceededError):
+    """A throttle: it repeats as fast as it is asked, so the trail banks its first per principal per
+    window and logs the rest at DEBUG (`main.py::_repeats_a_throttle`)."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(code="rate_limited", message=message)
+
+
 def refuse_read_rate(principal_id: str) -> None:
     """Only a read is metered here: it is what a poll repeats."""
     if not _consume_rate_token(f"read:{principal_id}", burst=_READ_BURST, per_s=_READ_PER_S):
-        raise QuotaExceededError(
-            code="rate_limited",
-            message="Too many reads, faster than the dashboard polls; slow down and retry shortly.",
+        raise RateLimitedError(
+            "Too many reads, faster than the dashboard polls; slow down and retry shortly."
         )
+
+
+# Sized above a person working a check-in by hand: each committed edit is one write, none on a timer.
+_WRITE_BURST = 60.0
+_WRITE_PER_S = 1.0
+
+
+def refuse_write_rate(identity: IdentityContext) -> None:
+    """Every request but a read, a free verb's included; the host is exempt, as from every bucket that meters a stranger."""
+    if not is_host(identity) and not _consume_rate_token(
+        f"write:{acting_principal(identity).id}", burst=_WRITE_BURST, per_s=_WRITE_PER_S
+    ):
+        raise RateLimitedError("Too many changes in a row; slow down and retry shortly.")
 
 
 def check_launch_quotas(
@@ -122,10 +144,7 @@ def check_launch_quotas(
     # A fresh mint, a check-in's Start included, names no cycle yet.
     rate_limited = not spends_the_hosts_own_key(stores) and hop == UNRESOLVED_HOP
     if rate_limited and not _consume_launch_token(f"launch:{user.user_id}"):
-        raise QuotaExceededError(
-            code="rate_limited",
-            message="Too many campaign launches; slow down and retry shortly.",
-        )
+        raise RateLimitedError("Too many campaign launches; slow down and retry shortly.")
 
     # A queued launch counts, or an account queues without bound and the drain order can starve.
     # A scoring pass does not: the limit is on campaigns, and a pass that finds no slot is refused.
@@ -569,10 +588,7 @@ def refuse_verb_rate(stores: Stores, user: User, bucket: str) -> None:
     if not spends_the_hosts_own_key(stores) and not _consume_launch_token(
         f"{bucket}:{user.user_id}"
     ):
-        raise QuotaExceededError(
-            code="rate_limited",
-            message=f"Too many {bucket} requests; slow down and retry shortly.",
-        )
+        raise RateLimitedError(f"Too many {bucket} requests; slow down and retry shortly.")
 
 
 def _admit_call(

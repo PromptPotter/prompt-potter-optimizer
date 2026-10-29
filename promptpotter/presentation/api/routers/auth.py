@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import logging
 import secrets
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -29,13 +29,13 @@ from promptpotter.application.jobs.quota import QuotaStatus, quota_status
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import TERMS_VERSION, settings
 from promptpotter.domain.run_records import Device, device_of
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import RequestBody, StrictModel
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
-from promptpotter.infrastructure.identity.google import ProviderIdentity
 from promptpotter.infrastructure.identity.migration import maybe_claim_default, registered_user_id
 from promptpotter.infrastructure.identity.provider_config import (
     SUPPORTED_PROVIDERS,
     CodeExchangeError,
+    SignInClient,
 )
 from promptpotter.infrastructure.identity.user import derive_user_id
 from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
@@ -82,7 +82,7 @@ class ConnectedAccount(StrictModel):
     email: str | None
 
 
-class UserSettings(StrictModel):
+class UserSettings(RequestBody):
     """The caller's per-user preferences."""
 
     demo_mode_enabled: bool
@@ -123,24 +123,17 @@ def _require_bundle(request: Request) -> IdentityBundle:
     return bundle
 
 
-def _require_provider_client(bundle: IdentityBundle, provider: str) -> tuple[str, Any]:
+def _require_provider_client(bundle: IdentityBundle, provider: str) -> tuple[str, SignInClient]:
     """The server's own name for the provider beside its client: no URL text travels on."""
-    if provider == "google":
-        if bundle.google is None:
-            raise NotFoundError(
-                f"provider {provider!r} not configured",
-                code="provider_not_configured",
-                details={"provider": provider},
-            )
-        return "google", bundle.google
-    if provider == "github":
-        if bundle.github is None:
-            raise NotFoundError(
-                f"provider {provider!r} not configured",
-                code="provider_not_configured",
-                details={"provider": provider},
-            )
-        return "github", bundle.github
+    for name, client in bundle.clients.items():
+        if name == provider:
+            return name, client
+    if provider in SUPPORTED_PROVIDERS:
+        raise NotFoundError(
+            f"provider {provider!r} not configured",
+            code="provider_not_configured",
+            details={"provider": provider},
+        )
     raise NotFoundError(
         f"unknown provider {provider!r}", code="provider_unknown", details={"provider": provider}
     )
@@ -188,11 +181,7 @@ async def login(
     name, client = _require_provider_client(_require_bundle(request), provider)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
-    if name == "google":
-        url = client.authorize_url(state=state, nonce=nonce)
-    else:
-        url = client.authorize_url(state=state)
-    response = RedirectResponse(url=url, status_code=307)
+    response = RedirectResponse(url=client.authorize_url(state=state, nonce=nonce), status_code=307)
     _set_auth_cookie(
         response,
         request,
@@ -209,13 +198,9 @@ async def callback(
     background: BackgroundTasks,
     provider: Annotated[str, Path(pattern=r"^[a-z]+$", max_length=16)],
 ) -> RedirectResponse:
-    if provider not in SUPPORTED_PROVIDERS:
-        return _redirect_with_error("signin_unavailable")
     bundle: IdentityBundle | None = getattr(request.app.state, "identity_bundle", None)
-    if bundle is None:
-        return _redirect_with_error("signin_unavailable")
-    provider_client = bundle.google if provider == "google" else bundle.github
-    if provider_client is None:
+    client = bundle.clients.get(provider) if bundle is not None else None
+    if bundle is None or client is None:
         return _redirect_with_error("signin_unavailable")
 
     error = request.query_params.get("error")
@@ -233,12 +218,7 @@ async def callback(
         return _redirect_with_error("state_invalid_or_expired")
 
     try:
-        if provider == "google":
-            identity: ProviderIdentity = await bundle.google.exchange_code(  # type: ignore[union-attr]
-                code=code, expected_nonce=nonce
-            )
-        else:
-            identity = await bundle.github.exchange_code(code=code)  # type: ignore[union-attr]
+        identity = await client.exchange_code(code=code, nonce=nonce)
     except (CodeExchangeError, IDTokenInvalidError) as exc:
         logger.warning("OIDC sign-in through %s refused: %s", provider, exc)
         # Nobody signed in yet, so the refusal is the box's own to keep.
@@ -280,6 +260,12 @@ async def callback(
         signed_in = identity_of_session(session, bundle)
         device = _device(request)
         arrival = account.sign_in(build_stores_from_identity(signed_in), device=device)
+    except account.AccountCeilingError as full:
+        bundle.session_store.delete(session_id)
+        background.add_task(
+            notify_operator, f"Sign-up refused for {identity.email or 'no email'}: {full.message}"
+        )
+        return _redirect_with_error("accounts_full")
     except Exception:
         # Refused rather than let through unrecorded: the trail's promise is that no sign-in is missing.
         logger.exception("A %s sign-in could not be recorded", provider)
@@ -403,7 +389,7 @@ def patch_user_settings(body: UserSettings, stores: StoresDep) -> UserSettings:
     return UserSettings(demo_mode_enabled=body.demo_mode_enabled)
 
 
-class AcceptTermsBody(StrictModel):
+class AcceptTermsBody(RequestBody):
     """The terms version the client accepts, which must equal the live ``TERMS_VERSION``."""
 
     version: str
@@ -453,7 +439,7 @@ def get_coupon(stores: StoresDep) -> CouponStatus:
     return coupon_status(stores)
 
 
-class ApiKeyBody(StrictModel):
+class ApiKeyBody(RequestBody):
     """One provider key, never served back: a read names its last four characters alone."""
 
     secret: SecretStr
